@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: prodavan-postgres
+    environment:
+      POSTGRES_USER: prodavan
+      POSTGRES_PASSWORD: prodavan
+      POSTGRES_DB: prodavan
+    ports:
+      - "5432:5432"
+    volumes:
+      - prodavan_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prodavan -d prodavan"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: prodavan-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: prodavan
+      MINIO_ROOT_PASSWORD: prodavan123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - prodavan_minio_data:/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: prodavan-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - prodavan_redis_data:/data
+
+volumes:
+  prodavan_pg_data:
+  prodavan_minio_data:
+  prodavan_redis_data:

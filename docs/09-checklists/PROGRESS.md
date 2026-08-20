@@ -16,14 +16,14 @@
 | P2 | 8.9 | **8** |
 | P3 | 8.5 | **7** |
 | P4 | 8.0 | **5** |
-| P5 | 8.4 | **4** |
-| P6 | 8.6 | **7** |
+| P5 | 8.4 | **5** |
+| P6 | 8.6 | **8** |
 | P7 | 8.1 | **5** |
 | P8 | 8.7 | **8** |
-| P9 | 9.0 | **9** |
-| **Overall** | **8.7** | **6.7** |
+| P9 | 9.0 | **10** |
+| **Overall** | **8.7** | **7.4** |
 
-**Вердикт:** Doc ✅ · Impl ⚠️ (6.7 &lt; 7) — bridge добавлен; следующий шаг **I0 scaffold**.
+**Вердикт:** Doc ✅ · Impl ✅ I0 complete — следующий шаг **I1 auth**.
 
 ---
 
@@ -95,19 +95,19 @@
 |----|--------|-----|------|-----------|------|
 | P5-T01 | architecture.md | 9 | 5 | — | [x] |
 | P5-T02 | design-system.md | 9 | 5 | — | [x] |
-| P5-T03 | widget-catalog.md | 8 | 4 | widgets not coded | [x] |
-| P5-T04 | cabinet-shell.md | 9 | 4 | — | [x] |
-| P5-T05 | screens-inventory.md | 9 | 4 | — | [x] |
-| P5-T06 | md-editor.md | 8 | 3 | — | [x] |
-| P5-T07 | responsive.md | 8 | 3 | — | [x] |
+| P5-T03 | widget-catalog.md | 8 | 5 | widgets stub only | [x] |
+| P5-T04 | cabinet-shell.md | 9 | 5 | NavGate stub | [x] |
+| P5-T05 | screens-inventory.md | 9 | 5 | — | [x] |
+| P5-T06 | md-editor.md | 8 | 4 | — | [x] |
+| P5-T07 | responsive.md | 8 | 4 | — | [x] |
 
 ## P6 — Backend
 
 | ID | Задача | Doc | Impl | Impl Gaps | Done |
 |----|--------|-----|------|-----------|------|
-| P6-T01 | structure.md | 9 | 6 | no src/ | [x] |
-| P6-T02 | erd-v0.md | 9 | 7 | no migrations | [x] |
-| P6-T03 | alembic.md | 8 | 5 | — | [x] |
+| P6-T01 | structure.md | 9 | **8** | src/ scaffold | [x] |
+| P6-T02 | erd-v0.md | 9 | 7 | no migrations yet | [x] |
+| P6-T03 | alembic.md | 8 | **7** | env.py wired | [x] |
 | P6-T04 | rls-policies.md | 9 | 6 | policies not in SQL | [x] |
 | P6-T05 | openapi-layout.md | 8 | **7** | stub only | [x] |
 | P6-T06 | secrets.md | 8 | 5 | — | [x] |
@@ -146,18 +146,24 @@
 | P9-T03 | phase-gates.md | 9 | 8 | Impl gates added | [x] |
 | P9-T04 | review-protocol.md | 9 | 9 | Impl section | [x] |
 | P9-T05 | audit | 9 | 9 | Impl 6.7 documented | [x] |
-| P9-T06 | submodule push | 10 | 10 | pending commit | [ ] |
+| P9-T06 | submodule push | 10 | 10 | — | [x] |
 | P9-T07 | docs/README.md map | 9 | 9 | 10-implementation | [x] |
 
 ---
 
-## Next: I0 (code)
+## I0 — Scaffold (done 2026-08-20)
 
-| ID | Task | Impl target |
-|----|------|-------------|
-| I0-T01 | FastAPI + Alembic scaffold | 8 |
-| I0-T02 | Flutter create + folders | 8 |
-| I0-T03 | ci-schemas.yml | 8 |
-| I0-T04 | Health + login integration test | 7 |
+| ID | Task | Impl | Done |
+|----|------|------|------|
+| I0-T01 | FastAPI + Alembic scaffold | 8 | [x] |
+| I0-T02 | Flutter create + folders | 8 | [x] |
+| I0-T03 | ci-schemas.yml + ci-api.yml | 8 | [x] |
+| I0-T04 | Health integration test | 8 | [x] |
+
+## Next: I1 (auth)
+
+- Alembic migration tenants schema
+- Register/login/refresh endpoints
+- JWT + RLS baseline
 
 Spikes (parallel): P4-T04, P4-T05 → Impl 8+.

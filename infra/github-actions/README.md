@@ -2,15 +2,13 @@
 
 Спецификация: [`docs/07-infrastructure/github-actions.md`](../../docs/07-infrastructure/github-actions.md).
 
-**Статус:** workflow YAML — в итерации **I0** (lint + test) и **I7** (deploy).
+**Статус:** `ci-schemas.yml` и `ci-api.yml` — **I0 done**. Deploy — **I7**.
 
-Обязательные jobs v0:
-
-| Workflow | Trigger | Purpose |
-|----------|---------|---------|
-| `ci-api.yml` | push, PR | ruff, pytest, openapi diff |
-| `ci-flutter.yml` | push, PR | analyze, unit tests |
-| `ci-schemas.yml` | push, PR | validate pack JSON + cabinet-profile schema |
-| `deploy-staging.yml` | tag `v*` | Argo CD sync (manual approve) |
+| Workflow | Status | Purpose |
+|----------|--------|---------|
+| `ci-api.yml` | active | ruff, pytest health |
+| `ci-schemas.yml` | active | validate pack + cabinet-profile schema |
+| `ci-flutter.yml` | planned | analyze, unit tests |
+| `deploy-staging.yml` | planned I7 | Argo CD sync |
 
 **Commerce submodule:** в CI Commerce-репо — `git submodule update --init prodavan` перед docs lint.

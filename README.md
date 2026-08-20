@@ -2,7 +2,7 @@
 
 Коммерческая платформа автономного агента закупок: **Flutter Web** (→ Android/Windows/Linux) + **FastAPI** + **PostgreSQL** + **k3s**.
 
-Изолирован от [Commerce](../Commerce) (Telegram MVP): отдельный репозиторий, отдельный деплой, без общих volumes.
+Изолирован от [Commerce](https://github.com/ne-tort/commerce) (Telegram MVP): отдельный репозиторий, отдельный деплой, без общих volumes.
 
 ## Изоляция данных
 
@@ -24,21 +24,40 @@ Tenant → Cabinet → Project
 | Agent | Cursor SDK (primary), Codex CLI, Claude Code CLI |
 | Infra | k3s, Terraform, Argo CD, GitHub Actions, local GH runner |
 
+## Quick start (I0)
+
+```bash
+# Infrastructure
+docker compose -f infra/docker-compose.dev.yml up -d
+
+# API
+cd apps/api && pip install -e ".[dev]" && uvicorn prodavan.main:app --reload --port 8000
+
+# Flutter (Windows)
+cd apps/flutter && flutter pub get && flutter run -d chrome
+```
+
+Health: `GET http://localhost:8000/api/v1/health` → `{"status":"ok"}`
+
 ## Документация
 
 Карта: [`docs/README.md`](docs/README.md)
 
-Прогресс реализации: [`docs/09-checklists/PROGRESS.md`](docs/09-checklists/PROGRESS.md)
+Прогресс: [`docs/09-checklists/PROGRESS.md`](docs/09-checklists/PROGRESS.md)
+
+Roadmap кода: [`docs/10-implementation/roadmap.md`](docs/10-implementation/roadmap.md)
 
 ## Структура репозитория
 
 ```text
 prodavan/
-├── apps/flutter/          # Flutter client (placeholder)
-├── apps/api/              # FastAPI (placeholder)
+├── apps/flutter/            # Flutter client
+├── apps/api/                # FastAPI backend
 ├── packages/cabinet-packs/  # Profile packs + seed data
-├── docs/                  # Модульная документация
-└── infra/                 # Terraform, k3s, Argo CD, runner
+├── packages/schemas/        # JSON Schema (cabinet-profile)
+├── tools/                   # validate_schemas.py
+├── docs/                    # Модульная документация
+└── infra/                   # docker-compose.dev, Terraform/k8s (stubs)
 ```
 
 ## Commerce submodule
