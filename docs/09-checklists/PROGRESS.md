@@ -32,14 +32,14 @@
 
 | ID | Задача | Target | Fact | Gaps | Done |
 |----|--------|--------|------|------|------|
-| P1-T01 | gh repo ne-tort/prodavan | 10 | 9 | branch protection TBD | [ ] |
+| P1-T01 | gh repo ne-tort/prodavan | 10 | 10 | — | [x] |
 | P1-T02 | root README | 10 | 9 | — | [x] |
 | P1-T03 | .gitignore | 10 | 9 | — | [x] |
 | P1-T04 | scaffold dirs | 10 | 9 | — | [x] |
 | P1-T05 | electronics pack skeleton | 10 | 9 | prompt .md files deferred to installer | [x] |
-| P1-T06 | submodule in Commerce | 10 | 9 | pending push | [ ] |
-| P1-T07 | Commerce docs/08-prodavan | 10 | 9 | pending | [ ] |
-| P1-T08 | push both repos | 10 | 9 | pending | [ ] |
+| P1-T06 | submodule in Commerce | 10 | 10 | — | [x] |
+| P1-T07 | Commerce docs/08-prodavan | 10 | 10 | — | [x] |
+| P1-T08 | push both repos | 10 | 10 | — | [x] |
 
 ## P2 — Architecture ADRs
 
@@ -139,7 +139,7 @@
 | P9-T03 | phase-gates.md | 10 | 9 | — | [x] |
 | P9-T04 | review-protocol.md | 10 | 9 | — | [x] |
 | P9-T05 | final audit ≥8.5 | 10 | 9 | code not started (expected) | [x] |
-| P9-T06 | submodule push | 10 | 9 | in progress | [ ] |
+| P9-T06 | submodule push | 10 | 10 | — | [x] |
 | P9-T07 | docs/README.md map | 10 | 9 | — | [x] |
 
 ---

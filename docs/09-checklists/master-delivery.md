@@ -10,14 +10,14 @@
 
 ## P1 Repository (8)
 
-- [ ] P1-T01 gh repo ne-tort/prodavan
+- [x] P1-T01 gh repo ne-tort/prodavan
 - [x] P1-T02 README.md
 - [x] P1-T03 .gitignore
 - [x] P1-T04 docs/apps/packages/infra scaffold
 - [x] P1-T05 electronics-procurement pack
-- [ ] P1-T06 git submodule in Commerce
-- [ ] P1-T07 Commerce docs/08-prodavan
-- [ ] P1-T08 push both repos
+- [x] P1-T06 git submodule in Commerce
+- [x] P1-T07 Commerce docs/08-prodavan
+- [x] P1-T08 push both repos
 
 ## P2 Architecture (8 + vision)
 
