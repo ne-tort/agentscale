@@ -14,7 +14,7 @@ Gaps found while re-checking cabinet-layer work against ADR-001 / Cabinet SPI.
 | G7 | DB | Cabinet DB is SQLite file; no Postgres schema-per-cabinet | low | Optional DSN column + Alembic-per-pack |
 | G8 | Registry | Pack install/upgrade/signature not implemented | high | Registry API + version pins on cabinet row |
 | G9 | Auth | S4B vault tenant-scoped vs cabinet-scoped capability | med | **done** — vault under `cabinets/{id}/vault/s4b.json` + legacy tenant read fallback |
-| G10 | Trigger | PG trigger hard-codes `electronics-procurement` for S4B | med | Drop trigger; enforce via SPI/capabilities |
+| G10 | Trigger | PG trigger hard-codes `electronics-procurement` for S4B | med | **done** — migration `2026082101` drops trigger; gate via SPI/capabilities |
 | G11 | CI | ubuntu-latest jobs die in ~3s (empty steps) | med | **mitigated** — Flutter/Schemas → `[self-hosted, linux, docker]`; github-hosted still broken |
 | G12 | Argo | k3s kubeconfig needs sudo | med | Passwordless kubeconfig / apply when available |
 | G13 | SPI HTTP | Binary commands blocked on SPI HTTP (`upload_*`) | low | Keep domain facades; or add multipart SPI later |
