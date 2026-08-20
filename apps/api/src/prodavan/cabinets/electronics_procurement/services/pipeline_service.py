@@ -11,9 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.services.cabinet_service import CabinetError, get_cabinet
 from prodavan.application.services.project_service import ProjectError, get_project
 from prodavan.cabinets.electronics_procurement.catalogs.s4b_search import search_lineitems_in_s4b
-from prodavan.cabinets.electronics_procurement.catalogs.search import rank_selections, search_lineitems_in_catalogs
+from prodavan.cabinets.electronics_procurement.catalogs.search import (
+    rank_selections,
+    search_lineitems_in_catalogs,
+)
 from prodavan.cabinets.electronics_procurement.pipeline.classify import classify_rows
-from prodavan.cabinets.electronics_procurement.pipeline.ingest import extracted_markdown, ingest_rows
+from prodavan.cabinets.electronics_procurement.pipeline.ingest import (
+    extracted_markdown,
+    ingest_rows,
+)
 from prodavan.cabinets.electronics_procurement.pipeline.kp_export import (
     TEMPLATE_VERSION,
     build_kp_rows,
@@ -92,7 +98,7 @@ async def upload_inbox(
     data: bytes,
     auto_run: bool,
 ) -> dict:
-    project = await _project_or_raise(
+    await _project_or_raise(
         session, tenant_id=tenant_id, user_id=user_id, cabinet_id=cabinet_id, project_id=project_id
     )
     try:

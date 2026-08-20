@@ -15,18 +15,27 @@ on:
 
 jobs:
   analyze:
-    # ubuntu-latest currently fails instantly (empty steps) in this org;
-    # use the same self-hosted runner as CI Images.
+    # github-hosted ubuntu-latest fails instantly in this org;
+    # self-hosted runner image may lack xz for Flutter SDK tarball.
     runs-on: [self-hosted, linux, docker]
     defaults:
       run:
         working-directory: apps/flutter
     steps:
       - uses: actions/checkout@v4
+
+      - name: Ensure xz for Flutter SDK extract
+        run: |
+          if ! command -v xz >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xz-utils
+          fi
+
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
           cache: true
+
       - run: flutter pub get
       - run: flutter analyze --no-fatal-infos
       - name: No raw Color hex outside palette

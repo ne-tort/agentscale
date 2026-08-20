@@ -66,8 +66,8 @@ async def test_kp_export_uses_catalog_price(client: AsyncClient, unique_suffix: 
         f"/api/v1/projects/{project_id}/export/{filename}", headers=headers
     )
     assert download.status_code == 200
-    from pathlib import Path
     import tempfile
+    from pathlib import Path
 
     with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as tmp:
         tmp.write(download.content)

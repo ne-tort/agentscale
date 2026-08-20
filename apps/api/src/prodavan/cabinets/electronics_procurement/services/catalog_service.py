@@ -8,7 +8,10 @@ import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.services.cabinet_service import CabinetError, get_cabinet
-from prodavan.cabinets.electronics_procurement.catalogs.indexer import CatalogIndexError, index_csv_bytes
+from prodavan.cabinets.electronics_procurement.catalogs.indexer import (
+    CatalogIndexError,
+    index_csv_bytes,
+)
 from prodavan.cabinets.electronics_procurement.integrations.s4b_runtime import get_s4b_gateway
 from prodavan.cabinets.spi import CabinetDomainError
 from prodavan.infrastructure.auth.s4b_vault import delete_vault, public_status, save_vault
@@ -19,7 +22,7 @@ from prodavan.infrastructure.storage.catalog_storage import (
     user_catalogs_root,
     write_json,
 )
-from prodavan.infrastructure.storage.run_storage import sanitize_filename, RunStorageError
+from prodavan.infrastructure.storage.run_storage import RunStorageError, sanitize_filename
 
 
 class CatalogError(CabinetDomainError):

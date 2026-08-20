@@ -30,7 +30,10 @@ def import_run_to_sqlite(
         for item in lineitems:
             conn.execute(
                 """
-                INSERT INTO lineitems (id, run_id, seq, raw_text, qty, category, part_number, constraints_json, created_at, updated_at)
+                INSERT INTO lineitems (
+                    id, run_id, seq, raw_text, qty, category, part_number,
+                    constraints_json, created_at, updated_at
+                )
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (

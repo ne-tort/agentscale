@@ -12,7 +12,12 @@ from prodavan.application.dto.runs import (
 )
 from prodavan.cabinets.electronics_procurement.services.pipeline_service import PipelineError
 from prodavan.cabinets.events import emit_platform_event
-from prodavan.cabinets.host import load_cabinet, module_for_cabinet, require_raw_capability, spi_ctx_from
+from prodavan.cabinets.host import (
+    load_cabinet,
+    module_for_cabinet,
+    require_raw_capability,
+    spi_ctx_from,
+)
 from prodavan.cabinets.spi import CabinetDomainError
 
 router = APIRouter(tags=["specs"])

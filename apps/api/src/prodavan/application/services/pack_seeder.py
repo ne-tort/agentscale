@@ -6,7 +6,6 @@ import json
 import shutil
 import uuid
 from datetime import UTC, datetime
-from pathlib import Path
 
 from sqlalchemy.ext.asyncio import AsyncSession
 

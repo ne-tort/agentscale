@@ -10,7 +10,12 @@ from prodavan.cabinets.electronics_procurement.services.catalog_service import (
     CatalogError,
     refuse_system_delete,
 )
-from prodavan.cabinets.host import load_cabinet, module_for_cabinet, require_raw_capability, spi_ctx_from
+from prodavan.cabinets.host import (
+    load_cabinet,
+    module_for_cabinet,
+    require_raw_capability,
+    spi_ctx_from,
+)
 from prodavan.cabinets.spi import CabinetDomainError
 
 router = APIRouter(tags=["catalogs"])

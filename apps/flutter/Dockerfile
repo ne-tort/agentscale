@@ -69,9 +69,18 @@ RUN --mount=type=cache,target=/root/.pub-cache \
 COPY apps/flutter/ ./
 
 ARG API_BASE=http://localhost:8000
+ARG BUILD_ID=dev
+ARG BUILD_NAME=1.0.0
+ARG BUILD_NUMBER=0
 RUN --mount=type=cache,target=/root/.pub-cache \
     test -f lib/features/auth/data/datasources/auth_remote_datasource.dart \
-    && flutter build web --release --dart-define=API_BASE=${API_BASE}
+    && flutter build web --release \
+         --build-name=${BUILD_NAME} \
+         --build-number=${BUILD_NUMBER} \
+         --dart-define=API_BASE=${API_BASE} \
+         --dart-define=BUILD_ID=${BUILD_ID} \
+         --dart-define=BUILD_NAME=${BUILD_NAME} \
+         --dart-define=BUILD_NUMBER=${BUILD_NUMBER}
 
 # --- runtime nginx --------------------------------------------------------
 FROM nginx:1.27-alpine AS runtime

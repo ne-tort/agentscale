@@ -20,13 +20,13 @@ from prodavan.application.dto.cabinets import (
 )
 from prodavan.application.services.cabinet_service import (
     CabinetError,
+    _storage_uri,
     archive_cabinet,
     create_cabinet,
     get_cabinet,
     list_cabinets,
     restore_cabinet,
     switch_cabinet,
-    _storage_uri,
 )
 from prodavan.config.settings import settings
 from prodavan.domain.capabilities import capabilities_preview

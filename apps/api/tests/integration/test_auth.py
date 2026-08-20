@@ -187,7 +187,7 @@ async def test_neg_ten_01_cross_tenant_cabinet_isolation(
 ) -> None:
     """NEG-TEN-01: RLS hides cabinets from other tenants."""
     reg_a = await register_user(client, unique_suffix, prefix="a")
-    reg_b = await register_user(client, unique_suffix, prefix="b")
+    await register_user(client, unique_suffix, prefix="b")
 
     tenant_a_id = reg_a["tenants"][0]["id"]
     user_a_id = reg_a["user"]["id"]

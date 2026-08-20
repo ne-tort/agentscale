@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/build_info.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/widgets.dart';
@@ -68,6 +69,12 @@ class _LoginScreenState extends State<LoginScreen> {
                 label: 'Войти',
                 busy: state.busy,
                 onPressed: state.busy ? null : _submit,
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Text(
+                buildLabel,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.labelSmall?.copyWith(color: colors.muted),
               ),
             ],
           ),

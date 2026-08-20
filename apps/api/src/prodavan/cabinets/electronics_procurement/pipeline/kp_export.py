@@ -7,7 +7,6 @@ from pathlib import Path
 
 from openpyxl import Workbook
 
-
 TEMPLATE_VERSION = "kp-prodavan-v1"
 HEADERS = (
     "line_id",

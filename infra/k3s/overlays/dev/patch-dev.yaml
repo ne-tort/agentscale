@@ -22,7 +22,7 @@ spec:
     spec:
       containers:
         - name: web
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
 ---
 apiVersion: v1
 kind: ConfigMap
