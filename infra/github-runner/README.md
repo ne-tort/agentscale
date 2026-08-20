@@ -18,9 +18,15 @@ docker logs -f prodavan-gha-runner
 
 Expect a stable line: `Listening for Jobs`.
 
+If GitHub shows the runner **busy/offline** with a stuck `in_progress` job and compose logs
+`A session for this runner already exists`, cancel/force-cancel that run, then register under a
+**new** `RUNNER_NAME` (wipe the `runner-home` volume). Do not leave two listeners on the same name.
+
 ## Labels
 
 `self-hosted`, `linux`, `docker`, `wsl-dev`
+
+Default compose name: `wsl-prodavan` (or `wsl-prodavan-2` after a stuck-session recovery).
 
 ## Token
 
