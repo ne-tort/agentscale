@@ -38,8 +38,16 @@ def catalog_dir(tenant_id: uuid.UUID, cabinet_id: uuid.UUID, slug: str) -> Path:
     return user_catalogs_root(tenant_id, cabinet_id) / slug
 
 
-def vault_path(tenant_id: uuid.UUID) -> Path:
-    return settings.storage_root / "tenants" / str(tenant_id) / "vault" / "s4b.json"
+def vault_path(tenant_id: uuid.UUID, cabinet_id: uuid.UUID) -> Path:
+    return (
+        settings.storage_root
+        / "tenants"
+        / str(tenant_id)
+        / "cabinets"
+        / str(cabinet_id)
+        / "vault"
+        / "s4b.json"
+    )
 
 
 def write_json(path: Path, payload: dict) -> None:

@@ -222,24 +222,29 @@ def refuse_system_delete(system_id: str) -> None:
     )
 
 
-def s4b_status(tenant_id: uuid.UUID) -> dict:
-    return public_status(tenant_id)
+def s4b_status(tenant_id: uuid.UUID, cabinet_id: uuid.UUID) -> dict:
+    return public_status(tenant_id, cabinet_id)
 
 
-def put_s4b_credentials(tenant_id: uuid.UUID, username: str, password: str) -> dict:
+def put_s4b_credentials(
+    tenant_id: uuid.UUID, cabinet_id: uuid.UUID, username: str, password: str
+) -> dict:
     ping = get_s4b_gateway().ping(username, password)
     if ping.get("ok") or ping.get("error_code") == "rate_limited":
         # Too frequently still means the account was accepted.
-        save_vault(tenant_id, username, password, state="credentials_valid", last_error=None)
+        save_vault(
+            tenant_id, cabinet_id, username, password, state="credentials_valid", last_error=None
+        )
     else:
         save_vault(
             tenant_id,
+            cabinet_id,
             username,
             password,
             state="credentials_invalid",
             last_error=str(ping.get("error") or ping.get("error_code") or "s4b_ping_failed"),
         )
-    status = public_status(tenant_id)
+    status = public_status(tenant_id, cabinet_id)
     return {
         "state": status["state"],
         "validated_at": status.get("last_validated_at"),
@@ -247,6 +252,6 @@ def put_s4b_credentials(tenant_id: uuid.UUID, username: str, password: str) -> d
     }
 
 
-def delete_s4b_credentials(tenant_id: uuid.UUID) -> dict:
-    delete_vault(tenant_id)
-    return public_status(tenant_id)
+def delete_s4b_credentials(tenant_id: uuid.UUID, cabinet_id: uuid.UUID) -> dict:
+    delete_vault(tenant_id, cabinet_id)
+    return public_status(tenant_id, cabinet_id)

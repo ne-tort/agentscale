@@ -1,4 +1,8 @@
-"""S4B credential vault: encrypt at rest, never expose password via API."""
+"""S4B credential vault: encrypt at rest, never expose password via API.
+
+Vault is **cabinet-scoped** (capability is per cabinet). Legacy tenant-only
+path is read as fallback once, then new writes go under the cabinet.
+"""
 
 from __future__ import annotations
 
@@ -39,15 +43,20 @@ def mask_username(username: str) -> str:
     return f"{username[:2]}***"
 
 
-def load_vault(tenant_id: uuid.UUID) -> dict | None:
-    path = vault_path(tenant_id)
-    if not path.is_file():
-        return None
-    return json.loads(path.read_text(encoding="utf-8"))
+def load_vault(tenant_id: uuid.UUID, cabinet_id: uuid.UUID) -> dict | None:
+    path = vault_path(tenant_id, cabinet_id)
+    if path.is_file():
+        return json.loads(path.read_text(encoding="utf-8"))
+    # One-shot legacy: tenant-wide vault before cabinet scoping.
+    legacy = settings.storage_root / "tenants" / str(tenant_id) / "vault" / "s4b.json"
+    if legacy.is_file():
+        return json.loads(legacy.read_text(encoding="utf-8"))
+    return None
 
 
 def save_vault(
     tenant_id: uuid.UUID,
+    cabinet_id: uuid.UUID,
     username: str,
     password: str,
     *,
@@ -62,19 +71,20 @@ def save_vault(
         "last_error": last_error,
         "last_validated_at": validated,
         "updated_at": now_iso(),
+        "cabinet_id": str(cabinet_id),
     }
-    write_json(vault_path(tenant_id), payload)
+    write_json(vault_path(tenant_id, cabinet_id), payload)
     return payload
 
 
-def delete_vault(tenant_id: uuid.UUID) -> None:
-    path = vault_path(tenant_id)
+def delete_vault(tenant_id: uuid.UUID, cabinet_id: uuid.UUID) -> None:
+    path = vault_path(tenant_id, cabinet_id)
     if path.is_file():
         path.unlink()
 
 
-def public_status(tenant_id: uuid.UUID) -> dict:
-    vault = load_vault(tenant_id)
+def public_status(tenant_id: uuid.UUID, cabinet_id: uuid.UUID) -> dict:
+    vault = load_vault(tenant_id, cabinet_id)
     if vault is None:
         return {
             "state": "missing_credentials",

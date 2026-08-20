@@ -192,7 +192,7 @@ async def get_s4b_status(
             s4b_status,
         )
 
-        return s4b_status(current.tenant_id)
+        return s4b_status(current.tenant_id, cs.ctx.cabinet_id)
 
 
 @router.put("/tenant/s4b-credentials")

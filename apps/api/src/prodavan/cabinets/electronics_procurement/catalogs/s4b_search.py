@@ -14,6 +14,7 @@ from prodavan.infrastructure.auth.s4b_vault import decrypt_secret, load_vault
 
 def search_lineitems_in_s4b(
     tenant_id: uuid.UUID,
+    cabinet_id: uuid.UUID,
     lineitems: list[dict],
     *,
     s4b_enabled: bool,
@@ -24,7 +25,7 @@ def search_lineitems_in_s4b(
         logs.append("s4b skipped=profile_not_electronics")
         return [], logs
 
-    vault = load_vault(tenant_id)
+    vault = load_vault(tenant_id, cabinet_id)
     if vault is None:
         logs.append("s4b skipped=missing_credentials; on_order never imported")
         return [], logs

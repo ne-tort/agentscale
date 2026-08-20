@@ -226,6 +226,7 @@ def _run_search(tenant_id, cabinet_id, project_id, run_id, status: dict) -> None
     offers, logs = search_lineitems_in_catalogs(tenant_id, cabinet_id, lineitems)
     s4b_offers, s4b_logs = search_lineitems_in_s4b(
         tenant_id,
+        cabinet_id,
         lineitems,
         s4b_enabled=s4b,
         start_seq=len(offers),

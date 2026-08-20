@@ -176,10 +176,10 @@ class ElectronicsProcurementModule:
             return {}
         if name == "put_s4b_credentials":
             return catalog_service.put_s4b_credentials(
-                tenant_id, payload["username"], payload["password"]
+                tenant_id, cabinet_id, payload["username"], payload["password"]
             )
         if name == "delete_s4b_credentials":
-            return catalog_service.delete_s4b_credentials(tenant_id)
+            return catalog_service.delete_s4b_credentials(tenant_id, cabinet_id)
         raise KeyError(name)
 
     async def execute_query(
@@ -224,7 +224,7 @@ class ElectronicsProcurementModule:
                 active_cabinet_id=params.get("active_cabinet_id", cabinet_id),
             )
         if name == "s4b_status":
-            return catalog_service.s4b_status(tenant_id)
+            return catalog_service.s4b_status(tenant_id, cabinet_id)
         if name == "resolve_export_file":
             path = pipeline_service.resolve_export_file(
                 tenant_id, cabinet_id, project_id, params["filename"]
