@@ -21,9 +21,9 @@
 | P7 | 8.1 | **5** |
 | P8 | 8.7 | **8** |
 | P9 | 9.0 | **10** |
-| **Overall** | **8.7** | **8.7** |
+| **Overall** | **8.7** | **8.8** |
 
-**Вердикт:** Doc ✅ · **I3 complete** — следующий шаг **I4 M02 specs pipeline**.
+**Вердикт:** Doc ✅ · **I4 pipeline scaffold done** — next I5 catalogs/S4B for real offers.
 
 ---
 
@@ -192,6 +192,19 @@
 | I3-T06 | Prompt PUT + ETag + versions/rollback | 8 | [x] |
 | I3-T07 | Flutter cabinet shell + NavGate + auth | 8 | [x] |
 
-## Next: I4 — M02 Specs / KP pipeline
+## I4 — M02 Specs pipeline (scaffold 2026-08-20)
 
-Spikes (parallel): P4-T04, P4-T05 → Impl 8+.
+| ID | Task | Impl | Done |
+|----|------|------|------|
+| I4-T01 | Inbox upload + extracted.md | 8 | [x] |
+| I4-T02 | Run dir: input copy, status.json, ingest csv/txt | 8 | [x] |
+| I4-T03 | Phase guards + advance/finalize | 8 | [x] |
+| I4-T04 | Honest empty search (no invented prices) | 8 | [x] |
+| I4-T05 | NEG-SKP-003 finalize; skip rank without offers | 8 | [x] |
+| I4-T06 | Catalog/S4B live search | — | [ ] |
+| I4-T07 | KP xlsx export | — | [ ] |
+
+## Next: I5 — catalogs + S4B (real offers)
+
+Live search needs M04 catalogs and M05 S4B credentials. Until then offers.json stays empty by design.
+
