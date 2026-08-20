@@ -28,6 +28,14 @@ def problem_response(
 
 
 async def http_exception_handler(_request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    if isinstance(exc.detail, dict) and "code" in exc.detail:
+        return problem_response(
+            status=exc.status_code,
+            code=str(exc.detail["code"]),
+            title=str(exc.detail["code"]),
+            detail=str(exc.detail.get("message", "")),
+        )
+
     code = "HTTP_ERROR"
     if exc.status_code == 404:
         code = "NOT_FOUND"

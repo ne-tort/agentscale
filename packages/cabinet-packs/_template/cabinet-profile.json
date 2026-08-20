@@ -1,0 +1,25 @@
+{
+  "$schema": "https://prodavan.dev/schemas/cabinet-profile/v1.json",
+  "id": "generic-assistant",
+  "version": "1.0.0",
+  "displayName": "Универсальный ассистент",
+  "description": "Базовый ассистент без S4B",
+  "capabilities": ["agent.session"],
+  "ui": {
+    "theme": "system",
+    "navigation": [
+      { "id": "projects", "label": "", "icon": "folder", "route": "/projects" },
+      { "id": "prompts", "label": "", "icon": "description", "route": "/prompts" }
+    ],
+    "modules": {},
+    "projectTabs": ["chat"]
+  },
+  "mcp": {
+    "packages": [],
+    "tools_allowlist": []
+  },
+  "seeds": {
+    "prompts": "prompts/"
+  },
+  "constraints": {}
+}

@@ -21,9 +21,9 @@
 | P7 | 8.1 | **5** |
 | P8 | 8.7 | **8** |
 | P9 | 9.0 | **10** |
-| **Overall** | **8.7** | **7.8** |
+| **Overall** | **8.7** | **8.2** |
 
-**Вердикт:** Doc ✅ · I0+I1 complete — следующий шаг **I2 cabinets**.
+**Вердикт:** Doc ✅ · I0+I1+I2 complete — следующий шаг **I3 projects + prompts**.
 
 ---
 
@@ -170,10 +170,20 @@
 | I1-T04 | JWT + bcrypt | 8 | [x] |
 | I1-T05 | NEG-TEN-01 RLS test | 8 | [x] |
 
-## Next: I2 (cabinets + pack seed)
+## I2 — M00 Cabinets + Pack seed (done 2026-08-20)
 
-- CRUD cabinets, switch, manifest API
-- Pack installer electronics-procurement
-- Resolve BL-04 capability registry
+| ID | Task | Impl | Done |
+|----|------|------|------|
+| I2-T01 | cabinet_profiles + cabinets schema + s4b trigger | 8 | [x] |
+| I2-T02 | Pack seeder (prompts/shops/theme → storage) | 8 | [x] |
+| I2-T03 | capabilities snapshot (`procurement.*` → BL-04) | 8 | [x] |
+| I2-T04 | CRUD / switch / manifest / profiles API | 8 | [x] |
+| I2-T05 | NEG-CAB-004 archived switch, NEG-CAB-006 slug | 8 | [x] |
+
+## Next: I3 (projects + prompts)
+
+- Project CRUD, attachments → object store
+- Prompt documents + versioning
+- Flutter: cabinet shell + NavGate + project list
 
 Spikes (parallel): P4-T04, P4-T05 → Impl 8+.
