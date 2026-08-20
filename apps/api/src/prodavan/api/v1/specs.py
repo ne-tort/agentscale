@@ -1,17 +1,25 @@
 """Spec run endpoints (M02). Nested under /projects/{project_id}."""
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 
 from prodavan.api.deps import CabinetSession, get_cabinet_session
-from prodavan.application.dto.runs import AdvanceRunRequest, CreateRunRequest, FinalizeRunRequest
+from prodavan.application.dto.runs import (
+    AdvanceRunRequest,
+    CreateRunRequest,
+    ExportKpRequest,
+    FinalizeRunRequest,
+)
 from prodavan.application.services.pipeline_service import (
     PipelineError,
     advance_run,
     create_run,
     describe_run,
+    export_kp,
     finalize_run,
     list_lineitems,
     list_offers,
+    resolve_export_file,
     upload_inbox,
 )
 
@@ -153,3 +161,42 @@ async def get_offers(
         return list_offers(cs.ctx.user.tenant_id, cs.ctx.cabinet_id, project_id, run_id)
     except PipelineError as exc:
         raise _pipeline_error(exc) from exc
+
+
+@router.post("/projects/{project_id}/export/kp")
+async def post_export_kp(
+    project_id: str,
+    body: ExportKpRequest,
+    cs: CabinetSession = Depends(get_cabinet_session),
+) -> dict:
+    try:
+        return await export_kp(
+            cs.session,
+            tenant_id=cs.ctx.user.tenant_id,
+            user_id=cs.ctx.user.user_id,
+            cabinet_id=cs.ctx.cabinet_id,
+            project_id=project_id,
+            run_id=body.run_id,
+            include_alternatives=body.include_alternatives,
+        )
+    except PipelineError as exc:
+        raise _pipeline_error(exc) from exc
+
+
+@router.get("/projects/{project_id}/export/{filename}")
+async def get_export_file(
+    project_id: str,
+    filename: str,
+    cs: CabinetSession = Depends(get_cabinet_session),
+) -> FileResponse:
+    try:
+        path = resolve_export_file(
+            cs.ctx.user.tenant_id, cs.ctx.cabinet_id, project_id, filename
+        )
+    except PipelineError as exc:
+        raise _pipeline_error(exc) from exc
+    return FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=path.name,
+    )

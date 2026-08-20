@@ -15,3 +15,8 @@ class AdvanceRunRequest(BaseModel):
 class FinalizeRunRequest(BaseModel):
     confirmed: bool = False
     operator_note: str | None = None
+
+
+class ExportKpRequest(BaseModel):
+    run_id: str = Field(min_length=1)
+    include_alternatives: bool = True

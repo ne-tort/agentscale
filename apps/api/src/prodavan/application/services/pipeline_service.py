@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import secrets
 import uuid
 
@@ -11,6 +12,12 @@ from prodavan.application.pipeline.classify import classify_rows
 from prodavan.application.pipeline.ingest import extracted_markdown, ingest_rows
 from prodavan.application.pipeline.search import s4b_log_line
 from prodavan.application.catalogs.search import rank_selections, search_lineitems_in_catalogs
+from prodavan.application.pipeline.kp_export import (
+    TEMPLATE_VERSION,
+    build_kp_rows,
+    timestamp_stamp,
+    write_kp_workbook,
+)
 from prodavan.application.pipeline.variants import import_run_to_sqlite
 from prodavan.application.services.cabinet_service import CabinetError, get_cabinet
 from prodavan.application.services.project_service import ProjectError, get_project
@@ -21,6 +28,7 @@ from prodavan.domain.pipeline import (
     next_phase,
 )
 from prodavan.infrastructure.storage import run_storage as store
+from prodavan.infrastructure.storage.project_storage import project_root
 from prodavan.infrastructure.storage.run_storage import RunStorageError
 
 
@@ -70,6 +78,10 @@ def _s4b_enabled(capabilities: dict) -> bool:
 
 def _equipment_enabled(capabilities: dict) -> bool:
     return bool(capabilities.get("modules", {}).get("equipment_cards", {}).get("enabled"))
+
+
+def _kp_enabled(capabilities: dict) -> bool:
+    return bool(capabilities.get("modules", {}).get("specs_kp", {}).get("enabled"))
 
 
 async def upload_inbox(
@@ -145,6 +157,7 @@ async def create_run(
     snapshot = {
         "s4b": _s4b_enabled(caps),
         "equipment_cards": _equipment_enabled(caps),
+        "specs_kp": _kp_enabled(caps),
     }
     run_id = _new_run_id()
     try:
@@ -415,3 +428,73 @@ def list_offers(tenant_id, cabinet_id, project_id, run_id) -> dict:
         raise PipelineError("PHASE_GUARD_FAILED", "offers.json missing", 409)
     offers = [o for o in (doc.get("offers") or []) if o.get("in_stock") is not False]
     return {"items": offers}
+
+
+async def export_kp(
+    session: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    user_id: uuid.UUID,
+    cabinet_id: uuid.UUID,
+    project_id: str,
+    run_id: str,
+    include_alternatives: bool,
+) -> dict:
+    await _project_or_raise(
+        session, tenant_id=tenant_id, user_id=user_id, cabinet_id=cabinet_id, project_id=project_id
+    )
+    try:
+        status = store.load_status(tenant_id, cabinet_id, project_id, run_id)
+    except RunStorageError as exc:
+        raise _wrap_storage(exc) from exc
+    if not status.get("capabilities_snapshot", {}).get("specs_kp"):
+        raise PipelineError("CAPABILITY_MISSING", "KP export requires specs_kp", 403)
+    if status.get("phase") not in {"review", "final"}:
+        raise PipelineError("PHASE_GUARD_FAILED", "KP export after review or final only", 409)
+
+    lineitems = list_lineitems(tenant_id, cabinet_id, project_id, run_id)["items"]
+    offers = (
+        store.read_json_artifact(tenant_id, cabinet_id, project_id, run_id, "offers.json") or {}
+    ).get("offers") or []
+    selections = (
+        store.read_json_artifact(tenant_id, cabinet_id, project_id, run_id, "selection.json") or {}
+    ).get("selections") or []
+    rows = build_kp_rows(
+        lineitems, offers, selections, include_alternatives=include_alternatives
+    )
+    stamp = timestamp_stamp()
+    filename = f"kp-{run_id}-{stamp}.xlsx"
+    export_dir = project_root(tenant_id, cabinet_id, project_id) / "export"
+    xlsx_path = export_dir / filename
+    write_kp_workbook(xlsx_path, rows)
+    meta = {
+        "run_id": run_id,
+        "template_version": TEMPLATE_VERSION,
+        "generated_at": stamp,
+        "operator_finalized": status.get("phase") == "final",
+        "lines_filled": sum(1 for row in rows if row[7] is not None),
+        "lines_review": sum(1 for row in rows if row[10] is True and row[4] in {"", "primary"}),
+    }
+    meta_path = export_dir / f"kp-{run_id}-{stamp}.meta.json"
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    return {
+        "export_path": f"export/{filename}",
+        "download_url": f"/api/v1/projects/{project_id}/export/{filename}",
+        "lines_filled": meta["lines_filled"],
+        "lines_review": meta["lines_review"],
+    }
+
+
+def resolve_export_file(
+    tenant_id: uuid.UUID,
+    cabinet_id: uuid.UUID,
+    project_id: str,
+    filename: str,
+):
+    from prodavan.infrastructure.storage.run_storage import sanitize_filename
+
+    safe = sanitize_filename(filename)
+    path = project_root(tenant_id, cabinet_id, project_id) / "export" / safe
+    if not path.is_file():
+        raise PipelineError("EXPORT_NOT_FOUND", "Export file not found", 404)
+    return path

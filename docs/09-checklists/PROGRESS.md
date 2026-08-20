@@ -21,9 +21,9 @@
 | P7 | 8.1 | **5** |
 | P8 | 8.7 | **8** |
 | P9 | 9.0 | **10** |
-| **Overall** | **8.7** | **8.9** |
+| **Overall** | **8.7** | **9.0** |
 
-**Вердикт:** Doc ✅ · **I5 catalogs wired into search** — live S4B still blocked until ping.
+**Вердикт:** Doc ✅ · **KP export done** — next live S4B or Flutter inbox/catalog upload.
 
 ---
 
@@ -202,7 +202,7 @@
 | I4-T04 | Honest empty search (no invented prices) | 8 | [x] |
 | I4-T05 | NEG-SKP-003 finalize; skip rank without offers | 8 | [x] |
 | I4-T06 | Catalog/S4B live search | 8 | [x] (catalog exact P/N; S4B not live) |
-| I4-T07 | KP xlsx export | — | [ ] |
+| I4-T07 | KP xlsx export | 8 | [x] |
 
 ## I5 — Catalogs + S4B vault (2026-08-20)
 
@@ -214,5 +214,5 @@
 | I5-T04 | S4B vault (no password in API; no fake valid ping) | 8 | [x] |
 | I5-T05 | Live S4B in_stock search | — | [ ] |
 
-## Next: live S4B (when ping exists) or KP export
+## Next: live S4B ping or Flutter inbox/catalog upload
 
