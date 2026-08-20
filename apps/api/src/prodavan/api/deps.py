@@ -3,7 +3,7 @@
 import uuid
 from dataclasses import dataclass
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, Header, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,7 @@ class CurrentUser:
     tenant_id: uuid.UUID
     cabinet_ids: list[uuid.UUID]
     active_cabinet_id: uuid.UUID | None = None
+    active_project_id: str | None = None
 
 
 async def get_session() -> AsyncSession:
@@ -48,7 +49,63 @@ async def get_current_user(
         tenant_id=uuid.UUID(payload["tenant_id"]),
         cabinet_ids=[uuid.UUID(cid) for cid in payload.get("cabinet_ids", [])],
         active_cabinet_id=uuid.UUID(active_raw) if active_raw else None,
+        active_project_id=payload.get("active_project_id"),
     )
+
+
+@dataclass
+class CabinetContext:
+    user: CurrentUser
+    cabinet_id: uuid.UUID
+
+
+async def get_cabinet_context(
+    current: CurrentUser = Depends(get_current_user),
+    x_cabinet_id: str | None = Header(default=None, alias="X-Cabinet-Id"),
+) -> CabinetContext:
+    cabinet_raw = x_cabinet_id or (
+        str(current.active_cabinet_id) if current.active_cabinet_id else None
+    )
+    if cabinet_raw is None:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "NO_ACTIVE_CABINET", "message": "Active cabinet required"},
+        )
+    try:
+        cabinet_id = uuid.UUID(cabinet_raw)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "INVALID_CABINET_ID", "message": "Invalid cabinet id"},
+        ) from exc
+    if cabinet_id not in current.cabinet_ids:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "CABINET_ACCESS_DENIED", "message": "Cabinet not in token"},
+        )
+    return CabinetContext(user=current, cabinet_id=cabinet_id)
+
+
+@dataclass
+class CabinetSession:
+    ctx: CabinetContext
+    session: AsyncSession
+
+
+async def get_cabinet_session(
+    ctx: CabinetContext = Depends(get_cabinet_context),
+    session: AsyncSession = Depends(get_session),
+) -> CabinetSession:
+    """Session with tenant + cabinet RLS."""
+    from prodavan.infrastructure.persistence.rls import apply_rls
+
+    await apply_rls(
+        session,
+        user_id=ctx.user.user_id,
+        tenant_id=ctx.user.tenant_id,
+        cabinet_id=ctx.cabinet_id,
+    )
+    return CabinetSession(ctx=ctx, session=session)
 
 
 async def get_authenticated_session(

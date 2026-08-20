@@ -21,9 +21,9 @@
 | P7 | 8.1 | **5** |
 | P8 | 8.7 | **8** |
 | P9 | 9.0 | **10** |
-| **Overall** | **8.7** | **8.2** |
+| **Overall** | **8.7** | **8.5** |
 
-**Вердикт:** Doc ✅ · I0+I1+I2 complete — следующий шаг **I3 projects + prompts**.
+**Вердикт:** Doc ✅ · I0–I2 complete, **I3 in progress** — projects + prompts read done; versioning next.
 
 ---
 
@@ -180,10 +180,22 @@
 | I2-T04 | CRUD / switch / manifest / profiles API | 8 | [x] |
 | I2-T05 | NEG-CAB-004 archived switch, NEG-CAB-006 slug | 8 | [x] |
 
-## Next: I3 (projects + prompts)
+## I3 — M01 Projects + M03 Prompts (in progress 2026-08-20)
 
-- Project CRUD, attachments → object store
-- Prompt documents + versioning
-- Flutter: cabinet shell + NavGate + project list
+| ID | Task | Impl | Done |
+|----|------|------|------|
+| I3-T01 | projects table + RLS (cabinet scope) | 8 | [x] |
+| I3-T02 | Project storage: inbox/runs/export, project.json, commerce.sqlite | 8 | [x] |
+| I3-T03 | CRUD / open / stats + active cabinet deps | 8 | [x] |
+| I3-T04 | Prompts tree + file read from cabinet storage | 8 | [x] |
+| I3-T05 | NEG-PRJ-002, NEG-PRJ-003 tests | 8 | [x] |
+| I3-T06 | Prompt versioning (PUT/versions/rollback) | — | [ ] |
+| I3-T07 | Flutter cabinet shell + NavGate | — | [ ] |
+
+## Next (I3 remainder → I4)
+
+- Prompt PUT + ETag versioning + snapshots
+- Flutter auth + cabinet shell
+- I4: M02 specs pipeline port
 
 Spikes (parallel): P4-T04, P4-T05 → Impl 8+.

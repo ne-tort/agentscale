@@ -18,6 +18,7 @@ def create_access_token(
     tenant_id: uuid.UUID,
     cabinet_ids: list[uuid.UUID],
     active_cabinet_id: uuid.UUID | None = None,
+    active_project_id: str | None = None,
 ) -> str:
     expire = datetime.now(UTC) + timedelta(seconds=settings.access_token_ttl_seconds)
     payload = {
@@ -29,6 +30,8 @@ def create_access_token(
     }
     if active_cabinet_id is not None:
         payload["active_cabinet_id"] = str(active_cabinet_id)
+    if active_project_id is not None:
+        payload["active_project_id"] = active_project_id
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
 

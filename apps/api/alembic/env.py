@@ -16,6 +16,7 @@ if config.config_file_name is not None:
 
 config.set_main_option("sqlalchemy.url", settings.database_url)
 
+from prodavan.infrastructure.persistence.models import projects as _projects  # noqa: F401
 from prodavan.infrastructure.persistence.models import tenants as _tenants  # noqa: F401
 from prodavan.infrastructure.persistence.models.base import Base
 
