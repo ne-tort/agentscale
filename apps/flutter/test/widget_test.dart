@@ -1,11 +1,25 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:prodavan/app.dart';
+import 'package:prodavan/shell/app_state.dart';
 
 void main() {
-  testWidgets('shows Prodavan placeholder home', (WidgetTester tester) async {
-    await tester.pumpWidget(const ProdavanApp());
-    expect(find.text('Prodavan'), findsOneWidget);
-    expect(find.text('I0 scaffold'), findsOneWidget);
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
+
+  testWidgets('shows login screen when not authenticated', (WidgetTester tester) async {
+    final appState = await createAppState();
+    await appState.bootstrap();
+    addTearDown(appState.dispose);
+
+    await tester.pumpWidget(ProdavanApp(appState: appState));
+    await tester.pump();
+
+    expect(find.text('Prodavan'), findsWidgets);
+    expect(find.text('Войти'), findsOneWidget);
   });
 }

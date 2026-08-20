@@ -1,4 +1,4 @@
-// Auth repository port (I1).
+// Auth repository port — session handled by [AppState].
 
 abstract class AuthRepository {
   Future<bool> isAuthenticated();

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
-/// Feature flag gate from cabinet profile (stub for I0).
+import 'package:prodavan/shell/app_scope.dart';
+
+/// Feature flag gate from active cabinet capabilities.
 class FeatureGate extends StatelessWidget {
   const FeatureGate({
     super.key,
@@ -15,7 +17,7 @@ class FeatureGate extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // I2: read active cabinet capabilities from app state.
-    return child;
+    final enabled = AppScope.of(context).isCapabilityEnabled(capability);
+    return enabled ? child : fallback;
   }
 }

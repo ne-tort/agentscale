@@ -1,10 +1,14 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/theme/app_theme.dart';
-import 'package:prodavan/features/auth/presentation/screens/placeholder_home_screen.dart';
+import 'package:prodavan/shell/app_root.dart';
+import 'package:prodavan/shell/app_scope.dart';
+import 'package:prodavan/shell/app_state.dart';
 
 class ProdavanApp extends StatelessWidget {
-  const ProdavanApp({super.key});
+  const ProdavanApp({super.key, required this.appState});
+
+  final AppState appState;
 
   @override
   Widget build(BuildContext context) {
@@ -13,7 +17,10 @@ class ProdavanApp extends StatelessWidget {
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: ThemeMode.system,
-      home: const PlaceholderHomeScreen(),
+      home: AppScope(
+        appState: appState,
+        child: AppRoot(appState: appState),
+      ),
     );
   }
 }

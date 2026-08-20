@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
-/// Manifest-driven navigation gate (stub for I0).
+import 'package:prodavan/shell/app_scope.dart';
+
+/// Manifest-driven navigation gate: shows child only if capability enabled.
 class NavGate extends StatelessWidget {
   const NavGate({
     super.key,
@@ -15,7 +17,7 @@ class NavGate extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // I2: filter by cabinet manifest capabilities.
-    return child;
+    final enabled = AppScope.of(context).isCapabilityEnabled(capability);
+    return enabled ? child : fallback;
   }
 }
