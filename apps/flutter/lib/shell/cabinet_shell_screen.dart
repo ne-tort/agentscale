@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/shell/app_scope.dart';
@@ -233,7 +234,11 @@ class ProjectDashboardBody extends StatelessWidget {
             ),
             FeatureGate(
               capability: 'specs_kp',
-              child: _StatChip(icon: Icons.description_outlined, label: 'КП', value: 'скоро'),
+              child: _StatChip(
+                icon: Icons.description_outlined,
+                label: 'КП',
+                value: AppScope.of(context).lastExportPath == null ? 'готово' : 'файл',
+              ),
             ),
             NavGate(
               capability: 'procurement.s4b',
@@ -242,16 +247,92 @@ class ProjectDashboardBody extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 32),
-        const Card(
+        if (AppScope.of(context).error != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(
+              AppScope.of(context).error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
+        if (AppScope.of(context).statusMessage != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(AppScope.of(context).statusMessage!),
+          ),
+        FeatureGate(
+          capability: 'specs_kp',
+          child: Card(
+            child: ListTile(
+              leading: const Icon(Icons.storage_outlined),
+              title: const Text('Каталог CSV'),
+              subtitle: const Text('part_number, title, price, stock · под заказ отбрасывается'),
+              trailing: const Icon(Icons.upload),
+              onTap: AppScope.of(context).busy ? null : () => _pickCatalog(context),
+            ),
+          ),
+        ),
+        Card(
           child: ListTile(
-            leading: Icon(Icons.upload_file_outlined),
-            title: Text('Inbox'),
-            subtitle: Text('I4: загрузка спеки и прогоны'),
+            leading: const Icon(Icons.upload_file_outlined),
+            title: const Text('Inbox: спека'),
+            subtitle: const Text('csv/txt → ingest → review (цены только из каталога)'),
+            trailing: const Icon(Icons.play_arrow),
+            onTap: AppScope.of(context).busy ? null : () => _pickSpec(context),
+          ),
+        ),
+        FeatureGate(
+          capability: 'specs_kp',
+          child: Card(
+            child: ListTile(
+              leading: const Icon(Icons.description_outlined),
+              title: const Text('Экспорт КП'),
+              subtitle: Text(AppScope.of(context).lastRunId == null
+                  ? 'Сначала прогон до review'
+                  : 'Прогон ${AppScope.of(context).lastRunId}'),
+              onTap: AppScope.of(context).busy ? null : () => AppScope.of(context).exportKp(),
+            ),
           ),
         ),
       ],
     );
   }
+}
+
+Future<void> _pickCatalog(BuildContext context) async {
+  final picked = await FilePicker.platform.pickFiles(
+    type: FileType.custom,
+    allowedExtensions: ['csv'],
+    withData: true,
+  );
+  final file = picked?.files.single;
+  final bytes = file?.bytes;
+  if (bytes == null || !context.mounted) return;
+  await AppScope.of(context).uploadCatalog(
+    filename: file!.name,
+    bytes: bytes,
+    slug: _slugFromFilename(file.name),
+    displayName: file.name,
+  );
+}
+
+Future<void> _pickSpec(BuildContext context) async {
+  final picked = await FilePicker.platform.pickFiles(
+    type: FileType.custom,
+    allowedExtensions: ['csv', 'txt', 'xlsx', 'xls'],
+    withData: true,
+  );
+  final file = picked?.files.single;
+  final bytes = file?.bytes;
+  if (bytes == null || !context.mounted) return;
+  await AppScope.of(context).uploadSpecAndRun(filename: file!.name, bytes: bytes);
+}
+
+String _slugFromFilename(String name) {
+  final base = name.toLowerCase().replaceAll(RegExp(r'\.[^.]+$'), '');
+  final slug = base.replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-+|-+$'), '');
+  if (slug.length >= 3) return slug.substring(0, slug.length.clamp(0, 64));
+  return 'catalog';
 }
 
 class _StatChip extends StatelessWidget {

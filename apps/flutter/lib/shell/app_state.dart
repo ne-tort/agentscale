@@ -15,12 +15,16 @@ class AppState extends ChangeNotifier {
     required AuthApi authApi,
     required CabinetsApi cabinetsApi,
     required ProjectsApi projectsApi,
+    required CatalogsApi catalogsApi,
+    required SpecsApi specsApi,
   })  : _store = store,
         _session = sessionContext,
         _api = api,
         _authApi = authApi,
         _cabinetsApi = cabinetsApi,
-        _projectsApi = projectsApi;
+        _projectsApi = projectsApi,
+        _catalogsApi = catalogsApi,
+        _specsApi = specsApi;
 
   final SessionStore _store;
   final SessionContext _session;
@@ -28,6 +32,8 @@ class AppState extends ChangeNotifier {
   final AuthApi _authApi;
   final CabinetsApi _cabinetsApi;
   final ProjectsApi _projectsApi;
+  final CatalogsApi _catalogsApi;
+  final SpecsApi _specsApi;
 
   bool _bootstrapped = false;
   bool _busy = false;
@@ -42,10 +48,14 @@ class AppState extends ChangeNotifier {
   List<ProjectItem> _projects = [];
   ProjectItem? _activeProject;
   Map<String, dynamic>? _projectStats;
+  String? _statusMessage;
+  String? _lastRunId;
+  String? _lastExportPath;
 
   bool get bootstrapped => _bootstrapped;
   bool get busy => _busy;
   String? get error => _error;
+  String? get statusMessage => _statusMessage;
   bool get isAuthenticated => _session.accessToken != null && _session.accessToken!.isNotEmpty;
   String? get userEmail => _userEmail;
   String? get tenantName => _tenantName;
@@ -56,6 +66,8 @@ class AppState extends ChangeNotifier {
   List<ProjectItem> get projects => List.unmodifiable(_projects);
   ProjectItem? get activeProject => _activeProject;
   Map<String, dynamic>? get projectStats => _projectStats;
+  String? get lastRunId => _lastRunId;
+  String? get lastExportPath => _lastExportPath;
 
   Future<void> bootstrap() async {
     _session.accessToken = _store.accessToken;
@@ -110,6 +122,9 @@ class AppState extends ChangeNotifier {
     _projects = [];
     _activeProject = null;
     _projectStats = null;
+    _statusMessage = null;
+    _lastRunId = null;
+    _lastExportPath = null;
     _error = null;
     notifyListeners();
   }
@@ -185,6 +200,81 @@ class AppState extends ChangeNotifier {
       await _store.saveActiveProject(project.id);
       _activeProject = project;
       await _loadProjectStats(project.id);
+    });
+  }
+
+  Future<void> uploadCatalog({
+    required String filename,
+    required List<int> bytes,
+    required String slug,
+    required String displayName,
+  }) async {
+    final cabinet = _activeCabinet;
+    if (cabinet == null) {
+      _error = 'Нет активного кабинета';
+      notifyListeners();
+      return;
+    }
+    await _run(() async {
+      final data = await _catalogsApi.upload(
+        cabinetId: cabinet.id,
+        filename: filename,
+        bytes: bytes,
+        slug: slug,
+        displayName: displayName,
+      );
+      _statusMessage =
+          'Каталог ${data['status']}: ${data['stats']?['rows'] ?? 0} строк (on_order отброшены)';
+    });
+  }
+
+  Future<void> uploadSpecAndRun({
+    required String filename,
+    required List<int> bytes,
+  }) async {
+    final project = _activeProject;
+    if (project == null) {
+      _error = 'Нет активного проекта';
+      notifyListeners();
+      return;
+    }
+    await _run(() async {
+      final uploaded = await _specsApi.uploadInbox(
+        projectId: project.id,
+        filename: filename,
+        bytes: bytes,
+      );
+      final runId = uploaded['run_id'] as String?;
+      if (runId == null) {
+        _statusMessage = 'Файл в inbox, прогон не создан';
+        return;
+      }
+      _lastRunId = runId;
+      for (final phase in SpecsApi.pipelineToReview) {
+        await _specsApi.advance(
+          projectId: project.id,
+          runId: runId,
+          targetPhase: phase,
+        );
+      }
+      _statusMessage = 'Прогон $runId до review. Цены только из каталога.';
+      await _loadProjectStats(project.id);
+    });
+  }
+
+  Future<void> exportKp() async {
+    final project = _activeProject;
+    final runId = _lastRunId;
+    if (project == null || runId == null) {
+      _error = 'Нет прогона для КП';
+      notifyListeners();
+      return;
+    }
+    await _run(() async {
+      final data = await _specsApi.exportKp(projectId: project.id, runId: runId);
+      _lastExportPath = data['export_path'] as String?;
+      _statusMessage =
+          'КП: ${data['lines_filled']} строк с ценой, review ${data['lines_review']} · ${data['export_path']}';
     });
   }
 
@@ -285,6 +375,7 @@ class AppState extends ChangeNotifier {
   Future<void> _run(Future<void> Function() action) async {
     _busy = true;
     _error = null;
+    _statusMessage = null;
     notifyListeners();
     try {
       await action();
@@ -323,5 +414,7 @@ Future<AppState> createAppState() async {
     authApi: AuthApi(api),
     cabinetsApi: CabinetsApi(api),
     projectsApi: ProjectsApi(api),
+    catalogsApi: CatalogsApi(api),
+    specsApi: SpecsApi(api),
   );
 }

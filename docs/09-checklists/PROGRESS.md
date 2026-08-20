@@ -191,6 +191,7 @@
 | I3-T05 | NEG-PRJ-002, NEG-PRJ-003 tests | 8 | [x] |
 | I3-T06 | Prompt PUT + ETag + versions/rollback | 8 | [x] |
 | I3-T07 | Flutter cabinet shell + NavGate + auth | 8 | [x] |
+| I3-T08 | Flutter catalog/inbox/KP actions | 8 | [x] |
 
 ## I4 — M02 Specs pipeline (scaffold 2026-08-20)
 
@@ -214,5 +215,5 @@
 | I5-T04 | S4B vault (no password in API; no fake valid ping) | 8 | [x] |
 | I5-T05 | Live S4B in_stock search | — | [ ] |
 
-## Next: live S4B ping or Flutter inbox/catalog upload
+## Next: live S4B ping or xlsx spec parser
 

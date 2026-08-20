@@ -96,6 +96,24 @@ class ApiClient {
     return body;
   }
 
+  Future<Map<String, dynamic>> postMultipart(
+    String path, {
+    required String fileField,
+    required String filename,
+    required List<int> bytes,
+    Map<String, String> fields = const {},
+  }) async {
+    final request = http.MultipartRequest('POST', _uri(path));
+    final headers = _headers();
+    headers.remove('Content-Type');
+    request.headers.addAll(headers);
+    request.fields.addAll(fields);
+    request.files.add(http.MultipartFile.fromBytes(fileField, bytes, filename: filename));
+    final streamed = await _http.send(request);
+    final response = await http.Response.fromStream(streamed);
+    return _decode(response);
+  }
+
   void dispose() => _http.close();
 }
 
@@ -166,4 +184,70 @@ class ProjectsApi {
 
   Future<Map<String, dynamic>> stats(String projectId) =>
       _client.get('/projects/$projectId/stats');
+}
+
+class CatalogsApi {
+  CatalogsApi(this._client);
+
+  final ApiClient _client;
+
+  Future<Map<String, dynamic>> upload({
+    required String cabinetId,
+    required String filename,
+    required List<int> bytes,
+    required String slug,
+    required String displayName,
+    bool trustedSeller = true,
+  }) =>
+      _client.postMultipart(
+        '/cabinets/$cabinetId/catalogs/upload',
+        fileField: 'file',
+        filename: filename,
+        bytes: bytes,
+        fields: {
+          'slug': slug,
+          'display_name': displayName,
+          'trusted_seller': trustedSeller.toString(),
+        },
+      );
+}
+
+class SpecsApi {
+  SpecsApi(this._client);
+
+  final ApiClient _client;
+
+  static const pipelineToReview = ['classify', 'search', 'rank', 'variants', 'review'];
+
+  Future<Map<String, dynamic>> uploadInbox({
+    required String projectId,
+    required String filename,
+    required List<int> bytes,
+    bool autoRun = true,
+  }) =>
+      _client.postMultipart(
+        '/projects/$projectId/inbox/upload',
+        fileField: 'file',
+        filename: filename,
+        bytes: bytes,
+        fields: {'auto_run': autoRun.toString()},
+      );
+
+  Future<Map<String, dynamic>> advance({
+    required String projectId,
+    required String runId,
+    required String targetPhase,
+  }) =>
+      _client.post('/projects/$projectId/runs/$runId/advance', body: {
+        'target_phase': targetPhase,
+      });
+
+  Future<Map<String, dynamic>> exportKp({
+    required String projectId,
+    required String runId,
+  }) =>
+      _client.post('/projects/$projectId/export/kp', body: {
+        'run_id': runId,
+        'include_alternatives': true,
+      });
 }
