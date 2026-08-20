@@ -15,8 +15,8 @@ Gaps found while re-checking cabinet-layer work against ADR-001 / Cabinet SPI.
 | G8 | Registry | Pack install/upgrade/signature not implemented | high | Registry API + version pins on cabinet row |
 | G9 | Auth | S4B vault tenant-scoped vs cabinet-scoped capability | med | **done** — vault under `cabinets/{id}/vault/s4b.json` + legacy tenant read fallback |
 | G10 | Trigger | PG trigger hard-codes `electronics-procurement` for S4B | med | **done** — migration `2026082101` drops trigger; gate via SPI/capabilities |
-| G11 | CI | ubuntu-latest jobs die in ~3s (empty steps) | med | **mitigated** — Flutter/Schemas → `[self-hosted, linux, docker]`; github-hosted still broken |
-| G12 | Argo | k3s kubeconfig needs sudo | med | Passwordless kubeconfig / apply when available |
+| G11 | CI | ubuntu-latest jobs die in ~3s; self-hosted had ghost session | med | **mitigated** — Flutter/Schemas/API/Images on `[self-hosted,linux,docker]`; runner renamed to `wsl-prodavan-2` after stuck job on `#29` |
+| G12 | Argo | k3s kubeconfig needs sudo | med | **mitigated (local)** — k3d kubeconfig in `infra/.kube/` + runner mount; see `local-cluster-e2e.md` |
 | G13 | SPI HTTP | Binary commands blocked on SPI HTTP (`upload_*`) | low | Keep domain facades; or add multipart SPI later |
 | G14 | Agent UI | Chat is stub echo until LLM wired | high | Same as G5 |
 | G15 | Events | Modules no-op on `file.uploaded` / `project.created` | low | Wire auto-index / welcome hooks when needed |

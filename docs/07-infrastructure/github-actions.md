@@ -19,6 +19,14 @@ flowchart LR
 
 ---
 
+## Local-dev deploy (active)
+
+`deploy-dev-k3s.yml` — после успешного **CI Images** на `main` (или `workflow_dispatch`): self-hosted runner поднимает/проверяет k3d через Terraform `environments/local`, ждёт Argo Application `prodavan-dev` (fallback `kubectl apply -k`), smoke на `http://127.0.0.1:8088` с `Host: prodavan.local`.
+
+Runbook: [local-cluster-e2e.md](local-cluster-e2e.md).
+
+---
+
 ## Workflows
 
 ### `ci.yml` — on every PR

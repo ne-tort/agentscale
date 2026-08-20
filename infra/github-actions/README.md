@@ -1,8 +1,8 @@
-# GitHub Actions (stub)
+# GitHub Actions
 
 Спецификация: [`docs/07-infrastructure/github-actions.md`](../../docs/07-infrastructure/github-actions.md).
 
-**Статус:** `ci-schemas.yml` и `ci-api.yml` — **I0 done**. Deploy — **I7**.
+Локальный k3s E2E: [`docs/07-infrastructure/local-cluster-e2e.md`](../../docs/07-infrastructure/local-cluster-e2e.md).
 
 | Workflow | Status | Purpose |
 |----------|--------|---------|
@@ -10,6 +10,7 @@
 | `ci-schemas.yml` | active | validate pack + cabinet-profile schema |
 | `ci-images.yml` | active | self-hosted build/push GHCR + k3s tag bump |
 | `ci-flutter.yml` | active | analyze + palette hex guard |
-| `deploy-staging.yml` | planned I7 | Argo CD sync wait |
+| `deploy-dev-k3s.yml` | active (local-dev) | after Images: terraform/k3d, Argo wait, curl smoke `:8088` |
+| `deploy-staging.yml` | planned | cloud staging Argo sync |
 
 **Commerce submodule:** в CI Commerce-репо — `git submodule update --init prodavan` перед docs lint.

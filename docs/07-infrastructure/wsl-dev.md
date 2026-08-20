@@ -148,9 +148,18 @@ docker run --rm -v ~/git/prodavan/dev-workspace:/workspace \
 Mode C:
 
 ```bash
-k3d cluster create prodavan-dev --agents 1
-kubectl apply -k infra/k3s/overlays/dev
+# Preferred: Terraform + Argo (see local-cluster-e2e.md)
+bash infra/scripts/bootstrap_local_cluster.sh
+export KUBECONFIG=infra/.kube/prodavan-k3d.yaml
+kubectl -n prodavan get pods
+curl -sS -H 'Host: prodavan.local' http://127.0.0.1:8088/health
+
+# Minimal without Argo:
+# k3d cluster create prodavan-dev -p "8088:80@loadbalancer"
+# kubectl apply -k infra/k3s/overlays/dev
 ```
+
+Полный runbook: [local-cluster-e2e.md](local-cluster-e2e.md).
 
 ---
 
@@ -230,5 +239,6 @@ Migration testing: import sample `projects/demo/` via script — см. [../08-mi
 
 - [env-matrix.md](env-matrix.md)
 - [github-runner-local.md](github-runner-local.md)
+- [local-cluster-e2e.md](local-cluster-e2e.md)
 - [topology.md](topology.md)
 - [../06-agent-runtime/claude-code-spike.md](../06-agent-runtime/claude-code-spike.md)
