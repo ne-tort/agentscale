@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from prodavan.application.integrations.s4b_port import S4BGateway
+from prodavan.cabinets.electronics_procurement.integrations.s4b_port import S4BGateway
 from prodavan.infrastructure.integrations.http_s4b import HttpS4BGateway
 
 _gateway: S4BGateway | None = None

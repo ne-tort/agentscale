@@ -1,0 +1,1 @@
+"""Electronics procurement cabinet package."""

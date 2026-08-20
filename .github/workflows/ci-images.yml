@@ -131,7 +131,15 @@ jobs:
 
       - name: Bump overlay image tags
         run: |
-          python3 infra/scripts/bump_k3s_dev_images.py \
+          if command -v python3 >/dev/null 2>&1; then
+            PY=python3
+          elif command -v python >/dev/null 2>&1; then
+            PY=python
+          else
+            echo "Python required for bump_k3s_dev_images.py" >&2
+            exit 1
+          fi
+          "$PY" infra/scripts/bump_k3s_dev_images.py \
             --owner "${{ needs.build-api.outputs.owner }}" \
             --tag "${{ needs.build-api.outputs.tag }}"
 

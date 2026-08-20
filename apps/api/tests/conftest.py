@@ -53,7 +53,7 @@ class _StubS4B:
 @pytest.fixture(autouse=True)
 def stub_s4b_gateway(monkeypatch):
     monkeypatch.setattr(
-        "prodavan.application.integrations.s4b_runtime._gateway",
+        "prodavan.cabinets.electronics_procurement.integrations.s4b_runtime._gateway",
         _StubS4B(),
     )
 

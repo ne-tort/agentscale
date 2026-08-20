@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from prodavan.application.integrations.s4b_parse import normalize_distributor
+from prodavan.cabinets.electronics_procurement.integrations.s4b_parse import normalize_distributor
 from prodavan.config.settings import settings
 
 

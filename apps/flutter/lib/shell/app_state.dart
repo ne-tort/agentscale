@@ -26,6 +26,7 @@ class AppState extends ChangeNotifier {
     required ProjectsApi projectsApi,
     required CatalogsApi catalogsApi,
     required SpecsApi specsApi,
+    required AgentApi agentApi,
     UiMessenger? uiMessenger,
   })  : _store = store,
         _session = sessionContext,
@@ -37,6 +38,7 @@ class AppState extends ChangeNotifier {
         _projectsApi = projectsApi,
         _catalogsApi = catalogsApi,
         _specsApi = specsApi,
+        _agentApi = agentApi,
         uiMessenger = uiMessenger ?? UiMessenger();
 
   final SessionStore _store;
@@ -49,6 +51,7 @@ class AppState extends ChangeNotifier {
   final ProjectsApi _projectsApi;
   final CatalogsApi _catalogsApi;
   final SpecsApi _specsApi;
+  final AgentApi _agentApi;
   final UiMessenger uiMessenger;
   final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey =
       GlobalKey<ScaffoldMessengerState>();
@@ -269,7 +272,7 @@ class AppState extends ChangeNotifier {
   Future<void> createCabinet({
     required String slug,
     required String displayName,
-    String profileId = 'electronics-procurement',
+    required String profileId,
   }) async {
     await _run(() async {
       final data = await _cabinetsApi.create(
@@ -434,6 +437,8 @@ class AppState extends ChangeNotifier {
   bool isCapabilityEnabled(String capability) {
     final caps = _capabilities;
     if (caps == null) return false;
+    final raw = caps['raw'];
+    if (raw is List && raw.contains(capability)) return true;
     switch (capability) {
       case 'procurement.s4b':
       case 's4b':
@@ -444,10 +449,54 @@ class AppState extends ChangeNotifier {
       case 'procurement.equipment':
       case 'equipment_cards':
         return caps['modules']?['equipment_cards']?['enabled'] == true;
+      case 'procurement.pipeline':
+      case 'pipeline':
+        return caps['modules']?['pipeline']?['enabled'] == true;
+      case 'agent.session':
+        return true; // platform agent available for every cabinet
       default:
         return false;
     }
   }
+
+  /// Tabs from cabinet pack manifest (`ui.projectTabs`).
+  List<String> get projectTabs {
+    final ui = _manifestUi;
+    final tabs = ui?['projectTabs'];
+    if (tabs is List && tabs.isNotEmpty) {
+      return tabs.map((e) => e.toString()).toList();
+    }
+    // Fallback for older cabinets without UI snapshot.
+    final out = <String>['chat'];
+    if (isCapabilityEnabled('pipeline')) {
+      out.addAll(['specs', 'variants']);
+    }
+    if (isCapabilityEnabled('specs_kp')) {
+      out.add('kp');
+    }
+    if (isCapabilityEnabled('equipment_cards')) {
+      out.add('equipment');
+    }
+    return out;
+  }
+
+  bool hasProjectTab(String tabId) => projectTabs.contains(tabId);
+
+  Future<List<Map<String, dynamic>>> listCabinetProfiles() async {
+    final data = await _cabinetsApi.listProfiles();
+    final items = data['items'] as List<dynamic>? ?? [];
+    return items.cast<Map<String, dynamic>>();
+  }
+
+  Future<Map<String, dynamic>> startAgentSession(String projectId) =>
+      _agentApi.startSession(projectId);
+
+  Future<Map<String, dynamic>> sendAgentMessage({
+    required String projectId,
+    required String sessionId,
+    required String text,
+  }) =>
+      _agentApi.sendMessage(projectId: projectId, sessionId: sessionId, text: text);
 
   Future<void> _applyAuthResponse(Map<String, dynamic> data) async {
     await _setTokens(
@@ -600,6 +649,7 @@ Future<AppState> createAppState() async {
     projectsApi: ProjectsApi(api),
     catalogsApi: CatalogsApi(api),
     specsApi: SpecsApi(api),
+    agentApi: AgentApi(api),
   );
   api.onUnauthorized = state.tryRefreshTokens;
   return state;

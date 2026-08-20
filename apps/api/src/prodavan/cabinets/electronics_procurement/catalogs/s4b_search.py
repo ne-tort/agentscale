@@ -5,9 +5,9 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from prodavan.application.integrations.s4b_parse import to_outbound_item
-from prodavan.application.integrations.s4b_runtime import get_s4b_gateway
-from prodavan.application.integrations.s4b_trusted import split_trusted
+from prodavan.cabinets.electronics_procurement.integrations.s4b_parse import to_outbound_item
+from prodavan.cabinets.electronics_procurement.integrations.s4b_runtime import get_s4b_gateway
+from prodavan.cabinets.electronics_procurement.integrations.s4b_trusted import split_trusted
 from prodavan.domain.s4b_stock import is_s4b_in_stock
 from prodavan.infrastructure.auth.s4b_vault import decrypt_secret, load_vault
 

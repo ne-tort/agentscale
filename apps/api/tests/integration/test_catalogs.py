@@ -136,7 +136,7 @@ async def test_s4b_rate_limited_ping_still_validates_account(
         def search_by_part_numbers(self, *args, **kwargs) -> dict:
             return {"ok": False, "error_code": "rate_limited"}
 
-    monkeypatch.setattr("prodavan.application.integrations.s4b_runtime._gateway", _RateLimited())
+    monkeypatch.setattr("prodavan.cabinets.electronics_procurement.integrations.s4b_runtime._gateway", _RateLimited())
     reg = await register_user(client, unique_suffix, prefix="s4b-rl")
     headers = {"Authorization": f"Bearer {reg['access_token']}"}
     put = await client.put(
@@ -154,7 +154,7 @@ class _ValidS4B:
         return {"ok": True, "auth_ok": True}
 
     def search_by_part_numbers(self, username: str, password: str, part_numbers: list[str]) -> dict:
-        from prodavan.application.integrations.s4b_parse import parse_response
+        from prodavan.cabinets.electronics_procurement.integrations.s4b_parse import parse_response
 
         raw = {
             "results": [
@@ -217,7 +217,7 @@ class _ValidS4B:
 async def test_s4b_live_search_keeps_in_stock_and_ranks_trusted(
     client: AsyncClient, unique_suffix: str, monkeypatch
 ) -> None:
-    monkeypatch.setattr("prodavan.application.integrations.s4b_runtime._gateway", _ValidS4B())
+    monkeypatch.setattr("prodavan.cabinets.electronics_procurement.integrations.s4b_runtime._gateway", _ValidS4B())
     reg = await register_user(client, unique_suffix, prefix="s4b-live")
     _, headers = await active_cabinet_headers(client, reg, unique_suffix)
     project_id = await _project(client, headers, unique_suffix + "s")

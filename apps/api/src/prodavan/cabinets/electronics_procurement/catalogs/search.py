@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 
-from prodavan.application.catalogs.indexer import search_exact_pn
+from prodavan.cabinets.electronics_procurement.catalogs.indexer import search_exact_pn
 from prodavan.infrastructure.storage.catalog_storage import catalog_dir, user_catalogs_root
 
 

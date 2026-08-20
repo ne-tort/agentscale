@@ -72,6 +72,23 @@ async def create_cabinet(
     try:
         capabilities = await run_pack_seed(session, cabinet=cabinet, profile_id=profile_id)
         cabinet.capabilities = capabilities
+        # Provision cabinet-owned DB via SPI (never core Alembic).
+        from prodavan.cabinets.events import spi_context
+        from prodavan.cabinets.registry import get_module_for_profile
+
+        module = get_module_for_profile(profile_id)
+        await module.migrate(
+            spi_context(
+                tenant_id=tenant_id,
+                cabinet_id=cabinet.id,
+                user_id=user_id,
+            )
+        )
+        runtime = dict(capabilities.get("runtime") or {})
+        runtime["db"] = "cabinet.sqlite"
+        runtime["pack_id"] = module.pack_id
+        capabilities = {**capabilities, "runtime": runtime}
+        cabinet.capabilities = capabilities
         cabinet.status = "active"
         await session.commit()
         await session.refresh(cabinet)

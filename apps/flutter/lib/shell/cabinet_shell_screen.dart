@@ -5,6 +5,7 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/widgets.dart';
 import 'package:prodavan/features/auth/presentation/screens/profile_screen.dart';
 import 'package:prodavan/features/runs/presentation/runs_screen.dart';
+import 'package:prodavan/shell/agent_chat_panel.dart';
 import 'package:prodavan/shell/app_scope.dart';
 import 'package:prodavan/shell/feature_gate.dart';
 import 'package:prodavan/shell/models.dart';
@@ -42,49 +43,75 @@ class CabinetShellScreen extends StatelessWidget {
       body: project == null
           ? _NoProjectBody(onCreate: () => _showCreateProjectDialog(context))
           : ProjectDashboardBody(project: project, stats: state.projectStats),
-      floatingActionButton: cabinet?.profileId == null
+      floatingActionButton: cabinet == null
           ? FloatingActionButton.extended(
               onPressed: () => _showCreateCabinetDialog(context),
               icon: const Icon(Icons.add),
-              label: const Text('Кабинет закупок'),
+              label: const Text('Создать кабинет'),
             )
-          : null,
+          : FloatingActionButton(
+              onPressed: () => _showCreateCabinetDialog(context),
+              tooltip: 'Ещё кабинет',
+              child: const Icon(Icons.add_business_outlined),
+            ),
     );
   }
 
   Future<void> _showCreateCabinetDialog(BuildContext context) async {
-    final slug = TextEditingController(text: 'zakupki');
-    final name = TextEditingController(text: 'Закупки');
+    final slug = TextEditingController(text: 'workspace');
+    final name = TextEditingController(text: 'Рабочее пространство');
     final formKey = GlobalKey<FormState>();
     final state = AppScope.of(context);
+    final profiles = await state.listCabinetProfiles();
+    if (!context.mounted) return;
+    String? profileId =
+        profiles.isNotEmpty ? profiles.first['id'] as String? : 'electronics-procurement';
     final ok = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Новый кабинет'),
-        content: AppForm(
-          formKey: formKey,
-          children: [
-            AppTextField(controller: slug, label: 'Slug'),
-            AppTextField(controller: name, label: 'Название'),
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocal) => AlertDialog(
+          title: const Text('Новый кабинет'),
+          content: AppForm(
+            formKey: formKey,
+            children: [
+              AppTextField(controller: slug, label: 'Slug'),
+              AppTextField(controller: name, label: 'Название'),
+              DropdownButtonFormField<String>(
+                initialValue: profileId,
+                decoration: const InputDecoration(labelText: 'Профиль кабинета'),
+                items: [
+                  for (final p in profiles)
+                    DropdownMenuItem(
+                      value: p['id'] as String,
+                      child: Text('${p['display_name']} (${p['id']})'),
+                    ),
+                ],
+                onChanged: (v) => setLocal(() => profileId = v),
+              ),
+            ],
+          ),
+          actions: [
+            AppButton(
+              label: 'Отмена',
+              variant: AppButtonVariant.text,
+              expanded: false,
+              onPressed: () => Navigator.pop(ctx, false),
+            ),
+            AppButton(
+              label: 'Создать',
+              expanded: false,
+              onPressed: () => Navigator.pop(ctx, true),
+            ),
           ],
         ),
-        actions: [
-          AppButton(
-            label: 'Отмена',
-            variant: AppButtonVariant.text,
-            expanded: false,
-            onPressed: () => Navigator.pop(ctx, false),
-          ),
-          AppButton(
-            label: 'Создать',
-            expanded: false,
-            onPressed: () => Navigator.pop(ctx, true),
-          ),
-        ],
       ),
     );
-    if (ok == true && context.mounted) {
-      await state.createCabinet(slug: slug.text.trim(), displayName: name.text.trim());
+    if (ok == true && context.mounted && profileId != null) {
+      await state.createCabinet(
+        slug: slug.text.trim(),
+        displayName: name.text.trim(),
+        profileId: profileId!,
+      );
     }
     slug.dispose();
     name.dispose();
@@ -237,14 +264,92 @@ class ProjectDashboardBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tabs = AppScope.of(context).projectTabs;
+    if (tabs.length <= 1 && tabs.contains('chat')) {
+      return Padding(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: AgentChatPanel(projectId: project.id),
+      );
+    }
+    return DefaultTabController(
+      length: tabs.length,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.md, AppSpacing.lg, 0),
+            child: Text(project.displayName, style: Theme.of(context).textTheme.headlineSmall),
+          ),
+          TabBar(
+            isScrollable: true,
+            tabs: [for (final t in tabs) Tab(text: _tabLabel(t))],
+          ),
+          Expanded(
+            child: TabBarView(
+              children: [
+                for (final t in tabs) _tabBody(context, t),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _tabLabel(String id) {
+    switch (id) {
+      case 'chat':
+        return 'Чат';
+      case 'specs':
+        return 'Спеки';
+      case 'variants':
+        return 'Варианты';
+      case 'kp':
+        return 'КП';
+      case 'equipment':
+        return 'Оборудование';
+      default:
+        return id;
+    }
+  }
+
+  Widget _tabBody(BuildContext context, String id) {
+    switch (id) {
+      case 'chat':
+        return Padding(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: AgentChatPanel(projectId: project.id),
+        );
+      case 'specs':
+      case 'variants':
+      case 'kp':
+      case 'equipment':
+        return _ProcurementActionsPanel(project: project, stats: stats, focusTab: id);
+      default:
+        return Center(child: Text('Модуль «$id» не зарегистрирован в shell'));
+    }
+  }
+}
+
+class _ProcurementActionsPanel extends StatelessWidget {
+  const _ProcurementActionsPanel({
+    required this.project,
+    required this.stats,
+    required this.focusTab,
+  });
+
+  final ProjectItem project;
+  final Map<String, dynamic>? stats;
+  final String focusTab;
+
+  @override
+  Widget build(BuildContext context) {
     final inbox = (stats?['inbox_files'] as num?)?.toInt() ?? project.inboxPending;
     final runsByPhase = stats?['runs_by_phase'] as Map<String, dynamic>? ?? {};
 
     return ListView(
       padding: const EdgeInsets.all(AppSpacing.lg),
       children: [
-        Text(project.displayName, style: Theme.of(context).textTheme.headlineSmall),
-        const SizedBox(height: AppSpacing.sm),
         Text(project.workspaceKey, style: Theme.of(context).textTheme.bodySmall),
         const SizedBox(height: AppSpacing.lg),
         Wrap(
@@ -281,83 +386,91 @@ class ProjectDashboardBody extends StatelessWidget {
             padding: const EdgeInsets.only(bottom: AppSpacing.md),
             child: Text(AppScope.of(context).statusMessage!),
           ),
-        FeatureGate(
-          capability: 'procurement.s4b',
-          child: AppCard(
-            padding: EdgeInsets.zero,
-            child: ListTile(
-              leading: const Icon(Icons.vpn_key_outlined),
-              title: const Text('S4B логин'),
-              subtitle: Text(
-                AppScope.of(context).s4bState == 'credentials_valid'
-                    ? 'Подключено · пароль не показывается'
-                    : 'Ping на s4b.ru · пароль в API не возвращается',
-              ),
-              trailing: const Icon(Icons.edit),
-              onTap: AppScope.of(context).busy ? null : () => _editS4bCredentials(context),
-            ),
-          ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        FeatureGate(
-          capability: 'specs_kp',
-          child: AppCard(
-            padding: EdgeInsets.zero,
-            child: ListTile(
-              leading: const Icon(Icons.storage_outlined),
-              title: const Text('Каталог CSV'),
-              subtitle: const Text('part_number, title, price, stock · под заказ отбрасывается'),
-              trailing: const Icon(Icons.upload),
-              onTap: AppScope.of(context).busy ? null : () => _pickCatalog(context),
-            ),
-          ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        AppCard(
-          padding: EdgeInsets.zero,
-          child: ListTile(
-            leading: const Icon(Icons.upload_file_outlined),
-            title: const Text('Inbox: спека'),
-            subtitle: const Text('csv/txt/xlsx → ingest → review (цены из каталога и S4B in_stock)'),
-            trailing: const Icon(Icons.play_arrow),
-            onTap: AppScope.of(context).busy ? null : () => _pickSpec(context),
-          ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        AppCard(
-          padding: EdgeInsets.zero,
-          child: ListTile(
-            leading: const Icon(Icons.list_alt_outlined),
-            title: const Text('Прогоны / варианты'),
-            subtitle: const Text('Список runs, lineitems и offers'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => RunsScreen(
-                    projectId: project.id,
-                    projectName: project.displayName,
-                  ),
+        if (focusTab == 'specs' || focusTab == 'variants') ...[
+          FeatureGate(
+            capability: 'procurement.s4b',
+            child: AppCard(
+              padding: EdgeInsets.zero,
+              child: ListTile(
+                leading: const Icon(Icons.vpn_key_outlined),
+                title: const Text('S4B логин'),
+                subtitle: Text(
+                  AppScope.of(context).s4bState == 'credentials_valid'
+                      ? 'Подключено · пароль не показывается'
+                      : 'Ping на s4b.ru · пароль в API не возвращается',
                 ),
-              );
-            },
-          ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        FeatureGate(
-          capability: 'specs_kp',
-          child: AppCard(
-            padding: EdgeInsets.zero,
-            child: ListTile(
-              leading: const Icon(Icons.description_outlined),
-              title: const Text('Экспорт КП'),
-              subtitle: Text(AppScope.of(context).lastRunId == null
-                  ? 'Сначала прогон до review'
-                  : 'Прогон ${AppScope.of(context).lastRunId}'),
-              onTap: AppScope.of(context).busy ? null : () => AppScope.of(context).exportKp(),
+                trailing: const Icon(Icons.edit),
+                onTap: AppScope.of(context).busy ? null : () => _editS4bCredentials(context),
+              ),
             ),
           ),
-        ),
+          const SizedBox(height: AppSpacing.sm),
+          FeatureGate(
+            capability: 'specs_kp',
+            child: AppCard(
+              padding: EdgeInsets.zero,
+              child: ListTile(
+                leading: const Icon(Icons.storage_outlined),
+                title: const Text('Каталог CSV'),
+                subtitle: const Text('part_number, title, price, stock · под заказ отбрасывается'),
+                trailing: const Icon(Icons.upload),
+                onTap: AppScope.of(context).busy ? null : () => _pickCatalog(context),
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          AppCard(
+            padding: EdgeInsets.zero,
+            child: ListTile(
+              leading: const Icon(Icons.upload_file_outlined),
+              title: const Text('Inbox: спека'),
+              subtitle: const Text('csv/txt/xlsx → ingest → review'),
+              trailing: const Icon(Icons.play_arrow),
+              onTap: AppScope.of(context).busy ? null : () => _pickSpec(context),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          AppCard(
+            padding: EdgeInsets.zero,
+            child: ListTile(
+              leading: const Icon(Icons.list_alt_outlined),
+              title: const Text('Прогоны / варианты'),
+              subtitle: const Text('Список runs, lineitems и offers'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => RunsScreen(
+                      projectId: project.id,
+                      projectName: project.displayName,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+        if (focusTab == 'kp') ...[
+          FeatureGate(
+            capability: 'specs_kp',
+            child: AppCard(
+              padding: EdgeInsets.zero,
+              child: ListTile(
+                leading: const Icon(Icons.description_outlined),
+                title: const Text('Экспорт КП'),
+                subtitle: Text(AppScope.of(context).lastRunId == null
+                    ? 'Сначала прогон до review'
+                    : 'Прогон ${AppScope.of(context).lastRunId}'),
+                onTap: AppScope.of(context).busy ? null : () => AppScope.of(context).exportKp(),
+              ),
+            ),
+          ),
+        ],
+        if (focusTab == 'equipment')
+          const ListTile(
+            title: Text('Карточки оборудования'),
+            subtitle: Text('Модуль кабинета · MCP equipment'),
+          ),
       ],
     );
   }

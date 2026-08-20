@@ -7,7 +7,7 @@ from typing import Any
 
 import httpx
 
-from prodavan.application.integrations.s4b_parse import (
+from prodavan.cabinets.electronics_procurement.integrations.s4b_parse import (
     decode_body_bytes,
     parse_response,
     resolve_poll_url,

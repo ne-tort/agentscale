@@ -6,7 +6,7 @@
 
 1. [Глоссарий](00-glossary.md)
 2. [Product vision](01-vision/product-vision.md) → [Domain model](01-vision/domain-model.md)
-3. [Architecture overview](02-architecture/overview.md)
+3. [Architecture overview](02-architecture/overview.md) → [ADR-001 Platform vs Cabinet SPI](02-architecture/ADR-001-platform-core-vs-cabinet-spi.md) → [Cabinet SPI](02-architecture/cabinet-spi.md)
 4. Модули [M00–M09](03-modules/README.md) по порядку зависимостей
 5. [Frontend](04-frontend/architecture.md) · [Backend](05-backend/structure.md) · [Agent runtime](06-agent-runtime/providers.md) · [Infra](07-infrastructure/topology.md)
 6. [Migration from Commerce](08-migration/commerce-boundary.md)

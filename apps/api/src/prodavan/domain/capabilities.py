@@ -10,23 +10,30 @@ def has_capability(capabilities: list[str], name: str) -> bool:
 
 
 def build_capabilities_snapshot(profile: dict[str, Any]) -> dict[str, Any]:
-    """Map canonical procurement.* list to effective JSON for API/UI."""
+    """Map canonical capability list to effective JSON for API/UI."""
     raw: list[str] = list(profile.get("capabilities", []))
     s4b = has_capability(raw, "procurement.s4b")
+    kp = has_capability(raw, "procurement.kp")
+    pipeline = has_capability(raw, "procurement.pipeline")
+    equipment = has_capability(raw, "procurement.equipment")
+    # User catalogs are part of procurement packs, not generic assistant.
+    catalogs_user = kp or pipeline or s4b
     return {
         "raw": raw,
         "integrations": {"s4b": {"enabled": s4b}},
         "modules": {
-            "specs_kp": {"enabled": has_capability(raw, "procurement.kp")},
-            "equipment_cards": {"enabled": has_capability(raw, "procurement.equipment")},
+            "specs_kp": {"enabled": kp},
+            "equipment_cards": {"enabled": equipment},
             "prompts": {"enabled": True},
-            "catalogs_user": {"enabled": True},
+            "catalogs_user": {"enabled": catalogs_user},
             "catalogs_system_s4b": {"enabled": s4b},
-            "pipeline": {"enabled": has_capability(raw, "procurement.pipeline")},
+            "pipeline": {"enabled": pipeline},
+            "agent_chat": {"enabled": True},
         },
         "agent": {
             "default_profile_path": profile.get("seeds", {}).get("prompts", "prompts/"),
             "mcp_packages": profile.get("mcp", {}).get("packages", []),
+            "tools_allowlist": profile.get("mcp", {}).get("tools_allowlist", []),
         },
     }
 

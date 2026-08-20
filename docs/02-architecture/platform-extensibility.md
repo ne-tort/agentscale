@@ -2,6 +2,8 @@
 
 Prodavan разделяет **ядро платформы (core)**, **cabinet pack** (вертикальный профиль + UI + seeds) и **domain plugin** (исполняемая доменная логика). Так достигается добавление новых бизнес-направлений без форка FastAPI и без ослабления multi-tenant изоляции.
 
+> **Канон изоляции (2026-08):** кабинет = модуль со **своей БД** и **Cabinet SPI**. См. [ADR-001](ADR-001-platform-core-vs-cabinet-spi.md) и [cabinet-spi.md](cabinet-spi.md). Domain Plugin ниже = реализация SPI (in-process или remote).
+
 ---
 
 ## Три слоя расширения

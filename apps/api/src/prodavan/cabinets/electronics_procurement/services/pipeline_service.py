@@ -8,17 +8,17 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from prodavan.application.pipeline.classify import classify_rows
-from prodavan.application.pipeline.ingest import extracted_markdown, ingest_rows
-from prodavan.application.catalogs.s4b_search import search_lineitems_in_s4b
-from prodavan.application.catalogs.search import rank_selections, search_lineitems_in_catalogs
-from prodavan.application.pipeline.kp_export import (
+from prodavan.cabinets.electronics_procurement.pipeline.classify import classify_rows
+from prodavan.cabinets.electronics_procurement.pipeline.ingest import extracted_markdown, ingest_rows
+from prodavan.cabinets.electronics_procurement.catalogs.s4b_search import search_lineitems_in_s4b
+from prodavan.cabinets.electronics_procurement.catalogs.search import rank_selections, search_lineitems_in_catalogs
+from prodavan.cabinets.electronics_procurement.pipeline.kp_export import (
     TEMPLATE_VERSION,
     build_kp_rows,
     timestamp_stamp,
     write_kp_workbook,
 )
-from prodavan.application.pipeline.variants import import_run_to_sqlite
+from prodavan.cabinets.electronics_procurement.pipeline.variants import import_run_to_sqlite
 from prodavan.application.services.cabinet_service import CabinetError, get_cabinet
 from prodavan.application.services.project_service import ProjectError, get_project
 from prodavan.domain.pipeline import (

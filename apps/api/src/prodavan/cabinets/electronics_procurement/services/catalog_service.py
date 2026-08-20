@@ -7,9 +7,9 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from prodavan.application.catalogs.indexer import CatalogIndexError, index_csv_bytes
+from prodavan.cabinets.electronics_procurement.catalogs.indexer import CatalogIndexError, index_csv_bytes
 from prodavan.application.services.cabinet_service import CabinetError, get_cabinet
-from prodavan.application.integrations.s4b_runtime import get_s4b_gateway
+from prodavan.cabinets.electronics_procurement.integrations.s4b_runtime import get_s4b_gateway
 from prodavan.infrastructure.auth.s4b_vault import delete_vault, public_status, save_vault
 from prodavan.infrastructure.storage.catalog_storage import (
     catalog_dir,

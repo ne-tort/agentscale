@@ -210,6 +210,8 @@ class CabinetsApi {
   Future<Map<String, dynamic>> switchCabinet(String cabinetId) =>
       _client.post('/cabinets/$cabinetId/switch');
 
+  Future<Map<String, dynamic>> listProfiles() => _client.get('/cabinet-profiles');
+
   Future<Map<String, dynamic>> create({
     required String slug,
     required String displayName,
@@ -340,4 +342,23 @@ class SpecsApi {
         'run_id': runId,
         'include_alternatives': true,
       });
+}
+
+class AgentApi {
+  AgentApi(this._client);
+
+  final ApiClient _client;
+
+  Future<Map<String, dynamic>> startSession(String projectId) =>
+      _client.post('/projects/$projectId/agent/sessions');
+
+  Future<Map<String, dynamic>> sendMessage({
+    required String projectId,
+    required String sessionId,
+    required String text,
+  }) =>
+      _client.post(
+        '/projects/$projectId/agent/sessions/$sessionId/messages',
+        body: {'text': text},
+      );
 }

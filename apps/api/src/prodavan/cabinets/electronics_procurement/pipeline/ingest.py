@@ -6,7 +6,7 @@ import csv
 import io
 from pathlib import Path
 
-from prodavan.application.pipeline.spec_table import (
+from prodavan.cabinets.electronics_procurement.pipeline.spec_table import (
     clean_extracted_rows,
     headers_by_sheet,
     to_ingest_rows,

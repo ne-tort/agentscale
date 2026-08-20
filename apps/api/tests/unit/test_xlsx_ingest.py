@@ -4,9 +4,9 @@ from pathlib import Path
 
 from openpyxl import Workbook
 
-from prodavan.application.pipeline.classify import classify_rows
-from prodavan.application.pipeline.ingest import ingest_rows
-from prodavan.application.pipeline.spec_table import clean_extracted_rows
+from prodavan.cabinets.electronics_procurement.pipeline.classify import classify_rows
+from prodavan.cabinets.electronics_procurement.pipeline.ingest import ingest_rows
+from prodavan.cabinets.electronics_procurement.pipeline.spec_table import clean_extracted_rows
 
 
 def test_clean_drops_ref_and_prefers_pn_sheet() -> None:

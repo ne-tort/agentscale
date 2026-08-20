@@ -1,7 +1,7 @@
 """S4B parse/stock: drop on_order, keep named prices only."""
 
-from prodavan.application.integrations.s4b_parse import decode_zip_bytes, parse_response, to_outbound_item
-from prodavan.application.integrations.s4b_trusted import is_trusted_distributor
+from prodavan.cabinets.electronics_procurement.integrations.s4b_parse import decode_zip_bytes, parse_response, to_outbound_item
+from prodavan.cabinets.electronics_procurement.integrations.s4b_trusted import is_trusted_distributor
 from prodavan.domain.s4b_stock import is_s4b_in_stock
 
 
@@ -57,7 +57,7 @@ def test_parse_drops_nostock_via_availability() -> None:
 
 
 def test_rank_trusted_min_price_beats_cheaper_untrusted() -> None:
-    from prodavan.application.catalogs.search import rank_selections
+    from prodavan.cabinets.electronics_procurement.catalogs.search import rank_selections
 
     lineitems = [{"line_id": "line_001", "part_number": "910-001793"}]
     offers = [
@@ -82,7 +82,7 @@ def test_rank_trusted_min_price_beats_cheaper_untrusted() -> None:
 
 
 def test_rate_limited_status_is_not_auth_failed() -> None:
-    from prodavan.application.integrations.s4b_parse import parse_upstream_error
+    from prodavan.cabinets.electronics_procurement.integrations.s4b_parse import parse_upstream_error
 
     err = parse_upstream_error(
         {"status": "error,Слишком высокая частота запросов. Too frequently."}

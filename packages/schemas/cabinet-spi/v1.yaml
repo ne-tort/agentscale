@@ -1,0 +1,219 @@
+openapi: 3.1.0
+info:
+  title: Prodavan Cabinet SPI
+  version: 1.0.0
+  description: Contract between Platform Host and a Cabinet Module.
+servers:
+  - url: /spi/v1
+paths:
+  /health:
+    get:
+      operationId: spiHealth
+      summary: Module liveness
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+  /manifest:
+    get:
+      operationId: spiManifest
+      summary: Capabilities, UI, tools, schemas
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/CabinetId"
+      responses:
+        "200":
+          description: Manifest
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpiManifest"
+  /commands/{name}:
+    post:
+      operationId: spiCommand
+      summary: Execute domain command
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/CabinetId"
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/UserId"
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: Command result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "404":
+          description: Unknown command
+  /queries/{name}:
+    get:
+      operationId: spiQuery
+      summary: Domain read model
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/CabinetId"
+        - $ref: "#/components/parameters/ProjectId"
+        - $ref: "#/components/parameters/UserId"
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Query result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+  /hooks/platform-event:
+    post:
+      operationId: spiPlatformEvent
+      summary: Receive platform event
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlatformEvent"
+      responses:
+        "202":
+          description: Accepted
+  /migrate:
+    post:
+      operationId: spiMigrate
+      summary: Apply cabinet DB migrations
+      parameters:
+        - $ref: "#/components/parameters/TenantId"
+        - $ref: "#/components/parameters/CabinetId"
+      responses:
+        "200":
+          description: Migration result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  applied:
+                    type: array
+                    items:
+                      type: string
+components:
+  parameters:
+    TenantId:
+      name: X-Tenant-Id
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+    CabinetId:
+      name: X-Cabinet-Id
+      in: header
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ProjectId:
+      name: X-Project-Id
+      in: header
+      required: false
+      schema:
+        type: string
+        format: uuid
+    UserId:
+      name: X-User-Id
+      in: header
+      required: false
+      schema:
+        type: string
+        format: uuid
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status, pack_id, pack_version]
+      properties:
+        status:
+          type: string
+          enum: [ok, degraded]
+        pack_id:
+          type: string
+        pack_version:
+          type: string
+    SpiManifest:
+      type: object
+      properties:
+        pack_id:
+          type: string
+        pack_version:
+          type: string
+        capabilities:
+          type: object
+          additionalProperties: true
+        ui:
+          type: object
+          additionalProperties: true
+        tools:
+          type: array
+          items:
+            type: object
+            properties:
+              name:
+                type: string
+              allow:
+                type: boolean
+        commands:
+          type: array
+          items:
+            type: string
+        queries:
+          type: array
+          items:
+            type: string
+    PlatformEvent:
+      type: object
+      required: [event_id, type, occurred_at, tenant_id, cabinet_id, data]
+      properties:
+        event_id:
+          type: string
+          format: uuid
+        type:
+          type: string
+        occurred_at:
+          type: string
+          format: date-time
+        tenant_id:
+          type: string
+          format: uuid
+        cabinet_id:
+          type: string
+          format: uuid
+        project_id:
+          type: string
+          nullable: true
+          description: Opaque project id (not necessarily UUID)
+        actor_user_id:
+          type: string
+          format: uuid
+          nullable: true
+        data:
+          type: object
+          additionalProperties: true

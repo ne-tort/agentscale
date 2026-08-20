@@ -108,6 +108,27 @@ async def create_project(
         )
         await session.commit()
         await session.refresh(project)
+        try:
+            from prodavan.cabinets.events import emit_platform_event
+            from prodavan.infrastructure.persistence.models.tenants import Cabinet
+
+            cab = await session.get(Cabinet, cabinet_id)
+            if cab and cab.profile_id:
+                await emit_platform_event(
+                    profile_id=cab.profile_id,
+                    event_type="project.created",
+                    tenant_id=tenant_id,
+                    cabinet_id=cabinet_id,
+                    project_id=project_id,
+                    actor_user_id=user_id,
+                    data={
+                        "project_id": project_id,
+                        "slug": slug,
+                        "workspace_key": workspace_key,
+                    },
+                )
+        except Exception:
+            pass
         return project
     except Exception as exc:
         remove_project_storage(tenant_id, cabinet_id, project_id)
