@@ -21,9 +21,9 @@
 | P7 | 8.1 | **5** |
 | P8 | 8.7 | **8** |
 | P9 | 9.0 | **10** |
-| **Overall** | **8.7** | **8.8** |
+| **Overall** | **8.7** | **8.9** |
 
-**Вердикт:** Doc ✅ · **I4 pipeline scaffold done** — next I5 catalogs/S4B for real offers.
+**Вердикт:** Doc ✅ · **I5 catalogs wired into search** — live S4B still blocked until ping.
 
 ---
 
@@ -201,10 +201,18 @@
 | I4-T03 | Phase guards + advance/finalize | 8 | [x] |
 | I4-T04 | Honest empty search (no invented prices) | 8 | [x] |
 | I4-T05 | NEG-SKP-003 finalize; skip rank without offers | 8 | [x] |
-| I4-T06 | Catalog/S4B live search | — | [ ] |
+| I4-T06 | Catalog/S4B live search | 8 | [x] (catalog exact P/N; S4B not live) |
 | I4-T07 | KP xlsx export | — | [ ] |
 
-## Next: I5 — catalogs + S4B (real offers)
+## I5 — Catalogs + S4B vault (2026-08-20)
 
-Live search needs M04 catalogs and M05 S4B credentials. Until then offers.json stays empty by design.
+| ID | Task | Impl | Done |
+|----|------|------|------|
+| I5-T01 | User catalog CSV → catalog.sqlite, skip on_order | 8 | [x] |
+| I5-T02 | Search exact P/N from catalogs + rank trusted min price | 8 | [x] |
+| I5-T03 | system-databases s4b-cache electronics-only; DELETE 403 | 8 | [x] |
+| I5-T04 | S4B vault (no password in API; no fake valid ping) | 8 | [x] |
+| I5-T05 | Live S4B in_stock search | — | [ ] |
+
+## Next: live S4B (when ping exists) or KP export
 

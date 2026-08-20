@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.pipeline.classify import classify_rows
 from prodavan.application.pipeline.ingest import extracted_markdown, ingest_rows
-from prodavan.application.pipeline.search import empty_offers, empty_selection, search_log_lines
+from prodavan.application.pipeline.search import s4b_log_line
+from prodavan.application.catalogs.search import rank_selections, search_lineitems_in_catalogs
 from prodavan.application.pipeline.variants import import_run_to_sqlite
 from prodavan.application.services.cabinet_service import CabinetError, get_cabinet
 from prodavan.application.services.project_service import ProjectError, get_project
@@ -209,12 +210,29 @@ def _run_classify(tenant_id, cabinet_id, project_id, run_id, status: dict) -> No
 
 def _run_search(tenant_id, cabinet_id, project_id, run_id, status: dict) -> None:
     s4b = bool(status.get("capabilities_snapshot", {}).get("s4b"))
+    lineitems = (
+        store.read_json_artifact(tenant_id, cabinet_id, project_id, run_id, "lineitems.json") or {}
+    ).get("items") or []
+    offers, logs = search_lineitems_in_catalogs(tenant_id, cabinet_id, lineitems)
     store.write_json_artifact(
-        tenant_id, cabinet_id, project_id, run_id, "offers.json", empty_offers(s4b_enabled=s4b)
+        tenant_id,
+        cabinet_id,
+        project_id,
+        run_id,
+        "offers.json",
+        {
+            "offers": offers,
+            "sources_log_ref": "sources.log",
+            "s4b_eligible": s4b,
+        },
     )
-    for line in search_log_lines(s4b_enabled=s4b):
+    for line in logs:
         store.append_sources_log(tenant_id, cabinet_id, project_id, run_id, line)
-    status["stats"]["offers"] = 0
+    store.append_sources_log(tenant_id, cabinet_id, project_id, run_id, s4b_log_line(s4b_enabled=s4b))
+    store.append_sources_log(
+        tenant_id, cabinet_id, project_id, run_id, "web skipped=allowlist_not_queried"
+    )
+    status["stats"]["offers"] = len(offers)
     status["phase"] = "search"
     status["phase_status"] = "completed"
     status["phase_history"].append({"phase": "search", "status": "completed"})
@@ -222,8 +240,19 @@ def _run_search(tenant_id, cabinet_id, project_id, run_id, status: dict) -> None
 
 
 def _run_rank(tenant_id, cabinet_id, project_id, run_id, status: dict) -> None:
+    lineitems = (
+        store.read_json_artifact(tenant_id, cabinet_id, project_id, run_id, "lineitems.json") or {}
+    ).get("items") or []
+    offers = (
+        store.read_json_artifact(tenant_id, cabinet_id, project_id, run_id, "offers.json") or {}
+    ).get("offers") or []
     store.write_json_artifact(
-        tenant_id, cabinet_id, project_id, run_id, "selection.json", empty_selection()
+        tenant_id,
+        cabinet_id,
+        project_id,
+        run_id,
+        "selection.json",
+        rank_selections(lineitems, offers),
     )
     status["phase"] = "rank"
     status["phase_status"] = "completed"
