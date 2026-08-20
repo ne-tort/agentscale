@@ -5,10 +5,12 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   validate:
-    runs-on: ubuntu-latest
+    # Same runner as Images — github-hosted ubuntu-latest fails empty in this org.
+    runs-on: [self-hosted, linux, docker]
     steps:
       - uses: actions/checkout@v4
 

@@ -15,7 +15,9 @@ on:
 
 jobs:
   analyze:
-    runs-on: ubuntu-latest
+    # ubuntu-latest currently fails instantly (empty steps) in this org;
+    # use the same self-hosted runner as CI Images.
+    runs-on: [self-hosted, linux, docker]
     defaults:
       run:
         working-directory: apps/flutter

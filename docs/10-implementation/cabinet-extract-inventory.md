@@ -11,7 +11,7 @@ Maps current **core** code that must move behind Cabinet SPI (`electronics-procu
 | `application/catalogs/*` | indexer, search, s4b_search | commands `upload_catalog`, `s4b_search`; queries `list_catalogs` |
 | `application/services/catalog_service.py` | Catalogs API | same |
 | `application/integrations/*` | S4B port/runtime | commands `s4b_*` |
-| `infrastructure/integrations/http_s4b.py` | HTTP client | infra of cabinet |
+| `cabinets/electronics_procurement/integrations/http_s4b.py` | HTTP client | cabinet infra (**moved from** `infrastructure/integrations/http_s4b.py`) |
 | `api/v1/specs.py` | HTTP | Platform facade → SPI |
 | `api/v1/catalogs.py` | HTTP | Platform facade → SPI |
 | Pack `electronics-procurement/**` | prompts, shops, theme | already pack-owned |

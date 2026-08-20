@@ -16,6 +16,7 @@ class AppTextField extends StatelessWidget {
     this.obscureText = false,
     this.autofillHints,
     this.onChanged,
+    this.onFieldSubmitted,
     this.prefixIcon,
     this.suffixIcon,
     this.maxLines = 1,
@@ -33,6 +34,7 @@ class AppTextField extends StatelessWidget {
   final bool obscureText;
   final Iterable<String>? autofillHints;
   final ValueChanged<String>? onChanged;
+  final ValueChanged<String>? onFieldSubmitted;
   final Widget? prefixIcon;
   final Widget? suffixIcon;
   final int? maxLines;
@@ -50,6 +52,7 @@ class AppTextField extends StatelessWidget {
       obscureText: obscureText,
       autofillHints: autofillHints,
       onChanged: onChanged,
+      onFieldSubmitted: onFieldSubmitted,
       maxLines: obscureText ? 1 : maxLines,
       style: size == AppFieldSize.compact
           ? Theme.of(context).textTheme.bodyMedium

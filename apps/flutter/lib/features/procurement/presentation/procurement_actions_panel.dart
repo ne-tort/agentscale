@@ -1,0 +1,249 @@
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+
+import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/widgets/widgets.dart';
+import 'package:prodavan/features/runs/presentation/runs_screen.dart';
+import 'package:prodavan/shell/app_scope.dart';
+import 'package:prodavan/shell/feature_gate.dart';
+import 'package:prodavan/shell/models.dart';
+import 'package:prodavan/shell/nav_gate.dart';
+
+/// Electronics-procurement project tabs (specs / variants / kp / equipment).
+/// Hosted by shell via manifest `projectTabs`; not a platform-core widget.
+class ProcurementActionsPanel extends StatelessWidget {
+  const ProcurementActionsPanel({
+    super.key,
+    required this.project,
+    required this.stats,
+    required this.focusTab,
+  });
+
+  final ProjectItem project;
+  final Map<String, dynamic>? stats;
+  final String focusTab;
+
+  @override
+  Widget build(BuildContext context) {
+    final inbox = (stats?['inbox_files'] as num?)?.toInt() ?? project.inboxPending;
+    final runsByPhase = stats?['runs_by_phase'] as Map<String, dynamic>? ?? {};
+
+    return ListView(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      children: [
+        Text(project.workspaceKey, style: Theme.of(context).textTheme.bodySmall),
+        const SizedBox(height: AppSpacing.lg),
+        Wrap(
+          spacing: AppSpacing.md,
+          runSpacing: AppSpacing.md,
+          children: [
+            _StatChip(icon: Icons.inbox_outlined, label: 'Inbox', value: '$inbox'),
+            _StatChip(
+              icon: Icons.play_circle_outline,
+              label: 'Фазы',
+              value: '${runsByPhase.length}',
+            ),
+            FeatureGate(
+              capability: 'specs_kp',
+              child: _StatChip(
+                icon: Icons.description_outlined,
+                label: 'КП',
+                value: AppScope.of(context).lastExportPath == null ? 'готово' : 'файл',
+              ),
+            ),
+            NavGate(
+              capability: 'procurement.s4b',
+              child: _StatChip(
+                icon: Icons.bolt,
+                label: 'S4B',
+                value: AppScope.of(context).s4bState ?? 'нет кредов',
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.xl),
+        if (AppScope.of(context).statusMessage != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.md),
+            child: Text(AppScope.of(context).statusMessage!),
+          ),
+        if (focusTab == 'specs' || focusTab == 'variants') ...[
+          FeatureGate(
+            capability: 'procurement.s4b',
+            child: AppCard(
+              padding: EdgeInsets.zero,
+              child: ListTile(
+                leading: const Icon(Icons.vpn_key_outlined),
+                title: const Text('S4B логин'),
+                subtitle: Text(
+                  AppScope.of(context).s4bState == 'credentials_valid'
+                      ? 'Подключено · пароль не показывается'
+                      : 'Ping на s4b.ru · пароль в API не возвращается',
+                ),
+                trailing: const Icon(Icons.edit),
+                onTap: AppScope.of(context).busy ? null : () => _editS4bCredentials(context),
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          FeatureGate(
+            capability: 'specs_kp',
+            child: AppCard(
+              padding: EdgeInsets.zero,
+              child: ListTile(
+                leading: const Icon(Icons.storage_outlined),
+                title: const Text('Каталог CSV'),
+                subtitle: const Text('part_number, title, price, stock · под заказ отбрасывается'),
+                trailing: const Icon(Icons.upload),
+                onTap: AppScope.of(context).busy ? null : () => _pickCatalog(context),
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          AppCard(
+            padding: EdgeInsets.zero,
+            child: ListTile(
+              leading: const Icon(Icons.upload_file_outlined),
+              title: const Text('Inbox: спека'),
+              subtitle: const Text('csv/txt/xlsx → ingest → review'),
+              trailing: const Icon(Icons.play_arrow),
+              onTap: AppScope.of(context).busy ? null : () => _pickSpec(context),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          AppCard(
+            padding: EdgeInsets.zero,
+            child: ListTile(
+              leading: const Icon(Icons.list_alt_outlined),
+              title: const Text('Прогоны / варианты'),
+              subtitle: const Text('Список runs, lineitems и offers'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => RunsScreen(
+                      projectId: project.id,
+                      projectName: project.displayName,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+        if (focusTab == 'kp') ...[
+          FeatureGate(
+            capability: 'specs_kp',
+            child: AppCard(
+              padding: EdgeInsets.zero,
+              child: ListTile(
+                leading: const Icon(Icons.description_outlined),
+                title: const Text('Экспорт КП'),
+                subtitle: Text(AppScope.of(context).lastRunId == null
+                    ? 'Сначала прогон до review'
+                    : 'Прогон ${AppScope.of(context).lastRunId}'),
+                onTap: AppScope.of(context).busy ? null : () => AppScope.of(context).exportKp(),
+              ),
+            ),
+          ),
+        ],
+        if (focusTab == 'equipment')
+          const ListTile(
+            title: Text('Карточки оборудования'),
+            subtitle: Text('Модуль кабинета · MCP equipment'),
+          ),
+      ],
+    );
+  }
+}
+
+Future<void> _editS4bCredentials(BuildContext context) async {
+  final userCtrl = TextEditingController();
+  final passCtrl = TextEditingController();
+  final formKey = GlobalKey<FormState>();
+  final saved = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('S4B'),
+      content: AppForm(
+        formKey: formKey,
+        children: [
+          AppTextField(
+            controller: userCtrl,
+            label: 'Логин',
+            autofillHints: const [AutofillHints.username],
+          ),
+          AppPasswordField(controller: passCtrl),
+        ],
+      ),
+      actions: [
+        AppButton(
+          label: 'Отмена',
+          variant: AppButtonVariant.text,
+          expanded: false,
+          onPressed: () => Navigator.pop(ctx, false),
+        ),
+        AppButton(
+          label: 'Проверить',
+          expanded: false,
+          onPressed: () => Navigator.pop(ctx, true),
+        ),
+      ],
+    ),
+  );
+  final username = userCtrl.text.trim();
+  final password = passCtrl.text;
+  userCtrl.dispose();
+  passCtrl.dispose();
+  if (saved != true || !context.mounted) return;
+  await AppScope.of(context).saveS4bCredentials(username: username, password: password);
+}
+
+Future<void> _pickCatalog(BuildContext context) async {
+  final picked = await FilePicker.platform.pickFiles(
+    type: FileType.custom,
+    allowedExtensions: ['csv'],
+    withData: true,
+  );
+  final file = picked?.files.single;
+  final bytes = file?.bytes;
+  if (bytes == null || !context.mounted) return;
+  await AppScope.of(context).uploadCatalog(
+    filename: file!.name,
+    bytes: bytes,
+    slug: _slugFromFilename(file.name),
+    displayName: file.name,
+  );
+}
+
+Future<void> _pickSpec(BuildContext context) async {
+  final picked = await FilePicker.platform.pickFiles(
+    type: FileType.custom,
+    allowedExtensions: ['csv', 'txt', 'xlsx', 'xls'],
+    withData: true,
+  );
+  final file = picked?.files.single;
+  final bytes = file?.bytes;
+  if (bytes == null || !context.mounted) return;
+  await AppScope.of(context).uploadSpecAndRun(filename: file!.name, bytes: bytes);
+}
+
+String _slugFromFilename(String name) {
+  final base = name.toLowerCase().replaceAll(RegExp(r'\.[^.]+$'), '');
+  final slug = base.replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-+|-+$'), '');
+  if (slug.length >= 3) return slug.substring(0, slug.length.clamp(0, 64));
+  return 'catalog';
+}
+
+class _StatChip extends StatelessWidget {
+  const _StatChip({required this.icon, required this.label, required this.value});
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Chip(avatar: Icon(icon, size: 18), label: Text('$label: $value'));
+  }
+}

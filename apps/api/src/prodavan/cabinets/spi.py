@@ -8,6 +8,16 @@ from typing import Any, Protocol
 from uuid import UUID
 
 
+class CabinetDomainError(Exception):
+    """Shared domain error for cabinet modules (facades map to HTTP)."""
+
+    def __init__(self, code: str, message: str, status: int = 400) -> None:
+        self.code = code
+        self.message = message
+        self.status = status
+        super().__init__(message)
+
+
 @dataclass(frozen=True)
 class SpiContext:
     tenant_id: UUID

@@ -11,14 +11,16 @@ from prodavan.application.dto.runs import (
     FinalizeRunRequest,
 )
 from prodavan.cabinets.electronics_procurement.services.pipeline_service import PipelineError
+from prodavan.cabinets.events import emit_platform_event
 from prodavan.cabinets.host import load_cabinet, module_for_cabinet, require_raw_capability, spi_ctx_from
+from prodavan.cabinets.spi import CabinetDomainError
 
 router = APIRouter(tags=["specs"])
 
 _ALLOWED_UPLOAD = {".xlsx", ".xls", ".csv", ".txt"}
 
 
-def _pipeline_error(exc: PipelineError) -> HTTPException:
+def _pipeline_error(exc: CabinetDomainError) -> HTTPException:
     return HTTPException(
         status_code=exc.status,
         detail={"code": exc.code, "message": exc.message},
@@ -38,7 +40,7 @@ async def post_inbox_upload(
     auto_run: bool = Form(default=False),
     cs: CabinetSession = Depends(get_cabinet_session),
 ) -> dict:
-    module, _ = await _module(cs)
+    module, cabinet = await _module(cs)
     filename = file.filename or "upload.bin"
     suffix = filename[filename.rfind(".") :].lower() if "." in filename else ""
     if suffix not in _ALLOWED_UPLOAD:
@@ -54,7 +56,7 @@ async def post_inbox_upload(
         project_id=project_id,
     )
     try:
-        return await module.execute_command(
+        result = await module.execute_command(
             ctx,
             "upload_inbox",
             {
@@ -69,6 +71,28 @@ async def post_inbox_upload(
         raise _pipeline_error(exc) from exc
     except KeyError as exc:
         raise HTTPException(404, detail={"code": "UNKNOWN_COMMAND", "message": str(exc)}) from exc
+
+    try:
+        if cabinet.profile_id:
+            await emit_platform_event(
+                profile_id=cabinet.profile_id,
+                event_type="file.uploaded",
+                tenant_id=cs.ctx.user.tenant_id,
+                cabinet_id=cs.ctx.cabinet_id,
+                project_id=project_id,
+                actor_user_id=cs.ctx.user.user_id,
+                data={
+                    "filename": result.get("filename"),
+                    "size_bytes": result.get("size_bytes"),
+                    "sha256": result.get("sha256"),
+                    "extracted_md": result.get("extracted_md"),
+                    "auto_run": auto_run,
+                    "run_id": result.get("run_id"),
+                },
+            )
+    except Exception:
+        pass
+    return result
 
 
 @router.post("/projects/{project_id}/runs", status_code=status.HTTP_201_CREATED)

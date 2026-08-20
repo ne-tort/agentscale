@@ -82,7 +82,12 @@ class ElectronicsProcurementModule:
         return {"applied": applied, "db": str(db_path)}
 
     async def on_platform_event(self, event: PlatformEvent) -> None:
-        _ = event
+        # Hook for pack-specific reactions (e.g. auto-index after file.uploaded).
+        if event.type == "file.uploaded":
+            return
+        if event.type == "project.created":
+            return
+        return
 
     async def execute_command(
         self, ctx: SpiContext, name: str, payload: dict[str, Any]

@@ -11,6 +11,7 @@ from prodavan.cabinets.electronics_procurement.services.catalog_service import (
     refuse_system_delete,
 )
 from prodavan.cabinets.host import load_cabinet, module_for_cabinet, require_raw_capability, spi_ctx_from
+from prodavan.cabinets.spi import CabinetDomainError
 
 router = APIRouter(tags=["catalogs"])
 
@@ -20,7 +21,7 @@ class S4BCredentialsRequest(BaseModel):
     password: str = Field(min_length=1)
 
 
-def _catalog_error(exc: CatalogError) -> HTTPException:
+def _catalog_error(exc: CabinetDomainError) -> HTTPException:
     return HTTPException(
         status_code=exc.status,
         detail={"code": exc.code, "message": exc.message},

@@ -7,9 +7,10 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from prodavan.cabinets.electronics_procurement.catalogs.indexer import CatalogIndexError, index_csv_bytes
 from prodavan.application.services.cabinet_service import CabinetError, get_cabinet
+from prodavan.cabinets.electronics_procurement.catalogs.indexer import CatalogIndexError, index_csv_bytes
 from prodavan.cabinets.electronics_procurement.integrations.s4b_runtime import get_s4b_gateway
+from prodavan.cabinets.spi import CabinetDomainError
 from prodavan.infrastructure.auth.s4b_vault import delete_vault, public_status, save_vault
 from prodavan.infrastructure.storage.catalog_storage import (
     catalog_dir,
@@ -21,12 +22,8 @@ from prodavan.infrastructure.storage.catalog_storage import (
 from prodavan.infrastructure.storage.run_storage import sanitize_filename, RunStorageError
 
 
-class CatalogError(Exception):
-    def __init__(self, code: str, message: str, status: int = 400) -> None:
-        self.code = code
-        self.message = message
-        self.status = status
-        super().__init__(message)
+class CatalogError(CabinetDomainError):
+    """Catalog / S4B vault domain error."""
 
 
 async def _cabinet(
