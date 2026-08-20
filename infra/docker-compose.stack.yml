@@ -64,6 +64,9 @@ services:
       target: runtime
       args:
         API_BASE: http://localhost:8000
+        BUILD_ID: local-stack
+        BUILD_NAME: 1.0.0
+        BUILD_NUMBER: "0"
       cache_from:
         - type=local,src=../.docker-cache/web
       cache_to:
