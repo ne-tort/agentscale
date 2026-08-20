@@ -11,6 +11,7 @@
 5. [Frontend](04-frontend/architecture.md) · [Backend](05-backend/structure.md) · [Agent runtime](06-agent-runtime/providers.md) · [Infra](07-infrastructure/topology.md)
 6. [Migration from Commerce](08-migration/commerce-boundary.md)
 7. [Checklists & progress](09-checklists/PROGRESS.md)
+8. [Implementation roadmap](10-implementation/roadmap.md) — код I0–I9, Impl-оценки
 
 ## Карта разделов
 
@@ -24,10 +25,18 @@
 | Agent | [06-agent-runtime/](06-agent-runtime/) | Providers, isolation, prompts |
 | Infrastructure | [07-infrastructure/](07-infrastructure/) | k3s, Terraform, CI/CD, runner |
 | Migration | [08-migration/](08-migration/) | Commerce MVP → Prodavan |
-| Checklists | [09-checklists/](09-checklists/) | PROGRESS, gates, review |
+| Checklists | [09-checklists/](09-checklists/) | PROGRESS, gates, review, Impl protocol |
+| Implementation | [10-implementation/](10-implementation/) | Roadmap I0–I9, module readiness |
 
-## Приёмка документации
+## Приёмка
 
-- Обязательный пункт: **≥ 8/10** (см. шкалу в [PROGRESS.md](09-checklists/PROGRESS.md))
-- Среднее по итерации: **≥ 8.5/10**
+**Документация (P0–P9):**
+
+- Пункт Doc: **≥ 8/10**
+- Среднее Doc: **≥ 8.5/10** (текущее: **8.7**)
+
+**Реализация (I0–I9):**
+
+- Отдельная шкала Impl — см. [implementation-readiness.md](09-checklists/implementation-readiness.md)
+- Старт I0: Impl avg **≥ 7** (текущее: **6.7** — bridge добавлен, нужен scaffold)
 - После каждой фазы: [review-protocol.md](09-checklists/review-protocol.md)

@@ -32,11 +32,19 @@
 - [ ] S4B creds in vault only
 - [ ] Escape test catalog referenced
 
-## 6. Score
+## 6. Score (Doc)
 
-- [ ] Update [`PROGRESS.md`](PROGRESS.md) Fact column
-- [ ] List Gaps where Fact < Target
-- [ ] Block merge if any mandatory item < 6
+- [ ] Update [`PROGRESS.md`](PROGRESS.md) **Doc** column
+- [ ] List Gaps where Doc < Target
+- [ ] Block merge if any mandatory Doc item < 6
+
+## 7. Implementation readiness (Impl)
+
+- [ ] Update **Impl** column in [`PROGRESS.md`](PROGRESS.md)
+- [ ] Check blockers in [`implementation-readiness.md`](implementation-readiness.md)
+- [ ] Per-module matrix in [`10-implementation/module-readiness.md`](../10-implementation/module-readiness.md)
+- [ ] Before starting code iteration I*: Impl avg ≥ 7, no module Impl < 5
+- [ ] Contracts in repo: OpenAPI paths, JSON Schema, seeds — not «later in code»
 
 ## Module review (×10)
 

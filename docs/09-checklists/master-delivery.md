@@ -129,4 +129,9 @@ Each module: README, domain, api, persistence, storage, mcp-tools, ui, security,
 
 ## Score summary
 
-See [PROGRESS.md](PROGRESS.md) — overall **8.7/10** (documentation iteration).
+| Scale | Score | Gate |
+|-------|-------|------|
+| **Doc** | **8.7/10** | ✅ ≥ 8.5 |
+| **Impl** | **6.7/10** | ⚠️ need ≥ 7 for I0 |
+
+See [PROGRESS.md](PROGRESS.md) and [implementation-readiness.md](implementation-readiness.md).

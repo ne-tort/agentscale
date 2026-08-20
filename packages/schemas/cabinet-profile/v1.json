@@ -1,0 +1,220 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prodavan.dev/schemas/cabinet-profile/v1.json",
+  "title": "CabinetProfile",
+  "type": "object",
+  "required": ["id", "version", "displayName", "capabilities", "ui", "mcp"],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": { "type": "string", "format": "uri" },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{2,48}$"
+    },
+    "version": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+(-[\\w.]+)?$" },
+    "displayName": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "capabilities": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/capability" },
+      "uniqueItems": true,
+      "minItems": 1
+    },
+    "ui": { "$ref": "#/$defs/uiManifest" },
+    "mcp": { "$ref": "#/$defs/mcpConfig" },
+    "seeds": { "$ref": "#/$defs/seedConfig" },
+    "constraints": { "$ref": "#/$defs/constraints" }
+  },
+  "$defs": {
+    "capability": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-z0-9*]*)+$"
+    },
+    "uiManifest": {
+      "type": "object",
+      "required": ["navigation", "modules"],
+      "additionalProperties": false,
+      "properties": {
+        "theme": { "enum": ["light", "dark", "system"] },
+        "navigation": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/navItem" },
+          "minItems": 1
+        },
+        "modules": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/uiModule" }
+        },
+        "projectTabs": {
+          "type": "array",
+          "items": { "type": "string" },
+          "uniqueItems": true
+        }
+      }
+    },
+    "navItem": {
+      "type": "object",
+      "required": ["id", "label", "route"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "label": { "type": "string" },
+        "icon": { "type": "string" },
+        "route": { "type": "string", "minLength": 1 },
+        "capability": { "type": "string" },
+        "badge": { "type": ["string", "null"] }
+      }
+    },
+    "uiModule": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "enum": [
+            "project-list",
+            "agent-chat",
+            "line-items",
+            "offers-grid",
+            "kp-export",
+            "spec-upload",
+            "integrations",
+            "equipment-cards"
+          ]
+        },
+        "enabled": { "type": "boolean" },
+        "config": { "type": "object" }
+      }
+    },
+    "mcpConfig": {
+      "type": "object",
+      "required": ["tools_allowlist"],
+      "additionalProperties": false,
+      "properties": {
+        "packages": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "tools_allowlist": {
+          "type": "array",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "filters": {
+          "type": "object",
+          "additionalProperties": { "type": "object" }
+        },
+        "servers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "transport"],
+            "properties": {
+              "name": { "type": "string" },
+              "transport": { "enum": ["stdio", "http"] },
+              "url": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "seedConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "prompts": { "type": "string" },
+        "shops": { "type": "string" },
+        "theme": { "type": "string" },
+        "sql": { "type": "array", "items": { "type": "string" } },
+        "json": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        },
+        "system_catalogs": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["slug", "kind"],
+            "properties": {
+              "slug": { "type": "string" },
+              "kind": { "enum": ["system_reserved", "user_importable"] }
+            }
+          }
+        }
+      }
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requiresIntegration": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "maxProjects": { "type": "integer", "minimum": 1 },
+        "s4b_include_on_order": { "type": "boolean" }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "capabilities": {
+            "contains": { "const": "procurement.s4b" }
+          }
+        },
+        "required": ["capabilities"]
+      },
+      "then": {
+        "properties": {
+          "seeds": {
+            "properties": {
+              "system_catalogs": {
+                "contains": {
+                  "type": "object",
+                  "properties": { "slug": { "const": "s4b" } },
+                  "required": ["slug"]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "not": {
+          "properties": {
+            "capabilities": {
+              "contains": { "const": "procurement.s4b" }
+            }
+          },
+          "required": ["capabilities"]
+        }
+      },
+      "then": {
+        "properties": {
+          "capabilities": {
+            "not": {
+              "contains": { "const": "procurement.s4b" }
+            }
+          },
+          "seeds": {
+            "properties": {
+              "system_catalogs": {
+                "not": {
+                  "contains": {
+                    "type": "object",
+                    "properties": { "slug": { "const": "s4b" } },
+                    "required": ["slug"]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,292 @@
+openapi: 3.1.0
+info:
+  title: Prodavan API
+  version: 0.1.0-draft
+  description: |
+    Contract stub for FastAPI ↔ Flutter codegen.
+    Source layout: [`docs/05-backend/openapi-layout.md`](../../../docs/05-backend/openapi-layout.md).
+    Implementation status: **not started** — paths are skeletal.
+servers:
+  - url: https://api.prodavan.dev/api/v1
+    description: staging
+  - url: http://localhost:8000/api/v1
+    description: local dev
+tags:
+  - name: auth
+    description: M08 tenants
+  - name: cabinets
+    description: M00 cabinets
+  - name: projects
+    description: M01 projects
+  - name: specs
+    description: M02 specs and KP
+  - name: agent
+    description: M07 agent sessions
+paths:
+  /health:
+    get:
+      operationId: healthCheck
+      tags: [ops]
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    enum: [ok]
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Tokens issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenPair"
+        default:
+          $ref: "#/components/responses/Problem"
+  /cabinets:
+    get:
+      operationId: listCabinets
+      tags: [cabinets]
+      parameters:
+        - $ref: "#/components/parameters/Cursor"
+        - $ref: "#/components/parameters/Limit"
+      responses:
+        "200":
+          description: Cabinet list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CabinetList"
+        default:
+          $ref: "#/components/responses/Problem"
+    post:
+      operationId: createCabinet
+      tags: [cabinets]
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateCabinetRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cabinet"
+        default:
+          $ref: "#/components/responses/Problem"
+  /cabinets/{cabinet_id}/switch:
+    post:
+      operationId: switchCabinet
+      tags: [cabinets]
+      parameters:
+        - $ref: "#/components/parameters/CabinetId"
+      responses:
+        "200":
+          description: Active cabinet updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CabinetSwitchResult"
+        default:
+          $ref: "#/components/responses/Problem"
+  /cabinets/{cabinet_id}/projects:
+    get:
+      operationId: listProjects
+      tags: [projects]
+      parameters:
+        - $ref: "#/components/parameters/CabinetId"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: Project list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectList"
+        default:
+          $ref: "#/components/responses/Problem"
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    CabinetId:
+      name: cabinet_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Cursor:
+      name: cursor
+      in: query
+      schema:
+        type: string
+    Limit:
+      name: limit
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      schema:
+        type: string
+  responses:
+    Problem:
+      description: RFC 7807 problem
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+  schemas:
+    Problem:
+      type: object
+      required: [type, title, status, code]
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        code:
+          type: string
+        detail:
+          type: string
+        trace_id:
+          type: string
+    TokenClaims:
+      type: object
+      properties:
+        sub:
+          type: string
+          format: uuid
+        tenant_id:
+          type: string
+          format: uuid
+        cabinet_ids:
+          type: array
+          items:
+            type: string
+            format: uuid
+        exp:
+          type: integer
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          format: password
+    TokenPair:
+      type: object
+      required: [access_token, refresh_token, token_type]
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        token_type:
+          type: string
+          enum: [bearer]
+    Cabinet:
+      type: object
+      required: [id, slug, display_name, profile_id, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        display_name:
+          type: string
+        profile_id:
+          type: string
+        status:
+          type: string
+          enum: [active, archived]
+    CreateCabinetRequest:
+      type: object
+      required: [slug, display_name, profile_id]
+      properties:
+        slug:
+          type: string
+          pattern: "^[a-z0-9-]{3,64}$"
+        display_name:
+          type: string
+        profile_id:
+          type: string
+    CabinetList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Cabinet"
+        next_cursor:
+          type: string
+    CabinetSwitchResult:
+      type: object
+      required: [cabinet_id, manifest_etag]
+      properties:
+        cabinet_id:
+          type: string
+          format: uuid
+        manifest_etag:
+          type: string
+    Project:
+      type: object
+      required: [id, slug, display_name]
+      properties:
+        id:
+          type: string
+          format: uuid
+        slug:
+          type: string
+        display_name:
+          type: string
+    ProjectList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/Project"
+        next_cursor:
+          type: string
+security:
+  - bearerAuth: []
