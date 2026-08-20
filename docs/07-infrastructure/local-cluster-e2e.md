@@ -102,25 +102,32 @@ Compose монтирует `../.kube` → `/kube` и задаёт `KUBECONFIG=/k
 
 ## 5b. После перезагрузки WSL / Docker Desktop
 
-k3d хранит данные в Docker volumes; контейнеры получают `restart=unless-stopped`. Если API всё же недоступен:
+k3d хранит данные в Docker volumes; контейнеры получают `restart=unless-stopped`.
+Если API всё же недоступен (server `Exited`, `0/1`):
 
 ```bash
-# единственная команда recover для кластера
+# полный recover (ensure → secret/import → wait → smoke)
+export GHCR_TOKEN=ghp_...   # optional but recommended
+bash infra/scripts/recover_local_stack.sh
+```
+
+Только кластер:
+
+```bash
 bash infra/scripts/ensure_k3d_cluster.sh
 export KUBECONFIG=infra/.kube/prodavan-k3d.yaml
-
-# workloads (Argo/pods уже в etcd — обычно сами поднимаются)
-bash infra/scripts/wait_prodavan_ready.sh
-bash infra/scripts/smoke_ingress.sh
 ```
 
-Проверка recover без образов:
+Проверка recover:
 
 ```bash
+# nodes only
 bash infra/scripts/test_k3d_recover.sh
+# + workloads + HTTP smoke (нужны уже импортированные образы)
+TEST_WORKLOADS=1 bash infra/scripts/test_k3d_recover.sh
 ```
 
-Не полагайтесь на повторный `terraform apply` как на recover: provisioner не перезапускается, если inputs не менялись. Source of truth runtime — `ensure_k3d_cluster.sh`.
+Не полагайтесь на повторный `terraform apply` как на recover: provisioner не перезапускается, если inputs не менялись. Source of truth runtime — `ensure_k3d_cluster.sh` / `recover_local_stack.sh`.
 
 ---
 
@@ -146,8 +153,10 @@ curl -sS -H 'Host: prodavan.local' http://127.0.0.1:8088/ | head
 | Runner session conflict | новый `RUNNER_NAME`, wipe volume `runner-home` |
 | kubectl permission denied | не использовать `/etc/rancher/k3s`; только `infra/.kube/...` |
 | Smoke 404 Host | заголовок `Host: prodavan.local` обязателен |
-| После reboot API down | `bash infra/scripts/ensure_k3d_cluster.sh` |
-| Nodes NotReady | ensure делает start + retry; `docker ps -a --filter label=k3d.cluster=prodavan-dev` |
+| После reboot API down | `bash infra/scripts/recover_local_stack.sh` |
+| Server Exited (128) | ensure детектит unhealthy + `k3d cluster start` / `docker start` |
+| Nodes NotReady | ensure делает start + API wait + retry |
+| Smoke сразу после start | `smoke_ingress.sh` ретраит до ~2 мин |
 | ImagePullBackOff (rancher/*) | `bash infra/scripts/warm_k3d_base_images.sh` (host pull + `k3d image import`) |
 | TLS handshake timeout docker.io | warm script с ретраями; VPN/прокси; повторить ensure |
 
@@ -155,7 +164,7 @@ curl -sS -H 'Host: prodavan.local' http://127.0.0.1:8088/ | head
 
 ## Связанные файлы
 
-- Ensure: `infra/scripts/ensure_k3d_cluster.sh`, `ensure_argocd.sh`, `wait_prodavan_ready.sh`
+- Ensure: `infra/scripts/ensure_k3d_cluster.sh`, `recover_local_stack.sh`, `ensure_argocd.sh`, `wait_prodavan_ready.sh`
 - Terraform: `infra/terraform/environments/local`, `infra/terraform/modules/k3s-local`
 - Argo: `infra/argocd/apps/prodavan-dev.yaml`
 - Workflow: `.github/workflows/deploy-dev-k3s.yml`

@@ -11,9 +11,16 @@ need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "'$1' not found on PATH"
 }
 
-repo_root_from_scripts() {
-  # Call from a file in infra/scripts/
-  local script_dir
+default_kubeconfig() {
+  local script_dir root
   script_dir="$(cd "$(dirname "${BASH_SOURCE[1]}")" && pwd)"
-  cd "${script_dir}/../.." && pwd
+  root="$(cd "${script_dir}/../.." && pwd)"
+  echo "${root}/infra/.kube/prodavan-k3d.yaml"
+}
+
+ensure_kubeconfig_env() {
+  if [[ -z "${KUBECONFIG:-}" ]]; then
+    export KUBECONFIG
+    KUBECONFIG="$(default_kubeconfig)"
+  fi
 }

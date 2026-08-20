@@ -8,9 +8,10 @@ NS_APP="${PRODAVAN_NS:-prodavan}"
 ARGO_ATTEMPTS="${ARGO_ATTEMPTS:-60}"
 ARGO_SLEEP_SEC="${ARGO_SLEEP_SEC:-10}"
 
-if [[ -z "${KUBECONFIG:-}" ]]; then
-  export KUBECONFIG="${ROOT}/infra/.kube/prodavan-k3d.yaml"
-fi
+# shellcheck source=lib/common.sh
+source "${SCRIPT_DIR}/lib/common.sh"
+ensure_kubeconfig_env
+export KUBECONFIG="${KUBECONFIG:-${ROOT}/infra/.kube/prodavan-k3d.yaml}"
 
 apply_fallback() {
   echo "Fallback: kubectl apply -k infra/k3s/overlays/dev"
@@ -43,7 +44,12 @@ else
 fi
 
 echo "==> Rollout status"
-kubectl -n "$NS_APP" rollout status deploy/prodavan-postgres --timeout=300s || true
-kubectl -n "$NS_APP" rollout status deploy/prodavan-api --timeout=300s
-kubectl -n "$NS_APP" rollout status deploy/prodavan-web --timeout=300s
+# Deployments may still be rolling after node restart; wait for available replicas.
+for dep in prodavan-postgres prodavan-api prodavan-web; do
+  if kubectl -n "$NS_APP" get deploy "$dep" >/dev/null 2>&1; then
+    kubectl -n "$NS_APP" rollout status "deploy/${dep}" --timeout=300s || true
+  fi
+done
+# Prefer Ready pods over mere rollout return codes.
+kubectl -n "$NS_APP" wait --for=condition=Ready pods --all --timeout=300s || true
 kubectl -n "$NS_APP" get pods

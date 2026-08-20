@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Idempotent local k3d cluster: create / start after reboot / refresh kubeconfig.
-# Safe to run after WSL or Docker Desktop restart.
+# Safe to run after WSL or Docker Desktop restart (including Exited server containers).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -49,7 +49,7 @@ cluster_listed() {
 }
 
 # True if k3d reports all servers up (e.g. 1/1, not 0/1).
-cluster_servers_running() {
+k3d_servers_ready() {
   k3d cluster list 2>/dev/null | awk -v c="$CLUSTER" '
     NR>1 && $1==c {
       split($2, a, "/");
@@ -60,9 +60,26 @@ cluster_servers_running() {
   '
 }
 
+# True if the server container is actually running (not Exited/Created).
+docker_server_running() {
+  docker ps --filter "name=k3d-${CLUSTER}-server" --filter "status=running" --format '{{.ID}}' 2>/dev/null | grep -q .
+}
+
+cluster_healthy() {
+  # Docker may show Up while k3d list still says 0/1 for a moment — prefer API.
+  docker_server_running || return 1
+  if [[ -f "$KCFG" ]] && KUBECONFIG="$KCFG" kubectl get --raw=/readyz >/dev/null 2>&1; then
+    return 0
+  fi
+  k3d_servers_ready
+}
+
 set_restart_unless_stopped() {
   local ids
-  ids="$(docker ps -aq --filter "label=k3d.cluster=${CLUSTER}" 2>/dev/null || true)"
+  ids="$(docker ps -aq --filter "name=k3d-${CLUSTER}" 2>/dev/null || true)"
+  if [[ -z "$ids" ]]; then
+    ids="$(docker ps -aq --filter "label=k3d.cluster=${CLUSTER}" 2>/dev/null || true)"
+  fi
   if [[ -z "$ids" ]]; then
     return 0
   fi
@@ -83,8 +100,18 @@ create_cluster() {
 }
 
 start_cluster() {
-  echo "Starting k3d cluster ${CLUSTER} (recover after stop/reboot)..."
-  k3d cluster start "$CLUSTER"
+  echo "Starting k3d cluster ${CLUSTER} (recover after stop/reboot/crash)..."
+  # If docker left server in Exited, k3d start brings it back.
+  k3d cluster start "$CLUSTER" || true
+  if ! docker_server_running; then
+    echo "k3d start incomplete — docker start server containers..."
+    docker ps -aq --filter "name=k3d-${CLUSTER}-server" | while read -r id; do
+      docker start "$id" || true
+    done
+    docker ps -aq --filter "name=k3d-${CLUSTER}-serverlb" | while read -r id; do
+      docker start "$id" || true
+    done
+  fi
   set_restart_unless_stopped
 }
 
@@ -95,19 +122,30 @@ write_kubeconfig() {
   echo "kubeconfig -> $KCFG"
 }
 
+wait_api() {
+  export KUBECONFIG="$KCFG"
+  local i
+  for i in $(seq 1 30); do
+    if kubectl get --raw=/readyz >/dev/null 2>&1 || kubectl get nodes >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
 wait_nodes() {
   export KUBECONFIG="$KCFG"
   need_cmd kubectl
-  echo "Waiting for nodes Ready (${WAIT_NODES_TIMEOUT})..."
+  echo "Waiting for API + nodes Ready (${WAIT_NODES_TIMEOUT})..."
   local attempt
   for attempt in 1 2 3 4 5 6; do
-    if kubectl wait --for=condition=Ready nodes --all --timeout="$WAIT_NODES_TIMEOUT"; then
+    if wait_api && kubectl wait --for=condition=Ready nodes --all --timeout="$WAIT_NODES_TIMEOUT"; then
       kubectl get nodes -o wide
       return 0
     fi
-    echo "kubectl wait failed (attempt ${attempt}) — restarting cluster and retrying..."
-    k3d cluster start "$CLUSTER" || true
-    set_restart_unless_stopped
+    echo "API/nodes not ready (attempt ${attempt}) — restarting cluster..."
+    start_cluster
     write_kubeconfig
     sleep 5
   done
@@ -126,10 +164,11 @@ main() {
   fi
 
   if cluster_listed; then
-    if cluster_servers_running; then
-      echo "k3d cluster ${CLUSTER} already running"
+    if cluster_healthy; then
+      echo "k3d cluster ${CLUSTER} already healthy"
       set_restart_unless_stopped
     else
+      echo "k3d cluster ${CLUSTER} listed but unhealthy (servers/docker) — recovering"
       start_cluster
     fi
   else
