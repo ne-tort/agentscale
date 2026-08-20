@@ -4,9 +4,26 @@ from __future__ import annotations
 
 import re
 
-_QTY_KEYS = ("qty", "quantity", "кол-во", "количество")
-_PN_KEYS = ("pn", "p/n", "part_number", "partnumber", "артикул")
+_QTY_KEYS = ("qty", "quantity", "кол-во", "количество", "колво")
+_PN_KEYS = (
+    "pn",
+    "p/n",
+    "p-n",
+    "part_number",
+    "partnumber",
+    "артикул",
+    "партномер",
+    "парт-номер",
+)
 _PN_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{2,63}$")
+
+
+def _normalize_header(key: str) -> str:
+    return key.lower().replace(" ", "").replace("/", "").replace("-", "").replace("_", "")
+
+
+_PN_HEADERS = {_normalize_header(k) for k in _PN_KEYS}
+_QTY_HEADERS = {_normalize_header(k) for k in _QTY_KEYS}
 
 
 def classify_rows(rows: list[dict]) -> dict:
@@ -34,7 +51,7 @@ def classify_rows(rows: list[dict]) -> dict:
 
 def _qty_from_cells(cells: dict) -> float:
     for key, value in cells.items():
-        if key.lower() in _QTY_KEYS:
+        if _normalize_header(key) in _QTY_HEADERS:
             try:
                 return float(str(value).replace(",", "."))
             except ValueError:
@@ -43,9 +60,11 @@ def _qty_from_cells(cells: dict) -> float:
 
 
 def _pn_from_cells(cells: dict) -> str | None:
+    """P/N only from a named column. Never scan the description for a token."""
     for key, value in cells.items():
-        if key.lower().replace(" ", "") in {k.replace("/", "") for k in _PN_KEYS} or key.lower() in _PN_KEYS:
-            text = str(value).strip()
-            if text and _PN_PATTERN.match(text):
-                return text
+        if _normalize_header(key) not in _PN_HEADERS:
+            continue
+        text = str(value).strip()
+        if text and _PN_PATTERN.match(text):
+            return text
     return None

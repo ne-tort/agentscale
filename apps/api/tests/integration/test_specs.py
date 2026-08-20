@@ -134,3 +134,58 @@ async def test_xlsx_does_not_invent_rows(client: AsyncClient, unique_suffix: str
     run_id = upload.json()["run_id"]
     run = await client.get(f"/api/v1/projects/{project_id}/runs/{run_id}", headers=headers)
     assert run.json()["stats"]["rows"] == 0
+
+
+@requires_postgres
+@pytest.mark.asyncio
+async def test_xlsx_spec_ingest_dedupes_and_keeps_named_pn(
+    client: AsyncClient, unique_suffix: str
+) -> None:
+    from io import BytesIO
+
+    from openpyxl import Workbook
+
+    reg = await register_user(client, unique_suffix, prefix="skp-xlsx-ok")
+    _, headers = await active_cabinet_headers(client, reg, unique_suffix)
+    project_id = await _open_project(client, headers, unique_suffix + "x")
+
+    wb = Workbook()
+    sheet = wb.active
+    sheet.title = "Спецификация"
+    sheet.append(["№", "Описание", "P/N", "Кол-во"])
+    sheet.append([1, "Mouse Logitech", "910-001793", 10])
+    kp = wb.create_sheet("КП")
+    kp.append(["№", "Описание", "P/N", "Кол-во"])
+    kp.append([1, "Mouse Logitech", "910-001793", 10])
+    buf = BytesIO()
+    wb.save(buf)
+
+    upload = await client.post(
+        f"/api/v1/projects/{project_id}/inbox/upload",
+        headers=headers,
+        files={
+            "file": (
+                "spec.xlsx",
+                buf.getvalue(),
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+        data={"auto_run": "true"},
+    )
+    assert upload.status_code == 201, upload.text
+    run_id = upload.json()["run_id"]
+    run = await client.get(f"/api/v1/projects/{project_id}/runs/{run_id}", headers=headers)
+    assert run.json()["stats"]["rows"] == 1
+
+    classify = await client.post(
+        f"/api/v1/projects/{project_id}/runs/{run_id}/advance",
+        headers=headers,
+        json={"target_phase": "classify"},
+    )
+    assert classify.status_code == 202, classify.text
+    items = await client.get(
+        f"/api/v1/projects/{project_id}/runs/{run_id}/lineitems", headers=headers
+    )
+    line = items.json()["items"][0]
+    assert line["part_number"] == "910-001793"
+

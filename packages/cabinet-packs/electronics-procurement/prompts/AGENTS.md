@@ -78,7 +78,7 @@ python tools/kp_export.py --project <имя>
 python tools/validate_run.py --run-id <id> [--runs-dir projects/<имя>/runs]
 ```
 
-Пока парсер xlsx/API не подключён для входной спеки, тул пишет честный `not_implemented` или пустой список. **Не подменяй это цифрами из головы.** Варианты — SQLite проекта (`commerce.sqlite`), MCP `commerce-offers`. КП: бот `/кп` → `templates/kp-template.xlsx` с зависимыми списками P/N→продавец. S4B-продавец: `{имя}-s4b`.
+xlsx спеки парсит сервер: `#REF!` и дубли листов КП/Маржа/Спецификация отсекаются; **P/N только из колонки партномера**, не из описания. Битый файл и legacy `.xls` → пустые rows (`not_implemented` / error), **не выдумывать строки и цены**. Варианты — SQLite проекта. КП: `POST /projects/{id}/export/kp`, не агент. S4B live пока не подключён — не подставлять офферы с s4b.ru из головы.
 
 ## Поиск (порядок)
 
