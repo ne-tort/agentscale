@@ -1,9 +1,10 @@
 services:
   runner:
-    image: myoung34/github-runner:ubuntu-jammy
+    build: .
+    image: prodavan-gha-runner:local
     container_name: prodavan-gha-runner
     restart: unless-stopped
-    # Bridge NAT in this WSL Docker cannot reach api.github.com (HTTP 000).
+    # Prefer host net: bridge DNS on Desktop/WSL often fails for broker.actions.githubusercontent.com
     network_mode: host
     env_file:
       - .env
@@ -11,12 +12,11 @@ services:
       REPO_URL: ${REPO_URL:-https://github.com/ne-tort/prodavan}
       RUNNER_NAME: ${RUNNER_NAME:-wsl-prodavan}
       LABELS: ${LABELS:-self-hosted,linux,docker,wsl-dev}
-      DISABLE_AUTO_UPDATE: "true"
-      RUNNER_SCOPE: repo
-      RUNNER_WORKDIR: /tmp/runner/work
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - runner-work:/tmp/runner
+      - runner-home:/opt/actions-runner
+      # Optional preload (avoids flaky GitHub download):
+      - ./actions-runner-linux-x64-2.328.0.tar.gz:/tmp/actions-runner-linux-x64-2.328.0.tar.gz:ro
 
 volumes:
-  runner-work:
+  runner-home:

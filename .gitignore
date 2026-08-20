@@ -5,6 +5,11 @@
 *.pem
 *.key
 
+# Local runner assets / runtime
+infra/github-runner/*.tar.gz
+infra/github-runner/actions-runner*
+data/
+
 # Python
 __pycache__/
 *.py[cod]

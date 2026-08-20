@@ -1,0 +1,4 @@
+.env
+*.tar.gz
+actions-runner*
+README.md
