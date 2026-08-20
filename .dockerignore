@@ -1,31 +1,9 @@
-# Build context = prodavan repo root
-.git
-.gitignore
-**/.dart_tool
-**/.terraform
-**/tools/.terraform-bin
-**/.docker-cache
-**/__pycache__
-**/.pytest_cache
-**/.ruff_cache
-**/node_modules
-**/data
-**/*.sqlite
-**/*.md
-!apps/api/README.md
-docs
-infra
-.github
-# Host Flutter build artifacts except web/ (from-host target)
-apps/flutter/build/**
-!apps/flutter/build/web
-!apps/flutter/build/web/**
-apps/api/.venv
-apps/api/.env
-apps/flutter/.dart_tool
-apps/flutter/android
-apps/flutter/ios
-apps/flutter/linux
-apps/flutter/macos
-apps/flutter/windows
-apps/flutter/test
+# Build context is prodavan/ repo root (see Dockerfile COPY paths).
+**/build/
+**/.dart_tool/
+**/.idea/
+**/*.iml
+**/node_modules/
+.git/
+infra/github-runner/*.tar.gz
+data/

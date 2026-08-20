@@ -59,17 +59,19 @@ FROM flutter-sdk AS build
 
 WORKDIR /app
 
+# Copy the whole Flutter package (avoids incomplete `lib/` trees on some
+# Windows → Linux build-context transfers of deep paths).
 COPY apps/flutter/pubspec.yaml apps/flutter/pubspec.lock apps/flutter/analysis_options.yaml ./
 
 RUN --mount=type=cache,target=/root/.pub-cache \
     flutter pub get
 
-COPY apps/flutter/lib ./lib
-COPY apps/flutter/web ./web
+COPY apps/flutter/ ./
 
 ARG API_BASE=http://localhost:8000
 RUN --mount=type=cache,target=/root/.pub-cache \
-    flutter build web --release --dart-define=API_BASE=${API_BASE}
+    test -f lib/features/auth/data/datasources/auth_remote_datasource.dart \
+    && flutter build web --release --dart-define=API_BASE=${API_BASE}
 
 # --- runtime nginx --------------------------------------------------------
 FROM nginx:1.27-alpine AS runtime
