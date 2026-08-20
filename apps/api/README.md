@@ -8,23 +8,28 @@
 # Infrastructure (from repo root)
 docker compose -f infra/docker-compose.dev.yml up -d
 
-# API
+# Migrations (superuser — один раз после docker up)
 cd apps/api
-python -m venv .venv
-# Windows: .venv\Scripts\activate
-# WSL/Linux: source .venv/bin/activate
 pip install -e ".[dev]"
+DATABASE_URL=postgresql+asyncpg://prodavan:prodavan@localhost:5432/prodavan alembic upgrade head
+
+# API (prodavan_app — RLS enforced)
 cp .env.example .env
-alembic upgrade head
 uvicorn prodavan.main:app --reload --host 0.0.0.0 --port 8000
 ```
+
+Endpoints (I1):
+- `POST /api/v1/auth/register` — tenant + user + default cabinet
+- `POST /api/v1/auth/login`
+- `POST /api/v1/auth/refresh`
+- `GET /api/v1/me` — Bearer token
 
 Health: `GET http://localhost:8000/api/v1/health` → `{"status":"ok"}`
 
 ## Tests
 
 ```bash
-pytest tests/integration/test_health.py
+DATABASE_URL=postgresql+asyncpg://prodavan_app:prodavan@localhost:5432/prodavan pytest tests/ -q
 ```
 
 OpenAPI stub: [`openapi/openapi.yaml`](openapi/openapi.yaml)

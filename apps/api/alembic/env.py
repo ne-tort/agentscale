@@ -16,7 +16,10 @@ if config.config_file_name is not None:
 
 config.set_main_option("sqlalchemy.url", settings.database_url)
 
-target_metadata = None
+from prodavan.infrastructure.persistence.models import tenants as _tenants  # noqa: F401
+from prodavan.infrastructure.persistence.models.base import Base
+
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:

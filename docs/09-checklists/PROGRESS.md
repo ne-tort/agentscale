@@ -21,9 +21,9 @@
 | P7 | 8.1 | **5** |
 | P8 | 8.7 | **8** |
 | P9 | 9.0 | **10** |
-| **Overall** | **8.7** | **7.4** |
+| **Overall** | **8.7** | **7.8** |
 
-**Вердикт:** Doc ✅ · Impl ✅ I0 complete — следующий шаг **I1 auth**.
+**Вердикт:** Doc ✅ · I0+I1 complete — следующий шаг **I2 cabinets**.
 
 ---
 
@@ -160,10 +160,20 @@
 | I0-T03 | ci-schemas.yml + ci-api.yml | 8 | [x] |
 | I0-T04 | Health integration test | 8 | [x] |
 
-## Next: I1 (auth)
+## I1 — Auth / M08 (done 2026-08-20)
 
-- Alembic migration tenants schema
-- Register/login/refresh endpoints
-- JWT + RLS baseline
+| ID | Task | Impl | Done |
+|----|------|------|------|
+| I1-T01 | Alembic tenants schema + RLS | 8 | [x] |
+| I1-T02 | prodavan_app role (non-superuser) | 8 | [x] |
+| I1-T03 | register/login/refresh/me | 8 | [x] |
+| I1-T04 | JWT + bcrypt | 8 | [x] |
+| I1-T05 | NEG-TEN-01 RLS test | 8 | [x] |
+
+## Next: I2 (cabinets + pack seed)
+
+- CRUD cabinets, switch, manifest API
+- Pack installer electronics-procurement
+- Resolve BL-04 capability registry
 
 Spikes (parallel): P4-T04, P4-T05 → Impl 8+.

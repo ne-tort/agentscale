@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from prodavan.config.settings import settings
+from prodavan.infrastructure.persistence.rls import reset_rls
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
@@ -32,7 +33,10 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     session_factory = get_session_factory()
     async with session_factory() as session:
-        yield session
+        try:
+            yield session
+        finally:
+            await reset_rls(session)
 
 
 async def dispose_engine() -> None:
@@ -41,3 +45,8 @@ async def dispose_engine() -> None:
         await _engine.dispose()
         _engine = None
         _session_factory = None
+
+
+async def reset_engine() -> None:
+    """Test helper: drop cached engine between async tests."""
+    await dispose_engine()
