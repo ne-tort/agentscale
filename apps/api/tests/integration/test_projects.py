@@ -5,47 +5,14 @@ from httpx import AsyncClient
 
 from prodavan.config.settings import settings
 from tests.conftest import requires_postgres
-
-
-async def _register(client: AsyncClient, suffix: str) -> dict:
-    body = {
-        "email": f"prj-{suffix}@example.com",
-        "password": "securepass123",
-        "display_name": "Project User",
-        "tenant_slug": f"prj-tenant-{suffix}",
-        "tenant_display_name": "Project Tenant",
-    }
-    resp = await client.post("/api/v1/auth/register", json=body)
-    assert resp.status_code == 200, resp.text
-    return resp.json()
-
-
-async def _cabinet_with_token(client: AsyncClient, reg: dict, suffix: str) -> tuple[str, dict]:
-    token = reg["access_token"]
-    headers = {"Authorization": f"Bearer {token}"}
-    create = await client.post(
-        "/api/v1/cabinets",
-        headers=headers,
-        json={
-            "slug": f"proc-{suffix}",
-            "display_name": "Proc cabinet",
-            "profile_id": "electronics-procurement",
-        },
-    )
-    assert create.status_code == 201, create.text
-    cabinet_id = create.json()["id"]
-    switch = await client.post(f"/api/v1/cabinets/{cabinet_id}/switch", headers=headers)
-    assert switch.status_code == 200, switch.text
-    sw = switch.json()
-    headers = {"Authorization": f"Bearer {sw['access_token']}"}
-    return cabinet_id, headers
+from tests.helpers import active_cabinet_headers, register_user
 
 
 @requires_postgres
 @pytest.mark.asyncio
 async def test_create_project_storage(client: AsyncClient, unique_suffix: str) -> None:
-    reg = await _register(client, unique_suffix)
-    cabinet_id, headers = await _cabinet_with_token(client, reg, unique_suffix)
+    reg = await register_user(client, unique_suffix, prefix="prj")
+    cabinet_id, headers = await active_cabinet_headers(client, reg, unique_suffix)
 
     create = await client.post(
         "/api/v1/projects",
@@ -84,7 +51,7 @@ async def test_create_project_storage(client: AsyncClient, unique_suffix: str) -
 @pytest.mark.asyncio
 async def test_neg_prj_002_no_active_cabinet(client: AsyncClient, unique_suffix: str) -> None:
     """NEG-PRJ-002: create project without active cabinet."""
-    reg = await _register(client, unique_suffix)
+    reg = await register_user(client, unique_suffix, prefix="prj")
     headers = {"Authorization": f"Bearer {reg['access_token']}"}
     resp = await client.post(
         "/api/v1/projects",
@@ -99,8 +66,8 @@ async def test_neg_prj_002_no_active_cabinet(client: AsyncClient, unique_suffix:
 @pytest.mark.asyncio
 async def test_neg_prj_003_slug_conflict(client: AsyncClient, unique_suffix: str) -> None:
     """NEG-PRJ-003: duplicate slug in cabinet."""
-    reg = await _register(client, unique_suffix)
-    _, headers = await _cabinet_with_token(client, reg, unique_suffix)
+    reg = await register_user(client, unique_suffix, prefix="prj")
+    _, headers = await active_cabinet_headers(client, reg, unique_suffix)
     slug = f"dup-{unique_suffix}"
     payload = {"slug": slug, "display_name": "First"}
 
@@ -115,8 +82,8 @@ async def test_neg_prj_003_slug_conflict(client: AsyncClient, unique_suffix: str
 @requires_postgres
 @pytest.mark.asyncio
 async def test_prompts_tree_and_file(client: AsyncClient, unique_suffix: str) -> None:
-    reg = await _register(client, unique_suffix)
-    cabinet_id, headers = await _cabinet_with_token(client, reg, unique_suffix)
+    reg = await register_user(client, unique_suffix, prefix="prj")
+    cabinet_id, headers = await active_cabinet_headers(client, reg, unique_suffix)
 
     tree = await client.get(f"/api/v1/cabinets/{cabinet_id}/prompts/tree", headers=headers)
     assert tree.status_code == 200, tree.text

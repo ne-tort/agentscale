@@ -21,9 +21,9 @@
 | P7 | 8.1 | **5** |
 | P8 | 8.7 | **8** |
 | P9 | 9.0 | **10** |
-| **Overall** | **8.7** | **8.5** |
+| **Overall** | **8.7** | **8.6** |
 
-**Вердикт:** Doc ✅ · I0–I2 complete, **I3 in progress** — projects + prompts read done; versioning next.
+**Вердикт:** Doc ✅ · I3 backend complete — Flutter shell (I3-T07) или I4 pipeline next.
 
 ---
 
