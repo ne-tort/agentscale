@@ -47,6 +47,11 @@ Thumbs.db
 *.tfstate.*
 tools/.terraform-bin/
 
+# Local k3d kubeconfig (mounted into github-runner)
+infra/.kube/*
+!infra/.kube/.gitkeep
+!infra/.kube/README.md
+
 # Local BuildKit layer cache (docker compose / buildx)
 .docker-cache/
 

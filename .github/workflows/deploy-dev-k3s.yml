@@ -1,0 +1,63 @@
+name: Deploy Dev k3s
+
+on:
+  workflow_run:
+    workflows: ["CI Images"]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: deploy-dev-k3s
+  cancel-in-progress: true
+
+env:
+  HTTP_PORT: "8088"
+  KUBECONFIG: ${{ github.workspace }}/infra/.kube/prodavan-k3d.yaml
+
+jobs:
+  deploy-smoke:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Ensure k3d (create/start after reboot)
+        run: |
+          set -euo pipefail
+          bash infra/scripts/ensure_k3d_cluster.sh
+          TF=""
+          if command -v terraform >/dev/null 2>&1; then TF=terraform
+          elif [[ -x tools/terraform ]]; then TF=./tools/terraform
+          elif [[ -x tools/terraform.exe ]]; then TF=./tools/terraform.exe
+          fi
+          if [[ -n "$TF" ]]; then
+            (cd infra/terraform/environments/local && "$TF" init -input=false && "$TF" apply -auto-approve -input=false) || true
+          fi
+          echo "KUBECONFIG=${GITHUB_WORKSPACE}/infra/.kube/prodavan-k3d.yaml" >> "$GITHUB_ENV"
+
+      - name: Ensure GHCR pull secret
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}
+          GHCR_USERNAME: ${{ github.actor }}
+        run: bash infra/scripts/create_ghcr_pull_secret.sh
+
+      - name: Ensure Argo CD + Application
+        env:
+          ARGOCD_REPO_TOKEN: ${{ secrets.ARGOCD_REPO_TOKEN }}
+        run: bash infra/scripts/ensure_argocd.sh
+
+      - name: Wait rollout (Argo or kubectl apply -k)
+        run: bash infra/scripts/wait_prodavan_ready.sh
+
+      - name: Smoke HTTP via ingress
+        run: bash infra/scripts/smoke_ingress.sh

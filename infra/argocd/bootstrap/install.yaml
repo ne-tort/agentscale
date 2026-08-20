@@ -1,0 +1,11 @@
+# One-shot install pointer — actual apply uses upstream stable manifests:
+#   kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+# See infra/scripts/argocd-bootstrap.sh and docs/07-infrastructure/local-cluster-e2e.md
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prodavan-argocd-bootstrap-info
+  namespace: argocd
+data:
+  install: "upstream-stable-manifests"
+  app: "infra/argocd/apps/prodavan-dev.yaml"

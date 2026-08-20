@@ -1,19 +1,6 @@
-# Argo CD bootstrap for Prodavan (dev)
+# Argo CD (local / GitOps)
 
-Install Argo into the cluster, then apply the Application that syncs `infra/k3s/overlays/dev`.
+- `bootstrap/` — namespace + install pointer (real install via `infra/scripts/argocd-bootstrap.sh`)
+- `apps/prodavan-dev.yaml` — Application → `infra/k3s/overlays/dev` on `main` (auto-sync + prune for **dev only**)
 
-```bash
-# Install Argo CD (once)
-kubectl create namespace argocd --dry-run=client -o yaml | kubectl apply -f -
-kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
-
-# Wait
-kubectl -n argocd rollout status deployment/argocd-server
-
-# Apply Prodavan app (edit repoURL if needed)
-kubectl apply -f infra/argocd/apps/prodavan-dev.yaml
-```
-
-Or: `bash infra/scripts/argocd-bootstrap.sh`
-
-CI pushes images to `ghcr.io/<owner>/prodavan-*` and bumps `infra/k3s/overlays/dev/kustomization.yaml`; Argo auto-syncs.
+Runbook: [`docs/07-infrastructure/local-cluster-e2e.md`](../../docs/07-infrastructure/local-cluster-e2e.md).

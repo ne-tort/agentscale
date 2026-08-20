@@ -1,0 +1,8 @@
+# Minimal bootstrap notes. Install is driven by infra/scripts/argocd-bootstrap.sh
+# (official stable install.yaml into namespace argocd).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+  labels:
+    app.kubernetes.io/name: argocd

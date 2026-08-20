@@ -13,22 +13,16 @@ infra/k3s/
 
 Deferred (см. CLUSTER-GAPS): `mcp-gateway`, `prodavan-ws`, `workers/agent-worker`.
 
-## Apply (single-node k3s)
+## Apply (local k3d)
 
 ```bash
-# 1) Install k3s on Linux VM / WSL2 (official curl | sh)
-# 2) Build images and import into k3s, or push to GHCR and pull
-docker build -t ghcr.io/prodavan/prodavan-api:dev -f apps/api/Dockerfile .
-docker build -t ghcr.io/prodavan/prodavan-web:dev \
-  --build-arg API_BASE=http://prodavan.local \
-  -f apps/flutter/Dockerfile .
-# example import on the k3s node:
-# docker save ... | sudo k3s ctr images import -
-
+bash infra/scripts/bootstrap_local_cluster.sh
+# or:
 kubectl apply -k infra/k3s/overlays/dev
 kubectl -n prodavan rollout status deploy/prodavan-api
-curl -sS http://prodavan.local/api/v1/health
-# map prodavan.local → node IP in /etc/hosts (or Windows hosts)
+curl -sS -H 'Host: prodavan.local' http://127.0.0.1:8088/health
 ```
 
-Smoke без кластера: `docker compose -f infra/docker-compose.stack.yml up --build`.
+Full chain (Terraform → Argo → CI smoke): [`docs/07-infrastructure/local-cluster-e2e.md`](../../docs/07-infrastructure/local-cluster-e2e.md).
+
+Smoke без кластера: `docker compose -f infra/docker-compose.stack.yml up --build` (порт web `:8080`).

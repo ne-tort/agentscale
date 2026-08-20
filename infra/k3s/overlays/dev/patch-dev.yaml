@@ -7,9 +7,11 @@ spec:
   replicas: 1
   template:
     spec:
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: api
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -20,6 +22,8 @@ spec:
   replicas: 1
   template:
     spec:
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: web
           imagePullPolicy: Always
@@ -32,5 +36,6 @@ metadata:
 data:
   STORAGE_ROOT: /data/storage
   PACKS_ROOT: /packages/cabinet-packs
-  CORS_ORIGINS: "http://prodavan.local,http://localhost:8080,http://127.0.0.1:8080"
+  CORS_ORIGINS: "http://prodavan.local,http://localhost:8080,http://127.0.0.1:8080,http://localhost:8088,http://127.0.0.1:8088"
   RUN_MIGRATIONS: "1"
+  API_V1_PREFIX: /api/v1
