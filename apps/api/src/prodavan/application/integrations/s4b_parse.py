@@ -73,11 +73,14 @@ def resolve_poll_url(base_url: str, url: str | None) -> str | None:
 def parse_upstream_error(obj: dict[str, Any]) -> dict[str, Any] | None:
     status = obj.get("status")
     if isinstance(status, str) and status.lower().startswith("error"):
-        return {
-            "ok": False,
-            "error_code": "auth_failed" if "авториз" in status.lower() else "upstream_error",
-            "error": status,
-        }
+        lower = status.lower()
+        if "авториз" in lower or "authorization" in lower or "логин" in lower or "парол" in lower:
+            code = "auth_failed"
+        elif "частот" in lower or "frequently" in lower:
+            code = "rate_limited"
+        else:
+            code = "upstream_error"
+        return {"ok": False, "error_code": code, "error": status}
     url = obj.get("url")
     if isinstance(url, str) and url.strip().upper() == "X" and "results" not in obj:
         return {"ok": False, "error_code": "upstream_error", "error": "S4B url=X without results"}
@@ -205,11 +208,16 @@ def decode_zip_bytes(data: bytes) -> dict[str, Any]:
 
 
 def _decode_json_bytes(data: bytes) -> dict[str, Any] | None:
+    best: dict[str, Any] | None = None
     for encoding in ("utf-8", "cp1251"):
         try:
             obj = json.loads(data.decode(encoding))
         except (UnicodeDecodeError, json.JSONDecodeError):
             continue
-        if isinstance(obj, dict):
+        if not isinstance(obj, dict):
+            continue
+        text = str(obj.get("status") or "") + str(obj.get("error") or "")
+        if any("\u0400" <= ch <= "\u04FF" for ch in text):
             return obj
-    return None
+        best = obj
+    return best

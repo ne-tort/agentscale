@@ -81,7 +81,14 @@ def test_rank_trusted_min_price_beats_cheaper_untrusted() -> None:
     assert "off_1" in ranked["selections"][0]["alternative_offer_ids"]
 
 
-def test_zip_xlsx_is_not_invented() -> None:
+def test_rate_limited_status_is_not_auth_failed() -> None:
+    from prodavan.application.integrations.s4b_parse import parse_upstream_error
+
+    err = parse_upstream_error(
+        {"status": "error,Слишком высокая частота запросов. Too frequently."}
+    )
+    assert err is not None
+    assert err["error_code"] == "rate_limited"
     import io
     import zipfile
 

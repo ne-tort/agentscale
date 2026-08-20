@@ -210,6 +210,18 @@ class CatalogsApi {
           'trusted_seller': trustedSeller.toString(),
         },
       );
+
+  Future<Map<String, dynamic>> s4bStatus() =>
+      _client.get('/tenant/s4b-credentials/status');
+
+  Future<Map<String, dynamic>> putS4bCredentials({
+    required String username,
+    required String password,
+  }) =>
+      _client.put('/tenant/s4b-credentials', body: {
+        'username': username,
+        'password': password,
+      });
 }
 
 class SpecsApi {

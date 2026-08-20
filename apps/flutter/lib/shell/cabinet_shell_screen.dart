@@ -242,7 +242,11 @@ class ProjectDashboardBody extends StatelessWidget {
             ),
             NavGate(
               capability: 'procurement.s4b',
-              child: _StatChip(icon: Icons.bolt, label: 'S4B', value: 'on'),
+              child: _StatChip(
+                icon: Icons.bolt,
+                label: 'S4B',
+                value: AppScope.of(context).s4bState ?? 'нет кредов',
+              ),
             ),
           ],
         ),
@@ -261,6 +265,22 @@ class ProjectDashboardBody extends StatelessWidget {
             child: Text(AppScope.of(context).statusMessage!),
           ),
         FeatureGate(
+          capability: 'procurement.s4b',
+          child: Card(
+            child: ListTile(
+              leading: const Icon(Icons.vpn_key_outlined),
+              title: const Text('S4B логин'),
+              subtitle: Text(
+                AppScope.of(context).s4bState == 'credentials_valid'
+                    ? 'Подключено · пароль не показывается'
+                    : 'Ping на s4b.ru · пароль в API не возвращается',
+              ),
+              trailing: const Icon(Icons.edit),
+              onTap: AppScope.of(context).busy ? null : () => _editS4bCredentials(context),
+            ),
+          ),
+        ),
+        FeatureGate(
           capability: 'specs_kp',
           child: Card(
             child: ListTile(
@@ -276,7 +296,7 @@ class ProjectDashboardBody extends StatelessWidget {
           child: ListTile(
             leading: const Icon(Icons.upload_file_outlined),
             title: const Text('Inbox: спека'),
-            subtitle: const Text('csv/txt → ingest → review (цены только из каталога)'),
+            subtitle: const Text('csv/txt/xlsx → ingest → review (цены из каталога и S4B in_stock)'),
             trailing: const Icon(Icons.play_arrow),
             onTap: AppScope.of(context).busy ? null : () => _pickSpec(context),
           ),
@@ -297,6 +317,43 @@ class ProjectDashboardBody extends StatelessWidget {
       ],
     );
   }
+}
+
+Future<void> _editS4bCredentials(BuildContext context) async {
+  final userCtrl = TextEditingController();
+  final passCtrl = TextEditingController();
+  final saved = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('S4B'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TextField(
+            controller: userCtrl,
+            decoration: const InputDecoration(labelText: 'Логин'),
+            autofillHints: const [AutofillHints.username],
+          ),
+          TextField(
+            controller: passCtrl,
+            decoration: const InputDecoration(labelText: 'Пароль'),
+            obscureText: true,
+            autofillHints: const [AutofillHints.password],
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
+        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Проверить')),
+      ],
+    ),
+  );
+  final username = userCtrl.text.trim();
+  final password = passCtrl.text;
+  userCtrl.dispose();
+  passCtrl.dispose();
+  if (saved != true || !context.mounted) return;
+  await AppScope.of(context).saveS4bCredentials(username: username, password: password);
 }
 
 Future<void> _pickCatalog(BuildContext context) async {

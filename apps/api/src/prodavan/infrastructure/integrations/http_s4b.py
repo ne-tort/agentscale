@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 import httpx
@@ -15,6 +16,9 @@ from prodavan.config.settings import settings
 
 
 class HttpS4BGateway:
+    def __init__(self) -> None:
+        self._last_request_at = 0.0
+
     def ping(self, username: str, password: str) -> dict[str, Any]:
         raw = self._fetch(username, password, ["__ping__"])
         if raw.get("ok") is False:
@@ -36,6 +40,12 @@ class HttpS4BGateway:
         items, meta = parse_response(raw)
         return {"ok": True, "items": items, "meta": meta}
 
+    def _cooldown(self) -> None:
+        wait = settings.s4b_cooldown_seconds - (time.monotonic() - self._last_request_at)
+        if wait > 0:
+            time.sleep(wait)
+        self._last_request_at = time.monotonic()
+
     def _fetch(self, username: str, password: str, terms: list[str]) -> dict[str, Any]:
         params = {
             "a": "10041",
@@ -46,6 +56,8 @@ class HttpS4BGateway:
             "sr": ";".join(terms) + ";",
         }
         parsed = self._get(settings.s4b_base_url, params)
+        if parsed.get("error_code") == "rate_limited":
+            parsed = self._get(settings.s4b_base_url, params)
         if parsed.get("ok") is False:
             return parsed
         if "results" in parsed:
@@ -54,14 +66,43 @@ class HttpS4BGateway:
         if not poll_url:
             if "list" in parsed:
                 return {**parsed, "results": parsed.get("results") or []}
-            return {
-                "ok": False,
-                "error_code": "timeout",
-                "error": "S4B did not return a poll URL",
-            }
-        return self._get(poll_url, None)
+            for _ in range(settings.s4b_poll_attempts):
+                time.sleep(settings.s4b_poll_delay_seconds)
+                parsed = self._get(settings.s4b_base_url, params)
+                if parsed.get("ok") is False:
+                    return parsed
+                if "results" in parsed:
+                    return parsed
+                poll_url = resolve_poll_url(settings.s4b_base_url, parsed.get("url"))
+                if poll_url:
+                    break
+            if not poll_url:
+                return {
+                    "ok": False,
+                    "error_code": "timeout",
+                    "error": "S4B did not return a poll URL",
+                }
+        for _ in range(settings.s4b_poll_attempts):
+            polled = self._get(poll_url, None)
+            if polled.get("ok") is False:
+                if polled.get("error_code") in {"parse", "upstream_error"}:
+                    time.sleep(settings.s4b_poll_delay_seconds)
+                    continue
+                return polled
+            if "results" in polled:
+                return polled
+            nxt = resolve_poll_url(settings.s4b_base_url, polled.get("url"))
+            if nxt:
+                poll_url = nxt
+            time.sleep(settings.s4b_poll_delay_seconds)
+        return {
+            "ok": False,
+            "error_code": "timeout",
+            "error": "S4B poll did not return results",
+        }
 
     def _get(self, url: str, params: dict[str, str] | None) -> dict[str, Any]:
+        self._cooldown()
         try:
             response = httpx.get(url, params=params, timeout=settings.s4b_timeout_seconds)
         except httpx.TimeoutException:

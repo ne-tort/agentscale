@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     packs_root: Path = _REPO_ROOT / "packages" / "cabinet-packs"
     s4b_base_url: str = "http://s4b.ru/s.jsp"
     s4b_timeout_seconds: float = 30.0
+    s4b_cooldown_seconds: float = 10.0
+    s4b_poll_attempts: int = 8
+    s4b_poll_delay_seconds: float = 2.0
 
     @property
     def cors_origin_list(self) -> list[str]:

@@ -51,6 +51,7 @@ class AppState extends ChangeNotifier {
   String? _statusMessage;
   String? _lastRunId;
   String? _lastExportPath;
+  String? _s4bState;
 
   bool get bootstrapped => _bootstrapped;
   bool get busy => _busy;
@@ -68,6 +69,7 @@ class AppState extends ChangeNotifier {
   Map<String, dynamic>? get projectStats => _projectStats;
   String? get lastRunId => _lastRunId;
   String? get lastExportPath => _lastExportPath;
+  String? get s4bState => _s4bState;
 
   Future<void> bootstrap() async {
     _session.accessToken = _store.accessToken;
@@ -125,6 +127,7 @@ class AppState extends ChangeNotifier {
     _statusMessage = null;
     _lastRunId = null;
     _lastExportPath = null;
+    _s4bState = null;
     _error = null;
     notifyListeners();
   }
@@ -257,8 +260,38 @@ class AppState extends ChangeNotifier {
           targetPhase: phase,
         );
       }
-      _statusMessage = 'Прогон $runId до review. Цены только из каталога.';
+      _statusMessage = 'Прогон $runId до review. Цены только из каталога/S4B in_stock.';
       await _loadProjectStats(project.id);
+    });
+  }
+
+  Future<void> refreshS4bStatus() async {
+    if (!isCapabilityEnabled('procurement.s4b')) {
+      _s4bState = null;
+      return;
+    }
+    try {
+      final data = await _catalogsApi.s4bStatus();
+      _s4bState = data['state'] as String?;
+    } catch (_) {
+      _s4bState = null;
+    }
+    notifyListeners();
+  }
+
+  Future<void> saveS4bCredentials({
+    required String username,
+    required String password,
+  }) async {
+    await _run(() async {
+      final data = await _catalogsApi.putS4bCredentials(
+        username: username,
+        password: password,
+      );
+      _s4bState = data['state'] as String?;
+      _statusMessage = _s4bState == 'credentials_valid'
+          ? 'S4B подключён (ping ok). Пароль в ответах не возвращается.'
+          : 'S4B не принял креды: ${data['last_error'] ?? data['state']}';
     });
   }
 
@@ -347,6 +380,7 @@ class AppState extends ChangeNotifier {
           (c) => c?.id == cabinetId,
           orElse: () => _activeCabinet,
         );
+    await refreshS4bStatus();
   }
 
   Future<void> _loadProjects() async {

@@ -23,7 +23,7 @@
 | P9 | 9.0 | **10** |
 | **Overall** | **8.7** | **9.0** |
 
-**Вердикт:** Doc ✅ · **S4B live (in_stock, ping gates vault)** — next web allowlist or MCP gateway.
+**Вердикт:** Doc ✅ · **S4B live verified against s4b.ru** (cooldown, rate_limited, in_stock only). Next: web allowlist or MCP.
 
 ---
 

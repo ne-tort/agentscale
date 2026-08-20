@@ -231,7 +231,8 @@ def s4b_status(tenant_id: uuid.UUID) -> dict:
 
 def put_s4b_credentials(tenant_id: uuid.UUID, username: str, password: str) -> dict:
     ping = get_s4b_gateway().ping(username, password)
-    if ping.get("ok"):
+    if ping.get("ok") or ping.get("error_code") == "rate_limited":
+        # Too frequently still means the account was accepted.
         save_vault(tenant_id, username, password, state="credentials_valid", last_error=None)
     else:
         save_vault(

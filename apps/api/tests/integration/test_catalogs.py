@@ -124,6 +124,31 @@ async def test_neg_cat_003_vault_secret_not_in_api(
     assert body["s4b_username_hint"] == "bu***@acme.ru"
 
 
+@requires_postgres
+@pytest.mark.asyncio
+async def test_s4b_rate_limited_ping_still_validates_account(
+    client: AsyncClient, unique_suffix: str, monkeypatch
+) -> None:
+    class _RateLimited:
+        def ping(self, username: str, password: str) -> dict:
+            return {"ok": False, "error_code": "rate_limited", "error": "Too frequently"}
+
+        def search_by_part_numbers(self, *args, **kwargs) -> dict:
+            return {"ok": False, "error_code": "rate_limited"}
+
+    monkeypatch.setattr("prodavan.application.integrations.s4b_runtime._gateway", _RateLimited())
+    reg = await register_user(client, unique_suffix, prefix="s4b-rl")
+    headers = {"Authorization": f"Bearer {reg['access_token']}"}
+    put = await client.put(
+        "/api/v1/tenant/s4b-credentials",
+        headers=headers,
+        json={"username": "buyer@acme.ru", "password": "secret"},
+    )
+    assert put.status_code == 200
+    assert put.json()["state"] == "credentials_valid"
+    assert "secret" not in str(put.json())
+
+
 class _ValidS4B:
     def ping(self, username: str, password: str) -> dict:
         return {"ok": True, "auth_ok": True}
