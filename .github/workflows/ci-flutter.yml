@@ -1,0 +1,35 @@
+name: CI Flutter
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/flutter/**"
+      - ".github/workflows/ci-flutter.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/flutter/**"
+      - ".github/workflows/ci-flutter.yml"
+  workflow_dispatch:
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/flutter
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: flutter analyze --no-fatal-infos
+      - name: No raw Color hex outside palette
+        run: |
+          if grep -RIn --exclude=app_palette.dart 'Color(0x' lib; then
+            echo "Raw Color(0x…) found outside app_palette.dart"
+            exit 1
+          fi

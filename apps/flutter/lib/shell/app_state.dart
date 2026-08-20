@@ -1,9 +1,16 @@
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/errors/error_mapper.dart';
+import 'package:prodavan/core/errors/ui_messenger.dart';
 import 'package:prodavan/core/network/api_client.dart';
 import 'package:prodavan/core/network/api_exception.dart';
 import 'package:prodavan/core/session/session_context.dart';
 import 'package:prodavan/core/session/session_store.dart';
+import 'package:prodavan/features/admin/data/datasources/admin_remote_datasource.dart';
+import 'package:prodavan/features/admin/domain/entities/admin_models.dart';
+import 'package:prodavan/features/auth/data/datasources/auth_remote_datasource.dart';
+import 'package:prodavan/features/auth/data/repositories/auth_repository_impl.dart';
+import 'package:prodavan/features/auth/domain/entities/user_session.dart';
 import 'package:prodavan/shell/models.dart';
 
 /// Application session and workspace state (cabinet → project chain).
@@ -13,32 +20,47 @@ class AppState extends ChangeNotifier {
     required SessionContext sessionContext,
     required ApiClient api,
     required AuthApi authApi,
+    required AuthRepositoryImpl authRepository,
+    required AdminRemoteDataSource adminApi,
     required CabinetsApi cabinetsApi,
     required ProjectsApi projectsApi,
     required CatalogsApi catalogsApi,
     required SpecsApi specsApi,
+    UiMessenger? uiMessenger,
   })  : _store = store,
         _session = sessionContext,
         _api = api,
         _authApi = authApi,
+        _authRepository = authRepository,
+        _adminApi = adminApi,
         _cabinetsApi = cabinetsApi,
         _projectsApi = projectsApi,
         _catalogsApi = catalogsApi,
-        _specsApi = specsApi;
+        _specsApi = specsApi,
+        uiMessenger = uiMessenger ?? UiMessenger();
 
   final SessionStore _store;
   final SessionContext _session;
   final ApiClient _api;
   final AuthApi _authApi;
+  final AuthRepositoryImpl _authRepository;
+  final AdminRemoteDataSource _adminApi;
   final CabinetsApi _cabinetsApi;
   final ProjectsApi _projectsApi;
   final CatalogsApi _catalogsApi;
   final SpecsApi _specsApi;
+  final UiMessenger uiMessenger;
+  final GlobalKey<ScaffoldMessengerState> scaffoldMessengerKey =
+      GlobalKey<ScaffoldMessengerState>();
+
+  /// Exposed for debug screens (runs / variants).
+  SpecsApi get specsApi => _specsApi;
 
   bool _bootstrapped = false;
   bool _busy = false;
+  bool _refreshInFlight = false;
   String? _error;
-  String? _userEmail;
+  UserSession? _currentUser;
   String? _tenantName;
   List<String> _cabinetIdsFromToken = [];
   List<CabinetItem> _cabinets = [];
@@ -58,7 +80,10 @@ class AppState extends ChangeNotifier {
   String? get error => _error;
   String? get statusMessage => _statusMessage;
   bool get isAuthenticated => _session.accessToken != null && _session.accessToken!.isNotEmpty;
-  String? get userEmail => _userEmail;
+  UserSession? get currentUser => _currentUser;
+  bool get isPlatformAdmin => _currentUser?.isPlatformAdmin ?? false;
+  @Deprecated('Use currentUser.email')
+  String? get userEmail => _currentUser?.email;
   String? get tenantName => _tenantName;
   List<CabinetItem> get cabinets => List.unmodifiable(_cabinets);
   CabinetItem? get activeCabinet => _activeCabinet;
@@ -73,48 +98,143 @@ class AppState extends ChangeNotifier {
 
   Future<void> bootstrap() async {
     _session.accessToken = _store.accessToken;
+    _session.refreshToken = _store.refreshToken;
     _session.activeCabinetId = _store.activeCabinetId;
     if (_session.accessToken == null) {
       _bootstrapped = true;
       notifyListeners();
       return;
     }
-    await _loadSession();
+    try {
+      await _loadSession();
+    } on ApiException catch (_) {
+      final ok = await tryRefreshTokens();
+      if (ok) {
+        await _loadSession();
+      } else {
+        await logout();
+      }
+    }
     _bootstrapped = true;
     notifyListeners();
   }
 
-  Future<void> login({required String email, required String password}) async {
+  /// Exchange refresh_token → new access (+ rotated refresh). Returns false if logged out.
+  Future<bool> tryRefreshTokens() async {
+    final refresh = _session.refreshToken ?? _store.refreshToken;
+    if (refresh == null || refresh.isEmpty || _refreshInFlight) {
+      return false;
+    }
+    _refreshInFlight = true;
+    try {
+      final data = await _authApi.refresh(refresh);
+      await _setTokens(
+        accessToken: data['access_token'] as String,
+        refreshToken: data['refresh_token'] as String?,
+      );
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      _refreshInFlight = false;
+    }
+  }
+
+  Future<void> login({required String loginId, required String password}) async {
     await _run(() async {
-      final data = await _authApi.login({'email': email, 'password': password});
+      await _authRepository.login(loginId: loginId, password: password);
+      final data = _authRepository.lastAuthResponse!;
       await _applyAuthResponse(data);
     });
   }
 
-  Future<void> register({
-    required String email,
-    required String password,
-    required String displayName,
-    required String tenantSlug,
-    required String tenantDisplayName,
+  Future<void> updateProfile({
+    String? contactPerson,
+    String? phone,
+    String? email,
   }) async {
     await _run(() async {
-      final data = await _authApi.register({
-        'email': email,
+      _currentUser = await _authRepository.updateProfile(
+        contactPerson: contactPerson,
+        phone: phone,
+        email: email,
+      );
+      uiMessenger.showSuccess('Профиль сохранён');
+    });
+  }
+
+  Future<void> changePassword({
+    required String currentPassword,
+    required String newPassword,
+  }) async {
+    await _run(() async {
+      await _authRepository.changePassword(
+        currentPassword: currentPassword,
+        newPassword: newPassword,
+      );
+      uiMessenger.showSuccess('Пароль изменён');
+    });
+  }
+
+  Future<AdminStats> loadAdminStats() async {
+    final data = await _adminApi.stats();
+    return AdminStats.fromJson(data);
+  }
+
+  Future<List<AdminUser>> loadAdminUsers() async {
+    final rows = await _adminApi.listUsers();
+    return rows
+        .map((e) => AdminUser.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<AdminUser> loadAdminUser(String id) async {
+    final data = await _adminApi.getUser(id);
+    return AdminUser.fromJson(data);
+  }
+
+  Future<bool> createAdminUser({
+    required String loginId,
+    required String companyName,
+    required String password,
+    String? contactPerson,
+    String? phone,
+    String? email,
+  }) async {
+    var ok = false;
+    await _run(() async {
+      await _adminApi.createUser({
+        'login_id': loginId,
+        'company_name': companyName,
         'password': password,
-        'display_name': displayName,
-        'tenant_slug': tenantSlug,
-        'tenant_display_name': tenantDisplayName,
+        if (contactPerson != null) 'contact_person': contactPerson,
+        if (phone != null) 'phone': phone,
+        if (email != null) 'email': email,
       });
-      await _applyAuthResponse(data);
+      uiMessenger.showSuccess('Пользователь создан');
+      ok = true;
+    });
+    return ok;
+  }
+
+  Future<void> updateAdminUser(String id, {required String status}) async {
+    await _run(() async {
+      await _adminApi.updateUser(id, {'status': status});
+    });
+  }
+
+  Future<void> deleteAdminUser(String id) async {
+    await _run(() async {
+      await _adminApi.deleteUser(id);
     });
   }
 
   Future<void> logout() async {
     await _store.clear();
     _session.accessToken = null;
+    _session.refreshToken = null;
     _session.activeCabinetId = null;
-    _userEmail = null;
+    _currentUser = null;
     _tenantName = null;
     _cabinetIdsFromToken = [];
     _cabinets = [];
@@ -330,8 +450,14 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> _applyAuthResponse(Map<String, dynamic> data) async {
-    await _setAccessToken(data['access_token'] as String);
-    _userEmail = data['user']?['email'] as String?;
+    await _setTokens(
+      accessToken: data['access_token'] as String,
+      refreshToken: data['refresh_token'] as String?,
+    );
+    final userJson = data['user'] as Map<String, dynamic>?;
+    if (userJson != null) {
+      _currentUser = UserSession.fromJson(userJson);
+    }
     final tenants = data['tenants'] as List<dynamic>? ?? [];
     if (tenants.isNotEmpty) {
       _tenantName = tenants.first['display_name'] as String?;
@@ -341,10 +467,17 @@ class AppState extends ChangeNotifier {
 
   Future<void> _loadSession() async {
     final me = await _authApi.me();
-    _userEmail = me['user']?['email'] as String?;
+    final userJson = me['user'] as Map<String, dynamic>?;
+    if (userJson != null) {
+      _currentUser = UserSession.fromJson(userJson);
+    }
     _tenantName = me['tenant']?['display_name'] as String?;
     _cabinetIdsFromToken =
         (me['cabinet_ids'] as List<dynamic>? ?? []).map((id) => id.toString()).toList();
+
+    if (_currentUser?.isPlatformAdmin == true) {
+      return;
+    }
 
     var cabinetId = _store.activeCabinetId ?? _session.activeCabinetId;
     if (cabinetId == null && _cabinetIdsFromToken.isNotEmpty) {
@@ -401,6 +534,14 @@ class AppState extends ChangeNotifier {
     await _store.saveToken(token);
   }
 
+  Future<void> _setTokens({required String accessToken, String? refreshToken}) async {
+    _session.accessToken = accessToken;
+    if (refreshToken != null) {
+      _session.refreshToken = refreshToken;
+    }
+    await _store.saveTokens(accessToken: accessToken, refreshToken: refreshToken);
+  }
+
   Future<void> _setActiveCabinet(String cabinetId) async {
     _session.activeCabinetId = cabinetId;
     await _store.saveActiveCabinet(cabinetId);
@@ -414,9 +555,13 @@ class AppState extends ChangeNotifier {
     try {
       await action();
     } on ApiException catch (exc) {
-      _error = exc.message;
+      final failure = ErrorMapper.fromApiException(exc);
+      _error = failure.message;
+      uiMessenger.showFailure(failure);
     } catch (exc) {
-      _error = exc.toString();
+      final failure = ErrorMapper.fromUnknown(exc);
+      _error = failure.message;
+      uiMessenger.showFailure(failure);
     } finally {
       _busy = false;
       notifyListeners();
@@ -434,21 +579,28 @@ Future<AppState> createAppState() async {
   final store = await SessionStore.open();
   final session = SessionContext()
     ..accessToken = store.accessToken
+    ..refreshToken = store.refreshToken
     ..activeCabinetId = store.activeCabinetId;
 
   final api = ApiClient(
     tokenProvider: () => session.accessToken,
     cabinetIdProvider: () => session.activeCabinetId,
   );
+  final authApi = AuthApi(api);
+  final authRepository = AuthRepositoryImpl(AuthRemoteDataSource(authApi, api));
 
-  return AppState(
+  final state = AppState(
     store: store,
     sessionContext: session,
     api: api,
-    authApi: AuthApi(api),
+    authApi: authApi,
+    authRepository: authRepository,
+    adminApi: AdminRemoteDataSource(api),
     cabinetsApi: CabinetsApi(api),
     projectsApi: ProjectsApi(api),
     catalogsApi: CatalogsApi(api),
     specsApi: SpecsApi(api),
   );
+  api.onUnauthorized = state.tryRefreshTokens;
+  return state;
 }

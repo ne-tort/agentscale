@@ -18,8 +18,13 @@ class CurrentUser:
     user_id: uuid.UUID
     tenant_id: uuid.UUID
     cabinet_ids: list[uuid.UUID]
+    role: str = "user"
     active_cabinet_id: uuid.UUID | None = None
     active_project_id: str | None = None
+
+    @property
+    def is_platform_admin(self) -> bool:
+        return self.role == "platform.admin"
 
 
 async def get_session() -> AsyncSession:
@@ -48,9 +53,21 @@ async def get_current_user(
         user_id=uuid.UUID(payload["sub"]),
         tenant_id=uuid.UUID(payload["tenant_id"]),
         cabinet_ids=[uuid.UUID(cid) for cid in payload.get("cabinet_ids", [])],
+        role=str(payload.get("role") or "user"),
         active_cabinet_id=uuid.UUID(active_raw) if active_raw else None,
         active_project_id=payload.get("active_project_id"),
     )
+
+
+async def require_platform_admin(
+    current: CurrentUser = Depends(get_current_user),
+) -> CurrentUser:
+    if not current.is_platform_admin:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "FORBIDDEN", "message": "platform.admin role required"},
+        )
+    return current
 
 
 @dataclass

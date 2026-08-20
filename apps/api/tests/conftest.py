@@ -59,6 +59,18 @@ def stub_s4b_gateway(monkeypatch):
 
 
 @pytest_asyncio.fixture(autouse=True)
+async def seed_platform_admin():
+    """Ensure bootstrap platform.admin exists (ASGI lifespan may not run in all clients)."""
+    from prodavan.application.services.auth_service import ensure_platform_admin
+    from prodavan.infrastructure.persistence.database import get_session_factory
+
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        await ensure_platform_admin(session)
+    yield
+
+
+@pytest_asyncio.fixture(autouse=True)
 async def clean_engine_cache():
     yield
     await reset_engine()

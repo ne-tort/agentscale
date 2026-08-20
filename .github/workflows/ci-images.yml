@@ -1,0 +1,148 @@
+name: CI Images
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/api/**"
+      - "apps/flutter/**"
+      - "packages/cabinet-packs/**"
+      - "packages/schemas/**"
+      - "infra/k3s/**"
+      - ".github/workflows/ci-images.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/api/**"
+      - "apps/flutter/**"
+      - ".github/workflows/ci-images.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-api:
+    runs-on: [self-hosted, linux, docker]
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      push: ${{ steps.meta.outputs.push }}
+      owner: ${{ steps.meta.outputs.owner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image names
+        id: meta
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "owner=${OWNER}" >> "$GITHUB_OUTPUT"
+          echo "api=${{ env.REGISTRY }}/${OWNER}/prodavan-api" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "tag=pr-${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+            echo "push=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: steps.meta.outputs.push == 'true'
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: ${{ steps.meta.outputs.push }}
+          tags: |
+            ${{ steps.meta.outputs.api }}:${{ steps.meta.outputs.tag }}
+            ${{ steps.meta.outputs.api }}:latest
+          cache-from: type=local,src=/tmp/.buildx-cache-api
+          cache-to: type=local,dest=/tmp/.buildx-cache-api-new,mode=max
+
+      - name: Rotate cache
+        run: |
+          rm -rf /tmp/.buildx-cache-api
+          mv /tmp/.buildx-cache-api-new /tmp/.buildx-cache-api || true
+
+  build-web:
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Image names
+        id: meta
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "web=${{ env.REGISTRY }}/${OWNER}/prodavan-web" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "tag=pr-${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+            echo "push=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        if: steps.meta.outputs.push == 'true'
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Flutter web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/flutter/Dockerfile
+          target: runtime
+          push: ${{ steps.meta.outputs.push }}
+          build-args: |
+            API_BASE=https://prodavan.local
+          tags: |
+            ${{ steps.meta.outputs.web }}:${{ steps.meta.outputs.tag }}
+            ${{ steps.meta.outputs.web }}:latest
+          cache-from: type=local,src=/tmp/.buildx-cache-web
+          cache-to: type=local,dest=/tmp/.buildx-cache-web-new,mode=max
+
+      - name: Rotate cache
+        run: |
+          rm -rf /tmp/.buildx-cache-web
+          mv /tmp/.buildx-cache-web-new /tmp/.buildx-cache-web || true
+
+  bump-k3s-dev:
+    needs: [build-api, build-web]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bump overlay image tags
+        run: |
+          python3 infra/scripts/bump_k3s_dev_images.py \
+            --owner "${{ needs.build-api.outputs.owner }}" \
+            --tag "${{ needs.build-api.outputs.tag }}"
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add infra/k3s/overlays/dev/kustomization.yaml
+          if git diff --cached --quiet; then
+            echo "No tag change"
+            exit 0
+          fi
+          git commit -m "chore(k3s): bump dev images to ${{ needs.build-api.outputs.tag }}"
+          git push

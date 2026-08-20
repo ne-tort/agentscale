@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prodavan-api
+  namespace: prodavan
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: api
+          imagePullPolicy: IfNotPresent
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prodavan-web
+  namespace: prodavan
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: web
+          imagePullPolicy: IfNotPresent
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prodavan-config
+  namespace: prodavan
+data:
+  STORAGE_ROOT: /data/storage
+  PACKS_ROOT: /packages/cabinet-packs
+  CORS_ORIGINS: "http://prodavan.local,http://localhost:8080,http://127.0.0.1:8080"
+  RUN_MIGRATIONS: "1"

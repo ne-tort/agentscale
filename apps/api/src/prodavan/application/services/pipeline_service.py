@@ -422,6 +422,16 @@ def describe_run(tenant_id, cabinet_id, project_id, run_id) -> dict:
     }
 
 
+def list_runs(tenant_id, cabinet_id, project_id) -> dict:
+    items = []
+    for run_id in store.list_run_ids(tenant_id, cabinet_id, project_id):
+        try:
+            items.append(describe_run(tenant_id, cabinet_id, project_id, run_id))
+        except PipelineError:
+            items.append({"run_id": run_id, "phase": "unknown", "phase_status": None})
+    return {"items": items, "count": len(items)}
+
+
 def list_lineitems(tenant_id, cabinet_id, project_id, run_id) -> dict:
     doc = store.read_json_artifact(tenant_id, cabinet_id, project_id, run_id, "lineitems.json")
     if doc is None:

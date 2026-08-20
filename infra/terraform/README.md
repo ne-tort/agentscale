@@ -1,21 +1,27 @@
-# Terraform (stub)
+# Terraform — cloud primitives for Prodavan (k3s VMs, managed PG, object storage)
 
-Спецификация: [`docs/07-infrastructure/terraform.md`](../../docs/07-infrastructure/terraform.md).
-
-**Статус:** каталог зарезервирован; `.tf` файлы — в итерации **I7** (см. [`docs/10-implementation/roadmap.md`](../../docs/10-implementation/roadmap.md)).
-
-Планируемая структура:
+Layout mirrors [`docs/07-infrastructure/terraform.md`](../../docs/07-infrastructure/terraform.md).
 
 ```text
 infra/terraform/
-├── environments/
-│   ├── dev/
-│   ├── staging/
-│   └── prod/
+├── versions.tf
+├── backends.tf          # local backend until cloud state is configured
 ├── modules/
+│   ├── network/
 │   ├── k3s-cluster/
 │   ├── postgres/
-│   ├── object-store/
-│   └── dns/
-└── README.md
+│   └── object-storage/
+└── environments/
+    ├── dev/
+    └── staging/
 ```
+
+Modules are **skeletons** (`null_resource` placeholders). Real Yandex/AWS resources require an explicit cloud apply request.
+
+```bash
+cd infra/terraform/environments/dev
+terraform init
+terraform validate
+```
+
+Kubernetes workloads live in `infra/k3s/`, not here.

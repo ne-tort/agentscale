@@ -1,0 +1,14 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prodavan
+resources:
+  - namespace.yaml
+  - prodavan-api/configmap.yaml
+  - prodavan-api/secret.yaml
+  - prodavan-api/pvc.yaml
+  - prodavan-api/deployment.yaml
+  - prodavan-api/service.yaml
+  - prodavan-web/deployment.yaml
+  - prodavan-web/service.yaml
+  - ingress.yaml
+# Deferred (I6 / MCP): mcp-gateway, prodavan-ws SSE split, agent-worker

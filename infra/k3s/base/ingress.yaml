@@ -1,0 +1,35 @@
+# Traefik (bundled with k3s) IngressRoute via networking.k8s.io Ingress
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: prodavan
+  namespace: prodavan
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: web
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: prodavan.local
+      http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: prodavan-api
+                port:
+                  number: 8000
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: prodavan-api
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: prodavan-web
+                port:
+                  number: 80

@@ -196,6 +196,7 @@ async def post_open_project(
         user_id=cs.ctx.user.user_id,
         tenant_id=cs.ctx.user.tenant_id,
         cabinet_ids=cs.ctx.user.cabinet_ids,
+        role=cs.ctx.user.role,
         active_cabinet_id=cs.ctx.cabinet_id,
         active_project_id=project.id,
     )

@@ -65,15 +65,16 @@ S4B часто кладёт «под заказ» в **listStock** (колонк
 
 После идентификации модели: `equipment_upsert` в текущий проект.
 
-## Веб (не pipeline `search_offers`)
+## Веб (MCP `commerce-web-shops` + pipeline)
 
-`list_web_shops` — **список разрешённых хостов**, не поисковик. Для сверки P/N, характеристик и цен:
+`list_web_shops` — allowlist хостов (`/магазины`, `enabled=false` → пропуск цен). Поиск и цены — **MCP spider**, не browser и не выдуманные цифры:
 
-- Открывай сайты в **browser** (встроенный в Cursor) или web search.
-- Найденные офферы — `offers_add_variants` с `source_type: web` (и в `offers.json` при ручной записи).
+- **`web_offers_for_lineitem(lineitem)`** — на **каждую** позицию после catalog/S4B: каскад по enabled магазинам, items[] → `offers_add_variants` с `source_type: web`, `seller_tier: acceptable`.
+- **`web_search_shop(shop_id, query)`** — точечный поиск в одном магазине (DNS: cookies `catalogs/web-cookies/dns.json` с qrator_*).
+- **`web_cookie_status`** — `ready=false` → re-import (`tools/web_spider_cookies.py`).
 - Уточнение без цен — `equipment_upsert` + `log_source(..., source_type=web_clarify)`.
-- `search_offers --allow-web` в pipeline — **stub**; не полагайся на него для реального веба.
-- S4B live — **`commerce-s4b` MCP**, не `search_offers --allow-api` (тот дублирует кэш CLI).
+
+Pipeline CLI: `search_offers --allow-web` вызывает тот же каскад (`tools/web_spider/cascade.py`) и дописывает в `offers.json`. S4B live — **`commerce-s4b` MCP**, не `search_offers --allow-api`.
 
 ## Rank (напоминание)
 

@@ -2,18 +2,44 @@
 
 from httpx import AsyncClient
 
+from prodavan.config.settings import settings
+
+
+async def admin_headers(client: AsyncClient) -> dict:
+    login = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "login_id": settings.platform_admin_id,
+            "password": settings.platform_admin_password,
+        },
+    )
+    assert login.status_code == 200, login.text
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
 
 async def register_user(client: AsyncClient, suffix: str, *, prefix: str = "user") -> dict:
-    body = {
-        "email": f"{prefix}-{suffix}@example.com",
-        "password": "securepass123",
-        "display_name": "Test User",
-        "tenant_slug": f"tenant-{prefix}-{suffix}",
-        "tenant_display_name": "Test Tenant",
-    }
-    resp = await client.post("/api/v1/auth/register", json=body)
-    assert resp.status_code == 200, resp.text
-    return resp.json()
+    """Create company user via admin API and return login TokenResponse."""
+    headers = await admin_headers(client)
+    login_id = f"{prefix}-{suffix}".lower()
+    create = await client.post(
+        "/api/v1/admin/users",
+        headers=headers,
+        json={
+            "login_id": login_id,
+            "company_name": "Test Tenant",
+            "password": "securepass123",
+            "contact_person": "Test User",
+            "email": f"{prefix}-{suffix}@example.com",
+        },
+    )
+    assert create.status_code == 201, create.text
+
+    login = await client.post(
+        "/api/v1/auth/login",
+        json={"login_id": login_id, "password": "securepass123"},
+    )
+    assert login.status_code == 200, login.text
+    return login.json()
 
 
 async def active_cabinet_headers(

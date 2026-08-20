@@ -1,0 +1,72 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prodavan-postgres-data
+  namespace: prodavan
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prodavan-postgres
+  namespace: prodavan
+  labels:
+    app: prodavan-postgres
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prodavan-postgres
+  template:
+    metadata:
+      labels:
+        app: prodavan-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16
+          ports:
+            - containerPort: 5432
+              name: pg
+          env:
+            - name: POSTGRES_USER
+              value: prodavan
+            - name: POSTGRES_PASSWORD
+              value: prodavan
+            - name: POSTGRES_DB
+              value: prodavan
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "prodavan", "-d", "prodavan"]
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: prodavan-postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prodavan-postgres
+  namespace: prodavan
+spec:
+  selector:
+    app: prodavan-postgres
+  ports:
+    - name: pg
+      port: 5432
+      targetPort: pg

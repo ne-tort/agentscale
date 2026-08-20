@@ -7,40 +7,32 @@ from prodavan.api.deps import get_session
 from prodavan.application.dto.auth import (
     LoginRequest,
     RefreshRequest,
-    RegisterRequest,
     TenantResponse,
     TokenResponse,
     UserResponse,
 )
-from prodavan.application.services.auth_service import AuthError, login, refresh, register
+from prodavan.application.services.auth_service import AuthError, AuthResult, login, refresh
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 def _auth_error(exc: AuthError) -> HTTPException:
-    status = 401
-    if exc.code in {"EMAIL_OR_SLUG_TAKEN"}:
-        status = 409
-    return HTTPException(status_code=status, detail={"code": exc.code, "message": exc.message})
+    return HTTPException(
+        status_code=exc.status,
+        detail={"code": exc.code, "message": exc.message},
+    )
 
 
-@router.post("/register", response_model=TokenResponse)
-async def register_user(
-    body: RegisterRequest,
-    session: AsyncSession = Depends(get_session),
-) -> TokenResponse:
-    try:
-        result = await register(
-            session,
-            email=body.email,
-            password=body.password,
-            display_name=body.display_name,
-            tenant_slug=body.tenant_slug,
-            tenant_display_name=body.tenant_display_name,
-        )
-    except AuthError as exc:
-        raise _auth_error(exc) from exc
-    return _to_response(result)
+@router.post("/register", status_code=410)
+async def register_closed() -> dict:
+    """Public self-registration is disabled; accounts are created by platform.admin."""
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "REGISTER_DISABLED",
+            "message": "Public registration is closed. Contact platform administrator.",
+        },
+    )
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -49,7 +41,7 @@ async def login_user(
     session: AsyncSession = Depends(get_session),
 ) -> TokenResponse:
     try:
-        result = await login(session, email=body.email, password=body.password)
+        result = await login(session, login_id=body.login_id, password=body.password)
     except AuthError as exc:
         raise _auth_error(exc) from exc
     return _to_response(result)
@@ -67,16 +59,28 @@ async def refresh_tokens(
     return _to_response(result)
 
 
-def _to_response(result) -> TokenResponse:
+def user_response_from_info(user) -> UserResponse:
+    return UserResponse(
+        id=user.id,
+        login_id=user.login_id,
+        company_name=user.company_name,
+        contact_person=user.contact_person,
+        phone=user.phone,
+        email=user.email,
+        role=user.role,
+        status=user.status,
+        display_name=user.display_name
+        if hasattr(user, "display_name")
+        else (user.contact_person or user.company_name),
+    )
+
+
+def _to_response(result: AuthResult) -> TokenResponse:
     return TokenResponse(
         access_token=result.access_token,
         refresh_token=result.refresh_token,
         expires_in=result.expires_in,
-        user=UserResponse(
-            id=result.user.id,
-            email=result.user.email,
-            display_name=result.user.display_name,
-        ),
+        user=user_response_from_info(result.user),
         tenants=[
             TenantResponse(id=t.id, slug=t.slug, display_name=t.display_name)
             for t in result.tenants

@@ -2,12 +2,14 @@
 
 from fastapi import APIRouter
 
-from prodavan.api.v1 import auth, cabinets, catalogs, health, me, projects, prompts, specs
+from prodavan.api.v1 import admin, auth, cabinets, catalogs, health, me, projects, prompts, specs
 
 router = APIRouter()
+# Also mounted at app root for k3s probes (/health/live|/ready) — see main.py
 router.include_router(health.router)
 router.include_router(auth.router)
 router.include_router(me.router)
+router.include_router(admin.router)
 router.include_router(cabinets.router)
 router.include_router(projects.router)
 router.include_router(prompts.router)

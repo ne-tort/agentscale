@@ -19,6 +19,7 @@ from prodavan.application.services.pipeline_service import (
     finalize_run,
     list_lineitems,
     list_offers,
+    list_runs,
     resolve_export_file,
     upload_inbox,
 )
@@ -80,6 +81,17 @@ async def post_run(
             project_id=project_id,
             input_filename=body.input_filename,
         )
+    except PipelineError as exc:
+        raise _pipeline_error(exc) from exc
+
+
+@router.get("/projects/{project_id}/runs")
+async def get_runs(
+    project_id: str,
+    cs: CabinetSession = Depends(get_cabinet_session),
+) -> dict:
+    try:
+        return list_runs(cs.ctx.user.tenant_id, cs.ctx.cabinet_id, project_id)
     except PipelineError as exc:
         raise _pipeline_error(exc) from exc
 

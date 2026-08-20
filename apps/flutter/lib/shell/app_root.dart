@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/features/admin/presentation/screens/admin_shell_screen.dart';
 import 'package:prodavan/features/auth/presentation/screens/login_screen.dart';
 import 'package:prodavan/shell/app_state.dart';
 import 'package:prodavan/shell/cabinet_shell_screen.dart';
@@ -36,6 +37,9 @@ class _AppRootState extends State<AppRoot> {
     }
     if (!state.isAuthenticated) {
       return const LoginScreen();
+    }
+    if (state.isPlatformAdmin) {
+      return const AdminShellScreen();
     }
     return const CabinetShellScreen();
   }

@@ -1,0 +1,86 @@
+# Full stack: Postgres + API + Flutter web (nginx).
+# From prodavan/:
+#   bash infra/scripts/docker-build-cached.sh ensure-builder
+#   export BUILDX_BUILDER=prodavan DOCKER_BUILDKIT=1
+#   docker compose -f infra/docker-compose.stack.yml up --build -d
+#
+# UI:  http://localhost:8080
+# API: http://localhost:8000/api/v1/health
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: prodavan
+      POSTGRES_PASSWORD: prodavan
+      POSTGRES_DB: prodavan
+    ports:
+      - "5432:5432"
+    volumes:
+      - prodavan_stack_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prodavan -d prodavan"]
+      interval: 5s
+      timeout: 5s
+      retries: 8
+
+  api:
+    build:
+      context: ..
+      dockerfile: apps/api/Dockerfile
+      cache_from:
+        - type=local,src=../.docker-cache/api
+      cache_to:
+        - type=local,dest=../.docker-cache/api,mode=max
+    image: prodavan-api:stack
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@postgres:5432/prodavan
+      JWT_SECRET: stack-dev-change-me
+      STORAGE_ROOT: /data/storage
+      PACKS_ROOT: /packages/cabinet-packs
+      CORS_ORIGINS: >-
+        http://localhost:8080,http://127.0.0.1:8080,http://localhost:3000
+      RUN_MIGRATIONS: "1"
+    ports:
+      - "8000:8000"
+    volumes:
+      - prodavan_stack_storage:/data/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  web:
+    build:
+      context: ..
+      dockerfile: apps/flutter/Dockerfile
+      target: runtime
+      args:
+        API_BASE: http://localhost:8000
+      cache_from:
+        - type=local,src=../.docker-cache/web
+      cache_to:
+        - type=local,dest=../.docker-cache/web,mode=max
+    image: prodavan-web:stack
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+
+volumes:
+  prodavan_stack_pg:
+  prodavan_stack_storage:

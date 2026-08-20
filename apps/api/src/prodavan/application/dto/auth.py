@@ -2,19 +2,13 @@
 
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, Field
 
-
-class RegisterRequest(BaseModel):
-    email: EmailStr
-    password: str = Field(min_length=8)
-    display_name: str = Field(min_length=1)
-    tenant_slug: str = Field(pattern=r"^[a-z0-9-]{3,64}$")
-    tenant_display_name: str = Field(min_length=1)
+from prodavan.application.dto.validators import OptionalEmail
 
 
 class LoginRequest(BaseModel):
-    email: EmailStr
+    login_id: str = Field(min_length=2, max_length=64)
     password: str
 
 
@@ -22,10 +16,28 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=8)
+
+
+class UpdateProfileRequest(BaseModel):
+    contact_person: str | None = None
+    phone: str | None = None
+    email: OptionalEmail = None
+
+
 class UserResponse(BaseModel):
     id: UUID
-    email: str
-    display_name: str
+    login_id: str
+    company_name: str
+    contact_person: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    role: str
+    status: str
+    # Compat for older clients
+    display_name: str | None = None
 
 
 class TenantResponse(BaseModel):

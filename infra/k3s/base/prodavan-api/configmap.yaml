@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prodavan-config
+  namespace: prodavan
+data:
+  STORAGE_ROOT: /data/storage
+  PACKS_ROOT: /packages/cabinet-packs
+  CORS_ORIGINS: "http://prodavan.local,http://localhost:8080,http://127.0.0.1:8080"
+  RUN_MIGRATIONS: "1"
+  API_V1_PREFIX: /api/v1

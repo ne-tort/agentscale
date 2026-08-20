@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/theme/app_theme.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/shell/app_root.dart';
 import 'package:prodavan/shell/app_scope.dart';
 import 'package:prodavan/shell/app_state.dart';
@@ -17,9 +18,13 @@ class ProdavanApp extends StatelessWidget {
       theme: AppTheme.light,
       darkTheme: AppTheme.dark,
       themeMode: ThemeMode.system,
-      home: AppScope(
-        appState: appState,
-        child: AppRoot(appState: appState),
+      scaffoldMessengerKey: appState.scaffoldMessengerKey,
+      home: AppSnackHost(
+        messenger: appState.uiMessenger,
+        child: AppScope(
+          appState: appState,
+          child: AppRoot(appState: appState),
+        ),
       ),
     );
   }

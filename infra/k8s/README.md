@@ -1,19 +1,10 @@
-# Kubernetes manifests (stub)
+# Kubernetes path stub (redirect)
 
-Спецификация: [`docs/07-infrastructure/k3s-services.md`](../../docs/07-infrastructure/k3s-services.md).
+**Канон манифестов: [`../k3s/`](../k3s/).**
 
-**Статус:** манифесты — в итерации **I7** после scaffold API и worker.
+Целевая платформа — **k3s** (см. [`docs/07-infrastructure/k3s-services.md`](../../docs/07-infrastructure/k3s-services.md)).
+Каталог `infra/k8s/` оставлен только как указатель; не добавляйте сюда Deployment YAML.
 
-Планируемые overlays:
-
-```text
-infra/k8s/
-├── base/
-│   ├── api/
-│   ├── agent-worker/
-│   ├── mcp-gateway/
-│   └── postgres/
-└── overlays/
-    ├── dev/
-    └── staging/
+```bash
+kubectl apply -k infra/k3s/overlays/dev
 ```

@@ -1,6 +1,10 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/widgets/widgets.dart';
+import 'package:prodavan/features/auth/presentation/screens/profile_screen.dart';
+import 'package:prodavan/features/runs/presentation/runs_screen.dart';
 import 'package:prodavan/shell/app_scope.dart';
 import 'package:prodavan/shell/feature_gate.dart';
 import 'package:prodavan/shell/models.dart';
@@ -15,19 +19,26 @@ class CabinetShellScreen extends StatelessWidget {
     final cabinet = state.activeCabinet;
     final project = state.activeProject;
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(project?.displayName ?? cabinet?.displayName ?? 'Prodavan'),
-        actions: [
-          if (cabinet != null) _CabinetMenu(cabinets: state.cabinets, active: cabinet),
-          if (cabinet != null) _ProjectMenu(projects: state.projects, active: project),
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: state.logout,
-            tooltip: 'Выйти',
-          ),
-        ],
-      ),
+    return AppScaffold(
+      title: Text(project?.displayName ?? cabinet?.displayName ?? 'Prodavan'),
+      actions: [
+        if (cabinet != null) _CabinetMenu(cabinets: state.cabinets, active: cabinet),
+        if (cabinet != null) _ProjectMenu(projects: state.projects, active: project),
+        IconButton(
+          icon: const Icon(Icons.person_outline),
+          onPressed: () {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(builder: (_) => const ProfileScreen()),
+            );
+          },
+          tooltip: 'Профиль',
+        ),
+        IconButton(
+          icon: const Icon(Icons.logout),
+          onPressed: state.logout,
+          tooltip: 'Выйти',
+        ),
+      ],
       body: project == null
           ? _NoProjectBody(onCreate: () => _showCreateProjectDialog(context))
           : ProjectDashboardBody(project: project, stats: state.projectStats),
@@ -44,21 +55,31 @@ class CabinetShellScreen extends StatelessWidget {
   Future<void> _showCreateCabinetDialog(BuildContext context) async {
     final slug = TextEditingController(text: 'zakupki');
     final name = TextEditingController(text: 'Закупки');
+    final formKey = GlobalKey<FormState>();
     final state = AppScope.of(context);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Новый кабинет'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
+        content: AppForm(
+          formKey: formKey,
           children: [
-            TextField(controller: slug, decoration: const InputDecoration(labelText: 'Slug')),
-            TextField(controller: name, decoration: const InputDecoration(labelText: 'Название')),
+            AppTextField(controller: slug, label: 'Slug'),
+            AppTextField(controller: name, label: 'Название'),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Создать')),
+          AppButton(
+            label: 'Отмена',
+            variant: AppButtonVariant.text,
+            expanded: false,
+            onPressed: () => Navigator.pop(ctx, false),
+          ),
+          AppButton(
+            label: 'Создать',
+            expanded: false,
+            onPressed: () => Navigator.pop(ctx, true),
+          ),
         ],
       ),
     );
@@ -72,21 +93,31 @@ class CabinetShellScreen extends StatelessWidget {
   Future<void> _showCreateProjectDialog(BuildContext context) async {
     final slug = TextEditingController(text: 'client');
     final name = TextEditingController(text: 'Клиент');
+    final formKey = GlobalKey<FormState>();
     final state = AppScope.of(context);
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Новый проект'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
+        content: AppForm(
+          formKey: formKey,
           children: [
-            TextField(controller: slug, decoration: const InputDecoration(labelText: 'Slug')),
-            TextField(controller: name, decoration: const InputDecoration(labelText: 'Название')),
+            AppTextField(controller: slug, label: 'Slug'),
+            AppTextField(controller: name, label: 'Название'),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Создать')),
+          AppButton(
+            label: 'Отмена',
+            variant: AppButtonVariant.text,
+            expanded: false,
+            onPressed: () => Navigator.pop(ctx, false),
+          ),
+          AppButton(
+            label: 'Создать',
+            expanded: false,
+            onPressed: () => Navigator.pop(ctx, true),
+          ),
         ],
       ),
     );
@@ -181,20 +212,14 @@ class _NoProjectBody extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.folder_open_outlined, size: 64),
-          const SizedBox(height: 16),
-          const Text('Создайте проект для загрузки спеки'),
-          const SizedBox(height: 16),
-          FilledButton.icon(
-            onPressed: onCreate,
-            icon: const Icon(Icons.add),
-            label: const Text('Новый проект'),
-          ),
-        ],
+    return EmptyState(
+      title: 'Создайте проект для загрузки спеки',
+      icon: Icons.folder_open_outlined,
+      action: AppButton(
+        label: 'Новый проект',
+        icon: Icons.add,
+        expanded: false,
+        onPressed: onCreate,
       ),
     );
   }
@@ -216,15 +241,15 @@ class ProjectDashboardBody extends StatelessWidget {
     final runsByPhase = stats?['runs_by_phase'] as Map<String, dynamic>? ?? {};
 
     return ListView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(AppSpacing.lg),
       children: [
         Text(project.displayName, style: Theme.of(context).textTheme.headlineSmall),
-        const SizedBox(height: 8),
+        const SizedBox(height: AppSpacing.sm),
         Text(project.workspaceKey, style: Theme.of(context).textTheme.bodySmall),
-        const SizedBox(height: 24),
+        const SizedBox(height: AppSpacing.lg),
         Wrap(
-          spacing: 12,
-          runSpacing: 12,
+          spacing: AppSpacing.md,
+          runSpacing: AppSpacing.md,
           children: [
             _StatChip(icon: Icons.inbox_outlined, label: 'Inbox', value: '$inbox'),
             _StatChip(
@@ -250,23 +275,16 @@ class ProjectDashboardBody extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 32),
-        if (AppScope.of(context).error != null)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Text(
-              AppScope.of(context).error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          ),
+        const SizedBox(height: AppSpacing.xl),
         if (AppScope.of(context).statusMessage != null)
           Padding(
-            padding: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.only(bottom: AppSpacing.md),
             child: Text(AppScope.of(context).statusMessage!),
           ),
         FeatureGate(
           capability: 'procurement.s4b',
-          child: Card(
+          child: AppCard(
+            padding: EdgeInsets.zero,
             child: ListTile(
               leading: const Icon(Icons.vpn_key_outlined),
               title: const Text('S4B логин'),
@@ -280,9 +298,11 @@ class ProjectDashboardBody extends StatelessWidget {
             ),
           ),
         ),
+        const SizedBox(height: AppSpacing.sm),
         FeatureGate(
           capability: 'specs_kp',
-          child: Card(
+          child: AppCard(
+            padding: EdgeInsets.zero,
             child: ListTile(
               leading: const Icon(Icons.storage_outlined),
               title: const Text('Каталог CSV'),
@@ -292,7 +312,9 @@ class ProjectDashboardBody extends StatelessWidget {
             ),
           ),
         ),
-        Card(
+        const SizedBox(height: AppSpacing.sm),
+        AppCard(
+          padding: EdgeInsets.zero,
           child: ListTile(
             leading: const Icon(Icons.upload_file_outlined),
             title: const Text('Inbox: спека'),
@@ -301,9 +323,31 @@ class ProjectDashboardBody extends StatelessWidget {
             onTap: AppScope.of(context).busy ? null : () => _pickSpec(context),
           ),
         ),
+        const SizedBox(height: AppSpacing.sm),
+        AppCard(
+          padding: EdgeInsets.zero,
+          child: ListTile(
+            leading: const Icon(Icons.list_alt_outlined),
+            title: const Text('Прогоны / варианты'),
+            subtitle: const Text('Список runs, lineitems и offers'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => RunsScreen(
+                    projectId: project.id,
+                    projectName: project.displayName,
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
         FeatureGate(
           capability: 'specs_kp',
-          child: Card(
+          child: AppCard(
+            padding: EdgeInsets.zero,
             child: ListTile(
               leading: const Icon(Icons.description_outlined),
               title: const Text('Экспорт КП'),
@@ -322,29 +366,34 @@ class ProjectDashboardBody extends StatelessWidget {
 Future<void> _editS4bCredentials(BuildContext context) async {
   final userCtrl = TextEditingController();
   final passCtrl = TextEditingController();
+  final formKey = GlobalKey<FormState>();
   final saved = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
       title: const Text('S4B'),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
+      content: AppForm(
+        formKey: formKey,
         children: [
-          TextField(
+          AppTextField(
             controller: userCtrl,
-            decoration: const InputDecoration(labelText: 'Логин'),
+            label: 'Логин',
             autofillHints: const [AutofillHints.username],
           ),
-          TextField(
-            controller: passCtrl,
-            decoration: const InputDecoration(labelText: 'Пароль'),
-            obscureText: true,
-            autofillHints: const [AutofillHints.password],
-          ),
+          AppPasswordField(controller: passCtrl),
         ],
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Отмена')),
-        FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Проверить')),
+        AppButton(
+          label: 'Отмена',
+          variant: AppButtonVariant.text,
+          expanded: false,
+          onPressed: () => Navigator.pop(ctx, false),
+        ),
+        AppButton(
+          label: 'Проверить',
+          expanded: false,
+          onPressed: () => Navigator.pop(ctx, true),
+        ),
       ],
     ),
   );

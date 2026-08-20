@@ -8,16 +8,9 @@ from tests.conftest import requires_postgres
 
 
 async def _register(client: AsyncClient, suffix: str) -> dict:
-    body = {
-        "email": f"cab-{suffix}@example.com",
-        "password": "securepass123",
-        "display_name": "Cab User",
-        "tenant_slug": f"cab-tenant-{suffix}",
-        "tenant_display_name": "Cab Tenant",
-    }
-    resp = await client.post("/api/v1/auth/register", json=body)
-    assert resp.status_code == 200, resp.text
-    return resp.json()
+    from tests.helpers import register_user
+
+    return await register_user(client, suffix, prefix="cab")
 
 
 @requires_postgres

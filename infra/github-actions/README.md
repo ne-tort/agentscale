@@ -8,7 +8,8 @@
 |----------|--------|---------|
 | `ci-api.yml` | active | ruff, pytest health |
 | `ci-schemas.yml` | active | validate pack + cabinet-profile schema |
-| `ci-flutter.yml` | planned | analyze, unit tests |
-| `deploy-staging.yml` | planned I7 | Argo CD sync |
+| `ci-images.yml` | active | self-hosted build/push GHCR + k3s tag bump |
+| `ci-flutter.yml` | active | analyze + palette hex guard |
+| `deploy-staging.yml` | planned I7 | Argo CD sync wait |
 
 **Commerce submodule:** в CI Commerce-репо — `git submodule update --init prodavan` перед docs lint.

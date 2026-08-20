@@ -17,6 +17,7 @@ def create_access_token(
     user_id: uuid.UUID,
     tenant_id: uuid.UUID,
     cabinet_ids: list[uuid.UUID],
+    role: str = "user",
     active_cabinet_id: uuid.UUID | None = None,
     active_project_id: str | None = None,
 ) -> str:
@@ -25,6 +26,7 @@ def create_access_token(
         "sub": str(user_id),
         "tenant_id": str(tenant_id),
         "cabinet_ids": [str(cid) for cid in cabinet_ids],
+        "role": role,
         "exp": expire,
         "type": "access",
     }

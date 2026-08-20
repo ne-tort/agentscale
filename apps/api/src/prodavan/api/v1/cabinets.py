@@ -211,6 +211,7 @@ async def post_switch_cabinet(
         user_id=current.user_id,
         tenant_id=current.tenant_id,
         cabinet_ids=cabinet_ids,
+        role=current.role,
         active_cabinet_id=cabinet.id,
     )
     workspace_key = f"cab:{current.tenant_id}:{cabinet.id}"

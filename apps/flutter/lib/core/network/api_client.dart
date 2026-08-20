@@ -7,6 +7,7 @@ import 'package:prodavan/core/network/api_exception.dart';
 
 typedef TokenProvider = String? Function();
 typedef CabinetIdProvider = String? Function();
+typedef RefreshHandler = Future<bool> Function();
 
 /// Thin HTTP client: auth header, optional X-Cabinet-Id, problem+json errors.
 class ApiClient {
@@ -15,15 +16,21 @@ class ApiClient {
     http.Client? httpClient,
     TokenProvider? tokenProvider,
     CabinetIdProvider? cabinetIdProvider,
+    RefreshHandler? onUnauthorized,
   })  : _config = config,
         _http = httpClient ?? http.Client(),
         _tokenProvider = tokenProvider,
-        _cabinetIdProvider = cabinetIdProvider;
+        _cabinetIdProvider = cabinetIdProvider,
+        _onUnauthorized = onUnauthorized;
 
   final ApiConfig _config;
   final http.Client _http;
   final TokenProvider? _tokenProvider;
   final CabinetIdProvider? _cabinetIdProvider;
+  RefreshHandler? _onUnauthorized;
+
+  /// Wired after [AppState] construction (refresh needs AuthApi).
+  set onUnauthorized(RefreshHandler? handler) => _onUnauthorized = handler;
 
   Uri _uri(String path, [Map<String, String>? query]) {
     final base = '${_config.v1Prefix}$path';
@@ -52,19 +59,34 @@ class ApiClient {
     return headers;
   }
 
+  Future<http.Response> _send(Future<http.Response> Function() send, {bool allowRefresh = true}) async {
+    var response = await send();
+    if (response.statusCode == 401 && allowRefresh && _onUnauthorized != null) {
+      final refreshed = await _onUnauthorized!();
+      if (refreshed) {
+        response = await send();
+      }
+    }
+    return response;
+  }
+
   Future<Map<String, dynamic>> get(String path, {Map<String, String>? query}) async {
-    final response = await _http.get(_uri(path, query), headers: _headers());
+    final response = await _send(() => _http.get(_uri(path, query), headers: _headers()));
     return _decode(response);
   }
 
   Future<Map<String, dynamic>> post(
     String path, {
     Map<String, dynamic>? body,
+    bool allowRefresh = true,
   }) async {
-    final response = await _http.post(
-      _uri(path),
-      headers: _headers(),
-      body: body == null ? null : jsonEncode(body),
+    final response = await _send(
+      () => _http.post(
+        _uri(path),
+        headers: _headers(),
+        body: body == null ? null : jsonEncode(body),
+      ),
+      allowRefresh: allowRefresh,
     );
     return _decode(response);
   }
@@ -74,15 +96,55 @@ class ApiClient {
     Map<String, dynamic>? body,
     String? ifMatch,
   }) async {
-    final response = await _http.put(
-      _uri(path),
-      headers: _headers(ifMatch: ifMatch),
-      body: body == null ? null : jsonEncode(body),
+    final response = await _send(
+      () => _http.put(
+        _uri(path),
+        headers: _headers(ifMatch: ifMatch),
+        body: body == null ? null : jsonEncode(body),
+      ),
     );
     return _decode(response);
   }
 
+  Future<Map<String, dynamic>> patch(
+    String path, {
+    Map<String, dynamic>? body,
+  }) async {
+    final response = await _send(
+      () => _http.patch(
+        _uri(path),
+        headers: _headers(),
+        body: body == null ? null : jsonEncode(body),
+      ),
+    );
+    return _decode(response);
+  }
+
+  Future<Map<String, dynamic>> delete(String path) async {
+    final response = await _send(() => _http.delete(_uri(path), headers: _headers()));
+    return _decode(response);
+  }
+
+  Future<List<dynamic>> getList(String path, {Map<String, String>? query}) async {
+    final response = await _send(() => _http.get(_uri(path, query), headers: _headers()));
+    if (response.statusCode >= 400) {
+      Map<String, dynamic> body = {};
+      if (response.body.isNotEmpty) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic>) body = decoded;
+      }
+      throw ApiException.fromJson(response.statusCode, body);
+    }
+    if (response.body.isEmpty) return [];
+    final decoded = jsonDecode(response.body);
+    if (decoded is List<dynamic>) return decoded;
+    throw ApiException.fromJson(500, {'message': 'Expected JSON array'});
+  }
+
   Map<String, dynamic> _decode(http.Response response) {
+    if (response.statusCode == 204) {
+      return {};
+    }
     Map<String, dynamic> body = {};
     if (response.body.isNotEmpty) {
       final decoded = jsonDecode(response.body);
@@ -103,14 +165,18 @@ class ApiClient {
     required List<int> bytes,
     Map<String, String> fields = const {},
   }) async {
-    final request = http.MultipartRequest('POST', _uri(path));
-    final headers = _headers();
-    headers.remove('Content-Type');
-    request.headers.addAll(headers);
-    request.fields.addAll(fields);
-    request.files.add(http.MultipartFile.fromBytes(fileField, bytes, filename: filename));
-    final streamed = await _http.send(request);
-    final response = await http.Response.fromStream(streamed);
+    Future<http.Response> once() async {
+      final request = http.MultipartRequest('POST', _uri(path));
+      final headers = _headers();
+      headers.remove('Content-Type');
+      request.headers.addAll(headers);
+      request.fields.addAll(fields);
+      request.files.add(http.MultipartFile.fromBytes(fileField, bytes, filename: filename));
+      final streamed = await _http.send(request);
+      return http.Response.fromStream(streamed);
+    }
+
+    final response = await _send(once);
     return _decode(response);
   }
 
@@ -123,11 +189,11 @@ class AuthApi {
 
   final ApiClient _client;
 
-  Future<Map<String, dynamic>> register(Map<String, dynamic> body) =>
-      _client.post('/auth/register', body: body);
-
   Future<Map<String, dynamic>> login(Map<String, dynamic> body) =>
-      _client.post('/auth/login', body: body);
+      _client.post('/auth/login', body: body, allowRefresh: false);
+
+  Future<Map<String, dynamic>> refresh(String refreshToken) =>
+      _client.post('/auth/refresh', body: {'refresh_token': refreshToken}, allowRefresh: false);
 
   Future<Map<String, dynamic>> me() => _client.get('/me');
 }
@@ -244,6 +310,18 @@ class SpecsApi {
         bytes: bytes,
         fields: {'auto_run': autoRun.toString()},
       );
+
+  Future<Map<String, dynamic>> listRuns(String projectId) =>
+      _client.get('/projects/$projectId/runs');
+
+  Future<Map<String, dynamic>> getRun({required String projectId, required String runId}) =>
+      _client.get('/projects/$projectId/runs/$runId');
+
+  Future<Map<String, dynamic>> listLineitems({required String projectId, required String runId}) =>
+      _client.get('/projects/$projectId/runs/$runId/lineitems');
+
+  Future<Map<String, dynamic>> listOffers({required String projectId, required String runId}) =>
+      _client.get('/projects/$projectId/runs/$runId/offers');
 
   Future<Map<String, dynamic>> advance({
     required String projectId,
