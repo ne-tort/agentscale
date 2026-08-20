@@ -115,9 +115,123 @@ async def test_neg_cat_003_vault_secret_not_in_api(
     assert put.status_code == 200
     assert "password" not in put.json()
     assert put.json()["state"] != "credentials_valid"
+    assert put.json()["state"] == "credentials_invalid"
 
     status = await client.get("/api/v1/tenant/s4b-credentials/status", headers=headers)
     body = status.json()
     assert "password" not in body
     assert "super-secret" not in str(body)
     assert body["s4b_username_hint"] == "bu***@acme.ru"
+
+
+class _ValidS4B:
+    def ping(self, username: str, password: str) -> dict:
+        return {"ok": True, "auth_ok": True}
+
+    def search_by_part_numbers(self, username: str, password: str, part_numbers: list[str]) -> dict:
+        from prodavan.application.integrations.s4b_parse import parse_response
+
+        raw = {
+            "results": [
+                {
+                    "in": "910-001793",
+                    "listStock": {
+                        "rows": [
+                            [
+                                "1",
+                                "910-001793",
+                                "Mouse trusted",
+                                "5",
+                                "5",
+                                "1-2 дн",
+                                "x",
+                                "1200",
+                                "Merlion",
+                                "Logitech",
+                            ],
+                            [
+                                "9",
+                                "910-001793",
+                                "Mouse cheap untrusted",
+                                "8",
+                                "8",
+                                "1 дн",
+                                "x",
+                                "100",
+                                "RandomCo",
+                                "Logitech",
+                            ],
+                            [
+                                "3",
+                                "910-001793",
+                                "Mouse backorder",
+                                "2",
+                                "2",
+                                "под заказ",
+                                "x",
+                                "50",
+                                "Merlion",
+                                "Logitech",
+                            ],
+                        ]
+                    },
+                    "listNoStock": {
+                        "rows": [
+                            ["2", "910-001793", "Mouse OO", "1", "1", "Merlion", "X"],
+                        ]
+                    },
+                }
+            ]
+        }
+        items, _ = parse_response(raw)
+        return {"ok": True, "items": items}
+
+
+@requires_postgres
+@pytest.mark.asyncio
+async def test_s4b_live_search_keeps_in_stock_and_ranks_trusted(
+    client: AsyncClient, unique_suffix: str, monkeypatch
+) -> None:
+    monkeypatch.setattr("prodavan.application.integrations.s4b_runtime._gateway", _ValidS4B())
+    reg = await register_user(client, unique_suffix, prefix="s4b-live")
+    _, headers = await active_cabinet_headers(client, reg, unique_suffix)
+    project_id = await _project(client, headers, unique_suffix + "s")
+
+    put = await client.put(
+        "/api/v1/tenant/s4b-credentials",
+        headers=headers,
+        json={"username": "buyer@acme.ru", "password": "ok-secret"},
+    )
+    assert put.status_code == 200, put.text
+    assert put.json()["state"] == "credentials_valid"
+    assert "ok-secret" not in str(put.json())
+
+    spec = "name,qty,part_number\nMouse Logitech,10,910-001793\n"
+    run_up = await client.post(
+        f"/api/v1/projects/{project_id}/inbox/upload",
+        headers=headers,
+        files={"file": ("spec.csv", spec.encode("utf-8"), "text/csv")},
+        data={"auto_run": "true"},
+    )
+    run_id = run_up.json()["run_id"]
+    for phase in ("classify", "search", "rank"):
+        step = await client.post(
+            f"/api/v1/projects/{project_id}/runs/{run_id}/advance",
+            headers=headers,
+            json={"target_phase": phase},
+        )
+        assert step.status_code == 202, step.text
+
+    offers = await client.get(
+        f"/api/v1/projects/{project_id}/runs/{run_id}/offers", headers=headers
+    )
+    items = offers.json()["items"]
+    prices = sorted(o["price"] for o in items)
+    assert prices == [100, 1200]
+    assert all(o["in_stock"] is True for o in items)
+    assert all(o["source"] == "s4b" for o in items)
+    trusted = next(o for o in items if o["trusted_seller"])
+    cheap = next(o for o in items if not o["trusted_seller"])
+    assert trusted["price"] == 1200
+    assert cheap["price"] == 100
+

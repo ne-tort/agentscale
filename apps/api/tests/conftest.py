@@ -40,6 +40,24 @@ requires_postgres = pytest.mark.skipif(
 )
 
 
+class _StubS4B:
+    """Tests never hit live S4B; ping fails unless a test replaces the gateway."""
+
+    def ping(self, username: str, password: str) -> dict:
+        return {"ok": False, "error_code": "auth_failed", "error": "stub: no live S4B"}
+
+    def search_by_part_numbers(self, username: str, password: str, part_numbers: list[str]) -> dict:
+        return {"ok": False, "error_code": "auth_failed", "error": "stub: no live S4B"}
+
+
+@pytest.fixture(autouse=True)
+def stub_s4b_gateway(monkeypatch):
+    monkeypatch.setattr(
+        "prodavan.application.integrations.s4b_runtime._gateway",
+        _StubS4B(),
+    )
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def clean_engine_cache():
     yield

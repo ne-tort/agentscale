@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.catalogs.indexer import CatalogIndexError, index_csv_bytes
 from prodavan.application.services.cabinet_service import CabinetError, get_cabinet
+from prodavan.application.integrations.s4b_runtime import get_s4b_gateway
 from prodavan.infrastructure.auth.s4b_vault import delete_vault, public_status, save_vault
 from prodavan.infrastructure.storage.catalog_storage import (
     catalog_dir,
@@ -229,9 +230,23 @@ def s4b_status(tenant_id: uuid.UUID) -> dict:
 
 
 def put_s4b_credentials(tenant_id: uuid.UUID, username: str, password: str) -> dict:
-    save_vault(tenant_id, username, password)
+    ping = get_s4b_gateway().ping(username, password)
+    if ping.get("ok"):
+        save_vault(tenant_id, username, password, state="credentials_valid", last_error=None)
+    else:
+        save_vault(
+            tenant_id,
+            username,
+            password,
+            state="credentials_invalid",
+            last_error=str(ping.get("error") or ping.get("error_code") or "s4b_ping_failed"),
+        )
     status = public_status(tenant_id)
-    return {"state": status["state"], "validated_at": None, "last_error": status.get("last_error")}
+    return {
+        "state": status["state"],
+        "validated_at": status.get("last_validated_at"),
+        "last_error": status.get("last_error"),
+    }
 
 
 def delete_s4b_credentials(tenant_id: uuid.UUID) -> dict:

@@ -23,7 +23,7 @@
 | P9 | 9.0 | **10** |
 | **Overall** | **8.7** | **9.0** |
 
-**Вердикт:** Doc ✅ · **xlsx spec ingest done** — next live S4B (real API only) or MCP gateway.
+**Вердикт:** Doc ✅ · **S4B live (in_stock, ping gates vault)** — next web allowlist or MCP gateway.
 
 ---
 
@@ -214,7 +214,7 @@
 | I5-T02 | Search exact P/N from catalogs + rank trusted min price | 8 | [x] |
 | I5-T03 | system-databases s4b-cache electronics-only; DELETE 403 | 8 | [x] |
 | I5-T04 | S4B vault (no password in API; no fake valid ping) | 8 | [x] |
-| I5-T05 | Live S4B in_stock search | — | [ ] |
+| I5-T05 | Live S4B in_stock search | 8 | [x] |
 
-## Next: live S4B in_stock (no fake prices) or MCP gateway
+## Next: web-shop allowlist search (no invented prices) or MCP gateway
 

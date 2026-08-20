@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     storage_root: Path = _REPO_ROOT / "data" / "storage"
     packs_root: Path = _REPO_ROOT / "packages" / "cabinet-packs"
+    s4b_base_url: str = "http://s4b.ru/s.jsp"
+    s4b_timeout_seconds: float = 30.0
 
     @property
     def cors_origin_list(self) -> list[str]:

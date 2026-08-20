@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.pipeline.classify import classify_rows
 from prodavan.application.pipeline.ingest import extracted_markdown, ingest_rows
-from prodavan.application.pipeline.search import s4b_log_line
+from prodavan.application.catalogs.s4b_search import search_lineitems_in_s4b
 from prodavan.application.catalogs.search import rank_selections, search_lineitems_in_catalogs
 from prodavan.application.pipeline.kp_export import (
     TEMPLATE_VERSION,
@@ -227,6 +227,14 @@ def _run_search(tenant_id, cabinet_id, project_id, run_id, status: dict) -> None
         store.read_json_artifact(tenant_id, cabinet_id, project_id, run_id, "lineitems.json") or {}
     ).get("items") or []
     offers, logs = search_lineitems_in_catalogs(tenant_id, cabinet_id, lineitems)
+    s4b_offers, s4b_logs = search_lineitems_in_s4b(
+        tenant_id,
+        lineitems,
+        s4b_enabled=s4b,
+        start_seq=len(offers),
+    )
+    offers.extend(s4b_offers)
+    logs.extend(s4b_logs)
     store.write_json_artifact(
         tenant_id,
         cabinet_id,
@@ -241,7 +249,6 @@ def _run_search(tenant_id, cabinet_id, project_id, run_id, status: dict) -> None
     )
     for line in logs:
         store.append_sources_log(tenant_id, cabinet_id, project_id, run_id, line)
-    store.append_sources_log(tenant_id, cabinet_id, project_id, run_id, s4b_log_line(s4b_enabled=s4b))
     store.append_sources_log(
         tenant_id, cabinet_id, project_id, run_id, "web skipped=allowlist_not_queried"
     )

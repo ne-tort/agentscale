@@ -24,6 +24,11 @@ def encrypt_secret(plain: str) -> str:
     return base64.urlsafe_b64encode(raw).decode("ascii")
 
 
+def decrypt_secret(token: str) -> str:
+    raw = base64.urlsafe_b64decode(token.encode("ascii"))
+    return _xor(raw, _key()).decode("utf-8")
+
+
 def mask_username(username: str) -> str:
     if "@" in username:
         local, domain = username.split("@", 1)
@@ -41,12 +46,21 @@ def load_vault(tenant_id: uuid.UUID) -> dict | None:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def save_vault(tenant_id: uuid.UUID, username: str, password: str) -> dict:
+def save_vault(
+    tenant_id: uuid.UUID,
+    username: str,
+    password: str,
+    *,
+    state: str,
+    last_error: str | None,
+) -> dict:
+    validated = now_iso() if state == "credentials_valid" else None
     payload = {
         "username": username,
         "password_ciphertext": encrypt_secret(password),
-        "state": "credentials_invalid",
-        "last_error": "s4b_ping not_implemented",
+        "state": state,
+        "last_error": last_error,
+        "last_validated_at": validated,
         "updated_at": now_iso(),
     }
     write_json(vault_path(tenant_id), payload)
@@ -70,7 +84,7 @@ def public_status(tenant_id: uuid.UUID) -> dict:
         }
     return {
         "state": vault.get("state", "missing_credentials"),
-        "last_validated_at": None,
+        "last_validated_at": vault.get("last_validated_at"),
         "s4b_username_hint": mask_username(vault.get("username") or ""),
         "rate_limit_reset_at": None,
         "last_error": vault.get("last_error"),

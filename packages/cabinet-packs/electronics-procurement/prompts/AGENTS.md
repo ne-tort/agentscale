@@ -83,7 +83,7 @@ xlsx спеки парсит сервер: `#REF!` и дубли листов К
 ## Поиск (порядок)
 
 1. Локальные БД прайсов `catalogs/db/` — MCP `commerce-search`. **Exact P/N, если он есть в спеке.** После live S4B кэш доступен той же MCP как виртуальная БД `s4b-cache` (`search_by_part_number` / `query_database`). Это API-кэш, не локальный trusted-прайс.
-2. **S4B.ru** — MCP `commerce-s4b`. Trusted: `/s4b доверенные`. Локальные БД = trusted автоматически. Только **в наличии** (`in_stock`). **«Под заказ» не использовать** — ни через MCP (`include_on_order` у тулов нет), ни через CLI (`--include-on-order`). Не класть `on_order` / listNoStock / строки с «под заказ» в `offers.json`.
+2. **S4B.ru** — live только если vault `credentials_valid` после ping. P/N → `sr=`. Только **в наличии**. «Под заказ» / listNoStock / Тран «под заказ» не класть в offers. Недоверенный дешевле — alternative, не primary. ZIP без JSON не выдумывать строки.
 3. **Веб** — `list_web_shops` / бот `/магазины` (DNS, Ozon, AliExpress…). **Не экономь:** сверка P/N, характеристик, аналогов, совместимости. Не только «если каталог пуст».
 
 Есть партномер ≠ нет партномера: «Ноутбук ACER 16 ГБ {PN}» → ~90% exact этот PN. «Ноутбук ACER 16 ГБ» → поиск по характеристикам, не первый SKU. См. [`profiles/kp/07-equipment.md`](profiles/kp/07-equipment.md).
