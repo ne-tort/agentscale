@@ -1,0 +1,19 @@
+{
+  "packId": "electronics-procurement",
+  "version": "1.0.0",
+  "profileFile": "cabinet-profile.json",
+  "commerceSourceRef": "Commerce/profiles/kp, catalogs/web-shop-allowlist.json, AGENTS.md",
+  "files": {
+    "profile": "cabinet-profile.json",
+    "promptsMaster": "prompts/AGENTS.md",
+    "promptsKp": "prompts/kp/",
+    "shops": "shops/allowlist.json",
+    "theme": "theme/tokens.json"
+  },
+  "capabilities": {
+    "s4b": true,
+    "equipment": true,
+    "kp": true
+  },
+  "systemCatalogs": ["s4b"]
+}

@@ -1,0 +1,50 @@
+{
+  "$schema": "https://prodavan.dev/schemas/cabinet-profile/v1.json",
+  "id": "electronics-procurement",
+  "version": "1.0.0",
+  "displayName": "Закупки электроники",
+  "description": "Спеки, каталоги, S4B, КП, карточки оборудования",
+  "capabilities": [
+    "procurement.kp",
+    "procurement.equipment",
+    "procurement.s4b",
+    "procurement.pipeline"
+  ],
+  "ui": {
+    "theme": "system",
+    "navigation": [
+      { "id": "projects", "label": "", "icon": "folder", "route": "/projects" },
+      { "id": "catalogs", "label": "", "icon": "database", "route": "/catalogs" },
+      { "id": "prompts", "label": "", "icon": "description", "route": "/prompts" },
+      { "id": "integrations", "label": "", "icon": "store", "route": "/integrations" },
+      { "id": "s4b_settings", "label": "", "icon": "cloud", "route": "/integrations/s4b", "capability": "procurement.s4b" },
+      { "id": "mcp", "label": "", "icon": "extension", "route": "/mcp" },
+      { "id": "operations", "label": "", "icon": "monitoring", "route": "/operations" }
+    ],
+    "modules": {
+      "equipment_specs": { "type": "equipment-cards", "enabled": true },
+      "kp_export": { "type": "kp-export", "enabled": true }
+    },
+    "projectTabs": ["chat", "specs", "variants", "kp", "equipment"]
+  },
+  "mcp": {
+    "packages": [
+      "prodavan-mcp-catalog",
+      "prodavan-mcp-s4b",
+      "prodavan-mcp-offers",
+      "prodavan-mcp-pipeline",
+      "prodavan-mcp-equipment",
+      "prodavan-mcp-extract"
+    ],
+    "tools_allowlist": ["catalog.*", "s4b.*", "offers.*", "pipeline.*", "equipment.*", "extract.*"]
+  },
+  "seeds": {
+    "prompts": "prompts/",
+    "shops": "shops/allowlist.json",
+    "system_catalogs": [{ "slug": "s4b", "kind": "system_reserved" }],
+    "theme": "theme/tokens.json"
+  },
+  "constraints": {
+    "s4b_include_on_order": false
+  }
+}

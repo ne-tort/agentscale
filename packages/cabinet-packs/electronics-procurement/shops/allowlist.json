@@ -1,0 +1,11 @@
+{
+  "enabled": true,
+  "sites": [
+    { "id": "dns", "host": "www.dns-shop.ru", "kind": "shop" },
+    { "id": "ozon", "host": "www.ozon.ru", "kind": "shop" },
+    { "id": "yandex-market", "host": "market.yandex.ru", "kind": "shop" },
+    { "id": "mvideo", "host": "www.mvideo.ru", "kind": "shop" },
+    { "id": "online-trade", "host": "www.onlinetrade.ru", "kind": "shop" },
+    { "id": "ixbt", "host": "www.ixbt.com", "kind": "specs" }
+  ]
+}
