@@ -11,7 +11,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: api
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -26,7 +26,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: web
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
 ---
 apiVersion: v1
 kind: ConfigMap

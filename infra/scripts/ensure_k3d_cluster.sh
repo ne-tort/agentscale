@@ -21,7 +21,6 @@ install_k3d() {
     return 0
   fi
   echo "Installing k3d..."
-  # Prefer writable user bin when /usr/local needs sudo
   export K3D_INSTALL_DIR="${K3D_INSTALL_DIR:-${HOME}/.local/bin}"
   mkdir -p "$K3D_INSTALL_DIR"
   curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
@@ -49,11 +48,16 @@ cluster_listed() {
   k3d cluster list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$CLUSTER"
 }
 
-# True if at least one server container is running.
+# True if k3d reports all servers up (e.g. 1/1, not 0/1).
 cluster_servers_running() {
-  local n
-  n="$(docker ps --filter "label=k3d.cluster=${CLUSTER}" --filter "label=k3d.role=server" --format '{{.ID}}' 2>/dev/null | wc -l | tr -d ' ')"
-  [[ "${n:-0}" -ge 1 ]]
+  k3d cluster list 2>/dev/null | awk -v c="$CLUSTER" '
+    NR>1 && $1==c {
+      split($2, a, "/");
+      ok = (a[1] == a[2] && a[1] + 0 > 0);
+      exit !ok
+    }
+    END { exit 1 }
+  '
 }
 
 set_restart_unless_stopped() {
@@ -88,7 +92,6 @@ write_kubeconfig() {
   mkdir -p "$(dirname "$KCFG")"
   k3d kubeconfig get "$CLUSTER" >"$KCFG"
   chmod 600 "$KCFG" || true
-  # Also refresh path expected by runner mount (same default).
   echo "kubeconfig -> $KCFG"
 }
 
@@ -135,6 +138,12 @@ main() {
 
   write_kubeconfig
   wait_nodes
+
+  if [[ "${WARM_K3D_IMAGES:-1}" == "1" ]]; then
+    echo "Warming base images into cluster (set WARM_K3D_IMAGES=0 to skip)..."
+    bash "${SCRIPT_DIR}/warm_k3d_base_images.sh" || echo "WARN: warm images incomplete — kube-system may stay ImagePullBackOff"
+  fi
+
   export KUBECONFIG="$KCFG"
   echo "OK cluster=${CLUSTER} KUBECONFIG=${KCFG}"
 }

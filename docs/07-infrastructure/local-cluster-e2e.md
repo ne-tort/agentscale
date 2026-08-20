@@ -68,7 +68,9 @@ kubectl -n prodavan create secret docker-registry ghcr-pull \
   --dry-run=client -o yaml | kubectl apply -f -
 ```
 
-Deployments в `overlays/dev` ссылаются на `imagePullSecrets: [ghcr-pull]` и `imagePullPolicy: Always`.
+Deployments в `overlays/dev` ссылаются на `imagePullSecrets: [ghcr-pull]` и
+`imagePullPolicy: IfNotPresent` (устойчивее к TLS flakes; свежие теги тянет
+`import_overlay_images.sh` на хосте → `k3d image import`).
 
 ---
 
@@ -90,7 +92,7 @@ Compose монтирует `../.kube` → `/kube` и задаёт `KUBECONFIG=/k
 1. Push в `main` (пути apps/infra как в `ci-images.yml`) → **CI Images** → GHCR + bump tags в `infra/k3s/overlays/dev`.
 2. После успешного Images → **Deploy Dev k3s** (`workflow_run`) на self-hosted:
    - `ensure_k3d_cluster.sh` (create **или start** после ребута) + optional terraform state
-   - `ensure_argocd.sh` → `wait_prodavan_ready.sh` (Argo или `kubectl apply -k`)
+   - `ensure_argocd.sh` → `import_overlay_images.sh` → `wait_prodavan_ready.sh`
    - `smoke_ingress.sh` на `:8088` с `Host: prodavan.local`
 3. Ручной прогон: Actions → Deploy Dev k3s → `workflow_dispatch`.
 
@@ -146,6 +148,8 @@ curl -sS -H 'Host: prodavan.local' http://127.0.0.1:8088/ | head
 | Smoke 404 Host | заголовок `Host: prodavan.local` обязателен |
 | После reboot API down | `bash infra/scripts/ensure_k3d_cluster.sh` |
 | Nodes NotReady | ensure делает start + retry; `docker ps -a --filter label=k3d.cluster=prodavan-dev` |
+| ImagePullBackOff (rancher/*) | `bash infra/scripts/warm_k3d_base_images.sh` (host pull + `k3d image import`) |
+| TLS handshake timeout docker.io | warm script с ретраями; VPN/прокси; повторить ensure |
 
 ---
 

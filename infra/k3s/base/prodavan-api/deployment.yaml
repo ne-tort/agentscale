@@ -22,7 +22,7 @@ spec:
       containers:
         - name: api
           image: ghcr.io/ne-tort/prodavan-api:latest
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           ports:
             - name: http
               containerPort: 8000

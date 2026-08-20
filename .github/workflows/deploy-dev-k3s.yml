@@ -51,6 +51,12 @@ jobs:
           GHCR_USERNAME: ${{ github.actor }}
         run: bash infra/scripts/create_ghcr_pull_secret.sh
 
+      - name: Import overlay images into k3d
+        env:
+          GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}
+          GHCR_USERNAME: ${{ github.actor }}
+        run: bash infra/scripts/import_overlay_images.sh
+
       - name: Ensure Argo CD + Application
         env:
           ARGOCD_REPO_TOKEN: ${{ secrets.ARGOCD_REPO_TOKEN }}
