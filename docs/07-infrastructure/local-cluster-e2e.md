@@ -35,7 +35,23 @@ bash infra/scripts/install_cli_tools.sh
 
 ## 2. Bootstrap кластера
 
-Из корня `prodavan` (предпочтительно WSL):
+### Рекомендуемо: Terraform на Windows → SSH в WSL (self-host)
+
+WSL = целевой хост; OpenSSH rootless на `127.0.0.1:2222` (sudo не нужен):
+
+```powershell
+wsl -e bash infra/scripts/setup_wsl_sshd.sh
+wsl -e bash -lc "cp -f ~/.ssh/prodavan_tf infra/.ssh/"   # gitignored
+# terraform.exe: скачать releases.hashicorp.com → tools/terraform.exe (gitignore)
+.\tools\terraform.exe -chdir=infra/terraform/environments/local init
+.\tools\terraform.exe -chdir=infra/terraform/environments/local apply -auto-approve
+# connection_type=ssh по умолчанию → remote-exec ensure_k3d_cluster.sh
+wsl -e bash -lc "export GHCR_TOKEN=... ARGOCD_REPO_TOKEN=... FROM_TERRAFORM=1; bash infra/scripts/from_scratch_local.sh"
+```
+
+Подробности: `infra/terraform/environments/local/README.md`, ключи — `infra/.ssh/README.md`.
+
+### Альтернатива: всё внутри WSL
 
 ```bash
 export GHCR_TOKEN=ghp_...          # read:packages (или PAT с packages)
@@ -47,10 +63,10 @@ bash infra/scripts/bootstrap_local_cluster.sh
 
 ```bash
 cd infra/terraform/environments/local
-terraform init && terraform apply -auto-approve
+terraform init && terraform apply -auto-approve -var=connection_type=local
 export KUBECONFIG="$(terraform output -raw kubeconfig_path)"
 bash ../../../scripts/k3d_kubeconfig_for_runner.sh
-bash ../../../scripts/bootstrap_local_cluster.sh   # или только argocd-bootstrap.sh
+FROM_TERRAFORM=1 bash ../../../scripts/from_scratch_local.sh
 ```
 
 Порты k3d:

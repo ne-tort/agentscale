@@ -4,32 +4,49 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+# shellcheck source=lib/common.sh
+source "${SCRIPT_DIR}/lib/common.sh"
 
 if [[ -z "${KUBECONFIG:-}" ]]; then
   export KUBECONFIG="${ROOT}/infra/.kube/prodavan-k3d.yaml"
 fi
 
-need_kubectl() {
-  command -v kubectl >/dev/null 2>&1 || {
-    echo "kubectl required" >&2
-    exit 1
-  }
-}
+need_cmd kubectl
+wait_nodes_schedulable 60
 
-need_kubectl
-
-echo "==> Argo CD namespace + install (upstream stable)"
+echo "==> Argo CD namespace + install (upstream stable, server-side apply)"
 kubectl apply -f "${ROOT}/infra/argocd/bootstrap/namespace.yaml"
 
-if ! kubectl -n argocd get deploy argocd-server >/dev/null 2>&1; then
-  kubectl apply -n argocd -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
+# Install once with SSA (avoids annotation-too-long). Re-apply only if CRDs incomplete.
+if ! kubectl -n argocd get deploy argocd-server >/dev/null 2>&1 \
+  || ! kubectl get crd applicationsets.argoproj.io >/dev/null 2>&1; then
+  kubectl apply -n argocd --server-side --force-conflicts \
+    -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml
 else
-  echo "argocd-server already present — skip full reinstall"
+  echo "argocd already installed (deploy+CRDs present) — skip full SSA reinstall"
 fi
+
+# Preload quay/ecr into k3d (kubelet Always+TLS timeout → ImagePullBackOff otherwise)
+if command -v k3d >/dev/null 2>&1 && command -v docker >/dev/null 2>&1; then
+  echo "==> Warm Argo CD images into k3d"
+  bash "${SCRIPT_DIR}/warm_argocd_images.sh"
+fi
+
+wait_nodes_schedulable 60
+
+# Upstream uses imagePullPolicy: Always — force local preload path + recreate pods.
+bash "${SCRIPT_DIR}/patch_argocd_pull_policy.sh" argocd
+
+wait_nodes_schedulable 30
 
 echo "Waiting for argocd-server..."
 kubectl -n argocd rollout status deployment/argocd-server --timeout=300s
 kubectl wait --for=condition=Established crd/applications.argoproj.io --timeout=120s || true
+
+# Controller must be up before Application status is meaningful.
+echo "Waiting for argocd-application-controller..."
+kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=300s || true
+kubectl -n argocd wait --for=condition=Ready pod -l app.kubernetes.io/name=argocd-application-controller --timeout=180s || true
 
 kubectl apply -f "${ROOT}/infra/argocd/apps/prodavan-dev.yaml"
 

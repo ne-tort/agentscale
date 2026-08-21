@@ -46,6 +46,8 @@ Thumbs.db
 *.tfstate
 *.tfstate.*
 tools/.terraform-bin/
+tools/terraform
+tools/terraform.exe
 
 # Local k3d kubeconfig (mounted into github-runner)
 infra/.kube/*

@@ -3,6 +3,10 @@
 # Helps when kubelet TLS to docker.io is flaky after WSL/Desktop restarts.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/common.sh
+source "${SCRIPT_DIR}/lib/common.sh"
+
 CLUSTER="${K3D_CLUSTER:-prodavan-dev}"
 RETRIES="${IMAGE_PULL_RETRIES:-5}"
 
@@ -32,8 +36,9 @@ pull_one() {
 }
 
 main() {
-  command -v docker >/dev/null
-  command -v k3d >/dev/null
+  need_cmd docker
+  need_cmd k3d
+  wait_docker 30
   local ok=()
   local img
   for img in "${IMAGES[@]}"; do
@@ -42,11 +47,11 @@ main() {
     fi
   done
   if [[ ${#ok[@]} -eq 0 ]]; then
-    echo "ERROR: no images pulled" >&2
-    exit 1
+    die "no images pulled"
   fi
   echo "Importing ${#ok[@]} image(s) into k3d cluster ${CLUSTER}..."
   k3d image import "${ok[@]}" -c "$CLUSTER"
+  after_k3d_image_import
   echo "warm images done"
 }
 

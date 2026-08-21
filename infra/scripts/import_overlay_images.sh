@@ -17,6 +17,8 @@ need_cmd docker
 need_cmd k3d
 need_cmd python3
 
+wait_docker 30
+
 if [[ -n "${GHCR_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
   USER="${GHCR_USERNAME:-${GITHUB_ACTOR:-ne-tort}}"
   echo "${GHCR_TOKEN:-$GITHUB_TOKEN}" | docker login ghcr.io -u "$USER" --password-stdin
@@ -55,4 +57,5 @@ done
 
 [[ ${#pulled[@]} -gt 0 ]] || die "no images pulled"
 k3d image import "${pulled[@]}" -c "$CLUSTER"
+after_k3d_image_import
 echo "imported: ${pulled[*]}"

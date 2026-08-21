@@ -25,6 +25,7 @@ wait_argo() {
     return 1
   fi
   for i in $(seq 1 "$ARGO_ATTEMPTS"); do
+    uncordon_all_nodes 2>/dev/null || true
     health="$(kubectl -n argocd get application prodavan-dev -o jsonpath='{.status.health.status}' 2>/dev/null || echo Unknown)"
     sync="$(kubectl -n argocd get application prodavan-dev -o jsonpath='{.status.sync.status}' 2>/dev/null || echo Unknown)"
     echo "  [${i}/${ARGO_ATTEMPTS}] sync=${sync} health=${health}"
