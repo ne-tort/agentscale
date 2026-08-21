@@ -1,42 +1,36 @@
 # Prodavan — документация
 
-Модульная спецификация платформы. Каждый модуль — папка с 10 файлами: domain, api, persistence, storage, mcp-tools, ui, security, checklists.
+## Канон (Target)
 
-## Как читать
+**Единственный источник правды для новой архитектуры:** [target/](target/).
 
-1. [Глоссарий](00-glossary.md)
-2. [Product vision](01-vision/product-vision.md) → [Domain model](01-vision/domain-model.md)
-3. [Architecture overview](02-architecture/overview.md) → [ADR-001 Platform vs Cabinet SPI](02-architecture/ADR-001-platform-core-vs-cabinet-spi.md) → [Cabinet SPI](02-architecture/cabinet-spi.md)
-4. Модули [M00–M09](03-modules/README.md) по порядку зависимостей
-5. [Frontend](04-frontend/architecture.md) · [Backend](05-backend/structure.md) · [Agent runtime](06-agent-runtime/providers.md) · [Infra](07-infrastructure/topology.md)
-6. [Migration from Commerce](08-migration/commerce-boundary.md)
-7. [Checklists & progress](09-checklists/PROGRESS.md)
-8. [Implementation roadmap](10-implementation/roadmap.md) — код I0–I9, Impl-оценки
+1. [Принципы](target/00-principles.md) · [Глоссарий target](target/00-glossary.md)
+2. [Platform Admin](target/01-platform-admin/) · [AI Provider Keys](target/02-ai-provider-keys/)
+3. [Companies](target/03-companies/) · [Employees](target/04-employees/)
+4. [Cabinets](target/05-cabinets/) · [Projects & runtime](target/06-projects-runtime/)
+5. [UI mobile core](target/07-ui-mobile-core/) · [Agent providers](target/08-agent-providers/)
+6. [Gap map (target ↔ legacy ↔ код)](target/09-gap-map.md)
 
-## Карта разделов
+Политика legacy: [LEGACY.md](LEGACY.md).
+
+---
+
+## LEGACY (справочно)
+
+Разделы ниже описывают **предыдущую** модель (Tenant / M00–M09 / desktop UI). Их **не расширять** новыми фичами без явной пометки. Новые требования — только в `target/`.
 
 | Раздел | Путь | О чём |
 |--------|------|--------|
-| Vision | [01-vision/](01-vision/) | Продукт, домен |
-| Architecture | [02-architecture/](02-architecture/) | ADR, tenancy, cabinets, agent, MCP, threat model |
-| Modules | [03-modules/](03-modules/) | M00–M09 функциональные модули |
-| Frontend | [04-frontend/](04-frontend/) | Flutter, design system, widgets |
-| Backend | [05-backend/](05-backend/) | FastAPI, ERD, RLS, Alembic |
-| Agent | [06-agent-runtime/](06-agent-runtime/) | Providers, isolation, prompts |
-| Infrastructure | [07-infrastructure/](07-infrastructure/) | k3s, Terraform, CI/CD, runner |
+| Глоссарий (legacy) | [00-glossary.md](00-glossary.md) | Superseded → [target/00-glossary.md](target/00-glossary.md) |
+| Vision | [01-vision/](01-vision/) | Продукт, домен (tenant-centric) |
+| Architecture | [02-architecture/](02-architecture/) | ADR, tenancy, cabinets, agent, MCP |
+| Modules | [03-modules/](03-modules/) | M00–M09 |
+| Frontend | [04-frontend/](04-frontend/) | Flutter; виджеты → [target/07](target/07-ui-mobile-core/) |
+| Backend | [05-backend/](05-backend/) | FastAPI, ERD, RLS |
+| Agent | [06-agent-runtime/](06-agent-runtime/) | Providers → [target/08](target/08-agent-providers/) |
+| Infrastructure | [07-infrastructure/](07-infrastructure/) | k3s, Terraform, CI/CD (актуально для ops) |
 | Migration | [08-migration/](08-migration/) | Commerce MVP → Prodavan |
-| Checklists | [09-checklists/](09-checklists/) | PROGRESS, gates, review, Impl protocol |
-| Implementation | [10-implementation/](10-implementation/) | Roadmap I0–I9, module readiness |
+| Checklists | [09-checklists/](09-checklists/) | Doc/Impl gates (исторические) |
+| Implementation | [10-implementation/](10-implementation/) | Roadmap I0–I9, gaps |
 
-## Приёмка
-
-**Документация (P0–P9):**
-
-- Пункт Doc: **≥ 8/10**
-- Среднее Doc: **≥ 8.5/10** (текущее: **8.7**)
-
-**Реализация (I0–I9):**
-
-- Отдельная шкала Impl — см. [implementation-readiness.md](09-checklists/implementation-readiness.md)
-- Старт I0: Impl avg **≥ 7** (текущее: **6.7** — bridge добавлен, нужен scaffold)
-- После каждой фазы: [review-protocol.md](09-checklists/review-protocol.md)
+Инфра-runbook'и в `07-infrastructure/` (k3d, Argo, runner) остаются рабочими для деплоя; доменная модель ролей/UI в них не канон.

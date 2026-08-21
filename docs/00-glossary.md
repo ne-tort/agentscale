@@ -1,5 +1,7 @@
 # Глоссарий Prodavan
 
+> **LEGACY.** Канонический словарь: [docs/target/00-glossary.md](target/00-glossary.md) (Company / Employee / AI Provider Key).
+
 Единый словарь терминов платформы **Prodavan** — многопользовательской SaaS-системы для AI-ассистированных бизнес-процессов с жёсткой изоляцией арендаторов. Документ согласован с архитектурой `docs/02-architecture/` и продуктовым видением `docs/01-vision/`.
 
 ---

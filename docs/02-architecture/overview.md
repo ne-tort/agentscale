@@ -1,5 +1,7 @@
 # Архитектурный обзор Prodavan
 
+> **LEGACY.** Канон ролей, компаний и runtime: [docs/target/](../target/). Не расширять без синхронизации с target.
+
 Prodavan построен по принципам **Clean Architecture** с чётким разделением слоёв, направлением зависимостей «внутрь» и сквозной изоляцией **Tenant → Cabinet → Project**. Стек: **Flutter** (presentation), **FastAPI** (application + infrastructure adapters), **PostgreSQL** (persistence + RLS), **k3s** (agent runtime).
 
 ---

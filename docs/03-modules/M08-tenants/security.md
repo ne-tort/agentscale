@@ -1,5 +1,7 @@
 # M08 — Безопасность
 
+> **LEGACY.** Целевая авторизация: [docs/target/10-identity-keycloak](../../target/10-identity-keycloak/). Локальный password-login + HS256 JWT не расширять.
+
 ## JWT
 
 | param | value |
@@ -10,6 +12,9 @@
 | issuer | prodavan |
 
 Keys in KMS. JWKS endpoint: `/.well-known/jwks.json`
+
+**Target:** issuer/JWKS — **Keycloak** realm; API не выдаёт access token сама.
+
 
 ## Password
 

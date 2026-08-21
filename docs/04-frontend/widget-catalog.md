@@ -1,5 +1,7 @@
 # Каталог виджетов `core/widgets`
 
+> **LEGACY.** Канон UI (mobile-first, без модалок): [docs/target/07-ui-mobile-core/](../target/07-ui-mobile-core/). Часть строк ниже описывает несуществующие виджеты.
+
 Переиспользуемые UI-компоненты уровня **core** — без привязки к конкретному модулю M00–M09. Feature-специфичные виджеты живут в `features/*/presentation/widgets/`.
 
 ---

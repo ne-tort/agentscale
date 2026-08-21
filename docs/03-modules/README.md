@@ -1,5 +1,7 @@
 # Модули Prodavan (M00–M09)
 
+> **LEGACY.** Канон модулей продукта: [docs/target/](../target/). M00–M09 — историческая нарезка.
+
 | ID | Модуль | Зависимости | Кратко |
 |----|--------|-------------|--------|
 | M00 | [cabinets](M00-cabinets/README.md) | M08 | Кабинеты, profile packs, switch |

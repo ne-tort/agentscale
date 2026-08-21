@@ -1,5 +1,7 @@
 # M08 — Tenants (мультитенантность)
 
+> **LEGACY.** Канон компаний/сотрудников: [docs/target/03-companies](../../target/03-companies/), [04-employees](../../target/04-employees/). Auth: [10-identity-keycloak](../../target/10-identity-keycloak/).
+
 Модуль **tenant CRUD**, пользователи, **RBAC**, роли на уровне кабинета, **JWT auth**, **полная изоляция** — нет глобальных боевых данных между tenant.
 
 ## Принципы
