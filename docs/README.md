@@ -28,7 +28,7 @@
 | Frontend | [04-frontend/](04-frontend/) | Flutter; виджеты → [target/07](target/07-ui-mobile-core/) |
 | Backend | [05-backend/](05-backend/) | FastAPI, ERD, RLS |
 | Agent | [06-agent-runtime/](06-agent-runtime/) | Providers → [target/08](target/08-agent-providers/) |
-| Infrastructure | [07-infrastructure/](07-infrastructure/) | k3s, Terraform, CI/CD (актуально для ops) |
+| Infrastructure | [07-infrastructure/](07-infrastructure/) | k3s, Terraform, CI/CD (актуально для ops); [Alembic](07-infrastructure/alembic.md) |
 | Migration | [08-migration/](08-migration/) | Commerce MVP → Prodavan |
 | Checklists | [09-checklists/](09-checklists/) | Doc/Impl gates (исторические) |
 | Implementation | [10-implementation/](10-implementation/) | Roadmap I0–I9, gaps |

@@ -1,35 +1,13 @@
-# FastAPI backend
+# Prodavan API — STUB
 
-Спека: [`docs/05-backend/structure.md`](../../docs/05-backend/structure.md)
+Это **болванка** платформы. Доменную логику не восстанавливать из git history —
+реализовывать по канону [`docs/target/`](../../docs/target/).
 
-## Quick start
+Что оставлено для k3s / CI:
 
-```bash
-# Infrastructure (from repo root)
-docker compose -f infra/docker-compose.dev.yml up -d
+- `GET /health`, `/health/live`, `/health/ready` (ready = Postgres `SELECT 1`)
+- `GET /api/v1/stub` — маркер stub
+- Alembic: единственная ревизия `stub_bootstrap` (таблица `stub_meta`)
+- Entrypoint: `alembic upgrade head` → uvicorn
 
-# Migrations (superuser — один раз после docker up)
-cd apps/api
-pip install -e ".[dev]"
-DATABASE_URL=postgresql+asyncpg://prodavan:prodavan@localhost:5432/prodavan alembic upgrade head
-
-# API (prodavan_app — RLS enforced)
-cp .env.example .env
-uvicorn prodavan.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-Endpoints (I1):
-- `POST /api/v1/auth/register` — tenant + user + default cabinet
-- `POST /api/v1/auth/login`
-- `POST /api/v1/auth/refresh`
-- `GET /api/v1/me` — Bearer token
-
-Health: `GET http://localhost:8000/api/v1/health` → `{"status":"ok"}`
-
-## Tests
-
-```bash
-DATABASE_URL=postgresql+asyncpg://prodavan_app:prodavan@localhost:5432/prodavan pytest tests/ -q
-```
-
-OpenAPI stub: [`openapi/openapi.yaml`](openapi/openapi.yaml)
+Миграции: [docs/07-infrastructure/alembic.md](../../docs/07-infrastructure/alembic.md).

@@ -17,6 +17,8 @@ flowchart LR
     MERGE --> MIGRATE[alembic staging]
 ```
 
+См. также [alembic.md](alembic.md) (stub bootstrap, cutover).
+
 ---
 
 ## Local-dev deploy (active)

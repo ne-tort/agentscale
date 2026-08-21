@@ -1,4 +1,4 @@
-"""Async SQLAlchemy engine factory."""
+"""Async SQLAlchemy engine factory — stub (no RLS)."""
 
 from collections.abc import AsyncGenerator
 
@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from prodavan.config.settings import settings
-from prodavan.infrastructure.persistence.rls import reset_rls
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
@@ -33,10 +32,7 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     session_factory = get_session_factory()
     async with session_factory() as session:
-        try:
-            yield session
-        finally:
-            await reset_rls(session)
+        yield session
 
 
 async def dispose_engine() -> None:

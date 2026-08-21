@@ -1,4 +1,4 @@
-"""Alembic migration environment."""
+"""Alembic migration environment — stub."""
 
 import asyncio
 from logging.config import fileConfig
@@ -9,16 +9,13 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from prodavan.config.settings import settings
+from prodavan.infrastructure.persistence.models.base import Base
 
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 config.set_main_option("sqlalchemy.url", settings.database_url)
-
-from prodavan.infrastructure.persistence.models import projects as _projects  # noqa: F401
-from prodavan.infrastructure.persistence.models import tenants as _tenants  # noqa: F401
-from prodavan.infrastructure.persistence.models.base import Base
 
 target_metadata = Base.metadata
 

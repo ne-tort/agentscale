@@ -1,1 +1,0 @@
-"""Generic assistant cabinet package."""

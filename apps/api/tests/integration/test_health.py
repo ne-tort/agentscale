@@ -25,3 +25,10 @@ def test_root_health_ok() -> None:
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "ok"}
+
+
+def test_stub_marker() -> None:
+    client = TestClient(create_app())
+    response = client.get("/api/v1/stub")
+    assert response.status_code == 200
+    assert response.json()["status"] == "stub"

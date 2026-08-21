@@ -1,4 +1,7 @@
-"""FastAPI application factory."""
+"""FastAPI application factory — platform STUB.
+
+Product behavior must be implemented from docs/target/, not legacy code.
+"""
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -15,24 +18,14 @@ from prodavan.infrastructure.persistence.database import dispose_engine
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    from prodavan.application.services.auth_service import ensure_platform_admin
-    from prodavan.infrastructure.persistence.database import get_session_factory
-
-    session_factory = get_session_factory()
-    async with session_factory() as session:
-        try:
-            await ensure_platform_admin(session)
-        except Exception:
-            # DB may be unavailable at import-time in some tooling; login seed retries on demand.
-            pass
     yield
     await dispose_engine()
 
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Prodavan API",
-        version="0.1.0",
+        title="Prodavan API (stub)",
+        version="0.0.0-stub",
         lifespan=lifespan,
     )
     app.add_middleware(
@@ -43,7 +36,7 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
     register_exception_handlers(app)
-    # k3s probes per docs/07-infrastructure/k3s-services.md (no /api/v1 prefix)
+    # k3s probes (no /api/v1 prefix) — docs/07-infrastructure/k3s-services.md
     app.include_router(health_routes.router)
     app.include_router(v1_router, prefix=settings.api_v1_prefix)
     return app

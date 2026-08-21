@@ -1,19 +1,21 @@
 # Gap map — target ↔ legacy ↔ код
 
+> **Код сейчас = STUB** ([STUB.md](../../STUB.md)): API/Flutter/DB без доменной логики. Таблица ниже — карта **целевой** реализации относительно legacy-доков; не копировать удалённый код из git history.
+
 Сводка расхождений. Не backlog задач с оценками — карта для реализации.
 
 | Target | Legacy docs | Код сейчас | Gap |
 |--------|-------------|------------|-----|
-| Platform Admin UI + metrics | M08 / admin screens | Flutter Admin (users-heavy) | Companies / keys / catalog shells по [ux-contract](01-platform-admin/ux-contract.md) |
-| Company / Employee | Tenant / membership | User≈Company ещё в коде | Schema + shells по [session](10-identity-keycloak/session.md) |
-| AI Provider Keys | env secrets | Models/API scaffold | Enforce resolve policy; UI |
-| Mobile UI, no modals | widget-catalog | Core primitives + часть screens | ListTile→AppListItem; chat-first |
-| Cabinet SPI + materialize | ADR-001 | SPI + materialize есть | Import ban specs/catalogs; grants enforce |
-| `equipment-procurement` | electronics-procurement | Alias в registry | Stable id + deprecate electronics |
-| Project container | agent-isolation | `local-ws` placeholder | Pod lifecycle + idle policy |
-| Triggers / attachments | — | Scaffold API | Durable bus; chat attach UI |
-| AgentProviderPort | bot SDK | Stub adapters | Sidecar + persist + AgentEvent |
-| Keycloak OIDC | HS256 login | Dual-verify scaffold | Cutover + AppAuth |
+| Platform Admin UI + metrics | M08 / admin screens | **stub** | Реализовать по [ux-contract](01-platform-admin/ux-contract.md) |
+| Company / Employee | Tenant / membership | **stub** | Schema + shells по [session](10-identity-keycloak/session.md) |
+| AI Provider Keys | env secrets | **stub** | Models/API + resolve policy; UI |
+| Mobile UI, no modals | widget-catalog | Theme + core widgets; no feature shells | EntityCollection / screens по [07](07-ui-mobile-core/) |
+| Cabinet SPI + materialize | ADR-001 | **stub** | SPI + packs по [05](05-cabinets/) |
+| `equipment-procurement` | electronics-procurement | Pack JSON only (prompts stubbed) | Module + id по target |
+| Project container | agent-isolation | **stub** | Pod lifecycle + idle policy |
+| Triggers / attachments | — | **stub** | Durable bus; chat attach UI |
+| AgentProviderPort | bot SDK | **stub** | Sidecar + persist + AgentEvent |
+| Keycloak OIDC | HS256 login | **stub** (+ infra/keycloak sketches) | Cutover + AppAuth |
 | OpenClaw / GLM | mentions | Нет | Не внедрять |
 
 ## Решённые противоречия канона
