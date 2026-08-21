@@ -16,9 +16,20 @@ Compose (`docker-compose.stack.yml`) **не** обязателен для это
 ## 1. Prerequisites
 
 - Docker Desktop (WSL2 backend) + контекст `desktop-linux`
-- В WSL или Git Bash: `kubectl`, `curl`; `k3d` поставится terraform/`install.sh`
-- Terraform ≥ 1.5 (`tools/terraform.exe` в репо или системный `terraform`)
+- `curl`; CLI ставятся официальными инсталлерами (без sudo в CI/WSL):
+
+```bash
+# Правильно: env на стороне bash в пайпе (иначе install.sh уйдёт в /usr/local/bin + sudo и зависнет)
+bash infra/scripts/install_cli_tools.sh
+# эквивалент:
+# curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh \
+#   | USE_SUDO=false K3D_INSTALL_DIR="$HOME/.local/bin" bash
+```
+
+- Terraform ≥ 1.5 (системный или `tools/terraform`)
 - Self-hosted runner с labels `self-hosted,linux,docker`
+
+**Антипаттерн (наш бывший баг):** `USE_SUDO=false curl … | bash` — переменные применяются к `curl`, не к `install.sh`, скрипт ставит в `/usr/local/bin` и ждёт пароль sudo → «Preparing to install» навсегда в non-interactive.
 
 ---
 
@@ -157,9 +168,9 @@ curl -sS -H 'Host: prodavan.local' http://127.0.0.1:8088/ | head
 | Server Exited (128) | ensure детектит unhealthy + `k3d cluster start` / `docker start` |
 | Nodes NotReady | ensure делает start + API wait + retry |
 | Smoke сразу после start | `smoke_ingress.sh` ретраит до ~2 мин |
-| ImagePullBackOff (rancher/*) | `bash infra/scripts/warm_k3d_base_images.sh` (host pull + `k3d image import`) |
-| TLS handshake timeout docker.io | warm script с ретраями; VPN/прокси; повторить ensure |
-
+| ImagePullBackOff (rancher/*) | `warm_k3d_base_images.sh` — host pull + `k3d image import` (документированный workflow k3d) |
+| ImagePullBackOff (ghcr) | secret `ghcr-pull` + `import_overlay_images.sh` (preload); политика `IfNotPresent` после import |
+| k3d install зависает на Preparing to install | env на стороне `bash` в пайпе + `USE_SUDO=false`; см. `install_cli_tools.sh` |
 ---
 
 ## Связанные файлы

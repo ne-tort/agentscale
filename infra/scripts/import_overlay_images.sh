@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
-# Pull overlay images on the Docker host and import into k3d.
-# Use with imagePullPolicy IfNotPresent when kubelet to GHCR is flaky.
+# Pull overlay images on the Docker host and import into k3d (documented k3d workflow).
+# Primary auth remains imagePullSecrets (ghcr-pull). Import is the standard k3d way to
+# preload images when the node pull path is slow/unreliable (Docker Desktop / WSL).
+# See: https://k3d.io/stable/usage/configfile/ and `k3d image import --help`
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

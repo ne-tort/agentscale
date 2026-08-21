@@ -16,34 +16,6 @@ API_PORT="${API_PORT:-6443}"
 KCFG="${KUBECONFIG_OUT:-${ROOT}/infra/.kube/prodavan-k3d.yaml}"
 WAIT_NODES_TIMEOUT="${WAIT_NODES_TIMEOUT:-180s}"
 
-install_k3d() {
-  if command -v k3d >/dev/null 2>&1; then
-    return 0
-  fi
-  echo "Installing k3d..."
-  export K3D_INSTALL_DIR="${K3D_INSTALL_DIR:-${HOME}/.local/bin}"
-  mkdir -p "$K3D_INSTALL_DIR"
-  curl -fsSL https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
-  export PATH="${K3D_INSTALL_DIR}:${PATH}"
-  need_cmd k3d
-}
-
-# Docker Desktop may leave a broken kubectl symlink under /usr/local/bin.
-install_kubectl() {
-  export PATH="${HOME}/.local/bin:${PATH}"
-  if command -v kubectl >/dev/null 2>&1 && kubectl version --client >/dev/null 2>&1; then
-    return 0
-  fi
-  echo "Installing kubectl to ~/.local/bin ..."
-  mkdir -p "${HOME}/.local/bin"
-  local ver
-  ver="$(curl -fsSL https://dl.k8s.io/release/stable.txt)"
-  curl -fsSLo "${HOME}/.local/bin/kubectl" "https://dl.k8s.io/release/${ver}/bin/linux/amd64/kubectl"
-  chmod +x "${HOME}/.local/bin/kubectl"
-  need_cmd kubectl
-  kubectl version --client >/dev/null
-}
-
 cluster_listed() {
   k3d cluster list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "$CLUSTER"
 }
@@ -156,8 +128,7 @@ main() {
   need_cmd docker
   need_cmd curl
   export PATH="${HOME}/.local/bin:${PATH}"
-  install_k3d
-  install_kubectl
+  bash "${SCRIPT_DIR}/install_cli_tools.sh"
 
   if ! docker info >/dev/null 2>&1; then
     die "docker daemon not reachable — start Docker Desktop / dockerd"
