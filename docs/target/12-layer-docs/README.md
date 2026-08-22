@@ -27,7 +27,7 @@
 |----|------|--------|---------|
 | [L00](L00-platform-skeleton.md) | Platform skeleton | done | **8** |
 | [L01](L01-identity.md) | Identity & entitlements | not_started | **0** |
-| [L02](L02-ui-core.md) | UI mobile core | not_started | **0** |
+| [L02](L02-ui-core.md) | UI mobile core | done | **8** |
 | [L03](L03-ai-keys.md) | AI Provider Keys | not_started | **0** |
 | [L04](L04-admin-company.md) | Admin + Company | not_started | **0** |
 | [L05](L05-employee-shell.md) | Employee shell | not_started | **0** |

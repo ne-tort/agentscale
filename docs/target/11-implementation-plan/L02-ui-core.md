@@ -32,13 +32,13 @@
 
 ## DoD
 
-- [ ] Реализованы все принципы §1–6 из principles.md (reuse, decomposition, EntityCollection, laconic, responsive, buttons).
-- [ ] EntityCollection: list↔table по breakpoint; один `onOpen`.
-- [ ] Selector page: search, multiSelect, checkboxes из core.
-- [ ] **Ноль** модалок/dropdown для выбора сущностей в core и в demo gallery.
-- [ ] Spacing/theme tokens по канону; не default Inter-only «временная» тема вразрез design-rules (если правила заданы).
-- [ ] Gallery/demo route: все примитивы видимы без backend.
-- [ ] Автотесты на ключевые виджеты + (опционально) screenshot golden.
+- [x] Реализованы все принципы §1–6 из principles.md (reuse, decomposition, EntityCollection, laconic, responsive, buttons).
+- [x] EntityCollection: list↔table по breakpoint; один `onOpen`.
+- [x] Selector page: search, multiSelect, checkboxes из core.
+- [x] **Ноль** модалок/dropdown для выбора сущностей в core и в demo gallery.
+- [x] Spacing/theme tokens по канону; не default Inter-only «временная» тема вразрез design-rules (если правила заданы).
+- [x] Gallery/demo route: все примитивы видимы без backend.
+- [x] Автотесты на ключевые виджеты + (опционально) screenshot golden.
 
 ## Не считать готовым, если…
 

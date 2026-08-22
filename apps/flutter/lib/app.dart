@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/theme/app_theme.dart';
+import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/features/gallery/core_gallery_page.dart';
 
-/// Platform UI stub. Implement product screens from docs/target/.
+/// Platform UI stub + entry to L02 core gallery.
 class ProdavanApp extends StatelessWidget {
   const ProdavanApp({super.key});
 
@@ -40,6 +42,18 @@ class _StubHomePage extends StatelessWidget {
               'Implement from docs/target/',
               style: theme.textTheme.bodyMedium,
               textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            AppButton(
+              label: 'Gallery',
+              expanded: false,
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const CoreGalleryPage(),
+                  ),
+                );
+              },
             ),
           ],
         ),

@@ -9,7 +9,7 @@
 |------|--------|---------|----------|----------------------------|---------|
 | [L00](L00-platform-skeleton.md) | done | 8 | [12](../12-layer-docs/L00-platform-skeleton.md) | L00 skeleton commit | |
 | [L01](L01-identity.md) | todo | 0 | [12](../12-layer-docs/L01-identity.md) | | |
-| [L02](L02-ui-core.md) | todo | 0 | [12](../12-layer-docs/L02-ui-core.md) | | |
+| [L02](L02-ui-core.md) | done | 8 | [12](../12-layer-docs/L02-ui-core.md) | L02 UI core commit | |
 | [L03](L03-ai-keys.md) | todo | 0 | [12](../12-layer-docs/L03-ai-keys.md) | | |
 | [L04](L04-admin-company.md) | todo | 0 | [12](../12-layer-docs/L04-admin-company.md) | | |
 | [L05](L05-employee-shell.md) | todo | 0 | [12](../12-layer-docs/L05-employee-shell.md) | | |

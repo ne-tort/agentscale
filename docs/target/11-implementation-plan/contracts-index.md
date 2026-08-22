@@ -9,9 +9,9 @@
 | C-MEMBERSHIP | L01 | Company/Employee/Membership | L04, L05, L06 | session | planned |
 | C-HEADERS | L01 | `X-Cabinet-Id`, `X-Project-Id` | L05–L08 | session | planned |
 | C-INVITE | L01 | KC invite без password | L04 | session | planned |
-| C-UI-COLLECTION | L02 | `AppEntityCollection` | L04–L07 | [entity-collection](../07-ui-mobile-core/entity-collection.md) | planned |
-| C-UI-SELECTOR | L02 | `AppSelectorPage` | L04, L05 | [app-selector-page](../07-ui-mobile-core/app-selector-page.md) | planned |
-| C-UI-CONFIRM | L02 | `DangerConfirmPage` | L04–L08 HITL | 07 | planned |
+| C-UI-COLLECTION | L02 | `AppEntityCollection` | L04–L07 | [entity-collection](../07-ui-mobile-core/entity-collection.md) | **live** |
+| C-UI-SELECTOR | L02 | `AppSelectorPage` | L04, L05 | [app-selector-page](../07-ui-mobile-core/app-selector-page.md) | **live** |
+| C-UI-CONFIRM | L02 | `DangerConfirmPage` | L04–L08 HITL | 07 | **live** |
 | C-KEY-ENTITY | L03 | `AiProviderKey` API (no secret) | L04, L08 | [02 domain](../02-ai-provider-keys/domain.md) | planned |
 | C-KEY-RESOLVE | L03 | `resolve_credentials` | L08 | 02 + [admin-control](../08-agent-providers/admin-control-plane.md) | planned |
 | C-ADMIN-COMPANY | L04 | Company CRUD, quotas, policy | L05, L06, L08 | [01](../01-platform-admin/), [03](../03-companies/) | planned |
@@ -34,6 +34,7 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-23 | C-UI-* | L02: EntityCollection, Selector, DangerConfirm live | no |
 | 2026-08-23 | C-API-HEALTH | L00: health meta + AppError problem+json | no |
 | (start) | * | Initial registry from target canon | — |
 
