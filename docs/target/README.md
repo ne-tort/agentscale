@@ -31,5 +31,5 @@
 | 05 | Cabinets | Modular monolith + строгие швы; base copy DX; schema-per-cabinet |
 | 06 | Projects & runtime | Project unit, контейнер, materialize, триггеры, чат с вложениями |
 | 07 | UI mobile core | Material 3, EntityCollection, laconic, без модалок |
-| 08 | Agent providers | SDK + паритет AGENTS/skills/rules/MCP |
+| 08 | Agent providers | SDK matrix, wrap, permissions, models, usage, Admin control |
 | 09 | Gap map | target ↔ legacy ↔ stub-код |

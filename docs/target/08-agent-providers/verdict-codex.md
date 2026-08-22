@@ -37,6 +37,8 @@ SDK позиционируется именно для: CI/CD, своих аге
 | `api_kind` | `codex_sdk` (новый) и/или `openai_api` |
 | `provider` | `codex` |
 
+Глубокий разбор: [capabilities-matrix](capabilities-matrix.md) · [permissions-policy](permissions-policy.md) · [vendor-docs/codex](vendor-docs/codex/).
+
 ## Риски
 
 - SDK тянет/пинит runtime Codex CLI — образ worker должен это учитывать.

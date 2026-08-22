@@ -39,6 +39,8 @@ Legacy spike (`claude-code-spike.md`) правильно предостерег�
 | `api_kind` | `claude_agent_sdk` (предпочтительно) или `anthropic_api` (если свой loop) |
 | Branding | Не называть продукт «Claude Code»; в UI — «Claude Agent» / свой бренд |
 
+Глубокий разбор: [capabilities-matrix](capabilities-matrix.md) · [permissions-policy](permissions-policy.md) · [usage-metrics](usage-metrics.md) · [vendor-docs/claude](vendor-docs/claude/).
+
 ## Риски
 
 - SDK бандлит native binary — pin + multi-arch worker images.

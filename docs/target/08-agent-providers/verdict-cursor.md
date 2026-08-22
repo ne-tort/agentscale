@@ -27,6 +27,8 @@
 | Adapter | `CursorSdkAdapter` |
 | Статус | **Готов к platform port** (перенос логики с bot → project container) |
 
+Глубокий разбор: [capabilities-matrix](capabilities-matrix.md) · [wrapping](wrapping.md) · [vendor-docs/cursor](vendor-docs/cursor/).
+
 ## Риски
 
 - Зависимость от Cursor cloud / квот.

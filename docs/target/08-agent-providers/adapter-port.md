@@ -2,6 +2,8 @@
 
 Целевой порт coding-agent backends. GLM / OpenClaw / personal CLI subscription — **вне runtime**.
 
+Детали по SDK: [capabilities-matrix](capabilities-matrix.md) · [wrapping](wrapping.md) · [permissions-policy](permissions-policy.md).
+
 ## Интерфейс
 
 ```text
@@ -11,6 +13,7 @@ AgentProviderPort
   send(handle, message: ChatMessage) -> Stream[AgentEvent]
   cancel(handle)
   close(handle)
+  getUsage?(handle) -> VendorUsage   # optional; Cursor getUsage etc.
 ```
 
 ### CreateOpts
@@ -18,11 +21,13 @@ AgentProviderPort
 | Field | Описание |
 |-------|----------|
 | `cwd` | Materialized workspace path |
-| `model` | Model id (optional) |
-| `mcpServers` | Из `materialize_project` |
-| `apiKey` | Из AiProviderKey resolve (**не** cli_subscription) |
-| `apiKind` | Runtime kind (`cursor_sdk`, …) |
-| `sandbox` | Policy |
+| `model` | Model id (+ params) from allowlist |
+| `mcpServers` | Из materialize ∩ policy |
+| `apiKey` | AiProviderKey resolve (**не** cli_subscription) |
+| `apiKind` | `cursor_sdk` / `codex_sdk` / `claude_agent_sdk` / … |
+| `toolPolicy` | `AgentToolPolicy` ([permissions-policy](permissions-policy.md)) |
+| `budget` | Optional `{ maxUsd?, maxTokens? }` |
+| `settingSources` | SaaS default: `["project"]` only |
 
 ### ChatMessage
 
@@ -30,6 +35,7 @@ AgentProviderPort
 |-------|----------|
 | `text` | User text |
 | `attachment_refs` | Ids из attachments pipeline |
+| `images` | Optional inline images (Cursor send shape) |
 
 ## AgentEvent schema (frozen)
 
@@ -38,26 +44,27 @@ AgentProviderPort
 | `text_delta` | `{ text: string }` | Stream в bubble |
 | `tool_call` | `{ id, name, input }` | Collapsed disclosure |
 | `tool_result` | `{ id, name, output, is_error? }` | Disclosure |
-| `usage` | `{ input_tokens?, output_tokens?, provider }` | Metrics → Admin |
-| `error` | `{ code, message }` | Inline / snack |
+| `tool_approval_request` | `{ id, name, input }` | Full-page approve (HITL) |
+| `usage` | `{ input_tokens?, output_tokens?, provider, model? }` | Metrics → Admin |
+| `error` | `{ code, message, retryable? }` | Inline / snack |
 | `done` | `{ reason?: string }` | Finalize turn |
 
 Каждый event: опционально `at` (ISO timestamp).  
-Адаптеры **обязаны** эмитить `usage` когда провайдер отдаёт counts (иначе Admin metrics пустые).
+Адаптеры **обязаны** эмитить `usage` когда провайдер отдаёт counts.
 
 ## Адаптеры
 
 | Class | Статус |
 |-------|--------|
-| `CursorSdkAdapter` | Primary — **Node sidecar in-pod** (эталон Commerce `CursorSdkRuntime`, без Telegram) |
+| `CursorSdkAdapter` | Primary — Node sidecar (эталон Commerce `CursorSdkRuntime`) |
 | `CodexSdkAdapter` | Secondary |
 | `ClaudeAgentSdkAdapter` | Alternative (API key only) |
-| CLI adapters | Spike/dev only, не multi-tenant SaaS |
+| CLI adapters | Spike/dev only |
 | OpenAI-compatible | Extension LLM, не peer Cursor |
 
-Sessions: **persist** в platform DB (не in-memory как канон).
+Sessions: **persist** в platform DB.
 
 ## Где живёт
 
-Bridge рядом с project workspace / container; API `/projects/{id}/agent/...`.  
-Telegram bot = optional **trigger transport**, не owner сессий.
+Bridge в project container; API `/projects/{id}/agent/...`.  
+Telegram = optional trigger transport.
