@@ -12,5 +12,6 @@
 | [verdict-codex.md](verdict-codex.md) | OpenAI Codex — есть SDK + CLI |
 | [verdict-claude.md](verdict-claude.md) | Claude Code / Agent SDK — есть SDK + CLI |
 | [adapter-port.md](adapter-port.md) | Целевой `AgentProviderPort` |
+| [workspace-context.md](workspace-context.md) | **AGENTS / skills / rules / MCP** — паритет провайдеров + materialize |
 
 Связь с ключами: [02-ai-provider-keys](../02-ai-provider-keys/).

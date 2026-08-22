@@ -35,7 +35,7 @@ create → materialize_project (cabinet SPI)
 | Сторона | Делает |
 |---------|--------|
 | Platform | CRUD metadata; container_ref; route triggers; AI key resolve; attachment metadata; agent session routing |
-| Cabinet | Domain rows; materialize; domain trigger handlers |
+| Cabinet | Domain rows; **UI-настраиваемый контекст** → materialize; domain trigger handlers |
 
 ## API (логический)
 

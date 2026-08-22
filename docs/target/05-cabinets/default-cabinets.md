@@ -1,31 +1,41 @@
 # Default cabinets
 
-В поставке платформы — **два** кабинета.
+В поставке — **два** профиля. Код apps сейчас stub; ниже — целевой смысл.
 
-## 1. Универсальный (`generic-assistant`)
+## 1. Base: `generic-assistant`
 
-| Аспект | Содержание |
-|--------|------------|
-| Назначение | Эталон «костей»: модульные промпты + MCP + чат |
-| UI | Chat, prompts editor, MCP status |
-| БД | Минимальная: sessions metadata, prompt versions |
-| Специфика домена | Нет (намеренно) |
-| Код сегодня | `prodavan/cabinets/generic_assistant` |
-
-На нём накручивается специфика новых кабинетов (copy contract + add domain).
-
-## 2. Подбор оборудования (`equipment-procurement`)
+Полноценный **независимый** кабинет и **эталон клонирования**. Не «пустой шаблон без UX».
 
 | Аспект | Содержание |
 |--------|------------|
-| Назначение | Спека → поиск → ранжирование → КП / характеристики |
-| UI | Projects, specs, variants, KP, equipment cards |
-| БД | runs, lineitems, offers, catalogs hooks |
-| Legacy id | `electronics-procurement` (map 1:1 при миграции docs/code) |
-| Код сегодня | `prodavan/cabinets/electronics_procurement` |
+| Роль | Основа продукта: универсальная автоматизация задач агентом |
+| Projects | EntityCollection |
+| Chat | Streaming + файлы/картинки |
+| Context UI | Prompts, skills, rules, MCP, seeds, AGENTS — пользователь управляет в UI |
+| БД | Своя schema: версии промптов/skills/rules, MCP configs, seed refs, … |
+| Домен | Нет закупочной/иной зашивки |
 
-Product name в UI: **«Подбор оборудования»**. Технический `profile_id` целевой: `equipment-procurement`; до переименования в коде допустим alias на `electronics-procurement`.
+Новый кабинет = **copy** этого pack (BE+FE+assets) → сменить `profile_id` → достроить.  
+Опционально позже: shared `_base` kit для helpers без копипасты низкоуровневого materialize.
+
+Подробнее: [packaging.md](packaging.md) § Base.
+
+## 2. Domain: `equipment-procurement`
+
+| Аспект | Содержание |
+|--------|------------|
+| Роль | Подбор оборудования (спека → поиск → КП / характеристики) |
+| База | **Копия/надстройка** base surfaces (projects, chat, context UI) |
+| UI доп. | Specs, variants, KP, equipment, catalogs — manifest tabs |
+| БД | Своя schema: runs, lineitems, offers, … |
+| Legacy id | `electronics-procurement` → map на `equipment-procurement` |
+
+UI name: **«Подбор оборудования»**.
 
 ## Регистрация
 
-Оба модуля перечислены в platform cabinet catalog; Admin выдаёт компаниям grants; Company — сотрудникам.
+Оба в cabinet catalog; Admin → Company grants; Company → Employee assign.
+
+## Связь
+
+- [packaging.md](packaging.md) · [frontend.md](frontend.md) · [backend.md](backend.md)

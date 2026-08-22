@@ -31,3 +31,4 @@
 
 - Зависимость от Cursor cloud / квот.
 - Версии SDK нужно пинить (как в bot `package.json`).
+- Paths skills/rules — см. [workspace-context.md](workspace-context.md).

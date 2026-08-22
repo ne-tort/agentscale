@@ -42,3 +42,4 @@ SDK позиционируется именно для: CI/CD, своих аге
 - SDK тянет/пинит runtime Codex CLI — образ worker должен это учитывать.
 - Поведение sandbox/MCP отличается от Cursor — маппинг событий в единый `AgentEvent` обязателен.
 - Legacy docs описывали только CLI spike — **обновить ожидания**: SDK существует и предпочтителен.
+- Контекст проекта: Codex нативно читает **AGENTS.md** + skills + MCP — см. [workspace-context.md](workspace-context.md).

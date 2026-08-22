@@ -10,4 +10,4 @@
 | API / Flutter / DB schema | Stub: health + empty UI + `stub_meta` |
 
 Агентам: **не** копировать удалённую S4B/pipeline/password-JWT логику из истории коммитов.
-Новая реализация — по `docs/target/` + Alembic с чистого bootstrap (см. [alembic.md](docs/07-infrastructure/alembic.md)).
+Новая реализация — по `docs/target/` + [AGENTS.md](AGENTS.md) + Alembic с чистого bootstrap (см. [alembic.md](docs/07-infrastructure/alembic.md)).

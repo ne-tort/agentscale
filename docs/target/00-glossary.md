@@ -21,11 +21,14 @@
 
 | Термин | Определение |
 |--------|-------------|
-| **Cabinet** | Специализированное рабочее пространство (модуль): свой UI, БД, промпты, MCP, tools. |
-| **Cabinet module** | Подключаемый пакет BE+FE, реализующий контракт платформы. |
+| **Prodavan** | Универсальный облачный SaaS автоматизации задач агентами (не только закупки). |
+| **Cabinet** | Специализированная рабочая вертикаль: свой UI, данные, промпты/skills/rules/MCP, materialize workspace. |
+| **Base cabinet** | `generic-assistant`: проекты + чат + UI-управление контекстом агента без доменной зашивки. |
+| **Cabinet module** | Pack BE+FE+schema; в монолите изолирован контрактами; готов к выносу в service ([packaging](05-cabinets/packaging.md)). |
 | **Cabinet allowlist** | Список кабинетов, которые Admin выдал компании; Company раздаёт их сотрудникам. |
 | **Project (unit)** | Изолированная единица работы внутри кабинета; контрактная сущность для runtime. |
 | **Project container** | Runtime-изоляция проекта (pod/container): FS, agent, MCP, seed files. |
+| **Materialize** | Сборка workspace проекта из БД/настроек кабинета (`materialize_project`). |
 | **Trigger** | Событие, запускающее/продолжающее агента (сообщение чата, webhook кабинета, cron…). |
 | **AI Provider Key** | Сущность ключа доступа к ИИ-провайдеру с профилем, сроками и привязками к компаниям. |
 | **api_kind** | Тип интеграции ключа: `cursor_sdk`, `openai_api`, `openrouter`, `anthropic_api`, `cli_subscription`, … |

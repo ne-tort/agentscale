@@ -44,3 +44,4 @@ Legacy spike (`claude-code-spike.md`) правильно предостерег�
 - SDK бандлит native binary — pin + multi-arch worker images.
 - Permissions/hooks модель другая, чем Cursor — нужен маппинг в `AgentEvent`.
 - Стоимость API ≠ «безлимит» подписки Claude Max.
+- Контекст: **CLAUDE.md** / `.claude/skills` / rules (не тот же path, что Cursor) — materialize dual-write, см. [workspace-context.md](workspace-context.md).
