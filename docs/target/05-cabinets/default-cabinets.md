@@ -1,41 +1,30 @@
-# Default cabinets
+# Default cabinets & starters
 
-В поставке — **два** профиля. Код apps сейчас stub; ниже — целевой смысл.
+## Base cabinet (обязательный шаблон)
 
-## 1. Base: `generic-assistant`
+При «Создать кабинет» Employee получает instance, склонированный с **Base**:
 
-Полноценный **независимый** кабинет и **эталон клонирования**. Не «пустой шаблон без UX».
+| System area | Содержание |
+|-------------|------------|
+| Projects | EntityCollection проектов |
+| Chat | Agent chat + attachments |
+| Context | Prompts, skills, rules, seeds, AGENTS |
+| Tables | UI над meta.tables (создать/архив) |
+| Tools | UI над mcp_tools registry |
+| MCP contracts | Platform `cabinet.*` уже подключены |
 
-| Аспект | Содержание |
-|--------|------------|
-| Роль | Основа продукта: универсальная автоматизация задач агентом |
-| Projects | EntityCollection |
-| Chat | Streaming + файлы/картинки |
-| Context UI | Prompts, skills, rules, MCP, seeds, AGENTS — пользователь управляет в UI |
-| БД | Своя schema: версии промптов/skills/rules, MCP configs, seed refs, … |
-| Домен | Нет закупочной/иной зашивки |
+Base **независим** и достаточен для универсальной автоматизации.  
+Домен появляется только как **новые tables/tabs/tools** (человек или ИИ).
 
-Новый кабинет = **copy** этого pack (BE+FE+assets) → сменить `profile_id` → достроить.  
-Опционально позже: shared `_base` kit для helpers без копипасты низкоуровневого materialize.
+## Starter bundles (не code modules)
 
-Подробнее: [packaging.md](packaging.md) § Base.
+| Bundle | Бывший смысл |
+|--------|----------------|
+| `equipment-procurement` starter | Спека/поиск/КП как seed tables + views + declarative MCP wrappers |
+| others | По мере появления |
 
-## 2. Domain: `equipment-procurement`
+Ставятся через **Import** из platform catalog или файла — тот же [bundle-format](bundle-format.md).
 
-| Аспект | Содержание |
-|--------|------------|
-| Роль | Подбор оборудования (спека → поиск → КП / характеристики) |
-| База | **Копия/надстройка** base surfaces (projects, chat, context UI) |
-| UI доп. | Specs, variants, KP, equipment, catalogs — manifest tabs |
-| БД | Своя schema: runs, lineitems, offers, … |
-| Legacy id | `electronics-procurement` → map на `equipment-procurement` |
+## Больше не канон
 
-UI name: **«Подбор оборудования»**.
-
-## Регистрация
-
-Оба в cabinet catalog; Admin → Company grants; Company → Employee assign.
-
-## Связь
-
-- [packaging.md](packaging.md) · [frontend.md](frontend.md) · [backend.md](backend.md)
+Отдельные деревья `cabinets/electronics_procurement` в коде приложения как способ добавить домен.

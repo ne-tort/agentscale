@@ -16,7 +16,7 @@
 ```text
 OIDC access_token (Keycloak)
   → API: JWKS validate → Principal { sub, roles, email? }
-  → DB: Employee by keycloak_sub (+ memberships, cabinet grants)
+  → DB: Employee by keycloak_sub (+ memberships, owned/accessible cabinets)
 
 Контекст работы (НЕ в access_token):
   X-Cabinet-Id: <uuid>
@@ -26,7 +26,7 @@ OIDC access_token (Keycloak)
 | Инвариант | Правило |
 |-----------|---------|
 | API **не** issuer | `POST .../switch`, `.../open` **не** перевыпускают access JWT |
-| Entitlements | Только DB: membership + cabinet assignment ⊆ company grants |
+| Entitlements | Только DB: membership + cabinet ownership/ACL (peers isolated) |
 | Cabinets в токене | **Запрещено** как канон (legacy HS256 claims — dual-verify only) |
 | Пароли | Только Keycloak; Prodavan API **не** принимает password на invite/create |
 | Authorization | Даже при claim `company_id` — re-check membership в DB |

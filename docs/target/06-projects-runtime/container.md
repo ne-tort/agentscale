@@ -2,49 +2,45 @@
 
 ## Семантика
 
-Изолированное FS/runtime пространство проекта. Default целевой: **per-project pod**; допустим `local-ws:{workspace_key}` до k8s cutover.
+Изолированное FS/runtime пространство проекта. Default: **per-project pod**; допустим `local-ws:{workspace_key}` до k8s cutover.
 
-Агент в контейнере видит **только** этот workspace (+ разрешённые MCP). Контекст формируется кабинетом, не «общим диском компании».
+Агент видит workspace + MCP: platform `cabinet.*` (scoped) + **enabled MCP packages** кабинета.
 
 ## Lifecycle
 
 | Действие | Эффект |
 |----------|--------|
-| create | Volume/path + `materialize_project` + `container_ref` |
-| update context | Повторный materialize (идемпотентно) после смены промптов/MCP в UI кабинета |
-| pause | Stop agent; сохранить volume |
-| resume | Start; resume agent если provider умеет |
-| delete | Destroy + cabinet `project.deleted` event |
+| create | Volume + materialize + `container_ref` |
+| update context | Re-materialize after prompts/MCP package changes |
+| pause | Stop agent; keep volume |
+| resume | Start; resume agent if supported |
+| delete | Destroy + cabinet event |
 
-Idle / scale-to-zero — platform policy per company plan (позже в ops; default: pause after idle TTL).
-
-## Откуда берётся содержимое
+## Откуда содержимое
 
 ```text
-Cabinet DB / UI settings  --materialize_project-->  /workspace FS
-     prompts, skills, rules, AGENTS fragments,
-     MCP configs, seed files, pack defaults
+CabinetInstance meta/data/settings
+  + mcp_packages (enabled)
+  --materialize-->  /workspace FS + sandbox MCP processes
 ```
 
-Пользователь настраивает контекст в UI кабинета; при создании проекта (и по политике — при sync) SPI пишет файлы в контейнер. Pack git defaults — только **начальные** шаблоны, не единственный источник истины.
+Источник истины — кабинет (UI/DB/packages), не git code-pack.
 
-## Layout (логический канон)
+## Layout
 
 ```text
 /workspace/
-  AGENTS.md                 # always-on instructions (канон для Cursor/Codex)
-  CLAUDE.md                 # optional alias/symlink/copy для Claude Agent SDK
-  prompts/                  # модульные промпты кабинета
-  rules/                    # или .cursor/rules / .claude/rules — см. workspace-context
-  skills/                   # SKILL.md деревья (layout под провайдера при materialize)
-  mcp.json                  # и/или провайдер-специфичный MCP config
+  AGENTS.md
+  CLAUDE.md              # optional dual-write
+  prompts/ rules/ skills/
+  mcp.json               # platform + package wiring
+  packages/              # extracted MCP package trees (sandbox roots)
   inbox/ out/
-  cabinet-seed/             # файлы, которые должны быть в контейнере с первого дня
+  cabinet-seed/
 ```
 
-Точные пути skills/rules **нормализует materialize** под `agent_provider` проекта (см. [workspace-context](../08-agent-providers/workspace-context.md)).
+См. [workspace-context](../08-agent-providers/workspace-context.md), [mcp-packages](../05-cabinets/mcp-packages.md).
 
 ## Agent
 
-Adapter [AgentProviderPort](../08-agent-providers/adapter-port.md) с `cwd=/workspace` и key из AiProviderKey resolve.  
-Primary: Node sidecar рядом с workspace (не Telegram).
+[AgentProviderPort](../08-agent-providers/adapter-port.md); cwd=/workspace; key from AiProviderKey resolve.

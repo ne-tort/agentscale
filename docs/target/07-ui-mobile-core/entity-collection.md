@@ -18,9 +18,9 @@
 
 | Contour | Коллекции |
 |---------|-----------|
-| Admin | Companies, AI keys, cabinet catalog |
-| Company | Employees, assigned cabinets / grants |
-| Employee | Projects; cabinet domain: prompts, runs, catalogs, … |
+| Admin | Companies, AI keys, starter bundles |
+| Company | Employees, org cabinets (metrics) |
+| Employee | Own cabinets; Projects; dynamic tabs from meta |
 
 ## Слоты оболочки (декомпозиция)
 

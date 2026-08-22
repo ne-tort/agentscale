@@ -15,8 +15,8 @@
 
 1. **Универсальный облачный сервис** автоматизации задач агентами (не только закупки).
 2. **Иерархия:** Platform Admin → Company → Employee (модель менеджмента).
-3. **Кабинеты** — изолированные вертикали (свой BE+FE+schema) под задачу. Сейчас в **modular monolith**, но со швами как у microservice ([packaging](docs/target/05-cabinets/packaging.md)). Базовый кабинет = независимая основа (проекты, чат, UI: промпты/skills/rules/MCP/seeds); остальные **копируют** base и достраивают домен.
-4. **Проект** — изолированный контейнер; агент получает контекст от кабинета (`AGENTS.md`, prompts, rules, skills, MCP, файлы), собранный из БД/настроек кабинета, которые пользователь настроил в UI.
+3. **Кабинеты (dynamic):** instance с ownership Employee+Company+Admin; schema-per-instance (изоляция пиров). UI из meta. ИИ создаёт таблицы/вкладки и **MCP packages** (zip код+контракт → deploy). Export/import. См. [`dynamic-cabinets.md`](docs/target/05-cabinets/dynamic-cabinets.md), [`mcp-packages.md`](docs/target/05-cabinets/mcp-packages.md).
+4. **Проект** — контейнер агента в кабинете; контекст из кабинета; агент может расширять экосистему кабинета (переиспользуемые MCP tools между проектами).
 
 Подробности: [`docs/target/00-principles.md`](docs/target/00-principles.md).
 

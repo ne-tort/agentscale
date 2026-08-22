@@ -5,7 +5,7 @@
 
 ## Суть (одной строкой)
 
-Универсальный облачный SaaS автоматизации задач: Admin → Company → Employee → **Cabinet** (модуль) → **Project** (контейнер агента с промптами/skills/rules/MCP из UI кабинета).
+Универсальный облачный SaaS: Admin → Company → Employee → **динамический Cabinet** (meta+data+MCP, UI из схемы) → **Project** (агент достраивает кабинет контрактами).
 
 ## Порядок чтения
 
@@ -24,11 +24,11 @@
 | ID | Модуль | Суть |
 |----|--------|------|
 | 10 | Identity (Keycloak) | OIDC IdP; JWKS; без локального password-login |
-| 01 | Platform Admin | UI админа: компании, ключи ИИ, мониторинг, allowlist кабинетов |
+| 01 | Platform Admin | UI админа: компании, ключи ИИ, мониторинг, квоты/policy кабинетов |
 | 02 | AI Provider Keys | Унифицированные ключи Cursor / Codex / Claude + профили |
-| 03 | Companies | Иерархия org: сотрудники, grants кабинетов, метрики |
+| 03 | Companies | Org: сотрудники, cabinet quotas/metrics, policy |
 | 04 | Employees | Сотрудник: выбор кабинета → работа в кабинете |
-| 05 | Cabinets | Modular monolith + строгие швы; base copy DX; schema-per-cabinet |
+| 05 | Cabinets | **Dynamic** instances: meta-UI, MCP contracts, bundles |
 | 06 | Projects & runtime | Project unit, контейнер, materialize, триггеры, чат с вложениями |
 | 07 | UI mobile core | Material 3, EntityCollection, laconic, без модалок |
 | 08 | Agent providers | SDK matrix, wrap, permissions, models, usage, Admin control |

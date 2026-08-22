@@ -32,7 +32,7 @@ Flutter / Web shell
 |-----------|------|
 | **Keycloak** | Login UI, credentials, MFA, refresh, realm roles |
 | **Prodavan API** | JWKS validate; enforce Company/Cabinet/Project access |
-| **Prodavan DB** | Employee, Company, memberships, grants — не пароли |
+| **Prodavan DB** | Employee, Company, memberships, CabinetInstance refs — не пароли |
 | **Flutter** | OIDC client; tokens в secure storage |
 
 ## Realm / clients

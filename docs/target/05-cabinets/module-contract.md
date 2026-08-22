@@ -1,75 +1,32 @@
-# Cabinets — module contract (frozen)
+# Cabinet Runtime contract
 
-Кабинет = **installable vertical** (BE+FE+данные+MCP+промпты/skills/rules).  
-Платформа не знает доменной логики кабинета.
+Бывший «module contract» code-pack’ов. Теперь контракт **платформенного Cabinet Runtime** ↔ UI/Agent.
 
-**Деплой сейчас:** modular monolith — [packaging.md](packaging.md).  
-**Контракты:** как к будущему microservice (SPI / UiModule — единственные швы).
+## Surface
 
-## Идентификация
+| Method / route group | Назначение |
+|----------------------|------------|
+| Instance CRUD | create from Base / import, rename, archive |
+| Meta CRUD | tables, columns, tabs, views |
+| Data | rows query/upsert/delete |
+| MCP registry | register/list/disable declarative tools |
+| Bundle | export/import |
+| Materialize hook | project prepare → mcp.json + workspace seeds |
 
-| Поле | Описание |
-|------|----------|
-| `profile_id` | Стабильный id. Канон: `generic-assistant`, `equipment-procurement` |
-| `display_name` | UI |
-| `version` | Semver модуля |
-| `min_platform_version` | Совместимость |
+Эквивалент SPI: всё, что раньше уходило в pack `execute_command`, теперь — **стабильные** `cabinet.*` операции Runtime.
 
-**Alias:** `electronics-procurement` → deprecated map на `equipment-procurement` (не новый product id).
+## Import ban (обновлённый)
 
-## SPI (обязательный surface)
+- Platform routers не содержат доменной логики «закупок».  
+- Agent не получает raw SQL.  
+- Custom executable MCP — не в v1.
 
-Host вызывает **только**:
-
-| Method | Назначение |
-|--------|------------|
-| `health` | Liveness |
-| `manifest` | capabilities, MCP allowlist, project tabs, trigger kinds, base surfaces flags |
-| `migrate` | **Только** cabinet schema / tables |
-| `execute_command` / `execute_query` | Domain ops |
-| `on_platform_event` | Platform → pack |
-| `materialize_project(ctx, workspace_path)` | AGENTS (+ vendor aliases), prompts, skills, rules, MCP, seeds из **кабинетной БД/UI**; идемпотентно |
-
-`SpiContext` несёт `session` (DB) на host + ids (company, employee, cabinet instance, project).  
-**Запрещено** требовать smuggling session только в payload как канон (payload session — transitional).
-
-### Platform import ban
-
-`prodavan/api/v1/**` и platform application **не** импортируют `cabinets.<pack>.*` internals.  
-Доменные HTTP = thin SPI name dispatch (или только `/spi/commands|queries`).
-
-### Cabinet isolation ban
-
-Pack **не** импортирует другой pack's services/tables.  
-Shared code — только явный `_base` kit без доменных таблиц.
-
-## Frontend
-
-1. `CabinetUiModule` (`profile_id`, tabs, builders) — единственная регистрация в shell.
-2. Код только в `lib/cabinets/<profile_id>/`.
-3. Виджеты — mobile core; доменные атомы — внутри pack tree.
-4. Shell **не** hardcode procurement panels.
-
-## Контракт с Project
-
-| Владеет platform | Владеет cabinet |
-|------------------|-----------------|
-| Project row, container_ref, triggers bus, agent routing, AI key resolve, attachments metadata | Domain rows (своя schema), materialize, domain trigger handlers, pack secrets scoped |
-
-## События platform → cabinet
+## Events
 
 | Event | Действие |
 |-------|----------|
-| `company.suspended` | Stop accepting work |
-| `project.created` / `project.prepare` | materialize + domain init |
-| `project.deleted` | Cleanup cabinet DB rows for project |
-| `employee.disabled` | Revoke in-flight ops |
+| `cabinet.meta.changed` | UI invalidate (v2 push) |
+| `project.created` | materialize from cabinet |
+| `cabinet.imported` | audit |
 
-## Изоляция (чеклист)
-
-- [ ] Нет SQL между cabinets / в platform schema из pack migrate  
-- [ ] MCP только allowlist manifest  
-- [ ] Grants: enter/create только если profile ∈ CompanyCabinetGrant  
-- [ ] Pack **не** читает AiProviderKey / platform vault напрямую  
-- [ ] Файлы BE/FE только в деревьях pack  
-- [ ] SPI + UiModule — единственные швы с host  
+См. [dynamic-cabinets.md](dynamic-cabinets.md), [mcp-contracts.md](mcp-contracts.md).

@@ -10,11 +10,12 @@
 |-----|-------|
 | Сводка | `CompanyOverviewPage` |
 | Сотрудники | `CompanyEmployeesPage` → detail |
-| Кабинеты | `CompanyCabinetsPage` |
+| Кабинеты | `CompanyCabinetsPage` (org list / metrics) |
 | Профиль | `CompanyProfilePage` |
 
 ## Потоки (кратко)
 
-- Invite employee: email + cabinets multi-select; **нет password**.
+- Invite employee: email + display name; **нет password**; **нет** static cabinet grants multi-select.
 - Enable/disable: status / danger page.
+- Cabinets: read-mostly org overview (owner, name) — не чужие rows.
 - Metrics: read-only; без входа в чужой чат по умолчанию.

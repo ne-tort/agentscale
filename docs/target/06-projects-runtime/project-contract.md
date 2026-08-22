@@ -2,7 +2,7 @@
 
 ## Семантика
 
-Project = **work unit** внутри cabinet: metadata + workspace + agent session + triggers + attachments.
+Project = **work unit** внутри **CabinetInstance**: metadata + workspace + agent session + triggers + attachments.
 
 Owner tuple: `(company_id, cabinet_id, owner_employee_id)`.
 
@@ -12,19 +12,20 @@ Owner tuple: `(company_id, cabinet_id, owner_employee_id)`.
 |------|----------|
 | `id` | `proj_*` |
 | `company_id` | |
-| `cabinet_id` | Instance кабинета |
-| `profile_id` | Тип модуля |
+| `cabinet_id` | Dynamic CabinetInstance |
 | `slug` / `name` | |
 | `owner_employee_id` | |
 | `status` | `active` \| `paused` \| `deleted` |
 | `workspace_key` | FS / volume key |
-| `container_ref` | Runtime id (`local-ws:…` сейчас; k8s pod later) |
-| `agent_provider` | Optional override preferred provider |
+| `container_ref` | Runtime id |
+| `agent_provider` | Optional override |
 
-## Lifecycle (platform)
+**Нет** `profile_id` code-module — тип кабинета = содержимое instance (meta + packages).
+
+## Lifecycle
 
 ```text
-create → materialize_project (cabinet SPI)
+create → materialize (prompts/skills/AGENTS + platform cabinet.* + enabled MCP packages)
       → ensure container_ref
       → accept triggers / agent sessions
       → pause | resume | archive
@@ -34,8 +35,9 @@ create → materialize_project (cabinet SPI)
 
 | Сторона | Делает |
 |---------|--------|
-| Platform | CRUD metadata; container_ref; route triggers; AI key resolve; attachment metadata; agent session routing |
-| Cabinet | Domain rows; **UI-настраиваемый контекст** → materialize; domain trigger handlers |
+| Platform | Project CRUD; container; triggers; AI keys; attachments meta; agent routing |
+| Cabinet Runtime | Meta/data contracts; package sandbox; materialize inputs |
+| Agent (in project) | May call `cabinet.*` + deployed packages to extend cabinet |
 
 ## API (логический)
 
@@ -50,9 +52,8 @@ POST   /api/v1/projects/{id}/triggers
 POST   /api/v1/projects/{id}/attachments
 ```
 
-Context headers: `X-Cabinet-Id` (+ `X-Project-Id` когда нужно).  
-Домен кабинета — SPI commands/queries, не раздувание platform API.
+Headers: `X-Cabinet-Id`, `X-Project-Id` as needed.
 
 ## Bot
 
-Commerce / Telegram bot = **transport** внешних triggers (`telegram.message`), не источник истины для agent sessions.
+Telegram/Commerce bot = optional **trigger transport**, не owner sessions.

@@ -2,35 +2,40 @@
 
 ## Семантика
 
-Company = **org** (control plane для сотрудников и grants).  
-Открывается пользователем с ролью `company.admin` (Company account = тот же Employee + роль).
+Company = **org** control plane: сотрудники, квоты, метрики, org-ownership кабинетов сотрудников.  
+UI: роль `company.admin`.
 
-**Не** создаёт кабинеты вне Admin allowlist. **Не** читает чужой agent chat по умолчанию.
+Кабинеты **динамические** ([05](../05-cabinets/dynamic-cabinets.md)): создаёт Employee; Company **владеет на уровне org** (метрики/policy), не раздаёт статические `profile_id` modules.
+
+**Не** читает agent chat / rows кабинета по умолчанию (break-glass — отдельная политика).
 
 ## Сущности
 
 | Сущность | Описание |
 |----------|----------|
-| `Company` | Организация (создаёт Platform Admin) |
+| `Company` | Org (создаёт Platform Admin) |
 | `Employee` | Person + `keycloak_sub` + membership |
-| `EmployeeCabinetAssignment` | M:N ⊆ `CompanyCabinetGrant` |
 | `EmployeeStatus` | `invited` \| `active` \| `disabled` |
-| `CompanyAgentPolicy` | `preferred_provider`, `platform_fallback` |
+| `CabinetInstance` | Принадлежит employee + `company_id` (org ownership) |
+| `CompanyAgentPolicy` | preferred_provider, platform_fallback, tool preset narrow |
+| Quotas | Inherited/override from Admin |
+
+**Устарело:** `EmployeeCabinetAssignment` ⊆ `CompanyCabinetGrant` по profile modules.
 
 ## Операции
 
 | Операция | Инвариант |
 |----------|-----------|
-| `employee.invite` | Email → Keycloak invite + DB stub `invited`. **Без password в Prodavan API** |
-| `employee.disable` / `enable` | Disabled → 403 на cabinet/project API |
-| `employee.assign_cabinets` | Только ∩ CompanyCabinetGrant; enforced на enter/create |
-| `metrics.employees` | Read aggregates |
+| `employee.invite` | Email → Keycloak; **без password** |
+| `employee.disable` / `enable` | Disabled → 403 cabinet/project API |
+| `metrics.employees` / `metrics.cabinets` | Aggregates; list cabinet names/owners read-only |
+| `policy.narrow` | Company может только **сужать** Admin policy |
 
-## Наследование кабинетов
+## Поток кабинетов
 
 ```text
-Admin grants profile_ids → Company
-Company assigns cabinet instances / profiles → Employee
-Employee login sees only assigned
-create_cabinet / enter → must pass grant check
+Admin → company + quotas
+Employee → create/import CabinetInstance (own schema)
+Company admin → sees list/metrics; does not edit peer data
+Peer employees → no access to each other's schemas
 ```

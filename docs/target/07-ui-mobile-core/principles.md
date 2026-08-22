@@ -25,9 +25,9 @@
 
 | Contour | Примеры коллекций |
 |---------|-------------------|
-| Admin | Companies, AI keys, cabinet catalog |
-| Company | Employees, grants |
-| Employee | Projects; prompts, runs, … |
+| Admin | Companies, AI keys, starter bundles |
+| Company | Employees, org cabinets |
+| Employee | Own cabinets; Projects; dynamic tabs |
 
 Знакомый UX при смене сущности: проекты → промпты = тот же каркас, другие колонки/данные.
 

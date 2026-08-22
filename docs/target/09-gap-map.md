@@ -10,8 +10,8 @@
 | Company / Employee | Tenant / membership | **stub** | Schema + shells по [session](10-identity-keycloak/session.md) |
 | AI Provider Keys | env secrets | **stub** | Models/API + resolve policy; UI |
 | Mobile UI, no modals | widget-catalog | Theme + core widgets; no feature shells | EntityCollection / screens по [07](07-ui-mobile-core/) |
-| Cabinet SPI + materialize | ADR-001 | **stub** | SPI + packs по [05](05-cabinets/) |
-| `equipment-procurement` | electronics-procurement | Pack JSON only (prompts stubbed) | Module + id по target |
+| Cabinet **dynamic** + bundles | static packs / M00 | **stub** | Runtime + meta-UI + `cabinet.*` MCP по [05](05-cabinets/dynamic-cabinets.md) |
+| Starter equipment bundle | electronics-procurement | Pack JSON remnants | Bundle seed, не Flutter module |
 | Project container | agent-isolation | **stub** | Pod lifecycle + idle policy |
 | Triggers / attachments | — | **stub** | Durable bus; chat attach UI |
 | AgentProviderPort | bot SDK | **stub** | Sidecar + persist + AgentEvent |
@@ -22,7 +22,7 @@
 
 | Было | Решение (зафиксировано) |
 |------|-------------------------|
-| Cabinets/company в JWT vs no reissue | Access token только OIDC; контекст `X-Cabinet-Id` / `X-Project-Id` + DB ([session](10-identity-keycloak/session.md)) |
+| Static cabinet code-packs vs dynamic | **Dynamic cabinets** (meta+bundle+MCP contracts); code-packs не канон ([05](05-cabinets/dynamic-cabinets.md)) |
 | Password в Company create vs Keycloak-only | Invite = email → Keycloak; нет password в Prodavan API |
 | `cli_subscription` vs ban personal CLI runtime | Учётная метка биллинга; **не** runtime credential ([02 domain](02-ai-provider-keys/domain.md)) |
 | Company = «вид пользователя» vs KC roles | Company = org; Company account = Employee + `company.admin` |
@@ -45,18 +45,17 @@ flowchart TB
   subgraph control [Control_plane]
     Admin[PlatformAdmin]
     Keys[AiProviderKeys]
-    Catalog[CabinetCatalog]
+    Quotas[CabinetQuotas_Bundles]
   end
   subgraph org [Org_plane]
     Company[Company]
     Employees[Employees]
-    Grants[CabinetGrants]
   end
   subgraph work [Work_plane]
-    CabHost[CabinetHost]
-    Pack[CabinetPack]
+    CabInst[CabinetInstance]
+    Runtime[CabinetRuntime_MetaUI]
     Project[Project]
-    Runtime[Container_Triggers]
+    Container[Container_Triggers]
     Agent[AgentProviderPort]
   end
 
@@ -64,28 +63,26 @@ flowchart TB
   KC --> Company
   KC --> Employees
   Admin --> Keys
-  Admin --> Catalog
+  Admin --> Quotas
   Admin --> Company
-  Catalog --> Grants
   Company --> Employees
-  Company --> Grants
-  Employees --> CabHost
-  Grants --> CabHost
-  CabHost --> Pack
-  Employees --> Project
-  Project --> Runtime
-  Pack -->|"materialize"| Project
+  Employees --> CabInst
+  Company -.->|"org metrics/policy"| CabInst
+  CabInst --> Runtime
+  CabInst --> Project
+  Project --> Container
+  Runtime -->|"materialize + MCP packages"| Project
   Keys --> Agent
-  Runtime --> Agent
+  Container --> Agent
 ```
 
 | BC | Ответственность | Запрещено |
 |----|-----------------|-----------|
 | Identity | OIDC, JWKS, Principal→Employee | Cabinets, AI keys |
-| Admin + Keys | Companies, grants catalog, keys, metrics | Workspace files, pack domain |
-| Company / Employee | Invite/assign, enter cabinet | Pack SQL, issue JWT |
-| Cabinets | SPI + UiModule | Container lifecycle, raw AI secrets |
-| Projects / Runtime | Project, container_ref, triggers, attachments | Procurement logic |
+| Admin + Keys | Companies, quotas/bundles, keys, metrics | Workspace files, cabinet data rows |
+| Company / Employee | Invite; Employee create/import cabinets | Issue JWT; peer schema access |
+| Cabinet Runtime | Meta UI, schema, `cabinet.*`, MCP packages | Container lifecycle, raw AI secrets |
+| Projects / Runtime | Project, container_ref, triggers, attachments | Hardcoded domain packs |
 | Agent | Port + adapters + usage | GLM, OpenClaw, CLI sub as key |
 | UI core | Primitives + UX system | Feature-specific ListTile zoos |
 
@@ -93,16 +90,16 @@ flowchart TB
 
 1. Identity schema Company/Employee + headers enforcement  
 2. Admin/Company/Employee shells по UX contracts  
-3. Key resolve + grants enforce  
-4. SPI import ban + equipment id  
+3. Key resolve + cabinet quotas/ACL  
+4. Cabinet Runtime + meta UI + `cabinet.*` MCP  
 5. Agent sidecar + persist + AgentEvent  
-6. Container/triggers/attachments productionize  
+6. Container/triggers/attachments + MCP packages deploy  
 
 ### Явно не делать
 
 - OpenClaw; GLM; personal Max/Pro как tenant runtime credentials  
 - Канонизация `POST /auth/login`  
-- Platform `api/v1` → pack service imports  
+- Static `profile_id` code-pack modules как канон  
 - Admin/Company логика внутри Employee screens  
 - JWT reissue на switch/open  
 

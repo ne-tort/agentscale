@@ -1,47 +1,42 @@
 # Platform Admin — UX contract
 
-Эталон плотности: **Stripe Dashboard** (ops) + **Linear** (lists). Не «школьный CRUD».  
-Коллекции: [EntityCollection](../07-ui-mobile-core/entity-collection.md). Лаконичность: [principles](../07-ui-mobile-core/principles.md) §4.
+Эталон: **Stripe Dashboard** + **Linear**.  
+Коллекции: [EntityCollection](../07-ui-mobile-core/entity-collection.md). Кабинеты: [dynamic](../05-cabinets/dynamic-cabinets.md).
 
 ## Семантика UI
 
-Control plane всей платформы. Нет чата проектов, нет домена закупок.
+Control plane платформы. Нет chat проектов, нет доменных cabinet screens.
 
 ## IA (bottom NavigationBar)
 
 | Tab | Экран | Содержимое |
 |-----|-------|------------|
-| Сводка | `AdminOverviewPage` | **Сначала alerts**, затем StatTiles; tap → drill-down page |
-| Компании | `AdminCompaniesPage` | `AppEntityCollection` (companies) + search/filter icons |
-| Ключи ИИ | `AdminAiKeysPage` | EntityCollection → detail / create |
-| Кабинеты | `AdminCabinetCatalogPage` | EntityCollection: modules + who has grant |
+| Сводка | `AdminOverviewPage` | Alerts first, затем StatTiles |
+| Компании | `AdminCompaniesPage` | EntityCollection companies |
+| Ключи ИИ | `AdminAiKeysPage` | Keys → detail / create |
+| Bundles | `AdminStarterBundlesPage` | Optional starter cabinet bundles |
 | Профиль | `AdminProfilePage` | Аккаунт admin |
+
+(Agent policy / quotas — sections в company detail или отдельный tab «Политики».)
 
 ## Chrome
 
-- Title только в слоте `AppScaffold` / section; нет free-floating подсказок.
-- Коллекции: EntityCollection (list/table); строки list — `AppListItem` (dense).
-- EmptyState: короткий факт + «Создать» (noun), без обучающих абзацев.
-- Loading: list skeletons предпочтительнее full-screen spinner на повторных заходах.
-- Toolbar: `AppIconButton` / toggle ([buttons](../07-ui-mobile-core/buttons.md)).
+- Titles только в слотах контейнера; laconic EmptyState.
+- EntityCollection; icon toolbar ([buttons](../07-ui-mobile-core/buttons.md)).
 
 ## Потоки
 
 ### Создать компанию
 
-`AdminCompanyFormPage`: name, slug, subscription (lifetime toggle **или** дата через selector).  
-Invite first `company.admin`: **email only** → Keycloak (нет поля password).  
-Начальные grants: multi `AppSelectorPage`.
+Form: name, slug, subscription.  
+Invite `company.admin`: **email only** → Keycloak.  
+Задать cabinet quotas (defaults).
 
-### Grants / keys
+### Keys / policy
 
-Company detail sections → multi selector pages → save.  
-Danger (suspend/delete): `DangerConfirmPage`.
-
-### AI key
-
-Create page (secret once) → renew months via `AppSelectorPage` → bind companies multi-select.
+Company detail → bind AI keys; set tool preset / model allowlist / quotas.  
+Danger: `DangerConfirmPage`.
 
 ## Definition of done (телефон)
 
-Admin создаёт компанию → ключ → grant `equipment-procurement` → видит alert на сводке — без модалок.
+Admin создаёт компанию → ключ → квоты кабинетов → видит alert на сводке — без модалок.
