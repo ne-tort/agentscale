@@ -10,4 +10,5 @@
 | API / Flutter / DB schema | Stub: health + empty UI + `stub_meta` |
 
 Агентам: **не** копировать удалённую S4B/pipeline/password-JWT логику из истории коммитов.
-Новая реализация — по `docs/target/` + [AGENTS.md](AGENTS.md) + Alembic с чистого bootstrap (см. [alembic.md](docs/07-infrastructure/alembic.md)).
+Новая реализация — по `docs/target/` + план [`11-implementation-plan/`](docs/target/11-implementation-plan/) + as-built [`12-layer-docs/`](docs/target/12-layer-docs/) + [AGENTS.md](AGENTS.md) + Alembic с чистого bootstrap (см. [alembic.md](docs/07-infrastructure/alembic.md)).
+Слой нельзя закрывать «минимальным прототипом» — см. DoD/veto в плане; карточку as-built обновлять в том же PR, что и код.

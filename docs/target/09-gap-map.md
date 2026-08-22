@@ -88,12 +88,17 @@ flowchart TB
 
 ### Волны кода (после канона)
 
-1. Identity schema Company/Employee + headers enforcement  
-2. Admin/Company/Employee shells по UX contracts  
-3. Key resolve + cabinet quotas/ACL  
-4. Cabinet Runtime + meta UI + `cabinet.*` MCP  
-5. Agent sidecar + persist + AgentEvent  
-6. Container/triggers/attachments + MCP packages deploy  
+Операционный план со слоями **L00–L09**, жёсткими DoD и реестром контрактов: **[11-implementation-plan/](11-implementation-plan/)**.  
+Живые карточки «что/как сделано»: **[12-layer-docs/](12-layer-docs/)**.
+
+1. Identity schema Company/Employee + headers enforcement → **L01** (+ **L00**)  
+2. Admin/Company/Employee shells по UX contracts → **L04**, **L05** (+ **L02**)  
+3. Key resolve + cabinet quotas/ACL → **L03**, **L04**, ACL в **L06**  
+4. Cabinet Runtime + meta UI + `cabinet.*` MCP → **L06**  
+5. Agent sidecar + persist + AgentEvent → **L08**  
+6. Container/triggers/attachments + MCP packages deploy → **L07**, **L09** (packages в **L06**)  
+
+Параллельный старт: **L00 ∥ L02 ∥ L03 ∥ каркас L06** — см. [sequence.md](11-implementation-plan/sequence.md).
 
 ### Явно не делать
 
@@ -110,4 +115,5 @@ flowchart TB
 - Keys policy: [02-ai-provider-keys/domain.md](02-ai-provider-keys/domain.md)
 - Cabinet contract: [05-cabinets/module-contract.md](05-cabinets/module-contract.md)
 - Agent port: [08-agent-providers/adapter-port.md](08-agent-providers/adapter-port.md)
+- Implementation plan: [11-implementation-plan/](11-implementation-plan/)
 - Legacy: [../LEGACY.md](../LEGACY.md)

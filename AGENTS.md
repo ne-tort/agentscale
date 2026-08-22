@@ -1,27 +1,50 @@
 # Prodavan Agent
 
-Ты работаешь над **Prodavan** — облачной платформой автоматизации задач (универсальный SaaS), не над Telegram Commerce-ботом.
+Работаешь в репозитории **`prodavan/`** (подмодуль Commerce) — облачная платформа автоматизации задач (SaaS).  
+**Не** Telegram Commerce-бот, **не** закупочный пайплайн из корня Commerce.
 
-Канон продукта: [`docs/target/`](docs/target/). Код `apps/*` сейчас **stub** — см. [`STUB.md`](STUB.md). Legacy docs — [`docs/LEGACY.md`](docs/LEGACY.md); **не** расширять и **не** копировать доменную логику из git history.
+Код `apps/*` сейчас stub: [`STUB.md`](STUB.md). Legacy (`docs/` вне target) — только справка: [`docs/LEGACY.md`](docs/LEGACY.md); не копировать домен из git history.
 
-## Субагенты (Cursor Task)
+## Документация (актуальная)
 
-**Всегда** запускай субагентов с моделью **Auto** = параметр `model: "inherit"` (или не передавай `model` — inherit по умолчанию).
+Всё продуктовое и реализационное — **`docs/target/`**. Индекс: [`docs/target/README.md`](docs/target/README.md).
 
-- **Запрещено** выбирать конкретные slug'и (`gpt-5.6-sol-*`, `composer-*`, `fast` как явный override и т.п.), если пользователь **сам** не попросил другую модель.
-- Сложность задачи **не** оправдывает смену модели субагента.
+| Что | Где | Когда читать |
+|-----|-----|----------------|
+| Суть / принципы продукта | [`00-principles.md`](docs/target/00-principles.md), [`00-glossary.md`](docs/target/00-glossary.md) | Старт любой задачи |
+| Канон BC (что должно быть) | [`01`](docs/target/01-platform-admin/)…[`10`](docs/target/10-identity-keycloak/) | Модуль по теме задачи |
+| Gap / запреты | [`09-gap-map.md`](docs/target/09-gap-map.md) | Перед крупными решениями |
+| План слоёв, DoD, порядок | [`11-implementation-plan/`](docs/target/11-implementation-plan/) | Перед и во время реализации |
+| Правила поставки | [`11/00-rules.md`](docs/target/11-implementation-plan/00-rules.md), [`sequence.md`](docs/target/11-implementation-plan/sequence.md) | Старт слоя |
+| Чеклист готовности | [`11/checklist-master.md`](docs/target/11-implementation-plan/checklist-master.md) | Закрытие слоя |
+| Контракты C-* | [`11/contracts-index.md`](docs/target/11-implementation-plan/contracts-index.md) | Границы между слоями |
+| As-built (что/как есть) | [`12-layer-docs/`](docs/target/12-layer-docs/) | **Сначала** при работе со слоем; обновлять в том же PR |
+| Принципы as-built | [`12/00-principles.md`](docs/target/12-layer-docs/00-principles.md) | Как писать семантику / контракты / связи |
+| Шкала Quality 0–10 | [`12/quality-score.md`](docs/target/12-layer-docs/quality-score.md) | Оценка законченности (`done` ≥ 8) |
+| Карта факта | [`12/map.md`](docs/target/12-layer-docs/map.md) | Связи после поставки |
 
-## Суть продукта (не терять)
+Кабинеты (dynamic): [`05-cabinets/dynamic-cabinets.md`](docs/target/05-cabinets/dynamic-cabinets.md), MCP packages: [`mcp-packages.md`](docs/target/05-cabinets/mcp-packages.md).
 
-1. **Универсальный облачный сервис** автоматизации задач агентами (не только закупки).
-2. **Иерархия:** Platform Admin → Company → Employee (модель менеджмента).
-3. **Кабинеты (dynamic):** instance с ownership Employee+Company+Admin; schema-per-instance (изоляция пиров). UI из meta. ИИ создаёт таблицы/вкладки и **MCP packages** (zip код+контракт → deploy). Export/import. См. [`dynamic-cabinets.md`](docs/target/05-cabinets/dynamic-cabinets.md), [`mcp-packages.md`](docs/target/05-cabinets/mcp-packages.md).
-4. **Проект** — контейнер агента в кабинете; контекст из кабинета; агент может расширять экосистему кабинета (переиспользуемые MCP tools между проектами).
+## Порядок работы
 
-Подробности: [`docs/target/00-principles.md`](docs/target/00-principles.md).
+1. Понять слой задачи → карточка плана `11/LNN-*.md` + as-built `12/LNN-*.md`.
+2. Канон только нужных модулей `01`…`10` (не весь target подряд).
+3. Реализовать за контрактами `C-*`; изолируемое — полностью (см. sequence).
+4. В том же изменении: as-built (семантика, что/как, контракты, Gaps, **Quality**).
+5. Слой `done` только по DoD + veto + Quality ≥ 8 — не «минимальный прототип».
+
+## Суть продукта (якорь)
+
+Admin → Company → Employee → **динамический Cabinet** (meta+UI+MCP packages, schema-per-instance) → **Project** (агент, materialize из кабинета).  
+Не static `profile_id` code-packs. Подробности — в `00-principles` и модуле слоя.
+
+## Субагенты
+
+Всегда **Auto**: `model: "inherit"` (или не указывать). Другие slug'и — только по явной просьбе пользователя.
 
 ## Язык и границы
 
-- Ответы пользователю — на русском, если не сказано иное.
+- Ответы — на русском, если не сказано иное.
 - Новые продуктовые требования — только в `docs/target/`.
 - Infra (k3s, Terraform, Argo, CI) не ломать без явной задачи.
+- Логику слоя не восстанавливать «с нуля из кода» — сначала `12`, затем точечно код.

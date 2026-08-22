@@ -18,6 +18,8 @@
 7. [UI mobile core](07-ui-mobile-core/) (+ [ux-system](07-ui-mobile-core/ux-system.md))
 8. [Agent providers](08-agent-providers/) (+ [workspace-context](08-agent-providers/workspace-context.md))
 9. [Gap map](09-gap-map.md)
+10. [Implementation plan](11-implementation-plan/) ← слои L00–L09, DoD, контракты, чеклисты
+11. [Layer docs (as-built)](12-layer-docs/) ← что сделано / как / семантика / связи по факту кода
 
 ## Карта модулей
 
@@ -33,3 +35,5 @@
 | 07 | UI mobile core | Material 3, EntityCollection, laconic, без модалок |
 | 08 | Agent providers | SDK matrix, wrap, permissions, models, usage, Admin control |
 | 09 | Gap map | target ↔ legacy ↔ stub-код |
+| 11 | Implementation plan | Послойная реализация: контракты, DoD, sequence, checklists |
+| 12 | Layer docs (as-built) | Живая семантика/контракты/связи + оценка качества 0–10 |

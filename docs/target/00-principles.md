@@ -6,7 +6,7 @@ Prodavan — **универсальный облачный сервис авто
 
 | Слой | Смысл |
 |------|--------|
-| **Платформа** | Identity, компании, сотрудники, ключи ИИ, каталог кабинетов, project runtime, чат/вложения, мониторинг |
+| **Платформа** | Identity, компании, сотрудники, ключи ИИ, квоты/bundles кабинетов, project runtime, чат/вложения, мониторинг |
 | **Иерархия** | Platform Admin → Company → Employee — модель менеджмента и доступов |
 | **Кабинет** | Динамический instance (Employee+Company+Admin ownership; peer-isolated schema); meta→UI; MCP packages; export/import |
 | **Проект** | Контейнер агента; platform `cabinet.*` + deployed packages; агент достраивает экосистему кабинета |
