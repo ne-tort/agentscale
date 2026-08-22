@@ -48,8 +48,11 @@ flowchart TB
 | ID | Поставщик | Потребители | Статус |
 |----|-----------|-------------|--------|
 | C-API-HEALTH | L00 | все | live |
+| C-UI-COLLECTION | L02 | L04–L07 | live |
+| C-UI-SELECTOR | L02 | L04, L05 | live |
+| C-UI-CONFIRM | L02 | L04–L08 | live |
 
 ## Заметки по интеграции
 
-- L00 закрыт (Quality 8). Следующий: L02 UI core.
+- L00 + L02 закрыты (Quality 8). Следующие: L01 / L03 / каркас L06.
 - См. [STUB.md](../../../STUB.md) / [L00 as-built](L00-platform-skeleton.md).
