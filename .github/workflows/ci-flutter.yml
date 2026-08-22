@@ -38,9 +38,16 @@ jobs:
 
       - run: flutter pub get
       - run: flutter analyze --no-fatal-infos
+      - run: flutter test
       - name: No raw Color hex outside palette
         run: |
           if grep -RIn --exclude=app_palette.dart 'Color(0x' lib; then
             echo "Raw Color(0x…) found outside app_palette.dart"
+            exit 1
+          fi
+      - name: No entity modals in features
+        run: |
+          if [ -d lib/features ] && grep -RInE 'showDialog\(|AlertDialog\(|showModalBottomSheet\(' lib/features; then
+            echo "Modal entity pickers forbidden in lib/features (use AppSelectorPage)"
             exit 1
           fi

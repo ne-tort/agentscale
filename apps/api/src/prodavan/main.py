@@ -1,6 +1,6 @@
-"""FastAPI application factory — platform STUB.
+"""FastAPI application factory — L00 platform skeleton.
 
-Product behavior must be implemented from docs/target/, not legacy code.
+Product behavior: docs/target/. Do not restore legacy domain from git history.
 """
 
 from collections.abc import AsyncIterator
@@ -24,8 +24,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Prodavan API (stub)",
-        version="0.0.0-stub",
+        title="Prodavan API",
+        version=settings.app_version,
         lifespan=lifespan,
     )
     app.add_middleware(

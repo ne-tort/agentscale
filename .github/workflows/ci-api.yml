@@ -75,6 +75,13 @@ jobs:
           DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@127.0.0.1:55432/prodavan
         run: alembic upgrade head
 
+      - name: Migration downgrade smoke
+        env:
+          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@127.0.0.1:55432/prodavan
+        run: |
+          alembic downgrade base
+          alembic upgrade head
+
       - name: Ruff check
         run: ruff check src tests
 

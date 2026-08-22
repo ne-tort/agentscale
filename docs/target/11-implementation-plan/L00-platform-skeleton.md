@@ -33,12 +33,12 @@
 
 ## DoD (критерий успеха)
 
-- [ ] API поднимается; health стабилен; OpenAPI/schema stub или эквивалент контрактных тестов.
-- [ ] Alembic: чистый bootstrap; `upgrade head` / `downgrade` на пустой Postgres в CI.
-- [ ] Flutter: приложение стартует; **нет** Dialog/BottomSheet в core; пустой home → готов к L02.
-- [ ] Запрет: нет password-login, нет HS256 issuer, нет procurement/S4B кода.
-- [ ] Документирован layout модулей API (`api` / `application` / `domain` / `infrastructure` или принятый эквивалент).
-- [ ] Lint/test job в CI зелёный на skeleton.
+- [x] API поднимается; health стабилен; OpenAPI/schema stub или эквивалент контрактных тестов.
+- [x] Alembic: чистый bootstrap; `upgrade head` / `downgrade` на пустой Postgres в CI.
+- [x] Flutter: приложение стартует; **нет** Dialog/BottomSheet в core; пустой home → готов к L02.
+- [x] Запрет: нет password-login, нет HS256 issuer, нет procurement/S4B кода.
+- [x] Документирован layout модулей API (`api` / `application` / `domain` / `infrastructure` или принятый эквивалент).
+- [x] Lint/test job в CI зелёный на skeleton.
 
 ## Не считать готовым, если…
 

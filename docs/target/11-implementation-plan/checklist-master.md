@@ -7,7 +7,7 @@
 
 | Слой | Статус | Quality | As-built | Доказательство (PR / suite) | Блокеры |
 |------|--------|---------|----------|----------------------------|---------|
-| [L00](L00-platform-skeleton.md) | todo | 1 | [12](../12-layer-docs/L00-platform-skeleton.md) | | |
+| [L00](L00-platform-skeleton.md) | done | 8 | [12](../12-layer-docs/L00-platform-skeleton.md) | L00 skeleton commit | |
 | [L01](L01-identity.md) | todo | 0 | [12](../12-layer-docs/L01-identity.md) | | |
 | [L02](L02-ui-core.md) | todo | 0 | [12](../12-layer-docs/L02-ui-core.md) | | |
 | [L03](L03-ai-keys.md) | todo | 0 | [12](../12-layer-docs/L03-ai-keys.md) | | |
@@ -22,7 +22,7 @@
 
 | Фаза | Условие выхода | Статус |
 |------|----------------|--------|
-| A фундамент (L00+L01+L02+L03 + API L06) | контракты C-* поставщиков зелёные | todo |
+| A фундамент (L00+L01+L02+L03 + API L06) | контракты C-* поставщиков зелёные | doing (L00 done) |
 | B control (L04+L05) | UX contracts 01/03/04 | todo |
 | C execution (L07+L08) | materialize + AgentEvent | todo |
 | D vertical (L09) | E2E + metrics | todo |

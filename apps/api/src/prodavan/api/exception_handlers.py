@@ -1,9 +1,11 @@
-"""RFC 7807 problem details — stub."""
+"""RFC 7807 problem details + AppError mapping."""
 
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+
+from prodavan.domain.errors import AppError
 
 
 def problem_response(
@@ -28,13 +30,22 @@ def problem_response(
     return JSONResponse(status_code=status, content=body, media_type="application/problem+json")
 
 
+async def app_error_handler(_request: Request, exc: AppError) -> JSONResponse:
+    return problem_response(
+        status=exc.status,
+        code=exc.code,
+        title=exc.title,
+        detail=exc.detail,
+    )
+
+
 async def http_exception_handler(_request: Request, exc: StarletteHTTPException) -> JSONResponse:
     if isinstance(exc.detail, dict) and "code" in exc.detail:
         return problem_response(
             status=exc.status_code,
             code=str(exc.detail["code"]),
-            title=str(exc.detail["code"]),
-            detail=str(exc.detail.get("message", "")),
+            title=str(exc.detail.get("title", exc.detail["code"])),
+            detail=str(exc.detail.get("message") or exc.detail.get("detail") or ""),
         )
 
     code = "HTTP_ERROR"
@@ -60,5 +71,6 @@ async def validation_exception_handler(
 
 
 def register_exception_handlers(app) -> None:
+    app.add_exception_handler(AppError, app_error_handler)
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)

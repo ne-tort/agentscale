@@ -1,4 +1,4 @@
-"""Application settings — stub."""
+"""Application settings — L00 platform skeleton."""
 
 from pathlib import Path
 
@@ -29,6 +29,15 @@ class Settings(BaseSettings):
     )
     api_v1_prefix: str = "/api/v1"
     storage_root: Path = _REPO_ROOT / "data" / "storage"
+
+    # Build / health metadata (C-API-HEALTH)
+    app_name: str = "prodavan-api"
+    app_version: str = "0.0.0-stub"
+    build_id: str = "dev"
+
+    # Slots for later layers (unused in L00; documented in .env.example)
+    keycloak_issuer_url: str | None = None
+    vault_addr: str | None = None
 
     @property
     def cors_origin_list(self) -> list[str]:
