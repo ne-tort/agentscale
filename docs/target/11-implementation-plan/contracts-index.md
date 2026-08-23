@@ -6,6 +6,7 @@
 |----|-----------|----------|-------------|-------|--------|
 | C-API-HEALTH | L00 | `/api/v1/health` + error envelope | все | STUB | **live** |
 | C-PRINCIPAL | L01 | JWKS → `Principal` | L04–L07 | [session](../10-identity-keycloak/session.md) | **live** |
+| C-AUTH-CONFIG | L01 | GET `/auth/config` OIDC discovery | L05 Flutter | session | **live** (subset) |
 | C-MEMBERSHIP | L01 | Company/Employee/Membership | L04, L05, L06 | session | **live** |
 | C-HEADERS | L01 | `X-Cabinet-Id`, `X-Project-Id` | L05–L08 | session | **live** |
 | C-INVITE | L01 | KC invite без password | L04 | session | **live** |
@@ -35,6 +36,9 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-23 | C-AUTH-CONFIG / C-PRINCIPAL | GET /auth/config; Flutter LoginPage + SessionStore | no |
+| 2026-08-23 | C-CABINET-MCP | meta_audit_events on MCP call + GET audit-events | no |
+| 2026-08-23 | C-EMP-SHELL | ContourSelectorPage multi-company | no |
 | 2026-08-23 | C-META-DATA / C-CABINET-MCP | meta table archive+rename; cabinet.tables.archive MCP | no |
 | 2026-08-23 | C-EMP-SHELL | CabinetTableSettingsPage + CabinetMetaViewEditPage | no |
 | 2026-08-23 | C-EMP-SHELL | Custom tabs UI (CabinetMetaTabsPage) + shell reload epoch | no |

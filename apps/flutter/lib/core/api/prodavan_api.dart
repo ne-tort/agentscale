@@ -26,6 +26,28 @@ class ProdavanApi {
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
 
+  Future<List<Map<String, dynamic>>> listAuditEvents({
+    required String cabinetId,
+    int limit = 50,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.get(
+        _uri('/cabinets/$cabinetId/audit-events?limit=$limit'),
+        headers: _headers,
+      );
+      _throwIfError(res);
+      final body = jsonDecode(res.body);
+      if (body is List) {
+        return body.cast<Map<String, dynamic>>();
+      }
+      return const [];
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
   Future<Map<String, dynamic>> me() async {
     final res = await http.get(_uri('/me'), headers: _headers);
     _throwIfError(res);

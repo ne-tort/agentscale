@@ -20,9 +20,11 @@
 
 | Сделано | Gaps |
 |---------|------|
-| `ProdavanApi` client (Bearer + work headers) | AppAuth OIDC login |
-| `WorkContext` singleton | ContourSelectorPage |
-| DevSessionPage (paste JWT) | Production secure storage |
+| `ProdavanApi` client (Bearer + work headers) | AppAuth PKCE (full) |
+| `WorkContext` singleton | |
+| LoginPage + SessionGate + SessionStore | Production secure storage |
+| ContourSelectorPage (multi-company) | |
+| DevSessionPage (legacy) | |
 | `CabinetCreatePage` full-page (no modal) | Custom bundle tab views (non-collection) |
 | `CabinetRowEditPage` full-page row edit | |
 | `ProjectCreatePage` full-page (no modal) | |
@@ -36,7 +38,7 @@
 
 | Требование | Статус | Заметка |
 |------------|--------|---------|
-| OIDC login | todo | L01 |
+| OIDC login | live (subset) | GET /auth/config + LoginPage stub; PKCE AppAuth — hole |
 | Import bundle UI | live | `CabinetImportBundlePage` |
 | Bundle export save | live | Context tab + `FilePicker.saveFile` |
 | Row edit UI | live | `CabinetRowEditPage` full-page |

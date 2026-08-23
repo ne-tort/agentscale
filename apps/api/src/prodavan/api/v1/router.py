@@ -2,11 +2,12 @@
 
 from fastapi import APIRouter
 
-from prodavan.api.v1 import admin_companies, admin_metrics, admin_starter_bundles, agent, ai_keys, cabinets, health, identity, projects, stub
+from prodavan.api.v1 import admin_companies, admin_metrics, admin_starter_bundles, agent, ai_keys, auth, cabinets, health, identity, projects, stub
 
 router = APIRouter()
 router.include_router(health.router)
 router.include_router(stub.router)
+router.include_router(auth.router)
 router.include_router(identity.router)
 router.include_router(admin_companies.router)
 router.include_router(admin_metrics.router)

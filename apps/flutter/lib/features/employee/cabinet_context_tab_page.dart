@@ -31,6 +31,7 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
   int _projects = 0;
   int _tables = 0;
   int _tools = 0;
+  int _auditEvents = 0;
 
   @override
   void initState() {
@@ -49,6 +50,7 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
         workContext.api.listProjects(widget.cabinetId),
         workContext.api.listMetaTables(widget.cabinetId),
         workContext.api.listCabinetMcpTools(widget.cabinetId),
+        workContext.api.listAuditEvents(cabinetId: widget.cabinetId, limit: 20),
       ]);
       if (!mounted) return;
       setState(() {
@@ -56,6 +58,7 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
         _projects = (results[1] as List).length;
         _tables = (results[2] as List).length;
         _tools = (results[3] as List).length;
+        _auditEvents = (results[4] as List).length;
         _loading = false;
       });
     } catch (e) {
@@ -132,6 +135,7 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
               SizedBox(width: 140, child: StatTile(label: 'Projects', value: '$_projects')),
               SizedBox(width: 140, child: StatTile(label: 'Meta tables', value: '$_tables')),
               SizedBox(width: 140, child: StatTile(label: 'MCP tools', value: '$_tools')),
+              SizedBox(width: 140, child: StatTile(label: 'Audit (recent)', value: '$_auditEvents')),
             ],
           ),
           const SizedBox(height: 16),

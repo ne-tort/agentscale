@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
 from prodavan.application.cabinets import (
+    CabinetAuditService,
     CabinetBundleService,
     CabinetInstanceService,
     CabinetMcpDispatcher,
@@ -633,6 +634,22 @@ async def mcp_call(
         employee=employee,
     )
     return {"tool": body.tool, "result": result}
+
+
+@router.get("/{cabinet_id}/audit-events")
+async def list_audit_events(
+    cabinet_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+    limit: int = 50,
+) -> list[dict]:
+    return await CabinetAuditService(session).list_events(
+        cabinet_id=cabinet_id,
+        principal=principal,
+        employee=employee,
+        limit=limit,
+    )
 
 
 @router.post("/{cabinet_id}/materialize-stub")

@@ -53,6 +53,16 @@ def test_me_requires_bearer(client: TestClient) -> None:
     assert r.headers["content-type"].startswith("application/problem+json")
 
 
+def test_auth_config_public(client: TestClient) -> None:
+    r = client.get("/api/v1/auth/config")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["auth_mode"] in {"test", "oidc"}
+    if body["auth_mode"] == "test":
+        assert body["oidc"] is None
+    assert "audience" not in body or body.get("oidc") is None or "audience" in body["oidc"]
+
+
 def test_invalid_token_rejected(client: TestClient) -> None:
     r = client.get("/api/v1/me", headers={"Authorization": "Bearer not-a-jwt"})
     assert r.status_code == 401

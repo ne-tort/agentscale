@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.cabinets.access import CabinetAccessService
+from prodavan.application.cabinets.audit_service import CabinetAuditService
 from prodavan.application.cabinets.bundle_service import CabinetBundleService
 from prodavan.application.cabinets.instance_service import CabinetInstanceService
 from prodavan.application.cabinets.meta_service import CabinetMetaService
@@ -44,6 +45,7 @@ class CabinetMcpDispatcher:
         self._rows = CabinetRowsService(session)
         self._bundles = CabinetBundleService(session)
         self._packages = CabinetPackagesService(session)
+        self._audit = CabinetAuditService(session)
 
     async def call(
         self,
@@ -86,6 +88,48 @@ class CabinetMcpDispatcher:
         )
         self._validate_required(spec.input_schema, args)
 
+        try:
+            result = await self._dispatch(
+                tool=tool,
+                args=args,
+                cabinet_id=cabinet_id,
+                principal=principal,
+                employee=employee,
+            )
+        except AppError as exc:
+            try:
+                await self._audit.record(
+                    cabinet_id=cabinet_id,
+                    event_type="mcp.call",
+                    tool_name=tool,
+                    principal=principal,
+                    detail={"status": "error", "code": exc.code, "arguments": args},
+                )
+            except Exception:
+                pass
+            raise
+
+        try:
+            await self._audit.record(
+                cabinet_id=cabinet_id,
+                event_type="mcp.call",
+                tool_name=tool,
+                principal=principal,
+                detail={"status": "ok", "arguments": args},
+            )
+        except Exception:
+            pass
+        return result
+
+    async def _dispatch(
+        self,
+        *,
+        tool: str,
+        args: dict[str, Any],
+        cabinet_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
         if tool == "cabinet.info":
             return await self._instances.get(cabinet_id=cabinet_id, principal=principal, employee=employee)
 

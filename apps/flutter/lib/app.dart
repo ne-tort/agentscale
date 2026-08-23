@@ -6,7 +6,8 @@ import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/features/admin/dev_admin_session_page.dart';
 import 'package:prodavan/features/company/dev_company_session_page.dart';
-import 'package:prodavan/features/employee/dev_session_page.dart';
+import 'package:prodavan/features/employee/login_page.dart';
+import 'package:prodavan/features/employee/session_gate_page.dart';
 import 'package:prodavan/features/gallery/core_gallery_page.dart';
 
 /// Platform entry — dev employee shell + L02 gallery.
@@ -48,11 +49,22 @@ class _HomePage extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.lg),
             AppButton(
-              label: 'Employee (dev)',
+              label: 'Employee sign in',
               expanded: false,
               onPressed: () {
                 Navigator.of(context).push(
-                  MaterialPageRoute<void>(builder: (_) => const DevSessionPage()),
+                  MaterialPageRoute<void>(builder: (_) => const SessionGatePage()),
+                );
+              },
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            AppButton(
+              label: 'Employee (dev paste only)',
+              expanded: false,
+              variant: AppButtonVariant.outlined,
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(builder: (_) => const LoginPage()),
                 );
               },
             ),

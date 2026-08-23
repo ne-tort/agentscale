@@ -49,6 +49,7 @@ equire_platform_admin.
 | ID | ????? | ?????? |
 |----|-------|--------|
 | C-PRINCIPAL | Bearer JWT ? Principal (oidc\|test) | **live** |
+| C-AUTH-CONFIG | GET /auth/config public OIDC discovery | **live** (subset) |
 | C-MEMBERSHIP | Company / Employee / Membership schema+API | **live** |
 | C-HEADERS | X-Cabinet-Id, X-Project-Id ? WorkContext | **live** |
 | C-INVITE | Invite API shape без password (Fake | Http KC Admin) | **live** (порт); realm cutover — gap |
@@ -98,7 +99,7 @@ apps/api/tests/unit/test_jwt_validator.py
 | Headers work context | done | |
 | Invite без password | done | Fake + HttpKeycloakInviteClient |
 | Disable ? 403 | done | tested with PG when available |
-| Flutter AppAuth session | todo | L05 shell |
+| Flutter AppAuth session | live (subset) | LoginPage + SessionStore; PKCE — hole |
 | Live KC realm cutover | todo | ????????? Status=done |
 | Platform admin dual employee row | done | /me loads row when email present |
 

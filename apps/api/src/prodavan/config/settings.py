@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     keycloak_issuer_url: str | None = None
     oidc_jwks_url: str | None = None
     oidc_audience: str = "prodavan-api"
+    oidc_flutter_client_id: str = "prodavan-flutter"
     oidc_jwks_cache_seconds: int = 300
     auth_test_secret: str = "dev-only-test-secret-change-me"
 

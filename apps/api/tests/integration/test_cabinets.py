@@ -663,3 +663,39 @@ def test_meta_table_archive_and_rename(client: TestClient) -> None:
     )
     assert mcp_ok.status_code == 200, mcp_ok.text
     assert mcp_ok.json()["result"]["status"] == "archived"
+
+
+@requires_postgres
+def test_mcp_audit_events(client: TestClient) -> None:
+    admin = _token(sub="audit-admin", platform_admin=True)
+    created = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "AuditCo", "admin_email": "audit@cabco.test"},
+    )
+    assert created.status_code == 201, created.text
+    company_id = created.json()["company"]["id"]
+
+    owner_tok = _token(sub="audit-owner", email="audit@cabco.test")
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "Audit Cab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    called = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/mcp/call",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"tool": "cabinet.tables.list", "arguments": {}},
+    )
+    assert called.status_code == 200, called.text
+
+    events = client.get(
+        f"/api/v1/cabinets/{cabinet_id}/audit-events",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert events.status_code == 200, events.text
+    body = events.json()
+    assert any(e.get("tool_name") == "cabinet.tables.list" for e in body)

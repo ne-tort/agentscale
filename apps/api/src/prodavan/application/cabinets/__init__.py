@@ -1,5 +1,6 @@
 """Cabinet Runtime application services."""
 
+from prodavan.application.cabinets.audit_service import CabinetAuditService
 from prodavan.application.cabinets.access import CabinetAccessService
 from prodavan.application.cabinets.bundle_service import CabinetBundleService
 from prodavan.application.cabinets.instance_service import CabinetInstanceService
@@ -11,6 +12,7 @@ from prodavan.application.cabinets.rows_service import CabinetRowsService
 
 __all__ = [
     "CabinetAccessService",
+    "CabinetAuditService",
     "CabinetBundleService",
     "CabinetInstanceService",
     "CabinetMcpDispatcher",

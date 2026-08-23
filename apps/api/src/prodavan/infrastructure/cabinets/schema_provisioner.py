@@ -116,6 +116,21 @@ class SchemaProvisioner:
             )
         )
 
+        await session.execute(
+            text(
+                f"""
+                CREATE TABLE IF NOT EXISTS {qschema}.meta_audit_events (
+                    id TEXT PRIMARY KEY,
+                    event_type TEXT NOT NULL,
+                    tool_name TEXT,
+                    actor_sub TEXT,
+                    detail JSONB NOT NULL DEFAULT '{{}}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+        )
+
         for title, order, slug in BASE_SYSTEM_TABS:
             view_id = _meta_id("view")
             tab_id = _meta_id("tab")

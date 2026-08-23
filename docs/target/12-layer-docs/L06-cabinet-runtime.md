@@ -25,7 +25,7 @@ CabinetInstance: schema-per-instance, meta?UI, cabinet.*, MCP packages, bundles.
 | Instance CRUD + schema-per-instance + Base tabs | UI interpreters (L05) |
 | Meta tables create + tabs list | columns/views mutate API (create/update/delete subset) |
 | Rows query/upsert/delete (physical + json_document) | hard delete meta table |
-| cabinet.* MCP dispatcher | audit events |
+| cabinet.* MCP dispatcher | audit events (MCP calls subset) |
 | Bundle v1 export/import ? new schema (+ packages) | |
 | MCP packages validate/deploy/list/disable/export | sandbox process start (L07 materialize) |
 | Soft max 20 packages/cabinet | Company quotas (L04) ? wired via CompanyQuotaService |
