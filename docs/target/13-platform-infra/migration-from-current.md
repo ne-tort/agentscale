@@ -17,9 +17,9 @@
 
 1. **core + lifespan** — **done** (каркас + DB/worker resources)  
 2. **Redis** — **done** (subset: manager + health; URL optional)  
-3. **MinIO** — **done** (subset: manager + attachments/packages; materialize FS hole)  
+3. **MinIO** — **done** (subset: manager + attachments/packages + materialize text/zip; sandbox extract hole)  
 4. **Celery** — **done** (subset: WorkerManager + tasks; deploy worker/beat hole)  
-5. **Kafka** — **done** (subset: dual-write publish; consumer cutover hole)  
+5. **Kafka** — **done** (subset: dual-write + consumer drain-kick; full cutover hole)  
 
 Допускается значительный рефакторинг; временные dual-write/adapters — только с явным сроком выпила в as-built Gaps.
 

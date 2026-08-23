@@ -24,29 +24,29 @@ Postgres и Keycloak/Vault роли не меняются.
 |---|-------|--------|---------|
 | 1 | core + lifespan | **done** | `DatabaseEngineResource`, `TriggerWorkerResource`, wiring |
 | 2 | Redis | **done** (subset) | URL optional; `REDIS_REQUIRED` для prod; нет docker-compose Redis в этом PR |
-| 3 | MinIO | **done** (subset) | `ObjectStorageManager` local|s3; attachments + cabinet packages → `object://`; materialize FS tree ещё local |
+| 3 | MinIO | **done** (subset) | ObjectStorage + attach/packages + materialize AGENTS/mcp/zip via store; sandbox extract local |
 | 4 | Celery | **done** (subset) | `WorkerManager` + tasks drain/idle/rematerialize; beat schedule; in-process skipped when Celery executor active |
-| 5 | Kafka | **done** (subset) | `KafkaManager` + envelopes; dual-write from emit/enqueue; PG still SoT; consumer cutover — hole |
+| 5 | Kafka | **done** (subset) | dual-write publish + optional consumer kick→Celery drain; PG claim still SoT |
 
 ## Definition of Done
 
 - [x] Пакет `core` с managers: Redis + ObjectStorage + Worker + Kafka (**live subset**)
 - [x] FastAPI lifespan только через `LifespanManager`; ресурсы зарегистрированы
 - [x] Redis live (health + settings); Celery broker = Redis URL when Celery enabled
-- [x] MinIO/S3 manager + attachments/packages via object store; materialize workspace tree — **hole**
+- [x] MinIO/S3 manager + attachments/packages + materialize text/zip via object store; sandbox extract local — **hole**
 - [x] Celery: trigger drain / idle sweep / rematerialize tasks; in-process — transitional fallback
-- [x] Kafka: envelope dual-write for triggers + platform events; **hole:** consumer replaces PG drain/SPI as sole path
+- [x] Kafka: dual-write + optional consumer kick; **hole:** consumer replaces PG drain/SPI as sole path
 - [x] Контракты: `C-CACHE` + `C-OBJECT-STORE` + `C-JOBS` + `C-EVENT-BUS` → **live** (subset)
 - [x] As-built L00/L07/L08 обновлены (w1–w5 subset)
 - [ ] Checklist master: строка P0 → `done` (осталось: deploy Redis/MinIO/Kafka/Celery + materialize SoT + consumer cutover)
 
 ## Дыры логики (следующая итерация)
 
-- Kafka **consumer** не заменяет PG outbox drain / in-process SPI — только dual-write publish.
-- Materialize workspace tree всё ещё local FS SoT.
-- Celery/Kafka/MinIO/Redis не в docker-compose/k3s как обязательный runtime.
-- `KAFKA_ENABLED` / `CELERY_ENABLED` default false.
-- S3 + `mirror_local` dual-write.
+- Kafka consumer **kick-only** (Celery drain); не заменяет PG claim/SPI delivery как sole path.
+- Package **sandbox trees** всё ещё локальный extract (zip в object store есть; mount-from-MinIO — hole).
+- `docker-compose.stack.yml` ещё без Redis/MinIO/Kafka; local sidecars — `infra/docker-compose.dev.yml`.
+- Celery worker/beat не в compose как сервис (документирован ручной запуск).
+- `KAFKA_*` / `CELERY_*` / S3 default off.
 - CORS middleware ещё не через core register.
 - Redis cache/lock facade почти не используется application-кодом.
 

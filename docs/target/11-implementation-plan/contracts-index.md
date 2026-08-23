@@ -40,6 +40,8 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-24 | C-MATERIALIZE / C-OBJECT-STORE | materialize AGENTS/mcp/package.zip via ObjectStorageManager | no |
+| 2026-08-24 | C-EVENT-BUS / C-JOBS | Kafka consumer opt-in kicks Celery trigger_drain (debounce) | no |
 | 2026-08-24 | C-EVENT-BUS | KafkaManager + EventEnvelope; dual-write from platform emit + trigger enqueue | no |
 | 2026-08-24 | C-JOBS | WorkerManager + Celery tasks; in-process loop skipped when Celery executor active | no |
 | 2026-08-24 | C-OBJECT-STORE / C-ATTACH / C-MCP-PKG | ObjectStorageManager; new refs `object://`; legacy `file://` readable | no |

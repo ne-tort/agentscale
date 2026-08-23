@@ -1,4 +1,4 @@
-"""Project workspace FS layout writer (L07)."""
+"""Project workspace FS layout writer (L07) + object-store dual-write (P0)."""
 
 from __future__ import annotations
 
@@ -10,10 +10,16 @@ from pathlib import Path
 from typing import Any
 
 from prodavan.config.settings import settings
+from prodavan.core.infra.object_keys import workspace_object_key
+from prodavan.core.infra.object_storage_manager import ensure_object_storage
 
 
 class WorkspaceLayoutWriter:
-    """Idempotent /workspace layout per container.md."""
+    """Idempotent /workspace layout per container.md.
+
+    Text/config blobs go through ObjectStorageManager (local backend = same paths).
+    Package sandbox trees remain local extract (agent cwd); zip copy also stored.
+    """
 
     def __init__(self, *, workspace_key: str) -> None:
         self._workspace_key = workspace_key
@@ -28,6 +34,10 @@ class WorkspaceLayoutWriter:
     def mcp_config_path(self) -> Path:
         return self._root / "mcp.json"
 
+    def _put_workspace_bytes(self, relative_path: str, data: bytes, *, content_type: str | None = None) -> None:
+        key = workspace_object_key(workspace_key=self._workspace_key, relative_path=relative_path)
+        ensure_object_storage().put_bytes_sync(key, data, content_type=content_type)
+
     def ensure_dirs(self) -> None:
         for rel in ("prompts", "rules", "skills", "packages", "inbox", "out", "cabinet-seed"):
             (self._root / rel).mkdir(parents=True, exist_ok=True)
@@ -38,8 +48,9 @@ class WorkspaceLayoutWriter:
             f"Project workspace for cabinet **{cabinet_name}**.\n\n"
             "Edit context in the cabinet UI; re-materialize to refresh.\n"
         )
-        (self._root / "AGENTS.md").write_text(text, encoding="utf-8")
-        (self._root / "CLAUDE.md").write_text(text, encoding="utf-8")
+        raw = text.encode("utf-8")
+        self._put_workspace_bytes("AGENTS.md", raw, content_type="text/markdown; charset=utf-8")
+        self._put_workspace_bytes("CLAUDE.md", raw, content_type="text/markdown; charset=utf-8")
 
     def write_mcp_config(self, *, cabinet_id: str, packages: list[dict[str, Any]]) -> None:
         payload = {
@@ -50,7 +61,8 @@ class WorkspaceLayoutWriter:
             },
             "packages": packages,
         }
-        self.mcp_config_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        raw = json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8")
+        self._put_workspace_bytes("mcp.json", raw, content_type="application/json")
 
     def prepare_package_sandboxes(self, package_names: list[str]) -> list[dict[str, Any]]:
         from prodavan.infrastructure.projects.mcp_sandbox import prepare_package_sandbox
@@ -66,6 +78,12 @@ class WorkspaceLayoutWriter:
         stop_all_package_processes(workspace_root=self._root)
         names: list[str] = []
         for pkg_name, raw in artifacts:
+            # Persist zip in object store (SoT for package blob in workspace prefix).
+            self._put_workspace_bytes(
+                f"packages/{pkg_name}.zip",
+                raw,
+                content_type="application/zip",
+            )
             dest = self._root / "packages" / pkg_name
             if dest.exists():
                 shutil.rmtree(dest)
@@ -78,7 +96,6 @@ class WorkspaceLayoutWriter:
     def store_inbox_attachment(self, *, filename: str, raw: bytes) -> Path:
         """Write inbox blob via ObjectStorageManager (local backend → same path)."""
         from prodavan.core.infra.object_keys import inbox_object_key
-        from prodavan.core.infra.object_storage_manager import ensure_object_storage
 
         safe = Path(filename).name
         key = inbox_object_key(workspace_key=self._workspace_key, filename=safe)
@@ -88,7 +105,6 @@ class WorkspaceLayoutWriter:
 
     def remove_inbox_attachment(self, *, filename: str) -> bool:
         from prodavan.core.infra.object_keys import inbox_object_key
-        from prodavan.core.infra.object_storage_manager import ensure_object_storage
 
         safe = Path(filename).name
         key = inbox_object_key(workspace_key=self._workspace_key, filename=safe)
@@ -96,7 +112,6 @@ class WorkspaceLayoutWriter:
 
     def read_inbox_attachment(self, *, filename: str) -> bytes:
         from prodavan.core.infra.object_keys import inbox_object_key
-        from prodavan.core.infra.object_storage_manager import ensure_object_storage
 
         safe = Path(filename).name
         key = inbox_object_key(workspace_key=self._workspace_key, filename=safe)

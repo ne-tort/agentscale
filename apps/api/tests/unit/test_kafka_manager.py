@@ -60,3 +60,21 @@ async def test_kafka_enabled_without_bootstrap_stays_buffer() -> None:
     await mgr.publish(platform_envelope(event_id="x", event_type="project.created"))
     assert len(mgr.recent_envelopes()) == 1
     await mgr.shutdown()
+
+
+def test_kafka_kick_drain_increments(monkeypatch: pytest.MonkeyPatch) -> None:
+    set_kafka_manager(None)
+    mgr = KafkaManager(enabled=False)
+    calls: list[dict] = []
+
+    def _fake_enqueue() -> dict:
+        calls.append({"ok": True})
+        return {"enqueued": False, "reason": "celery_disabled"}
+
+    monkeypatch.setattr(
+        "prodavan.core.jobs.enqueue.enqueue_trigger_drain",
+        _fake_enqueue,
+    )
+    mgr._kick_drain()
+    assert mgr.drain_kicks == 1
+    assert len(calls) == 1

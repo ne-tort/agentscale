@@ -37,7 +37,32 @@ services:
     volumes:
       - prodavan_redis_data:/data
 
+  # Kafka-compatible broker for P0 C-EVENT-BUS (local). API: KAFKA_BOOTSTRAP_SERVERS=localhost:19092
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.4
+    container_name: prodavan-redpanda
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr internal://redpanda:8082,external://localhost:18082
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr redpanda:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --mode dev-container
+      - --smp 1
+      - --default-log-level=warn
+    ports:
+      - "19092:19092"
+      - "18081:18081"
+      - "18082:18082"
+    volumes:
+      - prodavan_redpanda_data:/var/lib/redpanda/data
+
 volumes:
   prodavan_pg_data:
   prodavan_minio_data:
   prodavan_redis_data:
+  prodavan_redpanda_data:

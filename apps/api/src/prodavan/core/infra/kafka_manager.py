@@ -1,7 +1,8 @@
-"""KafkaManager — producer facade + LifespanResource (C-EVENT-BUS)."""
+"""KafkaManager — producer/consumer facade + LifespanResource (C-EVENT-BUS)."""
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from collections import deque
@@ -31,9 +32,10 @@ def set_kafka_manager(manager: KafkaManager | None) -> None:
 
 
 class KafkaManager(LifespanResource):
-    """Publish EventEnvelope to Kafka topics (or in-memory buffer when disabled).
+    """Publish EventEnvelope to Kafka; optional consumer kicks Celery drain.
 
-    Consumer cutover (replace PG drain) is a later hole — this wave is dual-write publish.
+    PG outbox remains claim/drain SoT until full consumer cutover (documented hole).
+    Consumer only accelerates ``prodavan.jobs.trigger_drain`` on project_trigger messages.
     """
 
     def __init__(
@@ -46,6 +48,9 @@ class KafkaManager(LifespanResource):
         topic_project_triggers: str = "prodavan.project.triggers",
         required: bool = False,
         buffer_size: int = 200,
+        consumer_enabled: bool = False,
+        consumer_group: str = "prodavan-api-triggers",
+        drain_debounce_sec: float = 1.0,
     ) -> None:
         self._enabled = enabled
         self._bootstrap = (bootstrap_servers or "").strip() or None
@@ -53,8 +58,15 @@ class KafkaManager(LifespanResource):
         self._topic_platform = topic_platform_events
         self._topic_triggers = topic_project_triggers
         self._required = required
+        self._consumer_enabled = consumer_enabled
+        self._consumer_group = consumer_group
+        self._drain_debounce_sec = max(0.1, float(drain_debounce_sec))
         self._producer: Any = None
+        self._consumer: Any = None
+        self._consume_task: asyncio.Task[None] | None = None
+        self._stop: asyncio.Event | None = None
         self._buffer: deque[dict[str, Any]] = deque(maxlen=max(1, buffer_size))
+        self._drain_kicks: int = 0
 
     @property
     def name(self) -> str:
@@ -65,9 +77,16 @@ class KafkaManager(LifespanResource):
         return bool(self._enabled and self._bootstrap and self._producer is not None)
 
     @property
+    def consumer_running(self) -> bool:
+        return self._consume_task is not None and not self._consume_task.done()
+
+    @property
     def buffering_only(self) -> bool:
-        """True when dual-write records locally but does not talk to Kafka."""
         return not self.enabled
+
+    @property
+    def drain_kicks(self) -> int:
+        return self._drain_kicks
 
     def topic_for(self, bus: str) -> str:
         if bus == "platform":
@@ -105,6 +124,56 @@ class KafkaManager(LifespanResource):
                 raise
             return False
 
+    def _kick_drain(self) -> None:
+        from prodavan.core.jobs.enqueue import enqueue_trigger_drain
+
+        result = enqueue_trigger_drain()
+        self._drain_kicks += 1
+        logger.info("kafka consumer: kick trigger_drain enqueued=%s", result.get("enqueued"))
+
+    async def _consume_loop(self, stop: asyncio.Event) -> None:
+        assert self._consumer is not None
+        pending_kick = False
+        logger.info(
+            "kafka: consumer started topic=%s group=%s",
+            self._topic_triggers,
+            self._consumer_group,
+        )
+        try:
+            while not stop.is_set():
+                try:
+                    batch = await self._consumer.getmany(timeout_ms=500, max_records=50)
+                except Exception:
+                    if stop.is_set():
+                        break
+                    logger.exception("kafka: consumer getmany failed")
+                    await asyncio.sleep(1.0)
+                    continue
+                if not batch:
+                    if pending_kick:
+                        self._kick_drain()
+                        pending_kick = False
+                    continue
+                for _tp, messages in batch.items():
+                    for msg in messages:
+                        try:
+                            data = json.loads(msg.value.decode("utf-8"))
+                        except Exception:
+                            logger.warning("kafka: skip bad message offset=%s", msg.offset)
+                            continue
+                        if data.get("bus") == "project_trigger":
+                            pending_kick = True
+                if pending_kick:
+                    # Debounce: wait briefly for more messages, then one drain kick.
+                    try:
+                        await asyncio.wait_for(stop.wait(), timeout=self._drain_debounce_sec)
+                        break
+                    except TimeoutError:
+                        self._kick_drain()
+                        pending_kick = False
+        finally:
+            logger.info("kafka: consumer loop stopped kicks=%s", self._drain_kicks)
+
     async def startup(self) -> None:
         set_kafka_manager(self)
         if not self._enabled:
@@ -138,8 +207,47 @@ class KafkaManager(LifespanResource):
                 set_kafka_manager(None)
                 raise
             logger.warning("kafka: falling back to buffer-only")
+            return
+
+        if not self._consumer_enabled:
+            return
+        try:
+            from aiokafka import AIOKafkaConsumer
+
+            self._consumer = AIOKafkaConsumer(
+                self._topic_triggers,
+                bootstrap_servers=self._bootstrap,
+                client_id=f"{self._client_id}-consumer",
+                group_id=self._consumer_group,
+                enable_auto_commit=True,
+                auto_offset_reset="latest",
+            )
+            await self._consumer.start()
+            self._stop = asyncio.Event()
+            self._consume_task = asyncio.create_task(
+                self._consume_loop(self._stop),
+                name="prodavan-kafka-trigger-consumer",
+            )
+        except Exception:
+            logger.exception("kafka: consumer startup failed (producer still up)")
+            self._consumer = None
 
     async def shutdown(self) -> None:
+        if self._stop is not None:
+            self._stop.set()
+        if self._consume_task is not None:
+            try:
+                await asyncio.wait_for(self._consume_task, timeout=5.0)
+            except (TimeoutError, asyncio.CancelledError):
+                self._consume_task.cancel()
+            self._consume_task = None
+        self._stop = None
+        if self._consumer is not None:
+            try:
+                await self._consumer.stop()
+            except Exception:
+                logger.exception("kafka: consumer stop failed")
+            self._consumer = None
         if self._producer is not None:
             try:
                 await self._producer.stop()
@@ -154,4 +262,8 @@ class KafkaManager(LifespanResource):
             return None
         if not self._bootstrap:
             return False
-        return self._producer is not None
+        if self._producer is None:
+            return False
+        if self._consumer_enabled and not self.consumer_running:
+            return False
+        return True

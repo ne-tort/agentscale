@@ -58,6 +58,9 @@ def build_lifespan_manager() -> LifespanManager:
             topic_platform_events=settings.kafka_topic_platform_events,
             topic_project_triggers=settings.kafka_topic_project_triggers,
             required=settings.kafka_required,
+            consumer_enabled=settings.kafka_consumer_enabled,
+            consumer_group=settings.kafka_consumer_group,
+            drain_debounce_sec=settings.kafka_drain_debounce_sec,
         )
     )
     manager.register(
