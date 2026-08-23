@@ -38,6 +38,7 @@ PLATFORM_EVENT_TYPES = frozenset(
         "project.resumed",
         "project.deleted",
         "company.suspended",
+        "company.reactivated",
         "employee.disabled",
     }
 )

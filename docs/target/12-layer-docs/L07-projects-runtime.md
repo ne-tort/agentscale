@@ -7,7 +7,7 @@
 | Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain/worker; k8s isolator — gap |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-23 — company fan-out SPI + package platform_events stub |
+| Last updated | 2026-08-23 — subscription transition events + trigger gate on suspend |
 | Owners | — |
 
 ---
@@ -37,9 +37,10 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 4. HTTP: `/cabinets/{id}/projects`, `/projects/{id}/*` per project-contract; `POST /admin/triggers/drain`.
 5. L06 `materialize-stub` → real FS (status `materialized`).
 6. Opt-in trigger worker (`TRIGGER_WORKER_ENABLED`) — in-process asyncio + `pg_try_advisory_lock`; hole: not durable outbox.
-7. `PlatformEventService` — lifecycle bus; emit on project lifecycle + employee.disabled + company.suspended; SPI fan-out to company cabinets when `cabinet_id` absent. Package manifest `platform_events` → stub audit rows; subprocess MCP invoke — hole.
-8. Signed webhook ingress `POST .../webhooks/http` with company `webhook_hmac_secret` (not returned in GET; `webhook_hmac_configured` flag).
-9. Signed telegram ingress `POST .../webhooks/telegram` with company `telegram_hmac_secret` (`telegram_hmac_configured` flag).
+7. `PlatformEventService` — lifecycle bus; subscription transitions emit `company.suspended` / `company.reactivated` once per edge; SPI fan-out to company cabinets. Package manifest `platform_events` → stub audit; subprocess MCP invoke — hole.
+8. `ProjectTriggerService.enqueue` — `COMPANY_SUSPENDED` for runtime kinds; `project.prepare` exempt.
+9. Signed webhook ingress `POST .../webhooks/http` with company `webhook_hmac_secret` (not returned in GET; `webhook_hmac_configured` flag).
+10. Signed telegram ingress `POST .../webhooks/telegram` with company `telegram_hmac_secret` (`telegram_hmac_configured` flag).
 
 ## Контракты
 

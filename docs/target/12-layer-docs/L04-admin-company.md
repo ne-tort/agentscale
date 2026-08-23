@@ -27,7 +27,7 @@ Platform Admin — компании, keys (L03), квоты/policy, metrics read
 | Agent policy UI incl. token budgets + max_attachment_mb + HMAC secrets | USD authoritative billing sync |
 | Company contour: Overview / Employees / Cabinets | |
 | Invite employee full-page form | |
-| `PUT /admin/companies/{id}/subscription` → emits `company.suspended` when expired | |
+| `PUT /admin/companies/{id}/subscription` → emits `company.suspended` on expire transition, `company.reactivated` on renew | |
 | Metrics: `subscription_ends_at`, expiring/expired flags | |
 | Starter bundle catalog API (`GET /admin/starter-bundles`) | |
 | AdminStarterBundlesPage read-only catalog tab | |

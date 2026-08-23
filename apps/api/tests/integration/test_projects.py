@@ -588,3 +588,152 @@ def test_company_suspended_invokes_package_platform_handler(client: TestClient) 
     assert detail.get("platform_event_type") == "company.suspended"
     assert detail.get("package_name") == "suspend_hook"
     assert detail.get("action") == "stub"
+
+
+@requires_postgres
+def test_subscription_suspend_event_is_idempotent(client: TestClient) -> None:
+    admin = _token(sub="padmin-idem", platform_admin=True)
+    created_co = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "IdemCo", "admin_email": "owner@idemco.test"},
+    )
+    assert created_co.status_code == 201, created_co.text
+    company_id = created_co.json()["company"]["id"]
+    past = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    first = client.put(
+        f"/api/v1/admin/companies/{company_id}/subscription",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"subscription_lifetime": False, "subscription_ends_at": past},
+    )
+    assert first.status_code == 200, first.text
+
+    def _count_suspended() -> int:
+        res = client.get(
+            f"/api/v1/admin/platform-events?company_id={company_id}&event_type=company.suspended",
+            headers={"Authorization": f"Bearer {admin}"},
+        )
+        assert res.status_code == 200, res.text
+        return len(res.json()["items"])
+
+    count_after_first = _count_suspended()
+    assert count_after_first >= 1
+
+    second = client.put(
+        f"/api/v1/admin/companies/{company_id}/subscription",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"subscription_lifetime": False, "subscription_ends_at": past},
+    )
+    assert second.status_code == 200, second.text
+    assert _count_suspended() == count_after_first
+
+
+@requires_postgres
+def test_subscription_reactivate_emits_event(client: TestClient) -> None:
+    admin = _token(sub="padmin-react", platform_admin=True)
+    created_co = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "ReactCo", "admin_email": "owner@reactco.test"},
+    )
+    assert created_co.status_code == 201, created_co.text
+    company_id = created_co.json()["company"]["id"]
+    owner_tok = _token(sub="owner-react", email="owner@reactco.test")
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "ReactCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    past = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    suspend = client.put(
+        f"/api/v1/admin/companies/{company_id}/subscription",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"subscription_lifetime": False, "subscription_ends_at": past},
+    )
+    assert suspend.status_code == 200, suspend.text
+
+    future = (datetime.now(UTC) + timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    renew = client.put(
+        f"/api/v1/admin/companies/{company_id}/subscription",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"subscription_lifetime": False, "subscription_ends_at": future},
+    )
+    assert renew.status_code == 200, renew.text
+    assert renew.json()["subscription_expired"] is False
+
+    events = client.get(
+        f"/api/v1/admin/platform-events?company_id={company_id}&event_type=company.reactivated",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert events.status_code == 200, events.text
+    assert len(events.json()["items"]) >= 1
+
+    audit = client.get(
+        f"/api/v1/cabinets/{cabinet_id}/audit-events",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert audit.status_code == 200, audit.text
+    assert any(e.get("event_type") == "platform_event.delivered" for e in audit.json())
+
+
+@requires_postgres
+def test_webhook_ingress_blocked_when_company_suspended(client: TestClient) -> None:
+    from prodavan.domain.projects import webhook_signature
+
+    admin = _token(sub="padmin-wh-sus", platform_admin=True)
+    created_co = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "WhSusCo", "admin_email": "owner@whsusco.test"},
+    )
+    assert created_co.status_code == 201, created_co.text
+    company_id = created_co.json()["company"]["id"]
+    owner_tok = _token(sub="owner-wh-sus", email="owner@whsusco.test")
+
+    policy = client.put(
+        f"/api/v1/admin/companies/{company_id}/agent-policy",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"tool_preset": "workspace_dev", "webhook_hmac_secret": "hook-secret"},
+    )
+    assert policy.status_code == 200, policy.text
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "WhSusCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "WhSusProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    past = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sub = client.put(
+        f"/api/v1/admin/companies/{company_id}/subscription",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"subscription_lifetime": False, "subscription_ends_at": past},
+    )
+    assert sub.status_code == 200, sub.text
+
+    body = b'{"text":"blocked"}'
+    blocked = client.post(
+        f"/api/v1/projects/{project_id}/webhooks/http",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Prodavan-Signature": webhook_signature("hook-secret", body),
+        },
+    )
+    assert blocked.status_code == 403, blocked.text
+    assert blocked.json()["code"] == "COMPANY_SUSPENDED"

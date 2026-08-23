@@ -46,7 +46,7 @@ mcp.package-v1.zip
     "network_hosts": ["api.example.com"],
     "shell": false
   },
-  "platform_events": ["company.suspended", "employee.disabled"],
+  "platform_events": ["company.suspended", "company.reactivated", "employee.disabled"],
   "content_hash": "sha256:…"
 }
 ```
