@@ -139,11 +139,15 @@ class ProdavanApi {
     }
   }
 
-  Future<List<Map<String, dynamic>>> listMetaTables(String cabinetId) async {
+  Future<List<Map<String, dynamic>>> listMetaTables(
+    String cabinetId, {
+    bool includeArchived = false,
+  }) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.get(_uri('/cabinets/$cabinetId/meta/tables'), headers: _headers);
+      final query = includeArchived ? '?include_archived=true' : '';
+      final res = await http.get(_uri('/cabinets/$cabinetId/meta/tables$query'), headers: _headers);
       _throwIfError(res);
       final body = jsonDecode(res.body);
       if (body is List) {
@@ -215,6 +219,23 @@ class ProdavanApi {
       );
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
+  Future<void> deleteMetaTable({
+    required String cabinetId,
+    required String tableSlug,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.delete(
+        _uri('/cabinets/$cabinetId/meta/tables/$tableSlug'),
+        headers: _headers,
+      );
+      _throwIfError(res);
     } finally {
       this.cabinetId = prev;
     }

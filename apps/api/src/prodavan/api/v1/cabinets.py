@@ -295,9 +295,13 @@ async def list_meta_tables(
     principal: PrincipalDep,
     session: SessionDep,
     employee: EmployeeDep,
+    include_archived: bool = False,
 ) -> list[dict]:
     return await CabinetMetaService(session).list_tables(
-        cabinet_id=cabinet_id, principal=principal, employee=employee
+        cabinet_id=cabinet_id,
+        principal=principal,
+        employee=employee,
+        include_archived=include_archived,
     )
 
 
@@ -363,6 +367,22 @@ async def archive_meta_table(
     employee: EmployeeDep,
 ) -> dict:
     return await CabinetMetaService(session).archive_table(
+        cabinet_id=cabinet_id,
+        table_slug=table_slug,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.delete("/{cabinet_id}/meta/tables/{table_slug}", status_code=204)
+async def delete_meta_table(
+    cabinet_id: str,
+    table_slug: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> None:
+    await CabinetMetaService(session).delete_table(
         cabinet_id=cabinet_id,
         table_slug=table_slug,
         principal=principal,

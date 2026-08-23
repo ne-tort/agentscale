@@ -664,6 +664,45 @@ def test_meta_table_archive_and_rename(client: TestClient) -> None:
     assert mcp_ok.status_code == 200, mcp_ok.text
     assert mcp_ok.json()["result"]["status"] == "archived"
 
+    archived_spare = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tables/spare/archive",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert archived_spare.status_code == 200
+
+    deleted_spare = client.delete(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tables/spare",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert deleted_spare.status_code == 204
+
+    events = client.get(
+        f"/api/v1/cabinets/{cabinet_id}/audit-events?limit=30",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert events.status_code == 200
+    types = {e["event_type"] for e in events.json()}
+    assert "meta.table.archive" in types
+    assert "meta.table.delete" in types
+
+    assert (
+        client.post(
+            f"/api/v1/cabinets/{cabinet_id}/meta/tables",
+            headers={"Authorization": f"Bearer {owner_tok}"},
+            json={
+                "slug": "live",
+                "label": "Live",
+                "columns": [{"name": "title", "type": "text", "required": True}],
+            },
+        ).status_code
+        == 201
+    )
+    blocked_delete = client.delete(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tables/live",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert blocked_delete.status_code == 409
+
 
 @requires_postgres
 def test_mcp_audit_events(client: TestClient) -> None:

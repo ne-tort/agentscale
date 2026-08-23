@@ -36,6 +36,7 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-23 | C-META-DATA / C-CABINET-MCP | meta HTTP audit; hard delete archived table; cabinet.tables.delete | no |
 | 2026-08-23 | C-AUTH-CONFIG / C-PRINCIPAL | GET /auth/config; Flutter LoginPage + SessionStore | no |
 | 2026-08-23 | C-CABINET-MCP | meta_audit_events on MCP call + GET audit-events | no |
 | 2026-08-23 | C-EMP-SHELL | ContourSelectorPage multi-company | no |

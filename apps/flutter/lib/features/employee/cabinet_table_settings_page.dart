@@ -31,6 +31,8 @@ class _CabinetTableSettingsPageState extends State<CabinetTableSettingsPage> {
   late final TextEditingController _label;
   bool _saving = false;
   bool _archiving = false;
+  bool _deleting = false;
+  bool _archived = false;
   String? _error;
 
   @override
@@ -88,7 +90,10 @@ class _CabinetTableSettingsPageState extends State<CabinetTableSettingsPage> {
         tableSlug: widget.tableSlug,
       );
       if (!mounted) return;
-      Navigator.of(context).pop(true);
+      setState(() {
+        _archived = true;
+        _archiving = false;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -98,9 +103,38 @@ class _CabinetTableSettingsPageState extends State<CabinetTableSettingsPage> {
     }
   }
 
+  Future<void> _deletePermanently() async {
+    final ok = await DangerConfirmPage.push(
+      context,
+      title: 'Delete table permanently?',
+      message: 'Drop all data for "${widget.tableSlug}". This cannot be undone.',
+      confirmLabel: 'Delete',
+    );
+    if (ok != true) return;
+
+    setState(() {
+      _deleting = true;
+      _error = null;
+    });
+    try {
+      await workContext.api.deleteMetaTable(
+        cabinetId: widget.cabinetId,
+        tableSlug: widget.tableSlug,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _deleting = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final busy = _saving || _archiving;
+    final busy = _saving || _archiving || _deleting;
     return AppScaffold(
       title: const Text('Table settings'),
       body: ListView(
@@ -108,27 +142,42 @@ class _CabinetTableSettingsPageState extends State<CabinetTableSettingsPage> {
         children: [
           Text(widget.tableSlug, style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: AppSpacing.sm),
+          if (_archived)
+            Text(
+              'Archived — you can delete permanently or go back.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+          if (_archived) const SizedBox(height: AppSpacing.sm),
           if (_error != null) InlineErrorBanner(message: _error!),
-          AppForm(
-            formKey: _formKey,
-            children: [
-              AppTextField(
-                controller: _label,
-                label: 'Label',
-                enabled: !busy,
-                validator: (v) => (v ?? '').trim().isEmpty ? 'Required' : null,
-              ),
-              AppButton(
-                label: _saving ? 'Saving…' : 'Save label',
-                onPressed: busy ? null : _saveLabel,
-              ),
-            ],
-          ),
-          const Divider(height: 32),
-          AppButton(
-            label: _archiving ? 'Archiving…' : 'Archive table',
-            onPressed: busy ? null : _archive,
-          ),
+          if (!_archived)
+            AppForm(
+              formKey: _formKey,
+              children: [
+                AppTextField(
+                  controller: _label,
+                  label: 'Label',
+                  enabled: !busy,
+                  validator: (v) => (v ?? '').trim().isEmpty ? 'Required' : null,
+                ),
+                AppButton(
+                  label: _saving ? 'Saving…' : 'Save label',
+                  onPressed: busy ? null : _saveLabel,
+                ),
+              ],
+            ),
+          if (!_archived) const Divider(height: 32),
+          if (!_archived)
+            AppButton(
+              label: _archiving ? 'Archiving…' : 'Archive table',
+              onPressed: busy ? null : _archive,
+            ),
+          if (_archived)
+            AppButton(
+              label: _deleting ? 'Deleting…' : 'Delete permanently',
+              onPressed: busy ? null : _deletePermanently,
+            ),
         ],
       ),
     );

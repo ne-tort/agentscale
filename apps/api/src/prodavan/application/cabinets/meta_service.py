@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.cabinets.access import CabinetAccessService
+from prodavan.application.cabinets.audit_service import CabinetAuditService
 from prodavan.domain.cabinets import BASE_SYSTEM_TABS, COLUMN_TYPES, ColumnType, StorageKind
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
@@ -47,6 +48,26 @@ class CabinetMetaService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._access = CabinetAccessService(session)
+        self._audit = CabinetAuditService(session)
+
+    async def _emit_audit(
+        self,
+        *,
+        cabinet_id: str,
+        principal: Principal,
+        event_type: str,
+        detail: dict,
+    ) -> None:
+        try:
+            await self._audit.record(
+                cabinet_id=cabinet_id,
+                event_type=event_type,
+                tool_name=None,
+                principal=principal,
+                detail=detail,
+            )
+        except Exception:
+            pass
 
     async def list_tables(
         self,
@@ -54,17 +75,19 @@ class CabinetMetaService:
         cabinet_id: str,
         principal: Principal,
         employee: EmployeeRow | None,
+        include_archived: bool = False,
     ) -> list[dict]:
         inst = await self._access.require_access(
             cabinet_id=cabinet_id, principal=principal, employee=employee, write=False
         )
         qschema = qident(inst.schema_name)
+        status_clause = "" if include_archived else "AND status = 'active'"
         q = await self._session.execute(
             text(
                 f"""
                 SELECT id, slug, label, storage_kind, status, created_at
                 FROM {qschema}.meta_tables
-                WHERE status = 'active'
+                WHERE 1=1 {status_clause}
                 ORDER BY slug
                 """
             )
@@ -258,7 +281,14 @@ class CabinetMetaService:
             )
 
         await self._session.commit()
-        return {"id": table_id, "slug": slug, "label": label.strip(), "storage_kind": storage_kind}
+        result = {"id": table_id, "slug": slug, "label": label.strip(), "storage_kind": storage_kind}
+        await self._emit_audit(
+            cabinet_id=cabinet_id,
+            principal=principal,
+            event_type="meta.table.create",
+            detail={"slug": slug, "storage_kind": storage_kind, "columns": len(columns)},
+        )
+        return result
 
     async def import_bundle_views_and_tabs(
         self,
@@ -369,6 +399,28 @@ class CabinetMetaService:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Table not found")
         return table
 
+    async def _get_table_any(
+        self,
+        *,
+        schema_name: str,
+        table_slug: str,
+    ):
+        qschema = qident(schema_name)
+        tq = await self._session.execute(
+            text(
+                f"""
+                SELECT id, slug, label, storage_kind, status
+                FROM {qschema}.meta_tables
+                WHERE slug = :slug
+                """
+            ),
+            {"slug": table_slug},
+        )
+        table = tq.fetchone()
+        if table is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Table not found")
+        return table
+
     async def add_column(
         self,
         *,
@@ -426,13 +478,20 @@ class CabinetMetaService:
             )
 
         await self._session.commit()
-        return {
+        col_result = {
             "name": name,
             "type": col_type,
             "required": bool(column.get("required")),
             "unique": bool(column.get("unique")),
             "ref_table_slug": column.get("ref_table_slug"),
         }
+        await self._emit_audit(
+            cabinet_id=cabinet_id,
+            principal=principal,
+            event_type="meta.column.add",
+            detail={"table_slug": table_slug, "column": name, "type": col_type},
+        )
+        return col_result
 
     async def delete_column(
         self,
@@ -475,6 +534,12 @@ class CabinetMetaService:
                 text(f"ALTER TABLE {fq} DROP COLUMN IF EXISTS {qident(name)}")
             )
         await self._session.commit()
+        await self._emit_audit(
+            cabinet_id=cabinet_id,
+            principal=principal,
+            event_type="meta.column.delete",
+            detail={"table_slug": table_slug, "column": name},
+        )
 
     async def list_views(
         self,
@@ -563,13 +628,20 @@ class CabinetMetaService:
             raise
 
         await self._session.commit()
-        return {
+        view_result = {
             "id": view_id,
             "slug": slug,
             "table_slug": table_slug,
             "ui_json": ui_json,
             "version": version,
         }
+        await self._emit_audit(
+            cabinet_id=cabinet_id,
+            principal=principal,
+            event_type="meta.view.create",
+            detail={"slug": slug, "table_slug": table_slug},
+        )
+        return view_result
 
     async def _require_view_row(self, *, schema_name: str, view_slug: str):
         qschema = qident(schema_name)
@@ -639,13 +711,20 @@ class CabinetMetaService:
             },
         )
         await self._session.commit()
-        return {
+        view_result = {
             "id": view.id,
             "slug": view.slug,
             "table_slug": new_table_slug,
             "ui_json": new_ui if isinstance(new_ui, dict) else {},
             "version": new_version,
         }
+        await self._emit_audit(
+            cabinet_id=cabinet_id,
+            principal=principal,
+            event_type="meta.view.update",
+            detail={"slug": view.slug, "patch_keys": sorted(patch.keys())},
+        )
+        return view_result
 
     async def delete_view(
         self,
@@ -672,6 +751,12 @@ class CabinetMetaService:
             {"id": view.id},
         )
         await self._session.commit()
+        await self._emit_audit(
+            cabinet_id=cabinet_id,
+            principal=principal,
+            event_type="meta.view.delete",
+            detail={"slug": view_slug},
+        )
 
     async def create_tab(
         self,
@@ -711,13 +796,20 @@ class CabinetMetaService:
             },
         )
         await self._session.commit()
-        return {
+        tab_result = {
             "id": tab_id,
             "title": title.strip(),
             "order": order,
             "view_slug": view_slug,
             "system": False,
         }
+        await self._emit_audit(
+            cabinet_id=cabinet_id,
+            principal=principal,
+            event_type="meta.tab.create",
+            detail={"title": title.strip(), "view_slug": view_slug},
+        )
+        return tab_result
 
     async def _require_tab_row(self, *, schema_name: str, tab_id: str):
         qschema = qident(schema_name)
@@ -783,13 +875,20 @@ class CabinetMetaService:
             {"id": tab_id, "title": new_title, "ord": new_order, "vid": new_view_id},
         )
         await self._session.commit()
-        return {
+        tab_result = {
             "id": tab_id,
             "title": new_title,
             "order": new_order,
             "view_slug": new_view_slug,
             "system": False,
         }
+        await self._emit_audit(
+            cabinet_id=cabinet_id,
+            principal=principal,
+            event_type="meta.tab.update",
+            detail={"tab_id": tab_id},
+        )
+        return tab_result
 
     async def delete_tab(
         self,
@@ -809,6 +908,12 @@ class CabinetMetaService:
             {"id": tab_id},
         )
         await self._session.commit()
+        await self._emit_audit(
+            cabinet_id=cabinet_id,
+            principal=principal,
+            event_type="meta.tab.delete",
+            detail={"tab_id": tab_id},
+        )
 
     async def update_table(
         self,
@@ -848,13 +953,20 @@ class CabinetMetaService:
             {"id": table.id},
         )
         row = tq.fetchone()
-        return {
+        table_result = {
             "id": row.id,
             "slug": row.slug,
             "label": row.label,
             "storage_kind": row.storage_kind,
             "status": row.status,
         }
+        await self._emit_audit(
+            cabinet_id=cabinet_id,
+            principal=principal,
+            event_type="meta.table.update",
+            detail={"slug": table_slug, "label": label},
+        )
+        return table_result
 
     async def archive_table(
         self,
@@ -894,5 +1006,72 @@ class CabinetMetaService:
             {"id": table.id},
         )
         await self._session.commit()
-        return {"slug": table_slug, "status": "archived"}
+        archive_result = {"slug": table_slug, "status": "archived"}
+        await self._emit_audit(
+            cabinet_id=cabinet_id,
+            principal=principal,
+            event_type="meta.table.archive",
+            detail={"slug": table_slug},
+        )
+        return archive_result
+
+    async def delete_table(
+        self,
+        *,
+        cabinet_id: str,
+        table_slug: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        inst = await self._access.require_access(
+            cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
+        )
+        table = await self._get_table_any(schema_name=inst.schema_name, table_slug=table_slug)
+        if table.status != "archived":
+            raise AppError(
+                code="CONFLICT",
+                title="Conflict",
+                status=409,
+                detail="table must be archived before delete",
+            )
+
+        qschema = qident(inst.schema_name)
+        refs = await self._session.execute(
+            text(
+                f"""
+                SELECT slug FROM {qschema}.meta_views
+                WHERE table_slug = :slug
+                LIMIT 1
+                """
+            ),
+            {"slug": table_slug},
+        )
+        ref_slug = refs.scalar_one_or_none()
+        if ref_slug is not None:
+            raise AppError(
+                code="CONFLICT",
+                title="Conflict",
+                status=409,
+                detail=f"view '{ref_slug}' references table",
+            )
+
+        fq = qualified(inst.schema_name, data_table_slug(table_slug))
+        await self._session.execute(text(f"DROP TABLE IF EXISTS {fq}"))
+        await self._session.execute(
+            text(f"DELETE FROM {qschema}.meta_columns WHERE table_id = :tid"),
+            {"tid": table.id},
+        )
+        await self._session.execute(
+            text(f"DELETE FROM {qschema}.meta_tables WHERE id = :id"),
+            {"id": table.id},
+        )
+        await self._session.commit()
+        delete_result = {"slug": table_slug, "deleted": True}
+        await self._emit_audit(
+            cabinet_id=cabinet_id,
+            principal=principal,
+            event_type="meta.table.delete",
+            detail={"slug": table_slug},
+        )
+        return delete_result
 

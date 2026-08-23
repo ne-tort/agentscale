@@ -65,6 +65,16 @@ PLATFORM_TOOLS: tuple[ToolSpec, ...] = (
         },
     ),
     ToolSpec(
+        name="cabinet.tables.delete",
+        description="Hard-delete an archived meta table and drop its data table.",
+        input_schema={
+            "type": "object",
+            "required": ["table_slug"],
+            "properties": {"table_slug": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    ),
+    ToolSpec(
         name="cabinet.tabs.list",
         description="List cabinet tabs (including Base system tabs).",
         input_schema={"type": "object", "properties": {}, "additionalProperties": False},

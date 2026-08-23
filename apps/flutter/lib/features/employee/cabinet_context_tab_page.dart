@@ -7,6 +7,7 @@ import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/core/widgets/stat_tile.dart';
+import 'package:prodavan/features/employee/cabinet_audit_events_page.dart';
 import 'package:prodavan/features/employee/cabinet_meta_tabs_page.dart';
 
 /// Cabinet context summary — projects, meta tables, MCP tools (L05/L06).
@@ -135,7 +136,19 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
               SizedBox(width: 140, child: StatTile(label: 'Projects', value: '$_projects')),
               SizedBox(width: 140, child: StatTile(label: 'Meta tables', value: '$_tables')),
               SizedBox(width: 140, child: StatTile(label: 'MCP tools', value: '$_tools')),
-              SizedBox(width: 140, child: StatTile(label: 'Audit (recent)', value: '$_auditEvents')),
+              SizedBox(
+                width: 140,
+                child: InkWell(
+                  onTap: () {
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => CabinetAuditEventsPage(cabinetId: widget.cabinetId),
+                      ),
+                    );
+                  },
+                  child: StatTile(label: 'Audit (recent)', value: '$_auditEvents'),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 16),
