@@ -99,6 +99,13 @@ class Settings(BaseSettings):
     # Idle pause sweep shares the trigger worker loop when enabled (default off).
     idle_pause_worker_enabled: bool = False
 
+    # P0 Celery (C-JOBS). When enabled + broker, in-process trigger loop is skipped.
+    celery_enabled: bool = False
+    celery_broker_url: str | None = None  # default: REDIS_URL
+    celery_result_backend: str | None = None  # default: broker
+    # Eager mode for unit tests (no broker needed).
+    celery_task_always_eager: bool = False
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

@@ -7,6 +7,7 @@ from prodavan.core.infra.database_resource import DatabaseEngineResource
 from prodavan.core.infra.object_storage_manager import ObjectStorageManager
 from prodavan.core.infra.redis_manager import RedisManager
 from prodavan.core.infra.trigger_worker_resource import TriggerWorkerResource
+from prodavan.core.infra.worker_manager import WorkerManager
 from prodavan.core.lifespan.manager import LifespanManager
 
 _lifespan_manager: LifespanManager | None = None
@@ -16,12 +17,17 @@ def get_lifespan_manager() -> LifespanManager | None:
     return _lifespan_manager
 
 
+def _celery_broker_url() -> str | None:
+    return (settings.celery_broker_url or settings.redis_url or "").strip() or None
+
+
 def build_lifespan_manager() -> LifespanManager:
-    """Register infra resources: DB → Redis → object store → transitional worker."""
+    """Register infra: DB → Redis → object store → Celery → transitional in-process worker."""
     global _lifespan_manager
     backend = (settings.object_store_backend or "local").strip().lower()
     if backend not in ("local", "s3"):
         backend = "local"
+    jobs_wanted = bool(settings.trigger_worker_enabled or settings.idle_pause_worker_enabled)
     manager = LifespanManager()
     manager.register(DatabaseEngineResource())
     manager.register(
@@ -41,6 +47,17 @@ def build_lifespan_manager() -> LifespanManager:
             s3_region=settings.s3_region,
             mirror_local=settings.object_store_mirror_local,
             required=settings.object_store_required,
+        )
+    )
+    manager.register(
+        WorkerManager(
+            enabled=settings.celery_enabled,
+            broker_url=_celery_broker_url(),
+            result_backend=(settings.celery_result_backend or "").strip() or _celery_broker_url(),
+            trigger_interval_sec=settings.trigger_worker_interval_sec,
+            schedule_trigger_drain=jobs_wanted,
+            schedule_idle_pause=False,  # idle covered by drain_once when IDLE_PAUSE_WORKER_ENABLED
+            task_always_eager=settings.celery_task_always_eager,
         )
     )
     manager.register(TriggerWorkerResource())

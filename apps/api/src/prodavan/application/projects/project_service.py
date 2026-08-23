@@ -358,6 +358,7 @@ class ProjectService:
         # Best-effort: drain leave-queued triggers without requiring a separate worker tick.
         try:
             from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
+            from prodavan.core.jobs.enqueue import enqueue_trigger_drain
 
             await AgentTriggerDispatcher(self._session).dispatch_batch(
                 project_id=row.id,
@@ -365,6 +366,7 @@ class ProjectService:
                 employee=employee,
                 max_n=10,
             )
+            enqueue_trigger_drain()
         except Exception:
             pass
         return await self._project_public(row)

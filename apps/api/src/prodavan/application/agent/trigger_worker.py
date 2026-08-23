@@ -1,13 +1,19 @@
 """Opt-in background drain of project triggers + optional idle pause (L07/L08/L09).
 
 Enable via TRIGGER_WORKER_ENABLED and/or IDLE_PAUSE_WORKER_ENABLED.
+
+Executors (P0):
+- **Celery** (preferred): ``CELERY_ENABLED=true`` + broker → tasks in
+  ``prodavan.core.jobs``; run ``celery -A prodavan.core.infra.worker_manager.celery_app worker -B``
+- **In-process asyncio** (transitional): when Celery executor is not active
+
 Prefer admin POST /admin/triggers/drain (and idle-pause/sweep) in CI.
 
 Safety layers:
 - process advisory lock (pg_try_advisory_lock) so one API process runs at a time
 - row-level outbox lease + SKIP LOCKED on claim (crash → lease expires → re-claim)
 
-Still not a separate durable broker (Kafka/SQS) — hole noted in L07 as outbox-lite.
+Still not a separate durable broker (Kafka) — hole noted in L07 as outbox-lite.
 """
 
 from __future__ import annotations

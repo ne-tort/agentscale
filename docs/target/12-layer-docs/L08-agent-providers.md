@@ -95,7 +95,7 @@ apps/api/tests/integration/test_agent.py
 | Token budget enforce | done | L04 policy → AgentBudgetService |
 | SSE chat stream | done | iter_chat_turn_sse + integration test |
 | USD cost cap | done | max_cost_usd_month + fixture cost_usd |
-| In-process trigger worker как prod executor | **P0 transitional** | обёрнут в `TriggerWorkerResource` (lifespan register); цель — Celery + Kafka ([13](../13-platform-infra/), [P0](../11-implementation-plan/P0-platform-infra.md)) |
+| In-process trigger worker как prod executor | **P0 transitional** | skipped when `CELERY_ENABLED` + broker; иначе asyncio loop; цель — только Celery worker -B ([13](../13-platform-infra/), [P0](../11-implementation-plan/P0-platform-infra.md)) |
 
 ## Проверка
 

@@ -126,7 +126,7 @@ apps/api/.env.example
 | Attachment DELETE | done | DB + inbox file; Flutter pending remove calls DELETE |
 | Object store (MinIO) как SoT blobs | **partial (P0 w3)** | attachments + MCP package zips → `ObjectStorageManager` / `object://`; legacy `file://` readable; materialize tree + `local-ws` — hole |
 | Durable bus = Kafka (triggers + platform events) | **P0 hole** | PG outbox-lite transitional; [triggers](../06-projects-runtime/triggers.md) |
-| Celery jobs (drain / idle / rematerialize) | **P0 hole** | in-process loop = `TriggerWorkerResource` (lifespan); Celery — волна 4 |
+| Celery jobs (drain / idle / rematerialize) | **partial (P0 w4)** | `WorkerManager` + `prodavan.jobs.*` tasks; in-process `TriggerWorkerResource` fallback when Celery off; deploy worker/beat — hole |
 
 ## Проверка
 

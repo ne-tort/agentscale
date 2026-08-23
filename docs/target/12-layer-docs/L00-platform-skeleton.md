@@ -7,7 +7,7 @@
 | Quality note | DoD закрыт: layout, health+meta, AppError, Alembic up/down CI, features placeholder, contract tests; veto пуст. P0 w1–w3: core lifespan + Redis + ObjectStorage (subset) |
 | Plan | [L00](../11-implementation-plan/L00-platform-skeleton.md), [P0](../11-implementation-plan/P0-platform-infra.md) |
 | Canon | [STUB](../../../STUB.md), [AGENTS](../../../AGENTS.md), [LAYOUT.md](../../../apps/api/src/prodavan/LAYOUT.md), [13](../13-platform-infra/) |
-| Last updated | 2026-08-24 — P0 ObjectStorageManager + attach/packages |
+| Last updated | 2026-08-24 — P0 Celery WorkerManager (w4) |
 | Owners | — |
 
 ---
@@ -55,6 +55,7 @@
 | C-API-HEALTH | `GET /api/v1/health` (+ live/ready) + problem+json | live |
 | C-CACHE | RedisManager + settings; ready checks when URL set | **live** (subset; URL optional) |
 | C-OBJECT-STORE | ObjectStorageManager local\|s3; `object://` refs | **live** (subset) |
+| C-JOBS | WorkerManager + Celery tasks (drain/idle/rematerialize) | **live** (subset) |
 
 ### Потребляет
 
@@ -107,9 +108,10 @@ apps/flutter/lib/
 | Lint/test CI green | done | workflows updated |
 | No legacy login/procurement | done | not in running app |
 | `LifespanManager` + `LifespanResource` register | **done** (P0 w1) | `core/lifespan/`; see [13](../13-platform-infra/core-managers.md) |
-| Infra managers в `prodavan.core` | **partial** | Redis + ObjectStorage live (subset); **hole:** Kafka / Celery WorkerManager — волны 4–5 |
+| Infra managers в `prodavan.core` | **partial** | Redis + ObjectStorage + Worker live (subset); **hole:** Kafka — волна 5 |
 | Redis обязателен во всех окружениях | **hole** | default `REDIS_URL` empty (CI/local); prod: set URL + `REDIS_REQUIRED=true` |
 | Object store SoT для всех blobs | **partial** | attach + cabinet packages via manager; materialize workspace tree — local FS hole |
+| Celery executor для background jobs | **partial** | `CELERY_ENABLED` + worker process; default off → in-process fallback |
 | Middleware register в core | **hole** | CORS всё ещё в `main.py` напрямую |
 
 ## Проверка
