@@ -72,6 +72,6 @@ apps/api/alembic/versions/2026082309_company_subscription.py
 | Starter bundle download | live | `GET .../bundle` base64 |
 | `storage_bytes` / `last_activity_at` | done | workspace scan + activity max |
 | E2E widget tests | live (subset) | metrics alerts + AdminShell NavigationBar destinations; full admin navigation flows — hole |
-| Redis runtime cache (policy/sub) | **done (P0 subset)** | `company_runtime_cache`; invalidate on policy/subscription writes |
+| Redis runtime cache (policy/sub) | **done (P0 subset)** | policy/sub/quota; HMAC via DB `get_ingress_hmac_secrets`; sub flags recompute on cache hit |
 
 ## Quality | **7** | doing |

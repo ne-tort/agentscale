@@ -37,8 +37,8 @@ TRIGGER_WORKER_ENABLED=true
 
 ## Notes / holes
 
-- Kafka consumer: `kick` (debounce drain) or `dispatch` (`claim_by_id` via Celery); PG outbox remains claim SoT until full cutover.
-- Package sandbox trees hydrate from object-store zip when local dir missing; live mount-from-MinIO still a hole.
-- k8s sketches: `deploy/k8s/{redis,minio,kafka,celery}` (not Helm).
-- CORS registered via `prodavan.core.middleware.register_cors`.
-- Company agent policy + subscription peek use Redis cache (`company_runtime_cache`).
+- Celery worker CLI bootstraps app at import (`worker_manager.celery_app`); beat drain/idle follow `TRIGGER_WORKER_ENABLED` / `IDLE_PAUSE_WORKER_ENABLED`.
+- Kafka consumer: `kick` or `dispatch`; PG outbox remains claim SoT until full cutover.
+- Package sandbox hydrate-from-zip; live mount-from-MinIO still a hole.
+- k8s sketches include minio-init Job; PVC/TLS/Helm still hole.
+- Company runtime cache: policy/sub/quota; HMAC secrets never stored in Redis.

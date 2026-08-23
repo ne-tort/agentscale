@@ -1,6 +1,9 @@
 # Sketch — Celery worker (+ beat) for C-JOBS (P0).
 # Reuses API image; requires Redis broker + same DB/object-store/Kafka env as API.
 # Replace image and Secret refs for your cluster.
+#
+# CLI bootstrap: ``celery -A prodavan.core.infra.worker_manager.celery_app`` builds the
+# app from settings at import (no FastAPI lifespan required).
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -39,6 +42,10 @@ spec:
               value: redis://prodavan-redis:6379/0
             - name: CELERY_BROKER_URL
               value: redis://prodavan-redis:6379/0
+            - name: TRIGGER_WORKER_ENABLED
+              value: "true"
+            - name: IDLE_PAUSE_WORKER_ENABLED
+              value: "true"
             - name: OBJECT_STORE_BACKEND
               value: s3
             - name: S3_ENDPOINT_URL

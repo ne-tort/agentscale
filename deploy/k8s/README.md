@@ -10,4 +10,5 @@
 # Apply (dev cluster only):
 #   kubectl apply -f deploy/k8s/redis -f deploy/k8s/minio -f deploy/k8s/kafka -f deploy/k8s/celery
 #
-# Holes: PVC, NetworkPolicy, TLS, multi-replica Kafka, image pull secrets, bucket init Job.
+# Holes: PVC, NetworkPolicy, TLS, multi-replica Kafka, image pull secrets.
+# Bucket init: ``deploy/k8s/minio/minio.yaml`` includes Job ``prodavan-minio-init``.

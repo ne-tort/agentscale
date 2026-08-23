@@ -275,14 +275,15 @@ async def ingress_signed_webhook(
 ) -> dict:
     """External webhook.http ingress — HMAC-SHA256 over raw body (company policy secret)."""
     project = await ProjectAccessService(session).get_project(project_id)
-    policy = await AdminCompanyService(session).get_agent_policy(project.company_id)
+    companies = AdminCompanyService(session)
+    webhook_secret, _ = await companies.get_ingress_hmac_secrets(project.company_id)
     return await enqueue_signed_trigger(
         session,
         project_id=project_id,
         kind="webhook.http",
         raw_body=await request.body(),
         signature_header=x_prodavan_signature,
-        secret=policy.webhook_hmac_secret,
+        secret=webhook_secret,
         secret_name="webhook_hmac_secret",
     )
 
@@ -296,13 +297,14 @@ async def ingress_signed_telegram(
 ) -> dict:
     """Telegram bot transport ingress — HMAC-SHA256 (company telegram_hmac_secret)."""
     project = await ProjectAccessService(session).get_project(project_id)
-    policy = await AdminCompanyService(session).get_agent_policy(project.company_id)
+    companies = AdminCompanyService(session)
+    _, telegram_secret = await companies.get_ingress_hmac_secrets(project.company_id)
     return await enqueue_signed_trigger(
         session,
         project_id=project_id,
         kind="telegram.message",
         raw_body=await request.body(),
         signature_header=x_prodavan_signature,
-        secret=policy.telegram_hmac_secret,
+        secret=telegram_secret,
         secret_name="telegram_hmac_secret",
     )

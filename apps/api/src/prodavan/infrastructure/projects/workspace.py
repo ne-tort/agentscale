@@ -140,10 +140,17 @@ class WorkspaceLayoutWriter:
         return ensure_object_storage().get_bytes_sync(key)
 
     def remove_project_tree(self) -> None:
+        from prodavan.core.infra.object_storage_manager import ensure_object_storage
         from prodavan.infrastructure.projects.mcp_sandbox import stop_all_package_processes
 
         if self._root.is_dir():
             stop_all_package_processes(workspace_root=self._root)
+        # Object-store SoT: wipe project prefix (S3 and/or local keys).
+        try:
+            ensure_object_storage().delete_prefix_sync(f"projects/{self._workspace_key}/")
+        except Exception:
+            # Fall through to local rmtree for transitional FS-only trees.
+            pass
         if self._project_root.is_dir():
             shutil.rmtree(self._project_root)
 

@@ -125,7 +125,7 @@ services:
       CELERY_ENABLED: "true"
       CELERY_BROKER_URL: redis://redis:6379/0
       TRIGGER_WORKER_ENABLED: "true"
-      IDLE_PAUSE_WORKER_ENABLED: "false"
+      IDLE_PAUSE_WORKER_ENABLED: "true"
       KAFKA_ENABLED: "true"
       KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
       KAFKA_CONSUMER_ENABLED: "true"

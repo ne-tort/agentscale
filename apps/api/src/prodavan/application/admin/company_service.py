@@ -39,7 +39,12 @@ def _quota_public(quota: CompanyCabinetQuota) -> dict:
     }
 
 
-def _policy_public(policy: CompanyAgentRuntimePolicy) -> dict:
+def _policy_public(
+    policy: CompanyAgentRuntimePolicy,
+    *,
+    webhook_configured: bool | None = None,
+    telegram_configured: bool | None = None,
+) -> dict:
     return {
         "tool_preset": policy.tool_preset,
         "preferred_provider": policy.preferred_provider,
@@ -52,8 +57,12 @@ def _policy_public(policy: CompanyAgentRuntimePolicy) -> dict:
         else None,
         "max_attachment_mb": policy.max_attachment_mb,
         "attachment_max_bytes": attachment_max_bytes(policy),
-        "webhook_hmac_configured": bool(policy.webhook_hmac_secret),
-        "telegram_hmac_configured": bool(policy.telegram_hmac_secret),
+        "webhook_hmac_configured": (
+            webhook_configured if webhook_configured is not None else bool(policy.webhook_hmac_secret)
+        ),
+        "telegram_hmac_configured": (
+            telegram_configured if telegram_configured is not None else bool(policy.telegram_hmac_secret)
+        ),
         "idle_pause_after_hours": policy.idle_pause_after_hours,
         "idle_pause_enabled": policy.idle_pause_enabled(),
     }
@@ -91,13 +100,18 @@ class AdminCompanyService:
         company = await self._require_company(company_id)
         quota = await self._quotas.get_quota(company_id)
         policy = await self.get_agent_policy(company_id)
+        webhook_secret, telegram_secret = await self.get_ingress_hmac_secrets(company_id)
         metrics = await self.get_metrics(company_id)
         return {
             "id": company.id,
             "name": company.name,
             "created_at": company.created_at.isoformat() if company.created_at else None,
             "cabinet_quota": _quota_public(quota),
-            "agent_policy": _policy_public(policy),
+            "agent_policy": _policy_public(
+                policy,
+                webhook_configured=bool(webhook_secret),
+                telegram_configured=bool(telegram_secret),
+            ),
             "metrics": metrics,
         }
 
@@ -113,7 +127,17 @@ class AdminCompanyService:
         row.max_bundle_import_mb = quota.max_bundle_import_mb
         await self._session.commit()
         await self._session.refresh(row)
+        from prodavan.application.admin.company_runtime_cache import invalidate_company_runtime_cache
+
+        await invalidate_company_runtime_cache(company_id)
         return _quota_public(row.to_domain())
+
+    async def get_ingress_hmac_secrets(self, company_id: str) -> tuple[str | None, str | None]:
+        """HMAC secrets always from DB — never Redis (C-CACHE harden)."""
+        row = await self._session.get(CompanyAgentRuntimePolicyRow, company_id)
+        if row is None:
+            return None, None
+        return row.webhook_hmac_secret, row.telegram_hmac_secret
 
     async def get_agent_policy(self, company_id: str) -> CompanyAgentRuntimePolicy:
         from prodavan.application.admin.company_runtime_cache import (
@@ -131,7 +155,13 @@ class AdminCompanyService:
 
     async def get_agent_policy_public(self, company_id: str) -> dict:
         await self._require_company(company_id)
-        return _policy_public(await self.get_agent_policy(company_id))
+        policy = await self.get_agent_policy(company_id)
+        webhook_secret, telegram_secret = await self.get_ingress_hmac_secrets(company_id)
+        return _policy_public(
+            policy,
+            webhook_configured=bool(webhook_secret),
+            telegram_configured=bool(telegram_secret),
+        )
 
     async def set_agent_policy(
         self,

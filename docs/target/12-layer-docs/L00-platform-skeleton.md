@@ -112,9 +112,9 @@ apps/flutter/lib/
 | Infra managers в `prodavan.core` | **partial** | Redis + ObjectStorage + Worker + Kafka; hole: Kafka sole-path cutover |
 | Redis обязателен во всех окружениях | **partial** | stack compose + k8s sketch set REDIS_URL; default local still empty |
 | Object store SoT для всех blobs | **partial** | materialize + hydrate zip; live MinIO mount — hole |
-| Celery executor для background jobs | **partial** | stack `celery-worker` + k8s sketch; default off → in-process fallback |
+| Celery executor для background jobs | **partial** | CLI bootstrap + beat drain/idle; stack/k8s worker; default off → in-process |
 | Middleware register в core | **done** (subset) | `register_cors` in `core/middleware.py` |
-| Redis cache facade | **done** (subset) | `cache.py` + company policy/subscription peek (`company_runtime_cache`) |
+| Redis cache facade | **done** (subset) | policy/sub/quota peek; HMAC secrets never in Redis |
 
 ## Проверка
 

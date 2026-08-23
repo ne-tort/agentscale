@@ -1,5 +1,5 @@
 # Sketch — MinIO (S3 API) for C-OBJECT-STORE (P0).
-# Create bucket `prodavan` via Job or console. API env:
+# Create bucket `prodavan` via Job below. API env:
 #   OBJECT_STORE_BACKEND=s3
 #   S3_ENDPOINT_URL=http://prodavan-minio:9000
 #   S3_ACCESS_KEY / S3_SECRET_KEY / S3_BUCKET=prodavan
@@ -76,3 +76,47 @@ spec:
       volumes:
         - name: data
           emptyDir: {}
+---
+# Parity with infra/docker-compose.stack.yml minio-init
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: prodavan-minio-init
+  labels:
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: minio-init
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prodavan-minio-init
+        app.kubernetes.io/part-of: prodavan
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:latest
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: prodavan-minio
+                  key: root-user
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: prodavan-minio
+                  key: root-password
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              i=0
+              until mc alias set local http://prodavan-minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD"; do
+                i=$((i+1))
+                if [ "$i" -gt 30 ]; then exit 1; fi
+                sleep 1
+              done
+              mc mb -p local/prodavan || true

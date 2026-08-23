@@ -30,15 +30,18 @@ async def test_worker_manager_eager_registers_tasks() -> None:
         broker_url="memory://",
         task_always_eager=True,
         schedule_trigger_drain=True,
+        schedule_idle_pause=True,
     )
     await mgr.startup()
     assert mgr.enabled is True
     # Eager mode keeps in-process loop available as fallback for API process.
     assert mgr.uses_celery_executor is False
     assert job_names.TRIGGER_DRAIN in mgr._app.tasks
+    assert job_names.DISPATCH_TRIGGER in mgr._app.tasks
     assert job_names.IDLE_PAUSE_SWEEP in mgr._app.tasks
     assert job_names.REMATERIALIZE_PROJECT in mgr._app.tasks
     assert "prodavan-trigger-drain" in mgr._app.conf.beat_schedule
+    assert "prodavan-idle-pause-sweep" in mgr._app.conf.beat_schedule
 
     with patch(
         "prodavan.application.agent.trigger_worker.drain_once",
@@ -51,6 +54,14 @@ async def test_worker_manager_eager_registers_tasks() -> None:
         assert enq["enqueued"] is True
     await mgr.shutdown()
     assert get_worker_manager() is None
+
+
+def test_cli_bootstrap_celery_app_not_none() -> None:
+    from prodavan.core.infra import worker_manager as wm
+
+    app = wm.bootstrap_celery_app_from_settings()
+    assert app is not None
+    assert wm.celery_app is not None
 
 
 @pytest.mark.asyncio

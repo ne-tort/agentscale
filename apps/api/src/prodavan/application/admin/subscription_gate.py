@@ -137,7 +137,9 @@ class CompanySubscriptionGate:
 
         cached = await get_cached_subscription(company_id)
         if cached is not None:
-            state = cached
+            from prodavan.application.admin.company_runtime_cache import refresh_subscription_cached_state
+
+            state = refresh_subscription_cached_state(cached)
         else:
             company = await self._company_row(company_id)
             state = self._read_model(company)

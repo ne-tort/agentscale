@@ -17,10 +17,18 @@ class CompanyQuotaService:
         self._session = session
 
     async def get_quota(self, company_id: str) -> CompanyCabinetQuota:
+        from prodavan.application.admin.company_runtime_cache import (
+            get_cached_quota,
+            set_cached_quota,
+        )
+
+        cached = await get_cached_quota(company_id)
+        if cached is not None:
+            return cached
         row = await self._session.get(CompanyCabinetQuotaRow, company_id)
-        if row is None:
-            return DEFAULT_CABINET_QUOTA
-        return row.to_domain()
+        quota = DEFAULT_CABINET_QUOTA if row is None else row.to_domain()
+        await set_cached_quota(company_id, quota)
+        return quota
 
     async def count_active_cabinets(self, company_id: str) -> int:
         q = await self._session.execute(

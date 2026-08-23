@@ -33,13 +33,16 @@
 | C-PROJECT-CHAT | L08 | `POST /chat`, `POST /chat/stream` (SSE), `GET /chat/transcript` | L05 UI, L09 | adapter-port | **live** (subset) |
 | C-OBJECT-STORE | P0 / L00 | MinIO/S3 put/get/delete + object refs (no local SoT) | L07 attach/materialize, L06 packages | [13 stack](../13-platform-infra/stack.md) | **live** (subset: manager + attach/packages; materialize FS hole) |
 | C-EVENT-BUS | P0 / L00 | Kafka envelopes: project triggers + platform events | L07, L06 SPI, L09 | [13](../13-platform-infra/), [triggers](../06-projects-runtime/triggers.md) | **live** (subset: dual-write + kick\|dispatch consumer; PG claim SoT) |
-| C-JOBS | P0 / L00 | Celery tasks: drain / dispatch_trigger / idle / rematerialize | L07, L08 | [13](../13-platform-infra/), [P0](P0-platform-infra.md) | **live** (subset: WorkerManager + tasks; Helm hole) |
-| C-CACHE | P0 / L00 | Redis cache / short locks / Celery broker conventions | L00 core, workers | [13](../13-platform-infra/) | **live** (subset: manager + company runtime cache) |
+| C-JOBS | P0 / L00 | Celery tasks: drain / dispatch_trigger / idle / rematerialize | L07, L08 | [13](../13-platform-infra/), [P0](P0-platform-infra.md) | **live** (subset: CLI bootstrap + beat; Helm hole) |
+| C-CACHE | P0 / L00 | Redis cache / short locks / Celery broker conventions | L00 core, workers | [13](../13-platform-infra/) | **live** (subset: policy/sub/quota; secrets not cached) |
 
 ## Compatibility log
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-24 | C-JOBS | Celery CLI import bootstrap; idle beat from `IDLE_PAUSE_WORKER_ENABLED` | no |
+| 2026-08-24 | C-CACHE | quota peek; no HMAC in Redis; subscription flags recompute on hit | no |
+| 2026-08-24 | C-OBJECT-STORE | `delete_prefix` + project tree wipe; k8s minio-init Job | no |
 | 2026-08-24 | C-EVENT-BUS / C-JOBS / C-TRIGGERS | Kafka `KAFKA_CONSUMER_MODE=dispatch` → Celery `dispatch_trigger` + `claim_by_id` | no |
 | 2026-08-24 | C-CACHE / C-ADMIN-POLICY | company agent policy + subscription Redis peek; invalidate on admin writes | no |
 | 2026-08-24 | P0 deploy | k8s sketches redis/minio/kafka/celery under `deploy/k8s/` | no |

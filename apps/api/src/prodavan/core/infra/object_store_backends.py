@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Any
@@ -22,6 +23,10 @@ class ObjectStoreBackend(ABC):
 
     @abstractmethod
     def exists(self, key: str) -> bool: ...
+
+    def delete_prefix(self, prefix: str) -> int:
+        """Delete all keys under prefix. Returns number of objects removed."""
+        raise NotImplementedError
 
     def health(self) -> bool:
         return True
@@ -66,6 +71,20 @@ class LocalFsObjectStore(ObjectStoreBackend):
 
     def exists(self, key: str) -> bool:
         return self._path(key).is_file()
+
+    def delete_prefix(self, prefix: str) -> int:
+        safe = prefix.lstrip("/").replace("\\", "/").rstrip("/")
+        if not safe or ".." in Path(safe).parts:
+            raise ValueError(f"unsafe object prefix: {prefix}")
+        base = self._root / safe
+        if base.is_dir():
+            count = sum(1 for p in base.rglob("*") if p.is_file())
+            shutil.rmtree(base)
+            return count
+        if base.is_file():
+            base.unlink()
+            return 1
+        return 0
 
 
 class S3ObjectStore(ObjectStoreBackend):
@@ -120,6 +139,28 @@ class S3ObjectStore(ObjectStoreBackend):
             return True
         except Exception:
             return False
+
+    def delete_prefix(self, prefix: str) -> int:
+        safe = prefix.lstrip("/")
+        if not safe or ".." in Path(safe).parts:
+            raise ValueError(f"unsafe object prefix: {prefix}")
+        deleted = 0
+        paginator = self._client.get_paginator("list_objects_v2")
+        try:
+            for page in paginator.paginate(Bucket=self._bucket, Prefix=safe):
+                objs = [{"Key": o["Key"]} for o in page.get("Contents") or []]
+                if not objs:
+                    continue
+                for i in range(0, len(objs), 1000):
+                    chunk = objs[i : i + 1000]
+                    self._client.delete_objects(
+                        Bucket=self._bucket,
+                        Delete={"Objects": chunk, "Quiet": True},
+                    )
+                    deleted += len(chunk)
+        except Exception:
+            logger.exception("s3 delete_prefix failed: %s", safe)
+        return deleted
 
     def health(self) -> bool:
         try:

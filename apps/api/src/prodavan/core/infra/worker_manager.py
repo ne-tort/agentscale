@@ -30,6 +30,64 @@ def get_celery_app() -> Any:
     return celery_app
 
 
+def _celery_broker_from_settings() -> str | None:
+    from prodavan.config.settings import settings
+
+    return (settings.celery_broker_url or settings.redis_url or "").strip() or None
+
+
+def worker_manager_from_settings() -> WorkerManager:
+    """Build WorkerManager from env (shared by API lifespan and Celery CLI)."""
+    from prodavan.config.settings import settings
+
+    broker = _celery_broker_from_settings()
+    return WorkerManager(
+        enabled=settings.celery_enabled,
+        broker_url=broker,
+        result_backend=(settings.celery_result_backend or "").strip() or broker,
+        trigger_interval_sec=settings.trigger_worker_interval_sec,
+        schedule_trigger_drain=settings.trigger_worker_enabled,
+        schedule_idle_pause=settings.idle_pause_worker_enabled,
+        task_always_eager=settings.celery_task_always_eager,
+    )
+
+
+def bootstrap_celery_app_from_settings() -> Any:
+    """Ensure ``celery_app`` exists without FastAPI lifespan (worker CLI / -B).
+
+    When ``CELERY_ENABLED`` + broker are set, builds a full app and registers the
+    WorkerManager singleton so ``enqueue_*`` helpers work inside tasks.
+    Otherwise installs a minimal inert Celery instance so the ``-A`` import path
+    never resolves to ``None``.
+    """
+    global celery_app
+    from celery import Celery
+
+    from prodavan.config.settings import settings
+
+    if celery_app is not None and get_worker_manager() is not None and get_worker_manager().enabled:
+        return celery_app
+
+    broker = _celery_broker_from_settings()
+    if not settings.celery_enabled or not broker:
+        if celery_app is None:
+            celery_app = Celery("prodavan")
+            logger.info("worker: CLI bootstrap inert (CELERY_ENABLED=false or no broker)")
+        return celery_app
+
+    mgr = worker_manager_from_settings()
+    mgr._app = mgr._build_app()
+    set_worker_manager(mgr)
+    celery_app = mgr._app
+    logger.info(
+        "worker: CLI bootstrap broker=%s beat_drain=%s beat_idle=%s",
+        broker,
+        mgr._schedule_trigger_drain,
+        mgr._schedule_idle_pause,
+    )
+    return celery_app
+
+
 class WorkerManager(LifespanResource):
     """Build/configure Celery; does not run the worker process inside API.
 
@@ -155,3 +213,7 @@ class WorkerManager(LifespanResource):
         if not self._broker_url:
             return False
         return self._app is not None
+
+
+# Import-time bootstrap so ``celery -A …celery_app`` works without API lifespan.
+celery_app = bootstrap_celery_app_from_settings()

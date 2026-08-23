@@ -5,7 +5,7 @@
 | Priority | **P0** (выше обычных LNN-волн при конфликте ресурсов) |
 | Canon | [13-platform-infra/](../13-platform-infra/) |
 | Refactor | **Significant refactor allowed** для L00, L03 (blob-adjacent), L07, L08 |
-| Status | `doing` (волны 1–5 subset + cache use + Kafka dispatch mode + k8s sketches) |
+| Status | `doing` (w1–5 + cache harden + Celery CLI bootstrap + idle beat + k8s minio-init) |
 
 ## Цель
 
@@ -25,7 +25,7 @@ Postgres и Keycloak/Vault роли не меняются.
 | 1 | core + lifespan | **done** | `DatabaseEngineResource`, `TriggerWorkerResource`, wiring |
 | 2 | Redis | **done** (subset) | URL optional; `REDIS_REQUIRED` для prod; нет docker-compose Redis в этом PR |
 | 3 | MinIO | **done** (subset) | ObjectStorage + attach/packages + materialize AGENTS/mcp/zip via store; sandbox extract local |
-| 4 | Celery | **done** (subset) | `WorkerManager` + tasks drain/idle/rematerialize; beat schedule; in-process skipped when Celery executor active |
+| 4 | Celery | **done** (subset) | CLI import bootstrap; beat drain+idle from settings; in-process skipped when Celery executor active |
 | 5 | Kafka | **done** (subset) | dual-write + consumer `kick`\|`dispatch` (`claim_by_id` + Celery `dispatch_trigger`); PG claim still SoT |
 
 ## Definition of Done
@@ -42,10 +42,11 @@ Postgres и Keycloak/Vault роли не меняются.
 
 ## Дыры логики (следующая итерация)
 
-- Kafka consumer **ускоряет** Celery (`kick` drain или `dispatch` per-id); PG outbox остаётся claim SoT; SPI fan-out не Kafka-only.
+- Kafka consumer **ускоряет** Celery (`kick`/`dispatch`); PG outbox остаётся claim SoT; SPI fan-out не Kafka-only.
 - Package sandbox: hydrate-from-zip есть; **live mount** workspace из MinIO в pod — hole.
-- C-CACHE: company agent policy + subscription peek закэшированы; другие hot paths ещё без cache.
-- k8s sketches в `deploy/k8s/{redis,minio,kafka,celery}` — не Helm, без PVC/NetworkPolicy/TLS.
+- `workspace_tree_bytes` / admin storage metrics — всё ещё local FS walk (S3 without mirror врёт).
+- Dual-write Kafka publish до PG commit → возможны ghost envelopes (claim → not_claimable).
+- k8s sketches: PVC/NetworkPolicy/TLS/Helm ещё hole (minio-init Job есть).
 
 ## Волны реализации
 
