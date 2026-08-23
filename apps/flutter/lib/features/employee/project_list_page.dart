@@ -82,7 +82,7 @@ class _ProjectListPageState extends State<ProjectListPage> {
               id: p['id'] as String,
               title: p['name'] as String? ?? p['id'] as String,
               subtitle: ProjectStatusChip.isPaused(status)
-                  ? 'Paused — chat and uploads disabled'
+                  ? 'Paused — chat, uploads and agent runs disabled'
                   : status,
               trailing: ProjectStatusChip(status: status),
             );
