@@ -686,6 +686,36 @@ class ProdavanApi {
     }
   }
 
+  Future<Map<String, dynamic>> pauseProject(String projectId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await http.post(
+        _uri('/projects/$projectId/pause'),
+        headers: _headers,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Map<String, dynamic>> resumeProject(String projectId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await http.post(
+        _uri('/projects/$projectId/resume'),
+        headers: _headers,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
   Future<Map<String, dynamic>> projectChat({
     required String projectId,
     required String text,

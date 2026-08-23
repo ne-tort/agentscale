@@ -32,6 +32,8 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
   bool _loading = true;
   bool _saving = false;
   bool _rematerializing = false;
+  bool _pausing = false;
+  String? _projectStatus;
   String? _error;
   String? _rematerializeInfo;
 
@@ -59,6 +61,7 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
       setState(() {
         _nameCtrl.text = project['name'] as String? ?? widget.projectName;
         _agentProvider = project['agent_provider'] as String?;
+        _projectStatus = project['status'] as String? ?? 'active';
         _loading = false;
       });
     } catch (e) {
@@ -119,6 +122,54 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
     }
   }
 
+  Future<void> _pause() async {
+    setState(() {
+      _pausing = true;
+      _error = null;
+    });
+    try {
+      final result = await workContext.api.pauseProject(widget.projectId);
+      if (!mounted) return;
+      setState(() {
+        _projectStatus = result['status'] as String? ?? 'paused';
+        _pausing = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Project paused')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _pausing = false;
+      });
+    }
+  }
+
+  Future<void> _resume() async {
+    setState(() {
+      _pausing = true;
+      _error = null;
+    });
+    try {
+      final result = await workContext.api.resumeProject(widget.projectId);
+      if (!mounted) return;
+      setState(() {
+        _projectStatus = result['status'] as String? ?? 'active';
+        _pausing = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Project resumed')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _pausing = false;
+      });
+    }
+  }
+
   String _labelFor(String? value) {
     if (value == null) return 'Company default';
     return value;
@@ -134,6 +185,19 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
               padding: const EdgeInsets.all(AppSpacing.lg),
               children: [
                 if (_error != null) InlineErrorBanner(message: _error!),
+                if (_projectStatus != null)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(
+                      _projectStatus == 'paused'
+                          ? Icons.pause_circle_filled
+                          : Icons.play_circle_outline,
+                    ),
+                    title: Text('Status: ${_projectStatus!}'),
+                    subtitle: _projectStatus == 'paused'
+                        ? const Text('Chat and uploads are disabled while paused')
+                        : null,
+                  ),
                 AppForm(
                   formKey: _formKey,
                   children: [
@@ -165,11 +229,21 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
                     ),
                     AppButton(
                       label: _saving ? 'Saving…' : 'Save',
-                      onPressed: _saving || _rematerializing ? null : _save,
+                      onPressed: _saving || _rematerializing || _pausing ? null : _save,
                     ),
+                    if (_projectStatus == 'paused')
+                      AppButton(
+                        label: _pausing ? 'Resuming…' : 'Resume project',
+                        onPressed: _saving || _rematerializing || _pausing ? null : _resume,
+                      )
+                    else
+                      AppButton(
+                        label: _pausing ? 'Pausing…' : 'Pause project',
+                        onPressed: _saving || _rematerializing || _pausing ? null : _pause,
+                      ),
                     AppButton(
                       label: _rematerializing ? 'Rematerializing…' : 'Rematerialize workspace',
-                      onPressed: _saving || _rematerializing ? null : _rematerialize,
+                      onPressed: _saving || _rematerializing || _pausing ? null : _rematerialize,
                     ),
                     if (_rematerializeInfo != null)
                       Text(

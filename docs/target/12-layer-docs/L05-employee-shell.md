@@ -7,7 +7,7 @@
 | Quality note | Dev shell + SSE chat + tab interpreters + bundle I/O + meta columns |
 | Plan | [L05](../11-implementation-plan/L05-employee-shell.md) |
 | Canon | [04-employees](../04-employees/), [session](../10-identity-keycloak/session.md) |
-| Last updated | 2026-08-23 — rematerialize workspace button |
+| Last updated | 2026-08-23 — project paused banner + pause/resume in settings |
 | Owners | — |
 
 ---
@@ -29,9 +29,9 @@
 | `CabinetCreatePage` full-page (no modal) | Custom bundle tab views (non-collection) |
 | `CabinetRowEditPage` full-page row edit | |
 | `ProjectCreatePage` full-page (no modal) + agent provider | |
-| `ProjectSettingsPage` — name + provider override + rematerialize | |
+| `ProjectSettingsPage` — name + provider override + pause/resume + rematerialize | |
 | Import/export bundle UI + starter catalog import | |
-| ProjectWorkspacePage — SSE chat + transcript + attachment chips + inbox list + suspend banner + HITL + cancel | Image thumbnails |
+| ProjectWorkspacePage — SSE chat + transcript + attachment chips + inbox list + suspend/paused banners + HITL + cancel | Image thumbnails |
 | Tables tab — row upsert/delete + DangerConfirm delete | |
 | Chat tab → `ProjectListPage` | |
 | Context tab — stats + export + AGENTS edit | |

@@ -70,8 +70,11 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   bool _uploadingAttachment = false;
   bool _cancelRequested = false;
   bool _companySuspended = false;
+  bool _projectPaused = false;
   String? _error;
   ProjectChatStreamHandle? _activeStream;
+
+  bool get _chatBlocked => _companySuspended || _projectPaused;
 
   @override
   void initState() {
@@ -90,7 +93,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   }
 
   Future<void> _pickAttachment() async {
-    if (_uploadingAttachment || _sending || _loading || _companySuspended) return;
+    if (_uploadingAttachment || _sending || _loading || _chatBlocked) return;
     final result = await FilePicker.platform.pickFiles(withData: true);
     if (result == null || result.files.isEmpty) return;
     final file = result.files.first;
@@ -224,6 +227,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       setState(() {
         _sessionId = result['session_id'] as String?;
         _companySuspended = sub['subscription_expired'] == true;
+        _projectPaused = project['status'] as String? == 'paused';
         _messages
           ..clear()
           ..addAll(lines);
@@ -243,7 +247,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
 
   Future<void> _send() async {
     final text = _composer.text.trim();
-    if (_sending || _companySuspended) return;
+    if (_sending || _chatBlocked) return;
     if (text.isEmpty && _pendingAttachments.isEmpty) return;
 
     final attachmentRefs = _pendingAttachments.map((a) => a.ref).toList(growable: false);
@@ -489,8 +493,11 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                       ),
                     ),
                   );
-                  if (!mounted || updated == null) return;
-                  setState(() => _projectName = updated);
+                  if (!mounted) return;
+                  await _loadTranscript();
+                  if (updated != null) {
+                    setState(() => _projectName = updated);
+                  }
                 },
           icon: const Icon(Icons.settings_outlined),
           tooltip: 'Project settings',
@@ -508,6 +515,13 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
               content: const Text('Company subscription expired — chat and uploads are disabled'),
               leading: const Icon(Icons.pause_circle_outline),
               backgroundColor: Theme.of(context).colorScheme.errorContainer,
+              actions: const [SizedBox.shrink()],
+            ),
+          if (_projectPaused && !_companySuspended)
+            MaterialBanner(
+              content: const Text('Project is paused — chat and uploads are disabled'),
+              leading: const Icon(Icons.pause_circle_filled),
+              backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
               actions: const [SizedBox.shrink()],
             ),
           if (_error != null) InlineErrorBanner(message: _error!),
@@ -531,7 +545,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                     trailing: IconButton(
                       icon: const Icon(Icons.delete_outline, size: 20),
                       tooltip: 'Delete',
-                      onPressed: _sending || _companySuspended
+                      onPressed: _sending || _chatBlocked
                           ? null
                           : () => _deleteInboxAttachment(item),
                     ),
@@ -679,7 +693,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                   Row(
                     children: [
                       IconButton(
-                        onPressed: _loading || _sending || _uploadingAttachment || _companySuspended
+                        onPressed: _loading || _sending || _uploadingAttachment || _chatBlocked
                             ? null
                             : _pickAttachment,
                         icon: _uploadingAttachment
@@ -696,7 +710,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                           controller: _composer,
                           minLines: 1,
                           maxLines: 4,
-                          enabled: !_loading && !_companySuspended,
+                          enabled: !_loading && !_chatBlocked,
                           textInputAction: TextInputAction.send,
                           onSubmitted: (_) => _send(),
                           decoration: const InputDecoration(
@@ -714,7 +728,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                           tooltip: 'Cancel',
                         ),
                       IconButton.filled(
-                        onPressed: _sending || _loading || _companySuspended ? null : _send,
+                        onPressed: _sending || _loading || _chatBlocked ? null : _send,
                         icon: _sending
                             ? const SizedBox(
                                 width: 18,

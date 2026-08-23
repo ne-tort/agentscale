@@ -4,6 +4,7 @@ import asyncio
 import os
 import socket
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from urllib.parse import urlparse
 
 import pytest
@@ -37,6 +38,29 @@ requires_postgres = pytest.mark.skipif(
     not _postgres_available(),
     reason="PostgreSQL not available at DATABASE_URL",
 )
+
+
+def sql_backdate_project(project_id: str, updated_at: datetime) -> None:
+    """Set projects.updated_at/created_at for idle-pause sweep tests."""
+
+    async def _run() -> None:
+        engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE projects SET updated_at = :ts, created_at = :ts WHERE id = :pid"),
+                {"ts": updated_at, "pid": project_id},
+            )
+        await engine.dispose()
+
+    def _runner() -> None:
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_run())
+        finally:
+            loop.close()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pool.submit(_runner).result(timeout=30)
 
 
 def _wipe_public_tables() -> None:

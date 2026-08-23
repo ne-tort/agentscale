@@ -18,7 +18,7 @@ from prodavan.config.settings import settings
 from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.infrastructure.keycloak.invite import reset_invite_client
 from prodavan.main import create_app
-from tests.conftest import requires_postgres
+from tests.conftest import requires_postgres, sql_backdate_project
 
 
 def _token(*, sub: str, email: str | None = None, platform_admin: bool = False) -> str:
@@ -733,3 +733,178 @@ def test_e2e_company_suspend_blocks_chat_and_lists_subscription(client: TestClie
     )
     assert events.status_code == 200, events.text
     assert len(events.json()["items"]) >= 1
+
+
+@requires_postgres
+def test_e2e_project_pause_blocks_chat(client: TestClient) -> None:
+    """L07→L09: manual pause → PROJECT_PAUSED on chat; resume restores writes."""
+    admin_h = {"Authorization": f"Bearer {_token(sub='e2e-pause-admin', platform_admin=True)}"}
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "E2EPauseCo", "admin_email": "owner@e2epause.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "E2E Pause Key",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-e2e-pause",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-pause-owner', email='owner@e2epause.test')}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "E2EPauseCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "E2EPauseProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+    assert proj.json()["status"] == "active"
+
+    paused = client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
+    assert paused.status_code == 200, paused.text
+    assert paused.json()["status"] == "paused"
+
+    got = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
+    assert got.status_code == 200, got.text
+    assert got.json()["status"] == "paused"
+
+    blocked = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "paused"},
+    )
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["code"] == "PROJECT_PAUSED"
+
+    resumed = client.post(f"/api/v1/projects/{project_id}/resume", headers=owner_h)
+    assert resumed.status_code == 200, resumed.text
+
+    ok = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "after resume"},
+    )
+    assert ok.status_code == 200, ok.text
+
+
+@requires_postgres
+def test_e2e_mcp_deploy_rematerializes_project(client: TestClient) -> None:
+    """L06→L07→L09: MCP package deploy rematerializes active cabinet projects."""
+    import base64
+
+    from prodavan.infrastructure.cabinets.package_codec import build_minimal_package_zip
+
+    admin_h = {"Authorization": f"Bearer {_token(sub='e2e-remat-admin', platform_admin=True)}"}
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "E2ERematCo", "admin_email": "owner@e2eremat.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-remat-owner', email='owner@e2eremat.test')}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "E2ERematCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "E2ERematProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    pkg_b64 = base64.b64encode(build_minimal_package_zip(name="e2e_remat_pkg")).decode()
+    deployed = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/mcp-packages",
+        headers=owner_h,
+        json={"zip_base64": pkg_b64},
+    )
+    assert deployed.status_code == 201, deployed.text
+    remat = deployed.json()["rematerialized"]
+    assert remat["count"] == 1
+    assert remat["projects"][0]["project_id"] == project_id
+    assert "e2e_remat_pkg" in remat["projects"][0]["package_names"]
+
+
+@requires_postgres
+def test_e2e_idle_pause_sweep_vertical(client: TestClient) -> None:
+    """L04→L07→L09: idle policy + admin sweep pauses stale project."""
+    admin_h = {"Authorization": f"Bearer {_token(sub='e2e-idle-admin', platform_admin=True)}"}
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "E2EIdleCo", "admin_email": "owner@e2eidle.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    policy = client.put(
+        f"/api/v1/admin/companies/{company_id}/agent-policy",
+        headers=admin_h,
+        json={"tool_preset": "workspace_dev", "idle_pause_after_hours": 24},
+    )
+    assert policy.status_code == 200, policy.text
+
+    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-idle-owner', email='owner@e2eidle.test')}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "E2EIdleCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "E2EIdleProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    stale = datetime.now(UTC) - timedelta(hours=48)
+    sql_backdate_project(project_id, stale)
+
+    swept = client.post(
+        f"/api/v1/admin/companies/{company_id}/idle-pause/sweep",
+        headers=admin_h,
+    )
+    assert swept.status_code == 200, swept.text
+    assert swept.json()["count"] == 1
+
+    got = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
+    assert got.status_code == 200, got.text
+    assert got.json()["status"] == "paused"
+
+    blocked = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "idle paused"},
+    )
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["code"] == "PROJECT_PAUSED"

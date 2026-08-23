@@ -3,10 +3,10 @@
 | Поле | Значение |
 |------|----------|
 | Status | doing |
-| Quality | 6 |
-| Quality note | API E2E + release_gate_check + suspend; Widget E2E — gap |
+| Quality | 7 |
+| Quality note | API E2E incl. pause/rematerialize/idle; Flutter paused UX; Widget E2E — gap |
 | Plan | [L09](../11-implementation-plan/L09-vertical-integration.md) |
-| Last updated | 2026-08-23 — rematerialize-on-deploy + idle worker opt-in |
+| Last updated | 2026-08-23 — E2E pause/rematerialize/idle-pause vertical |
 | Owners | — |
 
 ---
@@ -40,6 +40,9 @@
 | SSE cancel mid-stream → `(cancelled)` bubble + session cancel API | |
 | Release gate checklist | live (subset) | `tools/release_gate_check.py` wired in ci-api |
 | Company suspend E2E → COMPANY_SUSPENDED + platform_events | |
+| Project pause E2E → PROJECT_PAUSED + resume | |
+| MCP deploy rematerialize E2E | |
+| Idle pause sweep E2E (policy + admin sweep) | |
 
 ## Карта кода
 
@@ -63,4 +66,4 @@ tools/release_gate_check.py
 | Idle pause policy | live (subset) | policy + admin sweep + opt-in `IDLE_PAUSE_WORKER_ENABLED` |
 | Rematerialize after MCP deploy | live | deploy/disable returns `rematerialized`; Flutter settings button |
 
-## Quality | **6** | doing — E2E + release_gate_check; Widget E2E remains hole |
+## Quality | **7** | doing — vertical E2E + Flutter paused UX; Widget E2E remains hole |
