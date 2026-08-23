@@ -5,11 +5,13 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.application.agent.session_service import AgentSessionService
 from prodavan.application.projects.access import ProjectAccessService
 from prodavan.domain.agent import PLATFORM_EVENT_USER_MESSAGE, AgentSessionStatus
 from prodavan.domain.identity import Principal
 from prodavan.domain.projects import TriggerStatus
+from prodavan.domain.projects.types import SUBSCRIPTION_EXEMPT_TRIGGER_KINDS
 from prodavan.infrastructure.persistence.models.agent import AgentEventRow, AgentSessionRow
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.projects import ProjectTriggerRow
@@ -26,6 +28,7 @@ class AgentTriggerDispatcher:
         self._session = session
         self._sessions = AgentSessionService(session)
         self._projects = ProjectAccessService(session)
+        self._subscription = CompanySubscriptionGate(session)
 
     async def dispatch_next(
         self,
@@ -204,6 +207,19 @@ class AgentTriggerDispatcher:
         trigger = q.scalar_one_or_none()
         if trigger is None:
             return {"dispatched": False, "reason": "no queued triggers"}
+
+        if trigger.kind not in SUBSCRIPTION_EXEMPT_TRIGGER_KINDS:
+            project = await self._projects.get_project(project_id)
+            state = await self._subscription.subscription_state(project.company_id)
+            if state.get("subscription_expired"):
+                trigger.status = TriggerStatus.FAILED
+                await self._session.commit()
+                return {
+                    "dispatched": False,
+                    "trigger_id": trigger.id,
+                    "kind": trigger.kind,
+                    "reason": "company_suspended",
+                }
 
         payload = trigger.payload or {}
 

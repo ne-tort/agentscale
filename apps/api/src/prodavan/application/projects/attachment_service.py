@@ -9,6 +9,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.company_service import AdminCompanyService
+from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.application.projects.access import ProjectAccessService
 from prodavan.domain.admin import attachment_max_bytes
 from prodavan.domain.errors import AppError
@@ -35,6 +36,7 @@ class ProjectAttachmentService:
         self._session = session
         self._access = ProjectAccessService(session)
         self._companies = AdminCompanyService(session)
+        self._subscription = CompanySubscriptionGate(session)
 
     async def _max_bytes(self, company_id: str) -> int:
         policy = await self._companies.get_agent_policy(company_id)
@@ -103,6 +105,7 @@ class ProjectAttachmentService:
         project = await self._access.require_access(
             project_id=project_id, principal=principal, employee=employee, write=True
         )
+        await self._subscription.require_active(project.company_id)
         safe_name = filename.strip() or "attachment.bin"
         if not is_allowed_attachment_filename(safe_name):
             raise AppError(

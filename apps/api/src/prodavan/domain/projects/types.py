@@ -30,6 +30,9 @@ PROJECT_TRIGGER_KINDS = frozenset(
     }
 )
 
+# Triggers allowed while company subscription is expired (no agent runtime).
+SUBSCRIPTION_EXEMPT_TRIGGER_KINDS = frozenset({"project.prepare"})
+
 # Company / employee / project lifecycle — NOT project_triggers (see triggers.md).
 PLATFORM_EVENT_TYPES = frozenset(
     {

@@ -8,11 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.domain.errors import AppError
 from prodavan.domain.projects import PROJECT_TRIGGER_KINDS, ProjectStatus, TriggerStatus
+from prodavan.domain.projects.types import SUBSCRIPTION_EXEMPT_TRIGGER_KINDS
 from prodavan.infrastructure.persistence.models.projects import ProjectRow, ProjectTriggerRow
-
-# Materialize/prepare may run without agent; runtime triggers require active subscription.
-_SUBSCRIPTION_EXEMPT_TRIGGER_KINDS = frozenset({"project.prepare"})
-
 
 class ProjectTriggerService:
     def __init__(self, session: AsyncSession) -> None:
@@ -26,7 +23,7 @@ class ProjectTriggerService:
                 status=422,
                 detail=f"unsupported trigger kind: {kind}",
             )
-        if kind not in _SUBSCRIPTION_EXEMPT_TRIGGER_KINDS:
+        if kind not in SUBSCRIPTION_EXEMPT_TRIGGER_KINDS:
             project = await self._session.get(ProjectRow, project_id)
             if project is None or project.status == ProjectStatus.DELETED:
                 raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Project not found")

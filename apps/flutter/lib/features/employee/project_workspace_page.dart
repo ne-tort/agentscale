@@ -68,6 +68,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   bool _sending = false;
   bool _uploadingAttachment = false;
   bool _cancelRequested = false;
+  bool _companySuspended = false;
   String? _error;
   ProjectChatStreamHandle? _activeStream;
 
@@ -88,7 +89,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   }
 
   Future<void> _pickAttachment() async {
-    if (_uploadingAttachment || _sending || _loading) return;
+    if (_uploadingAttachment || _sending || _loading || _companySuspended) return;
     final result = await FilePicker.platform.pickFiles(withData: true);
     if (result == null || result.files.isEmpty) return;
     final file = result.files.first;
@@ -154,6 +155,8 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       _error = null;
     });
     try {
+      final project = await workContext.api.getProject(widget.projectId);
+      final sub = project['company_subscription'] as Map<String, dynamic>? ?? const {};
       final result = await workContext.api.projectChatTranscript(projectId: widget.projectId);
       if (!mounted) return;
       final items = result['messages'];
@@ -183,6 +186,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       }
       setState(() {
         _sessionId = result['session_id'] as String?;
+        _companySuspended = sub['subscription_expired'] == true;
         _messages
           ..clear()
           ..addAll(lines);
@@ -201,7 +205,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
 
   Future<void> _send() async {
     final text = _composer.text.trim();
-    if (_sending) return;
+    if (_sending || _companySuspended) return;
     if (text.isEmpty && _pendingAttachments.isEmpty) return;
 
     final attachmentRefs = _pendingAttachments.map((a) => a.ref).toList(growable: false);
@@ -442,6 +446,13 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       ],
       body: Column(
         children: [
+          if (_companySuspended)
+            MaterialBanner(
+              content: const Text('Company subscription expired — chat and uploads are disabled'),
+              leading: const Icon(Icons.pause_circle_outline),
+              backgroundColor: Theme.of(context).colorScheme.errorContainer,
+              actions: const [SizedBox.shrink()],
+            ),
           if (_error != null) InlineErrorBanner(message: _error!),
           Expanded(
             child: _loading
@@ -584,7 +595,9 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                   Row(
                     children: [
                       IconButton(
-                        onPressed: _loading || _sending || _uploadingAttachment ? null : _pickAttachment,
+                        onPressed: _loading || _sending || _uploadingAttachment || _companySuspended
+                            ? null
+                            : _pickAttachment,
                         icon: _uploadingAttachment
                             ? const SizedBox(
                                 width: 20,
@@ -599,7 +612,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                           controller: _composer,
                           minLines: 1,
                           maxLines: 4,
-                          enabled: !_loading,
+                          enabled: !_loading && !_companySuspended,
                           textInputAction: TextInputAction.send,
                           onSubmitted: (_) => _send(),
                           decoration: const InputDecoration(
@@ -617,7 +630,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                           tooltip: 'Cancel',
                         ),
                       IconButton.filled(
-                        onPressed: _sending || _loading ? null : _send,
+                        onPressed: _sending || _loading || _companySuspended ? null : _send,
                         icon: _sending
                             ? const SizedBox(
                                 width: 18,

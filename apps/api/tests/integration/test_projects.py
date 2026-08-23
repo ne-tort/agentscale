@@ -836,3 +836,180 @@ def test_package_platform_handler_invoked_when_enabled(
     detail = handler.get("detail") or {}
     assert detail.get("action") == "invoked"
     assert detail.get("exit_code") == 0
+
+
+@requires_postgres
+def test_get_project_includes_company_subscription(client: TestClient) -> None:
+    admin = _token(sub="padmin-sub-dto", platform_admin=True)
+    created_co = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "SubDtoCo", "admin_email": "owner@subdtoco.test"},
+    )
+    assert created_co.status_code == 201, created_co.text
+    company_id = created_co.json()["company"]["id"]
+    owner_tok = _token(sub="owner-sub-dto", email="owner@subdtoco.test")
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "SubDtoCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "SubDtoProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+    assert proj.json()["company_subscription"]["subscription_expired"] is False
+
+    past = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    client.put(
+        f"/api/v1/admin/companies/{company_id}/subscription",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"subscription_lifetime": False, "subscription_ends_at": past},
+    )
+
+    got = client.get(
+        f"/api/v1/projects/{project_id}",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert got.status_code == 200, got.text
+    sub = got.json()["company_subscription"]
+    assert sub["subscription_expired"] is True
+
+
+@requires_postgres
+def test_upload_attachment_blocked_when_company_suspended(client: TestClient) -> None:
+    admin = _token(sub="padmin-att-sus", platform_admin=True)
+    created_co = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "AttSusCo", "admin_email": "owner@attsusco.test"},
+    )
+    assert created_co.status_code == 201, created_co.text
+    company_id = created_co.json()["company"]["id"]
+    owner_tok = _token(sub="owner-att-sus", email="owner@attsusco.test")
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "AttSusCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "AttSusProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    past = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    client.put(
+        f"/api/v1/admin/companies/{company_id}/subscription",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"subscription_lifetime": False, "subscription_ends_at": past},
+    )
+
+    blocked = client.post(
+        f"/api/v1/projects/{project_id}/attachments",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={
+            "filename": "note.txt",
+            "content_base64": base64.b64encode(b"nope").decode("ascii"),
+        },
+    )
+    assert blocked.status_code == 403, blocked.text
+    assert blocked.json()["code"] == "COMPANY_SUSPENDED"
+
+
+@requires_postgres
+def test_trigger_drain_fails_queued_when_company_suspended(client: TestClient) -> None:
+    admin = _token(sub="padmin-trg-sus", platform_admin=True)
+    created_co = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "TrgSusCo", "admin_email": "owner@trgsusco.test"},
+    )
+    assert created_co.status_code == 201, created_co.text
+    company_id = created_co.json()["company"]["id"]
+    owner_tok = _token(sub="owner-trg-sus", email="owner@trgsusco.test")
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={
+            "name": "Cursor Trg",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-trg",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "TrgSusCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "TrgSusProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    from prodavan.domain.projects import webhook_signature
+
+    policy = client.put(
+        f"/api/v1/admin/companies/{company_id}/agent-policy",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"tool_preset": "workspace_dev", "webhook_hmac_secret": "pre-suspend"},
+    )
+    assert policy.status_code == 200, policy.text
+
+    body = b'{"text":"queued before suspend"}'
+    queued = client.post(
+        f"/api/v1/projects/{project_id}/webhooks/http",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Prodavan-Signature": webhook_signature("pre-suspend", body),
+        },
+    )
+    assert queued.status_code == 202, queued.text
+
+    past = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    client.put(
+        f"/api/v1/admin/companies/{company_id}/subscription",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"subscription_lifetime": False, "subscription_ends_at": past},
+    )
+
+    drain = client.post(
+        f"/api/v1/projects/{project_id}/triggers/dispatch?max=1",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert drain.status_code == 200, drain.text
+    items = drain.json().get("items") or []
+    assert items
+    assert items[0].get("reason") == "company_suspended"
+
+    listed = client.get(
+        f"/api/v1/projects/{project_id}/triggers",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert listed.status_code == 200, listed.text
+    assert any(t.get("status") == "failed" for t in listed.json())

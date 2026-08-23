@@ -36,6 +36,7 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-23 | C-PROJECT / C-ATTACH / C-TRIGGERS | company_subscription on project GET; attachment gate; drain fail queued on suspend | no |
 | 2026-08-23 | C-CABINET-MCP / C-PROJECT | MCP_PLATFORM_EVENT_INVOKE zip handler; project create COMPANY_SUSPENDED gate | no |
 | 2026-08-23 | C-ADMIN-COMPANY / C-TRIGGERS | subscription transition events (dedupe); trigger enqueue gate; company.reactivated | no |
 | 2026-08-23 | C-CABINET-MCP / platform events | company-scoped SPI fan-out; manifest platform_events stub audit | no |

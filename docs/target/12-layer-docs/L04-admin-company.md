@@ -7,7 +7,7 @@
 | Quality note | Admin shell + starter catalog + subscription alerts |
 | Plan | [L04](../11-implementation-plan/L04-admin-company.md) |
 | Canon | [01-platform-admin](../01-platform-admin/), [03-companies](../03-companies/) |
-| Last updated | 2026-08-23 — company.suspended + telegram/webhook HMAC UI fields |
+| Last updated | 2026-08-23 — company_subscription on project GET + runtime gate semantics |
 | Owners | — |
 
 ---
@@ -27,7 +27,7 @@ Platform Admin — компании, keys (L03), квоты/policy, metrics read
 | Agent policy UI incl. token budgets + max_attachment_mb + HMAC secrets | USD authoritative billing sync |
 | Company contour: Overview / Employees / Cabinets | |
 | Invite employee full-page form | |
-| `PUT /admin/companies/{id}/subscription` → emits `company.suspended` on expire transition, `company.reactivated` on renew | |
+| `PUT /admin/companies/{id}/subscription` → emits `company.suspended` on expire transition, `company.reactivated` on renew | auto-expiry SPI without admin PUT — hole |
 | Metrics: `subscription_ends_at`, expiring/expired flags | |
 | Starter bundle catalog API (`GET /admin/starter-bundles`) | |
 | AdminStarterBundlesPage read-only catalog tab | |

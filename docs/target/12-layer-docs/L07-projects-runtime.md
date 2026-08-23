@@ -7,7 +7,7 @@
 | Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain/worker; k8s isolator — gap |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-23 — project create suspend gate + package handler invoke |
+| Last updated | 2026-08-23 — company_subscription on project + attachment/trigger suspend |
 | Owners | — |
 
 ---
@@ -38,7 +38,8 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 5. L06 `materialize-stub` → real FS (status `materialized`).
 6. Opt-in trigger worker (`TRIGGER_WORKER_ENABLED`) — in-process asyncio + `pg_try_advisory_lock`; hole: not durable outbox.
 7. `PlatformEventService` — subscription transitions + SPI fan-out. Package `platform_events` + opt-in `MCP_PLATFORM_EVENT_INVOKE` runs `src/on_platform_event.py` from zip; MCP stdio — hole.
-8. `ProjectTriggerService.enqueue` — `COMPANY_SUSPENDED` for runtime kinds; `project.prepare` exempt. `ProjectService.create` — same gate.
+8. `ProjectTriggerService.enqueue` + drain — `COMPANY_SUSPENDED` for runtime kinds; `project.prepare` exempt; queued triggers → `failed` on drain.
+9. Project GET/list includes `company_subscription` read model (L04 → L05).
 9. Signed webhook ingress `POST .../webhooks/http` with company `webhook_hmac_secret` (not returned in GET; `webhook_hmac_configured` flag).
 10. Signed telegram ingress `POST .../webhooks/telegram` with company `telegram_hmac_secret` (`telegram_hmac_configured` flag).
 

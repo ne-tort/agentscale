@@ -44,7 +44,12 @@ def _normalize_agent_provider(value: str | None) -> str | None:
     return normalized
 
 
-def _public(row: ProjectRow, *, limits: dict | None = None) -> dict:
+def _public(
+    row: ProjectRow,
+    *,
+    limits: dict | None = None,
+    company_subscription: dict | None = None,
+) -> dict:
     out = {
         "id": row.id,
         "company_id": row.company_id,
@@ -61,6 +66,8 @@ def _public(row: ProjectRow, *, limits: dict | None = None) -> dict:
     }
     if limits is not None:
         out["limits"] = limits
+    if company_subscription is not None:
+        out["company_subscription"] = company_subscription
     return out
 
 
@@ -78,6 +85,11 @@ class ProjectService:
     async def _attachment_limits(self, company_id: str) -> dict:
         policy = await self._companies.get_agent_policy(company_id)
         return {"attachment_max_bytes": attachment_max_bytes(policy)}
+
+    async def _project_public(self, row: ProjectRow) -> dict:
+        limits = await self._attachment_limits(row.company_id)
+        subscription = await self._subscription.subscription_state(row.company_id)
+        return _public(row, limits=limits, company_subscription=subscription)
 
     async def create(
         self,
@@ -144,8 +156,7 @@ class ProjectService:
         )
         await self._session.commit()
         await self._session.refresh(row)
-        limits = await self._attachment_limits(row.company_id)
-        out = _public(row, limits=limits)
+        out = await self._project_public(row)
         out["materialize"] = {
             "workspace_root": mat.workspace_root,
             "mcp_config_path": mat.mcp_config_path,
@@ -167,12 +178,15 @@ class ProjectService:
             cabinet_id=cabinet_id, principal=principal, employee=employee, write=False
         )
         limits = await self._attachment_limits(inst.company_id)
+        subscription = await self._subscription.subscription_state(inst.company_id)
         q = await self._session.execute(
             select(ProjectRow)
             .where(ProjectRow.cabinet_id == cabinet_id, ProjectRow.status != ProjectStatus.DELETED)
             .order_by(ProjectRow.created_at.desc())
         )
-        return [_public(r, limits=limits) for r in q.scalars().all()]
+        return [
+            _public(r, limits=limits, company_subscription=subscription) for r in q.scalars().all()
+        ]
 
     async def get(
         self,
@@ -184,8 +198,7 @@ class ProjectService:
         row = await self._access.require_access(
             project_id=project_id, principal=principal, employee=employee, write=False
         )
-        limits = await self._attachment_limits(row.company_id)
-        return _public(row, limits=limits)
+        return await self._project_public(row)
 
     async def patch(
         self,
@@ -215,8 +228,7 @@ class ProjectService:
             row.agent_provider = _normalize_agent_provider(agent_provider)
         await self._session.commit()
         await self._session.refresh(row)
-        limits = await self._attachment_limits(row.company_id)
-        return _public(row, limits=limits)
+        return await self._project_public(row)
 
     async def rematerialize(
         self,
@@ -266,8 +278,7 @@ class ProjectService:
         )
         await self._session.commit()
         await self._session.refresh(row)
-        limits = await self._attachment_limits(row.company_id)
-        return _public(row, limits=limits)
+        return await self._project_public(row)
 
     async def resume(
         self,
@@ -296,8 +307,7 @@ class ProjectService:
         )
         await self._session.commit()
         await self._session.refresh(row)
-        limits = await self._attachment_limits(row.company_id)
-        return _public(row, limits=limits)
+        return await self._project_public(row)
 
     async def delete(
         self,
@@ -327,5 +337,4 @@ class ProjectService:
         if purge_workspace:
             WorkspaceLayoutWriter(workspace_key=row.workspace_key).remove_project_tree()
         await self._session.refresh(row)
-        limits = await self._attachment_limits(row.company_id)
-        return _public(row, limits=limits)
+        return await self._project_public(row)
