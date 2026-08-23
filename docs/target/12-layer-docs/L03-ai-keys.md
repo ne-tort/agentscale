@@ -115,4 +115,4 @@ cd apps/api && ruff check src tests && pytest tests/unit/test_ai_keys_domain.py 
 | B. Контракты | 2 | C-KEY-ENTITY / C-KEY-RESOLVE live |
 | C. Инварианты и проверки | 2 | no secret leak; cli ban tested |
 | D. As-built ясность | 2 | эта карточка |
-| **Quality (итог)** | **8** | Vault/platform_fallback = Gaps |
+| **Quality (итог)** | **8** | Vault backend = gap |
