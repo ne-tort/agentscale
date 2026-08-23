@@ -55,7 +55,11 @@ class _DynamicCabinetShellState extends State<DynamicCabinetShell> with SingleTi
   }
 
   Widget _tabBody(Map<String, dynamic> tab) {
-    return CabinetTabHost(cabinetId: widget.cabinetId, tab: tab);
+    return CabinetTabHost(
+      cabinetId: widget.cabinetId,
+      cabinetName: widget.cabinetName,
+      tab: tab,
+    );
   }
 
   @override

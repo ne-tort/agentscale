@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Annotated
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
@@ -23,6 +25,13 @@ class CabinetQuotaBody(BaseModel):
     max_cabinets: int = Field(ge=1, le=10_000)
     max_packages_per_cabinet: int = Field(ge=0, le=500)
     max_bundle_import_mb: int = Field(ge=1, le=10_000)
+
+
+class SubscriptionBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    subscription_lifetime: bool = False
+    subscription_ends_at: str | None = None
 
 
 class AgentPolicyBody(BaseModel):
@@ -92,6 +101,40 @@ async def set_agent_policy(
     )
     return await AdminCompanyService(session).set_agent_policy(company_id, policy)
 
+
+@router.put("/{company_id}/subscription")
+async def set_company_subscription(
+    company_id: str,
+    body: SubscriptionBody,
+    _: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    ends_at: datetime | None = None
+    if body.subscription_ends_at:
+        try:
+            raw = body.subscription_ends_at.replace("Z", "+00:00")
+            ends_at = datetime.fromisoformat(raw)
+            if ends_at.tzinfo is None:
+                ends_at = ends_at.replace(tzinfo=UTC)
+        except ValueError as exc:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="invalid subscription_ends_at",
+            ) from exc
+    if not body.subscription_lifetime and ends_at is None:
+        raise AppError(
+            code="VALIDATION_ERROR",
+            title="Validation Error",
+            status=422,
+            detail="subscription_ends_at required unless subscription_lifetime",
+        )
+    return await AdminCompanyService(session).set_subscription(
+        company_id,
+        subscription_ends_at=ends_at,
+        subscription_lifetime=body.subscription_lifetime,
+    )
 
 
 @router.get("/{company_id}/metrics")

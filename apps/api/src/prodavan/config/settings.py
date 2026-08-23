@@ -57,6 +57,7 @@ class Settings(BaseSettings):
 
     # L04 admin metrics alerts (0 = disabled)
     admin_metrics_token_alert_threshold: int = 50_000
+    admin_metrics_subscription_expiring_days: int = 30
 
     @property
     def cors_origin_list(self) -> list[str]:

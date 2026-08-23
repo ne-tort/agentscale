@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 
 TOOL_PRESETS = frozenset({"chat_readonly", "workspace_dev", "workspace_full"})
 
@@ -41,3 +42,41 @@ class CompanyAgentRuntimePolicy:
             raise ValueError("max_agent_tokens_month must be >= 1")
         if self.max_tokens_per_run is not None and self.max_tokens_per_run < 1:
             raise ValueError("max_tokens_per_run must be >= 1")
+
+
+SUBSCRIPTION_EXPIRING_SOON_DAYS = 30
+
+
+def subscription_read_model(
+    *,
+    ends_at: datetime | None,
+    lifetime: bool,
+    now: datetime,
+    expiring_days: int = SUBSCRIPTION_EXPIRING_SOON_DAYS,
+) -> dict[str, object]:
+    """Metrics DTO fields for company subscription (L04 / metrics.md)."""
+    if lifetime:
+        return {
+            "subscription_ends_at": None,
+            "subscription_lifetime": True,
+            "subscription_expiring_soon": False,
+            "subscription_expired": False,
+        }
+    if ends_at is None:
+        return {
+            "subscription_ends_at": None,
+            "subscription_lifetime": False,
+            "subscription_expiring_soon": False,
+            "subscription_expired": False,
+        }
+    if ends_at.tzinfo is None:
+        ends_at = ends_at.replace(tzinfo=now.tzinfo)
+    expired = ends_at < now
+    soon_limit = now + timedelta(days=expiring_days)
+    expiring_soon = not expired and ends_at <= soon_limit
+    return {
+        "subscription_ends_at": ends_at.isoformat(),
+        "subscription_lifetime": False,
+        "subscription_expiring_soon": expiring_soon,
+        "subscription_expired": expired,
+    }

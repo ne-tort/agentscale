@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.admin.quota_service import CompanyQuotaService
 from prodavan.application.ai_keys.service import AiKeysService
 from prodavan.config.settings import settings
-from prodavan.domain.admin import CompanyAgentRuntimePolicy, CompanyCabinetQuota
+from prodavan.domain.admin import CompanyAgentRuntimePolicy, CompanyCabinetQuota, subscription_read_model
 from prodavan.domain.cabinets import CabinetStatus
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import EmployeeStatus
@@ -156,7 +156,7 @@ class AdminCompanyService:
         return sum(workspace_tree_bytes(key) for key in keys_q.scalars().all())
 
     async def get_metrics(self, company_id: str) -> dict:
-        await self._require_company(company_id)
+        company = await self._require_company(company_id)
         emp_q = await self._session.execute(
             select(func.count(func.distinct(MembershipRow.employee_id))).where(
                 MembershipRow.company_id == company_id
@@ -215,6 +215,12 @@ class AdminCompanyService:
         tokens_used = input_tok + output_tok
         threshold = settings.admin_metrics_token_alert_threshold
         high_usage = threshold > 0 and tokens_used >= threshold
+        sub = subscription_read_model(
+            ends_at=company.subscription_ends_at,
+            lifetime=company.subscription_lifetime,
+            now=datetime.now(UTC),
+            expiring_days=settings.admin_metrics_subscription_expiring_days,
+        )
         return {
             "employees_total": int(emp_q.scalar_one() or 0),
             "employees_active": int(emp_active_q.scalar_one() or 0),
@@ -234,7 +240,31 @@ class AdminCompanyService:
             "storage_bytes": storage_bytes,
             "high_agent_usage": high_usage,
             **key_metrics,
+            **sub,
         }
+
+    async def set_subscription(
+        self,
+        company_id: str,
+        *,
+        subscription_ends_at: datetime | None,
+        subscription_lifetime: bool,
+    ) -> dict:
+        company = await self._require_company(company_id)
+        if subscription_lifetime:
+            company.subscription_lifetime = True
+            company.subscription_ends_at = None
+        else:
+            company.subscription_lifetime = False
+            company.subscription_ends_at = subscription_ends_at
+        await self._session.commit()
+        await self._session.refresh(company)
+        return subscription_read_model(
+            ends_at=company.subscription_ends_at,
+            lifetime=company.subscription_lifetime,
+            now=datetime.now(UTC),
+            expiring_days=settings.admin_metrics_subscription_expiring_days,
+        )
 
     async def list_companies_metrics(self) -> list[dict]:
         q = await self._session.execute(select(CompanyRow).order_by(CompanyRow.created_at.desc()))

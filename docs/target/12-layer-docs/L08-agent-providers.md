@@ -26,7 +26,7 @@ AgentProviderPort + frozen AgentEvent; credentials только через L03 r
 | `FixtureCursorAdapter` (cursor_sdk) + `FakeAgentAdapter` | Codex/Claude real adapters |
 | ORM agent_sessions / agent_events / agent_usage | Codex/Claude real adapters |
 | `POST /projects/{id}/chat` + `/chat/stream` (SSE) | Node sidecar (real Cursor SDK) |
-| `GET .../chat/transcript` + list sessions; platform `user_message` | USD cost cap |
+| `GET .../chat/transcript` + list sessions; user + tool bubbles | USD cost cap |
 | `AgentBudgetService` — monthly + per-run token hard-stop | Platform fallback key pool |
 | Trigger dispatch (`chat.message` → agent run) | Background worker loop |
 | Unit + integration tests | Golden JSON fixtures |

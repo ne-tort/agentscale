@@ -55,14 +55,32 @@ class ProdavanApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
-  Future<List<Map<String, dynamic>>> listMetaTabs(String cabinetId) async {
-    final res = await http.get(_uri('/cabinets/$cabinetId/meta/tabs'), headers: _headers);
-    _throwIfError(res);
-    final body = jsonDecode(res.body);
-    if (body is List) {
-      return body.cast<Map<String, dynamic>>();
+  Future<Map<String, dynamic>> getCabinet(String cabinetId) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.get(_uri('/cabinets/$cabinetId'), headers: _headers);
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
     }
-    return const [];
+  }
+
+  Future<List<Map<String, dynamic>>> listMetaTabs(String cabinetId) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.get(_uri('/cabinets/$cabinetId/meta/tabs'), headers: _headers);
+      _throwIfError(res);
+      final body = jsonDecode(res.body);
+      if (body is List) {
+        return body.cast<Map<String, dynamic>>();
+      }
+      return const [];
+    } finally {
+      this.cabinetId = prev;
+    }
   }
 
   Future<List<Map<String, dynamic>>> listMetaTables(String cabinetId) async {

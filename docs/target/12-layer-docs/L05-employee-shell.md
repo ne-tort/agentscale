@@ -7,7 +7,7 @@
 | Quality note | Dev shell + SSE chat + attachments + tab interpreters |
 | Plan | [L05](../11-implementation-plan/L05-employee-shell.md) |
 | Canon | [04-employees](../04-employees/), [session](../10-identity-keycloak/session.md) |
-| Last updated | 2026-08-23 — tool transcript replay + cabinet tab interpreters |
+| Last updated | 2026-08-23 — context tab interpreter + getCabinet API |
 | Owners | — |
 
 ---
@@ -32,6 +32,7 @@
 | Cancel + abort SSE in workspace | |
 | Live + replay `tool_call` bubbles | |
 | Tables/Tools tab interpreters (read-only) | |
+| Context tab — cabinet summary stats | |
 
 ## Как сделано
 
@@ -53,7 +54,7 @@ apps/flutter/lib/
   core/api/prodavan_api.dart
   core/session/work_context.dart
   features/employee/{dev_session,cabinet_list,dynamic_cabinet_shell,cabinet_tab_host,
-    cabinet_tables_tab_page,cabinet_tools_tab_page,project_list,project_workspace}_page.dart
+    cabinet_context_tab_page,cabinet_tables_tab_page,cabinet_tools_tab_page,project_list,project_workspace}_page.dart
 ```
 
 ## Gaps
@@ -67,6 +68,6 @@ apps/flutter/lib/
 | Attachment upload in chat | live | file_picker → POST `/attachments` → chips → `attachment_refs` |
 | In-flight SSE abort | live | `ProjectChatStreamHandle.abort()` closes HTTP client |
 | Event history reload | live | `GET .../chat/transcript` incl. user + tool bubbles |
-| Meta tab interpreters | live (subset) | projects/tables/tools; chat/context placeholder |
+| Meta tab interpreters | live (subset) | projects/tables/tools/context; chat placeholder |
 | Custom bundle views | hole | non-system tabs from imported bundles |
 | Row edit UI | hole | read-only tables tab |

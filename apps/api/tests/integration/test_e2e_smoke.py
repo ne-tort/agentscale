@@ -146,6 +146,12 @@ def test_e2e_smoke_admin_to_agent_ping(client: TestClient) -> None:
     assert any(e.get("type") == "text_delta" for e in stream_events)
     assert any(e.get("type") == "_turn_complete" for e in stream_events)
 
+    tabs = client.get(f"/api/v1/cabinets/{cabinet_id}/meta/tabs", headers=owner_h)
+    assert tabs.status_code == 200, tabs.text
+    slugs = {t.get("view_slug") for t in tabs.json()}
+    assert "projects" in slugs
+    assert all(t.get("view_slug") for t in tabs.json())
+
 
 @requires_postgres
 def test_e2e_disabled_employee_cannot_chat(client: TestClient) -> None:

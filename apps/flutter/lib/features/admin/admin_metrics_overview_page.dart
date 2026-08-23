@@ -10,7 +10,7 @@ import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/core/widgets/stat_tile.dart';
 import 'package:prodavan/features/admin/company_detail_page.dart';
 
-enum _AlertKind { noKeys, keyExpiring, highUsage }
+enum _AlertKind { noKeys, keyExpiring, highUsage, subscriptionExpiring, subscriptionExpired }
 
 class _OverviewAlert {
   const _OverviewAlert({
@@ -109,6 +109,27 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
           ),
         );
       }
+      if (c['subscription_lifetime'] != true && c['subscription_expired'] == true) {
+        final ends = c['subscription_ends_at'];
+        alerts.add(
+          _OverviewAlert(
+            kind: _AlertKind.subscriptionExpired,
+            companyId: id,
+            companyName: name,
+            subtitle: 'Subscription ended${ends != null ? ' · $ends' : ''}',
+          ),
+        );
+      } else if (c['subscription_lifetime'] != true && c['subscription_expiring_soon'] == true) {
+        final ends = c['subscription_ends_at'];
+        alerts.add(
+          _OverviewAlert(
+            kind: _AlertKind.subscriptionExpiring,
+            companyId: id,
+            companyName: name,
+            subtitle: 'Subscription ends soon${ends != null ? ' · $ends' : ''}',
+          ),
+        );
+      }
     }
     return alerts;
   }
@@ -191,22 +212,28 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
             ..._alerts.map(
               (a) => ListTile(
                 leading: Icon(
-                  a.kind == _AlertKind.noKeys
-                      ? Icons.warning_amber_outlined
-                      : a.kind == _AlertKind.keyExpiring
-                          ? Icons.schedule_outlined
-                          : Icons.trending_up,
-                  color: a.kind == _AlertKind.noKeys
-                      ? Colors.orange
-                      : a.kind == _AlertKind.keyExpiring
-                          ? Colors.deepOrange
-                          : Colors.redAccent,
+                  switch (a.kind) {
+                    _AlertKind.noKeys => Icons.warning_amber_outlined,
+                    _AlertKind.keyExpiring => Icons.schedule_outlined,
+                    _AlertKind.highUsage => Icons.trending_up,
+                    _AlertKind.subscriptionExpiring => Icons.event_outlined,
+                    _AlertKind.subscriptionExpired => Icons.event_busy_outlined,
+                  },
+                  color: switch (a.kind) {
+                    _AlertKind.noKeys => Colors.orange,
+                    _AlertKind.keyExpiring => Colors.deepOrange,
+                    _AlertKind.highUsage => Colors.redAccent,
+                    _AlertKind.subscriptionExpiring => Colors.deepOrange,
+                    _AlertKind.subscriptionExpired => Colors.red,
+                  },
                 ),
                 title: Text(
                   switch (a.kind) {
                     _AlertKind.noKeys => '${a.companyName}: no AI keys bound',
                     _AlertKind.keyExpiring => '${a.companyName}: AI key renewal soon',
                     _AlertKind.highUsage => '${a.companyName}: high agent token usage',
+                    _AlertKind.subscriptionExpiring => '${a.companyName}: subscription expiring',
+                    _AlertKind.subscriptionExpired => '${a.companyName}: subscription expired',
                   },
                 ),
                 subtitle: Text(a.subtitle),

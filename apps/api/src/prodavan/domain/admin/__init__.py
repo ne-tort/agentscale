@@ -5,6 +5,7 @@ from prodavan.domain.admin.types import (
     TOOL_PRESETS,
     CompanyAgentRuntimePolicy,
     CompanyCabinetQuota,
+    subscription_read_model,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "CompanyAgentRuntimePolicy",
     "CompanyCabinetQuota",
     "TOOL_PRESETS",
+    "subscription_read_model",
 ]

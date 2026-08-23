@@ -141,6 +141,35 @@ def test_list_platform_metrics_companies(client: TestClient) -> None:
 
 
 @requires_postgres
+def test_company_subscription_expiring_metrics(client: TestClient) -> None:
+    admin = _token(sub="sub-admin", email="sub@example.com", platform_admin=True)
+    created = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "SubCo", "admin_email": "boss@subco.test"},
+    )
+    assert created.status_code == 201, created.text
+    company_id = created.json()["company"]["id"]
+    ends = (datetime.now(UTC) + timedelta(days=7)).isoformat()
+
+    updated = client.put(
+        f"/api/v1/admin/companies/{company_id}/subscription",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"subscription_lifetime": False, "subscription_ends_at": ends},
+    )
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["subscription_expiring_soon"] is True
+
+    metrics = client.get(
+        f"/api/v1/admin/companies/{company_id}/metrics",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert metrics.status_code == 200, metrics.text
+    assert metrics.json()["subscription_expiring_soon"] is True
+    assert metrics.json()["subscription_ends_at"] is not None
+
+
+@requires_postgres
 def test_company_metrics_key_expiring_soon(client: TestClient) -> None:
     import asyncio
 

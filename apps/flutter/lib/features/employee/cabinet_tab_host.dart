@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/features/employee/cabinet_context_tab_page.dart';
 import 'package:prodavan/features/employee/cabinet_placeholder_tab_page.dart';
 import 'package:prodavan/features/employee/cabinet_tables_tab_page.dart';
 import 'package:prodavan/features/employee/cabinet_tools_tab_page.dart';
@@ -10,11 +11,13 @@ class CabinetTabHost extends StatelessWidget {
   const CabinetTabHost({
     super.key,
     required this.cabinetId,
+    required this.cabinetName,
     required this.tab,
   });
 
   final String cabinetId;
   final Map<String, dynamic> tab;
+  final String cabinetName;
 
   @override
   Widget build(BuildContext context) {
@@ -28,15 +31,12 @@ class CabinetTabHost extends StatelessWidget {
         return CabinetTablesTabPage(cabinetId: cabinetId);
       case 'tools':
         return CabinetToolsTabPage(cabinetId: cabinetId);
+      case 'context':
+        return CabinetContextTabPage(cabinetId: cabinetId, cabinetName: cabinetName);
       case 'chat':
         return CabinetPlaceholderTabPage(
           title: title,
           hint: 'Open a project from the Projects tab to chat with the agent.',
-        );
-      case 'context':
-        return CabinetPlaceholderTabPage(
-          title: title,
-          hint: 'Cabinet context and memory views will appear here (L06 bundle).',
         );
       default:
         return CabinetPlaceholderTabPage(

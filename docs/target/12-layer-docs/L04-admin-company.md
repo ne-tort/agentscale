@@ -4,10 +4,10 @@
 |------|----------|
 | Status | doing |
 | Quality | 7 |
-| Quality note | Admin shell Overview + Companies + AI Keys + Company contour |
+| Quality note | Admin shell Overview + Companies + AI Keys + subscription alerts |
 | Plan | [L04](../11-implementation-plan/L04-admin-company.md) |
 | Canon | [01-platform-admin](../01-platform-admin/), [03-companies](../03-companies/) |
-| Last updated | 2026-08-23 — storage/activity metrics + high usage alert |
+| Last updated | 2026-08-23 — subscription_ends_at metrics + Overview alerts |
 | Owners | — |
 
 ---
@@ -21,13 +21,14 @@ Platform Admin — компании, keys (L03), квоты/policy, metrics read
 | Сделано | Gaps |
 |---------|------|
 | AdminShell NavigationBar: Overview + Companies + AI Keys | Starter bundle catalog |
-| Platform Overview tab + no-keys / key-expiring alerts | Subscription expiring alert |
+| Platform Overview tab + no-keys / key-expiring / subscription alerts | |
 | Create company full-page + quotas on create | |
 | AI Keys: list, create, bind, disable, renew, rotate | |
 | Agent policy UI incl. token budgets | |
 | Company contour: Overview / Employees / Cabinets | |
 | Invite employee full-page form | |
-| API: employees/summary + list_keys with company_ids | |
+| `PUT /admin/companies/{id}/subscription` | |
+| Metrics: `subscription_ends_at`, expiring/expired flags | |
 
 ## Карта кода
 
@@ -39,6 +40,8 @@ apps/flutter/lib/features/admin/
   {company_list,company_detail,ai_key_list,ai_key_create,ai_key_detail,ai_key_rotate}_page.dart
 apps/flutter/lib/features/company/company_invite_employee_page.dart
 apps/flutter/lib/core/api/admin_api.dart
+apps/api/src/prodavan/domain/admin/types.py (subscription_read_model)
+apps/api/alembic/versions/2026082309_company_subscription.py
 ```
 
 ## Gaps
@@ -51,8 +54,10 @@ apps/flutter/lib/core/api/admin_api.dart
 | Overview no-keys alert | done | ai_keys_bound in metrics |
 | Key expiring alert | done | ai_keys_expiring_soon + next_key_renewal_at |
 | High usage alert | done | high_agent_usage + ADMIN_METRICS_TOKEN_ALERT_THRESHOLD |
+| Subscription expiring alert | done | subscription_expiring_soon + Flutter Overview |
+| Subscription expired alert | done | subscription_expired flag |
+| Subscription UI on create/edit | hole | API only via PUT subscription |
 | `storage_bytes` / `last_activity_at` | done | workspace scan + activity max |
-| Subscription expiring alert | hole | needs subscription_ends_at |
 | E2E widget tests | hole | |
 
 ## Quality | **7** | doing |
