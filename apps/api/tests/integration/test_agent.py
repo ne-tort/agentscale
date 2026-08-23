@@ -344,3 +344,80 @@ def test_chat_stream_sse(client: TestClient) -> None:
     )
     assert transcript.status_code == 200
     assert any("stream me" in m.get("text", "") for m in transcript.json()["messages"])
+
+
+@requires_postgres
+def test_chat_with_attachment_refs_emits_tool_call(client: TestClient) -> None:
+    import base64
+
+    admin = _token(sub="attach-admin", platform_admin=True)
+    admin_h = {"Authorization": f"Bearer {admin}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "AttachCo", "admin_email": "attach@agentco.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "Cursor",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-attach",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = {"Authorization": f"Bearer {_token(sub='attach-owner', email='attach@agentco.test')}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "AttachCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "AttachProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    note = b"hello attachment"
+    uploaded = client.post(
+        f"/api/v1/projects/{project_id}/attachments",
+        headers=owner_h,
+        json={
+            "filename": "note.txt",
+            "content_base64": base64.b64encode(note).decode("ascii"),
+            "content_type": "text/plain",
+        },
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    storage_ref = uploaded.json()["storage_ref"]
+    assert storage_ref
+
+    turn = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "process file", "attachment_refs": [storage_ref]},
+    )
+    assert turn.status_code == 200, turn.text
+    session_id = turn.json()["session_id"]
+
+    events = client.get(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/events",
+        headers=owner_h,
+    )
+    assert events.status_code == 200, events.text
+    tool_calls = [e for e in events.json()["items"] if e.get("type") == "tool_call"]
+    assert tool_calls
+    assert storage_ref in str(tool_calls[0].get("payload", {}))

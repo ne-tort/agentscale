@@ -7,7 +7,7 @@
 | Quality note | Dev shell + SSE chat workspace + transcript reload |
 | Plan | [L05](../11-implementation-plan/L05-employee-shell.md) |
 | Canon | [04-employees](../04-employees/), [session](../10-identity-keycloak/session.md) |
-| Last updated | 2026-08-23 — chat cancel button in workspace |
+| Last updated | 2026-08-23 — attachment picker + SSE abort |
 | Owners | — |
 
 ---
@@ -25,13 +25,15 @@
 | DevSessionPage (paste JWT) | Production secure storage |
 | CabinetListPage + create cabinet | Import bundle UI |
 | DynamicCabinetShell tabs from meta | Dynamic tab content interpreters |
-| ProjectWorkspacePage — SSE chat + transcript reload | Attachment picker |
-| `projectChatStream` → `POST /chat/stream` | In-flight stream abort (HTTP close) |
-| Cancel agent session UI | done | stop button → POST .../cancel |
+| ProjectWorkspacePage — SSE chat + transcript reload | AppAuth OIDC login |
+| `uploadProjectAttachment` + attachment chips in chat | ContourSelectorPage |
+| `projectChatStream` → abort via HTTP client close | Dynamic tab content interpreters |
+| `attachment_refs` forwarded to chat API | Import bundle UI |
+| Cancel agent session UI | done | stop + abort SSE |
 
 ## Как сделано
 
-1. `core/api/prodavan_api.dart` — `/me`, `/cabinets`, meta tabs, projects, `projectChatStream` / `projectChatTranscript`.
+1. `core/api/prodavan_api.dart` — `/me`, `/cabinets`, meta tabs, projects, `uploadProjectAttachment`, `projectChatStream` (abortable), `projectChatTranscript`.
 2. `features/employee/*` — list → shell → projects → chat workspace (reload on open).
 3. `AppScaffold.bottom` extended for TabBar.
 4. Entry from `app.dart` → Dev session (dev only until L01 cutover).
@@ -59,6 +61,8 @@ apps/flutter/lib/
 | Peer isolation UI test | hole |
 | Import bundle UI | hole |
 | Chat streaming | live | SSE text_delta in workspace |
+| Attachment upload in chat | live | file_picker → POST `/attachments` → chips → `attachment_refs` |
+| In-flight SSE abort | live | `ProjectChatStreamHandle.abort()` closes HTTP client |
 | Event history reload | live (`GET .../chat/transcript`) |
 | Pre-user_message legacy sessions | hole — assistant-only bubbles until re-chat |
 

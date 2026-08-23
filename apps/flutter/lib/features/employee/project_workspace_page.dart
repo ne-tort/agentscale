@@ -1,5 +1,7 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
@@ -33,15 +35,25 @@ class _ChatLine {
   final bool streaming;
 }
 
+class _PendingAttachment {
+  const _PendingAttachment({required this.ref, required this.filename});
+
+  final String ref;
+  final String filename;
+}
+
 class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   final _composer = TextEditingController();
   final _scroll = ScrollController();
   final _messages = <_ChatLine>[];
+  final _pendingAttachments = <_PendingAttachment>[];
   String? _sessionId;
   bool _loading = true;
   bool _sending = false;
+  bool _uploadingAttachment = false;
   bool _cancelRequested = false;
   String? _error;
+  ProjectChatStreamHandle? _activeStream;
 
   @override
   void initState() {
@@ -52,9 +64,53 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
 
   @override
   void dispose() {
+    _activeStream?.abort();
     _composer.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickAttachment() async {
+    if (_uploadingAttachment || _sending || _loading) return;
+    final result = await FilePicker.platform.pickFiles(withData: true);
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.first;
+    final bytes = file.bytes;
+    if (bytes == null) {
+      if (!mounted) return;
+      setState(() => _error = 'Could not read file bytes');
+      return;
+    }
+    final filename = file.name.trim().isEmpty ? 'attachment.bin' : file.name.trim();
+    setState(() {
+      _uploadingAttachment = true;
+      _error = null;
+    });
+    try {
+      final uploaded = await workContext.api.uploadProjectAttachment(
+        projectId: widget.projectId,
+        filename: filename,
+        bytes: bytes,
+      );
+      if (!mounted) return;
+      final ref = uploaded['storage_ref'] as String?;
+      if (ref == null || ref.isEmpty) {
+        setState(() => _error = 'Upload missing storage_ref');
+        return;
+      }
+      setState(() {
+        _pendingAttachments.add(_PendingAttachment(ref: ref, filename: filename));
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _uploadingAttachment = false);
+    }
+  }
+
+  void _removeAttachment(_PendingAttachment item) {
+    setState(() => _pendingAttachments.remove(item));
   }
 
   Future<void> _loadTranscript() async {
@@ -97,6 +153,8 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     final text = _composer.text.trim();
     if (text.isEmpty || _sending) return;
 
+    final attachmentRefs = _pendingAttachments.map((a) => a.ref).toList(growable: false);
+
     setState(() {
       _sending = true;
       _cancelRequested = false;
@@ -104,18 +162,23 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       _messages.add(_ChatLine(role: 'user', text: text));
       _messages.add(_ChatLine(role: 'assistant', text: '', streaming: true));
       _composer.clear();
+      _pendingAttachments.clear();
     });
     _scrollToEnd();
 
     final assistantIndex = _messages.length - 1;
     var assistantText = '';
 
+    final handle = workContext.api.projectChatStream(
+      projectId: widget.projectId,
+      text: text,
+      sessionId: _sessionId,
+      attachmentRefs: attachmentRefs,
+    );
+    _activeStream = handle;
+
     try {
-      await for (final event in workContext.api.projectChatStream(
-        projectId: widget.projectId,
-        text: text,
-        sessionId: _sessionId,
-      )) {
+      await for (final event in handle.stream) {
         if (!mounted || _cancelRequested) break;
         final type = event['type'] as String?;
         final data = event['data'];
@@ -171,12 +234,15 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         }
         _sending = false;
       });
+    } finally {
+      _activeStream = null;
     }
   }
 
   Future<void> _cancelStream() async {
     if (!_sending) return;
     setState(() => _cancelRequested = true);
+    _activeStream?.abort();
     final sid = _sessionId;
     if (sid == null) return;
     try {
@@ -263,39 +329,71 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
             top: false,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-              child: Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _composer,
-                      minLines: 1,
-                      maxLines: 4,
-                      enabled: !_loading,
-                      textInputAction: TextInputAction.send,
-                      onSubmitted: (_) => _send(),
-                      decoration: const InputDecoration(
-                        hintText: 'Message…',
-                        border: OutlineInputBorder(),
-                        isDense: true,
+                  if (_pendingAttachments.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (final att in _pendingAttachments)
+                            InputChip(
+                              label: Text(att.filename, overflow: TextOverflow.ellipsis),
+                              onDeleted: _sending ? null : () => _removeAttachment(att),
+                            ),
+                        ],
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  if (_sending)
-                    IconButton(
-                      onPressed: _cancelStream,
-                      icon: const Icon(Icons.stop_circle_outlined),
-                      tooltip: 'Cancel',
-                    ),
-                  IconButton.filled(
-                    onPressed: _sending || _loading ? null : _send,
-                    icon: _sending
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.send),
+                  Row(
+                    children: [
+                      IconButton(
+                        onPressed: _loading || _sending || _uploadingAttachment ? null : _pickAttachment,
+                        icon: _uploadingAttachment
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.attach_file),
+                        tooltip: 'Attach file',
+                      ),
+                      Expanded(
+                        child: TextField(
+                          controller: _composer,
+                          minLines: 1,
+                          maxLines: 4,
+                          enabled: !_loading,
+                          textInputAction: TextInputAction.send,
+                          onSubmitted: (_) => _send(),
+                          decoration: const InputDecoration(
+                            hintText: 'Message…',
+                            border: OutlineInputBorder(),
+                            isDense: true,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      if (_sending)
+                        IconButton(
+                          onPressed: _cancelStream,
+                          icon: const Icon(Icons.stop_circle_outlined),
+                          tooltip: 'Cancel',
+                        ),
+                      IconButton.filled(
+                        onPressed: _sending || _loading ? null : _send,
+                        icon: _sending
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.send),
+                      ),
+                    ],
                   ),
                 ],
               ),
