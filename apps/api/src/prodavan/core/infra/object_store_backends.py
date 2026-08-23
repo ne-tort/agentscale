@@ -24,6 +24,10 @@ class ObjectStoreBackend(ABC):
     @abstractmethod
     def exists(self, key: str) -> bool: ...
 
+    def prefix_size(self, prefix: str) -> int:
+        """Sum byte size of all objects under prefix."""
+        raise NotImplementedError
+
     def delete_prefix(self, prefix: str) -> int:
         """Delete all keys under prefix. Returns number of objects removed."""
         raise NotImplementedError
@@ -85,6 +89,22 @@ class LocalFsObjectStore(ObjectStoreBackend):
             base.unlink()
             return 1
         return 0
+
+    def prefix_size(self, prefix: str) -> int:
+        safe = prefix.lstrip("/").replace("\\", "/").rstrip("/")
+        if not safe or ".." in Path(safe).parts:
+            raise ValueError(f"unsafe object prefix: {prefix}")
+        base = self._root / safe
+        if not base.exists():
+            return 0
+        total = 0
+        for path in base.rglob("*"):
+            if path.is_file():
+                try:
+                    total += path.stat().st_size
+                except OSError:
+                    continue
+        return total
 
 
 class S3ObjectStore(ObjectStoreBackend):
@@ -161,6 +181,20 @@ class S3ObjectStore(ObjectStoreBackend):
         except Exception:
             logger.exception("s3 delete_prefix failed: %s", safe)
         return deleted
+
+    def prefix_size(self, prefix: str) -> int:
+        safe = prefix.lstrip("/")
+        if not safe or ".." in Path(safe).parts:
+            raise ValueError(f"unsafe object prefix: {prefix}")
+        total = 0
+        paginator = self._client.get_paginator("list_objects_v2")
+        try:
+            for page in paginator.paginate(Bucket=self._bucket, Prefix=safe):
+                for obj in page.get("Contents") or []:
+                    total += int(obj.get("Size") or 0)
+        except Exception:
+            logger.exception("s3 prefix_size failed: %s", safe)
+        return total
 
     def health(self) -> bool:
         try:

@@ -10,7 +10,7 @@
 | **Platform events** | Company / employee / project lifecycle | `company.suspended`, `employee.disabled`, `project.created` |
 
 **Durable bus (канон):** обе шины — **Kafka** ([13-platform-infra](../13-platform-infra/)).  
-**Сейчас (P0):** dual-write `EventEnvelope` при enqueue/emit; optional `KAFKA_CONSUMER_ENABLED` + `KAFKA_CONSUMER_MODE`:
+**Сейчас (P0):** dual-write `EventEnvelope` при enqueue/emit **после успешного PG commit** (`core/events/deferred.py`); optional `KAFKA_CONSUMER_ENABLED` + `KAFKA_CONSUMER_MODE`:
 - `kick` (default) → debounce Celery `trigger_drain`
 - `dispatch` → Celery `dispatch_trigger(event_id)` + PG `claim_by_id`
 

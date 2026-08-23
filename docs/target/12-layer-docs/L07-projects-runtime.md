@@ -124,7 +124,7 @@ apps/api/.env.example
 | telegram.message trigger | done | dispatch like chat.message; HMAC ingress like webhook |
 | Webhook HMAC ingress | done | company policy secret + X-Prodavan-Signature |
 | Attachment DELETE | done | DB + inbox file; Flutter pending remove calls DELETE |
-| Object store (MinIO) как SoT blobs | **partial (P0)** | attach/packages + materialize + hydrate + `delete_prefix` on project delete; live MinIO mount — hole |
+| Object store (MinIO) как SoT blobs | **partial (P0)** | attach/packages + materialize + hydrate + delete_prefix; admin storage_bytes via prefix_size; live MinIO mount — hole |
 | Durable bus = Kafka (triggers + platform events) | **partial (P0)** | dual-write + consumer `kick`\|`dispatch` (`claim_by_id`); PG outbox still claim SoT |
 | Stack deploy brokers | **partial (P0)** | compose stack + k8s sketches + minio-init Job; Helm/prod — hole |
 

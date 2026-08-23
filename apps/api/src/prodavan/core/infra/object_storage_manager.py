@@ -122,9 +122,14 @@ class ObjectStorageManager(LifespanResource):
         if self._backend_name == "s3" and self._mirror_local:
             deleted = max(deleted, self._local.delete_prefix(prefix))
         elif self._backend_name == "s3":
-            # Always clear local mirror leftovers if any.
             self._local.delete_prefix(prefix)
         return deleted
+
+    def prefix_size_sync(self, prefix: str) -> int:
+        assert self._primary is not None
+        if self._backend_name == "s3" and self._mirror_local:
+            return self._local.prefix_size(prefix)
+        return self._primary.prefix_size(prefix)
 
     def exists_sync(self, key: str) -> bool:
         assert self._primary is not None
@@ -145,6 +150,9 @@ class ObjectStorageManager(LifespanResource):
 
     async def delete_prefix(self, prefix: str) -> int:
         return await asyncio.to_thread(self.delete_prefix_sync, prefix)
+
+    async def prefix_size(self, prefix: str) -> int:
+        return await asyncio.to_thread(self.prefix_size_sync, prefix)
 
     async def exists(self, key: str) -> bool:
         return await asyncio.to_thread(self.exists_sync, key)

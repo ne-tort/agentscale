@@ -32,7 +32,7 @@
 | C-USAGE | L08 | usage records | L04 metrics | [usage-metrics](../08-agent-providers/usage-metrics.md) | **live** (subset) |
 | C-PROJECT-CHAT | L08 | `POST /chat`, `POST /chat/stream` (SSE), `GET /chat/transcript` | L05 UI, L09 | adapter-port | **live** (subset) |
 | C-OBJECT-STORE | P0 / L00 | MinIO/S3 put/get/delete + object refs (no local SoT) | L07 attach/materialize, L06 packages | [13 stack](../13-platform-infra/stack.md) | **live** (subset: manager + attach/packages; materialize FS hole) |
-| C-EVENT-BUS | P0 / L00 | Kafka envelopes: project triggers + platform events | L07, L06 SPI, L09 | [13](../13-platform-infra/), [triggers](../06-projects-runtime/triggers.md) | **live** (subset: dual-write + kick\|dispatch consumer; PG claim SoT) |
+| C-EVENT-BUS | P0 / L00 | Kafka envelopes: project triggers + platform events | L07, L06 SPI, L09 | [13](../13-platform-infra/), [triggers](../06-projects-runtime/triggers.md) | **live** (subset: dual-write after commit + kick\|dispatch consumer) |
 | C-JOBS | P0 / L00 | Celery tasks: drain / dispatch_trigger / idle / rematerialize | L07, L08 | [13](../13-platform-infra/), [P0](P0-platform-infra.md) | **live** (subset: CLI bootstrap + beat; Helm hole) |
 | C-CACHE | P0 / L00 | Redis cache / short locks / Celery broker conventions | L00 core, workers | [13](../13-platform-infra/) | **live** (subset: policy/sub/quota; secrets not cached) |
 
@@ -40,6 +40,8 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-24 | C-EVENT-BUS | deferred Kafka publish after PG commit (no ghost on rollback) | no |
+| 2026-08-24 | C-OBJECT-STORE | `prefix_size` + admin `storage_bytes` via object store | no |
 | 2026-08-24 | C-JOBS | Celery CLI import bootstrap; idle beat from `IDLE_PAUSE_WORKER_ENABLED` | no |
 | 2026-08-24 | C-CACHE | quota peek; no HMAC in Redis; subscription flags recompute on hit | no |
 | 2026-08-24 | C-OBJECT-STORE | `delete_prefix` + project tree wipe; k8s minio-init Job | no |

@@ -42,3 +42,4 @@ TRIGGER_WORKER_ENABLED=true
 - Package sandbox hydrate-from-zip; live mount-from-MinIO still a hole.
 - k8s sketches include minio-init Job; PVC/TLS/Helm still hole.
 - Company runtime cache: policy/sub/quota; HMAC secrets never stored in Redis.
+- Kafka dual-write schedules publish on PG commit (no ghost envelopes on rollback).

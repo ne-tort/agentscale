@@ -68,21 +68,18 @@ class ProjectTriggerService:
         self._session.add(row)
         await self._session.flush()
         public = _trigger_public(row)
-        # Dual-write C-EVENT-BUS (best-effort; PG outbox remains transitional SoT).
-        try:
-            from prodavan.core.events.bus import publish_project_trigger
+        from prodavan.core.events.deferred import schedule_project_trigger_publish
 
-            await publish_project_trigger(
-                event_id=row.id,
-                kind=row.kind,
-                project_id=row.project_id,
-                company_id=project.company_id,
-                cabinet_id=project.cabinet_id,
-                payload=row.payload if isinstance(row.payload, dict) else {},
-                occurred_at=public.get("created_at"),
-            )
-        except Exception:
-            pass
+        schedule_project_trigger_publish(
+            self._session,
+            event_id=row.id,
+            kind=row.kind,
+            project_id=row.project_id,
+            company_id=project.company_id,
+            cabinet_id=project.cabinet_id,
+            payload=row.payload if isinstance(row.payload, dict) else {},
+            occurred_at=public.get("created_at"),
+        )
         return public
 
     async def list_for_project(self, *, project_id: str, limit: int = 50) -> list[dict]:
