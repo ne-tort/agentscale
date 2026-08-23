@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -51,6 +52,7 @@ class CompanyAgentRuntimePolicyRow(Base):
     model_allowlist: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
     max_agent_tokens_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_tokens_per_run: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_cost_usd_month: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -63,4 +65,5 @@ class CompanyAgentRuntimePolicyRow(Base):
             model_allowlist=list(self.model_allowlist or []),
             max_agent_tokens_month=self.max_agent_tokens_month,
             max_tokens_per_run=self.max_tokens_per_run,
+            max_cost_usd_month=self.max_cost_usd_month,
         )

@@ -42,6 +42,9 @@ def _policy_public(policy: CompanyAgentRuntimePolicy) -> dict:
         "model_allowlist": policy.model_allowlist,
         "max_agent_tokens_month": policy.max_agent_tokens_month,
         "max_tokens_per_run": policy.max_tokens_per_run,
+        "max_cost_usd_month": float(policy.max_cost_usd_month)
+        if policy.max_cost_usd_month is not None
+        else None,
     }
 
 
@@ -120,6 +123,7 @@ class AdminCompanyService:
         row.model_allowlist = policy.model_allowlist
         row.max_agent_tokens_month = policy.max_agent_tokens_month
         row.max_tokens_per_run = policy.max_tokens_per_run
+        row.max_cost_usd_month = policy.max_cost_usd_month
         await self._session.commit()
         await self._session.refresh(row)
         return _policy_public(row.to_domain())

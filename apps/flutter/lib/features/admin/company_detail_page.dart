@@ -33,6 +33,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
   final _preferredProviderCtrl = TextEditingController();
   final _maxTokensMonthCtrl = TextEditingController();
   final _maxTokensPerRunCtrl = TextEditingController();
+  final _maxCostUsdMonthCtrl = TextEditingController();
   final _subscriptionEndsCtrl = TextEditingController();
 
   bool _loading = true;
@@ -61,6 +62,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
     _preferredProviderCtrl.dispose();
     _maxTokensMonthCtrl.dispose();
     _maxTokensPerRunCtrl.dispose();
+    _maxCostUsdMonthCtrl.dispose();
     _subscriptionEndsCtrl.dispose();
     super.dispose();
   }
@@ -85,6 +87,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
         _platformFallback = policy['platform_fallback'] as bool? ?? true;
         _maxTokensMonthCtrl.text = policy['max_agent_tokens_month']?.toString() ?? '';
         _maxTokensPerRunCtrl.text = policy['max_tokens_per_run']?.toString() ?? '';
+        _maxCostUsdMonthCtrl.text = policy['max_cost_usd_month']?.toString() ?? '';
         final metrics = detail['metrics'] as Map<String, dynamic>? ?? const {};
         _subscriptionLifetime = metrics['subscription_lifetime'] == true;
         final endsAt = metrics['subscription_ends_at'];
@@ -174,6 +177,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
         platformFallback: _platformFallback,
         maxAgentTokensMonth: _optionalPositiveInt(_maxTokensMonthCtrl.text),
         maxTokensPerRun: _optionalPositiveInt(_maxTokensPerRunCtrl.text),
+        maxCostUsdMonth: _optionalPositiveDouble(_maxCostUsdMonthCtrl.text),
       );
       await _load();
       if (!mounted) return;
@@ -380,6 +384,12 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                   keyboardType: TextInputType.number,
                   enabled: !_savingPolicy,
                 ),
+                AppTextField(
+                  controller: _maxCostUsdMonthCtrl,
+                  label: 'Max USD cost / month (optional)',
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  enabled: !_savingPolicy,
+                ),
                 AppButton(
                   label: _savingPolicy ? 'Saving…' : 'Save agent policy',
                   expanded: false,
@@ -401,6 +411,14 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
     if (trimmed.isEmpty) return null;
     final n = int.tryParse(trimmed);
     if (n == null || n < 1) return null;
+    return n;
+  }
+
+  double? _optionalPositiveDouble(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return null;
+    final n = double.tryParse(trimmed);
+    if (n == null || n <= 0) return null;
     return n;
   }
 }

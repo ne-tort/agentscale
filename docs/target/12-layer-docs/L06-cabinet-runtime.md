@@ -59,8 +59,8 @@ CabinetInstance: schema-per-instance, meta?UI, cabinet.*, MCP packages, bundles.
 | Sandbox start on materialize | hole | L07 |
 | Company/Admin quotas | done | L04 CompanyQuotaService |
 | columns/views CRUD | hole | |
-| UI meta interpreters | hole | L05 |
-| Non-system tabs from bundle | hole | |
+| UI meta interpreters | live (subset) | L05 tables/projects/tools/context + custom table_slug |
+| Non-system tabs from bundle | done | import_bundle_views_and_tabs |
 
 ## ????????
 

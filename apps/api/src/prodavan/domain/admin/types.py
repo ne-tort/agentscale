@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 TOOL_PRESETS = frozenset({"chat_readonly", "workspace_dev", "workspace_full"})
 
@@ -34,6 +35,7 @@ class CompanyAgentRuntimePolicy:
     model_allowlist: list[str] = field(default_factory=list)
     max_agent_tokens_month: int | None = None
     max_tokens_per_run: int | None = None
+    max_cost_usd_month: Decimal | None = None
 
     def validate(self) -> None:
         if self.tool_preset not in TOOL_PRESETS:
@@ -42,6 +44,8 @@ class CompanyAgentRuntimePolicy:
             raise ValueError("max_agent_tokens_month must be >= 1")
         if self.max_tokens_per_run is not None and self.max_tokens_per_run < 1:
             raise ValueError("max_tokens_per_run must be >= 1")
+        if self.max_cost_usd_month is not None and self.max_cost_usd_month <= 0:
+            raise ValueError("max_cost_usd_month must be > 0")
 
 
 SUBSCRIPTION_EXPIRING_SOON_DAYS = 30

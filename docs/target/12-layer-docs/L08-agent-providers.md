@@ -7,7 +7,7 @@
 | Quality note | Port+events+fixture+budget+chat/transcript+SSE; Node sidecar — gap |
 | Plan | [L08](../11-implementation-plan/L08-agent-providers.md) |
 | Canon | [08-agent-providers](../08-agent-providers/) |
-| Last updated | 2026-08-23 — transcript tool_call collapse |
+| Last updated | 2026-08-23 — USD monthly cost cap |
 | Owners | — |
 
 ---
@@ -26,8 +26,8 @@ AgentProviderPort + frozen AgentEvent; credentials только через L03 r
 | `FixtureCursorAdapter` (cursor_sdk) + `FakeAgentAdapter` | Codex/Claude real adapters |
 | ORM agent_sessions / agent_events / agent_usage | Codex/Claude real adapters |
 | `POST /projects/{id}/chat` + `/chat/stream` (SSE) | Node sidecar (real Cursor SDK) |
-| `GET .../chat/transcript` + list sessions; user + tool bubbles | USD cost cap |
-| `AgentBudgetService` — monthly + per-run token hard-stop | Platform fallback key pool |
+| `GET .../chat/transcript` + list sessions; user + tool bubbles | Platform fallback key pool |
+| `AgentBudgetService` — monthly tokens + USD + per-run token hard-stop | Node sidecar (real Cursor SDK) |
 | Trigger dispatch (`chat.message` → agent run) | Background worker loop |
 | Unit + integration tests | Golden JSON fixtures |
 
@@ -86,7 +86,7 @@ apps/api/tests/integration/test_agent.py
 | Cancel path | done | cancel endpoint |
 | Token budget enforce | done | L04 policy → AgentBudgetService |
 | SSE chat stream | done | iter_chat_turn_sse + integration test |
-| USD cost cap | hole | |
+| USD cost cap | done | max_cost_usd_month + fixture cost_usd |
 
 ## Проверка
 

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Annotated
-
 from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -43,6 +43,7 @@ class AgentPolicyBody(BaseModel):
     model_allowlist: list[str] = Field(default_factory=list)
     max_agent_tokens_month: int | None = Field(default=None, ge=1)
     max_tokens_per_run: int | None = Field(default=None, ge=1)
+    max_cost_usd_month: Decimal | None = Field(default=None, gt=0)
 
 
 @router.get("")
@@ -81,6 +82,9 @@ async def get_agent_policy(company_id: str, _: PlatformAdminDep, session: Sessio
         "model_allowlist": policy.model_allowlist,
         "max_agent_tokens_month": policy.max_agent_tokens_month,
         "max_tokens_per_run": policy.max_tokens_per_run,
+        "max_cost_usd_month": float(policy.max_cost_usd_month)
+        if policy.max_cost_usd_month is not None
+        else None,
     }
 
 
@@ -98,6 +102,7 @@ async def set_agent_policy(
         model_allowlist=body.model_allowlist,
         max_agent_tokens_month=body.max_agent_tokens_month,
         max_tokens_per_run=body.max_tokens_per_run,
+        max_cost_usd_month=body.max_cost_usd_month,
     )
     return await AdminCompanyService(session).set_agent_policy(company_id, policy)
 

@@ -107,6 +107,7 @@ class AdminApi {
     List<String> modelAllowlist = const [],
     int? maxAgentTokensMonth,
     int? maxTokensPerRun,
+    double? maxCostUsdMonth,
   }) async {
     final res = await http.put(
       _uri('/admin/companies/$companyId/agent-policy'),
@@ -118,6 +119,7 @@ class AdminApi {
         'model_allowlist': modelAllowlist,
         'max_agent_tokens_month': maxAgentTokensMonth,
         'max_tokens_per_run': maxTokensPerRun,
+        'max_cost_usd_month': maxCostUsdMonth,
       }),
     );
     _throwIfError(res);

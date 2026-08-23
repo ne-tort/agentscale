@@ -45,6 +45,7 @@ class FixtureCursorAdapter:
             {
                 "input_tokens": 42,
                 "output_tokens": 17,
+                "cost_usd": 0.05,
                 "provider": "cursor",
                 "model": handle.model,
             },

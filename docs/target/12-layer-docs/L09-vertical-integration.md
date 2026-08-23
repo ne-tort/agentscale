@@ -28,6 +28,8 @@
 | SSE chat stream in smoke | done | POST /chat/stream + meta/tabs + bundle import |
 | `GET meta/tables/{slug}` in smoke | done | columns on table detail |
 | CI nightly workflow | done | `.github/workflows/ci-nightly.yml` |
+| Starter bundle import E2E | done | equipment-procurement → line_items + tab |
+| USD cost cap E2E | done | max_cost_usd_month → AGENT_BUDGET |
 | `employees_active` in metrics | done | excludes disabled |
 | Admin metrics: agent_tokens_used, agent_messages, projects_total | |
 | Peer cabinet 403 in smoke | |

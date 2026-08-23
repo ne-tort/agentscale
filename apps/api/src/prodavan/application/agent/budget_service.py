@@ -1,8 +1,9 @@
-"""Agent token budget enforcement — company month + per-run (L08)."""
+"""Agent token + USD budget enforcement — company month + per-run (L08)."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,6 +41,19 @@ class AgentBudgetService:
         )
         return int(q.scalar_one() or 0)
 
+    async def company_cost_usd_month(self, company_id: str) -> Decimal:
+        q = await self._session.execute(
+            select(func.coalesce(func.sum(AgentUsageRow.cost_usd), 0))
+            .select_from(AgentUsageRow)
+            .join(AgentSessionRow, AgentSessionRow.id == AgentUsageRow.session_id)
+            .join(ProjectRow, ProjectRow.id == AgentSessionRow.project_id)
+            .where(
+                ProjectRow.company_id == company_id,
+                AgentUsageRow.created_at >= _month_start_utc(),
+            )
+        )
+        return Decimal(str(q.scalar_one() or 0))
+
     async def session_tokens_used(self, session_id: str) -> int:
         q = await self._session.execute(
             select(func.coalesce(func.sum(_token_sum_expr()), 0)).where(
@@ -66,6 +80,16 @@ class AgentBudgetService:
                     title="Agent budget exceeded",
                     status=429,
                     detail="company monthly token limit reached",
+                )
+
+        if policy.max_cost_usd_month is not None:
+            used_usd = await self.company_cost_usd_month(company_id)
+            if used_usd >= policy.max_cost_usd_month:
+                raise AppError(
+                    code="AGENT_BUDGET",
+                    title="Agent budget exceeded",
+                    status=429,
+                    detail="company monthly USD cost limit reached",
                 )
 
         if session_id is not None and policy.max_tokens_per_run is not None:

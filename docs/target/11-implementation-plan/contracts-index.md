@@ -35,6 +35,8 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-23 | C-USAGE / C-ADMIN-COMPANY | max_cost_usd_month agent policy + budget enforce | no |
+| 2026-08-23 | C-BUNDLE | E2E starter equipment-procurement import | no |
 | 2026-08-23 | C-BUNDLE | import applies views/tabs; equipment-procurement starter shipped | no |
 | 2026-08-23 | C-META-DATA | list_tabs includes table_slug; row edit full-page | no |
 | 2026-08-23 | C-META-DATA | `GET meta/tables/{slug}` columns for empty tables | no |

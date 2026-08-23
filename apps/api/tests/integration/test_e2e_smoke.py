@@ -415,3 +415,139 @@ def test_e2e_agent_budget_blocks_followup(client: TestClient) -> None:
     )
     assert blocked.status_code == 429
     assert blocked.json()["code"] == "AGENT_BUDGET"
+
+
+@requires_postgres
+def test_e2e_usd_cost_cap_blocks_followup(client: TestClient) -> None:
+    """Vertical slice: max_cost_usd_month → follow-up AGENT_BUDGET after fixture usage."""
+    admin_h = {"Authorization": f"Bearer {_token(sub='e2e-usd-admin', platform_admin=True)}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "USD Cap Co", "admin_email": "usd@e2e.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    policy = client.put(
+        f"/api/v1/admin/companies/{company_id}/agent-policy",
+        headers=admin_h,
+        json={"tool_preset": "workspace_dev", "max_cost_usd_month": 0.01},
+    )
+    assert policy.status_code == 200, policy.text
+    assert policy.json()["max_cost_usd_month"] == 0.01
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "USD Key",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-usd-e2e",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-usd-boss', email='usd@e2e.test')}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "Cab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "Proj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    first = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "spend"},
+    )
+    assert first.status_code == 200, first.text
+
+    blocked = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "again"},
+    )
+    assert blocked.status_code == 429, blocked.text
+    assert blocked.json()["code"] == "AGENT_BUDGET"
+    assert "USD" in blocked.json()["detail"]
+
+
+@requires_postgres
+def test_e2e_starter_bundle_import(client: TestClient) -> None:
+    """Download official starter zip → import → line_items table + custom tab."""
+    admin_h = {"Authorization": f"Bearer {_token(sub='e2e-starter-admin', platform_admin=True)}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "Starter Co", "admin_email": "starter@e2e.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    catalog = client.get("/api/v1/admin/starter-bundles", headers=admin_h)
+    assert catalog.status_code == 200, catalog.text
+    match = next(i for i in catalog.json()["items"] if i["id"] == "equipment-procurement")
+    assert match["bundle_available"] is True
+
+    bundle = client.get(
+        "/api/v1/admin/starter-bundles/equipment-procurement/bundle",
+        headers=admin_h,
+    )
+    assert bundle.status_code == 200, bundle.text
+    zip_b64 = bundle.json()["zip_base64"]
+
+    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-starter-boss', email='starter@e2e.test')}"}
+    imported = client.post(
+        "/api/v1/cabinets/import",
+        headers=owner_h,
+        json={
+            "company_id": company_id,
+            "zip_base64": zip_b64,
+            "name": "Procurement from starter",
+        },
+    )
+    assert imported.status_code == 201, imported.text
+    body = imported.json()
+    assert body["imported_tables"] >= 1
+    assert body["tabs_imported"] >= 1
+    cabinet_id = body["cabinet"]["id"]
+
+    tables = client.get(f"/api/v1/cabinets/{cabinet_id}/meta/tables", headers=owner_h)
+    assert tables.status_code == 200, tables.text
+    assert any(t["slug"] == "line_items" for t in tables.json())
+
+    detail = client.get(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tables/line_items",
+        headers=owner_h,
+    )
+    assert detail.status_code == 200, detail.text
+    col_names = {c["name"] for c in detail.json()["columns"]}
+    assert "title" in col_names
+    assert "part_number" in col_names
+
+    tabs = client.get(f"/api/v1/cabinets/{cabinet_id}/meta/tabs", headers=owner_h)
+    assert tabs.status_code == 200, tabs.text
+    custom = [t for t in tabs.json() if t.get("title") == "Line items" and not t.get("system")]
+    assert custom
+    assert custom[0].get("table_slug") == "line_items" or custom[0].get("view_slug") == "line_items"
+
+    rows = client.get(
+        f"/api/v1/cabinets/{cabinet_id}/data/line_items/rows",
+        headers=owner_h,
+    )
+    assert rows.status_code == 200, rows.text
+    assert len(rows.json()["rows"]) >= 1

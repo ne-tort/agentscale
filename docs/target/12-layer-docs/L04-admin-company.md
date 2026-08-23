@@ -24,7 +24,7 @@ Platform Admin — компании, keys (L03), квоты/policy, metrics read
 | Platform Overview tab + no-keys / key-expiring / subscription alerts | |
 | Create company full-page + quotas on create | |
 | AI Keys: list, create, bind, disable, renew, rotate | |
-| Agent policy UI incl. token budgets | |
+| Agent policy UI incl. token budgets | USD authoritative billing sync |
 | Company contour: Overview / Employees / Cabinets | |
 | Invite employee full-page form | |
 | `PUT /admin/companies/{id}/subscription` | |
