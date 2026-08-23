@@ -86,6 +86,22 @@ class CreateTabBody(BaseModel):
     view_slug: str = Field(min_length=1, max_length=64)
 
 
+class UpdateViewBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    table_slug: str | None = Field(default=None, max_length=64)
+    ui_json: dict | None = None
+    version: int | None = Field(default=None, ge=1)
+
+
+class UpdateTabBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    order: int | None = Field(default=None, ge=0, le=9999)
+    view_slug: str | None = Field(default=None, min_length=1, max_length=64)
+
+
 class UpsertRowBody(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -331,6 +347,24 @@ async def add_meta_column(
     )
 
 
+@router.delete("/{cabinet_id}/meta/tables/{table_slug}/columns/{column_name}", status_code=204)
+async def delete_meta_column(
+    cabinet_id: str,
+    table_slug: str,
+    column_name: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> None:
+    await CabinetMetaService(session).delete_column(
+        cabinet_id=cabinet_id,
+        table_slug=table_slug,
+        column_name=column_name,
+        principal=principal,
+        employee=employee,
+    )
+
+
 @router.get("/{cabinet_id}/meta/views")
 async def list_meta_views(
     cabinet_id: str,
@@ -362,6 +396,43 @@ async def create_meta_view(
     )
 
 
+@router.patch("/{cabinet_id}/meta/views/{view_slug}")
+async def update_meta_view(
+    cabinet_id: str,
+    view_slug: str,
+    body: UpdateViewBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    patch = body.model_dump(exclude_unset=True)
+    if not patch:
+        raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="empty patch")
+    return await CabinetMetaService(session).update_view(
+        cabinet_id=cabinet_id,
+        view_slug=view_slug,
+        patch=patch,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.delete("/{cabinet_id}/meta/views/{view_slug}", status_code=204)
+async def delete_meta_view(
+    cabinet_id: str,
+    view_slug: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> None:
+    await CabinetMetaService(session).delete_view(
+        cabinet_id=cabinet_id,
+        view_slug=view_slug,
+        principal=principal,
+        employee=employee,
+    )
+
+
 @router.post("/{cabinet_id}/meta/tabs", status_code=201)
 async def create_meta_tab(
     cabinet_id: str,
@@ -375,6 +446,45 @@ async def create_meta_tab(
         title=body.title,
         order=body.order,
         view_slug=body.view_slug,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.patch("/{cabinet_id}/meta/tabs/{tab_id}")
+async def update_meta_tab(
+    cabinet_id: str,
+    tab_id: str,
+    body: UpdateTabBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    patch = body.model_dump(exclude_unset=True)
+    if not patch:
+        raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="empty patch")
+    return await CabinetMetaService(session).update_tab(
+        cabinet_id=cabinet_id,
+        tab_id=tab_id,
+        title=patch.get("title"),
+        order=patch.get("order"),
+        view_slug=patch.get("view_slug"),
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.delete("/{cabinet_id}/meta/tabs/{tab_id}", status_code=204)
+async def delete_meta_tab(
+    cabinet_id: str,
+    tab_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> None:
+    await CabinetMetaService(session).delete_tab(
+        cabinet_id=cabinet_id,
+        tab_id=tab_id,
         principal=principal,
         employee=employee,
     )

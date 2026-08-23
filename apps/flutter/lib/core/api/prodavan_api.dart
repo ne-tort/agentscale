@@ -188,6 +188,24 @@ class ProdavanApi {
     }
   }
 
+  Future<void> deleteMetaColumn({
+    required String cabinetId,
+    required String tableSlug,
+    required String columnName,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.delete(
+        _uri('/cabinets/$cabinetId/meta/tables/$tableSlug/columns/$columnName'),
+        headers: _headers,
+      );
+      _throwIfError(res);
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
   Future<List<Map<String, dynamic>>> listMetaViews(String cabinetId) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;

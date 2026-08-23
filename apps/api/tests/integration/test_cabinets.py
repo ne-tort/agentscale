@@ -430,3 +430,69 @@ def test_meta_mutate_columns_views_tabs(client: TestClient) -> None:
     )
     assert tabs.status_code == 200
     assert any(t["title"] == "Parts" and t.get("view_slug") == "parts_list" for t in tabs.json())
+
+    tab_id = tab.json()["id"]
+    patched_tab = client.patch(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tabs/{tab_id}",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"title": "Parts catalog", "order": 55},
+    )
+    assert patched_tab.status_code == 200, patched_tab.text
+    assert patched_tab.json()["title"] == "Parts catalog"
+
+    patched_view = client.patch(
+        f"/api/v1/cabinets/{cabinet_id}/meta/views/parts_list",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"ui_json": {"version": 1, "kind": "collection", "title_field": "sku"}},
+    )
+    assert patched_view.status_code == 200, patched_view.text
+    assert patched_view.json()["ui_json"]["title_field"] == "sku"
+
+    protected = client.delete(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tables/parts/columns/id",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert protected.status_code == 409
+
+    deleted_col = client.delete(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tables/parts/columns/sku",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert deleted_col.status_code == 204
+
+    meta_after = client.get(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tables/parts",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert meta_after.status_code == 200
+    assert "sku" not in {c["name"] for c in meta_after.json()["columns"]}
+
+    view_blocked = client.delete(
+        f"/api/v1/cabinets/{cabinet_id}/meta/views/parts_list",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert view_blocked.status_code == 409
+
+    deleted_tab = client.delete(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tabs/{tab_id}",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert deleted_tab.status_code == 204
+
+    deleted_view = client.delete(
+        f"/api/v1/cabinets/{cabinet_id}/meta/views/parts_list",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert deleted_view.status_code == 204
+
+    system_tabs = client.get(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tabs",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert system_tabs.status_code == 200
+    projects_tab = next(t for t in system_tabs.json() if t["title"] == "Projects")
+    blocked_tab = client.delete(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tabs/{projects_tab['id']}",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert blocked_tab.status_code == 409

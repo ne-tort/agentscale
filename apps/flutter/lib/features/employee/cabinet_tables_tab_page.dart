@@ -6,6 +6,7 @@ import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/danger_confirm_page.dart';
 import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/features/employee/cabinet_column_add_page.dart';
 import 'package:prodavan/features/employee/cabinet_row_edit_page.dart';
 import 'package:prodavan/features/employee/cabinet_table_create_page.dart';
 
@@ -89,6 +90,30 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());
+    }
+  }
+
+  Future<void> _addColumn() async {
+    final slug = _selectedSlug;
+    if (slug == null) return;
+
+    final table = _tables.cast<Map<String, dynamic>?>().firstWhere(
+          (t) => t?['slug'] == slug,
+          orElse: () => null,
+        );
+    final label = table?['label'] as String? ?? slug;
+
+    final added = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => CabinetColumnAddPage(
+          cabinetId: widget.cabinetId,
+          tableSlug: slug,
+          tableLabel: label,
+        ),
+      ),
+    );
+    if (added == true) {
+      await _loadRows(slug);
     }
   }
 
@@ -219,13 +244,21 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
         if (_selectedSlug != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: TextButton.icon(
-                onPressed: () => _editRow(),
-                icon: const Icon(Icons.add),
-                label: const Text('Add row'),
-              ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton.icon(
+                  onPressed: _addColumn,
+                  icon: const Icon(Icons.view_column_outlined),
+                  label: const Text('Add column'),
+                ),
+                const SizedBox(width: 8),
+                TextButton.icon(
+                  onPressed: () => _editRow(),
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add row'),
+                ),
+              ],
             ),
           ),
         Expanded(

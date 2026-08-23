@@ -35,6 +35,8 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-23 | C-META-DATA | PATCH/DELETE views/tabs/columns; duplicate table slug 409 | no |
+| 2026-08-23 | C-EMP-SHELL | CabinetColumnAddPage for meta column mutate | no |
 | 2026-08-23 | C-META-DATA | POST columns/views/tabs + GET views; duplicate table slug 409 | no |
 | 2026-08-23 | C-EMP-SHELL | CabinetTableCreatePage (L05 full-page) | no |
 | 2026-08-23 | C-PROJECT-CHAT / C-AGENT-EVENT | HITL tool_approval_request + approve/deny API | no |

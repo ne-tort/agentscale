@@ -26,6 +26,22 @@ _PG_TYPE: dict[str, str] = {
     ColumnType.FILE_REF: "TEXT",
 }
 
+_PROTECTED_COLUMNS = frozenset({"id", "created_at"})
+
+
+def _system_view_slugs() -> set[str]:
+    return {slug for _, _, slug in BASE_SYSTEM_TABS}
+
+
+def _parse_column_def(column: dict) -> tuple[str, str]:
+    name = str(column.get("name") or "").strip()
+    col_type = str(column.get("type") or "")
+    if not name.replace("_", "").isalnum():
+        raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="bad column name")
+    if col_type not in COLUMN_TYPES:
+        raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="bad column type")
+    return name, col_type
+
 
 class CabinetMetaService:
     def __init__(self, session: AsyncSession) -> None:
@@ -200,12 +216,7 @@ class CabinetMetaService:
 
         ddl_cols = ['"id" TEXT PRIMARY KEY', '"created_at" TIMESTAMPTZ NOT NULL DEFAULT now()']
         for col in columns:
-            name = col.get("name", "")
-            col_type = col.get("type", "")
-            if not name.replace("_", "").isalnum():
-                raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="bad column name")
-            if col_type not in COLUMN_TYPES:
-                raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="bad column type")
+            name, col_type = _parse_column_def(col)
             col_id = f"col_{uuid.uuid4().hex[:12]}"
             await self._session.execute(
                 text(
@@ -358,12 +369,7 @@ class CabinetMetaService:
             cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
         )
         table = await self._require_table(schema_name=inst.schema_name, table_slug=table_slug)
-        name = str(column.get("name") or "").strip()
-        col_type = str(column.get("type") or "")
-        if not name.replace("_", "").isalnum():
-            raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="bad column name")
-        if col_type not in COLUMN_TYPES:
-            raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="bad column type")
+        name, col_type = _parse_column_def(column)
 
         qschema = qident(inst.schema_name)
         cq = await self._session.execute(
@@ -414,6 +420,48 @@ class CabinetMetaService:
             "unique": bool(column.get("unique")),
             "ref_table_slug": column.get("ref_table_slug"),
         }
+
+    async def delete_column(
+        self,
+        *,
+        cabinet_id: str,
+        table_slug: str,
+        column_name: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> None:
+        inst = await self._access.require_access(
+            cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
+        )
+        name = column_name.strip()
+        if name in _PROTECTED_COLUMNS:
+            raise AppError(code="CONFLICT", title="Conflict", status=409, detail="protected column")
+
+        table = await self._require_table(schema_name=inst.schema_name, table_slug=table_slug)
+        qschema = qident(inst.schema_name)
+        cq = await self._session.execute(
+            text(
+                f"""
+                SELECT id FROM {qschema}.meta_columns
+                WHERE table_id = :tid AND name = :name
+                """
+            ),
+            {"tid": table.id, "name": name},
+        )
+        col_id = cq.scalar_one_or_none()
+        if col_id is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="column not found")
+
+        await self._session.execute(
+            text(f"DELETE FROM {qschema}.meta_columns WHERE id = :id"),
+            {"id": str(col_id)},
+        )
+        if table.storage_kind == StorageKind.PHYSICAL:
+            fq = qualified(inst.schema_name, data_table_slug(table_slug))
+            await self._session.execute(
+                text(f"ALTER TABLE {fq} DROP COLUMN IF EXISTS {qident(name)}")
+            )
+        await self._session.commit()
 
     async def list_views(
         self,
@@ -469,7 +517,7 @@ class CabinetMetaService:
         inst = await self._access.require_access(
             cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
         )
-        system_slugs = {s for _, _, s in BASE_SYSTEM_TABS}
+        system_slugs = _system_view_slugs()
         if not slug.replace("_", "").isalnum() or not slug.islower():
             raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="bad slug")
         if slug in system_slugs:
@@ -509,6 +557,108 @@ class CabinetMetaService:
             "ui_json": ui_json,
             "version": version,
         }
+
+    async def _require_view_row(self, *, schema_name: str, view_slug: str):
+        qschema = qident(schema_name)
+        if view_slug in _system_view_slugs():
+            raise AppError(code="CONFLICT", title="Conflict", status=409, detail="reserved view slug")
+        vq = await self._session.execute(
+            text(
+                f"""
+                SELECT id, slug, table_slug, ui_json, version
+                FROM {qschema}.meta_views
+                WHERE slug = :slug
+                """
+            ),
+            {"slug": view_slug},
+        )
+        view = vq.fetchone()
+        if view is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="view not found")
+        return view
+
+    async def update_view(
+        self,
+        *,
+        cabinet_id: str,
+        view_slug: str,
+        patch: dict,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        inst = await self._access.require_access(
+            cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
+        )
+        view = await self._require_view_row(schema_name=inst.schema_name, view_slug=view_slug)
+        qschema = qident(inst.schema_name)
+
+        new_table_slug = view.table_slug
+        if "table_slug" in patch:
+            table_slug = patch["table_slug"]
+            if table_slug:
+                await self._require_table(schema_name=inst.schema_name, table_slug=str(table_slug))
+            new_table_slug = table_slug
+
+        new_ui = view.ui_json
+        if isinstance(new_ui, str):
+            try:
+                new_ui = json.loads(new_ui)
+            except json.JSONDecodeError:
+                new_ui = {}
+        if "ui_json" in patch and patch["ui_json"] is not None:
+            new_ui = patch["ui_json"]
+
+        new_version = patch.get("version", view.version)
+
+        await self._session.execute(
+            text(
+                f"""
+                UPDATE {qschema}.meta_views
+                SET table_slug = :table_slug, ui_json = CAST(:ui AS jsonb), version = :ver
+                WHERE id = :id
+                """
+            ),
+            {
+                "id": view.id,
+                "table_slug": new_table_slug,
+                "ui": json.dumps(new_ui if isinstance(new_ui, dict) else {}, ensure_ascii=False),
+                "ver": new_version,
+            },
+        )
+        await self._session.commit()
+        return {
+            "id": view.id,
+            "slug": view.slug,
+            "table_slug": new_table_slug,
+            "ui_json": new_ui if isinstance(new_ui, dict) else {},
+            "version": new_version,
+        }
+
+    async def delete_view(
+        self,
+        *,
+        cabinet_id: str,
+        view_slug: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> None:
+        inst = await self._access.require_access(
+            cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
+        )
+        view = await self._require_view_row(schema_name=inst.schema_name, view_slug=view_slug)
+        qschema = qident(inst.schema_name)
+        refs = await self._session.execute(
+            text(f"SELECT 1 FROM {qschema}.meta_tabs WHERE view_id = :vid LIMIT 1"),
+            {"vid": view.id},
+        )
+        if refs.scalar_one_or_none() is not None:
+            raise AppError(code="CONFLICT", title="Conflict", status=409, detail="view has tabs")
+
+        await self._session.execute(
+            text(f"DELETE FROM {qschema}.meta_views WHERE id = :id"),
+            {"id": view.id},
+        )
+        await self._session.commit()
 
     async def create_tab(
         self,
@@ -555,4 +705,95 @@ class CabinetMetaService:
             "view_slug": view_slug,
             "system": False,
         }
+
+    async def _require_tab_row(self, *, schema_name: str, tab_id: str):
+        qschema = qident(schema_name)
+        tq = await self._session.execute(
+            text(
+                f"""
+                SELECT t.id, t.title, t.tab_order, t.view_id, t.system_tab, v.slug AS view_slug
+                FROM {qschema}.meta_tabs t
+                LEFT JOIN {qschema}.meta_views v ON v.id = t.view_id
+                WHERE t.id = :id
+                """
+            ),
+            {"id": tab_id},
+        )
+        tab = tq.fetchone()
+        if tab is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="tab not found")
+        if tab.system_tab:
+            raise AppError(code="CONFLICT", title="Conflict", status=409, detail="system tab")
+        return tab
+
+    async def update_tab(
+        self,
+        *,
+        cabinet_id: str,
+        tab_id: str,
+        title: str | None = None,
+        order: int | None = None,
+        view_slug: str | None = None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        inst = await self._access.require_access(
+            cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
+        )
+        tab = await self._require_tab_row(schema_name=inst.schema_name, tab_id=tab_id)
+        qschema = qident(inst.schema_name)
+
+        new_title = title.strip() if title is not None else tab.title
+        new_order = order if order is not None else tab.tab_order
+        new_view_id = tab.view_id
+        new_view_slug = tab.view_slug
+
+        if view_slug is not None:
+            vq = await self._session.execute(
+                text(f"SELECT id, slug FROM {qschema}.meta_views WHERE slug = :slug"),
+                {"slug": view_slug},
+            )
+            view = vq.fetchone()
+            if view is None:
+                raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="view not found")
+            new_view_id = view.id
+            new_view_slug = view.slug
+
+        await self._session.execute(
+            text(
+                f"""
+                UPDATE {qschema}.meta_tabs
+                SET title = :title, tab_order = :ord, view_id = :vid
+                WHERE id = :id
+                """
+            ),
+            {"id": tab_id, "title": new_title, "ord": new_order, "vid": new_view_id},
+        )
+        await self._session.commit()
+        return {
+            "id": tab_id,
+            "title": new_title,
+            "order": new_order,
+            "view_slug": new_view_slug,
+            "system": False,
+        }
+
+    async def delete_tab(
+        self,
+        *,
+        cabinet_id: str,
+        tab_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> None:
+        inst = await self._access.require_access(
+            cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
+        )
+        await self._require_tab_row(schema_name=inst.schema_name, tab_id=tab_id)
+        qschema = qident(inst.schema_name)
+        await self._session.execute(
+            text(f"DELETE FROM {qschema}.meta_tabs WHERE id = :id"),
+            {"id": tab_id},
+        )
+        await self._session.commit()
 
