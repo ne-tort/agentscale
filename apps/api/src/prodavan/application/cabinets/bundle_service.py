@@ -139,6 +139,14 @@ class CabinetBundleService:
                         employee=employee,
                     )
 
+        meta_import = await self._meta.import_bundle_views_and_tabs(
+            cabinet_id=new_id,
+            views=parsed["views"],
+            tabs=parsed["tabs"],
+            principal=owner_principal,
+            employee=employee,
+        )
+
         packages_deployed = 0
         for _fname, raw_pkg in (parsed.get("package_files") or {}).items():
             await self._packages.deploy(
@@ -154,6 +162,8 @@ class CabinetBundleService:
             "cabinet": created,
             "imported_tables": len(parsed["tables"]),
             "imported_data_tables": len(parsed["data_by_slug"]) if include_data else 0,
+            "views_imported": meta_import["views_imported"],
+            "tabs_imported": meta_import["tabs_imported"],
             "mcp_packages_deployed": packages_deployed,
             "exported_from_cabinet_id": manifest.get("exported_from_cabinet_id"),
         }

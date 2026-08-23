@@ -36,6 +36,19 @@ class CabinetTabHost extends StatelessWidget {
       case 'chat':
         return ProjectListPage(cabinetId: cabinetId);
       default:
+        final tableSlug = tab['table_slug'] as String?;
+        if (tableSlug != null && tableSlug.isNotEmpty) {
+          return CabinetTablesTabPage(
+            cabinetId: cabinetId,
+            initialTableSlug: tableSlug,
+          );
+        }
+        if (slug.isNotEmpty) {
+          return CabinetTablesTabPage(
+            cabinetId: cabinetId,
+            initialTableSlug: slug,
+          );
+        }
         return CabinetPlaceholderTabPage(
           title: title,
           hint: slug.isEmpty

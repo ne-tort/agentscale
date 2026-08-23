@@ -176,6 +176,7 @@ def test_e2e_smoke_admin_to_agent_ping(client: TestClient) -> None:
     )
     assert imported.status_code == 201, imported.text
     assert imported.json()["cabinet"]["id"] != cabinet_id
+    assert imported.json().get("tabs_imported", 0) >= 0
 
 
 @requires_postgres

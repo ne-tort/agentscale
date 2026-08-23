@@ -7,7 +7,7 @@
 | Quality note | Admin shell + starter catalog + subscription alerts |
 | Plan | [L04](../11-implementation-plan/L04-admin-company.md) |
 | Canon | [01-platform-admin](../01-platform-admin/), [03-companies](../03-companies/) |
-| Last updated | 2026-08-23 — starter bundle catalog API + Admin Bundles tab |
+| Last updated | 2026-08-23 — starter bundle shipped + import views/tabs |
 | Owners | — |
 
 ---
@@ -20,7 +20,7 @@ Platform Admin — компании, keys (L03), квоты/policy, metrics read
 
 | Сделано | Gaps |
 |---------|------|
-| AdminShell NavigationBar: Overview + Companies + AI Keys + Bundles | Starter bundle zip files not shipped |
+| AdminShell NavigationBar: Overview + Companies + AI Keys + Bundles | E2E widget tests |
 | Platform Overview tab + no-keys / key-expiring / subscription alerts | |
 | Create company full-page + quotas on create | |
 | AI Keys: list, create, bind, disable, renew, rotate | |
@@ -63,8 +63,8 @@ apps/api/alembic/versions/2026082309_company_subscription.py
 | Subscription expiring alert | done | subscription_expiring_soon + Flutter Overview |
 | Subscription expired alert | done | subscription_expired flag |
 | Subscription UI on create/edit | done | lifetime + ends_at |
-| Starter bundle catalog | live (subset) | metadata + Admin UI; zip files in `data/starter_bundles/` |
-| Starter bundle download | hole | 503 until zip shipped |
+| Starter bundle catalog | live | metadata + Admin UI + shipped zip in fixtures |
+| Starter bundle download | live | `GET .../bundle` base64 |
 | `storage_bytes` / `last_activity_at` | done | workspace scan + activity max |
 | E2E widget tests | hole | |
 

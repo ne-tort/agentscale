@@ -5,12 +5,18 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/features/employee/cabinet_row_edit_page.dart';
 
 /// Meta tables browser with row upsert/delete (L05/L06 interpreter).
 class CabinetTablesTabPage extends StatefulWidget {
-  const CabinetTablesTabPage({super.key, required this.cabinetId});
+  const CabinetTablesTabPage({
+    super.key,
+    required this.cabinetId,
+    this.initialTableSlug,
+  });
 
   final String cabinetId;
+  final String? initialTableSlug;
 
   @override
   State<CabinetTablesTabPage> createState() => _CabinetTablesTabPageState();
@@ -24,12 +30,15 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
   List<Map<String, dynamic>> _rows = const [];
   List<Map<String, dynamic>> _columns = const [];
 
-  static const _systemFields = {'id', 'created_at'};
-
   @override
   void initState() {
     super.initState();
-    _loadTables();
+    _loadTables().then((_) {
+      final slug = widget.initialTableSlug;
+      if (slug != null && slug.isNotEmpty && mounted) {
+        _loadRows(slug);
+      }
+    });
   }
 
   Future<void> _loadTables() async {
@@ -81,88 +90,29 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
     }
   }
 
-  Set<String> _fieldNames() {
-    if (_columns.isNotEmpty) {
-      return _columns.map((c) => c['name'] as String).where((n) => n.isNotEmpty).toSet();
-    }
-    final names = <String>{};
-    for (final row in _rows) {
-      for (final key in row.keys) {
-        if (!_systemFields.contains(key)) names.add(key);
-      }
-    }
-    return names;
-  }
-
   Future<void> _editRow({Map<String, dynamic>? existing}) async {
     final slug = _selectedSlug;
     if (slug == null) return;
 
-    final fields = _fieldNames();
-    if (fields.isEmpty && existing == null) {
-      fields.add('title');
-    }
-    final controllers = <String, TextEditingController>{
-      for (final name in fields) name: TextEditingController(text: '${existing?[name] ?? ''}'),
-    };
+    final table = _tables.cast<Map<String, dynamic>?>().firstWhere(
+          (t) => t?['slug'] == slug,
+          orElse: () => null,
+        );
+    final label = table?['label'] as String? ?? slug;
 
-    final saved = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(existing == null ? 'Add row' : 'Edit row'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (final name in fields)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: TextField(
-                    controller: controllers[name],
-                    decoration: InputDecoration(labelText: name, border: const OutlineInputBorder()),
-                  ),
-                ),
-            ],
-          ),
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => CabinetRowEditPage(
+          cabinetId: widget.cabinetId,
+          tableSlug: slug,
+          tableLabel: label,
+          columns: _columns,
+          existing: existing,
         ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
-        ],
       ),
     );
-
-    if (saved != true) {
-      for (final c in controllers.values) {
-        c.dispose();
-      }
-      return;
-    }
-
-    final values = <String, dynamic>{};
-    for (final name in fields) {
-      final text = controllers[name]!.text.trim();
-      if (text.isNotEmpty) values[name] = text;
-    }
-    for (final c in controllers.values) {
-      c.dispose();
-    }
-    if (values.isEmpty) {
-      setState(() => _error = 'Enter at least one field value');
-      return;
-    }
-
-    try {
-      await workContext.api.upsertCabinetRow(
-        cabinetId: widget.cabinetId,
-        tableSlug: slug,
-        values: values,
-        rowId: existing?['id'] as String?,
-      );
+    if (saved == true) {
       await _loadRows(slug);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _error = e.toString());
     }
   }
 

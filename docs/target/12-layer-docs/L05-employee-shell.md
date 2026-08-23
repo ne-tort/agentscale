@@ -7,7 +7,7 @@
 | Quality note | Dev shell + SSE chat + tab interpreters + bundle I/O + meta columns |
 | Plan | [L05](../11-implementation-plan/L05-employee-shell.md) |
 | Canon | [04-employees](../04-employees/), [session](../10-identity-keycloak/session.md) |
-| Last updated | 2026-08-23 — project create page, meta table columns, starter import |
+| Last updated | 2026-08-23 — row edit page, bundle views/tabs import, starter zip |
 | Owners | — |
 
 ---
@@ -23,7 +23,8 @@
 | `ProdavanApi` client (Bearer + work headers) | AppAuth OIDC login |
 | `WorkContext` singleton | ContourSelectorPage |
 | DevSessionPage (paste JWT) | Production secure storage |
-| `CabinetCreatePage` full-page (no modal) | Custom bundle tab views |
+| `CabinetCreatePage` full-page (no modal) | Custom bundle tab views (non-collection) |
+| `CabinetRowEditPage` full-page row edit | |
 | `ProjectCreatePage` full-page (no modal) | |
 | Import/export bundle UI + starter catalog import | |
 | ProjectWorkspacePage — SSE chat + transcript reload | |
@@ -38,12 +39,9 @@
 | OIDC login | todo | L01 |
 | Import bundle UI | live | `CabinetImportBundlePage` |
 | Bundle export save | live | Context tab + `FilePicker.saveFile` |
-| Row edit UI | live (subset) | inferred fields; dialog not full-page |
-| Meta tab interpreters | live (subset) | projects/chat/tables/tools/context |
-| Create project full-page | live | `ProjectCreatePage` from `ProjectListPage` |
-| Meta columns on empty tables | live | `getMetaTable` in tables tab |
-| Starter bundle import | live (subset) | catalog list on import page; needs shipped zip |
-| Starter bundle catalog | live (subset) | employee `GET /starter-bundles` |
+| Row edit UI | live | `CabinetRowEditPage` full-page |
+| Custom bundle views | live (subset) | collection tabs → tables interpreter via `table_slug` |
+| Starter bundle import | live | catalog + shipped equipment-procurement zip |
 
 ## Карта кода
 
@@ -51,6 +49,7 @@
 apps/flutter/lib/features/employee/
   cabinet_create_page.dart
   cabinet_import_bundle_page.dart
+  cabinet_row_edit_page.dart
   cabinet_tables_tab_page.dart
   cabinet_tab_host.dart
   project_create_page.dart

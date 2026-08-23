@@ -58,7 +58,7 @@ class Settings(BaseSettings):
     # L04 admin metrics alerts (0 = disabled)
     admin_metrics_token_alert_threshold: int = 50_000
     admin_metrics_subscription_expiring_days: int = 30
-    starter_bundles_dir: Path = _REPO_ROOT / "data" / "starter_bundles"
+    starter_bundles_dir: Path = _REPO_ROOT / "apps" / "api" / "fixtures" / "starter_bundles"
 
     @property
     def cors_origin_list(self) -> list[str]:

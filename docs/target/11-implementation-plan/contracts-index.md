@@ -35,7 +35,8 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
-| 2026-08-23 | C-BUNDLE | L04 starter catalog + L05 import from catalog | no |
+| 2026-08-23 | C-BUNDLE | import applies views/tabs; equipment-procurement starter shipped | no |
+| 2026-08-23 | C-META-DATA | list_tabs includes table_slug; row edit full-page | no |
 | 2026-08-23 | C-META-DATA | `GET meta/tables/{slug}` columns for empty tables | no |
 | 2026-08-23 | C-EMP-SHELL | ProjectCreatePage full-page wiring | no |
 | 2026-08-23 | C-ADMIN-COMPANY | Admin Bundles tab + starter catalog API | no |

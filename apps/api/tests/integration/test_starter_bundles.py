@@ -15,6 +15,7 @@ os.environ.setdefault("AUTH_TEST_SECRET", "dev-only-test-secret-change-me")
 from prodavan.config.settings import settings
 from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.main import create_app
+from tests.conftest import requires_postgres
 
 
 def _token(*, sub: str, email: str | None = None, platform_admin: bool = False) -> str:
@@ -46,7 +47,20 @@ def test_admin_list_starter_bundles(client: TestClient) -> None:
     )
     assert res.status_code == 200, res.text
     items = res.json()["items"]
-    assert any(i["id"] == "equipment-procurement" for i in items)
+    match = next(i for i in items if i["id"] == "equipment-procurement")
+    assert match["bundle_available"] is True
+
+
+def test_admin_download_starter_bundle(client: TestClient) -> None:
+    admin = _token(sub="bundle-catalog-admin", platform_admin=True)
+    res = client.get(
+        "/api/v1/admin/starter-bundles/equipment-procurement/bundle",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["format"] == "cabinet.bundle"
+    assert body["zip_base64"]
 
 
 def test_employee_list_starter_bundles(client: TestClient) -> None:
