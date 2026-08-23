@@ -26,6 +26,19 @@ PROJECT_TRIGGER_KINDS = frozenset(
         "project.prepare",
         "system.schedule",
         "webhook.http",
+        "telegram.message",
+    }
+)
+
+# Company / employee / project lifecycle — NOT project_triggers (see triggers.md).
+PLATFORM_EVENT_TYPES = frozenset(
+    {
+        "project.created",
+        "project.paused",
+        "project.resumed",
+        "project.deleted",
+        "company.suspended",
+        "employee.disabled",
     }
 )
 
@@ -49,6 +62,15 @@ ATTACHMENT_ALLOWED_EXTENSIONS = frozenset(
     }
 )
 
+# Magic prefixes that must never appear in chat uploads (lightweight content policy).
+_FORBIDDEN_MAGIC = (
+    b"MZ",  # PE / DOS
+    b"\x7fELF",  # ELF
+    b"\xca\xfe\xba\xbe",  # Mach-O fat
+    b"\xcf\xfa\xed\xfe",  # Mach-O 64
+    b"\xce\xfa\xed\xfe",  # Mach-O 32
+)
+
 
 def attachment_extension(filename: str) -> str:
     dot = filename.rfind(".")
@@ -60,6 +82,14 @@ def attachment_extension(filename: str) -> str:
 def is_allowed_attachment_filename(filename: str) -> bool:
     ext = attachment_extension(filename.strip())
     return ext in ATTACHMENT_ALLOWED_EXTENSIONS
+
+
+def is_forbidden_attachment_content(raw: bytes) -> bool:
+    """Return True if bytes look like an executable (not a full virus scanner)."""
+    if not raw:
+        return False
+    head = raw[:8]
+    return any(head.startswith(magic) for magic in _FORBIDDEN_MAGIC)
 
 
 def new_project_id() -> str:

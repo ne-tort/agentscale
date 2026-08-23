@@ -297,3 +297,49 @@ def test_list_project_attachments(client: TestClient) -> None:
     items = listed.json()["items"]
     assert len(items) == 1
     assert items[0]["filename"] == "note.txt"
+
+
+@requires_postgres
+def test_platform_event_emitted_on_project_create(client: TestClient) -> None:
+    admin = _token(sub="padmin", platform_admin=True)
+    _, cabinet_id, owner_tok = _setup_cabinet(client)
+    created = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "Event Proj"},
+    )
+    assert created.status_code == 201, created.text
+    project_id = created.json()["id"]
+
+    events = client.get(
+        f"/api/v1/admin/platform-events?project_id={project_id}&event_type=project.created",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert events.status_code == 200, events.text
+    items = events.json()["items"]
+    assert len(items) >= 1
+    assert items[0]["event_type"] == "project.created"
+    assert items[0]["project_id"] == project_id
+
+
+@requires_postgres
+def test_attachment_rejects_executable_magic(client: TestClient) -> None:
+    _, cabinet_id, owner_tok = _setup_cabinet(client)
+    created = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "Magic Proj"},
+    )
+    assert created.status_code == 201, created.text
+    project_id = created.json()["id"]
+
+    pe = client.post(
+        f"/api/v1/projects/{project_id}/attachments",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={
+            "filename": "note.txt",
+            "content_base64": base64.b64encode(b"MZ\x90\x00fakepe").decode("ascii"),
+        },
+    )
+    assert pe.status_code == 422
+    assert pe.json()["code"] == "ATTACHMENT_CONTENT_FORBIDDEN"

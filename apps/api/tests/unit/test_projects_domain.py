@@ -25,6 +25,15 @@ def test_attachment_extension_allowlist() -> None:
     assert not is_allowed_attachment_filename("noext")
 
 
+def test_forbidden_attachment_content_magic() -> None:
+    from prodavan.domain.projects import is_forbidden_attachment_content
+
+    assert is_forbidden_attachment_content(b"MZ\x90\x00")
+    assert is_forbidden_attachment_content(b"\x7fELF\x01\x01")
+    assert not is_forbidden_attachment_content(b"hello text")
+    assert not is_forbidden_attachment_content(b"%PDF-1.4")
+
+
 def test_attachment_max_bytes_from_policy() -> None:
     policy = CompanyAgentRuntimePolicy(max_attachment_mb=5)
     assert attachment_max_bytes(policy) == 5 * 1024 * 1024

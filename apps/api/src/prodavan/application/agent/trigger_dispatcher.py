@@ -207,7 +207,7 @@ class AgentTriggerDispatcher:
 
         payload = trigger.payload or {}
 
-        if trigger.kind == "chat.message":
+        if trigger.kind in {"chat.message", "telegram.message"}:
             text = str(payload.get("text") or "")
             refs = payload.get("attachment_refs") or []
             result = await self._run_chat_turn(
@@ -219,7 +219,7 @@ class AgentTriggerDispatcher:
             )
             trigger.status = TriggerStatus.DONE
             await self._session.commit()
-            return {"dispatched": True, "trigger_id": trigger.id, "run": result}
+            return {"dispatched": True, "trigger_id": trigger.id, "kind": trigger.kind, "run": result}
 
         if trigger.kind == "chat.regenerate":
             session_id = payload.get("session_id")

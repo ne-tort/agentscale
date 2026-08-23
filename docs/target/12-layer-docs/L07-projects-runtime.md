@@ -7,7 +7,7 @@
 | Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain/worker; k8s isolator — gap |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-23 — regenerate/webhook triggers + worker advisory lock |
+| Last updated | 2026-08-23 — platform_events bus + telegram.message + magic sniff |
 | Owners | — |
 
 ---
@@ -24,8 +24,9 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 | CRUD: create/list/get/PATCH (name, agent_provider); pause/resume/delete | |
 | Materialize: AGENTS from cabinet workspace-docs + packages/sandbox | bubblewrap/k8s isolator |
 | `container_ref=local-ws:{workspace_key}` | |
-| Triggers: enqueue + list + dispatch/drain + regenerate/schedule/webhook handlers + admin drain + opt-in worker with advisory lock | Durable outbox; telegram.message |
-| Attachments: upload + list + ref validation on chat; company max_attachment_mb + extension allowlist | Virus scan; per-cabinet archive policy |
+| Triggers: enqueue + list + dispatch (incl. telegram.message) + admin drain + opt-in worker with advisory lock | Durable outbox; bot HMAC auth |
+| Platform events bus (`platform_events` + admin list) | cabinet `on_platform_event` SPI |
+| Attachments: upload + list + ref validation; size/type/magic policy | Full AV scan; image thumbnails |
 | Integration tests lifecycle + FS layout + provider patch + admin drain | E2E with agent ping |
 
 ## Как сделано
@@ -35,7 +36,8 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 3. `WorkspaceLayoutWriter` — container.md layout; extracts enabled package zips.
 4. HTTP: `/cabinets/{id}/projects`, `/projects/{id}/*` per project-contract; `POST /admin/triggers/drain`.
 5. L06 `materialize-stub` → real FS (status `materialized`).
-6. Opt-in trigger worker (`TRIGGER_WORKER_ENABLED`) — in-process asyncio + `pg_try_advisory_lock`; hole: not durable outbox / no telegram.message.
+6. Opt-in trigger worker (`TRIGGER_WORKER_ENABLED`) — in-process asyncio + `pg_try_advisory_lock`; hole: not durable outbox.
+7. `PlatformEventService` — lifecycle bus separate from `project_triggers`; emit on create/pause/resume/delete; admin list. Hole: cabinet SPI consumer.
 
 ## Контракты
 
@@ -76,6 +78,7 @@ apps/api/src/prodavan/
   infrastructure/persistence/models/projects.py
   api/v1/projects.py
 apps/api/alembic/versions/2026082306_projects.py
+apps/api/alembic/versions/2026082312_platform_events.py
 apps/api/tests/integration/test_projects.py
 apps/api/tests/unit/test_projects_domain.py
 ```
@@ -89,11 +92,12 @@ apps/api/tests/unit/test_projects_domain.py
 | Pause/resume/delete | done | local-ws only |
 | Trigger dispatch to agent | done | chat.message + chat.regenerate; schedule/webhook ack or run-if-text; advisory lock on worker |
 | MCP package sandbox run | live (subset) | prepare + opt-in local spawn (`MCP_SANDBOX_SPAWN`); k8s/bubblewrap — hole |
-| Platform vs project event bus split | partial | project_triggers table only; platform events — hole |
+| Platform vs project event bus split | live (subset) | platform_events table + emit; cabinet on_platform_event SPI — hole |
 | Attachment refs scoped to project | done | normalize id/storage_ref before agent send |
-| Attachment virus/size policy | live (subset) | company max_attachment_mb; platform extension allowlist; virus scan — hole |
+| Attachment virus/size policy | live (subset) | max_attachment_mb + extension allowlist + magic sniff (PE/ELF); AV — hole |
 | Project preferred_provider | done | `agent_provider` create/PATCH; resolve uses project override |
 | Attachment preview in chat UI | live (subset) | chips by filename from refs; no image thumbnails |
+| telegram.message trigger | done | dispatch like chat.message; bot HMAC — hole |
 
 ## Проверка
 

@@ -13,7 +13,7 @@ from prodavan.application.projects.access import ProjectAccessService
 from prodavan.domain.admin import attachment_max_bytes
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
-from prodavan.domain.projects import is_allowed_attachment_filename
+from prodavan.domain.projects import is_allowed_attachment_filename, is_forbidden_attachment_content
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.projects import ProjectAttachmentRow
 from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
@@ -127,6 +127,13 @@ class ProjectAttachmentService:
                 title="Attachment too large",
                 status=413,
                 detail=f"max {max_bytes} bytes (company policy)",
+            )
+        if is_forbidden_attachment_content(raw):
+            raise AppError(
+                code="ATTACHMENT_CONTENT_FORBIDDEN",
+                title="Attachment content forbidden",
+                status=422,
+                detail="executable or binary content not allowed for chat attachments",
             )
         guessed = content_type or mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
         writer = WorkspaceLayoutWriter(workspace_key=project.workspace_key)

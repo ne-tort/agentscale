@@ -36,6 +36,7 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-23 | C-TRIGGERS / C-ATTACH / platform events | platform_events bus; telegram.message; magic sniff; chat text optional w/ attachments | no |
 | 2026-08-23 | C-TRIGGERS / C-PROJECT-CHAT / C-ATTACH | chat.regenerate + schedule/webhook dispatch; worker advisory lock; transcript attachment_refs + Flutter chips | no |
 | 2026-08-23 | C-ATTACH / C-PROJECT-CHAT | list attachments; validate refs on chat (id or storage_ref) | no |
 | 2026-08-23 | C-ATTACH / C-ADMIN-COMPANY | company max_attachment_mb + upload extension allowlist; project limits in API | no |

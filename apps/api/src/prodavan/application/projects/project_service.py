@@ -9,6 +9,7 @@ from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.cabinets.access import CabinetAccessService
 from prodavan.application.projects.access import ProjectAccessService
 from prodavan.application.projects.materialize import get_materialize_service
+from prodavan.application.projects.platform_event_service import PlatformEventService
 from prodavan.application.projects.trigger_service import ProjectTriggerService
 from prodavan.domain.admin import attachment_max_bytes
 from prodavan.domain.ai_keys import AiProvider
@@ -70,6 +71,7 @@ class ProjectService:
         self._materialize = get_materialize_service()
         self._triggers = ProjectTriggerService(session)
         self._companies = AdminCompanyService(session)
+        self._platform_events = PlatformEventService(session)
 
     async def _attachment_limits(self, company_id: str) -> dict:
         policy = await self._companies.get_agent_policy(company_id)
@@ -129,6 +131,14 @@ class ProjectService:
             project_name=row.name,
         )
         await self._triggers.enqueue(project_id=project_id, kind="project.prepare", payload={"source": "create"})
+        await self._platform_events.emit(
+            event_type="project.created",
+            company_id=row.company_id,
+            project_id=project_id,
+            cabinet_id=cabinet_id,
+            principal=principal,
+            payload={"name": row.name, "slug": row.slug},
+        )
         await self._session.commit()
         await self._session.refresh(row)
         limits = await self._attachment_limits(row.company_id)
@@ -244,6 +254,13 @@ class ProjectService:
             project_id=project_id, principal=principal, employee=employee, write=True
         )
         row.status = ProjectStatus.PAUSED
+        await self._platform_events.emit(
+            event_type="project.paused",
+            company_id=row.company_id,
+            project_id=row.id,
+            cabinet_id=row.cabinet_id,
+            principal=principal,
+        )
         await self._session.commit()
         await self._session.refresh(row)
         limits = await self._attachment_limits(row.company_id)
@@ -267,6 +284,13 @@ class ProjectService:
                 detail="project is not paused",
             )
         row.status = ProjectStatus.ACTIVE
+        await self._platform_events.emit(
+            event_type="project.resumed",
+            company_id=row.company_id,
+            project_id=row.id,
+            cabinet_id=row.cabinet_id,
+            principal=principal,
+        )
         await self._session.commit()
         await self._session.refresh(row)
         limits = await self._attachment_limits(row.company_id)
@@ -288,6 +312,14 @@ class ProjectService:
             allow_paused=True,
         )
         row.status = ProjectStatus.DELETED
+        await self._platform_events.emit(
+            event_type="project.deleted",
+            company_id=row.company_id,
+            project_id=row.id,
+            cabinet_id=row.cabinet_id,
+            principal=principal,
+            payload={"purge_workspace": purge_workspace},
+        )
         await self._session.commit()
         if purge_workspace:
             WorkspaceLayoutWriter(workspace_key=row.workspace_key).remove_project_tree()

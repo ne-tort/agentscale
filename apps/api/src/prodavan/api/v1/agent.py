@@ -7,7 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
 from prodavan.application.agent import AgentSessionService, AgentTriggerDispatcher
@@ -20,8 +20,14 @@ router = APIRouter(tags=["agent"])
 class SendMessageBody(BaseModel):
     model_config = {"extra": "forbid"}
 
-    text: str = Field(min_length=1)
+    text: str = Field(default="")
     attachment_refs: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def require_text_or_attachments(self) -> SendMessageBody:
+        if not self.text.strip() and not self.attachment_refs:
+            raise ValueError("text or attachment_refs required")
+        return self
 
 
 class CreateSessionBody(BaseModel):
@@ -33,10 +39,16 @@ class CreateSessionBody(BaseModel):
 class ChatTurnBody(BaseModel):
     model_config = {"extra": "forbid"}
 
-    text: str = Field(min_length=1)
+    text: str = Field(default="")
     session_id: str | None = Field(default=None, max_length=64)
     attachment_refs: list[str] = Field(default_factory=list)
     model: str | None = Field(default=None, max_length=128)
+
+    @model_validator(mode="after")
+    def require_text_or_attachments(self) -> ChatTurnBody:
+        if not self.text.strip() and not self.attachment_refs:
+            raise ValueError("text or attachment_refs required")
+        return self
 
 
 class ToolApprovalBody(BaseModel):
@@ -47,6 +59,15 @@ class ToolApprovalBody(BaseModel):
 
 
 EmployeeDep = Annotated[EmployeeRow | None, Depends(get_current_employee)]
+
+
+def _chat_text(text: str, attachment_refs: list[str]) -> str:
+    trimmed = text.strip()
+    if trimmed:
+        return trimmed
+    if attachment_refs:
+        return "(attachment)"
+    return ""
 
 
 @router.post("/projects/{project_id}/agent/sessions", status_code=201)
@@ -91,7 +112,7 @@ async def project_chat_turn(
     """Convenience chat turn for mobile shell — session reuse + assistant_text (L05/L09)."""
     return await AgentSessionService(session).chat_turn(
         project_id=project_id,
-        text=body.text,
+        text=_chat_text(body.text, body.attachment_refs),
         session_id=body.session_id,
         attachment_refs=body.attachment_refs,
         principal=principal,
@@ -115,7 +136,7 @@ async def project_chat_stream(
         try:
             async for event in svc.iter_chat_turn_sse(
                 project_id=project_id,
-                text=body.text,
+                text=_chat_text(body.text, body.attachment_refs),
                 session_id=body.session_id,
                 attachment_refs=body.attachment_refs,
                 principal=principal,
@@ -162,7 +183,7 @@ async def send_agent_message(
     return await AgentSessionService(session).send_message(
         project_id=project_id,
         session_id=session_id,
-        text=body.text,
+        text=_chat_text(body.text, body.attachment_refs),
         attachment_refs=body.attachment_refs,
         principal=principal,
         employee=employee,
