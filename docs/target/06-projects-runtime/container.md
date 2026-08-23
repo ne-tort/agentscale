@@ -4,7 +4,8 @@
 
 Изолированное runtime-пространство проекта. Default: **per-project pod**.
 
-**Blobs / workspace files:** канон — **object store (MinIO / S3)** ([13-platform-infra](../13-platform-infra/)). Локальный path на ноде API и `local-ws:{workspace_key}` как source of truth — **канон-дефект** (переходный stub до P0). Pod монтирует/синхронизирует из object store; БД хранит object refs, не «путь на диске API».
+**Blobs / workspace files:** канон — **object store (MinIO / S3)** ([13-platform-infra](../13-platform-infra/)).  
+**Сейчас:** AGENTS/mcp/inbox/package.zip materialize через `ObjectStorageManager`; sandbox extract деревьев packages/ — ещё local FS (hole). `local-ws:` container_ref — transitional.
 
 Агент видит workspace + MCP: platform `cabinet.*` (scoped) + **enabled MCP packages** кабинета.
 
