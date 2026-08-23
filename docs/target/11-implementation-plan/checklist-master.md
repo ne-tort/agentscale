@@ -11,10 +11,10 @@
 | [L01](L01-identity.md) | partial | 7 | [12](../12-layer-docs/L01-identity.md) | identity + JWT tests | live KC Admin/realm |
 | [L02](L02-ui-core.md) | done | 8 | [12](../12-layer-docs/L02-ui-core.md) | L02 UI core commit | |
 | [L03](L03-ai-keys.md) | done | 8 | [12](../12-layer-docs/L03-ai-keys.md) | ai-keys CRUD+resolve | Vault backend |
-| [L04](L04-admin-company.md) | doing | 7 | [12](../12-layer-docs/L04-admin-company.md) | Admin Overview + subscription + platform events UI | widget E2E |
+| [L04](L04-admin-company.md) | doing | 7 | [12](../12-layer-docs/L04-admin-company.md) | Admin Overview + subscription + metrics alerts widgets | full admin Widget E2E |
 | [L05](L05-employee-shell.md) | doing | 7 | [12](../12-layer-docs/L05-employee-shell.md) | Flutter SSE chat + attachment preview (image/text/PDF stub) | AppAuth redirect URIs; real PDF renderer |
 | [L06](L06-cabinet-runtime.md) | done | 8 | [12](../12-layer-docs/L06-cabinet-runtime.md) | runtime API+MCP+bundle+packages | k8s sandbox |
-| [L07](L07-projects-runtime.md) | doing | 7 | [12](../12-layer-docs/L07-projects-runtime.md) | project CRUD+materialize+outbox+idle sweep ops | k8s pod; external broker; CronJob |
+| [L07](L07-projects-runtime.md) | doing | 7 | [12](../12-layer-docs/L07-projects-runtime.md) | project CRUD+materialize+outbox+CronJob examples | k8s pod; external broker |
 | [L08](L08-agent-providers.md) | doing | 8 | [12](../12-layer-docs/L08-agent-providers.md) | port+budget+transcript+fixture | Node sidecar SDK |
 | [L09](L09-vertical-integration.md) | doing | 7 | [12](../12-layer-docs/L09-vertical-integration.md) | E2E vertical + widget subset + release_gate_check | full Widget E2E |
 

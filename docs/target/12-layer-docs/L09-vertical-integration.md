@@ -6,7 +6,7 @@
 | Quality | 7 |
 | Quality note | API E2E incl. pause/rematerialize/idle; Flutter thumbnails + widget subset; full Widget E2E — gap |
 | Plan | [L09](../11-implementation-plan/L09-vertical-integration.md) |
-| Last updated | 2026-08-24 — platform idle sweep E2E + ops cron hooks |
+| Last updated | 2026-08-24 — rematerialize-while-paused + admin alert widgets |
 | Owners | — |
 
 ---
@@ -38,6 +38,7 @@
 | Peer cabinet 403 in smoke | |
 | Flutter ProjectWorkspacePage → SSE chat + transcript reload | |
 | Flutter widget tests — status banner + image/text/PDF preview | full navigation E2E — hole |
+| Flutter admin widget tests — metrics alerts | full admin navigation — hole |
 | SSE cancel mid-stream → `(cancelled)` bubble + session cancel API | |
 | Release gate checklist | live (subset) | `tools/release_gate_check.py` wired in ci-api |
 | Company suspend E2E → COMPANY_SUSPENDED + platform_events | |

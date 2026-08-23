@@ -9,6 +9,7 @@ import 'package:prodavan/core/widgets/app_section_header.dart';
 import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/core/widgets/stat_tile.dart';
+import 'package:prodavan/features/admin/widgets/admin_metrics_alerts.dart';
 
 /// Platform Admin company detail — metrics, quotas, agent policy (L04).
 class AdminCompanyDetailPage extends StatefulWidget {
@@ -297,12 +298,6 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
     return '$v';
   }
 
-  int _asInt(Object? v) {
-    if (v is int) return v;
-    if (v is num) return v.toInt();
-    return 0;
-  }
-
   @override
   Widget build(BuildContext context) {
     return AppScaffold(
@@ -319,25 +314,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                   InlineErrorBanner(message: _error!),
                   const SizedBox(height: AppSpacing.md),
                 ],
-                if (_asInt(_metrics?['ai_keys_expiring_soon']) > 0)
-                  InlineErrorBanner(
-                    message:
-                        '${_metric('ai_keys_expiring_soon')} AI key(s) renew soon'
-                        '${_metrics?['next_key_renewal_at'] != null ? ' · next ${_metrics!['next_key_renewal_at']}' : ''}',
-                  ),
-                if (_asInt(_metrics?['employees_total']) > 0 && _asInt(_metrics?['ai_keys_bound']) == 0)
-                  const InlineErrorBanner(message: 'No AI keys bound — agent will return NO_AI_KEY'),
-                if (_metrics?['high_agent_usage'] == true)
-                  InlineErrorBanner(
-                    message: 'High agent token usage (${_metric('agent_tokens_used')} tokens)',
-                  ),
-                if (_metrics?['subscription_lifetime'] != true && _metrics?['subscription_expired'] == true)
-                  InlineErrorBanner(message: 'Subscription expired'),
-                if (_metrics?['subscription_lifetime'] != true &&
-                    _metrics?['subscription_expiring_soon'] == true)
-                  InlineErrorBanner(
-                    message: 'Subscription expiring · ${_metric('subscription_ends_at', fallback: '—')}',
-                  ),
+                AdminMetricsAlerts(metrics: _metrics),
                 const AppSectionHeader(title: 'Metrics'),
                 Wrap(
                   spacing: AppSpacing.sm,

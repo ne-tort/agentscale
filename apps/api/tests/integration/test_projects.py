@@ -134,6 +134,36 @@ def test_project_create_materialize_lifecycle(client: TestClient) -> None:
 
 
 @requires_postgres
+def test_rematerialize_allowed_when_paused(client: TestClient) -> None:
+    """Workspace rematerialize is maintenance — allowed while PROJECT_PAUSED."""
+    _, cabinet_id, owner_tok = _setup_cabinet(client)
+    owner_h = {"Authorization": f"Bearer {owner_tok}"}
+    created = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "Remat Paused"},
+    )
+    assert created.status_code == 201, created.text
+    project_id = created.json()["id"]
+
+    paused = client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
+    assert paused.status_code == 200
+    assert paused.json()["status"] == "paused"
+
+    blocked_chat = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "nope"},
+    )
+    assert blocked_chat.status_code == 409
+
+    remat = client.post(f"/api/v1/projects/{project_id}/rematerialize", headers=owner_h)
+    assert remat.status_code == 200, remat.text
+    assert remat.json()["project_id"] == project_id
+    assert remat.json().get("workspace_root")
+
+
+@requires_postgres
 def test_project_patch_agent_provider(client: TestClient) -> None:
     _, cabinet_id, owner_tok = _setup_cabinet(client)
     created = client.post(

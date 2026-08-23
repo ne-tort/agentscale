@@ -1,0 +1,103 @@
+# Example CronJobs for platform ops hooks (L07/L09).
+# Requires Secret `prodavan-ops-token` with key `token` (platform.admin bearer).
+# Set PRODAVAN_API_BASE to the in-cluster API URL (e.g. http://prodavan-api:8000).
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prodavan-ops-cron-scripts
+  labels:
+    app.kubernetes.io/part-of: prodavan
+data:
+  idle-pause-sweep.sh: |
+    #!/bin/sh
+    set -eu
+    curl -fsS -X POST "${PRODAVAN_API_BASE}/api/v1/admin/triggers/idle-pause/sweep" \
+      -H "Authorization: Bearer ${PRODAVAN_OPS_TOKEN}" \
+      -H "Content-Type: application/json"
+  trigger-drain.sh: |
+    #!/bin/sh
+    set -eu
+    curl -fsS -X POST "${PRODAVAN_API_BASE}/api/v1/admin/triggers/drain" \
+      -H "Authorization: Bearer ${PRODAVAN_OPS_TOKEN}" \
+      -H "Content-Type: application/json"
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: prodavan-idle-pause-sweep
+  labels:
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: idle-pause
+spec:
+  # Hourly — policy default is off per company; no-op when idle_pause_after_hours unset.
+  schedule: "0 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: curl
+              image: curlimages/curl:8.10.1
+              command: ["/bin/sh", "/scripts/idle-pause-sweep.sh"]
+              env:
+                - name: PRODAVAN_API_BASE
+                  value: "http://prodavan-api:8000"
+                - name: PRODAVAN_OPS_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: prodavan-ops-token
+                      key: token
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: scripts
+              configMap:
+                name: prodavan-ops-cron-scripts
+                defaultMode: 0755
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: prodavan-trigger-drain
+  labels:
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: triggers
+spec:
+  # Every 5 minutes — prefer this over TRIGGER_WORKER_ENABLED in multi-replica.
+  schedule: "*/5 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: curl
+              image: curlimages/curl:8.10.1
+              command: ["/bin/sh", "/scripts/trigger-drain.sh"]
+              env:
+                - name: PRODAVAN_API_BASE
+                  value: "http://prodavan-api:8000"
+                - name: PRODAVAN_OPS_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: prodavan-ops-token
+                      key: token
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+          volumes:
+            - name: scripts
+              configMap:
+                name: prodavan-ops-cron-scripts
+                defaultMode: 0755

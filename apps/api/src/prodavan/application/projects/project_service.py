@@ -265,7 +265,11 @@ class ProjectService:
         employee: EmployeeRow | None,
     ) -> dict:
         row = await self._access.require_access(
-            project_id=project_id, principal=principal, employee=employee, write=True
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+            allow_paused=True,
         )
         inst = await self._cabinets.get_instance(row.cabinet_id)
         mat = await self._materialize.materialize_project(

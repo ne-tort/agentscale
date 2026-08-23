@@ -7,7 +7,7 @@
 | Quality note | Admin shell + starter catalog + subscription alerts |
 | Plan | [L04](../11-implementation-plan/L04-admin-company.md) |
 | Canon | [01-platform-admin](../01-platform-admin/), [03-companies](../03-companies/) |
-| Last updated | 2026-08-24 — platform-wide idle sweep button |
+| Last updated | 2026-08-24 — AdminMetricsAlerts widget + tests |
 | Owners | — |
 
 ---
@@ -33,6 +33,7 @@ Platform Admin — компании, keys (L03), квоты/policy, metrics read
 | Starter bundle catalog API (`GET /admin/starter-bundles`) | |
 | AdminStarterBundlesPage read-only catalog tab | |
 | Company detail: platform events list + drain triggers + company/platform idle sweep | |
+| `AdminMetricsAlerts` widget (subscription / keys / usage) | |
 
 ## Карта кода
 
@@ -43,6 +44,8 @@ apps/flutter/lib/features/admin/
   admin_company_create_page.dart
   {company_list,company_detail,ai_key_list,ai_key_create,ai_key_detail,ai_key_rotate}_page.dart
   admin_starter_bundles_page.dart
+  widgets/admin_metrics_alerts.dart
+apps/flutter/test/admin_widgets_test.dart
 apps/flutter/lib/features/company/company_invite_employee_page.dart
 apps/flutter/lib/core/api/admin_api.dart
 apps/api/src/prodavan/domain/admin/starter_catalog.py
@@ -68,6 +71,6 @@ apps/api/alembic/versions/2026082309_company_subscription.py
 | Starter bundle catalog | live | metadata + Admin UI + shipped zip in fixtures |
 | Starter bundle download | live | `GET .../bundle` base64 |
 | `storage_bytes` / `last_activity_at` | done | workspace scan + activity max |
-| E2E widget tests | hole | |
+| E2E widget tests | live (subset) | `admin_widgets_test.dart` — metrics alerts; full admin navigation — hole |
 
 ## Quality | **7** | doing |
