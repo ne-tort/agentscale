@@ -50,3 +50,17 @@ def test_events_to_transcript_includes_tool_call() -> None:
         {"role": "assistant", "text": "Ok"},
         {"role": "tool", "text": "mcp.cabinet.info"},
     ]
+
+
+def test_events_to_transcript_includes_attachment_refs() -> None:
+    events = [
+        {
+            "type": PLATFORM_EVENT_USER_MESSAGE,
+            "data": {"text": "see file", "attachment_refs": ["file://projects/a/inbox/n.txt"]},
+        },
+        {"type": AgentEventType.TEXT_DELTA, "data": {"text": "got it"}},
+    ]
+    messages = events_to_transcript(events)
+    assert messages[0]["role"] == "user"
+    assert messages[0]["attachment_refs"] == ["file://projects/a/inbox/n.txt"]
+    assert messages[1]["text"] == "got it"

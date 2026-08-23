@@ -33,6 +33,7 @@ class _ChatLine {
     this.approvalId,
     this.toolName,
     this.toolInput,
+    this.attachmentRefs = const [],
   });
 
   final String role;
@@ -41,6 +42,7 @@ class _ChatLine {
   final String? approvalId;
   final String? toolName;
   final Map<String, dynamic>? toolInput;
+  final List<String> attachmentRefs;
 }
 
 class _PendingAttachment {
@@ -123,6 +125,14 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     setState(() => _pendingAttachments.remove(item));
   }
 
+  String _attachmentLabel(String ref) {
+    final slash = ref.replaceAll('\\', '/').lastIndexOf('/');
+    if (slash >= 0 && slash < ref.length - 1) {
+      return ref.substring(slash + 1);
+    }
+    return ref.length > 24 ? '${ref.substring(0, 21)}…' : ref;
+  }
+
   Future<void> _loadTranscript() async {
     setState(() {
       _loading = true;
@@ -138,15 +148,20 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
           if (raw is! Map) continue;
           final role = raw['role'] as String? ?? 'assistant';
           final text = raw['text'] as String? ?? '';
-          if (text.isEmpty) continue;
+          final refsRaw = raw['attachment_refs'];
+          final refs = refsRaw is List
+              ? refsRaw.map((e) => e.toString()).where((s) => s.isNotEmpty).toList()
+              : const <String>[];
+          if (text.isEmpty && refs.isEmpty) continue;
           final input = raw['input'];
           lines.add(
             _ChatLine(
               role: role,
-              text: text,
+              text: text.isEmpty && refs.isNotEmpty ? '(attachment)' : text,
               approvalId: raw['approval_id'] as String?,
               toolName: raw['tool_name'] as String?,
               toolInput: input is Map<String, dynamic> ? input : null,
+              attachmentRefs: refs,
             ),
           );
         }
@@ -171,15 +186,27 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
 
   Future<void> _send() async {
     final text = _composer.text.trim();
-    if (text.isEmpty || _sending) return;
+    if (_sending) return;
+    if (text.isEmpty && _pendingAttachments.isEmpty) return;
 
     final attachmentRefs = _pendingAttachments.map((a) => a.ref).toList(growable: false);
+    final attachNames = _pendingAttachments.map((a) => a.filename).toList(growable: false);
+    final sendText = text.isEmpty && attachNames.isNotEmpty
+        ? '(attachment: ${attachNames.join(", ")})'
+        : text;
+    final displayText = sendText;
 
     setState(() {
       _sending = true;
       _cancelRequested = false;
       _error = null;
-      _messages.add(_ChatLine(role: 'user', text: text));
+      _messages.add(
+        _ChatLine(
+          role: 'user',
+          text: displayText,
+          attachmentRefs: attachmentRefs,
+        ),
+      );
       _messages.add(_ChatLine(role: 'assistant', text: '', streaming: true));
       _composer.clear();
       _pendingAttachments.clear();
@@ -191,7 +218,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
 
     final handle = workContext.api.projectChatStream(
       projectId: widget.projectId,
-      text: text,
+      text: sendText,
       sessionId: _sessionId,
       attachmentRefs: attachmentRefs,
     );
@@ -451,37 +478,61 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                                             : Theme.of(context).colorScheme.surfaceContainerHighest,
                                 borderRadius: BorderRadius.circular(isTool || isApproval ? 8 : 12),
                               ),
-                              child: Row(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  if (isTool || isApproval) ...[
-                                    Icon(
-                                      isApproval ? Icons.gavel_outlined : Icons.build_outlined,
-                                      size: 14,
-                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                    ),
-                                    const SizedBox(width: 4),
-                                  ],
-                                  Flexible(
-                                    child: Text(
-                                      isTool || isApproval
-                                          ? msg.text
-                                          : msg.text.isEmpty && msg.streaming
-                                              ? '…'
-                                              : msg.text,
-                                      style: isTool || isApproval
-                                          ? Theme.of(context).textTheme.labelSmall?.copyWith(
-                                                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                                              )
-                                          : null,
-                                    ),
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (isTool || isApproval) ...[
+                                        Icon(
+                                          isApproval ? Icons.gavel_outlined : Icons.build_outlined,
+                                          size: 14,
+                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                        ),
+                                        const SizedBox(width: 4),
+                                      ],
+                                      Flexible(
+                                        child: Text(
+                                          isTool || isApproval
+                                              ? msg.text
+                                              : msg.text.isEmpty && msg.streaming
+                                                  ? '…'
+                                                  : msg.text,
+                                          style: isTool || isApproval
+                                              ? Theme.of(context).textTheme.labelSmall?.copyWith(
+                                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                                  )
+                                              : null,
+                                        ),
+                                      ),
+                                      if (msg.streaming) ...[
+                                        const SizedBox(width: 6),
+                                        const SizedBox(
+                                          width: 12,
+                                          height: 12,
+                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                        ),
+                                      ],
+                                    ],
                                   ),
-                                  if (msg.streaming) ...[
-                                    const SizedBox(width: 6),
-                                    const SizedBox(
-                                      width: 12,
-                                      height: 12,
-                                      child: CircularProgressIndicator(strokeWidth: 2),
+                                  if (isUser && msg.attachmentRefs.isNotEmpty) ...[
+                                    const SizedBox(height: 6),
+                                    Wrap(
+                                      spacing: 4,
+                                      runSpacing: 4,
+                                      children: [
+                                        for (final ref in msg.attachmentRefs)
+                                          Chip(
+                                            visualDensity: VisualDensity.compact,
+                                            avatar: const Icon(Icons.attach_file, size: 14),
+                                            label: Text(
+                                              _attachmentLabel(ref),
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                      ],
                                     ),
                                   ],
                                 ],

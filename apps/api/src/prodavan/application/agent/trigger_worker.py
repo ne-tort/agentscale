@@ -2,6 +2,9 @@
 
 Not a durable queue worker — asyncio loop in API process. Enable via
 TRIGGER_WORKER_ENABLED=true. Prefer admin POST /admin/triggers/drain in CI.
+
+Multi-replica safety: pg_try_advisory_lock so only one API process drains
+at a time (still not a durable outbox — hole documented in L07).
 """
 
 from __future__ import annotations
@@ -9,11 +12,15 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from sqlalchemy import text
+
 from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
 from prodavan.config.settings import settings
 from prodavan.infrastructure.persistence.database import get_session_factory
 
 logger = logging.getLogger(__name__)
+
+_LOCK_KEY_SQL = "hashtext('prodavan.trigger_worker')"
 
 _stop: asyncio.Event | None = None
 _task: asyncio.Task[None] | None = None
@@ -22,10 +29,16 @@ _task: asyncio.Task[None] | None = None
 async def drain_once() -> dict:
     factory = get_session_factory()
     async with factory() as session:
-        return await AgentTriggerDispatcher(session).drain_all(
-            max_projects=settings.trigger_worker_max_projects,
-            max_per_project=settings.trigger_worker_batch_max,
-        )
+        locked = await session.execute(text(f"SELECT pg_try_advisory_lock({_LOCK_KEY_SQL})"))
+        if not locked.scalar():
+            return {"dispatched": False, "reason": "lock_held", "count": 0, "projects": []}
+        try:
+            return await AgentTriggerDispatcher(session).drain_all(
+                max_projects=settings.trigger_worker_max_projects,
+                max_per_project=settings.trigger_worker_batch_max,
+            )
+        finally:
+            await session.execute(text(f"SELECT pg_advisory_unlock({_LOCK_KEY_SQL})"))
 
 
 async def _loop(stop: asyncio.Event) -> None:
@@ -39,9 +52,12 @@ async def _loop(stop: asyncio.Event) -> None:
     while not stop.is_set():
         try:
             result = await drain_once()
-            count = int(result.get("count") or 0)
-            if count:
-                logger.info("trigger worker drained count=%s", count)
+            if result.get("reason") == "lock_held":
+                logger.debug("trigger worker skipped — advisory lock held")
+            else:
+                count = int(result.get("count") or 0)
+                if count:
+                    logger.info("trigger worker drained count=%s", count)
         except Exception:
             logger.exception("trigger worker tick failed")
         try:

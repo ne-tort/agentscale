@@ -7,7 +7,7 @@
 | Quality note | Port+events+fixture+budget+SSE+HITL; Node sidecar — gap |
 | Plan | [L08](../11-implementation-plan/L08-agent-providers.md) |
 | Canon | [08-agent-providers](../08-agent-providers/) |
-| Last updated | 2026-08-23 — admin drain + opt-in trigger worker |
+| Last updated | 2026-08-23 — regenerate/webhook triggers + transcript attachment_refs |
 | Owners | — |
 
 ---
@@ -29,7 +29,7 @@ AgentProviderPort + frozen AgentEvent; credentials только через L03 r
 | `GET .../chat/transcript` + list sessions; user + tool bubbles | |
 | `AgentBudgetService` — monthly tokens + USD + per-run token hard-stop | Node sidecar (real Cursor SDK) |
 | HITL `tool_approval_request` + approve/deny API + L05 ToolApprovePage | Codex/Claude real adapters |
-| Trigger dispatch + drain (`?max=`) + `POST /admin/triggers/drain` + opt-in asyncio worker | Durable multi-replica worker |
+| Trigger dispatch + drain (`?max=`) + regenerate/schedule/webhook + admin drain + opt-in worker (advisory lock) | Durable multi-replica outbox; telegram.message |
 | Unit + integration tests | Golden JSON fixtures |
 
 ## Как сделано

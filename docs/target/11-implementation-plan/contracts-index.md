@@ -36,6 +36,7 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-23 | C-TRIGGERS / C-PROJECT-CHAT / C-ATTACH | chat.regenerate + schedule/webhook dispatch; worker advisory lock; transcript attachment_refs + Flutter chips | no |
 | 2026-08-23 | C-ATTACH / C-PROJECT-CHAT | list attachments; validate refs on chat (id or storage_ref) | no |
 | 2026-08-23 | C-ATTACH / C-ADMIN-COMPANY | company max_attachment_mb + upload extension allowlist; project limits in API | no |
 | 2026-08-23 | C-PROJECT / C-TRIGGERS / C-KEY-RESOLVE | PATCH project agent_provider; admin trigger drain; opt-in TRIGGER_WORKER_* | no |

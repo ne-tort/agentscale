@@ -7,7 +7,7 @@
 | Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain/worker; k8s isolator — gap |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-23 — attachment list API + chat ref validation |
+| Last updated | 2026-08-23 — regenerate/webhook triggers + worker advisory lock |
 | Owners | — |
 
 ---
@@ -24,7 +24,7 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 | CRUD: create/list/get/PATCH (name, agent_provider); pause/resume/delete | |
 | Materialize: AGENTS from cabinet workspace-docs + packages/sandbox | bubblewrap/k8s isolator |
 | `container_ref=local-ws:{workspace_key}` | |
-| Triggers: enqueue + list + dispatch/drain (`?max=`) + admin drain-all + opt-in asyncio worker | Durable queue / multi-replica leader election |
+| Triggers: enqueue + list + dispatch/drain + regenerate/schedule/webhook handlers + admin drain + opt-in worker with advisory lock | Durable outbox; telegram.message |
 | Attachments: upload + list + ref validation on chat; company max_attachment_mb + extension allowlist | Virus scan; per-cabinet archive policy |
 | Integration tests lifecycle + FS layout + provider patch + admin drain | E2E with agent ping |
 
@@ -35,7 +35,7 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 3. `WorkspaceLayoutWriter` — container.md layout; extracts enabled package zips.
 4. HTTP: `/cabinets/{id}/projects`, `/projects/{id}/*` per project-contract; `POST /admin/triggers/drain`.
 5. L06 `materialize-stub` → real FS (status `materialized`).
-6. Opt-in trigger worker (`TRIGGER_WORKER_ENABLED`) — in-process asyncio; hole: no leader election for multi-replica.
+6. Opt-in trigger worker (`TRIGGER_WORKER_ENABLED`) — in-process asyncio + `pg_try_advisory_lock`; hole: not durable outbox / no telegram.message.
 
 ## Контракты
 
@@ -87,12 +87,13 @@ apps/api/tests/unit/test_projects_domain.py
 | Project CRUD in cabinet | done | |
 | Materialize layout | done | AGENTS from `meta_workspace_docs` (slug=agents); empty → default |
 | Pause/resume/delete | done | local-ws only |
-| Trigger dispatch to agent | done | POST triggers/dispatch + `?max=` + `POST /admin/triggers/drain` + opt-in `TRIGGER_WORKER_*` |
+| Trigger dispatch to agent | done | chat.message + chat.regenerate; schedule/webhook ack or run-if-text; advisory lock on worker |
 | MCP package sandbox run | live (subset) | prepare + opt-in local spawn (`MCP_SANDBOX_SPAWN`); k8s/bubblewrap — hole |
-| Platform vs project event bus split | partial | project_triggers table only |
+| Platform vs project event bus split | partial | project_triggers table only; platform events — hole |
 | Attachment refs scoped to project | done | normalize id/storage_ref before agent send |
 | Attachment virus/size policy | live (subset) | company max_attachment_mb; platform extension allowlist; virus scan — hole |
 | Project preferred_provider | done | `agent_provider` create/PATCH; resolve uses project override |
+| Attachment preview in chat UI | live (subset) | chips by filename from refs; no image thumbnails |
 
 ## Проверка
 
@@ -108,4 +109,4 @@ cd apps/api && ruff check src tests && pytest tests/unit/test_projects_domain.py
 | B. Контракты | 2 | C-PROJECT/MATERIALIZE/TRIGGERS live subset |
 | C. Инварианты и проверки | 1 | ACL + lifecycle + patch/drain tests |
 | D. As-built ясность | 2 | эта карточка |
-| **Quality (итог)** | **7** | doing; k8s isolator gap; worker not multi-replica safe |
+| **Quality (итог)** | **7** | doing; k8s isolator + durable outbox gaps |

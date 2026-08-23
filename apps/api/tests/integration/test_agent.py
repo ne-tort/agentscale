@@ -735,3 +735,82 @@ def test_trigger_dispatch_drain_batch(client: TestClient) -> None:
     assert empty.status_code == 200
     assert empty.json().get("dispatched") is False
     assert empty.json().get("reason") == "no queued triggers"
+
+
+@requires_postgres
+def test_trigger_regenerate_and_webhook_ack(client: TestClient) -> None:
+    admin_h = {"Authorization": f"Bearer {_token(sub='regen-admin', platform_admin=True)}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "RegenCo", "admin_email": "regen@agentco.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "Cursor",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-regen",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = {"Authorization": f"Bearer {_token(sub='regen-owner', email='regen@agentco.test')}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "RegenCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "RegenProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+    client.post(f"/api/v1/projects/{project_id}/triggers/dispatch?max=10", headers=owner_h)
+
+    first = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "original turn"},
+    )
+    assert first.status_code == 200, first.text
+    session_id = first.json()["session_id"]
+
+    regen = client.post(
+        f"/api/v1/projects/{project_id}/triggers",
+        headers=owner_h,
+        json={"kind": "chat.regenerate", "payload": {"session_id": session_id}},
+    )
+    assert regen.status_code == 202, regen.text
+    dispatched = client.post(
+        f"/api/v1/projects/{project_id}/triggers/dispatch",
+        headers=owner_h,
+    )
+    assert dispatched.status_code == 200, dispatched.text
+    assert dispatched.json().get("dispatched") is True
+
+    webhook = client.post(
+        f"/api/v1/projects/{project_id}/triggers",
+        headers=owner_h,
+        json={"kind": "webhook.http", "payload": {"source": "test"}},
+    )
+    assert webhook.status_code == 202, webhook.text
+    ack = client.post(
+        f"/api/v1/projects/{project_id}/triggers/dispatch",
+        headers=owner_h,
+    )
+    assert ack.status_code == 200, ack.text
+    assert ack.json().get("dispatched") is True
+    assert ack.json().get("action") == "ack_webhook.http"

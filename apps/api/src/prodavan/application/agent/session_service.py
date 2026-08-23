@@ -59,8 +59,12 @@ def events_to_transcript(events: list[dict]) -> list[dict]:
         if etype == PLATFORM_EVENT_USER_MESSAGE:
             flush_assistant()
             text = data.get("text")
-            if text:
-                messages.append({"role": "user", "text": str(text)})
+            refs = data.get("attachment_refs") or []
+            if text or refs:
+                bubble: dict = {"role": "user", "text": str(text or "")}
+                if isinstance(refs, list) and refs:
+                    bubble["attachment_refs"] = [str(r) for r in refs]
+                messages.append(bubble)
         elif etype == AgentEventType.TOOL_CALL:
             flush_assistant()
             name = data.get("name")
