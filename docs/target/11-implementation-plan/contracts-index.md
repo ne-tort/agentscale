@@ -36,6 +36,7 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-23 | C-ADMIN / L09 | release_gate_check + platform events admin UI + employee.disabled assert | no |
 | 2026-08-23 | C-CABINET-MCP / C-PLATFORM-EVENTS / L09 | stdin/stdout JSON handler result; lazy suspend commit; suspend E2E; SSE cancel UX | no |
 | 2026-08-23 | C-TRIGGERS / C-ATTACH | outbox-lite lease on project_triggers; Flutter inbox list/delete | no |
 | 2026-08-23 | C-ADMIN-SUBSCRIPTION / C-PLATFORM-EVENTS | lazy natural-expiry company.suspended via subscription gate | no |

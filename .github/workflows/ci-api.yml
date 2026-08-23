@@ -85,6 +85,10 @@ jobs:
       - name: Ruff check
         run: ruff check src tests
 
+      - name: Release gate check
+        working-directory: .
+        run: python tools/release_gate_check.py
+
       - name: Pytest
         run: pytest tests/ -q
 

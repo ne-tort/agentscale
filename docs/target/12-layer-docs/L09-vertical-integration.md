@@ -4,9 +4,9 @@
 |------|----------|
 | Status | doing |
 | Quality | 6 |
-| Quality note | API E2E smoke + suspend + chat cancel; Widget E2E / release gate — gap |
+| Quality note | API E2E + release_gate_check + suspend; Widget E2E — gap |
 | Plan | [L09](../11-implementation-plan/L09-vertical-integration.md) |
-| Last updated | 2026-08-23 — session commit-on-success + suspend E2E + cancel UX |
+| Last updated | 2026-08-23 — release_gate_check + metrics fields + employee.disabled event |
 | Owners | — |
 
 ---
@@ -20,8 +20,10 @@
 | Сделано | Gaps |
 |---------|------|
 | `test_e2e_smoke.py` — Admin→Company→Key→Cabinet→Project→Agent→metrics | Flutter widget/integration test |
-| `POST /projects/{id}/chat` + `GET .../chat/transcript` | storage_bytes, last_activity |
+| `POST /chat` + `GET .../chat/transcript` | |
+| Metrics: `storage_bytes`, `last_activity_at` asserted in smoke | |
 | Disabled employee 403 on chat | |
+| `employee.disabled` platform event on disable | |
 | Disabled AI key → `NO_AI_KEY` 404 | expired-by-date key path — done |
 | AGENT_BUDGET 429 on chat follow-up | done | test_e2e_agent_budget_blocks_followup |
 | Admin metrics list in smoke | done | GET /admin/metrics/companies |
@@ -36,6 +38,7 @@
 | Peer cabinet 403 in smoke | |
 | Flutter ProjectWorkspacePage → SSE chat + transcript reload | |
 | SSE cancel mid-stream → `(cancelled)` bubble + session cancel API | |
+| Release gate checklist | live (subset) | `tools/release_gate_check.py` wired in ci-api |
 | Company suspend E2E → COMPANY_SUSPENDED + platform_events | |
 
 ## Карта кода
@@ -46,14 +49,17 @@ apps/api/src/prodavan/api/v1/agent.py (chat + transcript)
 apps/flutter/lib/features/employee/project_workspace_page.dart
 apps/api/src/prodavan/application/admin/company_service.py (metrics)
 apps/api/src/prodavan/api/v1/admin_metrics.py
+tools/release_gate_check.py
+.github/workflows/{ci-api,ci-nightly}.yml
 ```
 
 ## Gaps
 
 | Требование | Статус |
 |------------|--------|
-| CI nightly | live (subset) | integration pytest on schedule |
-| Widget E2E | hole |
-| Release gate checklist automation | hole |
+| CI nightly | live | `.github/workflows/ci-nightly.yml` |
+| Release gate checklist automation | live (subset) | `tools/release_gate_check.py` in ci-api |
+| Widget E2E | hole | |
+| Idle pause policy | hole | DoD L09; default off in canon |
 
-## Quality | **6** | doing — API vertical + Flutter chat cancel + suspend smoke |
+## Quality | **6** | doing — E2E + release_gate_check; Widget E2E remains hole |

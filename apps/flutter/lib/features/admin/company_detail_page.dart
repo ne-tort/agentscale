@@ -43,9 +43,11 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
   bool _savingQuotas = false;
   bool _savingPolicy = false;
   bool _savingSubscription = false;
+  bool _drainingTriggers = false;
   bool _subscriptionLifetime = false;
   String? _error;
   Map<String, dynamic>? _metrics;
+  List<Map<String, dynamic>> _platformEvents = const [];
   String _toolPreset = 'workspace_dev';
   bool _platformFallback = true;
   bool _webhookHmacConfigured = false;
@@ -82,11 +84,16 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
     });
     try {
       final detail = await adminContext.api.getCompany(widget.companyId);
+      final events = await adminContext.api.listPlatformEvents(
+        companyId: widget.companyId,
+        limit: 20,
+      );
       if (!mounted) return;
       final quota = detail['cabinet_quota'] as Map<String, dynamic>? ?? const {};
       final policy = detail['agent_policy'] as Map<String, dynamic>? ?? const {};
       setState(() {
         _metrics = detail['metrics'] as Map<String, dynamic>?;
+        _platformEvents = events;
         _maxCabinetsCtrl.text = '${quota['max_cabinets'] ?? 10}';
         _maxPackagesCtrl.text = '${quota['max_packages_per_cabinet'] ?? 20}';
         _maxBundleMbCtrl.text = '${quota['max_bundle_import_mb'] ?? 50}';
@@ -172,6 +179,29 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
       setState(() {
         _error = e.toString();
         _savingSubscription = false;
+      });
+    }
+  }
+
+  Future<void> _drainTriggers() async {
+    setState(() {
+      _drainingTriggers = true;
+      _error = null;
+    });
+    try {
+      final result = await adminContext.api.drainTriggers();
+      await _load();
+      if (!mounted) return;
+      setState(() => _drainingTriggers = false);
+      final count = result['count'] ?? 0;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Drained $count trigger(s)')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _drainingTriggers = false;
       });
     }
   }
@@ -329,6 +359,34 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                   expanded: false,
                   onPressed: _savingSubscription ? null : _saveSubscription,
                 ),
+                const SizedBox(height: AppSpacing.lg),
+                const AppSectionHeader(title: 'Platform events'),
+                AppButton(
+                  label: _drainingTriggers ? 'Draining…' : 'Drain project triggers',
+                  expanded: false,
+                  onPressed: _drainingTriggers ? null : _drainTriggers,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                if (_platformEvents.isEmpty)
+                  Text(
+                    'No platform events yet',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  )
+                else
+                  for (final ev in _platformEvents.take(12))
+                    ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(ev['event_type']?.toString() ?? 'event'),
+                      subtitle: Text(
+                        [
+                          if (ev['created_at'] != null) ev['created_at'].toString(),
+                          if (ev['actor_sub'] != null) 'actor ${ev['actor_sub']}',
+                        ].join(' · '),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                 const SizedBox(height: AppSpacing.lg),
                 const AppSectionHeader(title: 'Cabinet quotas'),
                 AppForm(

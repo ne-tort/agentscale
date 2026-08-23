@@ -110,6 +110,10 @@ def test_e2e_smoke_admin_to_agent_ping(client: TestClient) -> None:
     assert body["projects_total"] >= 1
     assert body["agent_tokens_used"] > 0
     assert body["agent_messages"] >= 1
+    assert "storage_bytes" in body
+    assert body["storage_bytes"] >= 0
+    assert "last_activity_at" in body
+    assert body["last_activity_at"] is not None
 
     platform_metrics = client.get("/api/v1/admin/metrics/companies", headers=admin_h)
     assert platform_metrics.status_code == 200

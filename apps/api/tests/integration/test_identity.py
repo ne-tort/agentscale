@@ -151,5 +151,15 @@ def test_create_company_invite_no_password_and_disable(client: TestClient) -> No
     assert disabled.status_code == 200
     assert disabled.json()["status"] == "disabled"
 
+    events = client.get(
+        f"/api/v1/admin/platform-events?company_id={company_id}&event_type=employee.disabled",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert events.status_code == 200, events.text
+    items = events.json()["items"]
+    assert len(items) >= 1
+    assert items[0]["event_type"] == "employee.disabled"
+    assert items[0]["payload"].get("employee_id") == emp_id
+
     blocked = client.get("/api/v1/me", headers={"Authorization": f"Bearer {boss_tok}"})
     assert blocked.status_code == 403

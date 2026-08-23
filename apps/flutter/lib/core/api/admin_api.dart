@@ -248,6 +248,44 @@ class AdminApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<List<Map<String, dynamic>>> listPlatformEvents({
+    String? companyId,
+    String? eventType,
+    int limit = 50,
+  }) async {
+    final params = <String, String>{
+      'limit': '$limit',
+      if (companyId != null && companyId.isNotEmpty) 'company_id': companyId,
+      if (eventType != null && eventType.isNotEmpty) 'event_type': eventType,
+    };
+    final res = await http.get(
+      _uri('/admin/platform-events').replace(queryParameters: params),
+      headers: _headers,
+    );
+    _throwIfError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = body['items'];
+    if (items is List) {
+      return items.cast<Map<String, dynamic>>();
+    }
+    return const [];
+  }
+
+  Future<Map<String, dynamic>> drainTriggers({
+    int maxProjects = 20,
+    int maxPerProject = 10,
+  }) async {
+    final res = await http.post(
+      _uri('/admin/triggers/drain').replace(queryParameters: {
+        'max_projects': '$maxProjects',
+        'max_per_project': '$maxPerProject',
+      }),
+      headers: _headers,
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   void _throwIfError(http.Response res) {
     if (res.statusCode >= 400) {
       throw ProdavanApiException(res.statusCode, res.body);
