@@ -10,7 +10,7 @@ import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/core/widgets/stat_tile.dart';
 import 'package:prodavan/features/admin/company_detail_page.dart';
 
-enum _AlertKind { noKeys, keyExpiring }
+enum _AlertKind { noKeys, keyExpiring, highUsage }
 
 class _OverviewAlert {
   const _OverviewAlert({
@@ -99,6 +99,16 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
           ),
         );
       }
+      if (c['high_agent_usage'] == true) {
+        alerts.add(
+          _OverviewAlert(
+            kind: _AlertKind.highUsage,
+            companyId: id,
+            companyName: name,
+            subtitle: 'Agent tokens ${_asInt(c['agent_tokens_used'])} above platform threshold',
+          ),
+        );
+      }
     }
     return alerts;
   }
@@ -183,13 +193,21 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
                 leading: Icon(
                   a.kind == _AlertKind.noKeys
                       ? Icons.warning_amber_outlined
-                      : Icons.schedule_outlined,
-                  color: a.kind == _AlertKind.noKeys ? Colors.orange : Colors.deepOrange,
+                      : a.kind == _AlertKind.keyExpiring
+                          ? Icons.schedule_outlined
+                          : Icons.trending_up,
+                  color: a.kind == _AlertKind.noKeys
+                      ? Colors.orange
+                      : a.kind == _AlertKind.keyExpiring
+                          ? Colors.deepOrange
+                          : Colors.redAccent,
                 ),
                 title: Text(
-                  a.kind == _AlertKind.noKeys
-                      ? '${a.companyName}: no AI keys bound'
-                      : '${a.companyName}: AI key renewal soon',
+                  switch (a.kind) {
+                    _AlertKind.noKeys => '${a.companyName}: no AI keys bound',
+                    _AlertKind.keyExpiring => '${a.companyName}: AI key renewal soon',
+                    _AlertKind.highUsage => '${a.companyName}: high agent token usage',
+                  },
                 ),
                 subtitle: Text(a.subtitle),
                 trailing: const Icon(Icons.chevron_right),

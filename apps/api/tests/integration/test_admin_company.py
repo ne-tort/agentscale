@@ -135,6 +135,9 @@ def test_list_platform_metrics_companies(client: TestClient) -> None:
     assert "agent_tokens_used" in match
     assert "ai_keys_bound" in match
     assert match["ai_keys_bound"] == 0
+    assert "last_activity_at" in match
+    assert "storage_bytes" in match
+    assert "high_agent_usage" in match
 
 
 @requires_postgres

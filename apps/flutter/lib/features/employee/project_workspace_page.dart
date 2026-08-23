@@ -40,6 +40,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   String? _sessionId;
   bool _loading = true;
   bool _sending = false;
+  bool _cancelRequested = false;
   String? _error;
 
   @override
@@ -98,6 +99,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
 
     setState(() {
       _sending = true;
+      _cancelRequested = false;
       _error = null;
       _messages.add(_ChatLine(role: 'user', text: text));
       _messages.add(_ChatLine(role: 'assistant', text: '', streaming: true));
@@ -114,7 +116,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         text: text,
         sessionId: _sessionId,
       )) {
-        if (!mounted) return;
+        if (!mounted || _cancelRequested) break;
         final type = event['type'] as String?;
         final data = event['data'];
         final payload = data is Map<String, dynamic> ? data : const <String, dynamic>{};
@@ -155,6 +157,10 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         }
       }
       if (!mounted) return;
+      if (_cancelRequested) {
+        setState(() => _sending = false);
+        return;
+      }
       setState(() => _sending = false);
     } catch (e) {
       if (!mounted) return;
@@ -165,6 +171,19 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         }
         _sending = false;
       });
+    }
+  }
+
+  Future<void> _cancelStream() async {
+    if (!_sending) return;
+    setState(() => _cancelRequested = true);
+    final sid = _sessionId;
+    if (sid == null) return;
+    try {
+      await workContext.api.cancelAgentSession(projectId: widget.projectId, sessionId: sid);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.toString());
     }
   }
 
@@ -262,6 +281,12 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                     ),
                   ),
                   const SizedBox(width: 8),
+                  if (_sending)
+                    IconButton(
+                      onPressed: _cancelStream,
+                      icon: const Icon(Icons.stop_circle_outlined),
+                      tooltip: 'Cancel',
+                    ),
                   IconButton.filled(
                     onPressed: _sending || _loading ? null : _send,
                     icon: _sending

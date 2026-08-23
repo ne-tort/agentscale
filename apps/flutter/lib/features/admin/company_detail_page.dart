@@ -182,6 +182,10 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                   ),
                 if (_asInt(_metrics?['employees_total']) > 0 && _asInt(_metrics?['ai_keys_bound']) == 0)
                   const InlineErrorBanner(message: 'No AI keys bound — agent will return NO_AI_KEY'),
+                if (_metrics?['high_agent_usage'] == true)
+                  InlineErrorBanner(
+                    message: 'High agent token usage (${_metric('agent_tokens_used')} tokens)',
+                  ),
                 const AppSectionHeader(title: 'Metrics'),
                 Wrap(
                   spacing: AppSpacing.sm,
@@ -221,6 +225,18 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                       width: 160,
                       child: StatTile(label: 'AI keys bound', value: _metric('ai_keys_bound')),
                     ),
+                    SizedBox(
+                      width: 160,
+                      child: StatTile(label: 'Storage (bytes)', value: _metric('storage_bytes')),
+                    ),
+                    if (_metrics?['last_activity_at'] != null)
+                      SizedBox(
+                        width: 200,
+                        child: StatTile(
+                          label: 'Last activity',
+                          value: _metric('last_activity_at', fallback: '—'),
+                        ),
+                      ),
                   ],
                 ),
                 const SizedBox(height: AppSpacing.lg),

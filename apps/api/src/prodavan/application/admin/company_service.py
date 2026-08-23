@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.quota_service import CompanyQuotaService
 from prodavan.application.ai_keys.service import AiKeysService
+from prodavan.config.settings import settings
 from prodavan.domain.admin import CompanyAgentRuntimePolicy, CompanyCabinetQuota
 from prodavan.domain.cabinets import CabinetStatus
 from prodavan.domain.errors import AppError
@@ -20,6 +23,7 @@ from prodavan.infrastructure.persistence.models.agent import AgentEventRow, Agen
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 from prodavan.infrastructure.persistence.models.identity import CompanyRow, EmployeeRow, MembershipRow
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
+from prodavan.infrastructure.projects.workspace import workspace_tree_bytes
 
 
 def _quota_public(quota: CompanyCabinetQuota) -> dict:
@@ -120,6 +124,37 @@ class AdminCompanyService:
         await self._session.refresh(row)
         return _policy_public(row.to_domain())
 
+    async def _last_activity_at(self, company_id: str) -> datetime | None:
+        sess_q = await self._session.execute(
+            select(func.max(AgentSessionRow.updated_at))
+            .join(ProjectRow, ProjectRow.id == AgentSessionRow.project_id)
+            .where(ProjectRow.company_id == company_id)
+        )
+        proj_q = await self._session.execute(
+            select(func.max(ProjectRow.updated_at)).where(
+                ProjectRow.company_id == company_id,
+                ProjectRow.status != ProjectStatus.DELETED,
+            )
+        )
+        evt_q = await self._session.execute(
+            select(func.max(AgentEventRow.created_at))
+            .join(AgentSessionRow, AgentSessionRow.id == AgentEventRow.session_id)
+            .join(ProjectRow, ProjectRow.id == AgentSessionRow.project_id)
+            .where(ProjectRow.company_id == company_id)
+        )
+        candidates = [sess_q.scalar_one(), proj_q.scalar_one(), evt_q.scalar_one()]
+        times = [t for t in candidates if t is not None]
+        return max(times) if times else None
+
+    async def _storage_bytes(self, company_id: str) -> int:
+        keys_q = await self._session.execute(
+            select(ProjectRow.workspace_key).where(
+                ProjectRow.company_id == company_id,
+                ProjectRow.status != ProjectStatus.DELETED,
+            )
+        )
+        return sum(workspace_tree_bytes(key) for key in keys_q.scalars().all())
+
     async def get_metrics(self, company_id: str) -> dict:
         await self._require_company(company_id)
         emp_q = await self._session.execute(
@@ -175,6 +210,11 @@ class AdminCompanyService:
         quota = await self._quotas.get_quota(company_id)
         active_cabinets = int(cab_q.scalar_one() or 0)
         key_metrics = await AiKeysService(self._session).company_key_metrics(company_id)
+        last_activity = await self._last_activity_at(company_id)
+        storage_bytes = await self._storage_bytes(company_id)
+        tokens_used = input_tok + output_tok
+        threshold = settings.admin_metrics_token_alert_threshold
+        high_usage = threshold > 0 and tokens_used >= threshold
         return {
             "employees_total": int(emp_q.scalar_one() or 0),
             "employees_active": int(emp_active_q.scalar_one() or 0),
@@ -186,10 +226,13 @@ class AdminCompanyService:
             if quota.max_cabinets
             else 0,
             "projects_total": int(proj_q.scalar_one() or 0),
-            "agent_tokens_used": input_tok + output_tok,
+            "agent_tokens_used": tokens_used,
             "agent_input_tokens": input_tok,
             "agent_output_tokens": output_tok,
             "agent_messages": int(msg_q.scalar_one() or 0),
+            "last_activity_at": last_activity.isoformat() if last_activity else None,
+            "storage_bytes": storage_bytes,
+            "high_agent_usage": high_usage,
             **key_metrics,
         }
 

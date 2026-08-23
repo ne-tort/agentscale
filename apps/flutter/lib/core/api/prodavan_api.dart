@@ -186,6 +186,23 @@ class ProdavanApi {
     }
   }
 
+  Future<void> cancelAgentSession({
+    required String projectId,
+    required String sessionId,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await http.post(
+        _uri('/projects/$projectId/agent/sessions/$sessionId/cancel'),
+        headers: _headers,
+      );
+      _throwIfError(res);
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
   void _throwIfError(http.Response res) {
     if (res.statusCode >= 400) {
       throw ProdavanApiException(res.statusCode, res.body);

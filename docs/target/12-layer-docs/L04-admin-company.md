@@ -7,7 +7,7 @@
 | Quality note | Admin shell Overview + Companies + AI Keys + Company contour |
 | Plan | [L04](../11-implementation-plan/L04-admin-company.md) |
 | Canon | [01-platform-admin](../01-platform-admin/), [03-companies](../03-companies/) |
-| Last updated | 2026-08-23 — key expiring alerts via metrics API |
+| Last updated | 2026-08-23 — storage/activity metrics + high usage alert |
 | Owners | — |
 
 ---
@@ -50,9 +50,9 @@ apps/flutter/lib/core/api/admin_api.dart
 | Create company full-page | done | admin_company_create_page + navigate to detail |
 | Overview no-keys alert | done | ai_keys_bound in metrics |
 | Key expiring alert | done | ai_keys_expiring_soon + next_key_renewal_at |
+| High usage alert | done | high_agent_usage + ADMIN_METRICS_TOKEN_ALERT_THRESHOLD |
+| `storage_bytes` / `last_activity_at` | done | workspace scan + activity max |
 | Subscription expiring alert | hole | needs subscription_ends_at |
-| `employees_active` metric | done | metrics API + company detail UI |
-| High usage alert | hole | configurable thresholds |
 | E2E widget tests | hole | |
 
 ## Quality | **7** | doing |

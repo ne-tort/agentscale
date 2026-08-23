@@ -76,3 +76,18 @@ class WorkspaceLayoutWriter:
     def remove_project_tree(self) -> None:
         if self._project_root.is_dir():
             shutil.rmtree(self._project_root)
+
+
+def workspace_tree_bytes(workspace_key: str) -> int:
+    """Best-effort on-disk workspace size for admin metrics (L04)."""
+    root = Path(settings.storage_root) / "projects" / workspace_key
+    if not root.is_dir():
+        return 0
+    total = 0
+    for path in root.rglob("*"):
+        if path.is_file():
+            try:
+                total += path.stat().st_size
+            except OSError:
+                continue
+    return total

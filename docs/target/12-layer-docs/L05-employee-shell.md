@@ -7,7 +7,7 @@
 | Quality note | Dev shell + SSE chat workspace + transcript reload |
 | Plan | [L05](../11-implementation-plan/L05-employee-shell.md) |
 | Canon | [04-employees](../04-employees/), [session](../10-identity-keycloak/session.md) |
-| Last updated | 2026-08-23 — projectChatStream + incremental bubbles |
+| Last updated | 2026-08-23 — chat cancel button in workspace |
 | Owners | — |
 
 ---
@@ -26,7 +26,8 @@
 | CabinetListPage + create cabinet | Import bundle UI |
 | DynamicCabinetShell tabs from meta | Dynamic tab content interpreters |
 | ProjectWorkspacePage — SSE chat + transcript reload | Attachment picker |
-| `projectChatStream` → `POST /chat/stream` | Dynamic tab content interpreters |
+| `projectChatStream` → `POST /chat/stream` | In-flight stream abort (HTTP close) |
+| Cancel agent session UI | done | stop button → POST .../cancel |
 
 ## Как сделано
 

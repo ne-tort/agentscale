@@ -50,6 +50,12 @@ class _CompanyOverviewPageState extends State<CompanyOverviewPage> {
 
   String _metric(String key) => '${_metrics?[key] ?? 0}';
 
+  String _metricOrDash(String key) {
+    final v = _metrics?[key];
+    if (v == null) return '—';
+    return '$v';
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -65,6 +71,7 @@ class _CompanyOverviewPageState extends State<CompanyOverviewPage> {
           runSpacing: AppSpacing.sm,
           children: [
             SizedBox(width: 160, child: StatTile(label: 'Employees', value: _metric('employees_total'))),
+            SizedBox(width: 160, child: StatTile(label: 'Active', value: _metric('employees_active'))),
             SizedBox(
               width: 160,
               child: StatTile(
@@ -74,6 +81,11 @@ class _CompanyOverviewPageState extends State<CompanyOverviewPage> {
             ),
             SizedBox(width: 160, child: StatTile(label: 'Projects', value: _metric('projects_total'))),
             SizedBox(width: 160, child: StatTile(label: 'Agent tokens', value: _metric('agent_tokens_used'))),
+            SizedBox(width: 160, child: StatTile(label: 'Storage (bytes)', value: _metric('storage_bytes'))),
+            SizedBox(
+              width: 200,
+              child: StatTile(label: 'Last activity', value: _metricOrDash('last_activity_at')),
+            ),
           ],
         ),
       ],

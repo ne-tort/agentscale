@@ -55,6 +55,9 @@ class Settings(BaseSettings):
     vault_addr: str | None = None
     secrets_dir: Path = _REPO_ROOT / "data" / "secrets"
 
+    # L04 admin metrics alerts (0 = disabled)
+    admin_metrics_token_alert_threshold: int = 50_000
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
