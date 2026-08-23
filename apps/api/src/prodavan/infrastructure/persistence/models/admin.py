@@ -53,6 +53,7 @@ class CompanyAgentRuntimePolicyRow(Base):
     max_agent_tokens_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_tokens_per_run: Mapped[int | None] = mapped_column(Integer, nullable=True)
     max_cost_usd_month: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
+    max_attachment_mb: Mapped[int] = mapped_column(Integer, nullable=False, default=20, server_default="20")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -66,4 +67,5 @@ class CompanyAgentRuntimePolicyRow(Base):
             max_agent_tokens_month=self.max_agent_tokens_month,
             max_tokens_per_run=self.max_tokens_per_run,
             max_cost_usd_month=self.max_cost_usd_month,
+            max_attachment_mb=self.max_attachment_mb,
         )

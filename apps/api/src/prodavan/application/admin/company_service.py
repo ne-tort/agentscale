@@ -10,7 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.admin.quota_service import CompanyQuotaService
 from prodavan.application.ai_keys.service import AiKeysService
 from prodavan.config.settings import settings
-from prodavan.domain.admin import CompanyAgentRuntimePolicy, CompanyCabinetQuota, subscription_read_model
+from prodavan.domain.admin import (
+    CompanyAgentRuntimePolicy,
+    CompanyCabinetQuota,
+    attachment_max_bytes,
+    subscription_read_model,
+)
 from prodavan.domain.cabinets import CabinetStatus
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import EmployeeStatus
@@ -45,6 +50,8 @@ def _policy_public(policy: CompanyAgentRuntimePolicy) -> dict:
         "max_cost_usd_month": float(policy.max_cost_usd_month)
         if policy.max_cost_usd_month is not None
         else None,
+        "max_attachment_mb": policy.max_attachment_mb,
+        "attachment_max_bytes": attachment_max_bytes(policy),
     }
 
 
@@ -124,6 +131,7 @@ class AdminCompanyService:
         row.max_agent_tokens_month = policy.max_agent_tokens_month
         row.max_tokens_per_run = policy.max_tokens_per_run
         row.max_cost_usd_month = policy.max_cost_usd_month
+        row.max_attachment_mb = policy.max_attachment_mb
         await self._session.commit()
         await self._session.refresh(row)
         return _policy_public(row.to_domain())

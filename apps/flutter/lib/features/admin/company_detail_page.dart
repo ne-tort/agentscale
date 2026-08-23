@@ -34,6 +34,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
   final _maxTokensMonthCtrl = TextEditingController();
   final _maxTokensPerRunCtrl = TextEditingController();
   final _maxCostUsdMonthCtrl = TextEditingController();
+  final _maxAttachmentMbCtrl = TextEditingController(text: '20');
   final _subscriptionEndsCtrl = TextEditingController();
 
   bool _loading = true;
@@ -63,6 +64,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
     _maxTokensMonthCtrl.dispose();
     _maxTokensPerRunCtrl.dispose();
     _maxCostUsdMonthCtrl.dispose();
+    _maxAttachmentMbCtrl.dispose();
     _subscriptionEndsCtrl.dispose();
     super.dispose();
   }
@@ -88,6 +90,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
         _maxTokensMonthCtrl.text = policy['max_agent_tokens_month']?.toString() ?? '';
         _maxTokensPerRunCtrl.text = policy['max_tokens_per_run']?.toString() ?? '';
         _maxCostUsdMonthCtrl.text = policy['max_cost_usd_month']?.toString() ?? '';
+        _maxAttachmentMbCtrl.text = policy['max_attachment_mb']?.toString() ?? '20';
         final metrics = detail['metrics'] as Map<String, dynamic>? ?? const {};
         _subscriptionLifetime = metrics['subscription_lifetime'] == true;
         final endsAt = metrics['subscription_ends_at'];
@@ -178,6 +181,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
         maxAgentTokensMonth: _optionalPositiveInt(_maxTokensMonthCtrl.text),
         maxTokensPerRun: _optionalPositiveInt(_maxTokensPerRunCtrl.text),
         maxCostUsdMonth: _optionalPositiveDouble(_maxCostUsdMonthCtrl.text),
+        maxAttachmentMb: int.tryParse(_maxAttachmentMbCtrl.text.trim()) ?? 20,
       );
       await _load();
       if (!mounted) return;
@@ -389,6 +393,13 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                   label: 'Max USD cost / month (optional)',
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   enabled: !_savingPolicy,
+                ),
+                AppTextField(
+                  controller: _maxAttachmentMbCtrl,
+                  label: 'Max chat attachment size (MB)',
+                  keyboardType: TextInputType.number,
+                  enabled: !_savingPolicy,
+                  validator: (v) => _positiveInt(v, min: 1),
                 ),
                 AppButton(
                   label: _savingPolicy ? 'Saving…' : 'Save agent policy',

@@ -179,7 +179,7 @@ def test_admin_triggers_drain(client: TestClient) -> None:
         json={"name": "Drain Demo"},
     )
     assert created.status_code == 201, created.text
-    project_id = created.json()["id"]
+    _project_id = created.json()["id"]
 
     # create enqueues project.prepare — drain should ack it
     drained = client.post(
@@ -197,3 +197,72 @@ def test_admin_triggers_drain(client: TestClient) -> None:
     )
     assert empty.status_code == 200
     assert empty.json().get("dispatched") is False
+
+
+@requires_postgres
+def test_attachment_respects_company_policy_and_extension(client: TestClient) -> None:
+    admin = _token(sub="padmin", platform_admin=True)
+    created = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "AttachCo", "admin_email": "owner@attachco.test"},
+    )
+    assert created.status_code == 201, created.text
+    company_id = created.json()["company"]["id"]
+    owner_tok = _token(sub="owner-sub", email="owner@attachco.test")
+
+    policy = client.put(
+        f"/api/v1/admin/companies/{company_id}/agent-policy",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"tool_preset": "workspace_dev", "max_attachment_mb": 1},
+    )
+    assert policy.status_code == 200, policy.text
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "AttachCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "AttachProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+    assert proj.json()["limits"]["attachment_max_bytes"] == 1024 * 1024
+
+    too_big = client.post(
+        f"/api/v1/projects/{project_id}/attachments",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={
+            "filename": "big.txt",
+            "content_base64": base64.b64encode(b"x" * (1024 * 1024 + 1)).decode("ascii"),
+        },
+    )
+    assert too_big.status_code == 413
+    assert too_big.json()["code"] == "ATTACHMENT_TOO_LARGE"
+
+    forbidden = client.post(
+        f"/api/v1/projects/{project_id}/attachments",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={
+            "filename": "run.exe",
+            "content_base64": base64.b64encode(b"MZ").decode("ascii"),
+        },
+    )
+    assert forbidden.status_code == 422
+    assert forbidden.json()["code"] == "ATTACHMENT_TYPE_FORBIDDEN"
+
+    ok = client.post(
+        f"/api/v1/projects/{project_id}/attachments",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={
+            "filename": "note.txt",
+            "content_base64": base64.b64encode(b"hello").decode("ascii"),
+        },
+    )
+    assert ok.status_code == 201, ok.text

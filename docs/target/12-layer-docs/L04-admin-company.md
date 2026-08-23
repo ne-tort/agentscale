@@ -7,7 +7,7 @@
 | Quality note | Admin shell + starter catalog + subscription alerts |
 | Plan | [L04](../11-implementation-plan/L04-admin-company.md) |
 | Canon | [01-platform-admin](../01-platform-admin/), [03-companies](../03-companies/) |
-| Last updated | 2026-08-23 — starter bundle shipped + import views/tabs |
+| Last updated | 2026-08-23 — agent policy max_attachment_mb |
 | Owners | — |
 
 ---
@@ -24,7 +24,7 @@ Platform Admin — компании, keys (L03), квоты/policy, metrics read
 | Platform Overview tab + no-keys / key-expiring / subscription alerts | |
 | Create company full-page + quotas on create | |
 | AI Keys: list, create, bind, disable, renew, rotate | |
-| Agent policy UI incl. token budgets | USD authoritative billing sync |
+| Agent policy UI incl. token budgets + max_attachment_mb | USD authoritative billing sync |
 | Company contour: Overview / Employees / Cabinets | |
 | Invite employee full-page form | |
 | `PUT /admin/companies/{id}/subscription` | |

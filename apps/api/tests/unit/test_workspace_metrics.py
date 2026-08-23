@@ -17,7 +17,7 @@ def test_workspace_tree_bytes_sums_files(tmp_path: Path, monkeypatch) -> None:
     (root / "workspace" / "inbox").mkdir()
     (root / "workspace" / "inbox" / "a.bin").write_bytes(b"\x00" * 10)
 
-    assert workspace_tree_bytes("ws_test") == len("hello".encode()) + 10
+    assert workspace_tree_bytes("ws_test") == len(b"hello") + 10
 
 
 def test_workspace_tree_bytes_missing_returns_zero(tmp_path: Path, monkeypatch) -> None:

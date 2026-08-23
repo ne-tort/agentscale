@@ -1,7 +1,7 @@
 """Unit tests — chat transcript collapse (L05/L08)."""
 
 from prodavan.application.agent.session_service import events_to_transcript
-from prodavan.domain.agent import AgentEventType, PLATFORM_EVENT_USER_MESSAGE
+from prodavan.domain.agent import PLATFORM_EVENT_USER_MESSAGE, AgentEventType
 
 
 def test_events_to_transcript_user_and_assistant() -> None:

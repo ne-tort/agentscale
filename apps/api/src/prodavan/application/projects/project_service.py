@@ -5,10 +5,12 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.cabinets.access import CabinetAccessService
 from prodavan.application.projects.access import ProjectAccessService
 from prodavan.application.projects.materialize import get_materialize_service
 from prodavan.application.projects.trigger_service import ProjectTriggerService
+from prodavan.domain.admin import attachment_max_bytes
 from prodavan.domain.ai_keys import AiProvider
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
@@ -40,8 +42,8 @@ def _normalize_agent_provider(value: str | None) -> str | None:
     return normalized
 
 
-def _public(row: ProjectRow) -> dict:
-    return {
+def _public(row: ProjectRow, *, limits: dict | None = None) -> dict:
+    out = {
         "id": row.id,
         "company_id": row.company_id,
         "cabinet_id": row.cabinet_id,
@@ -55,6 +57,9 @@ def _public(row: ProjectRow) -> dict:
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
+    if limits is not None:
+        out["limits"] = limits
+    return out
 
 
 class ProjectService:
@@ -64,6 +69,11 @@ class ProjectService:
         self._cabinets = CabinetAccessService(session)
         self._materialize = get_materialize_service()
         self._triggers = ProjectTriggerService(session)
+        self._companies = AdminCompanyService(session)
+
+    async def _attachment_limits(self, company_id: str) -> dict:
+        policy = await self._companies.get_agent_policy(company_id)
+        return {"attachment_max_bytes": attachment_max_bytes(policy)}
 
     async def create(
         self,
@@ -121,7 +131,8 @@ class ProjectService:
         await self._triggers.enqueue(project_id=project_id, kind="project.prepare", payload={"source": "create"})
         await self._session.commit()
         await self._session.refresh(row)
-        out = _public(row)
+        limits = await self._attachment_limits(row.company_id)
+        out = _public(row, limits=limits)
         out["materialize"] = {
             "workspace_root": mat.workspace_root,
             "mcp_config_path": mat.mcp_config_path,
@@ -139,15 +150,16 @@ class ProjectService:
         principal: Principal,
         employee: EmployeeRow | None,
     ) -> list[dict]:
-        await self._cabinets.require_access(
+        inst = await self._cabinets.require_access(
             cabinet_id=cabinet_id, principal=principal, employee=employee, write=False
         )
+        limits = await self._attachment_limits(inst.company_id)
         q = await self._session.execute(
             select(ProjectRow)
             .where(ProjectRow.cabinet_id == cabinet_id, ProjectRow.status != ProjectStatus.DELETED)
             .order_by(ProjectRow.created_at.desc())
         )
-        return [_public(r) for r in q.scalars().all()]
+        return [_public(r, limits=limits) for r in q.scalars().all()]
 
     async def get(
         self,
@@ -159,7 +171,8 @@ class ProjectService:
         row = await self._access.require_access(
             project_id=project_id, principal=principal, employee=employee, write=False
         )
-        return _public(row)
+        limits = await self._attachment_limits(row.company_id)
+        return _public(row, limits=limits)
 
     async def patch(
         self,
@@ -189,7 +202,8 @@ class ProjectService:
             row.agent_provider = _normalize_agent_provider(agent_provider)
         await self._session.commit()
         await self._session.refresh(row)
-        return _public(row)
+        limits = await self._attachment_limits(row.company_id)
+        return _public(row, limits=limits)
 
     async def rematerialize(
         self,
@@ -232,7 +246,8 @@ class ProjectService:
         row.status = ProjectStatus.PAUSED
         await self._session.commit()
         await self._session.refresh(row)
-        return _public(row)
+        limits = await self._attachment_limits(row.company_id)
+        return _public(row, limits=limits)
 
     async def resume(
         self,
@@ -254,7 +269,8 @@ class ProjectService:
         row.status = ProjectStatus.ACTIVE
         await self._session.commit()
         await self._session.refresh(row)
-        return _public(row)
+        limits = await self._attachment_limits(row.company_id)
+        return _public(row, limits=limits)
 
     async def delete(
         self,
@@ -276,4 +292,5 @@ class ProjectService:
         if purge_workspace:
             WorkspaceLayoutWriter(workspace_key=row.workspace_key).remove_project_tree()
         await self._session.refresh(row)
-        return _public(row)
+        limits = await self._attachment_limits(row.company_id)
+        return _public(row, limits=limits)

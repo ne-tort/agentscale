@@ -44,6 +44,7 @@ class AgentPolicyBody(BaseModel):
     max_agent_tokens_month: int | None = Field(default=None, ge=1)
     max_tokens_per_run: int | None = Field(default=None, ge=1)
     max_cost_usd_month: Decimal | None = Field(default=None, gt=0)
+    max_attachment_mb: int = Field(default=20, ge=1, le=500)
 
 
 @router.get("")
@@ -85,6 +86,8 @@ async def get_agent_policy(company_id: str, _: PlatformAdminDep, session: Sessio
         "max_cost_usd_month": float(policy.max_cost_usd_month)
         if policy.max_cost_usd_month is not None
         else None,
+        "max_attachment_mb": policy.max_attachment_mb,
+        "attachment_max_bytes": int(policy.max_attachment_mb) * 1024 * 1024,
     }
 
 
@@ -103,6 +106,7 @@ async def set_agent_policy(
         max_agent_tokens_month=body.max_agent_tokens_month,
         max_tokens_per_run=body.max_tokens_per_run,
         max_cost_usd_month=body.max_cost_usd_month,
+        max_attachment_mb=body.max_attachment_mb,
     )
     return await AdminCompanyService(session).set_agent_policy(company_id, policy)
 

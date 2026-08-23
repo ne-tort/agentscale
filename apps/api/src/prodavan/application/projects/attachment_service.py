@@ -7,10 +7,12 @@ import mimetypes
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.projects.access import ProjectAccessService
+from prodavan.domain.admin import attachment_max_bytes
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
-from prodavan.domain.projects import ATTACHMENT_MAX_BYTES
+from prodavan.domain.projects import is_allowed_attachment_filename
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.projects import ProjectAttachmentRow
 from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
@@ -20,6 +22,11 @@ class ProjectAttachmentService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._access = ProjectAccessService(session)
+        self._companies = AdminCompanyService(session)
+
+    async def _max_bytes(self, company_id: str) -> int:
+        policy = await self._companies.get_agent_policy(company_id)
+        return attachment_max_bytes(policy)
 
     async def upload_base64(
         self,
@@ -34,6 +41,14 @@ class ProjectAttachmentService:
         project = await self._access.require_access(
             project_id=project_id, principal=principal, employee=employee, write=True
         )
+        safe_name = filename.strip() or "attachment.bin"
+        if not is_allowed_attachment_filename(safe_name):
+            raise AppError(
+                code="ATTACHMENT_TYPE_FORBIDDEN",
+                title="Attachment type forbidden",
+                status=422,
+                detail="file extension not allowed for chat attachments",
+            )
         try:
             raw = base64.b64decode(content_base64, validate=True)
         except Exception as exc:
@@ -43,14 +58,14 @@ class ProjectAttachmentService:
                 status=422,
                 detail="invalid content_base64",
             ) from exc
-        if len(raw) > ATTACHMENT_MAX_BYTES:
+        max_bytes = await self._max_bytes(project.company_id)
+        if len(raw) > max_bytes:
             raise AppError(
                 code="ATTACHMENT_TOO_LARGE",
                 title="Attachment too large",
                 status=413,
-                detail=f"max {ATTACHMENT_MAX_BYTES} bytes",
+                detail=f"max {max_bytes} bytes (company policy)",
             )
-        safe_name = filename.strip() or "attachment.bin"
         guessed = content_type or mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
         writer = WorkspaceLayoutWriter(workspace_key=project.workspace_key)
         path = writer.store_inbox_attachment(filename=safe_name, raw=raw)

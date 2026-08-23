@@ -108,6 +108,7 @@ class AdminApi {
     int? maxAgentTokensMonth,
     int? maxTokensPerRun,
     double? maxCostUsdMonth,
+    int maxAttachmentMb = 20,
   }) async {
     final res = await http.put(
       _uri('/admin/companies/$companyId/agent-policy'),
@@ -120,6 +121,7 @@ class AdminApi {
         'max_agent_tokens_month': maxAgentTokensMonth,
         'max_tokens_per_run': maxTokensPerRun,
         'max_cost_usd_month': maxCostUsdMonth,
+        'max_attachment_mb': maxAttachmentMb,
       }),
     );
     _throwIfError(res);

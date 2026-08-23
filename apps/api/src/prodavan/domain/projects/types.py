@@ -29,7 +29,37 @@ PROJECT_TRIGGER_KINDS = frozenset(
     }
 )
 
-ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024  # 20 MB stub policy — company policy later (L04/L08)
+# Platform fallback when company policy row missing (see L04 DEFAULT_MAX_ATTACHMENT_MB).
+ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024
+
+ATTACHMENT_ALLOWED_EXTENSIONS = frozenset(
+    {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+        ".gif",
+        ".pdf",
+        ".xlsx",
+        ".xls",
+        ".csv",
+        ".txt",
+        ".md",
+        ".zip",
+    }
+)
+
+
+def attachment_extension(filename: str) -> str:
+    dot = filename.rfind(".")
+    if dot <= 0:
+        return ""
+    return filename[dot:].lower()
+
+
+def is_allowed_attachment_filename(filename: str) -> bool:
+    ext = attachment_extension(filename.strip())
+    return ext in ATTACHMENT_ALLOWED_EXTENSIONS
 
 
 def new_project_id() -> str:

@@ -26,6 +26,9 @@ class CompanyCabinetQuota:
 
 DEFAULT_CABINET_QUOTA = CompanyCabinetQuota()
 
+DEFAULT_MAX_ATTACHMENT_MB = 20
+PLATFORM_MAX_ATTACHMENT_MB = 500
+
 
 @dataclass
 class CompanyAgentRuntimePolicy:
@@ -36,6 +39,7 @@ class CompanyAgentRuntimePolicy:
     max_agent_tokens_month: int | None = None
     max_tokens_per_run: int | None = None
     max_cost_usd_month: Decimal | None = None
+    max_attachment_mb: int = DEFAULT_MAX_ATTACHMENT_MB
 
     def validate(self) -> None:
         if self.tool_preset not in TOOL_PRESETS:
@@ -46,6 +50,13 @@ class CompanyAgentRuntimePolicy:
             raise ValueError("max_tokens_per_run must be >= 1")
         if self.max_cost_usd_month is not None and self.max_cost_usd_month <= 0:
             raise ValueError("max_cost_usd_month must be > 0")
+        if self.max_attachment_mb < 1 or self.max_attachment_mb > PLATFORM_MAX_ATTACHMENT_MB:
+            raise ValueError(f"max_attachment_mb must be 1..{PLATFORM_MAX_ATTACHMENT_MB}")
+
+
+def attachment_max_bytes(policy: CompanyAgentRuntimePolicy) -> int:
+    """Effective upload ceiling for project chat attachments (L07 / C-ATTACH)."""
+    return policy.max_attachment_mb * 1024 * 1024
 
 
 SUBSCRIPTION_EXPIRING_SOON_DAYS = 30

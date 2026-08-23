@@ -7,7 +7,7 @@
 | Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain/worker; k8s isolator — gap |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-23 — PATCH agent_provider + opt-in trigger worker |
+| Last updated | 2026-08-23 — company attachment limits + extension allowlist |
 | Owners | — |
 
 ---
@@ -25,7 +25,7 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 | Materialize: AGENTS from cabinet workspace-docs + packages/sandbox | bubblewrap/k8s isolator |
 | `container_ref=local-ws:{workspace_key}` | |
 | Triggers: enqueue + list + dispatch/drain (`?max=`) + admin drain-all + opt-in asyncio worker | Durable queue / multi-replica leader election |
-| Attachments: base64 upload → inbox + DB ref | Virus scan; company policy limits |
+| Attachments: base64 upload → inbox + DB ref; company max_attachment_mb + extension allowlist | Virus scan; per-cabinet archive policy |
 | Integration tests lifecycle + FS layout + provider patch + admin drain | E2E with agent ping |
 
 ## Как сделано
@@ -46,7 +46,7 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 | C-PROJECT | entity + lifecycle API | **live** (subset) |
 | C-MATERIALIZE | FS layout + paths | **live** (local-ws; no pod) |
 | C-TRIGGERS | enqueue + list + dispatch/drain + admin drain + opt-in worker | **live** (subset; in-process worker) |
-| C-ATTACH | upload + storage_ref | **live** (subset) |
+| C-ATTACH | upload + storage_ref + company size/type policy | **live** (subset) |
 
 ### Потребляет
 
@@ -90,7 +90,7 @@ apps/api/tests/unit/test_projects_domain.py
 | Trigger dispatch to agent | done | POST triggers/dispatch + `?max=` + `POST /admin/triggers/drain` + opt-in `TRIGGER_WORKER_*` |
 | MCP package sandbox run | live (subset) | prepare + opt-in local spawn (`MCP_SANDBOX_SPAWN`); k8s/bubblewrap — hole |
 | Platform vs project event bus split | partial | project_triggers table only |
-| Attachment virus/size policy | stub | ATTACHMENT_MAX_BYTES constant |
+| Attachment virus/size policy | live (subset) | company max_attachment_mb; platform extension allowlist; virus scan — hole |
 | Project preferred_provider | done | `agent_provider` create/PATCH; resolve uses project override |
 
 ## Проверка

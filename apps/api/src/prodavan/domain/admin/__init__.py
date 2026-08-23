@@ -5,6 +5,7 @@ from prodavan.domain.admin.types import (
     TOOL_PRESETS,
     CompanyAgentRuntimePolicy,
     CompanyCabinetQuota,
+    attachment_max_bytes,
     subscription_read_model,
 )
 
@@ -13,5 +14,6 @@ __all__ = [
     "CompanyAgentRuntimePolicy",
     "CompanyCabinetQuota",
     "TOOL_PRESETS",
+    "attachment_max_bytes",
     "subscription_read_model",
 ]

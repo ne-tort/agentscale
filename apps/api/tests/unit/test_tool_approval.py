@@ -1,7 +1,7 @@
 """Unit tests — HITL pending approvals helper (L08)."""
 
 from prodavan.application.agent.session_service import _pending_approvals_from_events
-from prodavan.domain.agent import AgentEventType, PLATFORM_EVENT_TOOL_APPROVAL_DECISION
+from prodavan.domain.agent import PLATFORM_EVENT_TOOL_APPROVAL_DECISION, AgentEventType
 
 
 def test_pending_approvals_until_resolved() -> None:
