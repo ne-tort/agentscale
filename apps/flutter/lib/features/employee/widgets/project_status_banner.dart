@@ -23,7 +23,9 @@ class ProjectStatusBanner {
     if (projectPaused) {
       return [
         MaterialBanner(
-          content: const Text('Project is paused — chat and uploads are disabled'),
+          content: const Text(
+            'Project is paused — chat, uploads and agent runs are disabled',
+          ),
           leading: const Icon(Icons.pause_circle_filled),
           backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
           actions: [

@@ -892,3 +892,48 @@ def test_agent_session_create_blocked_cancel_allowed_when_paused(client: TestCli
     )
     assert cancelled.status_code == 200, cancelled.text
     assert cancelled.json()["status"] == "cancelled"
+
+    # Transcript without session_id still returns history after auto-cancel.
+    transcript = client.get(f"/api/v1/projects/{project_id}/chat/transcript", headers=owner_h)
+    assert transcript.status_code == 200, transcript.text
+    assert transcript.json()["session_id"] == session_id
+
+
+@requires_postgres
+def test_project_prepare_allowed_while_paused(client: TestClient) -> None:
+    admin = _token(sub="padmin-prep-pause", platform_admin=True)
+    created_co = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "PrepPauseCo", "admin_email": "owner@preppause.test"},
+    )
+    assert created_co.status_code == 201, created_co.text
+    company_id = created_co.json()["company"]["id"]
+    owner_tok = _token(sub="owner-prep-pause", email="owner@preppause.test")
+    owner_h = {"Authorization": f"Bearer {owner_tok}"}
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "PrepPauseCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "PrepPauseProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
+
+    queued = client.post(
+        f"/api/v1/projects/{project_id}/triggers",
+        headers=owner_h,
+        json={"kind": "project.prepare", "payload": {}},
+    )
+    assert queued.status_code == 202, queued.text
+    assert queued.json()["kind"] == "project.prepare"

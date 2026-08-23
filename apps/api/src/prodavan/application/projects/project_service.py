@@ -332,7 +332,11 @@ class ProjectService:
         employee: EmployeeRow | None,
     ) -> dict:
         row = await self._access.require_access(
-            project_id=project_id, principal=principal, employee=employee, write=False
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+            allow_paused=True,
         )
         if row.status != ProjectStatus.PAUSED:
             raise AppError(
@@ -351,6 +355,18 @@ class ProjectService:
         )
         await self._session.commit()
         await self._session.refresh(row)
+        # Best-effort: drain leave-queued triggers without requiring a separate worker tick.
+        try:
+            from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
+
+            await AgentTriggerDispatcher(self._session).dispatch_batch(
+                project_id=row.id,
+                principal=principal,
+                employee=employee,
+                max_n=10,
+            )
+        except Exception:
+            pass
         return await self._project_public(row)
 
     async def delete(

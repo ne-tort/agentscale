@@ -1069,19 +1069,14 @@ def test_queued_trigger_survives_pause_and_runs_after_resume(client: TestClient)
     )
     assert skipped.status_code == 200, skipped.text
     assert skipped.json().get("dispatched") is False
+    assert skipped.json().get("reason") == "project_paused"
 
     client.post(f"/api/v1/projects/{project_id}/resume", headers=owner_h)
-
-    ran = client.post(
-        f"/api/v1/projects/{project_id}/triggers/dispatch?max=5",
-        headers=owner_h,
-    )
-    assert ran.status_code == 200, ran.text
-    assert ran.json().get("dispatched") is True
 
     listed = client.get(f"/api/v1/projects/{project_id}/triggers", headers=owner_h)
     assert listed.status_code == 200
     item = next(t for t in listed.json()["items"] if t["id"] == trigger_id)
+    # Resume kick-drains leave-queued triggers.
     assert item["status"] == "done"
 
 

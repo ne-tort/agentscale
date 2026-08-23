@@ -61,7 +61,7 @@ void main() {
         ),
       ),
     );
-    expect(find.text('Project is paused — chat and uploads are disabled'), findsOneWidget);
+    expect(find.text('Project is paused — chat, uploads and agent runs are disabled'), findsOneWidget);
     expect(find.text('Resume'), findsNothing);
   });
 
@@ -101,7 +101,7 @@ void main() {
       ),
     );
     expect(find.text('Company subscription expired — chat and uploads are disabled'), findsOneWidget);
-    expect(find.text('Project is paused — chat and uploads are disabled'), findsNothing);
+    expect(find.text('Project is paused — chat, uploads and agent runs are disabled'), findsNothing);
   });
 
   testWidgets('attachment preview chip shows image thumbnail', (tester) async {

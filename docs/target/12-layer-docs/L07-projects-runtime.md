@@ -7,7 +7,7 @@
 | Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain/worker; k8s isolator — gap |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-24 — idle pause cancels sessions; leave-queued |
+| Last updated | 2026-08-24 — soft dispatch while paused; resume kick-drain |
 | Owners | — |
 
 ---
@@ -111,8 +111,8 @@ apps/api/.env.example
 |------------|--------|---------|
 | Project CRUD in cabinet | done | |
 | Materialize layout | done | AGENTS from `meta_workspace_docs` (slug=agents); empty → default |
-| Pause/resume/delete | done | pause idempotent; rematerialize/PATCH/att-delete/cancel-session while paused; leave-queued triggers; pause cancels ACTIVE sessions |
-| Trigger dispatch to agent | done | chat.message + chat.regenerate; schedule/webhook ack or run-if-text; advisory lock + row lease; paused → no enqueue/claim; resume drains queue |
+| Pause/resume/delete | done | pause idempotent; rematerialize/PATCH/att-delete/cancel-session while paused; leave-queued; pause cancels ACTIVE; resume kick-drains queue |
+| Trigger dispatch to agent | done | chat.message + chat.regenerate; schedule/webhook ack or run-if-text; advisory lock + row lease; paused → soft-skip dispatch (`project_paused`); resume drains |
 | MCP package sandbox run | live (subset) | prepare + opt-in local spawn (`MCP_SANDBOX_SPAWN`); k8s/bubblewrap — hole |
 | Platform vs project event bus split | live (subset) | fan-out; zip handler stdin JSON + optional stdout JSON result; full MCP stdio — hole |
 | Attachment refs scoped to project | done | normalize id/storage_ref before agent send |

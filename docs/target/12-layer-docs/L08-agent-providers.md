@@ -7,7 +7,7 @@
 | Quality note | Port+events+fixture+budget+SSE+HITL; Node sidecar — gap |
 | Plan | [L08](../11-implementation-plan/L08-agent-providers.md) |
 | Canon | [08-agent-providers](../08-agent-providers/) |
-| Last updated | 2026-08-24 — idle pause cancels sessions; workspace Resume |
+| Last updated | 2026-08-24 — transcript after pause cancel; soft dispatch |
 | Owners | — |
 
 ---
@@ -32,7 +32,7 @@ AgentProviderPort + frozen AgentEvent; credentials только через L03 r
 | Trigger dispatch + drain (`?max=`) + regenerate/schedule/webhook/telegram + admin drain + opt-in worker (advisory lock + outbox lease) | External broker |
 | Chat text optional when attachment_refs present | |
 | `CompanySubscriptionGate` on session create/send → `COMPANY_SUSPENDED` | |
-| Pause: create_session / chat_turn blocked (`PROJECT_PAUSED`); cancel_session allowed; pause cancels ACTIVE sessions | |
+| Pause: create_session / chat_turn blocked (`PROJECT_PAUSED`); cancel_session allowed; pause cancels ACTIVE; transcript falls back to latest cancelled | |
 | Unit + integration tests | Golden JSON fixtures |
 
 ## Как сделано

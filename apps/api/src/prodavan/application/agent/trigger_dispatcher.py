@@ -11,6 +11,7 @@ from prodavan.application.projects.access import ProjectAccessService
 from prodavan.application.projects.trigger_service import ProjectTriggerService
 from prodavan.domain.agent import PLATFORM_EVENT_USER_MESSAGE, AgentSessionStatus
 from prodavan.domain.identity import Principal
+from prodavan.domain.projects import ProjectStatus
 from prodavan.domain.projects.types import SUBSCRIPTION_EXEMPT_TRIGGER_KINDS
 from prodavan.infrastructure.persistence.models.agent import AgentEventRow, AgentSessionRow
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
@@ -38,9 +39,15 @@ class AgentTriggerDispatcher:
         principal: Principal,
         employee: EmployeeRow | None,
     ) -> dict:
-        await self._projects.require_access(
-            project_id=project_id, principal=principal, employee=employee, write=True
+        project = await self._projects.require_access(
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+            allow_paused=True,
         )
+        if project.status == ProjectStatus.PAUSED:
+            return {"dispatched": False, "reason": "project_paused"}
         return await self._dispatch_one(project_id=project_id, principal=principal, employee=employee)
 
     async def dispatch_batch(
@@ -52,9 +59,15 @@ class AgentTriggerDispatcher:
         max_n: int = _DEFAULT_DRAIN_MAX,
     ) -> dict:
         """Drain up to max_n queued triggers (manual worker substitute)."""
-        await self._projects.require_access(
-            project_id=project_id, principal=principal, employee=employee, write=True
+        project = await self._projects.require_access(
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+            allow_paused=True,
         )
+        if project.status == ProjectStatus.PAUSED:
+            return {"dispatched": False, "reason": "project_paused", "items": []}
         limit = max_n if 1 <= max_n <= _HARD_DRAIN_MAX else _DEFAULT_DRAIN_MAX
         results: list[dict] = []
         for _ in range(limit):

@@ -320,6 +320,9 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
           ..addAll(lines);
         _loading = false;
       });
+      if (_projectPaused || _companySuspended) {
+        await _abortLocalStreamIfSending();
+      }
       _scrollToEnd();
       await _loadInbox();
       await _openPendingApprovalsIfAny();
@@ -506,6 +509,13 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       if (!mounted) return;
       setState(() => _error = e.toString());
     }
+  }
+
+  /// Local SSE abort when project becomes paused/suspended mid-stream (settings / reload).
+  Future<void> _abortLocalStreamIfSending() async {
+    if (!_sending) return;
+    setState(() => _cancelRequested = true);
+    _activeStream?.abort();
   }
 
   Future<void> _openPendingApprovalsIfAny() async {

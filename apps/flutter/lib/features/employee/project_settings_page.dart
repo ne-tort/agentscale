@@ -192,7 +192,7 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
                     leading: ProjectStatusChip(status: _projectStatus!),
                     title: const Text('Project status'),
                     subtitle: ProjectStatusChip.isPaused(_projectStatus)
-                        ? const Text('Chat and uploads are disabled while paused')
+                        ? const Text('Chat, uploads and agent runs are disabled while paused')
                         : Text(_projectStatus!),
                   ),
                 AppForm(

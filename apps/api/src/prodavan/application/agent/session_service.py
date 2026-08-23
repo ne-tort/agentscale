@@ -453,9 +453,20 @@ class AgentSessionService:
                 .limit(1)
             )
             active = q.scalar_one_or_none()
-            if active is None:
-                return {"session_id": None, "messages": []}
-            sid = active.id
+            if active is not None:
+                sid = active.id
+            else:
+                # After pause auto-cancel, fall back to latest session so history remains.
+                latest_q = await self._session.execute(
+                    select(AgentSessionRow)
+                    .where(AgentSessionRow.project_id == project_id)
+                    .order_by(AgentSessionRow.created_at.desc())
+                    .limit(1)
+                )
+                latest = latest_q.scalar_one_or_none()
+                if latest is None:
+                    return {"session_id": None, "messages": []}
+                sid = latest.id
         else:
             row = await self.get_session(session_id=sid)
             if row.project_id != project_id:
@@ -489,6 +500,8 @@ class AgentSessionService:
         row = await self.get_session(session_id=session_id)
         if row.project_id != project_id:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+        if row.status == AgentSessionStatus.CANCELLED:
+            return _session_public(row)
         adapter = get_agent_adapter(api_kind=row.api_kind)
         handle = AgentHandle(id=row.vendor_agent_id, provider=row.provider, cwd=row.cwd, model=row.model)
         await adapter.cancel(handle)
