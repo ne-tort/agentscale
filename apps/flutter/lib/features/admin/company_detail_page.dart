@@ -194,6 +194,13 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                     SizedBox(
                       width: 160,
                       child: StatTile(
+                        label: 'Active employees',
+                        value: _metric('employees_active'),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 160,
+                      child: StatTile(
                         label: 'Cabinets',
                         value: '${_metric('active_cabinets')} / ${_metric('cabinets_quota')}',
                       ),

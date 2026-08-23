@@ -129,6 +129,8 @@ def test_list_platform_metrics_companies(client: TestClient) -> None:
     assert match is not None
     assert match["name"] == "MetricsCo"
     assert match["employees_total"] >= 1
+    assert "employees_active" in match
+    assert match["employees_active"] >= 1
     assert "projects_total" in match
     assert "agent_tokens_used" in match
     assert "ai_keys_bound" in match

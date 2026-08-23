@@ -51,6 +51,7 @@ apps/flutter/lib/core/api/admin_api.dart
 | Overview no-keys alert | done | ai_keys_bound in metrics |
 | Key expiring alert | done | ai_keys_expiring_soon + next_key_renewal_at |
 | Subscription expiring alert | hole | needs subscription_ends_at |
+| `employees_active` metric | done | metrics API + company detail UI |
 | High usage alert | hole | configurable thresholds |
 | E2E widget tests | hole | |
 

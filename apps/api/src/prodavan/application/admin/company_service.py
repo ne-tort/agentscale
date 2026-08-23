@@ -10,6 +10,7 @@ from prodavan.application.ai_keys.service import AiKeysService
 from prodavan.domain.admin import CompanyAgentRuntimePolicy, CompanyCabinetQuota
 from prodavan.domain.cabinets import CabinetStatus
 from prodavan.domain.errors import AppError
+from prodavan.domain.identity import EmployeeStatus
 from prodavan.domain.projects import ProjectStatus
 from prodavan.infrastructure.persistence.models.admin import (
     CompanyAgentRuntimePolicyRow,
@@ -126,6 +127,15 @@ class AdminCompanyService:
                 MembershipRow.company_id == company_id
             )
         )
+        emp_active_q = await self._session.execute(
+            select(func.count(func.distinct(MembershipRow.employee_id)))
+            .select_from(MembershipRow)
+            .join(EmployeeRow, EmployeeRow.id == MembershipRow.employee_id)
+            .where(
+                MembershipRow.company_id == company_id,
+                EmployeeRow.status != EmployeeStatus.DISABLED,
+            )
+        )
         cab_q = await self._session.execute(
             select(func.count())
             .select_from(CabinetInstanceRow)
@@ -167,6 +177,7 @@ class AdminCompanyService:
         key_metrics = await AiKeysService(self._session).company_key_metrics(company_id)
         return {
             "employees_total": int(emp_q.scalar_one() or 0),
+            "employees_active": int(emp_active_q.scalar_one() or 0),
             "employees": int(emp_q.scalar_one() or 0),
             "active_cabinets": active_cabinets,
             "cabinets_active": active_cabinets,

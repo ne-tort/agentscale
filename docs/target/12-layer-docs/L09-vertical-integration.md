@@ -25,6 +25,8 @@
 | Disabled AI key → `NO_AI_KEY` 404 | expired-by-date key path — done |
 | AGENT_BUDGET 429 on chat follow-up | done | test_e2e_agent_budget_blocks_followup |
 | Admin metrics list in smoke | done | GET /admin/metrics/companies |
+| SSE chat stream in smoke | done | POST /chat/stream in happy path |
+| `employees_active` in metrics | done | excludes disabled |
 | Admin metrics: agent_tokens_used, agent_messages, projects_total | |
 | Peer cabinet 403 in smoke | |
 | Flutter ProjectWorkspacePage → SSE chat + transcript reload | SSE cancel mid-stream |

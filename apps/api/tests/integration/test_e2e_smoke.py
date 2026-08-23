@@ -129,6 +129,23 @@ def test_e2e_smoke_admin_to_agent_ping(client: TestClient) -> None:
     assert chat.status_code == 200, chat.text
     assert "Cursor fixture:" in chat.json()["assistant_text"]
 
+    import json
+
+    stream_events: list[dict] = []
+    with client.stream(
+        "POST",
+        f"/api/v1/projects/{project_id}/chat/stream",
+        headers=owner_h,
+        json={"text": "stream smoke", "session_id": chat.json()["session_id"]},
+    ) as resp:
+        assert resp.status_code == 200, resp.text
+        for line in resp.iter_lines():
+            if not line or not line.startswith("data: "):
+                continue
+            stream_events.append(json.loads(line.removeprefix("data: ")))
+    assert any(e.get("type") == "text_delta" for e in stream_events)
+    assert any(e.get("type") == "_turn_complete" for e in stream_events)
+
 
 @requires_postgres
 def test_e2e_disabled_employee_cannot_chat(client: TestClient) -> None:
