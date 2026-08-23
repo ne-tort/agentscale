@@ -120,6 +120,7 @@ apps/api/.env.example
 | Attachment virus/size policy | live (subset) | max_attachment_mb + extension + magic sniff + AV-lite; full AV scanner — hole |
 | Project preferred_provider | done | `agent_provider` create/PATCH; resolve uses project override |
 | Attachment preview in chat UI | live (subset) | image + text/JSON selectable preview + PDF stub; real PDF renderer — hole |
+| OOXML sniff (xlsx/docx) | done | zip magic + extension → correct content_type |
 | telegram.message trigger | done | dispatch like chat.message; HMAC ingress like webhook |
 | Webhook HMAC ingress | done | company policy secret + X-Prodavan-Signature |
 | Attachment DELETE | done | DB + inbox file; Flutter pending remove calls DELETE |

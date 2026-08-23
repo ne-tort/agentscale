@@ -100,6 +100,17 @@ _CONTENT_MAGIC: tuple[tuple[bytes, str], ...] = (
 def sniff_attachment_content_type(raw: bytes, *, filename: str = "", fallback: str | None = None) -> str:
     """Best-effort content type from magic bytes, then filename, then fallback."""
     head = raw[:16] if raw else b""
+    # Office Open XML (xlsx/docx/…) shares ZIP magic — prefer extension when present.
+    if head.startswith(b"PK\x03\x04") and filename:
+        ext = attachment_extension(filename)
+        office = {
+            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".xlsm": "application/vnd.ms-excel.sheet.macroEnabled.12",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        }
+        if ext in office:
+            return office[ext]
     for magic, ctype in _CONTENT_MAGIC:
         if head.startswith(magic):
             return ctype

@@ -7,6 +7,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field, model_validator
 
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from prodavan.api.deps import (
     PlatformAdminDep,
     PrincipalDep,
@@ -18,9 +20,23 @@ from prodavan.application.identity.service import EntitlementService, IdentityCo
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import MembershipRole
 from prodavan.infrastructure.keycloak.invite import get_invite_client
-from prodavan.infrastructure.persistence.models.identity import EmployeeRow
+from prodavan.infrastructure.persistence.models.identity import CompanyRow, EmployeeRow
 
 router = APIRouter(tags=["identity"])
+
+
+async def _memberships_public(session: AsyncSession, memberships: list) -> list[dict]:
+    out: list[dict] = []
+    for m in memberships:
+        company = await session.get(CompanyRow, m.company_id)
+        out.append(
+            {
+                "company_id": m.company_id,
+                "company_name": company.name if company is not None else m.company_id,
+                "role": m.role,
+            }
+        )
+    return out
 
 
 class CreateCompanyBody(BaseModel):
@@ -73,9 +89,7 @@ async def me(
             "id": employee.id,
             "status": employee.status,
             "email": employee.email,
-            "memberships": [
-                {"company_id": m.company_id, "role": m.role} for m in employee.memberships
-            ],
+            "memberships": await _memberships_public(session, list(employee.memberships)),
         },
         "work_context": {
             "cabinet_id": ctx.cabinet_id,

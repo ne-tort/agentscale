@@ -39,10 +39,13 @@ class ContourSelectorPage extends StatelessWidget {
         itemBuilder: (context, index) {
           final m = items[index];
           final companyId = m['company_id'] as String? ?? '';
+          final companyName = (m['company_name'] as String?)?.trim();
           final role = m['role'] as String? ?? '';
           return ListTile(
-            title: Text(companyId),
-            subtitle: Text(role),
+            title: Text(
+              (companyName != null && companyName.isNotEmpty) ? companyName : companyId,
+            ),
+            subtitle: Text(role.isEmpty ? companyId : '$role · $companyId'),
             onTap: companyId.isEmpty ? null : () => _select(context, companyId),
           );
         },

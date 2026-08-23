@@ -7,7 +7,7 @@
 | Quality note | Admin shell + starter catalog + subscription alerts |
 | Plan | [L04](../11-implementation-plan/L04-admin-company.md) |
 | Canon | [01-platform-admin](../01-platform-admin/), [03-companies](../03-companies/) |
-| Last updated | 2026-08-24 — suspend cancels company agent sessions |
+| Last updated | 2026-08-24 — model allowlist UI + enforce; dual-role by sub |
 | Owners | — |
 
 ---
@@ -24,7 +24,7 @@ Platform Admin — компании, keys (L03), квоты/policy, metrics read
 | Platform Overview tab + no-keys / key-expiring / subscription alerts | |
 | Create company full-page + quotas on create | |
 | AI Keys: list, create, bind, disable, renew, rotate | |
-| Agent policy UI incl. token budgets + max_attachment_mb + HMAC secrets + idle pause hours | USD authoritative billing sync |
+| Agent policy UI incl. token budgets + max_attachment_mb + HMAC secrets + idle pause hours + model allowlist | USD authoritative billing sync |
 | Company contour: Overview / Employees / Cabinets | |
 | Invite employee full-page form | |
 | `PUT /admin/companies/{id}/subscription` → emits `company.suspended` on expire transition (cancels ACTIVE agent sessions), `company.reactivated` on renew | |
@@ -71,6 +71,6 @@ apps/api/alembic/versions/2026082309_company_subscription.py
 | Starter bundle catalog | live | metadata + Admin UI + shipped zip in fixtures |
 | Starter bundle download | live | `GET .../bundle` base64 |
 | `storage_bytes` / `last_activity_at` | done | workspace scan + activity max |
-| E2E widget tests | live (subset) | `admin_widgets_test.dart` — metrics alerts; full admin navigation — hole |
+| E2E widget tests | live (subset) | metrics alerts + AdminShell NavigationBar destinations; full admin navigation flows — hole |
 
 ## Quality | **7** | doing |

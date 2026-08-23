@@ -78,24 +78,7 @@ async def set_cabinet_quotas(
 
 @router.get("/{company_id}/agent-policy")
 async def get_agent_policy(company_id: str, _: PlatformAdminDep, session: SessionDep) -> dict:
-    policy = await AdminCompanyService(session).get_agent_policy(company_id)
-    return {
-        "tool_preset": policy.tool_preset,
-        "preferred_provider": policy.preferred_provider,
-        "platform_fallback": policy.platform_fallback,
-        "model_allowlist": policy.model_allowlist,
-        "max_agent_tokens_month": policy.max_agent_tokens_month,
-        "max_tokens_per_run": policy.max_tokens_per_run,
-        "max_cost_usd_month": float(policy.max_cost_usd_month)
-        if policy.max_cost_usd_month is not None
-        else None,
-        "max_attachment_mb": policy.max_attachment_mb,
-        "attachment_max_bytes": int(policy.max_attachment_mb) * 1024 * 1024,
-        "idle_pause_after_hours": policy.idle_pause_after_hours,
-        "idle_pause_enabled": policy.idle_pause_enabled(),
-        "webhook_hmac_configured": bool(policy.webhook_hmac_secret),
-        "telegram_hmac_configured": bool(policy.telegram_hmac_secret),
-    }
+    return await AdminCompanyService(session).get_agent_policy_public(company_id)
 
 
 @router.put("/{company_id}/agent-policy")

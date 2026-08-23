@@ -10,6 +10,8 @@ import 'package:prodavan/features/employee/widgets/attachment_preview_chip.dart'
 import 'package:prodavan/features/employee/widgets/attachment_preview_kinds.dart';
 import 'package:prodavan/features/employee/widgets/project_status_banner.dart';
 import 'package:prodavan/features/employee/widgets/project_status_chip.dart';
+import 'package:prodavan/features/employee/contour_selector_page.dart';
+import 'package:prodavan/features/employee/tool_approve_page.dart';
 
 Widget themed(Widget child) {
   return MaterialApp(theme: AppTheme.light, home: Scaffold(body: child));
@@ -205,5 +207,41 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(ActionChip), findsNothing);
     expect(find.byType(Chip), findsOneWidget);
+  });
+
+  testWidgets('contour selector shows company name', (tester) async {
+    await tester.pumpWidget(
+      themed(
+        ContourSelectorPage(
+          me: {
+            'employee': {
+              'memberships': [
+                {'company_id': 'co_1', 'company_name': 'Acme Corp', 'role': 'member'},
+              ],
+            },
+          },
+        ),
+      ),
+    );
+    expect(find.text('Acme Corp'), findsOneWidget);
+    expect(find.textContaining('member'), findsOneWidget);
+  });
+
+  testWidgets('tool approve page shows tool name and actions', (tester) async {
+    await tester.pumpWidget(
+      themed(
+        ToolApprovePage(
+          projectId: 'p1',
+          sessionId: 's1',
+          approvalId: 'ap1',
+          toolName: 'mcp.cabinet.info',
+          toolInput: const {'x': 1},
+        ),
+      ),
+    );
+    expect(find.text('mcp.cabinet.info'), findsOneWidget);
+    expect(find.text('Deny'), findsOneWidget);
+    expect(find.text('Approve and continue'), findsOneWidget);
+    expect(find.textContaining('"x": 1'), findsOneWidget);
   });
 }

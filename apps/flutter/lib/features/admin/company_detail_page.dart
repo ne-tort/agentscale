@@ -40,6 +40,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
   final _webhookSecretCtrl = TextEditingController();
   final _telegramSecretCtrl = TextEditingController();
   final _subscriptionEndsCtrl = TextEditingController();
+  final _modelAllowlistCtrl = TextEditingController();
 
   bool _loading = true;
   bool _savingQuotas = false;
@@ -77,6 +78,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
     _webhookSecretCtrl.dispose();
     _telegramSecretCtrl.dispose();
     _subscriptionEndsCtrl.dispose();
+    _modelAllowlistCtrl.dispose();
     super.dispose();
   }
 
@@ -103,6 +105,10 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
         _toolPreset = policy['tool_preset'] as String? ?? 'workspace_dev';
         _preferredProviderCtrl.text = policy['preferred_provider'] as String? ?? '';
         _platformFallback = policy['platform_fallback'] as bool? ?? true;
+        final allow = policy['model_allowlist'];
+        _modelAllowlistCtrl.text = allow is List
+            ? allow.map((e) => e.toString()).where((s) => s.trim().isNotEmpty).join(', ')
+            : '';
         _maxTokensMonthCtrl.text = policy['max_agent_tokens_month']?.toString() ?? '';
         _maxTokensPerRunCtrl.text = policy['max_tokens_per_run']?.toString() ?? '';
         _maxCostUsdMonthCtrl.text = policy['max_cost_usd_month']?.toString() ?? '';
@@ -266,11 +272,17 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
       final provider = _preferredProviderCtrl.text.trim();
       final webhookSecret = _webhookSecretCtrl.text.trim();
       final telegramSecret = _telegramSecretCtrl.text.trim();
+      final modelAllowlist = _modelAllowlistCtrl.text
+          .split(RegExp(r'[,;\s]+'))
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
       await adminContext.api.setAgentPolicy(
         companyId: widget.companyId,
         toolPreset: _toolPreset,
         preferredProvider: provider.isEmpty ? null : provider,
         platformFallback: _platformFallback,
+        modelAllowlist: modelAllowlist,
         maxAgentTokensMonth: _optionalPositiveInt(_maxTokensMonthCtrl.text),
         maxTokensPerRun: _optionalPositiveInt(_maxTokensPerRunCtrl.text),
         maxCostUsdMonth: _optionalPositiveDouble(_maxCostUsdMonthCtrl.text),
@@ -480,6 +492,12 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                 AppTextField(
                   controller: _preferredProviderCtrl,
                   label: 'Preferred provider (optional)',
+                  enabled: !_savingPolicy,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                AppTextField(
+                  controller: _modelAllowlistCtrl,
+                  label: 'Model allowlist (comma-separated, empty = any)',
                   enabled: !_savingPolicy,
                 ),
                 const SizedBox(height: AppSpacing.sm),

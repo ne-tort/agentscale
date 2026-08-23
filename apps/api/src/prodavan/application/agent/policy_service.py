@@ -59,8 +59,18 @@ class AgentPolicyService:
         mcp_filtered = filter_mcp_servers(raw_mcp, tool_policy)
 
         model = model_override
-        if model is None and company_policy.model_allowlist:
-            model = company_policy.model_allowlist[0]
+        allow = [m for m in (company_policy.model_allowlist or []) if str(m).strip()]
+        if model is None and allow:
+            model = allow[0]
+        elif model is not None and allow and model not in allow:
+            from prodavan.domain.errors import AppError
+
+            raise AppError(
+                code="MODEL_NOT_ALLOWED",
+                title="Model not allowed",
+                status=403,
+                detail=f"model {model!r} not in company model_allowlist",
+            )
 
         budget: dict[str, int] | None = None
         if company_policy.max_tokens_per_run is not None:

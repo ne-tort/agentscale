@@ -7,7 +7,7 @@
 | Quality note | Port+events+fixture+budget+SSE+HITL; Node sidecar — gap |
 | Plan | [L08](../11-implementation-plan/L08-agent-providers.md) |
 | Canon | [08-agent-providers](../08-agent-providers/) |
-| Last updated | 2026-08-24 — company suspend cancels sessions |
+| Last updated | 2026-08-24 — MODEL_NOT_ALLOWED + model_allowlist enforce |
 | Owners | — |
 
 ---
@@ -39,7 +39,7 @@ AgentProviderPort + frozen AgentEvent; credentials только через L03 r
 ## Как сделано
 
 1. Domain `AgentEvent`, `CreateOpts`, `AgentToolPolicy` presets.
-2. `AgentPolicyService` — company preset + mcp.json ∩ policy.
+2. `AgentPolicyService` — company preset + mcp.json ∩ policy; `model_allowlist` default + `MODEL_NOT_ALLOWED` on override outside list.
 3. `AgentSessionService` — create/send/chat_turn/transcript; create uses write gate (blocks pause); cancel uses `allow_paused`; chat/SSE ignore non-ACTIVE `session_id` (stale after pause) and open a fresh session; transcript returns `session_status`; `AgentBudgetService` before turns.
 4. `AgentTriggerDispatcher` — dequeue trigger → session + send; regenerate falls back to latest/cancelled session text then opens a new ACTIVE session if needed; `drain_all` for worker/admin.
 5. HTTP `/projects/{id}/agent/sessions`, `/chat`, `/chat/transcript`, `/triggers/dispatch`; admin `/admin/triggers/drain`.

@@ -121,6 +121,10 @@ class AdminCompanyService:
             return CompanyAgentRuntimePolicy()
         return row.to_domain()
 
+    async def get_agent_policy_public(self, company_id: str) -> dict:
+        await self._require_company(company_id)
+        return _policy_public(await self.get_agent_policy(company_id))
+
     async def set_agent_policy(
         self,
         company_id: str,

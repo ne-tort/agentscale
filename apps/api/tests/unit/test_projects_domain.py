@@ -57,6 +57,11 @@ def test_sniff_attachment_content_type() -> None:
     assert sniff_attachment_content_type(b"plain", filename="note.txt") == "text/plain"
     assert sniff_attachment_content_type(b'{"a":1}', filename="data.json") == "application/json"
     assert sniff_attachment_content_type(b"x", fallback="application/json") == "application/json"
+    assert (
+        sniff_attachment_content_type(b"PK\x03\x04....", filename="sheet.xlsx")
+        == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    assert sniff_attachment_content_type(b"PK\x03\x04....", filename="pack.zip") == "application/zip"
 
 
 def test_project_is_idle() -> None:

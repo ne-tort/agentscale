@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:prodavan/core/theme/app_theme.dart';
+import 'package:prodavan/features/admin/admin_shell.dart';
 import 'package:prodavan/features/admin/widgets/admin_metrics_alerts.dart';
 
 void main() {
@@ -59,5 +60,15 @@ void main() {
       'subscription_lifetime': true,
     });
     expect(msgs, contains('2 AI key(s) renew soon · next 2026-09-01'));
+  });
+
+  testWidgets('admin shell navigation destinations', (tester) async {
+    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const AdminShell()));
+    await tester.pump(); // avoid waiting on overview network load
+    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(find.byType(NavigationDestination), findsNWidgets(4));
+    expect(find.text('Companies'), findsWidgets);
+    expect(find.text('AI Keys'), findsWidgets);
+    expect(find.text('Bundles'), findsWidgets);
   });
 }

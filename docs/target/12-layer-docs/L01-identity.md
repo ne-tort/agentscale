@@ -7,7 +7,7 @@
 | Quality note | API+schema+Principal live; DoD без live KC realm/Admin — поэтому 7; Gaps в as-built |
 | Plan | [L01](../11-implementation-plan/L01-identity.md) |
 | Canon | [10-identity](../10-identity-keycloak/), [session](../10-identity-keycloak/session.md) |
-| Last updated | 2026-08-24 — restored as-built encoding |
+| Last updated | 2026-08-24 — dual-role by sub without email |
 | Owners | — |
 
 ---
@@ -26,10 +26,10 @@ Entitlements = membership в таблице DB. Invite без password в Prodav
 | Сделано | Не сделано / Gaps |
 |---------|-------------------|
 | ORM companies / employees / memberships + Alembic identity_001 | Live Keycloak realm cutover + AppAuth Flutter |
-| Principal / WorkContext; JWT: AUTH_MODE=oidc (JWKS) \| test (HS256 CI) | Dual-role by sub-only token without email (edge) |
+| Principal / WorkContext; JWT: AUTH_MODE=oidc (JWKS) \| test (HS256 CI) | |
 | APP_ENV=prod запрещает AUTH_MODE=test | |
 | HttpKeycloakInviteClient (KEYCLOAK_INVITE_MODE=admin) + Fake for tests | E2E against live KC Admin in CI |
-| Dual-role platform.admin+employee: /me loads Employee when email in token | |
+| Dual-role platform.admin+employee: /me loads Employee by sub (email optional) | |
 | API: /me, companies create+invite, disable, session/switch-company (jwt_reissued: false) | PG invite E2E частично skip без Postgres |
 | Entitlements: disable → 403; platform admin без обязательной Employee row | |
 
@@ -100,7 +100,7 @@ apps/api/tests/unit/test_jwt_validator.py
 | Disable → 403 | done | tested with PG when available |
 | Flutter AppAuth session | live | PKCE AppAuth + secure storage; KC client redirect URIs — hole |
 | Live KC realm cutover | todo | блокирует Status=done |
-| Platform admin dual employee row | done | /me loads row when email present |
+| Platform admin dual employee row | done | /me loads by sub (email optional) |
 
 ## Проверка
 

@@ -48,9 +48,6 @@ class EntitlementService:
 
     async def ensure_active_employee(self, principal: Principal) -> EmployeeRow | None:
         """Platform admin may have no Employee row; dual-role loads row when email/sub present."""
-        if principal.is_platform_admin and not principal.email:
-            return None
-
         emp = await self.get_employee_by_sub(principal.sub)
         if emp is None:
             emp = await self._bind_invited_by_email(principal)

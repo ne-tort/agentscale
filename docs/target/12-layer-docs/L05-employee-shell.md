@@ -7,7 +7,7 @@
 | Quality note | Dev shell + SSE chat + tab interpreters + bundle I/O + meta columns |
 | Plan | [L05](../11-implementation-plan/L05-employee-shell.md) |
 | Canon | [04-employees](../04-employees/), [session](../10-identity-keycloak/session.md) |
-| Last updated | 2026-08-24 — regenerate button; ignore cancelled session on send |
+| Last updated | 2026-08-24 — company_name in /me; ContourSelector; ToolApprove widget |
 | Owners | — |
 
 ---
@@ -24,7 +24,8 @@
 | `WorkContext` singleton | |
 | LoginPage + SessionGate + SessionStore (secure) | |
 | OIDC PKCE — AppAuth mobile + desktop loopback | |
-| ContourSelectorPage (multi-company) | |
+| ContourSelectorPage (multi-company) — shows `company_name` from `/me` | |
+| `ToolApprovePage` widget tests (name + Approve/Deny) | |
 | DevSessionPage (legacy) | |
 | `CabinetCreatePage` full-page (no modal) | Custom bundle tab views (non-collection) |
 | `CabinetRowEditPage` full-page row edit | |

@@ -104,7 +104,7 @@ class AdminApi {
     required String toolPreset,
     String? preferredProvider,
     required bool platformFallback,
-    List<String> modelAllowlist = const [],
+    List<String>? modelAllowlist,
     int? maxAgentTokensMonth,
     int? maxTokensPerRun,
     double? maxCostUsdMonth,
@@ -120,7 +120,8 @@ class AdminApi {
         'tool_preset': toolPreset,
         'preferred_provider': preferredProvider,
         'platform_fallback': platformFallback,
-        'model_allowlist': modelAllowlist,
+        // Always send explicit list (incl. empty) so UI can clear; callers must pass loaded value.
+        'model_allowlist': modelAllowlist ?? const <String>[],
         'max_agent_tokens_month': maxAgentTokensMonth,
         'max_tokens_per_run': maxTokensPerRun,
         'max_cost_usd_month': maxCostUsdMonth,
