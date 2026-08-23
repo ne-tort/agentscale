@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from prodavan.config.settings import settings
 from prodavan.core.infra.database_resource import DatabaseEngineResource
+from prodavan.core.infra.kafka_manager import KafkaManager
 from prodavan.core.infra.object_storage_manager import ObjectStorageManager
 from prodavan.core.infra.redis_manager import RedisManager
 from prodavan.core.infra.trigger_worker_resource import TriggerWorkerResource
@@ -22,7 +23,7 @@ def _celery_broker_url() -> str | None:
 
 
 def build_lifespan_manager() -> LifespanManager:
-    """Register infra: DB → Redis → object store → Celery → transitional in-process worker."""
+    """Register infra: DB → Redis → object store → Kafka → Celery → transitional worker."""
     global _lifespan_manager
     backend = (settings.object_store_backend or "local").strip().lower()
     if backend not in ("local", "s3"):
@@ -50,13 +51,23 @@ def build_lifespan_manager() -> LifespanManager:
         )
     )
     manager.register(
+        KafkaManager(
+            enabled=settings.kafka_enabled,
+            bootstrap_servers=settings.kafka_bootstrap_servers,
+            client_id=settings.kafka_client_id,
+            topic_platform_events=settings.kafka_topic_platform_events,
+            topic_project_triggers=settings.kafka_topic_project_triggers,
+            required=settings.kafka_required,
+        )
+    )
+    manager.register(
         WorkerManager(
             enabled=settings.celery_enabled,
             broker_url=_celery_broker_url(),
             result_backend=(settings.celery_result_backend or "").strip() or _celery_broker_url(),
             trigger_interval_sec=settings.trigger_worker_interval_sec,
             schedule_trigger_drain=jobs_wanted,
-            schedule_idle_pause=False,  # idle covered by drain_once when IDLE_PAUSE_WORKER_ENABLED
+            schedule_idle_pause=False,
             task_always_eager=settings.celery_task_always_eager,
         )
     )

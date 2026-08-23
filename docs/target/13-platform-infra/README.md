@@ -4,7 +4,7 @@
 |------|----------|
 | Priority | **P0** — закрывать в первую очередь |
 | Refactor | **Significant refactor allowed** (L00/L03/L07/L08 и смежные) |
-| Status | canon; код: **w1–w4 done** (LifespanManager + Redis + ObjectStorage + Celery subset); w5 Kafka pending |
+| Status | canon; код: **w1–w5 subset done** (managers + Kafka dual-write); holes: consumer cutover, materialize SoT, deploy |
 | Plan | [P0-platform-infra](../11-implementation-plan/P0-platform-infra.md) |
 
 Канон платформенной инфраструктуры и backend core. Отклонение в коде — **дефект** относительно канона (как UI-принципы в §2 [00-principles](../00-principles.md)).

@@ -9,10 +9,11 @@
 | **Project triggers** | Всегда `project_id` | `chat.message`, `project.prepare`, `webhook.http` |
 | **Platform events** | Company / employee / project lifecycle | `company.suspended`, `employee.disabled`, `project.created` |
 
-**Durable bus (канон):** обе шины — **Kafka** ([13-platform-infra](../13-platform-infra/)). PG outbox-lite / таблица `project_triggers` — transitional implementation, не prod-канон шины. Исполнение фоновых drain/jobs — **Celery**, не in-process API worker.
+**Durable bus (канон):** обе шины — **Kafka** ([13-platform-infra](../13-platform-infra/)).  
+**Сейчас (P0 w5):** dual-write `EventEnvelope` при enqueue/emit (`KafkaManager`); PG outbox-lite / `platform_events` + in-process SPI — transitional SoT до consumer cutover. Исполнение drain/jobs — **Celery** (или in-process fallback).
 
 Project triggers: `POST /api/v1/projects/{id}/triggers`.  
-Platform events: emit → Kafka → cabinet `on_platform_event` (и прочие consumers).
+Platform events: emit → PG + SPI (+ Kafka dual-write) → cabinet `on_platform_event`.
 
 ## Project trigger kinds (platform)
 

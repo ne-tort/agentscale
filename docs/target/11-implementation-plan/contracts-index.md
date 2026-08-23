@@ -32,7 +32,7 @@
 | C-USAGE | L08 | usage records | L04 metrics | [usage-metrics](../08-agent-providers/usage-metrics.md) | **live** (subset) |
 | C-PROJECT-CHAT | L08 | `POST /chat`, `POST /chat/stream` (SSE), `GET /chat/transcript` | L05 UI, L09 | adapter-port | **live** (subset) |
 | C-OBJECT-STORE | P0 / L00 | MinIO/S3 put/get/delete + object refs (no local SoT) | L07 attach/materialize, L06 packages | [13 stack](../13-platform-infra/stack.md) | **live** (subset: manager + attach/packages; materialize FS hole) |
-| C-EVENT-BUS | P0 | Kafka envelopes: project triggers + platform events | L07, L06 SPI, L09 | [13](../13-platform-infra/), [triggers](../06-projects-runtime/triggers.md) | **planned** |
+| C-EVENT-BUS | P0 / L00 | Kafka envelopes: project triggers + platform events | L07, L06 SPI, L09 | [13](../13-platform-infra/), [triggers](../06-projects-runtime/triggers.md) | **live** (subset: dual-write publish; consumer hole) |
 | C-JOBS | P0 / L00 | Celery tasks: drain / idle / rematerialize (+ idempotency) | L07, L08 | [13](../13-platform-infra/), [P0](P0-platform-infra.md) | **live** (subset: WorkerManager + tasks; deploy hole) |
 | C-CACHE | P0 / L00 | Redis cache / short locks / Celery broker conventions | L00 core, workers | [13](../13-platform-infra/) | **live** (subset: manager+health; no Celery yet) |
 
@@ -40,6 +40,7 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-24 | C-EVENT-BUS | KafkaManager + EventEnvelope; dual-write from platform emit + trigger enqueue | no |
 | 2026-08-24 | C-JOBS | WorkerManager + Celery tasks; in-process loop skipped when Celery executor active | no |
 | 2026-08-24 | C-OBJECT-STORE / C-ATTACH / C-MCP-PKG | ObjectStorageManager; new refs `object://`; legacy `file://` readable | no |
 | 2026-08-24 | C-CACHE / L00 | RedisManager + LifespanManager wiring; ready checks when REDIS_URL set | no |

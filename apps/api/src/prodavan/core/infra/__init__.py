@@ -1,6 +1,12 @@
 """Infrastructure lifespan resources + managers (P0)."""
 
 from prodavan.core.infra.database_resource import DatabaseEngineResource
+from prodavan.core.infra.kafka_manager import (
+    KafkaManager,
+    get_kafka_manager,
+    get_kafka_manager_optional,
+    set_kafka_manager,
+)
 from prodavan.core.infra.object_storage_manager import (
     ObjectStorageManager,
     ensure_object_storage,
@@ -14,16 +20,20 @@ from prodavan.core.infra.worker_manager import WorkerManager, get_celery_app, ge
 
 __all__ = [
     "DatabaseEngineResource",
+    "KafkaManager",
     "ObjectStorageManager",
     "RedisManager",
     "TriggerWorkerResource",
     "WorkerManager",
     "ensure_object_storage",
     "get_celery_app",
+    "get_kafka_manager",
+    "get_kafka_manager_optional",
     "get_object_storage",
     "get_object_storage_optional",
     "get_redis_manager",
     "get_worker_manager",
+    "set_kafka_manager",
     "set_object_storage",
     "set_redis_manager",
 ]

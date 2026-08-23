@@ -95,6 +95,21 @@ class PlatformEventService:
             out["cabinet_deliveries"] = deliveries
             if cabinet_id and len(deliveries) == 1:
                 out["cabinet_delivery"] = deliveries[0]
+        # Dual-write C-EVENT-BUS (best-effort; PG row remains transitional SoT).
+        try:
+            from prodavan.core.events.bus import publish_platform_event
+
+            await publish_platform_event(
+                event_id=row.id,
+                event_type=row.event_type,
+                company_id=row.company_id,
+                project_id=row.project_id,
+                cabinet_id=row.cabinet_id,
+                payload=row.payload if isinstance(row.payload, dict) else {},
+                occurred_at=out.get("created_at"),
+            )
+        except Exception:
+            pass
         return out
 
     async def list_events(

@@ -108,7 +108,8 @@ apps/flutter/lib/
 | Lint/test CI green | done | workflows updated |
 | No legacy login/procurement | done | not in running app |
 | `LifespanManager` + `LifespanResource` register | **done** (P0 w1) | `core/lifespan/`; see [13](../13-platform-infra/core-managers.md) |
-| Infra managers в `prodavan.core` | **partial** | Redis + ObjectStorage + Worker live (subset); **hole:** Kafka — волна 5 |
+| Infra managers в `prodavan.core` | **partial** | Redis + ObjectStorage + Worker + Kafka live (subset); holes: consumer cutover, deploy |
+| Last updated | 2026-08-24 — P0 Kafka dual-write (w5) |
 | Redis обязателен во всех окружениях | **hole** | default `REDIS_URL` empty (CI/local); prod: set URL + `REDIS_REQUIRED=true` |
 | Object store SoT для всех blobs | **partial** | attach + cabinet packages via manager; materialize workspace tree — local FS hole |
 | Celery executor для background jobs | **partial** | `CELERY_ENABLED` + worker process; default off → in-process fallback |

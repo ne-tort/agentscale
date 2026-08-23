@@ -5,8 +5,9 @@ prodavan/
   application/      # identity, ai_keys, cabinets, admin, projects, agent use-cases
   domain/           # errors, identity, ai_keys, cabinets, admin, projects, agent
   infrastructure/   # persistence, auth/jwt, keycloak, secrets, cabinets, projects, agent
-  core/             # P0: LifespanManager + infra managers (Redis, object store, Celery)
+  core/             # P0: LifespanManager + infra managers (Redis, object store, Kafka, Celery)
     jobs/           # C-JOBS task names + Celery tasks + enqueue helpers
+    events/         # C-EVENT-BUS envelopes + publish helpers
   config/           # Settings / env
   main.py           # FastAPI factory (lifespan → core.wiring)
 ```

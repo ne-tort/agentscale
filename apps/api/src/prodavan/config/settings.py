@@ -106,6 +106,14 @@ class Settings(BaseSettings):
     # Eager mode for unit tests (no broker needed).
     celery_task_always_eager: bool = False
 
+    # P0 Kafka (C-EVENT-BUS). Dual-write from PG emit/enqueue; consumer cutover later.
+    kafka_enabled: bool = False
+    kafka_bootstrap_servers: str | None = None  # e.g. localhost:9092
+    kafka_client_id: str = "prodavan-api"
+    kafka_topic_platform_events: str = "prodavan.platform.events"
+    kafka_topic_project_triggers: str = "prodavan.project.triggers"
+    kafka_required: bool = False
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
