@@ -35,6 +35,9 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-23 | C-META-DATA | `GET meta/tabs` includes `view_slug` for L05 routing | no |
+| 2026-08-23 | C-PROJECT-CHAT | transcript collapse includes `role=tool` for tool_call | no |
+| 2026-08-23 | C-EMP-SHELL | CabinetTabHost interpreters: projects/tables/tools | no |
 | 2026-08-23 | C-PROJECT-CHAT | SSE `POST /chat/stream` + L05 streaming workspace | no |
 | 2026-08-23 | C-ADMIN-COMPANY / C-USAGE | L08 AgentBudgetService token limits on policy | no |
 | 2026-08-23 | C-KEY-ENTITY | Admin Flutter AI keys list/create/bind; list_keys includes company_ids | no |

@@ -32,3 +32,21 @@ def test_events_to_transcript_multiple_turns() -> None:
     assert messages[1]["text"] == "A"
     assert messages[2]["text"] == "two"
     assert messages[3]["text"] == "B"
+
+
+def test_events_to_transcript_includes_tool_call() -> None:
+    events = [
+        {"type": PLATFORM_EVENT_USER_MESSAGE, "data": {"text": "run tool"}},
+        {"type": AgentEventType.TEXT_DELTA, "data": {"text": "Ok"}},
+        {
+            "type": AgentEventType.TOOL_CALL,
+            "data": {"id": "tc_1", "name": "mcp.cabinet.info", "input": {}},
+        },
+        {"type": AgentEventType.DONE, "data": {}},
+    ]
+    messages = events_to_transcript(events)
+    assert messages == [
+        {"role": "user", "text": "run tool"},
+        {"role": "assistant", "text": "Ok"},
+        {"role": "tool", "text": "mcp.cabinet.info"},
+    ]

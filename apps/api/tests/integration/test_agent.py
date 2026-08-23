@@ -421,3 +421,12 @@ def test_chat_with_attachment_refs_emits_tool_call(client: TestClient) -> None:
     tool_calls = [e for e in events.json()["items"] if e.get("type") == "tool_call"]
     assert tool_calls
     assert storage_ref in str(tool_calls[0].get("payload", {}))
+
+    transcript = client.get(
+        f"/api/v1/projects/{project_id}/chat/transcript?session_id={session_id}",
+        headers=owner_h,
+    )
+    assert transcript.status_code == 200, transcript.text
+    msgs = transcript.json()["messages"]
+    assert any(m.get("role") == "user" and "process file" in m.get("text", "") for m in msgs)
+    assert any(m.get("role") == "tool" and "mcp.cabinet.info" in m.get("text", "") for m in msgs)

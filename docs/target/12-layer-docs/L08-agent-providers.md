@@ -7,7 +7,7 @@
 | Quality note | Port+events+fixture+budget+chat/transcript+SSE; Node sidecar — gap |
 | Plan | [L08](../11-implementation-plan/L08-agent-providers.md) |
 | Canon | [08-agent-providers](../08-agent-providers/) |
-| Last updated | 2026-08-23 — POST /chat/stream SSE |
+| Last updated | 2026-08-23 — transcript tool_call collapse |
 | Owners | — |
 
 ---

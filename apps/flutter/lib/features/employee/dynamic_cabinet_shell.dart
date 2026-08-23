@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
-import 'package:prodavan/features/employee/project_list_page.dart';
+import 'package:prodavan/features/employee/cabinet_tab_host.dart';
 
 /// Dynamic cabinet shell — tabs from L06 meta (L05).
 class DynamicCabinetShell extends StatefulWidget {
@@ -55,11 +55,7 @@ class _DynamicCabinetShellState extends State<DynamicCabinetShell> with SingleTi
   }
 
   Widget _tabBody(Map<String, dynamic> tab) {
-    final title = tab['title'] as String? ?? 'Tab';
-    if (title == 'Projects') {
-      return ProjectListPage(cabinetId: widget.cabinetId);
-    }
-    return Center(child: Text('$title — shell host (L05)'));
+    return CabinetTabHost(cabinetId: widget.cabinetId, tab: tab);
   }
 
   @override

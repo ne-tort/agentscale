@@ -4,10 +4,10 @@
 |------|----------|
 | Status | doing |
 | Quality | 7 |
-| Quality note | Dev shell + SSE chat + attachments + transcript |
+| Quality note | Dev shell + SSE chat + attachments + tab interpreters |
 | Plan | [L05](../11-implementation-plan/L05-employee-shell.md) |
 | Canon | [04-employees](../04-employees/), [session](../10-identity-keycloak/session.md) |
-| Last updated | 2026-08-23 — attachment picker + SSE abort + tool_call chips |
+| Last updated | 2026-08-23 — tool transcript replay + cabinet tab interpreters |
 | Owners | — |
 
 ---
@@ -24,19 +24,20 @@
 | `WorkContext` singleton | ContourSelectorPage |
 | DevSessionPage (paste JWT) | Production secure storage |
 | CabinetListPage + create cabinet | Import bundle UI |
-| DynamicCabinetShell tabs from meta | Dynamic tab content interpreters |
+| DynamicCabinetShell + `CabinetTabHost` by `view_slug` | Custom bundle tab views |
 | ProjectWorkspacePage — SSE chat + transcript reload | |
 | `uploadProjectAttachment` + attachment chips | |
 | `projectChatStream` abort via HTTP client close | |
 | `attachment_refs` forwarded to chat API | |
 | Cancel + abort SSE in workspace | |
-| Live `tool_call` hint bubbles during stream | |
+| Live + replay `tool_call` bubbles | |
+| Tables/Tools tab interpreters (read-only) | |
 
 ## Как сделано
 
-1. `core/api/prodavan_api.dart` — `/me`, `/cabinets`, meta tabs, projects, `uploadProjectAttachment`, `projectChatStream` (abortable), `projectChatTranscript`.
-2. `features/employee/*` — list → shell → projects → chat workspace (reload on open).
-3. `AppScaffold.bottom` extended for TabBar.
+1. `core/api/prodavan_api.dart` — cabinets meta/tables/rows, MCP tools, chat API.
+2. `features/employee/*` — `CabinetTabHost` routes `projects|tables|tools|chat|context`.
+3. `events_to_transcript` emits `role=tool` for persisted `tool_call` events.
 4. Entry from `app.dart` → Dev session (dev only until L01 cutover).
 
 ## Контракты
@@ -51,7 +52,8 @@
 apps/flutter/lib/
   core/api/prodavan_api.dart
   core/session/work_context.dart
-  features/employee/{dev_session,cabinet_list,dynamic_cabinet_shell,project_list,project_workspace}_page.dart
+  features/employee/{dev_session,cabinet_list,dynamic_cabinet_shell,cabinet_tab_host,
+    cabinet_tables_tab_page,cabinet_tools_tab_page,project_list,project_workspace}_page.dart
 ```
 
 ## Gaps
@@ -64,6 +66,7 @@ apps/flutter/lib/
 | Chat streaming | live | SSE text_delta in workspace |
 | Attachment upload in chat | live | file_picker → POST `/attachments` → chips → `attachment_refs` |
 | In-flight SSE abort | live | `ProjectChatStreamHandle.abort()` closes HTTP client |
-| Event history reload | live | `GET .../chat/transcript` incl. persisted `user_message` |
-| Tool transcript replay | hole | tool_call not in transcript collapse yet |
-| Dynamic tab interpreters | hole | L06 |
+| Event history reload | live | `GET .../chat/transcript` incl. user + tool bubbles |
+| Meta tab interpreters | live (subset) | projects/tables/tools; chat/context placeholder |
+| Custom bundle views | hole | non-system tabs from imported bundles |
+| Row edit UI | hole | read-only tables tab |

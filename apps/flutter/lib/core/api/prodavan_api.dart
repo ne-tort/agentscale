@@ -65,6 +65,59 @@ class ProdavanApi {
     return const [];
   }
 
+  Future<List<Map<String, dynamic>>> listMetaTables(String cabinetId) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.get(_uri('/cabinets/$cabinetId/meta/tables'), headers: _headers);
+      _throwIfError(res);
+      final body = jsonDecode(res.body);
+      if (body is List) {
+        return body.cast<Map<String, dynamic>>();
+      }
+      return const [];
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
+  Future<Map<String, dynamic>> queryCabinetRows({
+    required String cabinetId,
+    required String tableSlug,
+    int limit = 50,
+    int offset = 0,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.get(
+        _uri('/cabinets/$cabinetId/data/$tableSlug/rows?limit=$limit&offset=$offset'),
+        headers: _headers,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> listCabinetMcpTools(String cabinetId) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.get(_uri('/cabinets/$cabinetId/mcp/tools'), headers: _headers);
+      _throwIfError(res);
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final tools = body['tools'];
+      if (tools is List) {
+        return tools.cast<Map<String, dynamic>>();
+      }
+      return const [];
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
   Future<List<Map<String, dynamic>>> listProjects(String cabinetId) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;

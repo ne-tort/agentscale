@@ -78,9 +78,10 @@ class CabinetMetaService:
         q = await self._session.execute(
             text(
                 f"""
-                SELECT id, title, tab_order, view_id, system_tab, created_at
-                FROM {qschema}.meta_tabs
-                ORDER BY tab_order
+                SELECT t.id, t.title, t.tab_order, t.view_id, t.system_tab, t.created_at, v.slug AS view_slug
+                FROM {qschema}.meta_tabs t
+                LEFT JOIN {qschema}.meta_views v ON v.id = t.view_id
+                ORDER BY t.tab_order
                 """
             )
         )
@@ -90,6 +91,7 @@ class CabinetMetaService:
                 "title": r.title,
                 "order": r.tab_order,
                 "view_id": r.view_id,
+                "view_slug": r.view_slug,
                 "system": r.system_tab,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
             }

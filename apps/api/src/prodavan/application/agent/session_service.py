@@ -59,6 +59,11 @@ def events_to_transcript(events: list[dict]) -> list[dict]:
             text = data.get("text")
             if text:
                 messages.append({"role": "user", "text": str(text)})
+        elif etype == AgentEventType.TOOL_CALL:
+            flush_assistant()
+            name = data.get("name")
+            if name:
+                messages.append({"role": "tool", "text": str(name)})
         elif etype == AgentEventType.TEXT_DELTA:
             chunk = data.get("text")
             if chunk:
