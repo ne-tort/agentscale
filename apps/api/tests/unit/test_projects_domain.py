@@ -18,6 +18,14 @@ def test_workspace_and_container_ref() -> None:
     assert container_ref_for("abc123") == "local-ws:abc123"
 
 
+def test_pause_exempt_trigger_kinds() -> None:
+    from prodavan.domain.projects import PAUSE_EXEMPT_TRIGGER_KINDS, SUBSCRIPTION_EXEMPT_TRIGGER_KINDS
+
+    assert "project.prepare" in PAUSE_EXEMPT_TRIGGER_KINDS
+    assert "chat.message" not in PAUSE_EXEMPT_TRIGGER_KINDS
+    assert PAUSE_EXEMPT_TRIGGER_KINDS == SUBSCRIPTION_EXEMPT_TRIGGER_KINDS
+
+
 def test_attachment_extension_allowlist() -> None:
     assert is_allowed_attachment_filename("note.txt")
     assert is_allowed_attachment_filename("scan.PDF")

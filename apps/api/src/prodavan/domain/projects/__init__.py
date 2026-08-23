@@ -3,9 +3,11 @@
 from prodavan.domain.projects.types import (
     ATTACHMENT_ALLOWED_EXTENSIONS,
     ATTACHMENT_MAX_BYTES,
+    PAUSE_EXEMPT_TRIGGER_KINDS,
     PLATFORM_EVENT_TYPES,
     PROJECT_TRIGGER_KINDS,
     ProjectStatus,
+    SUBSCRIPTION_EXEMPT_TRIGGER_KINDS,
     TriggerStatus,
     attachment_extension,
     container_ref_for,
@@ -22,9 +24,11 @@ from prodavan.domain.projects.webhook_hmac import verify_webhook_signature, webh
 __all__ = [
     "ATTACHMENT_ALLOWED_EXTENSIONS",
     "ATTACHMENT_MAX_BYTES",
+    "PAUSE_EXEMPT_TRIGGER_KINDS",
     "PLATFORM_EVENT_TYPES",
     "PROJECT_TRIGGER_KINDS",
     "ProjectStatus",
+    "SUBSCRIPTION_EXEMPT_TRIGGER_KINDS",
     "TriggerStatus",
     "attachment_extension",
     "container_ref_for",

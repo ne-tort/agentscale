@@ -219,6 +219,14 @@ def test_paused_allows_patch_and_attachment_delete_blocks_upload(client: TestCli
     assert blocked.status_code == 409
     assert blocked.json()["code"] == "PROJECT_PAUSED"
 
+    trig = client.post(
+        f"/api/v1/projects/{project_id}/triggers",
+        headers=owner_h,
+        json={"kind": "chat.message", "payload": {"text": "queued?"}},
+    )
+    assert trig.status_code == 409, trig.text
+    assert trig.json()["code"] == "PROJECT_PAUSED"
+
 
 @requires_postgres
 def test_attachment_rejects_shebang_script(client: TestClient) -> None:
@@ -889,6 +897,62 @@ def test_webhook_ingress_blocked_when_company_suspended(client: TestClient) -> N
     )
     assert blocked.status_code == 403, blocked.text
     assert blocked.json()["code"] == "COMPANY_SUSPENDED"
+
+
+@requires_postgres
+def test_webhook_ingress_blocked_when_project_paused(client: TestClient) -> None:
+    from prodavan.domain.projects import webhook_signature
+
+    admin = _token(sub="padmin-hook-pause", platform_admin=True)
+    created_co = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "HookPauseCo", "admin_email": "owner@hookpause.test"},
+    )
+    assert created_co.status_code == 201, created_co.text
+    company_id = created_co.json()["company"]["id"]
+    owner_tok = _token(sub="owner-hook-pause", email="owner@hookpause.test")
+
+    policy = client.put(
+        f"/api/v1/admin/companies/{company_id}/agent-policy",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"tool_preset": "workspace_dev", "webhook_hmac_secret": "hook-pause-secret"},
+    )
+    assert policy.status_code == 200, policy.text
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "HookPauseCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "HookPauseProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    paused = client.post(
+        f"/api/v1/projects/{project_id}/pause",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert paused.status_code == 200
+
+    body = b'{"text":"while paused"}'
+    blocked = client.post(
+        f"/api/v1/projects/{project_id}/webhooks/http",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Prodavan-Signature": webhook_signature("hook-pause-secret", body),
+        },
+    )
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["code"] == "PROJECT_PAUSED"
 
 
 @requires_postgres

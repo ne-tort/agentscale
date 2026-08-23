@@ -1111,3 +1111,65 @@ def test_e2e_platform_idle_pause_sweep_all(client: TestClient) -> None:
     got = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
     assert got.status_code == 200
     assert got.json()["status"] == "paused"
+
+
+@requires_postgres
+def test_e2e_paused_blocks_triggers_allows_metadata(client: TestClient) -> None:
+    """L07→L09: paused blocks chat.message trigger; PATCH still works."""
+    admin_h = {"Authorization": f"Bearer {_token(sub='e2e-pm-admin', platform_admin=True)}"}
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "E2EPauseMatrixCo", "admin_email": "owner@e2epm.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "E2E PM Key",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-e2e-pm",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-pm-owner', email='owner@e2epm.test')}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "E2EPauseMatrixCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "E2EPauseMatrixProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
+
+    blocked = client.post(
+        f"/api/v1/projects/{project_id}/triggers",
+        headers=owner_h,
+        json={"kind": "chat.message", "payload": {"text": "no"}},
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["code"] == "PROJECT_PAUSED"
+
+    patched = client.patch(
+        f"/api/v1/projects/{project_id}",
+        headers=owner_h,
+        json={"name": "Renamed While Paused"},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["name"] == "Renamed While Paused"
+    assert patched.json()["status"] == "paused"

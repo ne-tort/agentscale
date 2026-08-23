@@ -7,7 +7,7 @@
 | Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain/worker; k8s isolator — gap |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-24 — paused write matrix + AV-lite shebang/WASM |
+| Last updated | 2026-08-24 — paused blocks trigger enqueue/claim + webhook |
 | Owners | — |
 
 ---
@@ -52,7 +52,7 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 16. MCP package deploy/disable rematerializes all non-deleted projects in the cabinet (L09 DoD).
 17. `GET .../attachments/{id}/content` — inline bytes for Flutter image/text preview (ACL read; works while paused).
 18. Manual rematerialize allowed while project is paused (maintenance; chat/upload still blocked).
-19. Paused write matrix: PATCH name/provider, rematerialize, attachment DELETE, idempotent pause — allowed; chat/upload/triggers runtime — blocked (`PROJECT_PAUSED`).
+19. Paused write matrix: PATCH name/provider, rematerialize, attachment DELETE, idempotent pause — allowed; chat/upload/runtime triggers/webhook — blocked (`PROJECT_PAUSED`). `project.prepare` exempt; claim/dispatch skip non-ACTIVE projects.
 20. AV-lite attachment content: PE/ELF/Mach-O/WASM/shebang/PHP/`<%` prefixes (UTF-8 BOM stripped); not a virus scanner.
 
 ## Контракты
@@ -63,7 +63,7 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 |----|-------|--------|
 | C-PROJECT | entity + lifecycle API | **live** (subset) |
 | C-MATERIALIZE | FS layout + paths | **live** (local-ws; no pod) |
-| C-TRIGGERS | enqueue + list + dispatch/drain + admin drain + opt-in worker + outbox lease | **live** (subset; outbox-lite) |
+| C-TRIGGERS | enqueue + list + dispatch/drain + admin drain + opt-in worker + outbox lease; pause-gated runtime kinds | **live** (subset; outbox-lite) |
 | C-ATTACH | upload + list + download + storage_ref validation on chat | **live** (subset) |
 
 ### Потребляет
@@ -112,7 +112,7 @@ apps/api/.env.example
 | Project CRUD in cabinet | done | |
 | Materialize layout | done | AGENTS from `meta_workspace_docs` (slug=agents); empty → default |
 | Pause/resume/delete | done | pause idempotent; rematerialize/PATCH/att-delete while paused |
-| Trigger dispatch to agent | done | chat.message + chat.regenerate; schedule/webhook ack or run-if-text; advisory lock + row lease |
+| Trigger dispatch to agent | done | chat.message + chat.regenerate; schedule/webhook ack or run-if-text; advisory lock + row lease; paused project → no enqueue/claim |
 | MCP package sandbox run | live (subset) | prepare + opt-in local spawn (`MCP_SANDBOX_SPAWN`); k8s/bubblewrap — hole |
 | Platform vs project event bus split | live (subset) | fan-out; zip handler stdin JSON + optional stdout JSON result; full MCP stdio — hole |
 | Attachment refs scoped to project | done | normalize id/storage_ref before agent send |

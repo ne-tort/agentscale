@@ -36,6 +36,7 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-24 | C-TRIGGERS / C-PROJECT | enqueue+claim refuse when paused (except `project.prepare`); webhook → PROJECT_PAUSED | no |
 | 2026-08-23 | C-MCP-PKG / C-MATERIALIZE / L09 | rematerialize on package deploy/disable; IDLE_PAUSE_WORKER_ENABLED | no |
 | 2026-08-23 | C-ADMIN-POLICY / C-PROJECT / L09 | idle_pause_after_hours + sweep; attachment MIME sniff | no |
 | 2026-08-23 | C-ADMIN / L09 | release_gate_check + platform events admin UI + employee.disabled assert | no |

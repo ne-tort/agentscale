@@ -12,7 +12,10 @@ from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.config.settings import settings
 from prodavan.domain.errors import AppError
 from prodavan.domain.projects import PROJECT_TRIGGER_KINDS, ProjectStatus, TriggerStatus
-from prodavan.domain.projects.types import SUBSCRIPTION_EXEMPT_TRIGGER_KINDS
+from prodavan.domain.projects.types import (
+    PAUSE_EXEMPT_TRIGGER_KINDS,
+    SUBSCRIPTION_EXEMPT_TRIGGER_KINDS,
+)
 from prodavan.infrastructure.persistence.models.projects import ProjectRow, ProjectTriggerRow
 
 
@@ -44,11 +47,18 @@ class ProjectTriggerService:
                 status=422,
                 detail=f"unsupported trigger kind: {kind}",
             )
+        project = await self._session.get(ProjectRow, project_id)
+        if project is None or project.status == ProjectStatus.DELETED:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Project not found")
         if kind not in SUBSCRIPTION_EXEMPT_TRIGGER_KINDS:
-            project = await self._session.get(ProjectRow, project_id)
-            if project is None or project.status == ProjectStatus.DELETED:
-                raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Project not found")
             await CompanySubscriptionGate(self._session).require_active(project.company_id)
+        if project.status == ProjectStatus.PAUSED and kind not in PAUSE_EXEMPT_TRIGGER_KINDS:
+            raise AppError(
+                code="PROJECT_PAUSED",
+                title="Project paused",
+                status=409,
+                detail="project is paused",
+            )
         row = ProjectTriggerRow(
             project_id=project_id,
             kind=kind,
@@ -91,8 +101,14 @@ class ProjectTriggerService:
         project_id: str,
         worker_id: str | None = None,
     ) -> ProjectTriggerRow | None:
-        """Claim next claimable queued trigger (SKIP LOCKED + lease)."""
+        """Claim next claimable queued trigger (SKIP LOCKED + lease).
+
+        Refuses to claim when the project is not ACTIVE (paused/deleted backlog stays queued).
+        """
         now = datetime.now(UTC)
+        project = await self._session.get(ProjectRow, project_id)
+        if project is None or project.status != ProjectStatus.ACTIVE:
+            return None
         lease_sec = max(15, int(settings.trigger_outbox_lease_sec))
         q = await self._session.execute(
             select(ProjectTriggerRow)
