@@ -40,7 +40,9 @@
 | Import bundle UI | live | `CabinetImportBundlePage` |
 | Bundle export save | live | Context tab + `FilePicker.saveFile` |
 | Row edit UI | live | `CabinetRowEditPage` full-page |
-| Custom bundle views | live (subset) | collection tabs → tables interpreter via `table_slug` |
+| Create project full-page | live | `ProjectCreatePage` |
+| Meta columns on empty tables | live | `getMetaTable` |
+| Custom bundle views | live (subset) | collection tabs via `table_slug` |
 | Starter bundle import | live | catalog + shipped equipment-procurement zip |
 
 ## Карта кода

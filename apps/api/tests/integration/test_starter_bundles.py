@@ -63,6 +63,7 @@ def test_admin_download_starter_bundle(client: TestClient) -> None:
     assert body["zip_base64"]
 
 
+@requires_postgres
 def test_employee_list_starter_bundles(client: TestClient) -> None:
     emp = _token(sub="bundle-emp", email="emp@starter.test")
     res = client.get(
