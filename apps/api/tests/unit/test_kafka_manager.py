@@ -62,7 +62,8 @@ async def test_kafka_enabled_without_bootstrap_stays_buffer() -> None:
     await mgr.shutdown()
 
 
-def test_kafka_kick_drain_increments(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.asyncio
+async def test_kafka_kick_drain_increments_async(monkeypatch: pytest.MonkeyPatch) -> None:
     set_kafka_manager(None)
     mgr = KafkaManager(enabled=False)
     calls: list[dict] = []
@@ -75,9 +76,44 @@ def test_kafka_kick_drain_increments(monkeypatch: pytest.MonkeyPatch) -> None:
         "prodavan.core.jobs.enqueue.enqueue_trigger_drain",
         _fake_enqueue,
     )
-    mgr._kick_drain()
+    monkeypatch.setattr(
+        "prodavan.core.infra.redis_manager.get_redis_manager",
+        lambda: None,
+    )
+    await mgr._kick_drain()
     assert mgr.drain_kicks == 1
     assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_kafka_kick_drain_skips_when_lock_held(monkeypatch: pytest.MonkeyPatch) -> None:
+    set_kafka_manager(None)
+    mgr = KafkaManager(enabled=False, drain_debounce_sec=2.0)
+    calls: list[dict] = []
+
+    def _fake_enqueue() -> dict:
+        calls.append({"ok": True})
+        return {"enqueued": True}
+
+    class _Redis:
+        enabled = True
+
+    monkeypatch.setattr(
+        "prodavan.core.jobs.enqueue.enqueue_trigger_drain",
+        _fake_enqueue,
+    )
+    monkeypatch.setattr(
+        "prodavan.core.infra.redis_manager.get_redis_manager",
+        lambda: _Redis(),
+    )
+
+    async def _no_lock(*_a, **_k):
+        return None
+
+    monkeypatch.setattr("prodavan.core.infra.cache.acquire_lock", _no_lock)
+    await mgr._kick_drain()
+    assert mgr.drain_kicks == 0
+    assert calls == []
 
 
 def test_kafka_dispatch_enqueue_increments(monkeypatch: pytest.MonkeyPatch) -> None:

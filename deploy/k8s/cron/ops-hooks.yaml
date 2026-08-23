@@ -38,6 +38,11 @@ spec:
   jobTemplate:
     spec:
       template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: prodavan-ops-cron
+            app.kubernetes.io/part-of: prodavan
+            app.kubernetes.io/component: idle-pause
         spec:
           restartPolicy: OnFailure
           containers:
@@ -78,6 +83,11 @@ spec:
   jobTemplate:
     spec:
       template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: prodavan-ops-cron
+            app.kubernetes.io/part-of: prodavan
+            app.kubernetes.io/component: triggers
         spec:
           restartPolicy: OnFailure
           containers:

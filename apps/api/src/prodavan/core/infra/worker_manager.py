@@ -132,7 +132,14 @@ class WorkerManager(LifespanResource):
         """True when background jobs should use Celery instead of in-process loop."""
         return self.enabled and not self._task_always_eager
 
-    def send_task(self, name: str, args: list[Any] | None = None, kwargs: dict[str, Any] | None = None) -> Any:
+    def send_task(
+        self,
+        name: str,
+        args: list[Any] | None = None,
+        kwargs: dict[str, Any] | None = None,
+        *,
+        task_id: str | None = None,
+    ) -> Any:
         if not self.enabled:
             raise RuntimeError("Celery worker manager is not enabled")
         task = self._app.tasks.get(name)
@@ -141,8 +148,8 @@ class WorkerManager(LifespanResource):
         args = args or []
         kwargs = kwargs or {}
         if self._task_always_eager:
-            return task.apply(args=args, kwargs=kwargs)
-        return task.apply_async(args=args, kwargs=kwargs)
+            return task.apply(args=args, kwargs=kwargs, task_id=task_id)
+        return task.apply_async(args=args, kwargs=kwargs, task_id=task_id)
 
     def _build_app(self) -> Any:
         from celery import Celery

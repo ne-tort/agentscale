@@ -141,8 +141,19 @@ class KafkaManager(LifespanResource):
                 raise
             return False
 
-    def _kick_drain(self) -> None:
+    async def _kick_drain(self) -> None:
+        """Enqueue Celery drain; coalesce across API replicas via Redis lock when available."""
+        from prodavan.core.infra.cache import acquire_lock, cache_key
+        from prodavan.core.infra.redis_manager import get_redis_manager
         from prodavan.core.jobs.enqueue import enqueue_trigger_drain
+
+        redis = get_redis_manager()
+        if redis is not None and redis.enabled:
+            ttl = max(1, int(self._drain_debounce_sec))
+            token = await acquire_lock(cache_key("lock", "kafka", "drain-kick"), ttl_sec=ttl)
+            if token is None:
+                logger.debug("kafka consumer: drain kick skipped (lock held)")
+                return
 
         result = enqueue_trigger_drain()
         self._drain_kicks += 1
@@ -174,7 +185,7 @@ class KafkaManager(LifespanResource):
                     continue
                 if not batch:
                     if pending_kick:
-                        self._kick_drain()
+                        await self._kick_drain()
                         pending_kick = False
                     continue
                 for _tp, messages in batch.items():
@@ -191,7 +202,7 @@ class KafkaManager(LifespanResource):
                         await asyncio.wait_for(stop.wait(), timeout=self._drain_debounce_sec)
                         break
                     except TimeoutError:
-                        self._kick_drain()
+                        await self._kick_drain()
                         pending_kick = False
         finally:
             logger.info("kafka: kick consumer stopped kicks=%s", self._drain_kicks)

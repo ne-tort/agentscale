@@ -44,10 +44,11 @@ Postgres и Keycloak/Vault роли не меняются.
 
 - Kafka consumer **ускоряет** Celery (`kick`/`dispatch`); PG outbox остаётся claim SoT; SPI fan-out не Kafka-only.
 - Package sandbox: hydrate-from-zip есть; **live mount** workspace из MinIO в pod — hole.
-- Cabinet archive reports `packages_wipe`; hard-delete schema / GC orphans after failed wipe — hole.
+- Cabinet archive reports `packages_wipe` (+ `remaining` verify); hard-delete schema / GC orphans after failed wipe — hole.
 - Dual-write Kafka publish **после** PG commit (`core/events/deferred.py`); ghost envelopes при rollback сняты.
-- k8s sketches: PVC + allow/default-deny NetworkPolicy + init Jobs; TLS/Helm/egress ещё hole.
-- C-CACHE: locks + rate_limit facade live; application call sites still sparse.
+- k8s sketches: PVC + allow/default-deny + **egress** API/Celery + API Deployment labels; TLS/Helm/Postgres·Keycloak egress CIDRs — hole.
+- C-CACHE: ingress webhook/telegram rate-limit + Kafka drain-kick lock wired; other call sites still sparse.
+- C-JOBS: stable Celery `task_id` for `dispatch_trigger` / `rematerialize_project`; periodic drain/idle coalesce via lock/beat (no fixed id).
 
 ## Волны реализации
 

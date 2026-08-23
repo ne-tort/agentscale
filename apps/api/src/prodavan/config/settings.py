@@ -122,6 +122,9 @@ class Settings(BaseSettings):
     # kick = debounce → trigger_drain; dispatch = enqueue dispatch_trigger(event_id).
     kafka_consumer_mode: str = "kick"
 
+    # External webhook/telegram ingress rate limit (C-CACHE); 0 = disabled.
+    ingress_rate_limit_per_minute: int = 120
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

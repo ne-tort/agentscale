@@ -274,6 +274,7 @@ async def ingress_signed_webhook(
     x_prodavan_signature: Annotated[str | None, Header(alias="X-Prodavan-Signature")] = None,
 ) -> dict:
     """External webhook.http ingress — HMAC-SHA256 over raw body (company policy secret)."""
+    await _enforce_ingress_rate_limit(project_id, channel="webhook")
     project = await ProjectAccessService(session).get_project(project_id)
     companies = AdminCompanyService(session)
     webhook_secret, _ = await companies.get_ingress_hmac_secrets(project.company_id)
@@ -296,6 +297,7 @@ async def ingress_signed_telegram(
     x_prodavan_signature: Annotated[str | None, Header(alias="X-Prodavan-Signature")] = None,
 ) -> dict:
     """Telegram bot transport ingress — HMAC-SHA256 (company telegram_hmac_secret)."""
+    await _enforce_ingress_rate_limit(project_id, channel="telegram")
     project = await ProjectAccessService(session).get_project(project_id)
     companies = AdminCompanyService(session)
     _, telegram_secret = await companies.get_ingress_hmac_secrets(project.company_id)
@@ -308,3 +310,24 @@ async def ingress_signed_telegram(
         secret=telegram_secret,
         secret_name="telegram_hmac_secret",
     )
+
+
+async def _enforce_ingress_rate_limit(project_id: str, *, channel: str) -> None:
+    from prodavan.config.settings import settings
+    from prodavan.core.infra.cache import cache_key, rate_limit_allow
+
+    limit = int(settings.ingress_rate_limit_per_minute or 0)
+    if limit < 1:
+        return
+    allowed = await rate_limit_allow(
+        cache_key("rl", "ingress", channel, project_id),
+        limit=limit,
+        window_sec=60,
+    )
+    if not allowed:
+        raise AppError(
+            code="RATE_LIMITED",
+            title="Too Many Requests",
+            status=429,
+            detail=f"{channel} ingress rate limit exceeded",
+        )

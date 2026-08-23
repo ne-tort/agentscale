@@ -33,13 +33,18 @@
 | C-PROJECT-CHAT | L08 | `POST /chat`, `POST /chat/stream` (SSE), `GET /chat/transcript` | L05 UI, L09 | adapter-port | **live** (subset) |
 | C-OBJECT-STORE | P0 / L00 | MinIO/S3 put/get/delete + object refs (no local SoT) | L07 attach/materialize, L06 packages | [13 stack](../13-platform-infra/stack.md) | **live** (subset: manager + attach/packages; materialize FS hole) |
 | C-EVENT-BUS | P0 / L00 | Kafka envelopes: project triggers + platform events | L07, L06 SPI, L09 | [13](../13-platform-infra/), [triggers](../06-projects-runtime/triggers.md) | **live** (subset: dual-write after commit + kick\|dispatch consumer) |
-| C-JOBS | P0 / L00 | Celery tasks: drain / dispatch_trigger / idle / rematerialize | L07, L08 | [13](../13-platform-infra/), [P0](P0-platform-infra.md) | **live** (subset: CLI bootstrap + beat; Helm hole) |
-| C-CACHE | P0 / L00 | Redis cache / short locks / Celery broker conventions | L00 core, workers | [13](../13-platform-infra/) | **live** (subset: get/set + lock + rate_limit; sparse callers) |
+| C-JOBS | P0 / L00 | Celery tasks: drain / dispatch_trigger / idle / rematerialize | L07, L08 | [13](../13-platform-infra/), [P0](P0-platform-infra.md) | **live** (subset: CLI + beat + stable task_id for dispatch/rematerialize; Helm hole) |
+| C-CACHE | P0 / L00 | Redis cache / short locks / Celery broker conventions | L00 core, workers | [13](../13-platform-infra/) | **live** (subset: get/set + lock + rate_limit; ingress + kick callers) |
 
 ## Compatibility log
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-24 | C-CACHE / C-TRIGGERS | ingress webhook/telegram rate limit (`INGRESS_RATE_LIMIT_PER_MINUTE`) | no |
+| 2026-08-24 | C-EVENT-BUS / C-CACHE | Kafka drain-kick Redis lock coalesce | no |
+| 2026-08-24 | C-JOBS | stable Celery `task_id` for dispatch_trigger / rematerialize_project | no |
+| 2026-08-24 | C-OBJECT-STORE | archive `packages_wipe.remaining` verify after delete_prefix | no |
+| 2026-08-24 | P0 deploy | egress NetworkPolicy + API Deployment sketch + cron pod labels | no |
 | 2026-08-24 | C-EVENT-BUS | deferred Kafka publish after PG commit (no ghost on rollback) | no |
 | 2026-08-24 | C-JOBS / C-API-HEALTH | WorkerManager broker ping; CELERY_REQUIRED readiness gate | no |
 | 2026-08-24 | C-CACHE | acquire_lock / release_lock / rate_limit_allow facades | no |
