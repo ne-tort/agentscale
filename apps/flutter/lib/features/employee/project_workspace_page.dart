@@ -74,12 +74,32 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   bool _cancelRequested = false;
   bool _companySuspended = false;
   bool _projectPaused = false;
+  bool _resuming = false;
   String? _error;
   ProjectChatStreamHandle? _activeStream;
 
   bool get _chatBlocked => _companySuspended || _projectPaused;
   /// Inbox cleanup allowed while paused; blocked only when company suspended.
   bool get _inboxMutationsBlocked => _companySuspended;
+
+  Future<void> _resumeFromBanner() async {
+    if (_resuming || !_projectPaused || _companySuspended) return;
+    setState(() {
+      _resuming = true;
+      _error = null;
+    });
+    try {
+      await workContext.api.resumeProject(widget.projectId);
+      if (!mounted) return;
+      setState(() => _projectPaused = false);
+      await _loadTranscript();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _resuming = false);
+    }
+  }
 
   @override
   void initState() {
@@ -581,6 +601,9 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
             context,
             companySuspended: _companySuspended,
             projectPaused: _projectPaused,
+            onResume: _projectPaused && !_companySuspended && !_resuming
+                ? _resumeFromBanner
+                : null,
           ),
           if (_error != null) InlineErrorBanner(message: _error!),
           if (_inboxAttachments.isNotEmpty)

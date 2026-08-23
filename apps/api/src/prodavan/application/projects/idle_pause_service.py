@@ -12,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.company_service import AdminCompanyService
+from prodavan.application.agent.session_service import AgentSessionService
 from prodavan.application.projects.platform_event_service import PlatformEventService
 from prodavan.domain.identity import Principal
 from prodavan.domain.projects import ProjectStatus, project_is_idle
@@ -25,6 +26,7 @@ class IdlePauseService:
         self._session = session
         self._companies = AdminCompanyService(session)
         self._events = PlatformEventService(session)
+        self._sessions = AgentSessionService(session)
 
     async def project_last_activity_at(self, project: ProjectRow) -> datetime | None:
         sess_q = await self._session.execute(
@@ -76,6 +78,8 @@ class IdlePauseService:
             ):
                 continue
             project.status = ProjectStatus.PAUSED
+            # Same side-effect as ProjectService.pause — stop in-flight agent runtime.
+            await self._sessions.cancel_active_for_project(project_id=project.id)
             await self._events.emit(
                 event_type="project.paused",
                 company_id=project.company_id,

@@ -7,7 +7,7 @@
 | Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain/worker; k8s isolator — gap |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-24 — pause matrix: session create blocked; cancel + leave-queued |
+| Last updated | 2026-08-24 — idle pause cancels sessions; leave-queued |
 | Owners | — |
 
 ---
@@ -47,7 +47,7 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 11. Signed telegram ingress `POST .../webhooks/telegram` with company `telegram_hmac_secret` (`telegram_hmac_configured` flag).
 12. Trigger outbox lease columns (migration `2026082315`) — claim increments `attempts`, sets `lease_until`; crash → lease expiry → re-claim.
 13. Lazy `company.suspended` emit commits inside `CompanySubscriptionGate` (no session auto-commit — SSE keeps the session open).
-14. Idle pause — `idle_pause_after_hours` (0/None=off); admin company + platform sweep; opt-in worker; CronJob examples in `deploy/k8s/cron/`.
+14. Idle pause — `idle_pause_after_hours` (0/None=off); admin company + platform sweep; opt-in worker; CronJob examples in `deploy/k8s/cron/`; cancels ACTIVE agent sessions (same as manual pause).
 15. Attachment upload sniffs PNG/JPEG/GIF/PDF/ZIP magic for `content_type`; allowlist includes `.json`.
 16. MCP package deploy/disable rematerializes all non-deleted projects in the cabinet (L09 DoD).
 17. `GET .../attachments/{id}/content` — inline bytes for Flutter image/text preview (ACL read; works while paused).

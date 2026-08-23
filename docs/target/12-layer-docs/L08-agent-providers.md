@@ -7,7 +7,7 @@
 | Quality note | Port+events+fixture+budget+SSE+HITL; Node sidecar — gap |
 | Plan | [L08](../11-implementation-plan/L08-agent-providers.md) |
 | Canon | [08-agent-providers](../08-agent-providers/) |
-| Last updated | 2026-08-24 — pause cancels ACTIVE sessions; create blocked |
+| Last updated | 2026-08-24 — idle pause cancels sessions; workspace Resume |
 | Owners | — |
 
 ---

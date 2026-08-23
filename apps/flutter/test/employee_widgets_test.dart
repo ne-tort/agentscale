@@ -62,6 +62,28 @@ void main() {
       ),
     );
     expect(find.text('Project is paused — chat and uploads are disabled'), findsOneWidget);
+    expect(find.text('Resume'), findsNothing);
+  });
+
+  testWidgets('project paused banner resume action', (tester) async {
+    var resumed = false;
+    await tester.pumpWidget(
+      themed(
+        Builder(
+          builder: (context) => Column(
+            children: ProjectStatusBanner.build(
+              context,
+              companySuspended: false,
+              projectPaused: true,
+              onResume: () => resumed = true,
+            ),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Resume'), findsOneWidget);
+    await tester.tap(find.text('Resume'));
+    expect(resumed, isTrue);
   });
 
   testWidgets('company suspend banner takes priority over paused', (tester) async {

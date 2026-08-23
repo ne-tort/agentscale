@@ -7,7 +7,7 @@
 | Quality note | Dev shell + SSE chat + tab interpreters + bundle I/O + meta columns |
 | Plan | [L05](../11-implementation-plan/L05-employee-shell.md) |
 | Canon | [04-employees](../04-employees/), [session](../10-identity-keycloak/session.md) |
-| Last updated | 2026-08-24 — inbox delete allowed while project paused |
+| Last updated | 2026-08-24 — paused banner Resume in workspace |
 | Owners | — |
 
 ---
@@ -50,7 +50,7 @@
 | Custom bundle views | live (subset) | collection tabs via `table_slug` |
 | Starter bundle import | live | catalog + shipped equipment-procurement zip |
 | HITL tool approval UI | live | `ToolApprovePage` on `tool_approval_request` |
-| Widget tests (status banner + image/text/PDF preview chips) | live (subset) | full workspace navigation E2E — hole |
+| Widget tests (status banner + Resume + image/text/PDF preview chips) | live (subset) | full workspace navigation E2E — hole |
 
 ## Карта кода
 

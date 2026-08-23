@@ -8,6 +8,7 @@ class ProjectStatusBanner {
     BuildContext context, {
     required bool companySuspended,
     required bool projectPaused,
+    VoidCallback? onResume,
   }) {
     if (companySuspended) {
       return [
@@ -25,7 +26,15 @@ class ProjectStatusBanner {
           content: const Text('Project is paused — chat and uploads are disabled'),
           leading: const Icon(Icons.pause_circle_filled),
           backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
-          actions: const [SizedBox.shrink()],
+          actions: [
+            if (onResume != null)
+              TextButton(
+                onPressed: onResume,
+                child: const Text('Resume'),
+              )
+            else
+              const SizedBox.shrink(),
+          ],
         ),
       ];
     }
