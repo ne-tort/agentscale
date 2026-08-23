@@ -170,6 +170,48 @@ class ProdavanApi {
     }
   }
 
+  Future<Map<String, dynamic>> upsertCabinetRow({
+    required String cabinetId,
+    required String tableSlug,
+    required Map<String, dynamic> values,
+    String? rowId,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.post(
+        _uri('/cabinets/$cabinetId/data/$tableSlug/rows'),
+        headers: _headers,
+        body: jsonEncode({
+          'values': values,
+          if (rowId != null && rowId.isNotEmpty) 'id': rowId,
+        }),
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
+  Future<void> deleteCabinetRow({
+    required String cabinetId,
+    required String tableSlug,
+    required String rowId,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.delete(
+        _uri('/cabinets/$cabinetId/data/$tableSlug/rows/$rowId'),
+        headers: _headers,
+      );
+      _throwIfError(res);
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
   Future<List<Map<String, dynamic>>> listProjects(String cabinetId) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;

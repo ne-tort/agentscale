@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/session/work_context.dart';
@@ -74,8 +77,21 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
       final exported = await workContext.api.exportCabinetBundle(widget.cabinetId);
       if (!mounted) return;
       final b64 = exported['zip_base64'] as String? ?? '';
+      if (b64.isEmpty) {
+        setState(() => _error = 'Empty bundle export');
+        return;
+      }
+      final bytes = base64Decode(b64);
+      final safeName = widget.cabinetName.replaceAll(RegExp(r'[^\w\-]+'), '_');
+      final saved = await FilePicker.platform.saveFile(
+        fileName: '$safeName.bundle.zip',
+        bytes: bytes,
+      );
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Bundle exported (${b64.length} base64 chars)')),
+        SnackBar(
+          content: Text(saved == null ? 'Export ready (${bytes.length} bytes)' : 'Saved to $saved'),
+        ),
       );
     } catch (e) {
       if (!mounted) return;

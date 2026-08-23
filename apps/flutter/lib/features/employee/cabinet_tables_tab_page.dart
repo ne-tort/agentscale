@@ -6,7 +6,7 @@ import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 
-/// Meta tables browser — read-only rows preview (L05/L06 interpreter).
+/// Meta tables browser with row upsert/delete (L05/L06 interpreter).
 class CabinetTablesTabPage extends StatefulWidget {
   const CabinetTablesTabPage({super.key, required this.cabinetId});
 
@@ -22,6 +22,8 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
   List<Map<String, dynamic>> _tables = const [];
   String? _selectedSlug;
   List<Map<String, dynamic>> _rows = const [];
+
+  static const _systemFields = {'id', 'created_at'};
 
   @override
   void initState() {
@@ -72,6 +74,119 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
     }
   }
 
+  Set<String> _fieldNames() {
+    final names = <String>{};
+    for (final row in _rows) {
+      for (final key in row.keys) {
+        if (!_systemFields.contains(key)) names.add(key);
+      }
+    }
+    return names;
+  }
+
+  Future<void> _editRow({Map<String, dynamic>? existing}) async {
+    final slug = _selectedSlug;
+    if (slug == null) return;
+
+    final fields = _fieldNames();
+    if (fields.isEmpty && existing == null) {
+      fields.add('title');
+    }
+    final controllers = <String, TextEditingController>{
+      for (final name in fields) name: TextEditingController(text: '${existing?[name] ?? ''}'),
+    };
+
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(existing == null ? 'Add row' : 'Edit row'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final name in fields)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: TextField(
+                    controller: controllers[name],
+                    decoration: InputDecoration(labelText: name, border: const OutlineInputBorder()),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Save')),
+        ],
+      ),
+    );
+
+    if (saved != true) {
+      for (final c in controllers.values) {
+        c.dispose();
+      }
+      return;
+    }
+
+    final values = <String, dynamic>{};
+    for (final name in fields) {
+      final text = controllers[name]!.text.trim();
+      if (text.isNotEmpty) values[name] = text;
+    }
+    for (final c in controllers.values) {
+      c.dispose();
+    }
+    if (values.isEmpty) {
+      setState(() => _error = 'Enter at least one field value');
+      return;
+    }
+
+    try {
+      await workContext.api.upsertCabinetRow(
+        cabinetId: widget.cabinetId,
+        tableSlug: slug,
+        values: values,
+        rowId: existing?['id'] as String?,
+      );
+      await _loadRows(slug);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.toString());
+    }
+  }
+
+  Future<void> _deleteRow(Map<String, dynamic> row) async {
+    final slug = _selectedSlug;
+    final rowId = row['id'] as String?;
+    if (slug == null || rowId == null) return;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete row?'),
+        content: Text('Delete row $rowId'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    try {
+      await workContext.api.deleteCabinetRow(
+        cabinetId: widget.cabinetId,
+        tableSlug: slug,
+        rowId: rowId,
+      );
+      await _loadRows(slug);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.toString());
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -106,11 +221,36 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
           ),
         ),
         const Divider(height: 1),
+        if (_selectedSlug != null)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () => _editRow(),
+                icon: const Icon(Icons.add),
+                label: const Text('Add row'),
+              ),
+            ),
+          ),
         Expanded(
           child: _selectedSlug == null
               ? const Center(child: Text('Select a table to preview rows'))
               : _rows.isEmpty
-                  ? const Center(child: Text('No rows'))
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text('No rows'),
+                          const SizedBox(height: 8),
+                          TextButton.icon(
+                            onPressed: () => _editRow(),
+                            icon: const Icon(Icons.add),
+                            label: const Text('Add row'),
+                          ),
+                        ],
+                      ),
+                    )
                   : ListView.separated(
                       padding: const EdgeInsets.all(12),
                       itemCount: _rows.length,
@@ -128,6 +268,11 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
                             style: Theme.of(context).textTheme.bodySmall,
                           ),
                           isThreeLine: true,
+                          onTap: () => _editRow(existing: row),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline),
+                            onPressed: () => _deleteRow(row),
+                          ),
                         );
                       },
                     ),

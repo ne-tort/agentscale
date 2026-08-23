@@ -35,7 +35,8 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
-| 2026-08-23 | C-BUNDLE | L05 Flutter import/export bundle UI wired | no |
+| 2026-08-23 | C-META-DATA | L05 tables tab upsert/delete + row HTTP client | no |
+| 2026-08-23 | C-BUNDLE | export save to zip via FilePicker | no |
 | 2026-08-23 | C-ADMIN-COMPANY | subscription edit UI on company create/detail | no |
 | 2026-08-23 | C-META-DATA | `GET meta/tabs` includes `view_slug` for L05 routing | no |
 | 2026-08-23 | C-PROJECT-CHAT | transcript collapse includes `role=tool` for tool_call | no |

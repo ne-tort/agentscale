@@ -34,10 +34,7 @@ class CabinetTabHost extends StatelessWidget {
       case 'context':
         return CabinetContextTabPage(cabinetId: cabinetId, cabinetName: cabinetName);
       case 'chat':
-        return CabinetPlaceholderTabPage(
-          title: title,
-          hint: 'Open a project from the Projects tab to chat with the agent.',
-        );
+        return ProjectListPage(cabinetId: cabinetId);
       default:
         return CabinetPlaceholderTabPage(
           title: title,
