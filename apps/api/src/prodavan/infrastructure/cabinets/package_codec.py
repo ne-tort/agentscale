@@ -100,6 +100,22 @@ def validate_package_zip(raw: bytes) -> dict[str, Any]:
     if not isinstance(tools, list) or not tools:
         raise AppError(code="PACKAGE_INVALID", title="Invalid package", status=422, detail="tools required")
 
+    platform_events = manifest.get("platform_events")
+    if platform_events is None:
+        platform_events = manifest.get("on_platform_event")
+    if platform_events is not None:
+        if isinstance(platform_events, str):
+            platform_events = [platform_events]
+        if not isinstance(platform_events, list) or not all(
+            isinstance(x, str) and x.strip() for x in platform_events
+        ):
+            raise AppError(
+                code="PACKAGE_INVALID",
+                title="Invalid package",
+                status=422,
+                detail="platform_events must be a list of non-empty strings",
+            )
+
     try:
         mcp_json = json.loads(zf.read("mcp.json").decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -127,6 +143,7 @@ def build_minimal_package_zip(
     name: str = "demo_sync",
     version: str = "1.0.0",
     tool_name: str = "demo.ping",
+    platform_events: list[str] | None = None,
 ) -> bytes:
     """Test helper — valid minimal package."""
     manifest = {
@@ -139,6 +156,8 @@ def build_minimal_package_zip(
         "tools": [{"name": tool_name, "description": "ping"}],
         "permissions": {"cabinet_data": ["read", "write"], "network_hosts": [], "shell": False},
     }
+    if platform_events:
+        manifest["platform_events"] = platform_events
     mcp_json = {"name": name, "tools": [{"name": tool_name}]}
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -147,6 +166,13 @@ def build_minimal_package_zip(
         zf.writestr("src/__init__.py", "")
         zf.writestr(
             "src/server.py",
-            "import time\n\ndef main():\n    while True:\n        time.sleep(3600)\n\nif __name__ == '__main__':\n    main()\n",
+            (
+                "import time\n\n"
+                "def main():\n"
+                "    while True:\n"
+                "        time.sleep(3600)\n\n"
+                "if __name__ == '__main__':\n"
+                "    main()\n"
+            ),
         )
     return buf.getvalue()

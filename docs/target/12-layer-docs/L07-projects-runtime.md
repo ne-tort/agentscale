@@ -7,7 +7,7 @@
 | Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain/worker; k8s isolator — gap |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-23 — telegram HMAC ingress + company.suspended gate |
+| Last updated | 2026-08-23 — company fan-out SPI + package platform_events stub |
 | Owners | — |
 
 ---
@@ -25,7 +25,7 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 | Materialize: AGENTS from cabinet workspace-docs + packages/sandbox | bubblewrap/k8s isolator |
 | `container_ref=local-ws:{workspace_key}` | |
 | Triggers: enqueue + list + dispatch + signed webhook/telegram ingress + admin drain + worker | Durable outbox |
-| Platform events bus + cabinet SPI deliver (audit) | package/MCP on_platform_event handlers |
+| Platform events bus + cabinet SPI deliver (audit) | subprocess MCP on_platform_event invoke |
 | Attachments: upload/list/delete + ref validation; size/type/magic policy | Full AV; image thumbnails |
 | Integration tests lifecycle + FS layout + provider patch + admin drain | E2E with agent ping |
 
@@ -37,7 +37,7 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 4. HTTP: `/cabinets/{id}/projects`, `/projects/{id}/*` per project-contract; `POST /admin/triggers/drain`.
 5. L06 `materialize-stub` → real FS (status `materialized`).
 6. Opt-in trigger worker (`TRIGGER_WORKER_ENABLED`) — in-process asyncio + `pg_try_advisory_lock`; hole: not durable outbox.
-7. `PlatformEventService` — lifecycle bus; emit on project lifecycle + employee.disabled; cabinet SPI → meta_audit. Hole: package MCP handlers.
+7. `PlatformEventService` — lifecycle bus; emit on project lifecycle + employee.disabled + company.suspended; SPI fan-out to company cabinets when `cabinet_id` absent. Package manifest `platform_events` → stub audit rows; subprocess MCP invoke — hole.
 8. Signed webhook ingress `POST .../webhooks/http` with company `webhook_hmac_secret` (not returned in GET; `webhook_hmac_configured` flag).
 9. Signed telegram ingress `POST .../webhooks/telegram` with company `telegram_hmac_secret` (`telegram_hmac_configured` flag).
 
@@ -94,7 +94,7 @@ apps/api/tests/unit/test_projects_domain.py
 | Pause/resume/delete | done | local-ws only |
 | Trigger dispatch to agent | done | chat.message + chat.regenerate; schedule/webhook ack or run-if-text; advisory lock on worker |
 | MCP package sandbox run | live (subset) | prepare + opt-in local spawn (`MCP_SANDBOX_SPAWN`); k8s/bubblewrap — hole |
-| Platform vs project event bus split | live (subset) | platform_events + cabinet SPI audit deliver; package handlers — hole |
+| Platform vs project event bus split | live (subset) | fan-out to company cabinets; package stub audit; subprocess invoke — hole |
 | Attachment refs scoped to project | done | normalize id/storage_ref before agent send |
 | Attachment virus/size policy | live (subset) | max_attachment_mb + extension + magic sniff; AV — hole |
 | Project preferred_provider | done | `agent_provider` create/PATCH; resolve uses project override |

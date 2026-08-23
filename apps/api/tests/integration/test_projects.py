@@ -516,6 +516,14 @@ def test_company_suspended_emit_and_chat_gate(client: TestClient) -> None:
     assert len(items) >= 1
     assert items[0]["event_type"] == "company.suspended"
 
+    audit = client.get(
+        f"/api/v1/cabinets/{cabinet_id}/audit-events",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert audit.status_code == 200, audit.text
+    audit_types = [e.get("event_type") for e in audit.json()]
+    assert "platform_event.delivered" in audit_types
+
     chat = client.post(
         f"/api/v1/projects/{project_id}/chat",
         headers={"Authorization": f"Bearer {owner_tok}"},
@@ -523,3 +531,60 @@ def test_company_suspended_emit_and_chat_gate(client: TestClient) -> None:
     )
     assert chat.status_code == 403, chat.text
     assert chat.json()["code"] == "COMPANY_SUSPENDED"
+
+
+@requires_postgres
+def test_company_suspended_invokes_package_platform_handler(client: TestClient) -> None:
+    from prodavan.infrastructure.cabinets.package_codec import build_minimal_package_zip
+
+    admin = _token(sub="padmin-pkg", platform_admin=True)
+    created_co = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "PkgCo", "admin_email": "owner@pkgco.test"},
+    )
+    assert created_co.status_code == 201, created_co.text
+    company_id = created_co.json()["company"]["id"]
+    owner_tok = _token(sub="owner-pkg", email="owner@pkgco.test")
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "PkgCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    pkg_b64 = base64.b64encode(
+        build_minimal_package_zip(
+            name="suspend_hook",
+            platform_events=["company.suspended"],
+        )
+    ).decode("ascii")
+    deployed = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/mcp-packages",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"zip_base64": pkg_b64},
+    )
+    assert deployed.status_code == 201, deployed.text
+
+    past = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sub = client.put(
+        f"/api/v1/admin/companies/{company_id}/subscription",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"subscription_lifetime": False, "subscription_ends_at": past},
+    )
+    assert sub.status_code == 200, sub.text
+
+    audit = client.get(
+        f"/api/v1/cabinets/{cabinet_id}/audit-events",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert audit.status_code == 200, audit.text
+    events = audit.json()
+    assert any(e.get("event_type") == "platform_event.delivered" for e in events)
+    handler = next(e for e in events if e.get("event_type") == "platform_event.package_handler")
+    detail = handler.get("detail") or {}
+    assert detail.get("platform_event_type") == "company.suspended"
+    assert detail.get("package_name") == "suspend_hook"
+    assert detail.get("action") == "stub"

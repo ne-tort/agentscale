@@ -36,6 +36,7 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-23 | C-CABINET-MCP / platform events | company-scoped SPI fan-out; manifest platform_events stub audit | no |
 | 2026-08-23 | C-TRIGGERS / C-ADMIN-COMPANY / C-PROJECT-CHAT | telegram HMAC ingress; company.suspended emit; COMPANY_SUSPENDED on agent create/send | no |
 | 2026-08-23 | C-TRIGGERS / C-ATTACH / platform events / C-CABINET-MCP | cabinet SPI deliver; webhook HMAC ingress; DELETE attachment; employee.disabled emit | no |
 | 2026-08-23 | C-TRIGGERS / C-ATTACH / platform events | platform_events bus; telegram.message; magic sniff; chat text optional w/ attachments | no |

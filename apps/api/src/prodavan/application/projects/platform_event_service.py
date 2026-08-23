@@ -5,15 +5,35 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.domain.cabinets import CabinetStatus
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.domain.projects import PLATFORM_EVENT_TYPES
+from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 from prodavan.infrastructure.persistence.models.platform_events import PlatformEventRow
 
 
 class PlatformEventService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def _cabinet_ids_for_delivery(
+        self,
+        *,
+        company_id: str | None,
+        cabinet_id: str | None,
+    ) -> list[str]:
+        if cabinet_id:
+            return [cabinet_id]
+        if not company_id:
+            return []
+        q = await self._session.execute(
+            select(CabinetInstanceRow.id).where(
+                CabinetInstanceRow.company_id == company_id,
+                CabinetInstanceRow.status == CabinetStatus.ACTIVE,
+            )
+        )
+        return list(q.scalars().all())
 
     async def emit(
         self,
@@ -42,17 +62,25 @@ class PlatformEventService:
         )
         self._session.add(row)
         await self._session.flush()
-        delivered: dict | None = None
-        if cabinet_id:
+        deliveries: list[dict] = []
+        target_cabinets = await self._cabinet_ids_for_delivery(
+            company_id=company_id,
+            cabinet_id=cabinet_id,
+        )
+        if target_cabinets:
             from prodavan.application.cabinets.platform_event_spi import CabinetPlatformEventSpi
 
-            delivered = await CabinetPlatformEventSpi(self._session).deliver(
-                cabinet_id=cabinet_id,
-                event_id=row.id,
-                event_type=event_type,
-                actor_sub=principal.sub if principal else None,
-                payload=payload or {},
-            )
+            spi = CabinetPlatformEventSpi(self._session)
+            actor = principal.sub if principal else None
+            for cid in target_cabinets:
+                delivered = await spi.deliver(
+                    cabinet_id=cid,
+                    event_id=row.id,
+                    event_type=event_type,
+                    actor_sub=actor,
+                    payload=payload or {},
+                )
+                deliveries.append(delivered)
         out = {
             "id": row.id,
             "event_type": row.event_type,
@@ -63,8 +91,10 @@ class PlatformEventService:
             "payload": row.payload,
             "created_at": row.created_at.isoformat() if row.created_at else None,
         }
-        if delivered is not None:
-            out["cabinet_delivery"] = delivered
+        if deliveries:
+            out["cabinet_deliveries"] = deliveries
+            if cabinet_id and len(deliveries) == 1:
+                out["cabinet_delivery"] = deliveries[0]
         return out
 
     async def list_events(
