@@ -114,7 +114,7 @@ apps/flutter/lib/
 | Object store SoT для всех blobs | **partial** | materialize + hydrate + delete_prefix; archive wipe packages; readiness when required; live MinIO mount — hole |
 | Celery executor для background jobs | **partial** | CLI bootstrap + beat drain/idle; stack/k8s worker; default off → in-process |
 | Middleware register в core | **done** (subset) | `register_cors` in `core/middleware.py` |
-| Redis cache facade | **done** (subset) | policy/sub/quota peek; HMAC secrets never in Redis |
+| Redis cache facade | **done** (subset) | get/set + lock + rate_limit; policy/sub/quota peek; HMAC never in Redis |
 
 ## Проверка
 

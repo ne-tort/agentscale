@@ -212,7 +212,22 @@ class WorkerManager(LifespanResource):
             return None
         if not self._broker_url:
             return False
-        return self._app is not None
+        if self._app is None:
+            return False
+        if self._task_always_eager:
+            return True
+        try:
+            import asyncio
+
+            def _ping_broker() -> bool:
+                with self._app.connection_for_write() as conn:
+                    conn.ensure_connection(max_retries=1)
+                return True
+
+            return await asyncio.to_thread(_ping_broker)
+        except Exception:
+            logger.exception("worker: broker health ping failed")
+            return False
 
 
 # Import-time bootstrap so ``celery -A …celery_app`` works without API lifespan.

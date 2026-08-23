@@ -105,6 +105,8 @@ class Settings(BaseSettings):
     celery_result_backend: str | None = None  # default: broker
     # Eager mode for unit tests (no broker needed).
     celery_task_always_eager: bool = False
+    # Fail /health/ready when Celery enabled but broker unreachable.
+    celery_required: bool = False
 
     # P0 Kafka (C-EVENT-BUS). Dual-write from PG emit/enqueue; consumer cutover later.
     kafka_enabled: bool = False

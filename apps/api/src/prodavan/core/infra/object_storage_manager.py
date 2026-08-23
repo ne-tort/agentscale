@@ -130,6 +130,10 @@ class ObjectStorageManager(LifespanResource):
         # Always measure primary SoT (S3 when enabled), not local mirror.
         return self._primary.prefix_size(prefix)
 
+    def list_prefix_sync(self, prefix: str, *, limit: int = 1000) -> list[str]:
+        assert self._primary is not None
+        return self._primary.list_prefix(prefix, limit=limit)
+
     def exists_sync(self, key: str) -> bool:
         assert self._primary is not None
         if self._primary.exists(key):
@@ -152,6 +156,9 @@ class ObjectStorageManager(LifespanResource):
 
     async def prefix_size(self, prefix: str) -> int:
         return await asyncio.to_thread(self.prefix_size_sync, prefix)
+
+    async def list_prefix(self, prefix: str, *, limit: int = 1000) -> list[str]:
+        return await asyncio.to_thread(self.list_prefix_sync, prefix, limit=limit)
 
     async def exists(self, key: str) -> bool:
         return await asyncio.to_thread(self.exists_sync, key)

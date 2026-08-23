@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +16,8 @@ from prodavan.domain.identity import Principal
 from prodavan.infrastructure.cabinets.schema_provisioner import SchemaProvisioner
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
+
+logger = logging.getLogger(__name__)
 
 
 def _public(row: CabinetInstanceRow) -> dict:
@@ -134,11 +138,15 @@ class CabinetInstanceService:
         await self._session.commit()
         await self._session.refresh(inst)
         # Wipe MCP package blobs (C-OBJECT-STORE); schema rows stay until hard-delete.
+        wipe: dict = {"ok": False, "deleted": 0}
         try:
             from prodavan.core.infra.object_keys import cabinet_packages_prefix
             from prodavan.core.infra.object_storage_manager import ensure_object_storage
 
-            ensure_object_storage().delete_prefix_sync(cabinet_packages_prefix(cabinet_id))
+            deleted = ensure_object_storage().delete_prefix_sync(cabinet_packages_prefix(cabinet_id))
+            wipe = {"ok": True, "deleted": int(deleted)}
         except Exception:
-            pass
-        return _public(inst)
+            logger.exception("cabinet archive: packages wipe failed cabinet_id=%s", cabinet_id)
+        out = _public(inst)
+        out["packages_wipe"] = wipe
+        return out
