@@ -36,6 +36,7 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-23 | C-KEY-RESOLVE | platform_fallback uses unbound key pool; ai_key.expired audit on lazy expire | no |
 | 2026-08-23 | C-KEY-ENTITY | ai_key.* audit events + GET /admin/ai-keys/audit-events | no |
 | 2026-08-23 | C-AUTH-CONFIG / C-EMP-SHELL | OIDC PKCE (AppAuth + desktop loopback); secure token storage; refresh on restore | no |
 | 2026-08-23 | C-META-DATA / C-CABINET-MCP | PATCH meta column type/metadata; cabinet.columns.update MCP | no |

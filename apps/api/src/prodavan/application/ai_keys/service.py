@@ -26,6 +26,7 @@ from prodavan.infrastructure.secrets.file_store import FileSecretStore, new_key_
 PROVIDERS = frozenset({"cursor", "codex", "claude_code"})
 API_KINDS = frozenset(k.value for k in ApiKind)
 KEY_EXPIRING_SOON_DAYS = 14
+_SYSTEM_PRINCIPAL = Principal(sub="system:lazy-expire")
 
 
 def _parse_price(value: str | Decimal | None) -> Decimal | None:
@@ -67,6 +68,62 @@ class AiKeysService:
             )
         except Exception:
             pass
+
+    async def _emit_lazy_expire_audits(self, key_ids: list[str]) -> None:
+        for key_id in key_ids:
+            try:
+                await self._audit.record(
+                    event_type="ai_key.expired",
+                    key_id=key_id,
+                    principal=_SYSTEM_PRINCIPAL,
+                    detail={"reason": "next_renewal_at_past"},
+                )
+            except Exception:
+                pass
+
+    def _apply_lazy_expiry(self, row: AiProviderKeyRow) -> tuple[bool, bool]:
+        """Returns (still_active, just_marked_expired)."""
+        now = datetime.now(UTC)
+        if row.next_renewal_at is not None and row.next_renewal_at <= now:
+            if row.status == KeyStatus.ACTIVE:
+                row.status = KeyStatus.EXPIRED
+                return False, True
+            return False, False
+        return row.status == KeyStatus.ACTIVE, False
+
+    def _pick_runtime_rows(
+        self,
+        rows: list[AiProviderKeyRow],
+        *,
+        preferred_provider: str | None,
+    ) -> tuple[list[AiProviderKeyRow], list[str]]:
+        expired_ids: list[str] = []
+        runtime: list[AiProviderKeyRow] = []
+        for row in rows:
+            active, just_expired = self._apply_lazy_expiry(row)
+            if just_expired:
+                expired_ids.append(row.id)
+            if not active:
+                continue
+            if is_runtime_api_kind(row.api_kind):
+                runtime.append(row)
+        if preferred_provider:
+            matched = [r for r in runtime if r.provider == preferred_provider]
+            if matched:
+                runtime = matched
+        return runtime, expired_ids
+
+    async def _unbound_active_keys(self) -> list[AiProviderKeyRow]:
+        bound = select(CompanyAiKeyBindingRow.key_id)
+        q = await self._session.execute(
+            select(AiProviderKeyRow)
+            .where(
+                AiProviderKeyRow.status == KeyStatus.ACTIVE,
+                AiProviderKeyRow.id.not_in(bound),
+            )
+            .order_by(AiProviderKeyRow.created_at)
+        )
+        return list(q.scalars().all())
 
     def _to_public(self, row: AiProviderKeyRow, *, company_ids: list[str] | None = None) -> dict:
         prefix = row.secret_ref[:24] + "…" if len(row.secret_ref) > 24 else row.secret_ref
@@ -277,15 +334,6 @@ class AiKeysService:
             detail={"name": name},
         )
 
-    def _mark_expired_if_past(self, row: AiProviderKeyRow) -> bool:
-        """Lazy expiry by next_renewal_at. Returns True when key remains active."""
-        now = datetime.now(UTC)
-        if row.next_renewal_at is not None and row.next_renewal_at <= now:
-            if row.status == KeyStatus.ACTIVE:
-                row.status = KeyStatus.EXPIRED
-            return False
-        return row.status == KeyStatus.ACTIVE
-
     async def resolve_credentials(
         self,
         *,
@@ -303,29 +351,30 @@ class AiKeysService:
             )
             .order_by(AiProviderKeyRow.created_at)
         )
-        rows = list(q.scalars().all())
-        expired_any = False
-        runtime: list[AiProviderKeyRow] = []
-        for row in rows:
-            if not self._mark_expired_if_past(row):
-                expired_any = True
-                continue
-            if is_runtime_api_kind(row.api_kind):
-                runtime.append(row)
-        if expired_any:
+        bound_rows = list(q.scalars().all())
+        runtime, expired_ids = self._pick_runtime_rows(
+            bound_rows, preferred_provider=preferred_provider
+        )
+        if expired_ids:
             await self._session.commit()
-        if preferred_provider:
-            matched = [r for r in runtime if r.provider == preferred_provider]
-            if matched:
-                runtime = matched
+            await self._emit_lazy_expire_audits(expired_ids)
+
         chosen = runtime[0] if runtime else None
 
         if chosen is None and platform_fallback:
-            # Gap: platform-owned key pool not implemented yet (as-built L03).
-            pass
+            pool_rows = await self._unbound_active_keys()
+            pool_runtime, pool_expired = self._pick_runtime_rows(
+                pool_rows, preferred_provider=preferred_provider
+            )
+            if pool_expired:
+                await self._session.commit()
+                await self._emit_lazy_expire_audits(pool_expired)
+            chosen = pool_runtime[0] if pool_runtime else None
 
         if chosen is None:
-            only_cli = bool(rows) and all(r.api_kind == ApiKind.CLI_SUBSCRIPTION for r in rows)
+            only_cli = bool(bound_rows) and all(
+                r.api_kind == ApiKind.CLI_SUBSCRIPTION for r in bound_rows
+            )
             detail = (
                 "only cli_subscription bindings; not a runtime credential"
                 if only_cli

@@ -186,6 +186,13 @@ def test_resolve_lazy_expires_past_renewal(
 
     asyncio.run(_resolve_fails())
 
+    audit_exp = client.get(
+        f"/api/v1/admin/ai-keys/audit-events?key_id={key_id}",
+        headers=auth_headers,
+    )
+    assert audit_exp.status_code == 200
+    assert any(e["event_type"] == "ai_key.expired" for e in audit_exp.json())
+
     got = client.get(f"/api/v1/admin/ai-keys/{key_id}", headers=auth_headers)
     assert got.status_code == 200
     assert got.json()["status"] == "expired"
@@ -208,3 +215,48 @@ def test_resolve_lazy_expires_past_renewal(
             assert cred.secret == "sk-expired"
 
     asyncio.run(_resolve_ok())
+
+
+@requires_postgres
+def test_platform_fallback_uses_unbound_pool_key(
+    client: TestClient, auth_headers: dict[str, str], tmp_path: Path
+) -> None:
+    company_id = asyncio.run(_create_company("Fallback Co"))
+
+    platform = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=auth_headers,
+        json={
+            "name": "Platform cursor",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "platform-cursor-secret",
+            "company_ids": [],
+        },
+    )
+    assert platform.status_code == 201, platform.text
+
+    async def _resolve_with_fallback() -> None:
+        factory = get_session_factory()
+        async with factory() as session:
+            cred = await AiKeysService(session, FileSecretStore(tmp_path)).resolve_credentials(
+                company_id=company_id,
+                preferred_provider="cursor",
+                platform_fallback=True,
+            )
+            assert cred.secret == "platform-cursor-secret"
+
+    asyncio.run(_resolve_with_fallback())
+
+    async def _resolve_without_fallback_fails() -> None:
+        factory = get_session_factory()
+        async with factory() as session:
+            with pytest.raises(AppError) as ei:
+                await AiKeysService(session, FileSecretStore(tmp_path)).resolve_credentials(
+                    company_id=company_id,
+                    preferred_provider="cursor",
+                    platform_fallback=False,
+                )
+            assert ei.value.code == "NO_AI_KEY"
+
+    asyncio.run(_resolve_without_fallback_fails())

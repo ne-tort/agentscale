@@ -47,7 +47,7 @@
 2. Filter: status=active, api_kind is runtime-capable (не cli_subscription)
 3. Match: preferred_provider (CompanyAgentPolicy или Project.agent_provider)
 4. Else: first binding for that provider by Admin priority / created_at
-5. Else: platform default key (только если Admin явно разрешил platform_fallback)
+5. Else: platform default key (только если Admin явно разрешил platform_fallback) — **unbound keys** (без bindings)
 6. Else: fail session start with NO_AI_KEY
 ```
 

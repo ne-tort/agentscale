@@ -27,8 +27,12 @@
 | `ai_key.rotated` | POST rotate-secret (secret never in detail) |
 | `ai_key.companies_set` | PUT companies |
 | `ai_key.deleted` | DELETE |
+| `ai_key.expired` | Lazy expire on resolve when `next_renewal_at` past |
 
-## Пример create
+## Platform fallback pool
+
+Keys with **no** `company_ai_key_bindings` rows are the platform pool.  
+Used only when `resolve_credentials(..., platform_fallback=True)` and company has no matching runtime key.
 
 ```json
 {

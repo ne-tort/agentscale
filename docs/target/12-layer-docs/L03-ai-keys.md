@@ -4,7 +4,7 @@
 |------|----------|
 | Status | done |
 | Quality | 8 |
-| Quality note | CRUD+bindings+file secret_ref+resolve ban cli_subscription; vault/platform_fallback — Gaps |
+| Quality note | CRUD+bindings+resolve+audit+platform pool; Vault backend — gap |
 | Plan | [L03](../11-implementation-plan/L03-ai-keys.md) |
 | Canon | [02-ai-provider-keys](../02-ai-provider-keys/) |
 | Last updated | 2026-08-23 — company_key_metrics in metrics API |
@@ -21,12 +21,13 @@
 | Сделано | Не сделано / Gaps |
 |---------|-------------------|
 | Таблицы ai_provider_keys, company_ai_key_bindings + Alembic ai_keys_001 | External Vault/KMS backend (file:// совместим по контракту) |
-| Admin CRUD /api/v1/admin/ai-keys без raw secret в response | platform_fallback pool ключей |
+| Admin CRUD /api/v1/admin/ai-keys без raw secret в response | Vault/KMS backend |
 | list_keys returns company_ids per key | — |
 | FileSecretStore → SECRETS_DIR/ai_keys/*.secret | Project-level preferred_provider override (L07) |
 | Admin Flutter: list/create/bind/disable/renew/rotate (L04) | |
 | AiKeysService.resolve_credentials + ban cli_subscription | |
-| Lazy expire: next_renewal_at past → status expired on resolve | |
+| Lazy expire: next_renewal_at past → status expired on resolve + audit | |
+| platform_fallback → unbound keys pool on resolve | |
 | company_key_metrics(company_id) for L04 alerts | |
 | Bind/unbind companies; renew months 1..12; rotate-secret | |
 
@@ -93,8 +94,8 @@ apps/flutter/lib/features/admin/ai_key_{list,create,detail,rotate}_page.dart
 | Test cli_subscription → NO_AI_KEY | done | |
 | secret_ref only | done | file:// backend |
 | Vault production backend | hole | тот же secret_ref контракт |
-| platform_fallback keys | hole | флаг принят, pool нет |
-| Audit ai_key.* | done | GET audit-events; lazy expire auto — hole |
+| platform_fallback keys | done | unbound keys (empty company_ids) |
+| Audit ai_key.* | done | incl. ai_key.expired on lazy expire |
 | HTTP resolve endpoint | n/a | in-process для L08 (секрет не светить в admin HTTP) |
 
 ## Проверка
