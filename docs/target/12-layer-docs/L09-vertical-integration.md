@@ -4,9 +4,9 @@
 |------|----------|
 | Status | doing |
 | Quality | 7 |
-| Quality note | API E2E incl. pause/rematerialize/idle; Flutter paused UX; Widget E2E — gap |
+| Quality note | API E2E incl. pause/rematerialize/idle; Flutter thumbnails + widget subset; full Widget E2E — gap |
 | Plan | [L09](../11-implementation-plan/L09-vertical-integration.md) |
-| Last updated | 2026-08-23 — E2E pause/rematerialize/idle-pause vertical |
+| Last updated | 2026-08-23 — widget tests subset + attachment download E2E path |
 | Owners | — |
 
 ---
@@ -19,7 +19,7 @@
 
 | Сделано | Gaps |
 |---------|------|
-| `test_e2e_smoke.py` — Admin→Company→Key→Cabinet→Project→Agent→metrics | Flutter widget/integration test |
+| `test_e2e_smoke.py` — Admin→Company→Key→Cabinet→Project→Agent→metrics | full Flutter navigation E2E |
 | `POST /chat` + `GET .../chat/transcript` | |
 | Metrics: `storage_bytes`, `last_activity_at` asserted in smoke | |
 | Disabled employee 403 on chat | |
@@ -37,6 +37,7 @@
 | Admin metrics: agent_tokens_used, agent_messages, projects_total | |
 | Peer cabinet 403 in smoke | |
 | Flutter ProjectWorkspacePage → SSE chat + transcript reload | |
+| Flutter widget tests — status banner + attachment chip | full navigation E2E — hole |
 | SSE cancel mid-stream → `(cancelled)` bubble + session cancel API | |
 | Release gate checklist | live (subset) | `tools/release_gate_check.py` wired in ci-api |
 | Company suspend E2E → COMPANY_SUSPENDED + platform_events | |
@@ -50,6 +51,7 @@
 apps/api/tests/integration/test_e2e_smoke.py
 apps/api/src/prodavan/api/v1/agent.py (chat + transcript)
 apps/flutter/lib/features/employee/project_workspace_page.dart
+apps/flutter/test/employee_widgets_test.dart
 apps/api/src/prodavan/application/admin/company_service.py (metrics)
 apps/api/src/prodavan/api/v1/admin_metrics.py
 tools/release_gate_check.py
@@ -62,7 +64,7 @@ tools/release_gate_check.py
 |------------|--------|
 | CI nightly | live | `.github/workflows/ci-nightly.yml` |
 | Release gate checklist automation | live (subset) | `tools/release_gate_check.py` in ci-api |
-| Widget E2E | hole | |
+| Widget E2E | hole (subset) | `employee_widgets_test.dart` — banner + chip; no full shell navigation |
 | Idle pause policy | live (subset) | policy + admin sweep + opt-in `IDLE_PAUSE_WORKER_ENABLED` |
 | Rematerialize after MCP deploy | live | deploy/disable returns `rematerialized`; Flutter settings button |
 

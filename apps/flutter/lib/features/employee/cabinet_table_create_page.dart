@@ -19,9 +19,10 @@ class CabinetTableCreatePage extends StatefulWidget {
 }
 
 class _ColumnDraft {
-  _ColumnDraft({required this.name, required this.type, this.required = false});
+  _ColumnDraft({String initialName = '', this.type = 'text', this.required = false})
+      : name = TextEditingController(text: initialName);
 
-  final TextEditingController name = TextEditingController();
+  final TextEditingController name;
   String type;
   bool required;
 }
@@ -32,7 +33,7 @@ class _CabinetTableCreatePageState extends State<CabinetTableCreatePage> {
   final _formKey = GlobalKey<FormState>();
   final _slug = TextEditingController();
   final _label = TextEditingController();
-  final _columns = [_ColumnDraft(name: 'name', type: 'text', required: true)];
+  final _columns = [_ColumnDraft(initialName: 'name', type: 'text', required: true)];
   String _storageKind = 'physical';
   bool _saving = false;
   String? _error;
@@ -48,7 +49,7 @@ class _CabinetTableCreatePageState extends State<CabinetTableCreatePage> {
   }
 
   void _addColumn() {
-    setState(() => _columns.add(_ColumnDraft(name: '', type: 'text')));
+    setState(() => _columns.add(_ColumnDraft()));
   }
 
   void _removeColumn(int index) {

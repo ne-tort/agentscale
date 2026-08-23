@@ -93,6 +93,13 @@ class WorkspaceLayoutWriter:
         path.unlink()
         return True
 
+    def read_inbox_attachment(self, *, filename: str) -> bytes:
+        safe = Path(filename).name
+        path = self._root / "inbox" / safe
+        if not path.is_file():
+            raise FileNotFoundError(safe)
+        return path.read_bytes()
+
     def remove_project_tree(self) -> None:
         from prodavan.infrastructure.projects.mcp_sandbox import stop_all_package_processes
 

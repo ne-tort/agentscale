@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Request
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
@@ -240,6 +241,28 @@ async def delete_attachment(
         attachment_id=attachment_id,
         principal=principal,
         employee=employee,
+    )
+
+
+@router.get("/projects/{project_id}/attachments/{attachment_id}/content")
+async def download_attachment_content(
+    project_id: str,
+    attachment_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> Response:
+    raw, content_type, filename = await ProjectAttachmentService(session).read_content(
+        project_id=project_id,
+        attachment_id=attachment_id,
+        principal=principal,
+        employee=employee,
+    )
+    safe_name = filename.replace('"', "")
+    return Response(
+        content=raw,
+        media_type=content_type,
+        headers={"Content-Disposition": f'inline; filename="{safe_name}"'},
     )
 
 

@@ -301,6 +301,48 @@ def test_list_project_attachments(client: TestClient) -> None:
 
 
 @requires_postgres
+def test_download_attachment_content(client: TestClient) -> None:
+    _, cabinet_id, owner_tok = _setup_cabinet(client)
+    created = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "Download Attach"},
+    )
+    assert created.status_code == 201, created.text
+    project_id = created.json()["id"]
+
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAD0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )
+    att = client.post(
+        f"/api/v1/projects/{project_id}/attachments",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={
+            "filename": "dot.png",
+            "content_base64": base64.b64encode(png).decode("ascii"),
+        },
+    )
+    assert att.status_code == 201, att.text
+    attachment_id = att.json()["id"]
+    assert att.json()["content_type"] == "image/png"
+
+    got = client.get(
+        f"/api/v1/projects/{project_id}/attachments/{attachment_id}/content",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert got.status_code == 200, got.text
+    assert got.content == png
+    assert got.headers["content-type"].startswith("image/png")
+
+    peer = _token(sub="peer-dl", email="peer@other.test")
+    denied = client.get(
+        f"/api/v1/projects/{project_id}/attachments/{attachment_id}/content",
+        headers={"Authorization": f"Bearer {peer}"},
+    )
+    assert denied.status_code == 403
+
+
+@requires_postgres
 def test_platform_event_emitted_on_project_create(client: TestClient) -> None:
     admin = _token(sub="padmin", platform_admin=True)
     _, cabinet_id, owner_tok = _setup_cabinet(client)

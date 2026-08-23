@@ -183,3 +183,35 @@ class ProjectAttachmentService:
         await self._session.delete(row)
         await self._session.commit()
         return {"deleted": True, **public}
+
+    async def read_content(
+        self,
+        *,
+        project_id: str,
+        attachment_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> tuple[bytes, str, str]:
+        project = await self._access.require_access(
+            project_id=project_id, principal=principal, employee=employee, write=False
+        )
+        row = await self._session.get(ProjectAttachmentRow, attachment_id)
+        if row is None or row.project_id != project_id:
+            raise AppError(
+                code="NOT_FOUND",
+                title="Not Found",
+                status=404,
+                detail="Attachment not found",
+            )
+        writer = WorkspaceLayoutWriter(workspace_key=project.workspace_key)
+        try:
+            raw = writer.read_inbox_attachment(filename=row.filename)
+        except FileNotFoundError as exc:
+            raise AppError(
+                code="NOT_FOUND",
+                title="Not Found",
+                status=404,
+                detail="attachment file missing on disk",
+            ) from exc
+        content_type = row.content_type or "application/octet-stream"
+        return raw, content_type, row.filename

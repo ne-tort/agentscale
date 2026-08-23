@@ -7,7 +7,7 @@
 | Quality note | Dev shell + SSE chat + tab interpreters + bundle I/O + meta columns |
 | Plan | [L05](../11-implementation-plan/L05-employee-shell.md) |
 | Canon | [04-employees](../04-employees/), [session](../10-identity-keycloak/session.md) |
-| Last updated | 2026-08-23 — project paused banner + pause/resume in settings |
+| Last updated | 2026-08-23 — attachment thumbnails + status banner widgets |
 | Owners | — |
 
 ---
@@ -31,7 +31,7 @@
 | `ProjectCreatePage` full-page (no modal) + agent provider | |
 | `ProjectSettingsPage` — name + provider override + pause/resume + rematerialize | |
 | Import/export bundle UI + starter catalog import | |
-| ProjectWorkspacePage — SSE chat + transcript + attachment chips + inbox list + suspend/paused banners + HITL + cancel | Image thumbnails |
+| ProjectWorkspacePage — SSE chat + transcript + attachment chips/thumbnails + inbox list + suspend/paused banners + HITL + cancel | Full-screen image viewer |
 | Tables tab — row upsert/delete + DangerConfirm delete | |
 | Chat tab → `ProjectListPage` | |
 | Context tab — stats + export + AGENTS edit | |
@@ -49,6 +49,7 @@
 | Custom bundle views | live (subset) | collection tabs via `table_slug` |
 | Starter bundle import | live | catalog + shipped equipment-procurement zip |
 | HITL tool approval UI | live | `ToolApprovePage` on `tool_approval_request` |
+| Widget tests (status banner + attachment chip) | live (subset) | full workspace navigation E2E — hole |
 
 ## Карта кода
 
@@ -63,5 +64,7 @@ apps/flutter/lib/features/employee/
   project_settings_page.dart
   project_list_page.dart
   project_workspace_page.dart
+  widgets/attachment_preview_chip.dart
+  widgets/project_status_banner.dart
   tool_approve_page.dart
 ```

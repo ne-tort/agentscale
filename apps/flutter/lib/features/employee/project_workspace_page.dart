@@ -7,6 +7,8 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/project_settings_page.dart';
 import 'package:prodavan/features/employee/tool_approve_page.dart';
+import 'package:prodavan/features/employee/widgets/attachment_preview_chip.dart';
+import 'package:prodavan/features/employee/widgets/project_status_banner.dart';
 
 /// Chat-first project workspace (L05/L09) — SSE streaming assistant deltas.
 class ProjectWorkspacePage extends StatefulWidget {
@@ -182,11 +184,58 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   }
 
   String _attachmentLabel(String ref) {
+    final meta = _metaForRef(ref);
+    final name = meta?['filename'] as String?;
+    if (name != null && name.isNotEmpty) return name;
     final slash = ref.replaceAll('\\', '/').lastIndexOf('/');
     if (slash >= 0 && slash < ref.length - 1) {
       return ref.substring(slash + 1);
     }
     return ref.length > 24 ? '${ref.substring(0, 21)}…' : ref;
+  }
+
+  Map<String, dynamic>? _metaForRef(String ref) {
+    for (final item in _inboxAttachments) {
+      if (item['storage_ref'] == ref || item['id'] == ref) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  Widget _attachmentChip(String ref) {
+    final meta = _metaForRef(ref);
+    final id = meta?['id'] as String?;
+    if (id != null && id.isNotEmpty) {
+      return AttachmentPreviewChip(
+        projectId: widget.projectId,
+        attachmentId: id,
+        label: _attachmentLabel(ref),
+        contentType: meta?['content_type'] as String?,
+      );
+    }
+    return Chip(
+      visualDensity: VisualDensity.compact,
+      avatar: const Icon(Icons.attach_file, size: 14),
+      label: Text(
+        _attachmentLabel(ref),
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
+  }
+
+  Widget? _inboxLeading(Map<String, dynamic> item) {
+    final id = item['id'] as String?;
+    final contentType = item['content_type'] as String?;
+    if (id == null || id.isEmpty) {
+      return const Icon(Icons.insert_drive_file_outlined, size: 20);
+    }
+    return AttachmentThumbnail(
+      projectId: widget.projectId,
+      attachmentId: id,
+      contentType: contentType,
+      size: 40,
+    );
   }
 
   Future<void> _loadTranscript() async {
@@ -227,7 +276,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       setState(() {
         _sessionId = result['session_id'] as String?;
         _companySuspended = sub['subscription_expired'] == true;
-        _projectPaused = project['status'] as String? == 'paused';
+        _projectPaused = (project['status'] as String?) == 'paused';
         _messages
           ..clear()
           ..addAll(lines);
@@ -510,20 +559,11 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       ],
       body: Column(
         children: [
-          if (_companySuspended)
-            MaterialBanner(
-              content: const Text('Company subscription expired — chat and uploads are disabled'),
-              leading: const Icon(Icons.pause_circle_outline),
-              backgroundColor: Theme.of(context).colorScheme.errorContainer,
-              actions: const [SizedBox.shrink()],
-            ),
-          if (_projectPaused && !_companySuspended)
-            MaterialBanner(
-              content: const Text('Project is paused — chat and uploads are disabled'),
-              leading: const Icon(Icons.pause_circle_filled),
-              backgroundColor: Theme.of(context).colorScheme.secondaryContainer,
-              actions: const [SizedBox.shrink()],
-            ),
+          ...ProjectStatusBanner.build(
+            context,
+            companySuspended: _companySuspended,
+            projectPaused: _projectPaused,
+          ),
           if (_error != null) InlineErrorBanner(message: _error!),
           if (_inboxAttachments.isNotEmpty)
             ExpansionTile(
@@ -534,6 +574,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                 for (final item in _inboxAttachments)
                   ListTile(
                     dense: true,
+                    leading: _inboxLeading(item),
                     title: Text(
                       (item['filename'] as String?) ?? 'file',
                       overflow: TextOverflow.ellipsis,
@@ -648,14 +689,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                                       runSpacing: 4,
                                       children: [
                                         for (final ref in msg.attachmentRefs)
-                                          Chip(
-                                            visualDensity: VisualDensity.compact,
-                                            avatar: const Icon(Icons.attach_file, size: 14),
-                                            label: Text(
-                                              _attachmentLabel(ref),
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                          ),
+                                          _attachmentChip(ref),
                                       ],
                                     ),
                                   ],

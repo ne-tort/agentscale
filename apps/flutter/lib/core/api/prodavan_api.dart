@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -795,6 +796,24 @@ class ProdavanApi {
         headers: _headers,
       );
       _throwIfError(res);
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Uint8List> downloadProjectAttachmentBytes({
+    required String projectId,
+    required String attachmentId,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await http.get(
+        _uri('/projects/$projectId/attachments/$attachmentId/content'),
+        headers: _headers,
+      );
+      _throwIfError(res);
+      return res.bodyBytes;
     } finally {
       this.projectId = prevProj;
     }

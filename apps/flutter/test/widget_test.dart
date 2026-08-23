@@ -15,8 +15,8 @@ void main() {
   testWidgets('stub home renders', (tester) async {
     await tester.pumpWidget(const ProdavanApp());
     expect(find.text('Prodavan'), findsOneWidget);
-    expect(find.text('Platform stub'), findsOneWidget);
-    expect(find.text('Gallery'), findsOneWidget);
+    expect(find.text('Prodavan dev shells'), findsOneWidget);
+    expect(find.text('UI Gallery'), findsOneWidget);
   });
 
   testWidgets('entity collection list opens row', (tester) async {
