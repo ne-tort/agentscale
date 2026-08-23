@@ -70,8 +70,18 @@ async def list_keys(_admin: PlatformAdminDep, session: SessionDep) -> list[dict]
     return await AiKeysService(session).list_keys()
 
 
+@router.get("/audit-events")
+async def list_audit_events(
+    _admin: PlatformAdminDep,
+    session: SessionDep,
+    key_id: str | None = None,
+    limit: int = 50,
+) -> list[dict]:
+    return await AiKeysService(session).list_audit_events(key_id=key_id, limit=limit)
+
+
 @router.post("", status_code=201)
-async def create_key(_admin: PlatformAdminDep, session: SessionDep, body: CreateKeyBody) -> dict:
+async def create_key(admin: PlatformAdminDep, session: SessionDep, body: CreateKeyBody) -> dict:
     return await AiKeysService(session).create_key(
         name=body.name,
         provider=body.provider,
@@ -82,6 +92,7 @@ async def create_key(_admin: PlatformAdminDep, session: SessionDep, body: Create
         currency=body.currency,
         notes=body.notes,
         company_ids=body.company_ids,
+        principal=admin,
     )
 
 
@@ -91,25 +102,25 @@ async def get_key(_admin: PlatformAdminDep, session: SessionDep, key_id: str) ->
 
 
 @router.patch("/{key_id}")
-async def patch_key(_admin: PlatformAdminDep, session: SessionDep, key_id: str, body: PatchKeyBody) -> dict:
-    return await AiKeysService(session).patch_key(key_id, body.as_updates())
+async def patch_key(admin: PlatformAdminDep, session: SessionDep, key_id: str, body: PatchKeyBody) -> dict:
+    return await AiKeysService(session).patch_key(key_id, body.as_updates(), principal=admin)
 
 
 @router.post("/{key_id}/renew")
-async def renew_key(_admin: PlatformAdminDep, session: SessionDep, key_id: str, body: RenewBody) -> dict:
-    return await AiKeysService(session).renew(key_id, body.months)
+async def renew_key(admin: PlatformAdminDep, session: SessionDep, key_id: str, body: RenewBody) -> dict:
+    return await AiKeysService(session).renew(key_id, body.months, principal=admin)
 
 
 @router.post("/{key_id}/rotate-secret")
-async def rotate_secret(_admin: PlatformAdminDep, session: SessionDep, key_id: str, body: RotateSecretBody) -> dict:
-    return await AiKeysService(session).rotate_secret(key_id, body.secret)
+async def rotate_secret(admin: PlatformAdminDep, session: SessionDep, key_id: str, body: RotateSecretBody) -> dict:
+    return await AiKeysService(session).rotate_secret(key_id, body.secret, principal=admin)
 
 
 @router.put("/{key_id}/companies")
-async def set_companies(_admin: PlatformAdminDep, session: SessionDep, key_id: str, body: CompaniesBody) -> dict:
-    return await AiKeysService(session).set_companies(key_id, body.company_ids)
+async def set_companies(admin: PlatformAdminDep, session: SessionDep, key_id: str, body: CompaniesBody) -> dict:
+    return await AiKeysService(session).set_companies(key_id, body.company_ids, principal=admin)
 
 
 @router.delete("/{key_id}", status_code=204)
-async def delete_key(_admin: PlatformAdminDep, session: SessionDep, key_id: str) -> None:
-    await AiKeysService(session).delete_key(key_id)
+async def delete_key(admin: PlatformAdminDep, session: SessionDep, key_id: str) -> None:
+    await AiKeysService(session).delete_key(key_id, principal=admin)

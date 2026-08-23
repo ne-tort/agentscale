@@ -22,7 +22,7 @@
 |---------|-------------------|
 | Таблицы ai_provider_keys, company_ai_key_bindings + Alembic ai_keys_001 | External Vault/KMS backend (file:// совместим по контракту) |
 | Admin CRUD /api/v1/admin/ai-keys без raw secret в response | platform_fallback pool ключей |
-| list_keys returns company_ids per key | Audit events ai_key.* |
+| list_keys returns company_ids per key | — |
 | FileSecretStore → SECRETS_DIR/ai_keys/*.secret | Project-level preferred_provider override (L07) |
 | Admin Flutter: list/create/bind/disable/renew/rotate (L04) | |
 | AiKeysService.resolve_credentials + ban cli_subscription | |
@@ -94,7 +94,7 @@ apps/flutter/lib/features/admin/ai_key_{list,create,detail,rotate}_page.dart
 | secret_ref only | done | file:// backend |
 | Vault production backend | hole | тот же secret_ref контракт |
 | platform_fallback keys | hole | флаг принят, pool нет |
-| Audit ai_key.* | hole | следующая итерация |
+| Audit ai_key.* | done | GET audit-events; lazy expire auto — hole |
 | HTTP resolve endpoint | n/a | in-process для L08 (секрет не светить в admin HTTP) |
 
 ## Проверка

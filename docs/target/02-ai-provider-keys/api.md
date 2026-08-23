@@ -14,6 +14,19 @@
 | POST | `/admin/ai-keys/{id}/rotate-secret` | Новый secret |
 | PUT | `/admin/ai-keys/{id}/companies` | Заменить набор company ids |
 | DELETE | `/admin/ai-keys/{id}` | Удалить (если политика позволяет) |
+| GET | `/admin/ai-keys/audit-events` | Audit log (`?key_id=` optional) |
+
+## Audit events
+
+| event_type | When |
+|------------|------|
+| `ai_key.created` | POST create |
+| `ai_key.updated` | PATCH metadata |
+| `ai_key.disabled` | PATCH status → disabled |
+| `ai_key.renewed` | POST renew |
+| `ai_key.rotated` | POST rotate-secret (secret never in detail) |
+| `ai_key.companies_set` | PUT companies |
+| `ai_key.deleted` | DELETE |
 
 ## Пример create
 

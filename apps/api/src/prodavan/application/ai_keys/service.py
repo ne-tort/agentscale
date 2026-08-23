@@ -10,6 +10,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.application.ai_keys.audit_service import AiKeyAuditService
 from prodavan.domain.ai_keys import (
     ApiKind,
     KeyStatus,
@@ -17,6 +18,7 @@ from prodavan.domain.ai_keys import (
     is_runtime_api_kind,
 )
 from prodavan.domain.errors import AppError
+from prodavan.domain.identity import Principal
 from prodavan.infrastructure.persistence.models.ai_keys import AiProviderKeyRow, CompanyAiKeyBindingRow
 from prodavan.infrastructure.persistence.models.identity import CompanyRow
 from prodavan.infrastructure.secrets.file_store import FileSecretStore, new_key_id
@@ -44,6 +46,27 @@ class AiKeysService:
     def __init__(self, session: AsyncSession, secrets: FileSecretStore | None = None) -> None:
         self._session = session
         self._secrets = secrets or FileSecretStore()
+        self._audit = AiKeyAuditService(session)
+
+    async def _emit_audit(
+        self,
+        *,
+        event_type: str,
+        key_id: str | None,
+        principal: Principal | None,
+        detail: dict | None = None,
+    ) -> None:
+        if principal is None:
+            return
+        try:
+            await self._audit.record(
+                event_type=event_type,
+                key_id=key_id,
+                principal=principal,
+                detail=detail,
+            )
+        except Exception:
+            pass
 
     def _to_public(self, row: AiProviderKeyRow, *, company_ids: list[str] | None = None) -> dict:
         prefix = row.secret_ref[:24] + "…" if len(row.secret_ref) > 24 else row.secret_ref
@@ -117,6 +140,7 @@ class AiKeysService:
         currency: str | None = None,
         notes: str | None = None,
         company_ids: list[str] | None = None,
+        principal: Principal | None = None,
     ) -> dict:
         self._validate_provider_kind(provider, api_kind)
         key_id = new_key_id()
@@ -139,10 +163,24 @@ class AiKeysService:
             await self._replace_bindings(key_id, company_ids)
         await self._session.commit()
         await self._session.refresh(row)
+        await self._emit_audit(
+            event_type="ai_key.created",
+            key_id=row.id,
+            principal=principal,
+            detail={
+                "name": row.name,
+                "provider": row.provider,
+                "api_kind": row.api_kind,
+                "company_ids": list(company_ids or []),
+            },
+        )
         return self._to_public(row, company_ids=list(company_ids or []))
 
-    async def patch_key(self, key_id: str, updates: dict[str, Any]) -> dict:
+    async def patch_key(
+        self, key_id: str, updates: dict[str, Any], *, principal: Principal | None = None
+    ) -> dict:
         row = await self._get_row(key_id)
+        old_status = row.status
         if "name" in updates and updates["name"] is not None:
             row.name = str(updates["name"]).strip()
         if "status" in updates and updates["status"] is not None:
@@ -160,9 +198,20 @@ class AiKeysService:
             row.notes = updates["notes"]
         await self._session.commit()
         await self._session.refresh(row)
+        event_type = (
+            "ai_key.disabled"
+            if row.status == KeyStatus.DISABLED and old_status != KeyStatus.DISABLED
+            else "ai_key.updated"
+        )
+        await self._emit_audit(
+            event_type=event_type,
+            key_id=key_id,
+            principal=principal,
+            detail={"fields": sorted(updates.keys()), "status": row.status},
+        )
         return self._to_public(row, company_ids=await self._company_ids(key_id))
 
-    async def renew(self, key_id: str, months: int) -> dict:
+    async def renew(self, key_id: str, months: int, *, principal: Principal | None = None) -> dict:
         if months < 1 or months > 12:
             raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="months 1..12")
         row = await self._get_row(key_id)
@@ -173,9 +222,18 @@ class AiKeysService:
             row.status = KeyStatus.ACTIVE
         await self._session.commit()
         await self._session.refresh(row)
+        renewal_iso = row.next_renewal_at.isoformat() if row.next_renewal_at else None
+        await self._emit_audit(
+            event_type="ai_key.renewed",
+            key_id=key_id,
+            principal=principal,
+            detail={"months": months, "next_renewal_at": renewal_iso},
+        )
         return self._to_public(row, company_ids=await self._company_ids(key_id))
 
-    async def rotate_secret(self, key_id: str, secret: str) -> dict:
+    async def rotate_secret(
+        self, key_id: str, secret: str, *, principal: Principal | None = None
+    ) -> dict:
         row = await self._get_row(key_id)
         old_ref = row.secret_ref
         row.secret_ref = self._secrets.put(key_id, secret)
@@ -183,20 +241,41 @@ class AiKeysService:
             self._secrets.delete(old_ref)
         await self._session.commit()
         await self._session.refresh(row)
+        await self._emit_audit(
+            event_type="ai_key.rotated",
+            key_id=key_id,
+            principal=principal,
+            detail={"secret_ref_prefix": row.secret_ref[:24] + "…" if len(row.secret_ref) > 24 else row.secret_ref},
+        )
         return self._to_public(row, company_ids=await self._company_ids(key_id))
 
-    async def set_companies(self, key_id: str, company_ids: list[str]) -> dict:
+    async def set_companies(
+        self, key_id: str, company_ids: list[str], *, principal: Principal | None = None
+    ) -> dict:
         await self._get_row(key_id)
         await self._replace_bindings(key_id, company_ids)
         await self._session.commit()
+        await self._emit_audit(
+            event_type="ai_key.companies_set",
+            key_id=key_id,
+            principal=principal,
+            detail={"company_ids": list(company_ids)},
+        )
         return await self.get_key(key_id)
 
-    async def delete_key(self, key_id: str) -> None:
+    async def delete_key(self, key_id: str, *, principal: Principal | None = None) -> None:
         row = await self._get_row(key_id)
         ref = row.secret_ref
+        name = row.name
         await self._session.delete(row)
         await self._session.commit()
         self._secrets.delete(ref)
+        await self._emit_audit(
+            event_type="ai_key.deleted",
+            key_id=key_id,
+            principal=principal,
+            detail={"name": name},
+        )
 
     def _mark_expired_if_past(self, row: AiProviderKeyRow) -> bool:
         """Lazy expiry by next_renewal_at. Returns True when key remains active."""
@@ -279,6 +358,9 @@ class AiKeysService:
             select(CompanyAiKeyBindingRow.company_id).where(CompanyAiKeyBindingRow.key_id == key_id)
         )
         return list(q.scalars().all())
+
+    async def list_audit_events(self, *, key_id: str | None = None, limit: int = 50) -> list[dict]:
+        return await self._audit.list_events(key_id=key_id, limit=limit)
 
     async def _replace_bindings(self, key_id: str, company_ids: list[str]) -> None:
         unique = list(dict.fromkeys(company_ids))

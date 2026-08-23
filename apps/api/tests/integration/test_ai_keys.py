@@ -98,6 +98,12 @@ def test_crud_and_resolve_bans_cli_subscription(
     listed_match = next(k for k in listed.json() if k["id"] == key_id)
     assert listed_match["company_ids"] == [company_id]
 
+    audit = client.get("/api/v1/admin/ai-keys/audit-events", headers=auth_headers)
+    assert audit.status_code == 200, audit.text
+    created_events = [e for e in audit.json() if e["event_type"] == "ai_key.created" and e["key_id"] == key_id]
+    assert len(created_events) >= 1
+    assert "secret" not in str(created_events[0]["detail"])
+
     async def _resolve_ok() -> None:
         factory = get_session_factory()
         async with factory() as session:
@@ -137,6 +143,14 @@ def test_crud_and_resolve_bans_cli_subscription(
 
     deleted = client.delete(f"/api/v1/admin/ai-keys/{key_id}", headers=auth_headers)
     assert deleted.status_code == 204
+
+    audit_after = client.get(
+        f"/api/v1/admin/ai-keys/audit-events?key_id={key_id}",
+        headers=auth_headers,
+    )
+    assert audit_after.status_code == 200
+    types = {e["event_type"] for e in audit_after.json()}
+    assert "ai_key.deleted" in types
 
 
 @requires_postgres
