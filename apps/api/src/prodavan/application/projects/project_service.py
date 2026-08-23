@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.company_service import AdminCompanyService
+from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.application.cabinets.access import CabinetAccessService
 from prodavan.application.projects.access import ProjectAccessService
 from prodavan.application.projects.materialize import get_materialize_service
@@ -72,6 +73,7 @@ class ProjectService:
         self._triggers = ProjectTriggerService(session)
         self._companies = AdminCompanyService(session)
         self._platform_events = PlatformEventService(session)
+        self._subscription = CompanySubscriptionGate(session)
 
     async def _attachment_limits(self, company_id: str) -> dict:
         policy = await self._companies.get_agent_policy(company_id)
@@ -94,6 +96,7 @@ class ProjectService:
             employee=employee,
             write=True,
         )
+        await self._subscription.require_active(inst.company_id)
         slug = slugify_name(name)
         existing = await self._session.execute(
             select(ProjectRow).where(ProjectRow.cabinet_id == cabinet_id, ProjectRow.slug == slug)

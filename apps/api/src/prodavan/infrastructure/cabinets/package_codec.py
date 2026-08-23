@@ -144,6 +144,7 @@ def build_minimal_package_zip(
     version: str = "1.0.0",
     tool_name: str = "demo.ping",
     platform_events: list[str] | None = None,
+    with_platform_event_handler: bool = False,
 ) -> bytes:
     """Test helper — valid minimal package."""
     manifest = {
@@ -164,6 +165,11 @@ def build_minimal_package_zip(
         zf.writestr("manifest.json", json.dumps(manifest, indent=2))
         zf.writestr("mcp.json", json.dumps(mcp_json, indent=2))
         zf.writestr("src/__init__.py", "")
+        if with_platform_event_handler:
+            zf.writestr(
+                "src/on_platform_event.py",
+                "import sys\n\nif __name__ == '__main__':\n    sys.exit(0)\n",
+            )
         zf.writestr(
             "src/server.py",
             (

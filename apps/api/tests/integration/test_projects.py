@@ -737,3 +737,102 @@ def test_webhook_ingress_blocked_when_company_suspended(client: TestClient) -> N
     )
     assert blocked.status_code == 403, blocked.text
     assert blocked.json()["code"] == "COMPANY_SUSPENDED"
+
+
+@requires_postgres
+def test_create_project_blocked_when_company_suspended(client: TestClient) -> None:
+    admin = _token(sub="padmin-proj-sus", platform_admin=True)
+    created_co = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "ProjSusCo", "admin_email": "owner@projsusco.test"},
+    )
+    assert created_co.status_code == 201, created_co.text
+    company_id = created_co.json()["company"]["id"]
+    owner_tok = _token(sub="owner-proj-sus", email="owner@projsusco.test")
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "ProjSusCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    past = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sub = client.put(
+        f"/api/v1/admin/companies/{company_id}/subscription",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"subscription_lifetime": False, "subscription_ends_at": past},
+    )
+    assert sub.status_code == 200, sub.text
+
+    blocked = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "Should Fail"},
+    )
+    assert blocked.status_code == 403, blocked.text
+    assert blocked.json()["code"] == "COMPANY_SUSPENDED"
+
+
+@requires_postgres
+def test_package_platform_handler_invoked_when_enabled(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from prodavan.config.settings import settings
+    from prodavan.infrastructure.cabinets.package_codec import build_minimal_package_zip
+
+    monkeypatch.setattr(settings, "mcp_platform_event_invoke", True)
+
+    admin = _token(sub="padmin-inv", platform_admin=True)
+    created_co = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "InvCo", "admin_email": "owner@invco.test"},
+    )
+    assert created_co.status_code == 201, created_co.text
+    company_id = created_co.json()["company"]["id"]
+    owner_tok = _token(sub="owner-inv", email="owner@invco.test")
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "InvCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    pkg_b64 = base64.b64encode(
+        build_minimal_package_zip(
+            name="invoke_hook",
+            platform_events=["company.suspended"],
+            with_platform_event_handler=True,
+        )
+    ).decode("ascii")
+    deployed = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/mcp-packages",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"zip_base64": pkg_b64},
+    )
+    assert deployed.status_code == 201, deployed.text
+
+    past = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sub = client.put(
+        f"/api/v1/admin/companies/{company_id}/subscription",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"subscription_lifetime": False, "subscription_ends_at": past},
+    )
+    assert sub.status_code == 200, sub.text
+
+    audit = client.get(
+        f"/api/v1/cabinets/{cabinet_id}/audit-events",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert audit.status_code == 200, audit.text
+    handler = next(
+        e for e in audit.json() if e.get("event_type") == "platform_event.package_handler"
+    )
+    detail = handler.get("detail") or {}
+    assert detail.get("action") == "invoked"
+    assert detail.get("exit_code") == 0

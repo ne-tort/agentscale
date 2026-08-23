@@ -7,7 +7,7 @@
 | Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain/worker; k8s isolator — gap |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-23 — subscription transition events + trigger gate on suspend |
+| Last updated | 2026-08-23 — project create suspend gate + package handler invoke |
 | Owners | — |
 
 ---
@@ -25,7 +25,7 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 | Materialize: AGENTS from cabinet workspace-docs + packages/sandbox | bubblewrap/k8s isolator |
 | `container_ref=local-ws:{workspace_key}` | |
 | Triggers: enqueue + list + dispatch + signed webhook/telegram ingress + admin drain + worker | Durable outbox |
-| Platform events bus + cabinet SPI deliver (audit) | subprocess MCP on_platform_event invoke |
+| Platform events bus + cabinet SPI deliver (audit) | MCP stdio handler protocol; bubblewrap |
 | Attachments: upload/list/delete + ref validation; size/type/magic policy | Full AV; image thumbnails |
 | Integration tests lifecycle + FS layout + provider patch + admin drain | E2E with agent ping |
 
@@ -37,8 +37,8 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 4. HTTP: `/cabinets/{id}/projects`, `/projects/{id}/*` per project-contract; `POST /admin/triggers/drain`.
 5. L06 `materialize-stub` → real FS (status `materialized`).
 6. Opt-in trigger worker (`TRIGGER_WORKER_ENABLED`) — in-process asyncio + `pg_try_advisory_lock`; hole: not durable outbox.
-7. `PlatformEventService` — lifecycle bus; subscription transitions emit `company.suspended` / `company.reactivated` once per edge; SPI fan-out to company cabinets. Package manifest `platform_events` → stub audit; subprocess MCP invoke — hole.
-8. `ProjectTriggerService.enqueue` — `COMPANY_SUSPENDED` for runtime kinds; `project.prepare` exempt.
+7. `PlatformEventService` — subscription transitions + SPI fan-out. Package `platform_events` + opt-in `MCP_PLATFORM_EVENT_INVOKE` runs `src/on_platform_event.py` from zip; MCP stdio — hole.
+8. `ProjectTriggerService.enqueue` — `COMPANY_SUSPENDED` for runtime kinds; `project.prepare` exempt. `ProjectService.create` — same gate.
 9. Signed webhook ingress `POST .../webhooks/http` with company `webhook_hmac_secret` (not returned in GET; `webhook_hmac_configured` flag).
 10. Signed telegram ingress `POST .../webhooks/telegram` with company `telegram_hmac_secret` (`telegram_hmac_configured` flag).
 
@@ -95,7 +95,7 @@ apps/api/tests/unit/test_projects_domain.py
 | Pause/resume/delete | done | local-ws only |
 | Trigger dispatch to agent | done | chat.message + chat.regenerate; schedule/webhook ack or run-if-text; advisory lock on worker |
 | MCP package sandbox run | live (subset) | prepare + opt-in local spawn (`MCP_SANDBOX_SPAWN`); k8s/bubblewrap — hole |
-| Platform vs project event bus split | live (subset) | fan-out to company cabinets; package stub audit; subprocess invoke — hole |
+| Platform vs project event bus split | live (subset) | fan-out; zip handler invoke opt-in; MCP stdio — hole |
 | Attachment refs scoped to project | done | normalize id/storage_ref before agent send |
 | Attachment virus/size policy | live (subset) | max_attachment_mb + extension + magic sniff; AV — hole |
 | Project preferred_provider | done | `agent_provider` create/PATCH; resolve uses project override |

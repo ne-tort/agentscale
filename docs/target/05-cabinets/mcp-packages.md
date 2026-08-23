@@ -51,6 +51,8 @@ mcp.package-v1.zip
 }
 ```
 
+Optional handler script in zip: `src/on_platform_event.py` — reads event JSON from stdin when `MCP_PLATFORM_EVENT_INVOKE=true` (as-built subset; not full MCP stdio).
+
 Невалидный manifest / hash mismatch / oversized zip → deploy reject.
 
 ---

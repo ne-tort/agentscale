@@ -68,6 +68,8 @@ class Settings(BaseSettings):
 
     # L07 local-ws MCP package processes (opt-in; no bubblewrap/k8s yet)
     mcp_sandbox_spawn: bool = False
+    # L06/L07 invoke src/on_platform_event.py from package zip on platform_events (opt-in)
+    mcp_platform_event_invoke: bool = False
 
     # L07/L08 background trigger drain (opt-in asyncio loop in API process)
     trigger_worker_enabled: bool = False
