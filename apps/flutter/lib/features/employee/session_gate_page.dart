@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/auth/auth_config.dart';
+import 'package:prodavan/core/auth/oidc_auth_service.dart';
 import 'package:prodavan/core/auth/session_store.dart';
 import 'package:prodavan/core/session/work_context.dart';
-import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/features/employee/contour_selector_page.dart';
 import 'package:prodavan/features/employee/cabinet_list_page.dart';
@@ -25,6 +26,42 @@ class _SessionGatePageState extends State<SessionGatePage> {
     _restore();
   }
 
+  Future<void> _navigateAfterMe(Map<String, dynamic> me, StoredSession stored) async {
+    if (!mounted) return;
+    final memberships = me['employee']?['memberships'];
+    if (stored.companyId == null && memberships is List && memberships.length > 1) {
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(builder: (_) => ContourSelectorPage(me: me)),
+      );
+      return;
+    }
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute<void>(builder: (_) => const CabinetListPage()),
+    );
+  }
+
+  Future<bool> _tryRefresh(StoredSession stored) async {
+    final refresh = stored.refreshToken;
+    if (refresh == null || refresh.isEmpty) return false;
+    try {
+      final cfg = await AuthConfigClient(baseUrl: stored.baseUrl).fetch();
+      final oidc = cfg['oidc'];
+      if (oidc is! Map<String, dynamic>) return false;
+      final result = await oidcAuthService.refresh(oidc: oidc, refreshToken: refresh);
+      if (result == null) return false;
+      workContext.setSession(baseUrl: stored.baseUrl, bearerToken: result.accessToken);
+      await sessionStore.save(
+        baseUrl: stored.baseUrl,
+        bearerToken: result.accessToken,
+        refreshToken: result.refreshToken ?? refresh,
+        companyId: stored.companyId,
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> _restore() async {
     final stored = await sessionStore.load();
     if (stored == null) {
@@ -36,19 +73,17 @@ class _SessionGatePageState extends State<SessionGatePage> {
     workContext.companyId = stored.companyId;
     try {
       final me = await workContext.api.me();
-      if (!mounted) return;
-      final memberships = me['employee']?['memberships'];
-      if (stored.companyId == null && memberships is List && memberships.length > 1) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute<void>(builder: (_) => ContourSelectorPage(me: me)),
-        );
-        return;
-      }
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(builder: (_) => const CabinetListPage()),
-      );
+      await _navigateAfterMe(me, stored);
     } catch (_) {
+      if (await _tryRefresh(stored)) {
+        try {
+          final me = await workContext.api.me();
+          await _navigateAfterMe(me, stored);
+          return;
+        } catch (_) {}
+      }
       await sessionStore.clear();
+      workContext.clear();
       if (!mounted) return;
       setState(() => _checking = false);
     }

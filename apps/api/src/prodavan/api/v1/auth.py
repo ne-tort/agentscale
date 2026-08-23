@@ -29,9 +29,12 @@ async def auth_config() -> dict:
             "audience": settings.oidc_audience,
             "client_id": settings.oidc_flutter_client_id,
             "realm": settings.keycloak_realm,
+            "discovery_url": f"{issuer}/.well-known/openid-configuration",
             "authorization_endpoint": f"{issuer}/protocol/openid-connect/auth",
             "token_endpoint": f"{issuer}/protocol/openid-connect/token",
             "jwks_uri": settings.oidc_jwks_url or f"{issuer}/protocol/openid-connect/certs",
+            "redirect_uri": settings.oidc_flutter_redirect_uri,
+            "redirect_uri_desktop": settings.oidc_flutter_redirect_uri_desktop,
         }
     return {
         "auth_mode": mode,

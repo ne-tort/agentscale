@@ -99,7 +99,7 @@ apps/api/tests/unit/test_jwt_validator.py
 | Headers work context | done | |
 | Invite без password | done | Fake + HttpKeycloakInviteClient |
 | Disable ? 403 | done | tested with PG when available |
-| Flutter AppAuth session | live (subset) | LoginPage + SessionStore; PKCE — hole |
+| Flutter AppAuth session | live | PKCE AppAuth + secure storage; KC client redirect URIs — hole |
 | Live KC realm cutover | todo | ????????? Status=done |
 | Platform admin dual employee row | done | /me loads row when email present |
 

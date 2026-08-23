@@ -20,9 +20,10 @@
 
 | Сделано | Gaps |
 |---------|------|
-| `ProdavanApi` client (Bearer + work headers) | AppAuth PKCE (full) |
+| `ProdavanApi` client (Bearer + work headers) | |
 | `WorkContext` singleton | |
-| LoginPage + SessionGate + SessionStore | Production secure storage |
+| LoginPage + SessionGate + SessionStore (secure) | |
+| OIDC PKCE — AppAuth mobile + desktop loopback | |
 | ContourSelectorPage (multi-company) | |
 | DevSessionPage (legacy) | |
 | `CabinetCreatePage` full-page (no modal) | Custom bundle tab views (non-collection) |
@@ -38,7 +39,7 @@
 
 | Требование | Статус | Заметка |
 |------------|--------|---------|
-| OIDC login | live (subset) | GET /auth/config + LoginPage stub; PKCE AppAuth — hole |
+| OIDC login | live | PKCE AppAuth + loopback; register redirect URIs in KC |
 | Import bundle UI | live | `CabinetImportBundlePage` |
 | Bundle export save | live | Context tab + `FilePicker.saveFile` |
 | Row edit UI | live | `CabinetRowEditPage` full-page |

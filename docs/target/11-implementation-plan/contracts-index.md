@@ -36,6 +36,7 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-23 | C-AUTH-CONFIG / C-EMP-SHELL | OIDC PKCE (AppAuth + desktop loopback); secure token storage; refresh on restore | no |
 | 2026-08-23 | C-META-DATA / C-CABINET-MCP | PATCH meta column type/metadata; cabinet.columns.update MCP | no |
 | 2026-08-23 | C-META-DATA / C-CABINET-MCP | meta HTTP audit; hard delete archived table; cabinet.tables.delete | no |
 | 2026-08-23 | C-AUTH-CONFIG / C-PRINCIPAL | GET /auth/config; Flutter LoginPage + SessionStore | no |

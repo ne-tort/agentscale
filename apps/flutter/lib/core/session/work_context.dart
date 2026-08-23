@@ -2,7 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
 
-/// Dev session holder — OIDC/AppAuth replaces in production (L01/L05).
+/// Session holder — Bearer + work headers (L01/L05).
 class WorkContext extends ChangeNotifier {
   String baseUrl = 'http://127.0.0.1:8000/api/v1';
   String bearerToken = '';

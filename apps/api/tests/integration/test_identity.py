@@ -61,6 +61,9 @@ def test_auth_config_public(client: TestClient) -> None:
     if body["auth_mode"] == "test":
         assert body["oidc"] is None
     assert "audience" not in body or body.get("oidc") is None or "audience" in body["oidc"]
+    if body.get("oidc"):
+        assert "redirect_uri" in body["oidc"]
+        assert "discovery_url" in body["oidc"]
 
 
 def test_invalid_token_rejected(client: TestClient) -> None:

@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     oidc_jwks_url: str | None = None
     oidc_audience: str = "prodavan-api"
     oidc_flutter_client_id: str = "prodavan-flutter"
+    oidc_flutter_redirect_uri: str = "prodavan://oauth/callback"
+    oidc_flutter_redirect_uri_desktop: str = "http://127.0.0.1:8765/oauth/callback"
     oidc_jwks_cache_seconds: int = 300
     auth_test_secret: str = "dev-only-test-secret-change-me"
 
