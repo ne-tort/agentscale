@@ -30,6 +30,7 @@
 | CI nightly workflow | done | `.github/workflows/ci-nightly.yml` |
 | Starter bundle import E2E | done | equipment-procurement → line_items + tab |
 | USD cost cap E2E | done | max_cost_usd_month → AGENT_BUDGET |
+| HITL tool approval E2E | done | dangerous: → deny/approve |
 | `employees_active` in metrics | done | excludes disabled |
 | Admin metrics: agent_tokens_used, agent_messages, projects_total | |
 | Peer cabinet 403 in smoke | |

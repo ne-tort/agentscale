@@ -7,7 +7,7 @@
 | Quality note | Dev shell + SSE chat + tab interpreters + bundle I/O + meta columns |
 | Plan | [L05](../11-implementation-plan/L05-employee-shell.md) |
 | Canon | [04-employees](../04-employees/), [session](../10-identity-keycloak/session.md) |
-| Last updated | 2026-08-23 — row edit page, bundle views/tabs import, starter zip |
+| Last updated | 2026-08-23 — HITL ToolApprovePage + DangerConfirm row delete |
 | Owners | — |
 
 ---
@@ -27,8 +27,8 @@
 | `CabinetRowEditPage` full-page row edit | |
 | `ProjectCreatePage` full-page (no modal) | |
 | Import/export bundle UI + starter catalog import | |
-| ProjectWorkspacePage — SSE chat + transcript reload | |
-| Tables tab — row upsert/delete + `GET meta/tables/{slug}` columns | |
+| ProjectWorkspacePage — SSE chat + transcript reload + HITL approve | |
+| Tables tab — row upsert/delete + DangerConfirm delete | |
 | Chat tab → `ProjectListPage` | |
 | Context tab — stats + export save to file | |
 
@@ -44,6 +44,7 @@
 | Meta columns on empty tables | live | `getMetaTable` |
 | Custom bundle views | live (subset) | collection tabs via `table_slug` |
 | Starter bundle import | live | catalog + shipped equipment-procurement zip |
+| HITL tool approval UI | live | `ToolApprovePage` on `tool_approval_request` |
 
 ## Карта кода
 
@@ -57,4 +58,5 @@ apps/flutter/lib/features/employee/
   project_create_page.dart
   project_list_page.dart
   project_workspace_page.dart
+  tool_approve_page.dart
 ```

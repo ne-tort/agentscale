@@ -15,6 +15,7 @@ from prodavan.application.agent.policy_service import AgentPolicyService
 from prodavan.application.ai_keys.service import AiKeysService
 from prodavan.application.projects.access import ProjectAccessService
 from prodavan.domain.agent import (
+    PLATFORM_EVENT_TOOL_APPROVAL_DECISION,
     PLATFORM_EVENT_USER_MESSAGE,
     AgentEventType,
     AgentHandle,
@@ -64,6 +65,19 @@ def events_to_transcript(events: list[dict]) -> list[dict]:
             name = data.get("name")
             if name:
                 messages.append({"role": "tool", "text": str(name)})
+        elif etype == AgentEventType.TOOL_APPROVAL_REQUEST:
+            flush_assistant()
+            name = data.get("name") or "tool"
+            approval_id = data.get("id") or ""
+            messages.append(
+                {
+                    "role": "approval",
+                    "text": f"Approve {name}?",
+                    "approval_id": approval_id,
+                    "tool_name": name,
+                    "input": data.get("input") or {},
+                }
+            )
         elif etype == AgentEventType.TEXT_DELTA:
             chunk = data.get("text")
             if chunk:
@@ -303,6 +317,7 @@ class AgentSessionService:
             employee=employee,
         )
         result["assistant_text"] = _assistant_text_from_events(result.get("events") or [])
+        result["pending_approvals"] = _pending_approvals_from_events(result.get("events") or [])
         return result
 
     async def iter_chat_turn_sse(
@@ -345,7 +360,11 @@ class AgentSessionService:
         assistant_text = _assistant_text_from_events(events)
         yield {
             "type": "_turn_complete",
-            "data": {"session_id": sid, "assistant_text": assistant_text},
+            "data": {
+                "session_id": sid,
+                "assistant_text": assistant_text,
+                "pending_approvals": _pending_approvals_from_events(events),
+            },
         }
 
     async def _resolve_active_session_id(
@@ -458,3 +477,164 @@ class AgentSessionService:
         await self._session.commit()
         await self._session.refresh(row)
         return _session_public(row)
+
+    async def list_pending_approvals(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> list[dict]:
+        events = await self.list_events(
+            session_id=session_id,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            limit=500,
+        )
+        return _pending_approvals_from_events(events)
+
+    async def resolve_tool_approval(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        approval_id: str,
+        decision: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        if employee is None:
+            raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
+        if decision not in {"approve", "deny"}:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="decision must be approve or deny",
+            )
+        await self._projects.require_access(
+            project_id=project_id, principal=principal, employee=employee, write=True
+        )
+        row = await self.get_session(session_id=session_id)
+        if row.project_id != project_id:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+        if row.status != AgentSessionStatus.ACTIVE:
+            raise AppError(code="SESSION_CLOSED", title="Session closed", status=409, detail="session not active")
+
+        events = await self.list_events(
+            session_id=session_id,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            limit=500,
+        )
+        pending = _pending_approvals_from_events(events)
+        match = next((p for p in pending if p["id"] == approval_id), None)
+        if match is None:
+            raise AppError(
+                code="NOT_FOUND",
+                title="Not Found",
+                status=404,
+                detail="pending tool approval not found",
+            )
+
+        seq_q = await self._session.execute(
+            select(func.coalesce(func.max(AgentEventRow.seq), 0)).where(AgentEventRow.session_id == session_id)
+        )
+        seq = int(seq_q.scalar_one() or 0)
+        out_events: list[dict] = []
+
+        def _append(event_type: str, payload: dict) -> None:
+            nonlocal seq
+            seq += 1
+            self._session.add(
+                AgentEventRow(
+                    session_id=session_id,
+                    seq=seq,
+                    event_type=event_type,
+                    payload=payload,
+                    at=None,
+                )
+            )
+            out_events.append({"type": event_type, "data": payload})
+
+        _append(
+            PLATFORM_EVENT_TOOL_APPROVAL_DECISION,
+            {"id": approval_id, "decision": decision, "name": match["name"]},
+        )
+
+        if decision == "approve":
+            _append(
+                AgentEventType.TOOL_RESULT,
+                {
+                    "id": approval_id,
+                    "name": match["name"],
+                    "output": {"ok": True, "approved": True},
+                    "is_error": False,
+                },
+            )
+            _append(
+                AgentEventType.TEXT_DELTA,
+                {"text": f"Approved {match['name']} and continued."},
+            )
+        else:
+            _append(
+                AgentEventType.TOOL_RESULT,
+                {
+                    "id": approval_id,
+                    "name": match["name"],
+                    "output": {"ok": False, "approved": False},
+                    "is_error": True,
+                },
+            )
+            _append(
+                AgentEventType.TEXT_DELTA,
+                {"text": f"Denied {match['name']}."},
+            )
+
+        _append(AgentEventType.DONE, {"reason": f"approval_{decision}"})
+        await self._session.commit()
+        return {
+            "session_id": session_id,
+            "approval_id": approval_id,
+            "decision": decision,
+            "events": out_events,
+            "assistant_text": _assistant_text_from_events(out_events),
+        }
+
+
+def _pending_approvals_from_events(events: list[dict]) -> list[dict]:
+    """tool_approval_request without later tool_result / decision for the same id."""
+    resolved: set[str] = set()
+    for event in events:
+        etype = event.get("type")
+        payload = event.get("payload") if "payload" in event else event.get("data") or {}
+        if not isinstance(payload, dict):
+            continue
+        eid = str(payload.get("id") or "")
+        if not eid:
+            continue
+        if etype in {AgentEventType.TOOL_RESULT, PLATFORM_EVENT_TOOL_APPROVAL_DECISION}:
+            resolved.add(eid)
+
+    pending: list[dict] = []
+    for event in events:
+        etype = event.get("type")
+        if etype != AgentEventType.TOOL_APPROVAL_REQUEST:
+            continue
+        payload = event.get("payload") if "payload" in event else event.get("data") or {}
+        if not isinstance(payload, dict):
+            continue
+        eid = str(payload.get("id") or "")
+        if not eid or eid in resolved:
+            continue
+        pending.append(
+            {
+                "id": eid,
+                "name": str(payload.get("name") or "tool"),
+                "input": payload.get("input") or {},
+            }
+        )
+    return pending

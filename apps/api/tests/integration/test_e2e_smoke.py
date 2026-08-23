@@ -551,3 +551,100 @@ def test_e2e_starter_bundle_import(client: TestClient) -> None:
     )
     assert rows.status_code == 200, rows.text
     assert len(rows.json()["rows"]) >= 1
+
+
+@requires_postgres
+def test_e2e_tool_approval_hitl(client: TestClient) -> None:
+    """dangerous: message → pending approval → approve continues turn."""
+    admin_h = {"Authorization": f"Bearer {_token(sub='e2e-hitl-admin', platform_admin=True)}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "HITL Co", "admin_email": "hitl@e2e.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "HITL Key",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-hitl",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-hitl-boss', email='hitl@e2e.test')}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "Cab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "Proj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    turn = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "dangerous: rm -rf /tmp/demo"},
+    )
+    assert turn.status_code == 200, turn.text
+    body = turn.json()
+    session_id = body["session_id"]
+    pending = body["pending_approvals"]
+    assert len(pending) == 1
+    approval_id = pending[0]["id"]
+    assert pending[0]["name"] == "shell.exec"
+    assert not any(e.get("type") == "done" for e in body["events"])
+
+    listed = client.get(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/pending-approvals",
+        headers=owner_h,
+    )
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["items"][0]["id"] == approval_id
+
+    denied = client.post(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/tool-approvals",
+        headers=owner_h,
+        json={"id": approval_id, "decision": "deny"},
+    )
+    assert denied.status_code == 200, denied.text
+    assert denied.json()["decision"] == "deny"
+    assert any(e.get("type") == "done" for e in denied.json()["events"])
+
+    empty = client.get(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/pending-approvals",
+        headers=owner_h,
+    )
+    assert empty.status_code == 200
+    assert empty.json()["items"] == []
+
+    again = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "dangerous: echo hi", "session_id": session_id},
+    )
+    assert again.status_code == 200, again.text
+    apr2 = again.json()["pending_approvals"][0]["id"]
+    approved = client.post(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/tool-approvals",
+        headers=owner_h,
+        json={"id": apr2, "decision": "approve"},
+    )
+    assert approved.status_code == 200, approved.text
+    assert approved.json()["decision"] == "approve"
+    assert "Approved" in approved.json()["assistant_text"]

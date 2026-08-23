@@ -35,6 +35,7 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-23 | C-PROJECT-CHAT / C-AGENT-EVENT | HITL tool_approval_request + approve/deny API | no |
 | 2026-08-23 | C-USAGE / C-ADMIN-COMPANY | max_cost_usd_month agent policy + budget enforce | no |
 | 2026-08-23 | C-BUNDLE | E2E starter equipment-procurement import | no |
 | 2026-08-23 | C-BUNDLE | import applies views/tabs; equipment-procurement starter shipped | no |

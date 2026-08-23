@@ -39,6 +39,13 @@ class ChatTurnBody(BaseModel):
     model: str | None = Field(default=None, max_length=128)
 
 
+class ToolApprovalBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    id: str = Field(min_length=1, max_length=64)
+    decision: str = Field(pattern="^(approve|deny)$")
+
+
 EmployeeDep = Annotated[EmployeeRow | None, Depends(get_current_employee)]
 
 
@@ -206,6 +213,42 @@ async def cancel_agent_session(
     return await AgentSessionService(session).cancel_session(
         project_id=project_id,
         session_id=session_id,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.get("/projects/{project_id}/agent/sessions/{session_id}/pending-approvals")
+async def list_pending_tool_approvals(
+    project_id: str,
+    session_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    items = await AgentSessionService(session).list_pending_approvals(
+        project_id=project_id,
+        session_id=session_id,
+        principal=principal,
+        employee=employee,
+    )
+    return {"items": items}
+
+
+@router.post("/projects/{project_id}/agent/sessions/{session_id}/tool-approvals")
+async def resolve_tool_approval(
+    project_id: str,
+    session_id: str,
+    body: ToolApprovalBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await AgentSessionService(session).resolve_tool_approval(
+        project_id=project_id,
+        session_id=session_id,
+        approval_id=body.id,
+        decision=body.decision,
         principal=principal,
         employee=employee,
     )

@@ -27,6 +27,22 @@ class FixtureCursorAdapter:
         return handle
 
     async def send(self, handle: AgentHandle, message: ChatMessage) -> AsyncIterator[AgentEvent]:
+        # HITL demo path: messages with "dangerous:" pause on tool_approval_request (no done).
+        if "dangerous:" in message.text.lower():
+            yield AgentEvent.now(
+                AgentEventType.TEXT_DELTA,
+                {"text": "Waiting for approval to run a dangerous tool."},
+            )
+            yield AgentEvent.now(
+                AgentEventType.TOOL_APPROVAL_REQUEST,
+                {
+                    "id": f"apr_{uuid.uuid4().hex[:10]}",
+                    "name": "shell.exec",
+                    "input": {"command": message.text},
+                },
+            )
+            return
+
         reply = f"Cursor fixture: {message.text}"
         for i, word in enumerate(reply.split()):
             chunk = word if i == 0 else f" {word}"

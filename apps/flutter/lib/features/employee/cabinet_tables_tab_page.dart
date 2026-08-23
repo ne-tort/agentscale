@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/session/work_context.dart';
+import 'package:prodavan/core/widgets/danger_confirm_page.dart';
 import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/cabinet_row_edit_page.dart';
@@ -121,16 +122,11 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
     final rowId = row['id'] as String?;
     if (slug == null || rowId == null) return;
 
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete row?'),
-        content: Text('Delete row $rowId'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
-        ],
-      ),
+    final ok = await DangerConfirmPage.push(
+      context,
+      title: 'Delete row?',
+      message: 'Delete row $rowId permanently.',
+      confirmLabel: 'Delete',
     );
     if (ok != true) return;
 

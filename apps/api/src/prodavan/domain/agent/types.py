@@ -22,6 +22,7 @@ class AgentEventType(StrEnum):
 # USER_MESSAGE for chat transcript — not emitted by AgentProviderPort adapters.
 FROZEN_EVENT_TYPES = frozenset(AgentEventType)
 PLATFORM_EVENT_USER_MESSAGE = "user_message"
+PLATFORM_EVENT_TOOL_APPROVAL_DECISION = "tool_approval_decision"
 
 
 class AgentSessionStatus(StrEnum):

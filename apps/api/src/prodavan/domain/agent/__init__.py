@@ -2,6 +2,7 @@
 
 from prodavan.domain.agent.types import (
     FROZEN_EVENT_TYPES,
+    PLATFORM_EVENT_TOOL_APPROVAL_DECISION,
     PLATFORM_EVENT_USER_MESSAGE,
     TOOL_PRESET_POLICIES,
     AgentEvent,
@@ -16,6 +17,7 @@ from prodavan.domain.agent.types import (
 
 __all__ = [
     "FROZEN_EVENT_TYPES",
+    "PLATFORM_EVENT_TOOL_APPROVAL_DECISION",
     "PLATFORM_EVENT_USER_MESSAGE",
     "AgentEvent",
     "AgentEventType",

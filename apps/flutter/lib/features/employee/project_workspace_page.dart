@@ -5,6 +5,7 @@ import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/features/employee/tool_approve_page.dart';
 
 /// Chat-first project workspace (L05/L09) — SSE streaming assistant deltas.
 class ProjectWorkspacePage extends StatefulWidget {
@@ -28,11 +29,17 @@ class _ChatLine {
     required this.role,
     required this.text,
     this.streaming = false,
+    this.approvalId,
+    this.toolName,
+    this.toolInput,
   });
 
   final String role;
   final String text;
   final bool streaming;
+  final String? approvalId;
+  final String? toolName;
+  final Map<String, dynamic>? toolInput;
 }
 
 class _PendingAttachment {
@@ -129,7 +136,16 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
           final role = raw['role'] as String? ?? 'assistant';
           final text = raw['text'] as String? ?? '';
           if (text.isEmpty) continue;
-          lines.add(_ChatLine(role: role, text: text));
+          final input = raw['input'];
+          lines.add(
+            _ChatLine(
+              role: role,
+              text: text,
+              approvalId: raw['approval_id'] as String?,
+              toolName: raw['tool_name'] as String?,
+              toolInput: input is Map<String, dynamic> ? input : null,
+            ),
+          );
         }
       }
       setState(() {
@@ -140,6 +156,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         _loading = false;
       });
       _scrollToEnd();
+      await _openPendingApprovalsIfAny();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -208,14 +225,45 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
             assistantIndex += 1;
           });
           _scrollToEnd();
+        } else if (type == 'tool_approval_request') {
+          final name = payload['name'] as String? ?? 'tool';
+          final approvalId = payload['id'] as String? ?? '';
+          final input = payload['input'];
+          setState(() {
+            _messages.insert(
+              assistantIndex,
+              _ChatLine(
+                role: 'approval',
+                text: 'Approve $name?',
+                approvalId: approvalId,
+                toolName: name,
+                toolInput: input is Map<String, dynamic> ? input : null,
+              ),
+            );
+            assistantIndex += 1;
+          });
+          _scrollToEnd();
         } else if (type == '_turn_complete') {
           final finalText = payload['assistant_text'] as String? ?? assistantText;
+          final pending = payload['pending_approvals'];
           setState(() {
             _sessionId = payload['session_id'] as String? ?? _sessionId;
             _messages[assistantIndex] = _ChatLine(role: 'assistant', text: finalText);
             _sending = false;
           });
           _scrollToEnd();
+          if (pending is List && pending.isNotEmpty) {
+            final first = pending.first;
+            if (first is Map<String, dynamic>) {
+              await _openApproval(
+                approvalId: first['id'] as String? ?? '',
+                toolName: first['name'] as String? ?? 'tool',
+                toolInput: first['input'] is Map<String, dynamic>
+                    ? first['input'] as Map<String, dynamic>
+                    : const {},
+              );
+            }
+          }
         } else if (type == '_error') {
           final detail = payload['detail'] as String? ?? payload['code'] as String? ?? 'Agent error';
           setState(() {
@@ -263,6 +311,50 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     }
   }
 
+  Future<void> _openPendingApprovalsIfAny() async {
+    final sid = _sessionId;
+    if (sid == null) return;
+    try {
+      final pending = await workContext.api.listPendingApprovals(
+        projectId: widget.projectId,
+        sessionId: sid,
+      );
+      if (!mounted || pending.isEmpty) return;
+      final first = pending.first;
+      await _openApproval(
+        approvalId: first['id'] as String? ?? '',
+        toolName: first['name'] as String? ?? 'tool',
+        toolInput: first['input'] is Map<String, dynamic>
+            ? first['input'] as Map<String, dynamic>
+            : const {},
+      );
+    } catch (_) {
+      // Non-fatal on reload; user can tap approval bubble.
+    }
+  }
+
+  Future<void> _openApproval({
+    required String approvalId,
+    required String toolName,
+    Map<String, dynamic> toolInput = const {},
+  }) async {
+    final sid = _sessionId;
+    if (sid == null || approvalId.isEmpty) return;
+    final decision = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => ToolApprovePage(
+          projectId: widget.projectId,
+          sessionId: sid,
+          approvalId: approvalId,
+          toolName: toolName,
+          toolInput: toolInput,
+        ),
+      ),
+    );
+    if (!mounted || decision == null) return;
+    await _loadTranscript();
+  }
+
   void _scrollToEnd() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scroll.hasClients) return;
@@ -303,35 +395,47 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                           final msg = _messages[index];
                           final isUser = msg.role == 'user';
                           final isTool = msg.role == 'tool';
+                          final isApproval = msg.role == 'approval';
                           return Align(
                             alignment: isUser
                                 ? Alignment.centerRight
-                                : isTool
+                                : isTool || isApproval
                                     ? Alignment.center
                                     : Alignment.centerLeft,
-                            child: Container(
+                            child: InkWell(
+                              onTap: isApproval && msg.approvalId != null
+                                  ? () => _openApproval(
+                                        approvalId: msg.approvalId!,
+                                        toolName: msg.toolName ?? 'tool',
+                                        toolInput: msg.toolInput ?? const {},
+                                      )
+                                  : null,
+                              child: Container(
                               margin: const EdgeInsets.only(bottom: 8),
                               padding: EdgeInsets.symmetric(
-                                horizontal: isTool ? 10 : 12,
-                                vertical: isTool ? 4 : 8,
+                                horizontal: isTool || isApproval ? 10 : 12,
+                                vertical: isTool || isApproval ? 4 : 8,
                               ),
                               constraints: BoxConstraints(
-                                maxWidth: MediaQuery.sizeOf(context).width * (isTool ? 0.9 : 0.82),
+                                maxWidth: MediaQuery.sizeOf(context).width *
+                                    (isTool || isApproval ? 0.9 : 0.82),
                               ),
                               decoration: BoxDecoration(
-                                color: isTool
-                                    ? Theme.of(context).colorScheme.surfaceContainerLow
-                                    : isUser
-                                        ? Theme.of(context).colorScheme.primaryContainer
-                                        : Theme.of(context).colorScheme.surfaceContainerHighest,
-                                borderRadius: BorderRadius.circular(isTool ? 8 : 12),
+                                color: isApproval
+                                    ? Theme.of(context).colorScheme.errorContainer
+                                    : isTool
+                                        ? Theme.of(context).colorScheme.surfaceContainerLow
+                                        : isUser
+                                            ? Theme.of(context).colorScheme.primaryContainer
+                                            : Theme.of(context).colorScheme.surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(isTool || isApproval ? 8 : 12),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  if (isTool) ...[
+                                  if (isTool || isApproval) ...[
                                     Icon(
-                                      Icons.build_outlined,
+                                      isApproval ? Icons.gavel_outlined : Icons.build_outlined,
                                       size: 14,
                                       color: Theme.of(context).colorScheme.onSurfaceVariant,
                                     ),
@@ -339,12 +443,12 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                                   ],
                                   Flexible(
                                     child: Text(
-                                      isTool
+                                      isTool || isApproval
                                           ? msg.text
                                           : msg.text.isEmpty && msg.streaming
                                               ? '…'
                                               : msg.text,
-                                      style: isTool
+                                      style: isTool || isApproval
                                           ? Theme.of(context).textTheme.labelSmall?.copyWith(
                                                 color: Theme.of(context).colorScheme.onSurfaceVariant,
                                               )
@@ -361,6 +465,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                                   ],
                                 ],
                               ),
+                            ),
                             ),
                           );
                         },

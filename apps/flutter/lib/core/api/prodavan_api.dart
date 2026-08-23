@@ -436,6 +436,50 @@ class ProdavanApi {
     }
   }
 
+  Future<List<Map<String, dynamic>>> listPendingApprovals({
+    required String projectId,
+    required String sessionId,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await http.get(
+        _uri('/projects/$projectId/agent/sessions/$sessionId/pending-approvals'),
+        headers: _headers,
+      );
+      _throwIfError(res);
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final items = body['items'];
+      if (items is List) {
+        return items.cast<Map<String, dynamic>>();
+      }
+      return const [];
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Map<String, dynamic>> resolveToolApproval({
+    required String projectId,
+    required String sessionId,
+    required String approvalId,
+    required String decision,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await http.post(
+        _uri('/projects/$projectId/agent/sessions/$sessionId/tool-approvals'),
+        headers: _headers,
+        body: jsonEncode({'id': approvalId, 'decision': decision}),
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
   void _throwIfError(http.Response res) {
     if (res.statusCode >= 400) {
       throw ProdavanApiException(res.statusCode, res.body);
