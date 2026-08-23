@@ -434,8 +434,6 @@ def test_chat_with_attachment_refs_emits_tool_call(client: TestClient) -> None:
 
 @requires_postgres
 def test_chat_rejects_unknown_attachment_ref(client: TestClient) -> None:
-    import base64
-
     admin = _token(sub="ref-admin", platform_admin=True)
     admin_h = {"Authorization": f"Bearer {admin}"}
 

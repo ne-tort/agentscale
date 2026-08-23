@@ -26,7 +26,7 @@
 | C-PROJECT | L07 | Project entity + lifecycle | L08, L09 | [project-contract](../06-projects-runtime/project-contract.md) | **live** (subset) |
 | C-MATERIALIZE | L07 | FS layout + cwd | L08 | [container](../06-projects-runtime/container.md) | **live** (local-ws) |
 | C-TRIGGERS | L07 | trigger ingress queue | L08, L09 | [triggers](../06-projects-runtime/triggers.md) | **live** (subset) |
-| C-ATTACH | L07 | attachment_refs | L08 ChatMessage | [chat-attachments](../06-projects-runtime/chat-attachments.md) | **live** (subset) |
+| C-ATTACH | L07 | upload + list + ref validation | L08 ChatMessage | [chat-attachments](../06-projects-runtime/chat-attachments.md) | **live** (subset) |
 | C-AGENT-PORT | L08 | `AgentProviderPort` | L09 chat | [adapter-port](../08-agent-providers/adapter-port.md) | **live** (fixture) |
 | C-AGENT-EVENT | L08 | frozen `AgentEvent` | L09 UI, L04 metrics | adapter-port | **live** (subset) |
 | C-USAGE | L08 | usage records | L04 metrics | [usage-metrics](../08-agent-providers/usage-metrics.md) | **live** (subset) |
