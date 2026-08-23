@@ -2,77 +2,49 @@
 
 | Поле | Значение |
 |------|----------|
-| Status | not_started |
-| Quality | 0 |
-| Quality note | Слой не начат |
+| Status | doing |
+| Quality | 5 |
+| Quality note | API E2E smoke + chat/transcript + disabled employee/key; Flutter reload; CI/release — gap |
 | Plan | [L09](../11-implementation-plan/L09-vertical-integration.md) |
-| Canon | [09-gap-map](../09-gap-map.md), [00-principles](../00-principles.md) |
-| Last updated | 2026-08-23 — добавлена шкала Quality |
+| Last updated | 2026-08-23 — AGENT_BUDGET E2E + platform metrics in smoke |
 | Owners | — |
 
 ---
 
 ## Семантика
 
-Сшивка слоёв: E2E, metrics e2e, release gate. Не место для недоделанного DoD L01…L08.
+Сшивка слоёв: E2E smoke, metrics end-to-end. Не замена DoD L01…L08.
 
 ## Что сделано
 
-—
-
-## Как сделано
-
-—
-
-## Контракты
-
-### Публикует
-
-| ID | Форма | Статус |
-|----|-------|--------|
-| E2E smoke suite | Admin→…→Agent | planned |
-| Release gate | checklist-master | planned |
-
-### Потребляет
-
-| ID | Откуда | Статус |
-|----|--------|--------|
-| все C-* live | L01…L08 | planned |
-
-## Связи
-
-Замыкает [map.md](map.md).
-
-## Инварианты
-
-- Нет bypass auth в зелёном E2E.
+| Сделано | Gaps |
+|---------|------|
+| `test_e2e_smoke.py` — Admin→Company→Key→Cabinet→Project→Agent→metrics | CI nightly job |
+| `POST /projects/{id}/chat` + `GET .../chat/transcript` | storage_bytes, last_activity |
+| Disabled employee 403 on chat | Flutter widget/integration test |
+| Disabled AI key → `NO_AI_KEY` 404 | expired-by-date key path — done |
+| AGENT_BUDGET 429 on chat follow-up | done | test_e2e_agent_budget_blocks_followup |
+| Admin metrics list in smoke | done | GET /admin/metrics/companies |
+| Admin metrics: agent_tokens_used, agent_messages, projects_total | |
+| Peer cabinet 403 in smoke | |
+| Flutter ProjectWorkspacePage → SSE chat + transcript reload | SSE cancel mid-stream |
 
 ## Карта кода
 
 ```text
-—
+apps/api/tests/integration/test_e2e_smoke.py
+apps/api/src/prodavan/api/v1/agent.py (chat + transcript)
+apps/flutter/lib/features/employee/project_workspace_page.dart
+apps/api/src/prodavan/application/admin/company_service.py (metrics)
+apps/api/src/prodavan/api/v1/admin_metrics.py
 ```
 
-## Gaps vs канон / DoD
+## Gaps
 
-| Требование | Статус | Заметка |
-|------------|--------|---------|
-| DoD L09 | todo | ждёт L01…L08 |
+| Требование | Статус |
+|------------|--------|
+| CI nightly | hole |
+| Widget E2E | hole |
+| Release gate checklist automation | hole |
 
-## Проверка
-
-```text
-—
-```
-
-## Оценка качества
-
-Рубрика: [quality-score.md](quality-score.md).
-
-| Ось | Балл 0–2 | Комментарий |
-|-----|----------|-------------|
-| A. Полнота DoD | 0 | |
-| B. Контракты | 0 | |
-| C. Инварианты и проверки | 0 | |
-| D. As-built ясность | 1 | карточка-заготовка |
-| **Quality (итог)** | **0** | not_started |
+## Quality | **5** | doing — API vertical + Flutter chat subset |

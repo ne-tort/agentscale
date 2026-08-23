@@ -1,0 +1,455 @@
+"""Agent session lifecycle + event persistence (L08)."""
+
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from decimal import Decimal
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from prodavan.application.admin.company_service import AdminCompanyService
+from prodavan.application.agent.adapter_registry import get_agent_adapter
+from prodavan.application.agent.budget_service import AgentBudgetService
+from prodavan.application.agent.policy_service import AgentPolicyService
+from prodavan.application.ai_keys.service import AiKeysService
+from prodavan.application.projects.access import ProjectAccessService
+from prodavan.domain.agent import (
+    PLATFORM_EVENT_USER_MESSAGE,
+    AgentEventType,
+    AgentHandle,
+    AgentSessionStatus,
+    ChatMessage,
+)
+from prodavan.domain.errors import AppError
+from prodavan.domain.identity import Principal
+from prodavan.infrastructure.persistence.models.agent import AgentEventRow, AgentSessionRow, AgentUsageRow
+from prodavan.infrastructure.persistence.models.identity import EmployeeRow
+from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
+
+
+def _assistant_text_from_events(events: list[dict]) -> str:
+    parts: list[str] = []
+    for event in events:
+        if event.get("type") != AgentEventType.TEXT_DELTA:
+            continue
+        data = event.get("data") or {}
+        chunk = data.get("text")
+        if chunk:
+            parts.append(str(chunk))
+    return "".join(parts)
+
+
+def events_to_transcript(events: list[dict]) -> list[dict]:
+    """Collapse platform user_message + text_delta turns into chat bubbles."""
+    messages: list[dict] = []
+    assistant_parts: list[str] = []
+
+    def flush_assistant() -> None:
+        if not assistant_parts:
+            return
+        messages.append({"role": "assistant", "text": "".join(assistant_parts)})
+        assistant_parts.clear()
+
+    for event in events:
+        etype = event.get("type")
+        data = event.get("data") or {}
+        if etype == PLATFORM_EVENT_USER_MESSAGE:
+            flush_assistant()
+            text = data.get("text")
+            if text:
+                messages.append({"role": "user", "text": str(text)})
+        elif etype == AgentEventType.TEXT_DELTA:
+            chunk = data.get("text")
+            if chunk:
+                assistant_parts.append(str(chunk))
+        elif etype in {AgentEventType.DONE, AgentEventType.ERROR}:
+            flush_assistant()
+
+    flush_assistant()
+    return messages
+
+
+def _session_public(row: AgentSessionRow) -> dict:
+    return {
+        "id": row.id,
+        "project_id": row.project_id,
+        "provider": row.provider,
+        "api_kind": row.api_kind,
+        "vendor_agent_id": row.vendor_agent_id,
+        "model": row.model,
+        "cwd": row.cwd,
+        "status": row.status,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+def _event_public(row: AgentEventRow) -> dict:
+    return {
+        "seq": row.seq,
+        "type": row.event_type,
+        "data": row.payload,
+        "at": row.at.isoformat() if row.at else None,
+    }
+
+
+class AgentSessionService:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+        self._projects = ProjectAccessService(session)
+        self._policy = AgentPolicyService(session)
+        self._keys = AiKeysService(session)
+        self._budget = AgentBudgetService(session)
+
+    async def create_session(
+        self,
+        *,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        model: str | None = None,
+    ) -> dict:
+        project = await self._projects.require_access(
+            project_id=project_id, principal=principal, employee=employee, write=False
+        )
+        company_policy = await AdminCompanyService(self._session).get_agent_policy(project.company_id)
+        await self._budget.enforce_before_turn(
+            company_id=project.company_id,
+            session_id=None,
+            policy=company_policy,
+        )
+        credential = await self._keys.resolve_credentials(
+            company_id=project.company_id,
+            preferred_provider=project.agent_provider or company_policy.preferred_provider,
+            platform_fallback=company_policy.platform_fallback,
+        )
+        cwd = str(WorkspaceLayoutWriter(workspace_key=project.workspace_key).workspace_root)
+        opts = await self._policy.build_create_opts(
+            project=project, cwd=cwd, credential=credential, model_override=model
+        )
+        adapter = get_agent_adapter(api_kind=credential.api_kind)
+        handle = await adapter.create(opts)
+        row = AgentSessionRow(
+            project_id=project_id,
+            provider=credential.provider,
+            api_kind=credential.api_kind,
+            vendor_agent_id=handle.id,
+            model=handle.model,
+            cwd=cwd,
+            status=AgentSessionStatus.ACTIVE,
+        )
+        self._session.add(row)
+        await self._session.commit()
+        await self._session.refresh(row)
+        return _session_public(row)
+
+    async def get_session(self, *, session_id: str) -> AgentSessionRow:
+        row = await self._session.get(AgentSessionRow, session_id)
+        if row is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+        return row
+
+    async def list_sessions(
+        self,
+        *,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        limit: int = 50,
+    ) -> list[dict]:
+        await self._projects.require_access(
+            project_id=project_id, principal=principal, employee=employee, write=False
+        )
+        q = await self._session.execute(
+            select(AgentSessionRow)
+            .where(AgentSessionRow.project_id == project_id)
+            .order_by(AgentSessionRow.created_at.desc())
+            .limit(limit)
+        )
+        return [_session_public(r) for r in q.scalars().all()]
+
+    async def send_message(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        text: str,
+        attachment_refs: list[str] | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        events_out: list[dict] = []
+        async for event in self._iter_send_events(
+            project_id=project_id,
+            session_id=session_id,
+            text=text,
+            attachment_refs=attachment_refs,
+            principal=principal,
+            employee=employee,
+        ):
+            events_out.append(event)
+        await self._session.commit()
+        return {"session_id": session_id, "events": events_out}
+
+    async def _iter_send_events(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        text: str,
+        attachment_refs: list[str] | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> AsyncIterator[dict]:
+        project = await self._projects.require_access(
+            project_id=project_id, principal=principal, employee=employee, write=True
+        )
+        row = await self.get_session(session_id=session_id)
+        if row.project_id != project_id:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+        if row.status != AgentSessionStatus.ACTIVE:
+            raise AppError(code="SESSION_CLOSED", title="Session closed", status=409, detail="session not active")
+
+        company_policy = await AdminCompanyService(self._session).get_agent_policy(project.company_id)
+        await self._budget.enforce_before_turn(
+            company_id=project.company_id,
+            session_id=session_id,
+            policy=company_policy,
+        )
+
+        adapter = get_agent_adapter(api_kind=row.api_kind)
+        handle = AgentHandle(id=row.vendor_agent_id, provider=row.provider, cwd=row.cwd, model=row.model)
+        refs = tuple(attachment_refs or ())
+        message = ChatMessage(text=text, attachment_refs=refs)
+
+        seq_q = await self._session.execute(
+            select(func.coalesce(func.max(AgentEventRow.seq), 0)).where(AgentEventRow.session_id == session_id)
+        )
+        seq = int(seq_q.scalar_one() or 0)
+
+        seq += 1
+        user_payload: dict = {"text": text}
+        if refs:
+            user_payload["attachment_refs"] = list(refs)
+        self._session.add(
+            AgentEventRow(
+                session_id=session_id,
+                seq=seq,
+                event_type=PLATFORM_EVENT_USER_MESSAGE,
+                payload=user_payload,
+                at=None,
+            )
+        )
+        yield {"type": PLATFORM_EVENT_USER_MESSAGE, "data": user_payload}
+
+        async for event in adapter.send(handle, message):
+            seq += 1
+            self._session.add(
+                AgentEventRow(
+                    session_id=session_id,
+                    seq=seq,
+                    event_type=event.type,
+                    payload=event.data,
+                    at=None,
+                )
+            )
+            yield event.to_dict()
+            if event.type == AgentEventType.USAGE:
+                self._session.add(
+                    AgentUsageRow(
+                        session_id=session_id,
+                        turn_id=f"turn_{seq}",
+                        provider=str(event.data.get("provider") or row.provider),
+                        model=event.data.get("model") or row.model,
+                        input_tokens=event.data.get("input_tokens"),
+                        output_tokens=event.data.get("output_tokens"),
+                        cost_usd=Decimal(str(event.data["cost_usd"]))
+                        if event.data.get("cost_usd") is not None
+                        else None,
+                    )
+                )
+
+    async def chat_turn(
+        self,
+        *,
+        project_id: str,
+        text: str,
+        session_id: str | None,
+        attachment_refs: list[str] | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        model: str | None = None,
+    ) -> dict:
+        """One-shot chat: reuse active session or create, then send (L05/L09)."""
+        if employee is None:
+            raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
+        sid = session_id or await self._resolve_active_session_id(
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            model=model,
+        )
+        result = await self.send_message(
+            project_id=project_id,
+            session_id=sid,
+            text=text,
+            attachment_refs=attachment_refs,
+            principal=principal,
+            employee=employee,
+        )
+        result["assistant_text"] = _assistant_text_from_events(result.get("events") or [])
+        return result
+
+    async def iter_chat_turn_sse(
+        self,
+        *,
+        project_id: str,
+        text: str,
+        session_id: str | None,
+        attachment_refs: list[str] | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        model: str | None = None,
+    ) -> AsyncIterator[dict]:
+        """SSE event stream for L05 workspace — persists like send_message."""
+        if employee is None:
+            raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
+        sid = session_id or await self._resolve_active_session_id(
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            model=model,
+        )
+        yield {"type": "_session", "data": {"session_id": sid}}
+        events: list[dict] = []
+        try:
+            async for event in self._iter_send_events(
+                project_id=project_id,
+                session_id=sid,
+                text=text,
+                attachment_refs=attachment_refs,
+                principal=principal,
+                employee=employee,
+            ):
+                events.append(event)
+                yield event
+            await self._session.commit()
+        except AppError:
+            await self._session.rollback()
+            raise
+        assistant_text = _assistant_text_from_events(events)
+        yield {
+            "type": "_turn_complete",
+            "data": {"session_id": sid, "assistant_text": assistant_text},
+        }
+
+    async def _resolve_active_session_id(
+        self,
+        *,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow,
+        model: str | None,
+    ) -> str:
+        q = await self._session.execute(
+            select(AgentSessionRow)
+            .where(AgentSessionRow.project_id == project_id)
+            .where(AgentSessionRow.status == AgentSessionStatus.ACTIVE)
+            .order_by(AgentSessionRow.created_at.desc())
+            .limit(1)
+        )
+        row = q.scalar_one_or_none()
+        if row is not None:
+            return row.id
+        created = await self.create_session(
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            model=model,
+        )
+        return str(created["id"])
+
+    async def list_events(
+        self,
+        *,
+        session_id: str,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        limit: int = 200,
+    ) -> list[dict]:
+        await self._projects.require_access(
+            project_id=project_id, principal=principal, employee=employee, write=False
+        )
+        row = await self.get_session(session_id=session_id)
+        if row.project_id != project_id:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+        q = await self._session.execute(
+            select(AgentEventRow)
+            .where(AgentEventRow.session_id == session_id)
+            .order_by(AgentEventRow.seq)
+            .limit(limit)
+        )
+        return [_event_public(r) for r in q.scalars().all()]
+
+    async def get_transcript(
+        self,
+        *,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        session_id: str | None = None,
+        limit: int = 500,
+    ) -> dict:
+        """Chat bubbles for active (or given) session — L05 workspace reload."""
+        await self._projects.require_access(
+            project_id=project_id, principal=principal, employee=employee, write=False
+        )
+        sid = session_id
+        if sid is None:
+            q = await self._session.execute(
+                select(AgentSessionRow)
+                .where(AgentSessionRow.project_id == project_id)
+                .where(AgentSessionRow.status == AgentSessionStatus.ACTIVE)
+                .order_by(AgentSessionRow.created_at.desc())
+                .limit(1)
+            )
+            active = q.scalar_one_or_none()
+            if active is None:
+                return {"session_id": None, "messages": []}
+            sid = active.id
+        else:
+            row = await self.get_session(session_id=sid)
+            if row.project_id != project_id:
+                raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+
+        events = await self.list_events(
+            session_id=sid,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            limit=limit,
+        )
+        return {"session_id": sid, "messages": events_to_transcript(events)}
+
+    async def cancel_session(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        await self._projects.require_access(
+            project_id=project_id, principal=principal, employee=employee, write=True
+        )
+        row = await self.get_session(session_id=session_id)
+        if row.project_id != project_id:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+        adapter = get_agent_adapter(api_kind=row.api_kind)
+        handle = AgentHandle(id=row.vendor_agent_id, provider=row.provider, cwd=row.cwd, model=row.model)
+        await adapter.cancel(handle)
+        row.status = AgentSessionStatus.CANCELLED
+        await self._session.commit()
+        await self._session.refresh(row)
+        return _session_public(row)

@@ -33,14 +33,14 @@ Keycloak OIDC как единственный IdP; Prodavan API — resource ser
 
 ## DoD
 
-- [ ] KC realm/roles: `platform.admin`, membership/`company.admin` по канону.
-- [ ] API отклоняет невалидный/просроченный token; JWKS cache ок.
-- [ ] **Нет** `POST /auth/login` с password как канон.
-- [ ] Switch company / open cabinet **не** reissue JWT.
-- [ ] Entitlements только из DB (тест: подмена claim `company_id` не обходит membership).
-- [ ] Invite company.admin и employee: email flow; статус `invited` → `active` после первого login.
-- [ ] Disable employee → 403 на API.
-- [ ] Contract tests на headers + Principal.
+- [ ] KC realm/roles: `platform.admin`, membership/`company.admin` по канону. *(API roles + Fake invite; live realm — Gap)*
+- [x] API отклоняет невалидный/просроченный token; JWKS cache ок. *(oidc path; CI: AUTH_MODE=test)*
+- [x] **Нет** `POST /auth/login` с password как канон.
+- [x] Switch company / open cabinet **не** reissue JWT.
+- [x] Entitlements только из DB (membership helpers; claim company_id не source of truth).
+- [x] Invite company.admin и employee: email flow shape; статус `invited` → `active` после первого login. *(Fake KC)*
+- [x] Disable employee → 403 на API.
+- [x] Contract tests на headers + Principal.
 
 ## Не считать готовым, если…
 

@@ -9,7 +9,8 @@ from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from prodavan.config.settings import settings
-from prodavan.infrastructure.persistence.models.base import Base
+from prodavan.infrastructure.persistence.models import Base  # noqa: F401 — register metadata
+from prodavan.infrastructure.persistence.models.base import Base as _Base
 
 config = context.config
 if config.config_file_name is not None:
@@ -17,7 +18,7 @@ if config.config_file_name is not None:
 
 config.set_main_option("sqlalchemy.url", settings.database_url)
 
-target_metadata = Base.metadata
+target_metadata = _Base.metadata
 
 
 def run_migrations_offline() -> None:

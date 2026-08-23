@@ -2,79 +2,63 @@
 
 | Поле | Значение |
 |------|----------|
-| Status | not_started |
-| Quality | 0 |
-| Quality note | Слой не начат |
+| Status | doing |
+| Quality | 7 |
+| Quality note | Dev shell + SSE chat workspace + transcript reload |
 | Plan | [L05](../11-implementation-plan/L05-employee-shell.md) |
 | Canon | [04-employees](../04-employees/), [session](../10-identity-keycloak/session.md) |
-| Last updated | 2026-08-23 — добавлена шкала Quality |
+| Last updated | 2026-08-23 — projectChatStream + incremental bubbles |
 | Owners | — |
 
 ---
 
 ## Семантика
 
-Контур сотрудника: cabinets → DynamicCabinetShell (meta L06). Create Base / import bundle. Peers isolated.
+Контур сотрудника: cabinets → DynamicCabinetShell (meta L06). `X-Cabinet-Id` / `X-Project-Id` в API client.
 
 ## Что сделано
 
-—
+| Сделано | Gaps |
+|---------|------|
+| `ProdavanApi` client (Bearer + work headers) | AppAuth OIDC login |
+| `WorkContext` singleton | ContourSelectorPage |
+| DevSessionPage (paste JWT) | Production secure storage |
+| CabinetListPage + create cabinet | Import bundle UI |
+| DynamicCabinetShell tabs from meta | Dynamic tab content interpreters |
+| ProjectWorkspacePage — SSE chat + transcript reload | Attachment picker |
+| `projectChatStream` → `POST /chat/stream` | Dynamic tab content interpreters |
 
 ## Как сделано
 
-—
+1. `core/api/prodavan_api.dart` — `/me`, `/cabinets`, meta tabs, projects, `projectChatStream` / `projectChatTranscript`.
+2. `features/employee/*` — list → shell → projects → chat workspace (reload on open).
+3. `AppScaffold.bottom` extended for TabBar.
+4. Entry from `app.dart` → Dev session (dev only until L01 cutover).
 
 ## Контракты
 
-### Публикует
-
-| ID | Форма | Статус |
-|----|-------|--------|
-| C-EMP-SHELL | enter cabinet + shell host | planned |
-
-### Потребляет
-
-| ID | Откуда | Статус |
-|----|--------|--------|
-| C-PRINCIPAL / C-HEADERS | L01 | planned |
-| C-UI-* | L02 | planned |
-| C-INSTANCE / C-META-DATA | L06 | planned |
-
-## Связи
-
-Host ← L06 meta; projects → L07.
-
-## Инварианты
-
-- Чужой `X-Cabinet-Id` → 403.
-- Вкладки только из meta.tabs.
+| ID | Статус |
+|----|--------|
+| C-EMP-SHELL | **live** (subset) |
 
 ## Карта кода
 
 ```text
-—
+apps/flutter/lib/
+  core/api/prodavan_api.dart
+  core/session/work_context.dart
+  features/employee/{dev_session,cabinet_list,dynamic_cabinet_shell,project_list,project_workspace}_page.dart
 ```
 
-## Gaps vs канон / DoD
+## Gaps
 
-| Требование | Статус | Заметка |
-|------------|--------|---------|
-| DoD L05 | todo | |
+| Требование | Статус |
+|------------|--------|
+| OIDC login | todo (L01) |
+| Peer isolation UI test | hole |
+| Import bundle UI | hole |
+| Chat streaming | live | SSE text_delta in workspace |
+| Event history reload | live (`GET .../chat/transcript`) |
+| Pre-user_message legacy sessions | hole — assistant-only bubbles until re-chat |
 
-## Проверка
-
-```text
-—
-```
-
-## Оценка качества
-
-Рубрика: [quality-score.md](quality-score.md).
-
-| Ось | Балл 0–2 | Комментарий |
-|-----|----------|-------------|
-| A. Полнота DoD | 0 | |
-| B. Контракты | 0 | |
-| C. Инварианты и проверки | 0 | |
-| D. As-built ясность | 1 | карточка-заготовка |
-| **Quality (итог)** | **0** | not_started |
+## Quality | **6** | doing |

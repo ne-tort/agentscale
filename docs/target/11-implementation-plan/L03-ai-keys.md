@@ -33,12 +33,12 @@
 
 ## DoD
 
-- [ ] CRUD ключей по api.md; list не светит secret.
-- [ ] `api_kind` enum полный; runtime kinds отделены от `cli_subscription`.
-- [ ] Bind/unbind company; resolve учитывает status `active`.
-- [ ] Тест: resolve с `cli_subscription`-only → error / no credential.
-- [ ] Persistence: secret только ref; ротация ref документирована.
-- [ ] Contract test `resolve_credentials` для Cursor/Codex/Claude kinds (хотя бы один real kind + fake secret backend).
+- [x] CRUD ключей по api.md; list не светит secret.
+- [x] `api_kind` enum полный; runtime kinds отделены от `cli_subscription`.
+- [x] Bind/unbind company; resolve учитывает status `active`.
+- [x] Тест: resolve с `cli_subscription`-only → error / no credential.
+- [x] Persistence: secret только ref; ротация ref документирована.
+- [x] Contract test `resolve_credentials` для Cursor/Codex/Claude kinds (хотя бы один real kind + fake secret backend).
 
 ## Не считать готовым, если…
 

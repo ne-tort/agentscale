@@ -8,24 +8,24 @@
 | Слой | Статус | Quality | As-built | Доказательство (PR / suite) | Блокеры |
 |------|--------|---------|----------|----------------------------|---------|
 | [L00](L00-platform-skeleton.md) | done | 8 | [12](../12-layer-docs/L00-platform-skeleton.md) | L00 skeleton commit | |
-| [L01](L01-identity.md) | todo | 0 | [12](../12-layer-docs/L01-identity.md) | | |
+| [L01](L01-identity.md) | partial | 7 | [12](../12-layer-docs/L01-identity.md) | identity + JWT tests | live KC Admin/realm |
 | [L02](L02-ui-core.md) | done | 8 | [12](../12-layer-docs/L02-ui-core.md) | L02 UI core commit | |
-| [L03](L03-ai-keys.md) | todo | 0 | [12](../12-layer-docs/L03-ai-keys.md) | | |
-| [L04](L04-admin-company.md) | todo | 0 | [12](../12-layer-docs/L04-admin-company.md) | | |
-| [L05](L05-employee-shell.md) | todo | 0 | [12](../12-layer-docs/L05-employee-shell.md) | | |
-| [L06](L06-cabinet-runtime.md) | todo | 0 | [12](../12-layer-docs/L06-cabinet-runtime.md) | | |
-| [L07](L07-projects-runtime.md) | todo | 0 | [12](../12-layer-docs/L07-projects-runtime.md) | | |
-| [L08](L08-agent-providers.md) | todo | 0 | [12](../12-layer-docs/L08-agent-providers.md) | | |
-| [L09](L09-vertical-integration.md) | todo | 0 | [12](../12-layer-docs/L09-vertical-integration.md) | | |
+| [L03](L03-ai-keys.md) | done | 8 | [12](../12-layer-docs/L03-ai-keys.md) | ai-keys CRUD+resolve | Vault backend |
+| [L04](L04-admin-company.md) | doing | 7 | [12](../12-layer-docs/L04-admin-company.md) | Admin Overview + create flow | starter bundles; widget E2E |
+| [L05](L05-employee-shell.md) | doing | 7 | [12](../12-layer-docs/L05-employee-shell.md) | Flutter SSE chat + transcript | AppAuth; attachments |
+| [L09](L09-vertical-integration.md) | doing | 5 | [12](../12-layer-docs/L09-vertical-integration.md) | E2E smoke + chat/transcript + negatives | CI; widget E2E |
+| [L06](L06-cabinet-runtime.md) | done | 8 | [12](../12-layer-docs/L06-cabinet-runtime.md) | runtime API+MCP+bundle+packages | sandbox L07; quotas L04 |
+| [L07](L07-projects-runtime.md) | doing | 6 | [12](../12-layer-docs/L07-projects-runtime.md) | project CRUD+materialize+triggers | L08 agent; k8s pod |
+| [L08](L08-agent-providers.md) | doing | 8 | [12](../12-layer-docs/L08-agent-providers.md) | port+budget+transcript+fixture | Node sidecar SDK |
 
 ## Фазы (сводка)
 
 | Фаза | Условие выхода | Статус |
 |------|----------------|--------|
-| A фундамент (L00+L01+L02+L03 + API L06) | контракты C-* поставщиков зелёные | doing (L00 done) |
-| B control (L04+L05) | UX contracts 01/03/04 | todo |
-| C execution (L07+L08) | materialize + AgentEvent | todo |
-| D vertical (L09) | E2E + metrics | todo |
+| A фундамент (L00+L01+L02+L03 + API L06) | контракты C-* поставщиков зелёные | doing (L00/L02/L03/L06 done; L01 partial; L04 API started) |
+| B control (L04+L05) | UX contracts 01/03/04 | doing (L04 Admin UI + L05 employee) |
+| C execution (L07+L08) | materialize + AgentEvent | doing (L07+L08 API) |
+| D vertical (L09) | E2E + metrics | doing (API smoke + Flutter chat subset) |
 
 ## Быстрый veto (глобальный)
 

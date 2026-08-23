@@ -16,6 +16,7 @@ dependencies = [
     "asyncpg>=0.30.0",
     "alembic>=1.14.0",
     "httpx>=0.28.0",
+    "PyJWT[crypto]>=2.9.0",
 ]
 
 [project.optional-dependencies]

@@ -1,0 +1,346 @@
+"""Integration tests — L08 agent port + event persistence."""
+
+from __future__ import annotations
+
+import os
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import jwt
+import pytest
+from fastapi.testclient import TestClient
+
+os.environ.setdefault("AUTH_MODE", "test")
+os.environ.setdefault("AUTH_TEST_SECRET", "dev-only-test-secret-change-me")
+
+from prodavan.config.settings import settings
+from prodavan.infrastructure.auth.jwt import reset_jwt_validator
+from prodavan.infrastructure.keycloak.invite import reset_invite_client
+from prodavan.main import create_app
+from tests.conftest import requires_postgres
+
+
+def _token(*, sub: str, email: str | None = None, platform_admin: bool = False) -> str:
+    now = datetime.now(UTC)
+    payload = {
+        "sub": sub,
+        "aud": settings.oidc_audience,
+        "exp": now + timedelta(hours=1),
+        "iat": now,
+        "platform_admin": platform_admin,
+        "roles": [] if not platform_admin else ["platform.admin"],
+    }
+    if email:
+        payload["email"] = email
+    return jwt.encode(payload, settings.auth_test_secret, algorithm="HS256")
+
+
+@pytest.fixture()
+def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    monkeypatch.setattr(settings, "secrets_dir", tmp_path)
+    reset_jwt_validator()
+    reset_invite_client()
+    return TestClient(create_app())
+
+
+@requires_postgres
+def test_agent_session_send_persists_events(client: TestClient) -> None:
+    admin = _token(sub="adm-agent", platform_admin=True)
+    admin_h = {"Authorization": f"Bearer {admin}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "AgentCo", "admin_email": "owner@agentco.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "Cursor",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-test-cursor",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_tok = _token(sub="owner-agent", email="owner@agentco.test")
+    owner_h = {"Authorization": f"Bearer {owner_tok}"}
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "AgentCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "Run 1"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    sess = client.post(
+        f"/api/v1/projects/{project_id}/agent/sessions",
+        headers=owner_h,
+        json={},
+    )
+    assert sess.status_code == 201, sess.text
+    session_id = sess.json()["id"]
+    assert sess.json()["provider"] == "cursor"
+    assert sess.json()["api_kind"] == "cursor_sdk"
+
+    sent = client.post(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/send",
+        headers=owner_h,
+        json={"text": "find suppliers"},
+    )
+    assert sent.status_code == 200, sent.text
+    events = sent.json()["events"]
+    assert any(e["type"] == "text_delta" for e in events)
+    assert any(e["type"] == "usage" for e in events)
+    assert events[-1]["type"] == "done"
+
+    listed = client.get(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/events",
+        headers=owner_h,
+    )
+    assert listed.status_code == 200
+    assert len(listed.json()["items"]) >= 3
+
+    trig = client.post(
+        f"/api/v1/projects/{project_id}/triggers",
+        headers=owner_h,
+        json={"kind": "chat.message", "payload": {"text": "via trigger"}},
+    )
+    assert trig.status_code == 202
+
+    disp = client.post(
+        f"/api/v1/projects/{project_id}/triggers/dispatch",
+        headers=owner_h,
+    )
+    assert disp.status_code == 200, disp.text
+    assert disp.json()["dispatched"] is True
+
+
+@requires_postgres
+def test_project_chat_turn_creates_and_reuses_session(client: TestClient) -> None:
+    admin_h = {"Authorization": f"Bearer {_token(sub='chat-admin', platform_admin=True)}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "ChatCo", "admin_email": "chat@co.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "Cursor",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-chat",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = {"Authorization": f"Bearer {_token(sub='chat-owner', email='chat@co.test')}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "ChatCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "ChatProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    first = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "hello"},
+    )
+    assert first.status_code == 200, first.text
+    body = first.json()
+    session_id = body["session_id"]
+    assert body["assistant_text"]
+    assert body["events"][-1]["type"] == "done"
+
+    second = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "again", "session_id": session_id},
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["session_id"] == session_id
+
+    sessions = client.get(f"/api/v1/projects/{project_id}/agent/sessions", headers=owner_h)
+    assert sessions.status_code == 200
+    assert any(s["id"] == session_id for s in sessions.json()["items"])
+
+    transcript = client.get(f"/api/v1/projects/{project_id}/chat/transcript", headers=owner_h)
+    assert transcript.status_code == 200, transcript.text
+    messages = transcript.json()["messages"]
+    assert transcript.json()["session_id"] == session_id
+    assert messages[0]["role"] == "user"
+    assert messages[0]["text"] == "hello"
+    assert any(m["role"] == "assistant" for m in messages)
+
+
+@requires_postgres
+def test_agent_budget_per_run_blocks_followup(client: TestClient) -> None:
+    admin_h = {"Authorization": f"Bearer {_token(sub='budget-admin', platform_admin=True)}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "BudgetCo", "admin_email": "boss@budget.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    policy = client.put(
+        f"/api/v1/admin/companies/{company_id}/agent-policy",
+        headers=admin_h,
+        json={"tool_preset": "workspace_dev", "max_tokens_per_run": 50},
+    )
+    assert policy.status_code == 200, policy.text
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "Cursor",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-budget",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = {"Authorization": f"Bearer {_token(sub='budget-boss', email='boss@budget.test')}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "BudgetCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "BudgetProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    first = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "hello"},
+    )
+    assert first.status_code == 200, first.text
+    session_id = first.json()["session_id"]
+
+    blocked = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "again", "session_id": session_id},
+    )
+    assert blocked.status_code == 429
+    assert blocked.json()["code"] == "AGENT_BUDGET"
+
+
+@requires_postgres
+def test_chat_stream_sse(client: TestClient) -> None:
+    import json
+
+    admin = _token(sub="stream-admin", platform_admin=True)
+    admin_h = {"Authorization": f"Bearer {admin}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "StreamCo", "admin_email": "stream@agentco.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "Cursor",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-stream",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = {"Authorization": f"Bearer {_token(sub='stream-owner', email='stream@agentco.test')}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "StreamCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "StreamProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    events: list[dict] = []
+    with client.stream(
+        "POST",
+        f"/api/v1/projects/{project_id}/chat/stream",
+        headers=owner_h,
+        json={"text": "stream me"},
+    ) as resp:
+        assert resp.status_code == 200, resp.text
+        assert "text/event-stream" in resp.headers.get("content-type", "")
+        for line in resp.iter_lines():
+            if not line or not line.startswith("data: "):
+                continue
+            events.append(json.loads(line.removeprefix("data: ")))
+
+    assert events[0]["type"] == "_session"
+    session_id = events[0]["data"]["session_id"]
+    assert session_id
+    deltas = [e for e in events if e.get("type") == "text_delta"]
+    assert len(deltas) >= 2
+    complete = next(e for e in events if e.get("type") == "_turn_complete")
+    assert "Cursor fixture: stream me" in complete["data"]["assistant_text"]
+
+    transcript = client.get(
+        f"/api/v1/projects/{project_id}/chat/transcript?session_id={session_id}",
+        headers=owner_h,
+    )
+    assert transcript.status_code == 200
+    assert any("stream me" in m.get("text", "") for m in transcript.json()["messages"])

@@ -2,29 +2,42 @@
 
 | Поле | Значение |
 |------|----------|
-| Status | not_started |
-| Quality | 0 |
-| Quality note | Слой не начат |
+| Status | done |
+| Quality | 8 |
+| Quality note | CRUD+bindings+file secret_ref+resolve ban cli_subscription; vault/platform_fallback — Gaps |
 | Plan | [L03](../11-implementation-plan/L03-ai-keys.md) |
 | Canon | [02-ai-provider-keys](../02-ai-provider-keys/) |
-| Last updated | 2026-08-23 — добавлена шкала Quality |
+| Last updated | 2026-08-23 — company_key_metrics in metrics API |
 | Owners | — |
 
 ---
 
 ## Семантика
 
-Инвентарь credentials для agent backends. Секрет только `secret_ref`. `resolve_credentials` — единственный runtime-путь. `cli_subscription` не credential.
-
-**Не** IdP; не cabinet MCP.
+Инвентарь credentials для agent backends. Секрет только secret_ref. `resolve_credentials` — единственный runtime-путь. cli_subscription не credential.
 
 ## Что сделано
 
-—
+| Сделано | Не сделано / Gaps |
+|---------|-------------------|
+| Таблицы ai_provider_keys, company_ai_key_bindings + Alembic ai_keys_001 | External Vault/KMS backend (file:// совместим по контракту) |
+| Admin CRUD /api/v1/admin/ai-keys без raw secret в response | platform_fallback pool ключей |
+| list_keys returns company_ids per key | Audit events ai_key.* |
+| FileSecretStore → SECRETS_DIR/ai_keys/*.secret | Project-level preferred_provider override (L07) |
+| Admin Flutter: list/create/bind/disable/renew/rotate (L04) | |
+| AiKeysService.resolve_credentials + ban cli_subscription | |
+| Lazy expire: next_renewal_at past → status expired on resolve | |
+| company_key_metrics(company_id) for L04 alerts | |
+| Bind/unbind companies; renew months 1..12; rotate-secret | |
 
 ## Как сделано
 
-—
+1. Domain enums AiProvider / ApiKind / RUNTIME_API_KINDS.
+2. ORM + FK на companies.id (L01).
+3. Create: secret → file store → DB только secret_ref; API отдаёт secret_ref_prefix.
+4. Resolve: active bindings → lazy expire by next_renewal_at → filter runtime kinds → preferred_provider → else first by created_at → else NO_AI_KEY.
+5. Renew: extends next_renewal_at; reactivates status expired → active.
+6. Тесты: unit (file store + kind ban); integration (CRUD+resolve+lazy expire) при Postgres.
 
 ## Контракты
 
@@ -32,40 +45,63 @@
 
 | ID | Форма | Статус |
 |----|-------|--------|
-| C-KEY-ENTITY | AiProviderKey API (no secret) | planned |
-| C-KEY-RESOLVE | resolve_credentials | planned |
+| C-KEY-ENTITY | Admin AI keys API без secret + Admin Flutter subset | **live** |
+| C-KEY-RESOLVE | AiKeysService.resolve_credentials → ResolvedCredential | **live** |
 
 ### Потребляет
 
 | ID | Откуда | Статус |
 |----|--------|--------|
-| C-MEMBERSHIP | L01 (`company_id`) | planned |
+| C-MEMBERSHIP | L01 company_id | live |
+| C-API-HEALTH | L00 | live |
 
 ## Связи
 
-L04 управляет ключами; L08 только resolve.
+→ L04 Admin UI, L08 AgentProviderPort. ← L01 companies.  
+Секрет не уходит в HTTP list/detail (только create/rotate принимают secret).
 
 ## Инварианты
 
-- Secret не в API response / логах.
-- Resolve не отдаёт `cli_subscription` как credential.
+- Нет plaintext secret в Postgres / JSON list/get.
+- cli_subscription не проходит resolve.
+- Disabled/expired не для новых сессий (resolve фильтрует active; lazy expire по дате).
+- Delete каскадит bindings; файл секрета удаляется.
 
 ## Карта кода
 
 ```text
-—
+apps/api/src/prodavan/
+  domain/ai_keys/
+  application/ai_keys/service.py
+  api/v1/ai_keys.py
+  infrastructure/secrets/file_store.py
+  infrastructure/persistence/models/ai_keys.py
+apps/api/alembic/versions/2026082303_ai_keys.py
+apps/api/tests/unit/test_ai_keys_domain.py
+apps/api/tests/integration/test_ai_keys.py
+apps/flutter/lib/features/admin/ai_key_{list,create,detail,rotate}_page.dart
 ```
 
 ## Gaps vs канон / DoD
 
 | Требование | Статус | Заметка |
 |------------|--------|---------|
-| DoD L03 | todo | |
+| CRUD без secret в list | done | |
+| api_kind enum + runtime filter | done | |
+| Bind/unbind + resolve active | done | |
+| Lazy expire next_renewal_at | done | on resolve; renew reactivates expired |
+| Test cli_subscription → NO_AI_KEY | done | |
+| secret_ref only | done | file:// backend |
+| Vault production backend | hole | тот же secret_ref контракт |
+| platform_fallback keys | hole | флаг принят, pool нет |
+| Audit ai_key.* | hole | следующая итерация |
+| HTTP resolve endpoint | n/a | in-process для L08 (секрет не светить в admin HTTP) |
 
 ## Проверка
 
 ```text
-—
+cd apps/api && ruff check src tests && pytest tests/unit/test_ai_keys_domain.py tests/integration/test_ai_keys.py -q
+# with Postgres: alembic upgrade head && full CRUD/resolve suite
 ```
 
 ## Оценка качества
@@ -74,8 +110,8 @@ L04 управляет ключами; L08 только resolve.
 
 | Ось | Балл 0–2 | Комментарий |
 |-----|----------|-------------|
-| A. Полнота DoD | 0 | |
-| B. Контракты | 0 | |
-| C. Инварианты и проверки | 0 | |
-| D. As-built ясность | 1 | карточка-заготовка |
-| **Quality (итог)** | **0** | not_started |
+| A. Полнота DoD | 2 | DoD CRUD+resolve закрыт |
+| B. Контракты | 2 | C-KEY-ENTITY / C-KEY-RESOLVE live |
+| C. Инварианты и проверки | 2 | no secret leak; cli ban tested |
+| D. As-built ясность | 2 | эта карточка |
+| **Quality (итог)** | **8** | Vault/platform_fallback = Gaps |

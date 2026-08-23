@@ -11,6 +11,7 @@ class AppScaffold extends StatelessWidget {
     this.floatingActionButton,
     this.drawer,
     this.bottomNavigationBar,
+    this.bottom,
     this.centerBody = false,
   });
 
@@ -20,6 +21,7 @@ class AppScaffold extends StatelessWidget {
   final Widget? floatingActionButton;
   final Widget? drawer;
   final Widget? bottomNavigationBar;
+  final PreferredSizeWidget? bottom;
   final bool centerBody;
 
   @override
@@ -36,7 +38,7 @@ class AppScaffold extends StatelessWidget {
     return Scaffold(
       appBar: title == null && (actions == null || actions!.isEmpty)
           ? null
-          : AppBar(title: title, actions: actions),
+          : AppBar(title: title, actions: actions, bottom: bottom),
       body: content,
       floatingActionButton: floatingActionButton,
       drawer: drawer,

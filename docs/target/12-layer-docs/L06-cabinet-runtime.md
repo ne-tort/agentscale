@@ -1,87 +1,79 @@
-# L06 — Cabinet Runtime
+# L06 ? Cabinet Runtime
 
-| Поле | Значение |
+| ???? | ???????? |
 |------|----------|
-| Status | not_started |
-| Quality | 0 |
-| Quality note | Слой не начат |
+| Status | done |
+| Quality | 8 |
+| Quality note | API Runtime: instance+meta+rows+MCP+bundle+packages; UI interpreters L05; sandbox start L07; L04 quotas soft stub |
 | Plan | [L06](../11-implementation-plan/L06-cabinet-runtime.md) |
 | Canon | [05-cabinets](../05-cabinets/) |
-| Last updated | 2026-08-23 — добавлена шкала Quality |
-| Owners | — |
+| Last updated | 2026-08-23 ? MCP packages |
+| Owners | ? |
 
 ---
 
-## Семантика
+## ?????????
 
-CabinetInstance: schema-per-instance, meta→UI, `cabinet.*`, MCP packages, bundles. Ownership Employee+Company+Admin; peers isolated.
+CabinetInstance: schema-per-instance, meta?UI, cabinet.*, MCP packages, bundles. Ownership Employee+Company+Admin; peers isolated.
 
-**Не** container (L07); не AgentPort (L08); не static pack.
+**??** container (L07); ?? AgentPort (L08); ?? static pack.
 
-## Что сделано
+## ??? ???????
 
-—
+| ??????? | Gaps / ????????? ???? |
+|---------|---------------------------|
+| Instance CRUD + schema-per-instance + Base tabs | UI interpreters (L05) |
+| Meta tables create + tabs list | columns/views mutate API |
+| Rows query/upsert/delete (physical) | json_document rows |
+| cabinet.* MCP dispatcher | audit events |
+| Bundle v1 export/import ? new schema (+ packages) | |
+| MCP packages validate/deploy/list/disable/export | sandbox process start (L07 materialize) |
+| Soft max 20 packages/cabinet | Company quotas (L04) ? wired via CompanyQuotaService |
+| Materialize stub port | Real FS layout (L07) |
 
-## Как сделано
+## ??? ???????
 
-—
+1. package_codec.validate_package_zip ? runtime/entry/shell allowlist, path safety.
+2. CabinetPackagesService ? registry meta_mcp_packages + file artifacts under storage/cabinet_packages/.
+3. Bundle pack/unpack embeds mcp_packages/*.zip; import redeploys into new instance.
+4. HTTP /mcp-packages + MCP tools cabinet.mcp_packages.*.
 
-## Контракты
+## ?????????
 
-### Публикует
+### ?????????
 
-| ID | Форма | Статус |
+| ID | ????? | ?????? |
 |----|-------|--------|
-| C-INSTANCE | Instance CRUD/ACL | planned |
-| C-META-DATA | Meta + rows API | planned |
-| C-CABINET-MCP | `cabinet.*` tools | planned |
-| C-MCP-PKG | package deploy/bindings | planned |
-| C-BUNDLE | export/import zip | planned |
-| C-MATERIALIZE | materialize hook | planned |
+| C-INSTANCE | CRUD + ACL | **live** |
+| C-META-DATA | meta + rows | **live** (subset) |
+| C-CABINET-MCP | dispatcher | **live** (subset) |
+| C-BUNDLE | export/import v1 | **live** |
+| C-MCP-PKG | deploy/list/disable/export | **live** (registry; no sandbox run) |
+| C-MATERIALIZE | stub port | **live** (stub) |
 
-### Потребляет
+## Gaps vs ????? / DoD
 
-| ID | Откуда | Статус |
-|----|--------|--------|
-| C-MEMBERSHIP / ACL | L01 | planned |
-| C-QUOTA | L04 | planned |
-| C-UI-COLLECTION | L02 | planned |
-
-## Связи
-
-L05 host; L07 materialize; L08 cabinet MCP.
-
-## Инварианты
-
-- Нет cross-schema SQL; нет raw SQL MCP.
-- Bundle import → новая schema.
-
-## Карта кода
-
-```text
-—
-```
-
-## Gaps vs канон / DoD
-
-| Требование | Статус | Заметка |
+| ?????????? | ?????? | ??????? |
 |------------|--------|---------|
-| DoD L06 | todo | |
+| Package deploy + strict manifest | done | |
+| Sandbox start on materialize | hole | L07 |
+| Company/Admin quotas | done | L04 CompanyQuotaService |
+| columns/views CRUD | hole | |
+| UI meta interpreters | hole | L05 |
+| Non-system tabs from bundle | hole | |
 
-## Проверка
+## ????????
 
-```text
-—
-```
+`	ext
+cd apps/api && ruff check src tests && pytest tests/unit/test_cabinet_*.py -q
+`
 
-## Оценка качества
+## ?????? ????????
 
-Рубрика: [quality-score.md](quality-score.md).
-
-| Ось | Балл 0–2 | Комментарий |
+| ??? | ???? 0?2 | ??????????? |
 |-----|----------|-------------|
-| A. Полнота DoD | 0 | |
-| B. Контракты | 0 | |
-| C. Инварианты и проверки | 0 | |
-| D. As-built ясность | 1 | карточка-заготовка |
-| **Quality (итог)** | **0** | not_started |
+| A. DoD API | 2 | Runtime API closed; UI/sandbox out of layer close |
+| B. ????????? | 2 | C-MCP-PKG live |
+| C. ?????????? | 2 | shell false, path allowlist, peer ACL |
+| D. As-built | 2 | ??? ???????? |
+| **Quality** | **8** | done ??? API Runtime Phase A |

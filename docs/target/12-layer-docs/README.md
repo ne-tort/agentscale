@@ -26,12 +26,12 @@
 | ID | Слой | Status | Quality |
 |----|------|--------|---------|
 | [L00](L00-platform-skeleton.md) | Platform skeleton | done | **8** |
-| [L01](L01-identity.md) | Identity & entitlements | not_started | **0** |
+| [L01](L01-identity.md) | Identity & entitlements | partial | **7** |
 | [L02](L02-ui-core.md) | UI mobile core | done | **8** |
-| [L03](L03-ai-keys.md) | AI Provider Keys | not_started | **0** |
+| [L03](L03-ai-keys.md) | AI Provider Keys | done | **8** |
 | [L04](L04-admin-company.md) | Admin + Company | not_started | **0** |
 | [L05](L05-employee-shell.md) | Employee shell | not_started | **0** |
-| [L06](L06-cabinet-runtime.md) | Cabinet Runtime | not_started | **0** |
+| [L06](L06-cabinet-runtime.md) | Cabinet Runtime | done | **8** |
 | [L07](L07-projects-runtime.md) | Projects & container | not_started | **0** |
 | [L08](L08-agent-providers.md) | Agent providers | not_started | **0** |
 | [L09](L09-vertical-integration.md) | Vertical integration | not_started | **0** |
