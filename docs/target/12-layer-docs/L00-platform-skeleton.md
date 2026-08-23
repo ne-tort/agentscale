@@ -7,7 +7,7 @@
 | Quality note | DoD закрыт: layout, health+meta, AppError, Alembic up/down CI, features placeholder, contract tests; veto пуст. P0 w1–w3: core lifespan + Redis + ObjectStorage (subset) |
 | Plan | [L00](../11-implementation-plan/L00-platform-skeleton.md), [P0](../11-implementation-plan/P0-platform-infra.md) |
 | Canon | [STUB](../../../STUB.md), [AGENTS](../../../AGENTS.md), [LAYOUT.md](../../../apps/api/src/prodavan/LAYOUT.md), [13](../13-platform-infra/) |
-| Last updated | 2026-08-24 — P0 Celery WorkerManager (w4) |
+| Last updated | 2026-08-24 — P0 Kafka dual-write (w5) |
 | Owners | — |
 
 ---
@@ -56,6 +56,7 @@
 | C-CACHE | RedisManager + settings; ready checks when URL set | **live** (subset; URL optional) |
 | C-OBJECT-STORE | ObjectStorageManager local\|s3; `object://` refs | **live** (subset) |
 | C-JOBS | WorkerManager + Celery tasks (drain/idle/rematerialize) | **live** (subset) |
+| C-EVENT-BUS | KafkaManager + EventEnvelope dual-write | **live** (subset) |
 
 ### Потребляет
 
@@ -109,7 +110,6 @@ apps/flutter/lib/
 | No legacy login/procurement | done | not in running app |
 | `LifespanManager` + `LifespanResource` register | **done** (P0 w1) | `core/lifespan/`; see [13](../13-platform-infra/core-managers.md) |
 | Infra managers в `prodavan.core` | **partial** | Redis + ObjectStorage + Worker + Kafka live (subset); holes: consumer cutover, deploy |
-| Last updated | 2026-08-24 — P0 Kafka dual-write (w5) |
 | Redis обязателен во всех окружениях | **hole** | default `REDIS_URL` empty (CI/local); prod: set URL + `REDIS_REQUIRED=true` |
 | Object store SoT для всех blobs | **partial** | attach + cabinet packages via manager; materialize workspace tree — local FS hole |
 | Celery executor для background jobs | **partial** | `CELERY_ENABLED` + worker process; default off → in-process fallback |
