@@ -20,8 +20,11 @@ class ProjectCreatePage extends StatefulWidget {
 }
 
 class _ProjectCreatePageState extends State<ProjectCreatePage> {
+  static const _providers = <String?>[null, 'cursor', 'codex', 'claude_code'];
+
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController(text: 'New project');
+  String? _agentProvider;
   bool _saving = false;
   String? _error;
 
@@ -41,6 +44,7 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
       final project = await workContext.api.createProject(
         cabinetId: widget.cabinetId,
         name: _nameCtrl.text.trim(),
+        agentProvider: _agentProvider,
       );
       if (!mounted) return;
       final projectId = project['id'] as String;
@@ -64,6 +68,11 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
     }
   }
 
+  String _labelFor(String? value) {
+    if (value == null) return 'Company default';
+    return value;
+  }
+
   @override
   Widget build(BuildContext context) {
     return AppScaffold(
@@ -83,6 +92,21 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
                   if (v == null || v.trim().isEmpty) return 'Name required';
                   return null;
                 },
+              ),
+              DropdownButtonFormField<String?>(
+                value: _agentProvider,
+                decoration: const InputDecoration(
+                  labelText: 'Preferred agent provider',
+                  border: OutlineInputBorder(),
+                ),
+                items: [
+                  for (final p in _providers)
+                    DropdownMenuItem<String?>(
+                      value: p,
+                      child: Text(_labelFor(p)),
+                    ),
+                ],
+                onChanged: _saving ? null : (v) => setState(() => _agentProvider = v),
               ),
               AppButton(
                 label: _saving ? 'Creating…' : 'Create and open chat',

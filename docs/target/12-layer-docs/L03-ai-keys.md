@@ -7,7 +7,7 @@
 | Quality note | CRUD+bindings+resolve+audit+platform pool+vault:// routing; live Vault ops — gap |
 | Plan | [L03](../11-implementation-plan/L03-ai-keys.md) |
 | Canon | [02-ai-provider-keys](../02-ai-provider-keys/) |
-| Last updated | 2026-08-23 — company_key_metrics in metrics API |
+| Last updated | 2026-08-23 — project agent_provider override wired |
 | Owners | — |
 
 ---
@@ -20,8 +20,8 @@
 
 | Сделано | Не сделано / Gaps |
 |---------|-------------------|
-| Таблицы ai_provider_keys, company_ai_key_bindings + Alembic ai_keys_001 | Project-level preferred_provider override (L07) |
-| Admin CRUD /api/v1/admin/ai-keys без raw secret в response | live Vault token/ops hardening |
+| Таблицы ai_provider_keys, company_ai_key_bindings + Alembic ai_keys_001 | live Vault token/ops hardening |
+| Admin CRUD /api/v1/admin/ai-keys без raw secret в response | — |
 | list_keys returns company_ids per key | — |
 | FileSecretStore → SECRETS_DIR/ai_keys/*.secret | — |
 | Vault KV v2 backend (`vault://ai_keys/…`) via RoutingSecretStore | — |
@@ -29,6 +29,7 @@
 | AiKeysService.resolve_credentials + ban cli_subscription | |
 | Lazy expire: next_renewal_at past → status expired on resolve + audit | |
 | platform_fallback → unbound keys pool on resolve | L08 create_session reads company policy |
+| Project.agent_provider override on resolve (via L07 create/PATCH) | — |
 | company_key_metrics(company_id) for L04 alerts | |
 | Bind/unbind companies; renew months 1..12; rotate-secret | |
 
@@ -37,7 +38,7 @@
 1. Domain enums AiProvider / ApiKind / RUNTIME_API_KINDS.
 2. ORM + FK на companies.id (L01).
 3. Create: secret → RoutingSecretStore (file:// or vault://) → DB только secret_ref; API отдаёт secret_ref_prefix.
-4. Resolve: active bindings → lazy expire by next_renewal_at → filter runtime kinds → preferred_provider → else first by created_at → else NO_AI_KEY.
+4. Resolve: active bindings → lazy expire by next_renewal_at → filter runtime kinds → preferred_provider (project.agent_provider or company policy) → else first by created_at → else NO_AI_KEY.
 5. Renew: extends next_renewal_at; reactivates status expired → active.
 6. Тесты: unit (file store + kind ban); integration (CRUD+resolve+lazy expire) при Postgres.
 

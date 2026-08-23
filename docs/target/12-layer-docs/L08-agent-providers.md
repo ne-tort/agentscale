@@ -7,7 +7,7 @@
 | Quality note | Port+events+fixture+budget+SSE+HITL; Node sidecar — gap |
 | Plan | [L08](../11-implementation-plan/L08-agent-providers.md) |
 | Canon | [08-agent-providers](../08-agent-providers/) |
-| Last updated | 2026-08-23 — HITL tool approval |
+| Last updated | 2026-08-23 — admin drain + opt-in trigger worker |
 | Owners | — |
 
 ---
@@ -29,7 +29,7 @@ AgentProviderPort + frozen AgentEvent; credentials только через L03 r
 | `GET .../chat/transcript` + list sessions; user + tool bubbles | |
 | `AgentBudgetService` — monthly tokens + USD + per-run token hard-stop | Node sidecar (real Cursor SDK) |
 | HITL `tool_approval_request` + approve/deny API + L05 ToolApprovePage | Codex/Claude real adapters |
-| Trigger dispatch + drain (`?max=`) | Background daemon worker |
+| Trigger dispatch + drain (`?max=`) + `POST /admin/triggers/drain` + opt-in asyncio worker | Durable multi-replica worker |
 | Unit + integration tests | Golden JSON fixtures |
 
 ## Как сделано
@@ -37,9 +37,10 @@ AgentProviderPort + frozen AgentEvent; credentials только через L03 r
 1. Domain `AgentEvent`, `CreateOpts`, `AgentToolPolicy` presets.
 2. `AgentPolicyService` — company preset + mcp.json ∩ policy.
 3. `AgentSessionService` — create/send/chat_turn/transcript; `AgentBudgetService` before turns.
-4. `AgentTriggerDispatcher` — dequeue trigger → session + send.
-5. HTTP `/projects/{id}/agent/sessions`, `/chat`, `/chat/transcript`, `/triggers/dispatch`.
-6. `user_message` — platform envelope only (not in frozen adapter AgentEvent stream).
+4. `AgentTriggerDispatcher` — dequeue trigger → session + send; `drain_all` for worker/admin.
+5. HTTP `/projects/{id}/agent/sessions`, `/chat`, `/chat/transcript`, `/triggers/dispatch`; admin `/admin/triggers/drain`.
+6. Opt-in `TRIGGER_WORKER_ENABLED` asyncio loop in API lifespan (not multi-replica safe).
+7. `user_message` — platform envelope only (not in frozen adapter AgentEvent stream).
 
 ## Контракты
 

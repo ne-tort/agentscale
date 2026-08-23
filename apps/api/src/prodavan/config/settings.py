@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     # L07 local-ws MCP package processes (opt-in; no bubblewrap/k8s yet)
     mcp_sandbox_spawn: bool = False
 
+    # L07/L08 background trigger drain (opt-in asyncio loop in API process)
+    trigger_worker_enabled: bool = False
+    trigger_worker_interval_sec: float = 5.0
+    trigger_worker_max_projects: int = 20
+    trigger_worker_batch_max: int = 10
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

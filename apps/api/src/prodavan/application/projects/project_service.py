@@ -9,6 +9,7 @@ from prodavan.application.cabinets.access import CabinetAccessService
 from prodavan.application.projects.access import ProjectAccessService
 from prodavan.application.projects.materialize import get_materialize_service
 from prodavan.application.projects.trigger_service import ProjectTriggerService
+from prodavan.domain.ai_keys import AiProvider
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.domain.projects import (
@@ -21,6 +22,22 @@ from prodavan.domain.projects import (
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
 from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
+
+_ALLOWED_PROVIDERS = frozenset(p.value for p in AiProvider)
+
+
+def _normalize_agent_provider(value: str | None) -> str | None:
+    if value is None or not str(value).strip():
+        return None
+    normalized = str(value).strip()
+    if normalized not in _ALLOWED_PROVIDERS:
+        raise AppError(
+            code="VALIDATION_ERROR",
+            title="Validation Error",
+            status=422,
+            detail=f"agent_provider must be one of: {', '.join(sorted(_ALLOWED_PROVIDERS))}",
+        )
+    return normalized
 
 
 def _public(row: ProjectRow) -> dict:
@@ -89,7 +106,7 @@ class ProjectService:
             status=ProjectStatus.ACTIVE,
             workspace_key=ws_key,
             container_ref=container_ref_for(ws_key),
-            agent_provider=agent_provider,
+            agent_provider=_normalize_agent_provider(agent_provider),
         )
         self._session.add(row)
         await self._session.flush()
@@ -142,6 +159,36 @@ class ProjectService:
         row = await self._access.require_access(
             project_id=project_id, principal=principal, employee=employee, write=False
         )
+        return _public(row)
+
+    async def patch(
+        self,
+        *,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        name: str | None = None,
+        agent_provider: str | None = None,
+        update_agent_provider: bool = False,
+    ) -> dict:
+        """Update mutable project fields. ``agent_provider`` overrides company preferred_provider."""
+        row = await self._access.require_access(
+            project_id=project_id, principal=principal, employee=employee, write=True
+        )
+        if name is not None:
+            trimmed = name.strip()
+            if not trimmed:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail="name required",
+                )
+            row.name = trimmed
+        if update_agent_provider:
+            row.agent_provider = _normalize_agent_provider(agent_provider)
+        await self._session.commit()
+        await self._session.refresh(row)
         return _public(row)
 
     async def rematerialize(

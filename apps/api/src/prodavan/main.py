@@ -12,14 +12,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from prodavan.api.exception_handlers import register_exception_handlers
 from prodavan.api.v1 import health as health_routes
 from prodavan.api.v1.router import router as v1_router
+from prodavan.application.agent.trigger_worker import start_trigger_worker, stop_trigger_worker
 from prodavan.config.settings import settings
 from prodavan.infrastructure.persistence.database import dispose_engine
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    yield
-    await dispose_engine()
+    start_trigger_worker()
+    try:
+        yield
+    finally:
+        await stop_trigger_worker()
+        await dispose_engine()
 
 
 def create_app() -> FastAPI:

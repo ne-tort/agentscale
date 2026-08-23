@@ -4,10 +4,10 @@
 |------|----------|
 | Status | doing |
 | Quality | 7 |
-| Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain; k8s isolator / daemon worker — gaps |
+| Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain/worker; k8s isolator — gap |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-23 — local MCP spawn + trigger drain |
+| Last updated | 2026-08-23 — PATCH agent_provider + opt-in trigger worker |
 | Owners | — |
 
 ---
@@ -21,20 +21,21 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 | Сделано | Gaps |
 |---------|------|
 | ORM projects / project_triggers / project_attachments + migration | k8s pod scheduler |
-| CRUD: create/list/get; pause/resume/delete | |
+| CRUD: create/list/get/PATCH (name, agent_provider); pause/resume/delete | |
 | Materialize: AGENTS from cabinet workspace-docs + packages/sandbox | bubblewrap/k8s isolator |
 | `container_ref=local-ws:{workspace_key}` | |
-| Triggers: enqueue + list + dispatch/drain (`?max=`) | Background daemon worker |
+| Triggers: enqueue + list + dispatch/drain (`?max=`) + admin drain-all + opt-in asyncio worker | Durable queue / multi-replica leader election |
 | Attachments: base64 upload → inbox + DB ref | Virus scan; company policy limits |
-| Integration tests lifecycle + FS layout | E2E with agent ping |
+| Integration tests lifecycle + FS layout + provider patch + admin drain | E2E with agent ping |
 
 ## Как сделано
 
-1. `ProjectService` — cabinet ACL via L06; create → materialize → `project.prepare` trigger.
+1. `ProjectService` — cabinet ACL via L06; create → materialize → `project.prepare` trigger; PATCH name/agent_provider.
 2. `ProjectMaterializeService` — idempotent FS under `storage/projects/{workspace_key}/workspace/`.
 3. `WorkspaceLayoutWriter` — container.md layout; extracts enabled package zips.
-4. HTTP: `/cabinets/{id}/projects`, `/projects/{id}/*` per project-contract.
+4. HTTP: `/cabinets/{id}/projects`, `/projects/{id}/*` per project-contract; `POST /admin/triggers/drain`.
 5. L06 `materialize-stub` → real FS (status `materialized`).
+6. Opt-in trigger worker (`TRIGGER_WORKER_ENABLED`) — in-process asyncio; hole: no leader election for multi-replica.
 
 ## Контракты
 
@@ -44,7 +45,7 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 |----|-------|--------|
 | C-PROJECT | entity + lifecycle API | **live** (subset) |
 | C-MATERIALIZE | FS layout + paths | **live** (local-ws; no pod) |
-| C-TRIGGERS | enqueue + list + dispatch/drain | **live** (subset; no daemon) |
+| C-TRIGGERS | enqueue + list + dispatch/drain + admin drain + opt-in worker | **live** (subset; in-process worker) |
 | C-ATTACH | upload + storage_ref | **live** (subset) |
 
 ### Потребляет
@@ -86,10 +87,11 @@ apps/api/tests/unit/test_projects_domain.py
 | Project CRUD in cabinet | done | |
 | Materialize layout | done | AGENTS from `meta_workspace_docs` (slug=agents); empty → default |
 | Pause/resume/delete | done | local-ws only |
-| Trigger dispatch to agent | done | POST triggers/dispatch + `?max=` drain |
+| Trigger dispatch to agent | done | POST triggers/dispatch + `?max=` + `POST /admin/triggers/drain` + opt-in `TRIGGER_WORKER_*` |
 | MCP package sandbox run | live (subset) | prepare + opt-in local spawn (`MCP_SANDBOX_SPAWN`); k8s/bubblewrap — hole |
 | Platform vs project event bus split | partial | project_triggers table only |
 | Attachment virus/size policy | stub | ATTACHMENT_MAX_BYTES constant |
+| Project preferred_provider | done | `agent_provider` create/PATCH; resolve uses project override |
 
 ## Проверка
 
@@ -101,8 +103,8 @@ cd apps/api && ruff check src tests && pytest tests/unit/test_projects_domain.py
 
 | Ось | Балл 0–2 | Комментарий |
 |-----|----------|-------------|
-| A. Полнота DoD | 1 | core API+FS; worker/pod gaps |
-| B. Контракты | 1 | C-PROJECT/MATERIALIZE live subset |
-| C. Инварианты и проверки | 1 | ACL + lifecycle tests |
+| A. Полнота DoD | 1 | core API+FS+worker opt-in; pod gap |
+| B. Контракты | 2 | C-PROJECT/MATERIALIZE/TRIGGERS live subset |
+| C. Инварианты и проверки | 1 | ACL + lifecycle + patch/drain tests |
 | D. As-built ясность | 2 | эта карточка |
-| **Quality (итог)** | **7** | doing; k8s isolator + daemon worker gaps |
+| **Quality (итог)** | **7** | doing; k8s isolator gap; worker not multi-replica safe |

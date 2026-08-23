@@ -5,6 +5,7 @@ import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/features/employee/project_settings_page.dart';
 import 'package:prodavan/features/employee/tool_approve_page.dart';
 
 /// Chat-first project workspace (L05/L09) — SSE streaming assistant deltas.
@@ -55,6 +56,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   final _messages = <_ChatLine>[];
   final _pendingAttachments = <_PendingAttachment>[];
   String? _sessionId;
+  late String _projectName;
   bool _loading = true;
   bool _sending = false;
   bool _uploadingAttachment = false;
@@ -65,6 +67,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   @override
   void initState() {
     super.initState();
+    _projectName = widget.projectName;
     workContext.enterProject(widget.projectId);
     _loadTranscript();
   }
@@ -369,8 +372,26 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   @override
   Widget build(BuildContext context) {
     return AppScaffold(
-      title: Text(widget.projectName),
+      title: Text(_projectName),
       actions: [
+        IconButton(
+          onPressed: _loading || _sending
+              ? null
+              : () async {
+                  final updated = await Navigator.of(context).push<String>(
+                    MaterialPageRoute(
+                      builder: (_) => ProjectSettingsPage(
+                        projectId: widget.projectId,
+                        projectName: _projectName,
+                      ),
+                    ),
+                  );
+                  if (!mounted || updated == null) return;
+                  setState(() => _projectName = updated);
+                },
+          icon: const Icon(Icons.settings_outlined),
+          tooltip: 'Project settings',
+        ),
         IconButton(
           onPressed: _loading || _sending ? null : _loadTranscript,
           icon: const Icon(Icons.refresh),

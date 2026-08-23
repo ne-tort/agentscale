@@ -6,8 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.domain.errors import AppError
-from prodavan.domain.projects import PROJECT_TRIGGER_KINDS, TriggerStatus
-from prodavan.infrastructure.persistence.models.projects import ProjectTriggerRow
+from prodavan.domain.projects import PROJECT_TRIGGER_KINDS, ProjectStatus, TriggerStatus
+from prodavan.infrastructure.persistence.models.projects import ProjectRow, ProjectTriggerRow
 
 
 class ProjectTriggerService:
@@ -55,3 +55,17 @@ class ProjectTriggerService:
             }
             for r in q.scalars().all()
         ]
+
+    async def list_active_project_ids_with_queued(self, *, limit: int = 50) -> list[str]:
+        """Distinct active projects that have at least one queued trigger (worker drain)."""
+        q = await self._session.execute(
+            select(ProjectTriggerRow.project_id)
+            .join(ProjectRow, ProjectRow.id == ProjectTriggerRow.project_id)
+            .where(
+                ProjectTriggerRow.status == TriggerStatus.QUEUED,
+                ProjectRow.status == ProjectStatus.ACTIVE,
+            )
+            .distinct()
+            .limit(limit)
+        )
+        return list(q.scalars().all())

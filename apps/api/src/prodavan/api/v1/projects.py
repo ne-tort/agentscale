@@ -27,6 +27,13 @@ class CreateProjectBody(BaseModel):
     agent_provider: str | None = Field(default=None, max_length=32)
 
 
+class PatchProjectBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    agent_provider: str | None = Field(default=None, max_length=32)
+
+
 class TriggerBody(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -85,6 +92,27 @@ async def get_project(
     employee: EmployeeDep,
 ) -> dict:
     return await ProjectService(session).get(project_id=project_id, principal=principal, employee=employee)
+
+
+@router.patch("/projects/{project_id}")
+async def patch_project(
+    project_id: str,
+    body: PatchProjectBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    fields = body.model_dump(exclude_unset=True)
+    if not fields:
+        raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="no fields to update")
+    return await ProjectService(session).patch(
+        project_id=project_id,
+        principal=principal,
+        employee=employee,
+        name=fields.get("name"),
+        agent_provider=fields.get("agent_provider"),
+        update_agent_provider="agent_provider" in fields,
+    )
 
 
 @router.post("/projects/{project_id}/materialize")

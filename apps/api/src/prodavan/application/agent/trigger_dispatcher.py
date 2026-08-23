@@ -63,6 +63,51 @@ class AgentTriggerDispatcher:
             "items": results,
         }
 
+    async def drain_all(
+        self,
+        *,
+        max_projects: int = 20,
+        max_per_project: int = _DEFAULT_DRAIN_MAX,
+    ) -> dict:
+        """Drain queued triggers across active projects (background worker / admin)."""
+        from prodavan.application.projects.trigger_service import ProjectTriggerService
+
+        limit_projects = max(1, min(max_projects, 100))
+        limit_each = max_per_project if 1 <= max_per_project <= _HARD_DRAIN_MAX else _DEFAULT_DRAIN_MAX
+        project_ids = await ProjectTriggerService(self._session).list_active_project_ids_with_queued(
+            limit=limit_projects
+        )
+        projects: list[dict] = []
+        total = 0
+        for project_id in project_ids:
+            project = await self._projects.get_project(project_id)
+            owner = await self._session.get(EmployeeRow, project.owner_employee_id)
+            if owner is None:
+                projects.append(
+                    {
+                        "project_id": project_id,
+                        "dispatched": False,
+                        "reason": "owner missing",
+                        "count": 0,
+                        "items": [],
+                    }
+                )
+                continue
+            principal = Principal(sub=owner.keycloak_sub or owner.id, email=owner.email)
+            batch = await self.dispatch_batch(
+                project_id=project_id,
+                principal=principal,
+                employee=owner,
+                max_n=limit_each,
+            )
+            total += int(batch.get("count") or 0)
+            projects.append({"project_id": project_id, **batch})
+        return {
+            "dispatched": total > 0,
+            "count": total,
+            "projects": projects,
+        }
+
     async def _dispatch_one(
         self,
         *,

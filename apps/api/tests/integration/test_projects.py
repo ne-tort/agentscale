@@ -130,3 +130,70 @@ def test_project_create_materialize_lifecycle(client: TestClient) -> None:
     assert deleted.status_code == 200
     assert deleted.json()["status"] == "deleted"
     assert not ws_root.parent.parent.joinpath(body["workspace_key"]).exists() or not ws_root.exists()
+
+
+@requires_postgres
+def test_project_patch_agent_provider(client: TestClient) -> None:
+    _, cabinet_id, owner_tok = _setup_cabinet(client)
+    created = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "Provider Demo", "agent_provider": "cursor"},
+    )
+    assert created.status_code == 201, created.text
+    project_id = created.json()["id"]
+    assert created.json()["agent_provider"] == "cursor"
+
+    patched = client.patch(
+        f"/api/v1/projects/{project_id}",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"agent_provider": "codex", "name": "Provider Demo Renamed"},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["agent_provider"] == "codex"
+    assert patched.json()["name"] == "Provider Demo Renamed"
+
+    cleared = client.patch(
+        f"/api/v1/projects/{project_id}",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"agent_provider": None},
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["agent_provider"] is None
+
+    bad = client.patch(
+        f"/api/v1/projects/{project_id}",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"agent_provider": "nope"},
+    )
+    assert bad.status_code == 422
+
+
+@requires_postgres
+def test_admin_triggers_drain(client: TestClient) -> None:
+    _, cabinet_id, owner_tok = _setup_cabinet(client)
+    admin = _token(sub="padmin", platform_admin=True)
+    created = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "Drain Demo"},
+    )
+    assert created.status_code == 201, created.text
+    project_id = created.json()["id"]
+
+    # create enqueues project.prepare — drain should ack it
+    drained = client.post(
+        "/api/v1/admin/triggers/drain?max_projects=10&max_per_project=5",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert drained.status_code == 200, drained.text
+    body = drained.json()
+    assert "projects" in body
+    assert body.get("count", 0) >= 1
+
+    empty = client.post(
+        "/api/v1/admin/triggers/drain",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert empty.status_code == 200
+    assert empty.json().get("dispatched") is False

@@ -611,6 +611,7 @@ class ProdavanApi {
   Future<Map<String, dynamic>> createProject({
     required String cabinetId,
     required String name,
+    String? agentProvider,
   }) async {
     final prevCab = this.cabinetId;
     this.cabinetId = cabinetId;
@@ -618,12 +619,55 @@ class ProdavanApi {
       final res = await http.post(
         _uri('/cabinets/$cabinetId/projects'),
         headers: _headers,
-        body: jsonEncode({'name': name}),
+        body: jsonEncode({
+          'name': name,
+          if (agentProvider != null && agentProvider.isNotEmpty) 'agent_provider': agentProvider,
+        }),
       );
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
       this.cabinetId = prevCab;
+    }
+  }
+
+  Future<Map<String, dynamic>> getProject(String projectId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await http.get(_uri('/projects/$projectId'), headers: _headers);
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Map<String, dynamic>> patchProject({
+    required String projectId,
+    String? name,
+    String? agentProvider,
+    bool clearAgentProvider = false,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final body = <String, dynamic>{};
+      if (name != null) body['name'] = name;
+      if (clearAgentProvider) {
+        body['agent_provider'] = null;
+      } else if (agentProvider != null) {
+        body['agent_provider'] = agentProvider;
+      }
+      final res = await http.patch(
+        _uri('/projects/$projectId'),
+        headers: _headers,
+        body: jsonEncode(body),
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
     }
   }
 
