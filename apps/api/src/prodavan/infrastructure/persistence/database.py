@@ -30,6 +30,11 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 
 async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
+    """Request-scoped session. Callers commit explicitly.
+
+    Do not auto-commit here: SSE (`chat/stream`) keeps using the session after
+    the route returns StreamingResponse.
+    """
     session_factory = get_session_factory()
     async with session_factory() as session:
         yield session

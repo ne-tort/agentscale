@@ -1,4 +1,10 @@
-"""Invoke MCP package platform event handlers from deployed zip artifacts (L06/L07)."""
+"""Invoke MCP package platform event handlers from deployed zip artifacts (L06/L07).
+
+Stdio contract (lite — not full MCP stdio):
+- stdin: one JSON object (UTF-8) with platform_event_id / platform_event_type / …
+- stdout: optional one JSON object; parsed into ``result`` when valid
+- exit 0 → action=invoked; non-zero → action=failed
+"""
 
 from __future__ import annotations
 
@@ -12,6 +18,29 @@ from typing import Any
 
 _DEFAULT_TIMEOUT_SEC = 5.0
 _HANDLER_REL = Path("src") / "on_platform_event.py"
+_STDOUT_CAP = 4000
+
+
+def _parse_stdout_result(stdout: str) -> dict[str, Any] | None:
+    text = stdout.strip()
+    if not text:
+        return None
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        # Prefer last non-empty line (handlers may log then print JSON).
+        for line in reversed(text.splitlines()):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                parsed = json.loads(line)
+                break
+            except json.JSONDecodeError:
+                continue
+        else:
+            return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def invoke_platform_event_from_artifact(
@@ -56,12 +85,16 @@ def invoke_platform_event_from_artifact(
         except OSError as exc:
             return {"action": "failed", "reason": str(exc), "package": package_name}
 
-        stdout = (proc.stdout or b"").decode("utf-8", errors="replace")[:500]
+        stdout = (proc.stdout or b"").decode("utf-8", errors="replace")[:_STDOUT_CAP]
         stderr = (proc.stderr or b"").decode("utf-8", errors="replace")[:500]
-        return {
+        out: dict[str, Any] = {
             "action": "invoked" if proc.returncode == 0 else "failed",
             "package": package_name,
             "exit_code": proc.returncode,
-            "stdout": stdout,
+            "stdout": stdout[:500],
             "stderr": stderr,
         }
+        parsed = _parse_stdout_result(stdout)
+        if parsed is not None:
+            out["result"] = parsed
+        return out

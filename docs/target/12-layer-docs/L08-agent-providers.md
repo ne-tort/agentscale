@@ -7,7 +7,7 @@
 | Quality note | Port+events+fixture+budget+SSE+HITL; Node sidecar — gap |
 | Plan | [L08](../11-implementation-plan/L08-agent-providers.md) |
 | Canon | [08-agent-providers](../08-agent-providers/) |
-| Last updated | 2026-08-23 — COMPANY_SUSPENDED gate on create/send |
+| Last updated | 2026-08-23 — outbox-lite sync + COMPANY_SUSPENDED |
 | Owners | — |
 
 ---
@@ -29,7 +29,7 @@ AgentProviderPort + frozen AgentEvent; credentials только через L03 r
 | `GET .../chat/transcript` + list sessions; user + tool bubbles | |
 | `AgentBudgetService` — monthly tokens + USD + per-run token hard-stop | Node sidecar (real Cursor SDK) |
 | HITL `tool_approval_request` + approve/deny API + L05 ToolApprovePage | Codex/Claude real adapters |
-| Trigger dispatch + drain (`?max=`) + regenerate/schedule/webhook/telegram + admin drain + opt-in worker (advisory lock) | Durable outbox |
+| Trigger dispatch + drain (`?max=`) + regenerate/schedule/webhook/telegram + admin drain + opt-in worker (advisory lock + outbox lease) | External broker |
 | Chat text optional when attachment_refs present | |
 | `CompanySubscriptionGate` on session create/send → `COMPANY_SUSPENDED` | |
 | Unit + integration tests | Golden JSON fixtures |
@@ -42,8 +42,9 @@ AgentProviderPort + frozen AgentEvent; credentials только через L03 r
 4. `AgentTriggerDispatcher` — dequeue trigger → session + send; `drain_all` for worker/admin.
 5. HTTP `/projects/{id}/agent/sessions`, `/chat`, `/chat/transcript`, `/triggers/dispatch`; admin `/admin/triggers/drain`.
 6. Chat attachment refs validated against project DB before send (C-ATTACH).
-7. Opt-in `TRIGGER_WORKER_ENABLED` asyncio loop in API lifespan (not multi-replica safe).
+7. Opt-in `TRIGGER_WORKER_ENABLED` asyncio loop in API lifespan + row lease/SKIP LOCKED (multi-replica: advisory lock + lease; not external broker).
 8. `user_message` — platform envelope only (not in frozen adapter AgentEvent stream).
+9. Lazy subscription SPI commit is inside `CompanySubscriptionGate.ensure_suspended_platform_event` (session has no auto-commit — SSE).
 
 ## Контракты
 

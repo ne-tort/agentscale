@@ -7,7 +7,7 @@
 | Quality note | Dev shell + SSE chat + tab interpreters + bundle I/O + meta columns |
 | Plan | [L05](../11-implementation-plan/L05-employee-shell.md) |
 | Canon | [04-employees](../04-employees/), [session](../10-identity-keycloak/session.md) |
-| Last updated | 2026-08-23 — project inbox attachment list/delete |
+| Last updated | 2026-08-23 — SSE cancel marks (cancelled) bubble |
 | Owners | — |
 
 ---
@@ -31,7 +31,7 @@
 | `ProjectCreatePage` full-page (no modal) + agent provider | |
 | `ProjectSettingsPage` — name + provider override | |
 | Import/export bundle UI + starter catalog import | |
-| ProjectWorkspacePage — SSE chat + transcript + attachment chips + inbox list + suspend banner + HITL | Image thumbnails |
+| ProjectWorkspacePage — SSE chat + transcript + attachment chips + inbox list + suspend banner + HITL + cancel | Image thumbnails |
 | Tables tab — row upsert/delete + DangerConfirm delete | |
 | Chat tab → `ProjectListPage` | |
 | Context tab — stats + export + AGENTS edit | |

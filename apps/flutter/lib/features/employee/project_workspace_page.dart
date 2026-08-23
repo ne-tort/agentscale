@@ -366,12 +366,31 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       }
       if (!mounted) return;
       if (_cancelRequested) {
-        setState(() => _sending = false);
+        setState(() {
+          _messages[assistantIndex] = _ChatLine(
+            role: 'assistant',
+            text: assistantText.isEmpty ? '(cancelled)' : '$assistantText\n(cancelled)',
+          );
+          _sending = false;
+          _cancelRequested = false;
+        });
         return;
       }
       setState(() => _sending = false);
     } catch (e) {
       if (!mounted) return;
+      if (_cancelRequested) {
+        setState(() {
+          _messages[assistantIndex] = _ChatLine(
+            role: 'assistant',
+            text: assistantText.isEmpty ? '(cancelled)' : '$assistantText\n(cancelled)',
+          );
+          _sending = false;
+          _cancelRequested = false;
+          _error = null;
+        });
+        return;
+      }
       setState(() {
         _error = e.toString();
         if (assistantText.isEmpty && _messages.length > assistantIndex) {

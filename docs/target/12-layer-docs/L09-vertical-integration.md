@@ -3,10 +3,10 @@
 | Поле | Значение |
 |------|----------|
 | Status | doing |
-| Quality | 5 |
-| Quality note | API E2E smoke + chat/transcript + disabled employee/key; Flutter reload; CI/release — gap |
+| Quality | 6 |
+| Quality note | API E2E smoke + suspend + chat cancel; Widget E2E / release gate — gap |
 | Plan | [L09](../11-implementation-plan/L09-vertical-integration.md) |
-| Last updated | 2026-08-23 — bundle export/import in smoke |
+| Last updated | 2026-08-23 — session commit-on-success + suspend E2E + cancel UX |
 | Owners | — |
 
 ---
@@ -34,7 +34,9 @@
 | `employees_active` in metrics | done | excludes disabled |
 | Admin metrics: agent_tokens_used, agent_messages, projects_total | |
 | Peer cabinet 403 in smoke | |
-| Flutter ProjectWorkspacePage → SSE chat + transcript reload | SSE cancel mid-stream |
+| Flutter ProjectWorkspacePage → SSE chat + transcript reload | |
+| SSE cancel mid-stream → `(cancelled)` bubble + session cancel API | |
+| Company suspend E2E → COMPANY_SUSPENDED + platform_events | |
 
 ## Карта кода
 
@@ -54,4 +56,4 @@ apps/api/src/prodavan/api/v1/admin_metrics.py
 | Widget E2E | hole |
 | Release gate checklist automation | hole |
 
-## Quality | **5** | doing — API vertical + Flutter chat subset |
+## Quality | **6** | doing — API vertical + Flutter chat cancel + suspend smoke |

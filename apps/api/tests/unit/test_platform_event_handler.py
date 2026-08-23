@@ -8,7 +8,10 @@ from io import BytesIO
 from pathlib import Path
 
 from prodavan.infrastructure.cabinets.package_codec import build_minimal_package_zip
-from prodavan.infrastructure.cabinets.platform_event_handler import invoke_platform_event_from_artifact
+from prodavan.infrastructure.cabinets.platform_event_handler import (
+    _parse_stdout_result,
+    invoke_platform_event_from_artifact,
+)
 
 
 def test_invoke_runs_handler_script(tmp_path: Path) -> None:
@@ -27,6 +30,8 @@ def test_invoke_runs_handler_script(tmp_path: Path) -> None:
     )
     assert result["action"] == "invoked"
     assert result["exit_code"] == 0
+    assert result.get("result", {}).get("ok") is True
+    assert result["result"]["event_type"] == "company.suspended"
 
 
 def test_invoke_stub_when_no_script(tmp_path: Path) -> None:
@@ -41,6 +46,11 @@ def test_invoke_stub_when_no_script(tmp_path: Path) -> None:
     )
     assert result["action"] == "stub"
     assert result["reason"] == "no handler script"
+
+
+def test_parse_stdout_result_last_json_line() -> None:
+    assert _parse_stdout_result('log line\n{"ok": true, "n": 1}\n') == {"ok": True, "n": 1}
+    assert _parse_stdout_result("not json") is None
 
 
 def test_invoke_failed_on_nonzero_exit(tmp_path: Path) -> None:

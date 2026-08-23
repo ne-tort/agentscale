@@ -168,7 +168,14 @@ def build_minimal_package_zip(
         if with_platform_event_handler:
             zf.writestr(
                 "src/on_platform_event.py",
-                "import sys\n\nif __name__ == '__main__':\n    sys.exit(0)\n",
+                (
+                    "import json\n"
+                    "import sys\n\n"
+                    "if __name__ == '__main__':\n"
+                    "    event = json.load(sys.stdin)\n"
+                    "    print(json.dumps({'ok': True, 'event_type': event.get('platform_event_type')}))\n"
+                    "    sys.exit(0)\n"
+                ),
             )
         zf.writestr(
             "src/server.py",

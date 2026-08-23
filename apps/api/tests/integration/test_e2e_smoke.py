@@ -649,3 +649,83 @@ def test_e2e_tool_approval_hitl(client: TestClient) -> None:
     assert approved.status_code == 200, approved.text
     assert approved.json()["decision"] == "approve"
     assert "Approved" in approved.json()["assistant_text"]
+
+
+@requires_postgres
+def test_e2e_company_suspend_blocks_chat_and_lists_subscription(client: TestClient) -> None:
+    """L04→L07→L09: expire subscription → COMPANY_SUSPENDED + project DTO flag."""
+    admin = _token(sub="e2e-admin-sus", platform_admin=True)
+    created = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "E2ESusCo", "admin_email": "owner@e2esus.test"},
+    )
+    assert created.status_code == 201, created.text
+    company_id = created.json()["company"]["id"]
+    owner = _token(sub="e2e-owner-sus", email="owner@e2esus.test")
+    owner_h = {"Authorization": f"Bearer {owner}"}
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={
+            "name": "E2E Sus Key",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-e2e-sus",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "E2ESusCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "E2ESusProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+    assert proj.json()["company_subscription"]["subscription_expired"] is False
+
+    ok_chat = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "before suspend"},
+    )
+    assert ok_chat.status_code == 200, ok_chat.text
+
+    past = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sub = client.put(
+        f"/api/v1/admin/companies/{company_id}/subscription",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"subscription_lifetime": False, "subscription_ends_at": past},
+    )
+    assert sub.status_code == 200, sub.text
+    assert sub.json()["subscription_expired"] is True
+
+    got = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
+    assert got.status_code == 200, got.text
+    assert got.json()["company_subscription"]["subscription_expired"] is True
+
+    blocked = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "after suspend"},
+    )
+    assert blocked.status_code == 403, blocked.text
+    assert blocked.json()["code"] == "COMPANY_SUSPENDED"
+
+    events = client.get(
+        f"/api/v1/admin/platform-events?company_id={company_id}&event_type=company.suspended",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert events.status_code == 200, events.text
+    assert len(events.json()["items"]) >= 1

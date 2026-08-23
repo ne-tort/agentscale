@@ -99,6 +99,8 @@ class CompanySubscriptionGate:
         if await self._latest_subscription_transition(company_id) == "company.suspended":
             return False
         await self._emit_suspended(company_id, subscription, principal=principal)
+        # Persist even on read paths (GET project) — session has no auto-commit (SSE).
+        await self._session.commit()
         return True
 
     async def emit_transition_events(
