@@ -9,8 +9,10 @@
 | **Project triggers** | Всегда `project_id` | `chat.message`, `project.prepare`, `webhook.http` |
 | **Platform events** | Company / employee / project lifecycle | `company.suspended`, `employee.disabled`, `project.created` |
 
+**Durable bus (канон):** обе шины — **Kafka** ([13-platform-infra](../13-platform-infra/)). PG outbox-lite / таблица `project_triggers` — transitional implementation, не prod-канон шины. Исполнение фоновых drain/jobs — **Celery**, не in-process API worker.
+
 Project triggers: `POST /api/v1/projects/{id}/triggers`.  
-Platform events: internal emit → cabinet `on_platform_event`.
+Platform events: emit → Kafka → cabinet `on_platform_event` (и прочие consumers).
 
 ## Project trigger kinds (platform)
 

@@ -30,6 +30,22 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     storage_root: Path = _REPO_ROOT / "data" / "storage"
 
+    # P0 Redis (C-CACHE). Empty = disabled (transitional; prod should set REDIS_URL).
+    redis_url: str | None = None
+    # When True, failed Redis ping on startup aborts process; readiness always requires Redis.
+    redis_required: bool = False
+
+    # P0 object storage (C-OBJECT-STORE). local = keys under storage_root; s3 = MinIO/AWS.
+    object_store_backend: str = "local"  # local | s3
+    s3_endpoint_url: str | None = None
+    s3_access_key: str | None = None
+    s3_secret_key: str | None = None
+    s3_bucket: str = "prodavan"
+    s3_region: str = "us-east-1"
+    # When backend=s3, also write/read mirror under storage_root for local-ws agent cwd.
+    object_store_mirror_local: bool = True
+    object_store_required: bool = False
+
     app_name: str = "prodavan-api"
     app_version: str = "0.1.0-l08"
     build_id: str = "dev"

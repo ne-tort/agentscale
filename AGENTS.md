@@ -13,10 +13,11 @@
 |-----|-----|----------------|
 | Суть / принципы продукта | [`00-principles.md`](docs/target/00-principles.md), [`00-glossary.md`](docs/target/00-glossary.md) | Старт любой задачи |
 | Канон BC (что должно быть) | [`01`](docs/target/01-platform-admin/)…[`10`](docs/target/10-identity-keycloak/) | Модуль по теме задачи |
-| Gap / запреты | [`09-gap-map.md`](docs/target/09-gap-map.md) | Перед крупными решениями |
-| План слоёв, DoD, порядок | [`11-implementation-plan/`](docs/target/11-implementation-plan/) | Перед и во время реализации |
+| Platform infra (P0) | [`13-platform-infra/`](docs/target/13-platform-infra/) | **До** крупных backend-задач (storage/workers/lifespan/bus) |
+| Gap / запреты | [`09-gap-map.md`](docs/target/09-gap-map.md) | Перед крупными решениями (блок P0 сверху) |
+| План слоёв, DoD, порядок | [`11-implementation-plan/`](docs/target/11-implementation-plan/) | Перед и во время реализации; P0: [`P0-platform-infra.md`](docs/target/11-implementation-plan/P0-platform-infra.md) |
 | Правила поставки | [`11/00-rules.md`](docs/target/11-implementation-plan/00-rules.md), [`sequence.md`](docs/target/11-implementation-plan/sequence.md) | Старт слоя |
-| Чеклист готовности | [`11/checklist-master.md`](docs/target/11-implementation-plan/checklist-master.md) | Закрытие слоя |
+| Чеклист готовности | [`11/checklist-master.md`](docs/target/11-implementation-plan/checklist-master.md) | Закрытие слоя / P0 |
 | Контракты C-* | [`11/contracts-index.md`](docs/target/11-implementation-plan/contracts-index.md) | Границы между слоями |
 | As-built (что/как есть) | [`12-layer-docs/`](docs/target/12-layer-docs/) | **Сначала** при работе со слоем; обновлять в том же PR |
 | Принципы as-built | [`12/00-principles.md`](docs/target/12-layer-docs/00-principles.md) | Как писать семантику / контракты / связи |
@@ -27,8 +28,8 @@
 
 ## Порядок работы
 
-1. Понять слой задачи → карточка плана `11/LNN-*.md` + as-built `12/LNN-*.md`.
-2. Канон только нужных модулей `01`…`10` (не весь target подряд).
+1. Понять слой задачи → карточка плана `11/LNN-*.md` (или `P0-platform-infra.md`) + as-built `12/LNN-*.md`.
+2. Канон только нужных модулей `01`…`10` + при backend infra — **`13-platform-infra`** (не весь target подряд).
 3. Реализовать за контрактами `C-*`; изолируемое — полностью (см. sequence).
 4. В том же изменении: as-built (семантика, что/как, контракты, Gaps, **Quality**).
 5. Слой `done` только по DoD + veto + Quality ≥ 8 — не «минимальный прототип».

@@ -99,6 +99,7 @@ apps/flutter/lib/features/admin/ai_key_{list,create,detail,rotate}_page.dart
 | platform_fallback keys | done | unbound keys (empty company_ids) |
 | Audit ai_key.* | done | incl. ai_key.expired on lazy expire |
 | HTTP resolve endpoint | n/a | in-process для L08 (секрет не светить в admin HTTP) |
+| Product blobs не через secrets_dir / local FS | **P0 note** | `file://` для **secret material** ок; workspace/attachments/packages — только MinIO ([13](../13-platform-infra/)); не расширять secrets_dir под product files |
 
 ## Проверка
 

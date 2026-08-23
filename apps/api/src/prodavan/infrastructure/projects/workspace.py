@@ -16,6 +16,7 @@ class WorkspaceLayoutWriter:
     """Idempotent /workspace layout per container.md."""
 
     def __init__(self, *, workspace_key: str) -> None:
+        self._workspace_key = workspace_key
         self._root = Path(settings.storage_root) / "projects" / workspace_key / "workspace"
         self._project_root = Path(settings.storage_root) / "projects" / workspace_key
 
@@ -75,30 +76,31 @@ class WorkspaceLayoutWriter:
         return names
 
     def store_inbox_attachment(self, *, filename: str, raw: bytes) -> Path:
+        """Write inbox blob via ObjectStorageManager (local backend → same path)."""
+        from prodavan.core.infra.object_keys import inbox_object_key
+        from prodavan.core.infra.object_storage_manager import ensure_object_storage
+
         safe = Path(filename).name
+        key = inbox_object_key(workspace_key=self._workspace_key, filename=safe)
+        ensure_object_storage().put_bytes_sync(key, raw)
         path = self._root / "inbox" / safe
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(raw)
-        try:
-            path.chmod(0o600)
-        except OSError:
-            pass
         return path
 
     def remove_inbox_attachment(self, *, filename: str) -> bool:
+        from prodavan.core.infra.object_keys import inbox_object_key
+        from prodavan.core.infra.object_storage_manager import ensure_object_storage
+
         safe = Path(filename).name
-        path = self._root / "inbox" / safe
-        if not path.is_file():
-            return False
-        path.unlink()
-        return True
+        key = inbox_object_key(workspace_key=self._workspace_key, filename=safe)
+        return ensure_object_storage().delete_sync(key)
 
     def read_inbox_attachment(self, *, filename: str) -> bytes:
+        from prodavan.core.infra.object_keys import inbox_object_key
+        from prodavan.core.infra.object_storage_manager import ensure_object_storage
+
         safe = Path(filename).name
-        path = self._root / "inbox" / safe
-        if not path.is_file():
-            raise FileNotFoundError(safe)
-        return path.read_bytes()
+        key = inbox_object_key(workspace_key=self._workspace_key, filename=safe)
+        return ensure_object_storage().get_bytes_sync(key)
 
     def remove_project_tree(self) -> None:
         from prodavan.infrastructure.projects.mcp_sandbox import stop_all_package_processes

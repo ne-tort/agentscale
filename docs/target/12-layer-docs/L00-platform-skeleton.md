@@ -4,10 +4,10 @@
 |------|----------|
 | Status | done |
 | Quality | 8 |
-| Quality note | DoD закрыт: layout, health+meta, AppError, Alembic up/down CI, features placeholder, contract tests; veto пуст |
-| Plan | [L00](../11-implementation-plan/L00-platform-skeleton.md) |
-| Canon | [STUB](../../../STUB.md), [AGENTS](../../../AGENTS.md), [LAYOUT.md](../../../apps/api/src/prodavan/LAYOUT.md) |
-| Last updated | 2026-08-23 — L00 implementation |
+| Quality note | DoD закрыт: layout, health+meta, AppError, Alembic up/down CI, features placeholder, contract tests; veto пуст. P0 w1–w3: core lifespan + Redis + ObjectStorage (subset) |
+| Plan | [L00](../11-implementation-plan/L00-platform-skeleton.md), [P0](../11-implementation-plan/P0-platform-infra.md) |
+| Canon | [STUB](../../../STUB.md), [AGENTS](../../../AGENTS.md), [LAYOUT.md](../../../apps/api/src/prodavan/LAYOUT.md), [13](../13-platform-infra/) |
+| Last updated | 2026-08-24 — P0 ObjectStorageManager + attach/packages |
 | Owners | — |
 
 ---
@@ -28,6 +28,11 @@
 | Alembic `stub_bootstrap`; CI upgrade + downgrade smoke | Product migrations |
 | Flutter stub home + empty `lib/features/` | L02 EntityCollection / gallery |
 | Pytest health/error; flutter analyze+test gate | — |
+| `prodavan.core`: `LifespanManager` / `LifespanResource` | Kafka / MinIO / Celery managers |
+| `main.py` lifespan → `build_lifespan_manager()` | — |
+| `RedisManager` + REDIS_URL / readiness checks | Redis required in all envs; Celery broker |
+| `ObjectStorageManager` local\|s3 + attach/packages | Materialize workspace tree via object store |
+| DB + trigger_worker as `LifespanResource` | Celery replaces in-process worker |
 
 ## Как сделано
 
@@ -37,6 +42,9 @@
 4. CI API: Postgres → alembic upgrade → downgrade base → upgrade → ruff → pytest.
 5. CI Flutter: analyze + test + запрет raw Color / modals в features.
 6. Legacy feature/shell/cabinets деревья не подключены к `app.dart` (stub only).
+7. **P0:** `core/wiring.build_lifespan_manager` регистрирует `DatabaseEngineResource` → `RedisManager` → `TriggerWorkerResource`; `main.py` только делегирует.
+8. **P0:** `/health/ready` проверяет DB; Redis — если `REDIS_URL` задан или `REDIS_REQUIRED`; отчёт `resources` из lifespan.
+9. **P0:** `ObjectStorageManager` в lifespan; C-ATTACH/C-MCP-PKG пишут `object://` keys (local backend = same paths under `storage_root`).
 
 ## Контракты
 
@@ -45,6 +53,8 @@
 | ID | Форма | Статус |
 |----|-------|--------|
 | C-API-HEALTH | `GET /api/v1/health` (+ live/ready) + problem+json | live |
+| C-CACHE | RedisManager + settings; ready checks when URL set | **live** (subset; URL optional) |
+| C-OBJECT-STORE | ObjectStorageManager local\|s3; `object://` refs | **live** (subset) |
 
 ### Потребляет
 
@@ -67,17 +77,21 @@
 ```text
 apps/api/src/prodavan/
   LAYOUT.md
-  main.py
+  main.py              # lifespan → core.wiring
+  core/                # P0 LifespanManager + infra managers
+    lifespan/
+    infra/             # database, redis, trigger_worker resources
+    wiring.py
   api/                 # routes, exception_handlers
-  application/         # empty (L01+)
-  domain/errors.py     # AppError
-  config/settings.py
+  application/
+  domain/errors.py
+  config/settings.py   # + REDIS_URL / REDIS_REQUIRED
   infrastructure/persistence/
 apps/api/alembic/versions/2026082301_stub_bootstrap.py
 apps/flutter/lib/
-  main.dart, app.dart  # stub home
+  main.dart, app.dart
   core/theme, core/widgets
-  features/            # placeholder (+ README)
+  features/
 .github/workflows/ci-api.yml
 .github/workflows/ci-flutter.yml
 ```
@@ -92,6 +106,11 @@ apps/flutter/lib/
 | Documented layout | done | LAYOUT.md |
 | Lint/test CI green | done | workflows updated |
 | No legacy login/procurement | done | not in running app |
+| `LifespanManager` + `LifespanResource` register | **done** (P0 w1) | `core/lifespan/`; see [13](../13-platform-infra/core-managers.md) |
+| Infra managers в `prodavan.core` | **partial** | Redis + ObjectStorage live (subset); **hole:** Kafka / Celery WorkerManager — волны 4–5 |
+| Redis обязателен во всех окружениях | **hole** | default `REDIS_URL` empty (CI/local); prod: set URL + `REDIS_REQUIRED=true` |
+| Object store SoT для всех blobs | **partial** | attach + cabinet packages via manager; materialize workspace tree — local FS hole |
+| Middleware register в core | **hole** | CORS всё ещё в `main.py` напрямую |
 
 ## Проверка
 

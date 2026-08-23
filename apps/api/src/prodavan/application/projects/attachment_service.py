@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+from pathlib import Path
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.application.projects.access import ProjectAccessService
+from prodavan.core.infra.object_keys import inbox_object_key, object_ref, parse_storage_ref
+from prodavan.core.infra.object_storage_manager import ensure_object_storage
 from prodavan.domain.admin import attachment_max_bytes
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
@@ -20,7 +23,6 @@ from prodavan.domain.projects import (
 )
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.projects import ProjectAttachmentRow
-from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
 
 
 def _attachment_public(row: ProjectAttachmentRow) -> dict:
@@ -142,12 +144,13 @@ class ProjectAttachmentService:
                 detail="executable or binary content not allowed for chat attachments",
             )
         guessed = sniff_attachment_content_type(raw, filename=safe_name, fallback=content_type)
-        writer = WorkspaceLayoutWriter(workspace_key=project.workspace_key)
-        path = writer.store_inbox_attachment(filename=safe_name, raw=raw)
-        storage_ref = f"file://projects/{project.workspace_key}/workspace/inbox/{path.name}"
+        key = inbox_object_key(workspace_key=project.workspace_key, filename=safe_name)
+        store = ensure_object_storage()
+        await store.put_bytes(key, raw, content_type=guessed)
+        storage_ref = object_ref(key)
         row = ProjectAttachmentRow(
             project_id=project_id,
-            filename=path.name,
+            filename=Path(safe_name).name,
             content_type=guessed,
             size_bytes=len(raw),
             storage_ref=storage_ref,
@@ -181,9 +184,12 @@ class ProjectAttachmentService:
                 detail="Attachment not found",
             )
         public = _attachment_public(row)
-        WorkspaceLayoutWriter(workspace_key=project.workspace_key).remove_inbox_attachment(
-            filename=row.filename
-        )
+        store = ensure_object_storage()
+        try:
+            key = parse_storage_ref(row.storage_ref)
+        except ValueError:
+            key = inbox_object_key(workspace_key=project.workspace_key, filename=row.filename)
+        await store.delete(key)
         await self._session.delete(row)
         await self._session.commit()
         return {"deleted": True, **public}
@@ -207,15 +213,19 @@ class ProjectAttachmentService:
                 status=404,
                 detail="Attachment not found",
             )
-        writer = WorkspaceLayoutWriter(workspace_key=project.workspace_key)
+        store = ensure_object_storage()
         try:
-            raw = writer.read_inbox_attachment(filename=row.filename)
+            key = parse_storage_ref(row.storage_ref)
+        except ValueError:
+            key = inbox_object_key(workspace_key=project.workspace_key, filename=row.filename)
+        try:
+            raw = await store.get_bytes(key)
         except FileNotFoundError as exc:
             raise AppError(
                 code="NOT_FOUND",
                 title="Not Found",
                 status=404,
-                detail="attachment file missing on disk",
+                detail="attachment blob missing in object store",
             ) from exc
         content_type = row.content_type or "application/octet-stream"
         return raw, content_type, row.filename

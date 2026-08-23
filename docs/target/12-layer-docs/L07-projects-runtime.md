@@ -124,6 +124,9 @@ apps/api/.env.example
 | telegram.message trigger | done | dispatch like chat.message; HMAC ingress like webhook |
 | Webhook HMAC ingress | done | company policy secret + X-Prodavan-Signature |
 | Attachment DELETE | done | DB + inbox file; Flutter pending remove calls DELETE |
+| Object store (MinIO) как SoT blobs | **partial (P0 w3)** | attachments + MCP package zips → `ObjectStorageManager` / `object://`; legacy `file://` readable; materialize tree + `local-ws` — hole |
+| Durable bus = Kafka (triggers + platform events) | **P0 hole** | PG outbox-lite transitional; [triggers](../06-projects-runtime/triggers.md) |
+| Celery jobs (drain / idle / rematerialize) | **P0 hole** | in-process loop = `TriggerWorkerResource` (lifespan); Celery — волна 4 |
 
 ## Проверка
 

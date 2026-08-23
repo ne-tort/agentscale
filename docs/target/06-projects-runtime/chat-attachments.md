@@ -6,9 +6,11 @@
 
 | Тип | Примеры | Хранение |
 |-----|---------|----------|
-| Image | png, jpeg, webp | object store + path в inbox |
-| Document | pdf, xlsx, csv, txt, md | object store |
-| Archive | zip (по политике кабинета) | object store |
+| Image | png, jpeg, webp | **MinIO** (S3) + object key в inbox; не локальный path API |
+| Document | pdf, xlsx, csv, txt, md | **MinIO** (S3) |
+| Archive | zip (по политике кабинета) | **MinIO** (S3) |
+
+Канон: [13-platform-infra](../13-platform-infra/). Локальный `storage/.../inbox` как SoT — дефект до закрытия P0.
 
 ## UX
 
@@ -18,9 +20,9 @@
 
 ## Runtime
 
-1. Upload → platform storage under `project_id/inbox/…`.
-2. Metadata в platform DB (`chat_attachments`).
-3. При `chat.message` trigger пути файлов попадают в workspace (bind/mount или copy).
+1. Upload → object store key `…/projects/{project_id}/inbox/…` (MinIO).
+2. Metadata в platform DB (`chat_attachments`) — object ref, не host path.
+3. При `chat.message` trigger объекты попадают в workspace pod (sync/mount из object store).
 4. Агент (Cursor SDK multimodal и т.д.) получает ссылки согласно adapter capabilities.
 
 Кабинет может дополнительно прогонять файл через свой pipeline (например xlsx → rows) по trigger `chat.message` с attachment kind.

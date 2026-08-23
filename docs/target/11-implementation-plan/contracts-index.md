@@ -31,11 +31,18 @@
 | C-AGENT-EVENT | L08 | frozen `AgentEvent` | L09 UI, L04 metrics | adapter-port | **live** (subset) |
 | C-USAGE | L08 | usage records | L04 metrics | [usage-metrics](../08-agent-providers/usage-metrics.md) | **live** (subset) |
 | C-PROJECT-CHAT | L08 | `POST /chat`, `POST /chat/stream` (SSE), `GET /chat/transcript` | L05 UI, L09 | adapter-port | **live** (subset) |
+| C-OBJECT-STORE | P0 / L00 | MinIO/S3 put/get/delete + object refs (no local SoT) | L07 attach/materialize, L06 packages | [13 stack](../13-platform-infra/stack.md) | **live** (subset: manager + attach/packages; materialize FS hole) |
+| C-EVENT-BUS | P0 | Kafka envelopes: project triggers + platform events | L07, L06 SPI, L09 | [13](../13-platform-infra/), [triggers](../06-projects-runtime/triggers.md) | **planned** |
+| C-JOBS | P0 | Celery tasks: drain / idle / rematerialize (+ idempotency) | L07, L08 | [13](../13-platform-infra/), [P0](P0-platform-infra.md) | **planned** |
+| C-CACHE | P0 / L00 | Redis cache / short locks / Celery broker conventions | L00 core, workers | [13](../13-platform-infra/) | **live** (subset: manager+health; no Celery yet) |
 
 ## Compatibility log
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-24 | C-OBJECT-STORE / C-ATTACH / C-MCP-PKG | ObjectStorageManager; new refs `object://`; legacy `file://` readable | no |
+| 2026-08-24 | C-CACHE / L00 | RedisManager + LifespanManager wiring; ready checks when REDIS_URL set | no |
+| 2026-08-24 | C-OBJECT-STORE / C-EVENT-BUS / C-JOBS / C-CACHE | planned P0 platform-infra contracts (Kafka/MinIO/Celery/Redis) | no |
 | 2026-08-24 | C-TRIGGERS / C-PROJECT | enqueue+claim refuse when paused (except `project.prepare`); webhook → PROJECT_PAUSED | no |
 | 2026-08-23 | C-MCP-PKG / C-MATERIALIZE / L09 | rematerialize on package deploy/disable; IDLE_PAUSE_WORKER_ENABLED | no |
 | 2026-08-23 | C-ADMIN-POLICY / C-PROJECT / L09 | idle_pause_after_hours + sweep; attachment MIME sniff | no |

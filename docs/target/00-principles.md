@@ -13,7 +13,7 @@ Prodavan — **универсальный облачный сервис авто
 
 Код сейчас stub — [`STUB.md`](../../STUB.md). Реализация — по этому дереву `docs/target/`.
 
-Шесть жёстких принципов ниже. Любое отклонение в коде или UI — дефект относительно канона.
+Семь жёстких принципов ниже. Любое отклонение в коде или UI — дефект относительно канона.
 
 ```mermaid
 flowchart TB
@@ -107,3 +107,16 @@ flowchart TB
 - Паритет контекста по провайдерам: [workspace-context.md](08-agent-providers/workspace-context.md).
 
 Детали: [06-projects-runtime/](06-projects-runtime/), [08-agent-providers/](08-agent-providers/).
+
+---
+
+## 7. Platform infrastructure & backend core
+
+- Межмодульные асинхронные контракты — **Kafka** (не PG-очередь как prod-шина).
+- Blobs (workspace, вложения, package artifacts) — **MinIO** (S3 API); **локальный disk storage запрещён** как продуктовый путь.
+- Фоновые jobs — **Celery** + Redis; in-process worker в API — не канон.
+- Redis обязателен (кэш / Celery / эфемерное); Postgres остаётся transactional truth.
+- Backend wiring — **manager + register**: `LifespanManager` / `LifespanResource` и infra-менеджеры в `prodavan.core`.
+- Отклонение = **дефект канона**. Приоритет **P0**, допускается значительный рефакторинг.
+
+Детали: [13-platform-infra/](13-platform-infra/).

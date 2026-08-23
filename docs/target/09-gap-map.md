@@ -4,6 +4,21 @@
 
 Сводка расхождений. Не backlog задач с оценками — карта для реализации.
 
+## P0 — Platform infra (приоритет, допускается крупный рефакторинг)
+
+Канон: [13-platform-infra/](13-platform-infra/). План: [P0-platform-infra](11-implementation-plan/P0-platform-infra.md).  
+Значительный рефакторинг L00 / L03 / L07 / L08 **разрешён**, чтобы закрыть эти gaps.
+
+| Gap | Сейчас в коде | Цель (канон 13) |
+|-----|---------------|-----------------|
+| Local workspace FS | `data/storage`, `local-ws:{key}`, path как SoT | **MinIO** (S3); DB хранит object refs |
+| In-process workers | `TRIGGER_WORKER` / idle asyncio в API lifespan | **Celery** + Redis |
+| Нет event bus | PG outbox-lite (`project_triggers`) как шина | **Kafka** для project triggers + platform events |
+| Нет Redis / MinIO / Kafka в стеке | только Postgres + local FS | Redis + MinIO + Kafka обязательны |
+| Lifespan без register | ad-hoc start/stop в `main.py` | `LifespanManager` + `LifespanResource` + infra managers в `core` |
+
+Связанные строки ниже («Durable bus», «Project container») закрываются этим P0-треком, не отдельным «когда-нибудь».
+
 | Target | Legacy docs | Код сейчас | Gap |
 |--------|-------------|------------|-----|
 | Platform Admin UI + metrics | M08 / admin screens | **stub** | Реализовать по [ux-contract](01-platform-admin/ux-contract.md) |
@@ -12,8 +27,8 @@
 | Mobile UI, no modals | widget-catalog | Theme + core widgets; no feature shells | EntityCollection / screens по [07](07-ui-mobile-core/) |
 | Cabinet **dynamic** + bundles | static packs / M00 | **stub** | Runtime + meta-UI + `cabinet.*` MCP по [05](05-cabinets/dynamic-cabinets.md) |
 | Starter equipment bundle | electronics-procurement | Pack JSON remnants | Bundle seed, не Flutter module |
-| Project container | agent-isolation | **stub** | Pod lifecycle + idle policy |
-| Triggers / attachments | — | **stub** | Durable bus; chat attach UI |
+| Project container | agent-isolation | **stub** / local-ws FS | Pod lifecycle + idle policy; blobs → MinIO (**P0**) |
+| Triggers / attachments | — | PG outbox-lite / local inbox | Durable bus = **Kafka** (**P0**); chat attach UI; object store |
 | AgentProviderPort | bot SDK | **stub** | Sidecar + persist + AgentEvent |
 | Keycloak OIDC | HS256 login | **stub** (+ infra/keycloak sketches) | Cutover + AppAuth |
 | OpenClaw / GLM | mentions | Нет | Не внедрять |

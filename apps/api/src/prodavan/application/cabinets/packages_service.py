@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.quota_service import CompanyQuotaService
 from prodavan.application.cabinets.access import CabinetAccessService
-from prodavan.config.settings import settings
+from prodavan.core.infra.object_keys import cabinet_package_object_key, object_ref, parse_storage_ref
+from prodavan.core.infra.object_storage_manager import ensure_object_storage
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.infrastructure.cabinets.package_codec import validate_package_zip
@@ -269,31 +270,37 @@ class CabinetPackagesService:
             )
         )
         out: list[tuple[str, bytes]] = []
+        store = ensure_object_storage()
         for r in q.fetchall():
-            path = self._path_from_ref(r.artifact_ref)
-            if path.is_file():
-                safe = f"{r.name}-{r.version}.zip"
-                out.append((safe, path.read_bytes()))
+            try:
+                key = parse_storage_ref(r.artifact_ref)
+            except ValueError:
+                continue
+            try:
+                raw = store.get_bytes_sync(key)
+            except FileNotFoundError:
+                continue
+            safe = f"{r.name}-{r.version}.zip"
+            out.append((safe, raw))
         return out
 
     def _store_artifact(self, cabinet_id: str, name: str, version: str, raw: bytes) -> str:
-        root = Path(settings.storage_root) / "cabinet_packages" / cabinet_id
-        root.mkdir(parents=True, exist_ok=True)
-        path = root / f"{name}-{version}.zip"
-        path.write_bytes(raw)
-        try:
-            path.chmod(0o600)
-        except OSError:
-            pass
-        return f"file://cabinet_packages/{cabinet_id}/{name}-{version}.zip"
+        key = cabinet_package_object_key(cabinet_id=cabinet_id, name=name, version=version)
+        ensure_object_storage().put_bytes_sync(key, raw, content_type="application/zip")
+        return object_ref(key)
 
     @staticmethod
     def _path_from_ref(artifact_ref: str) -> Path:
-        prefix = "file://cabinet_packages/"
-        if not artifact_ref.startswith(prefix):
-            raise AppError(code="PACKAGE_INVALID", title="Invalid package", status=500, detail="bad artifact_ref")
-        rel = artifact_ref.removeprefix(prefix)
-        return Path(settings.storage_root) / "cabinet_packages" / rel
+        """Legacy helper for callers expecting a local path; prefer object store get."""
+        from prodavan.config.settings import settings
+
+        try:
+            key = parse_storage_ref(artifact_ref)
+        except ValueError as exc:
+            raise AppError(
+                code="PACKAGE_INVALID", title="Invalid package", status=500, detail="bad artifact_ref"
+            ) from exc
+        return Path(settings.storage_root) / key
 
     async def _ensure_registry(self, schema_name: str) -> None:
         qschema = qident(schema_name)
