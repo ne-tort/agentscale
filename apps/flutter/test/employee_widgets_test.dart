@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:prodavan/core/theme/app_theme.dart';
 import 'package:prodavan/features/employee/widgets/attachment_image_viewer.dart';
 import 'package:prodavan/features/employee/widgets/attachment_preview_chip.dart';
+import 'package:prodavan/features/employee/widgets/attachment_preview_kinds.dart';
 import 'package:prodavan/features/employee/widgets/project_status_banner.dart';
 
 Widget themed(Widget child) {
@@ -23,6 +25,15 @@ Uint8List get _png => Uint8List.fromList([
     ]);
 
 void main() {
+  test('preview kind helpers', () {
+    expect(attachmentCanPreview('image/png'), isTrue);
+    expect(attachmentCanPreview('text/plain'), isTrue);
+    expect(attachmentCanPreview('application/json'), isTrue);
+    expect(attachmentCanPreview('application/pdf'), isTrue);
+    expect(attachmentCanPreview('application/zip'), isFalse);
+    expect(attachmentIsTextContentType('text/csv'), isTrue);
+  });
+
   testWidgets('project paused banner renders', (tester) async {
     await tester.pumpWidget(
       themed(
@@ -93,25 +104,71 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('dot.png'));
     await tester.pumpAndSettle();
-    expect(find.byType(AttachmentImageViewerPage), findsOneWidget);
+    expect(find.byType(AttachmentViewerPage), findsOneWidget);
     expect(find.byType(InteractiveViewer), findsOneWidget);
     expect(find.text('dot.png'), findsWidgets);
   });
 
-  testWidgets('non-image chip does not open viewer', (tester) async {
+  testWidgets('tapping text chip opens selectable text preview', (tester) async {
+    final bytes = Uint8List.fromList(utf8.encode('hello preview\nline 2'));
     await tester.pumpWidget(
-      themed(
-        AttachmentPreviewChip(
-          projectId: 'p1',
-          attachmentId: 'a1',
-          label: 'note.txt',
-          contentType: 'text/plain',
+      MaterialApp(
+        theme: AppTheme.light,
+        home: Scaffold(
+          body: AttachmentPreviewChip(
+            projectId: 'p1',
+            attachmentId: 'a2',
+            label: 'note.txt',
+            contentType: 'text/plain',
+            loadBytes: () async => bytes,
+          ),
         ),
       ),
     );
     await tester.pumpAndSettle();
     await tester.tap(find.text('note.txt'));
     await tester.pumpAndSettle();
-    expect(find.byType(AttachmentImageViewerPage), findsNothing);
+    expect(find.byType(AttachmentViewerPage), findsOneWidget);
+    expect(find.textContaining('hello preview'), findsOneWidget);
+    expect(find.byType(SelectableText), findsOneWidget);
+  });
+
+  testWidgets('tapping pdf chip opens stub viewer', (tester) async {
+    final bytes = Uint8List.fromList(utf8.encode('%PDF-1.4 stub'));
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light,
+        home: Scaffold(
+          body: AttachmentPreviewChip(
+            projectId: 'p1',
+            attachmentId: 'a3',
+            label: 'doc.pdf',
+            contentType: 'application/pdf',
+            loadBytes: () async => bytes,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('doc.pdf'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AttachmentViewerPage), findsOneWidget);
+    expect(find.textContaining('PDF inline preview is not available yet'), findsOneWidget);
+  });
+
+  testWidgets('zip chip does not open viewer', (tester) async {
+    await tester.pumpWidget(
+      themed(
+        AttachmentPreviewChip(
+          projectId: 'p1',
+          attachmentId: 'a4',
+          label: 'pack.zip',
+          contentType: 'application/zip',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(ActionChip), findsNothing);
+    expect(find.byType(Chip), findsOneWidget);
   });
 }

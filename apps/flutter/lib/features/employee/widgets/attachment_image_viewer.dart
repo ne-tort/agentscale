@@ -1,13 +1,14 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/session/work_context.dart';
-import 'package:prodavan/features/employee/widgets/attachment_preview_chip.dart';
+import 'package:prodavan/features/employee/widgets/attachment_preview_kinds.dart';
 
-/// Full-screen image viewer for project attachments (L05/L07).
-class AttachmentImageViewerPage extends StatefulWidget {
-  const AttachmentImageViewerPage({
+/// Full-screen attachment preview: image / text / PDF stub (L05/L07).
+class AttachmentViewerPage extends StatefulWidget {
+  const AttachmentViewerPage({
     super.key,
     required this.projectId,
     required this.attachmentId,
@@ -22,8 +23,8 @@ class AttachmentImageViewerPage extends StatefulWidget {
   final String? contentType;
   final Future<Uint8List> Function()? loadBytes;
 
-  /// Opens viewer when [contentType] is an image; no-op otherwise.
-  static Future<void> openIfImage(
+  /// Opens viewer when content is image, text, or PDF; no-op otherwise.
+  static Future<void> openIfPreviewable(
     BuildContext context, {
     required String projectId,
     required String attachmentId,
@@ -31,10 +32,10 @@ class AttachmentImageViewerPage extends StatefulWidget {
     String? contentType,
     Future<Uint8List> Function()? loadBytes,
   }) async {
-    if (!attachmentIsImageContentType(contentType)) return;
+    if (!attachmentCanPreview(contentType)) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => AttachmentImageViewerPage(
+        builder: (_) => AttachmentViewerPage(
           projectId: projectId,
           attachmentId: attachmentId,
           title: title,
@@ -45,11 +46,35 @@ class AttachmentImageViewerPage extends StatefulWidget {
     );
   }
 
+  /// Backward-compatible alias (opens any previewable type).
+  static Future<void> openIfImage(
+    BuildContext context, {
+    required String projectId,
+    required String attachmentId,
+    required String title,
+    String? contentType,
+    Future<Uint8List> Function()? loadBytes,
+  }) {
+    return openIfPreviewable(
+      context,
+      projectId: projectId,
+      attachmentId: attachmentId,
+      title: title,
+      contentType: contentType,
+      loadBytes: loadBytes,
+    );
+  }
+
   @override
-  State<AttachmentImageViewerPage> createState() => _AttachmentImageViewerPageState();
+  State<AttachmentViewerPage> createState() => _AttachmentViewerPageState();
 }
 
-class _AttachmentImageViewerPageState extends State<AttachmentImageViewerPage> {
+/// Deprecated name kept for existing imports/tests.
+typedef AttachmentImageViewerPage = AttachmentViewerPage;
+
+class _AttachmentViewerPageState extends State<AttachmentViewerPage> {
+  static const _maxTextPreviewChars = 200000;
+
   Uint8List? _bytes;
   bool _loading = true;
   String? _error;
@@ -86,34 +111,109 @@ class _AttachmentImageViewerPageState extends State<AttachmentImageViewerPage> {
     }
   }
 
+  String _decodeText(Uint8List bytes) {
+    try {
+      return utf8.decode(bytes);
+    } on FormatException {
+      return latin1.decode(bytes, allowInvalid: true);
+    }
+  }
+
+  Widget _body(ColorScheme scheme) {
+    if (_loading) return const CircularProgressIndicator();
+    if (_error != null) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: Text(_error!, textAlign: TextAlign.center),
+      );
+    }
+    final bytes = _bytes;
+    if (bytes == null) return const Text('No attachment data');
+
+    if (attachmentIsImageContentType(widget.contentType)) {
+      return InteractiveViewer(
+        minScale: 0.5,
+        maxScale: 5,
+        child: Image.memory(
+          bytes,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, size: 64),
+        ),
+      );
+    }
+
+    if (attachmentIsTextContentType(widget.contentType)) {
+      var text = _decodeText(bytes);
+      var truncated = false;
+      if (text.length > _maxTextPreviewChars) {
+        text = text.substring(0, _maxTextPreviewChars);
+        truncated = true;
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (truncated)
+            MaterialBanner(
+              content: const Text('Preview truncated to first 200k characters'),
+              actions: const [SizedBox.shrink()],
+            ),
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: SelectableText(
+                text,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontFamily: 'monospace',
+                      height: 1.35,
+                    ),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (attachmentIsPdfContentType(widget.contentType)) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.picture_as_pdf_outlined, size: 64, color: scheme.primary),
+            const SizedBox(height: 16),
+            Text(widget.title, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            Text(
+              'PDF inline preview is not available yet.\n'
+              '${bytes.length} bytes · ${widget.contentType ?? 'application/pdf'}',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Text(
+        'No preview for ${widget.contentType ?? 'unknown'} (${bytes.length} bytes)',
+        textAlign: TextAlign.center,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final fillBody =
+        attachmentIsTextContentType(widget.contentType) || attachmentIsPdfContentType(widget.contentType);
     return Scaffold(
       backgroundColor: scheme.surface,
       appBar: AppBar(
         title: Text(widget.title, overflow: TextOverflow.ellipsis),
       ),
-      body: Center(
-        child: _loading
-            ? const CircularProgressIndicator()
-            : _error != null
-                ? Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(_error!, textAlign: TextAlign.center),
-                  )
-                : _bytes == null
-                    ? const Text('No image data')
-                    : InteractiveViewer(
-                        minScale: 0.5,
-                        maxScale: 5,
-                        child: Image.memory(
-                          _bytes!,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_outlined, size: 64),
-                        ),
-                      ),
-      ),
+      body: fillBody ? _body(scheme) : Center(child: _body(scheme)),
     );
   }
 }

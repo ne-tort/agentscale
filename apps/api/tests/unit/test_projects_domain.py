@@ -21,6 +21,7 @@ def test_workspace_and_container_ref() -> None:
 def test_attachment_extension_allowlist() -> None:
     assert is_allowed_attachment_filename("note.txt")
     assert is_allowed_attachment_filename("scan.PDF")
+    assert is_allowed_attachment_filename("data.json")
     assert not is_allowed_attachment_filename("malware.exe")
     assert not is_allowed_attachment_filename("noext")
 
@@ -41,6 +42,7 @@ def test_sniff_attachment_content_type() -> None:
     assert sniff_attachment_content_type(b"\xff\xd8\xff\xe0") == "image/jpeg"
     assert sniff_attachment_content_type(b"%PDF-1.7") == "application/pdf"
     assert sniff_attachment_content_type(b"plain", filename="note.txt") == "text/plain"
+    assert sniff_attachment_content_type(b'{"a":1}', filename="data.json") == "application/json"
     assert sniff_attachment_content_type(b"x", fallback="application/json") == "application/json"
 
 

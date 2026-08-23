@@ -64,6 +64,7 @@ ATTACHMENT_ALLOWED_EXTENSIONS = frozenset(
         ".csv",
         ".txt",
         ".md",
+        ".json",
         ".zip",
     }
 )

@@ -6,7 +6,7 @@
 | Quality | 7 |
 | Quality note | API E2E incl. pause/rematerialize/idle; Flutter thumbnails + widget subset; full Widget E2E — gap |
 | Plan | [L09](../11-implementation-plan/L09-vertical-integration.md) |
-| Last updated | 2026-08-23 — attachment content E2E + full-screen viewer widgets |
+| Last updated | 2026-08-23 — text/json attachment content E2E + preview widgets |
 | Owners | — |
 
 ---
@@ -37,7 +37,7 @@
 | Admin metrics: agent_tokens_used, agent_messages, projects_total | |
 | Peer cabinet 403 in smoke | |
 | Flutter ProjectWorkspacePage → SSE chat + transcript reload | |
-| Flutter widget tests — status banner + attachment chip + image viewer | full navigation E2E — hole |
+| Flutter widget tests — status banner + image/text/PDF preview | full navigation E2E — hole |
 | SSE cancel mid-stream → `(cancelled)` bubble + session cancel API | |
 | Release gate checklist | live (subset) | `tools/release_gate_check.py` wired in ci-api |
 | Company suspend E2E → COMPANY_SUSPENDED + platform_events | |
@@ -45,6 +45,7 @@
 | MCP deploy rematerialize E2E | |
 | Idle pause sweep E2E (policy + admin sweep) | |
 | Attachment content download E2E (incl. read while paused) | |
+| Text/JSON attachment content-type + download E2E | |
 
 ## Карта кода
 

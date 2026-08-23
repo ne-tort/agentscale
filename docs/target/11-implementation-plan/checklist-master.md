@@ -12,7 +12,7 @@
 | [L02](L02-ui-core.md) | done | 8 | [12](../12-layer-docs/L02-ui-core.md) | L02 UI core commit | |
 | [L03](L03-ai-keys.md) | done | 8 | [12](../12-layer-docs/L03-ai-keys.md) | ai-keys CRUD+resolve | Vault backend |
 | [L04](L04-admin-company.md) | doing | 7 | [12](../12-layer-docs/L04-admin-company.md) | Admin Overview + subscription + platform events UI | widget E2E |
-| [L05](L05-employee-shell.md) | doing | 7 | [12](../12-layer-docs/L05-employee-shell.md) | Flutter SSE chat + inbox + thumbnails + viewer | AppAuth redirect URIs; PDF preview |
+| [L05](L05-employee-shell.md) | doing | 7 | [12](../12-layer-docs/L05-employee-shell.md) | Flutter SSE chat + attachment preview (image/text/PDF stub) | AppAuth redirect URIs; real PDF renderer |
 | [L06](L06-cabinet-runtime.md) | done | 8 | [12](../12-layer-docs/L06-cabinet-runtime.md) | runtime API+MCP+bundle+packages | k8s sandbox |
 | [L07](L07-projects-runtime.md) | doing | 7 | [12](../12-layer-docs/L07-projects-runtime.md) | project CRUD+materialize+outbox lease+idle pause | k8s pod; external broker; idle cron |
 | [L08](L08-agent-providers.md) | doing | 8 | [12](../12-layer-docs/L08-agent-providers.md) | port+budget+transcript+fixture | Node sidecar SDK |

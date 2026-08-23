@@ -228,7 +228,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   Future<void> _openAttachmentPreview(Map<String, dynamic> item) {
     final id = item['id'] as String?;
     if (id == null || id.isEmpty) return Future.value();
-    return AttachmentImageViewerPage.openIfImage(
+    return AttachmentViewerPage.openIfPreviewable(
       context,
       projectId: widget.projectId,
       attachmentId: id,
@@ -248,7 +248,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       attachmentId: id,
       contentType: contentType,
       size: 40,
-      onTap: AttachmentPreviewChip.isImageContentType(contentType)
+      onTap: AttachmentPreviewChip.canPreview(contentType)
           ? () => _openAttachmentPreview(item)
           : null,
     );
@@ -599,7 +599,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                       '${item['size_bytes'] ?? '?'} B',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
-                    onTap: AttachmentPreviewChip.isImageContentType(
+                    onTap: AttachmentPreviewChip.canPreview(
                       item['content_type'] as String?,
                     )
                         ? () => _openAttachmentPreview(item)

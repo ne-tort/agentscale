@@ -985,3 +985,76 @@ def test_e2e_attachment_content_download_and_paused_read(client: TestClient) -> 
     )
     assert blocked_upload.status_code == 409, blocked_upload.text
     assert blocked_upload.json()["code"] == "PROJECT_PAUSED"
+
+
+@requires_postgres
+def test_e2e_text_json_attachment_content_types(client: TestClient) -> None:
+    """L07→L09: .txt/.json upload sniff + content download for text preview."""
+    import base64
+
+    admin_h = {"Authorization": f"Bearer {_token(sub='e2e-txt-admin', platform_admin=True)}"}
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "E2ETxtCo", "admin_email": "owner@e2etxt.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-txt-owner', email='owner@e2etxt.test')}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "E2ETxtCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "E2ETxtProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    note = b"spec line one\nspec line two"
+    txt = client.post(
+        f"/api/v1/projects/{project_id}/attachments",
+        headers=owner_h,
+        json={
+            "filename": "note.txt",
+            "content_base64": base64.b64encode(note).decode("ascii"),
+        },
+    )
+    assert txt.status_code == 201, txt.text
+    assert txt.json()["content_type"] == "text/plain"
+    txt_id = txt.json()["id"]
+
+    txt_body = client.get(
+        f"/api/v1/projects/{project_id}/attachments/{txt_id}/content",
+        headers=owner_h,
+    )
+    assert txt_body.status_code == 200
+    assert txt_body.content == note
+
+    payload = b'{"sku":"ABC","qty":2}'
+    js = client.post(
+        f"/api/v1/projects/{project_id}/attachments",
+        headers=owner_h,
+        json={
+            "filename": "data.json",
+            "content_base64": base64.b64encode(payload).decode("ascii"),
+        },
+    )
+    assert js.status_code == 201, js.text
+    assert js.json()["content_type"] == "application/json"
+    js_id = js.json()["id"]
+
+    js_body = client.get(
+        f"/api/v1/projects/{project_id}/attachments/{js_id}/content",
+        headers=owner_h,
+    )
+    assert js_body.status_code == 200
+    assert js_body.content == payload
+    assert js_body.headers["content-type"].startswith("application/json")

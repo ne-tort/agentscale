@@ -4,10 +4,9 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/features/employee/widgets/attachment_image_viewer.dart';
+import 'package:prodavan/features/employee/widgets/attachment_preview_kinds.dart';
 
-bool attachmentIsImageContentType(String? contentType) {
-  return contentType != null && contentType.startsWith('image/');
-}
+export 'package:prodavan/features/employee/widgets/attachment_preview_kinds.dart';
 
 /// Small square image preview for inbox / chat attachments (L05/L07).
 class AttachmentThumbnail extends StatefulWidget {
@@ -98,7 +97,7 @@ class _AttachmentThumbnailState extends State<AttachmentThumbnail> {
         child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
       );
     } else {
-      child = Icon(Icons.insert_drive_file_outlined, size: widget.size * 0.55);
+      child = Icon(attachmentPreviewIcon(widget.contentType), size: widget.size * 0.55);
     }
 
     if (widget.onTap == null) return child;
@@ -132,8 +131,10 @@ class AttachmentPreviewChip extends StatelessWidget {
   static bool isImageContentType(String? contentType) =>
       attachmentIsImageContentType(contentType);
 
+  static bool canPreview(String? contentType) => attachmentCanPreview(contentType);
+
   Future<void> _defaultOpen(BuildContext context) {
-    return AttachmentImageViewerPage.openIfImage(
+    return AttachmentViewerPage.openIfPreviewable(
       context,
       projectId: projectId,
       attachmentId: attachmentId,
@@ -146,14 +147,10 @@ class AttachmentPreviewChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final open = onOpen ??
-        (AttachmentPreviewChip.isImageContentType(contentType)
-            ? () => _defaultOpen(context)
-            : null);
+        (attachmentCanPreview(contentType) ? () => _defaultOpen(context) : null);
 
     Widget? leading;
-    if (!AttachmentPreviewChip.isImageContentType(contentType)) {
-      leading = const Icon(Icons.attach_file, size: 14);
-    } else {
+    if (attachmentIsImageContentType(contentType)) {
       leading = SizedBox(
         width: 28,
         height: 28,
@@ -165,6 +162,8 @@ class AttachmentPreviewChip extends StatelessWidget {
           loadBytes: loadBytes,
         ),
       );
+    } else {
+      leading = Icon(attachmentPreviewIcon(contentType), size: 14);
     }
 
     if (open == null) {
