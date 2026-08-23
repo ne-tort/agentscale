@@ -56,7 +56,7 @@ CabinetInstance: schema-per-instance, meta?UI, cabinet.*, MCP packages, bundles.
 | ?????????? | ?????? | ??????? |
 |------------|--------|---------|
 | Package deploy + strict manifest | done | |
-| Sandbox start on materialize | hole | L07 |
+| Sandbox start on materialize | live (subset) | L07 prepare run.json; spawn hole |
 | Company/Admin quotas | done | L04 CompanyQuotaService |
 | columns/views CRUD | done | PATCH column type + metadata |
 | UI meta interpreters | live (subset) | tables settings + custom tabs + view edit |

@@ -22,7 +22,7 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 |---------|------|
 | ORM projects / project_triggers / project_attachments + migration | k8s pod scheduler |
 | CRUD: create/list/get; pause/resume/delete | AgentProviderPort wiring (L08) |
-| Materialize: AGENTS.md + CLAUDE.md dual-write, mcp.json, packages/, inbox/out | AGENTS text from cabinet UI meta |
+| Materialize: AGENTS.md + CLAUDE.md dual-write, mcp.json, packages/, inbox/out | MCP process spawn (bubblewrap/k8s) |
 | `container_ref=local-ws:{workspace_key}` | Sandbox MCP process start |
 | Triggers: enqueue + list (`chat.message`, `project.prepare`, …) | Background worker loop |
 | Attachments: base64 upload → inbox + DB ref | Virus scan; company policy limits |
@@ -87,7 +87,7 @@ apps/api/tests/unit/test_projects_domain.py
 | Materialize layout | done | default AGENTS; UI meta later |
 | Pause/resume/delete | done | local-ws only |
 | Trigger dispatch to agent | done | POST triggers/dispatch → AgentTriggerDispatcher |
-| MCP package sandbox run | hole | extract only |
+| MCP package sandbox run | live (subset) | prepare `.sandbox/run.json` + mcp.json sandbox block; process spawn — hole |
 | Platform vs project event bus split | partial | project_triggers table only |
 | Attachment virus/size policy | stub | ATTACHMENT_MAX_BYTES constant |
 
@@ -105,4 +105,4 @@ cd apps/api && ruff check src tests && pytest tests/unit/test_projects_domain.py
 | B. Контракты | 1 | C-PROJECT/MATERIALIZE live subset |
 | C. Инварианты и проверки | 1 | ACL + lifecycle tests |
 | D. As-built ясность | 2 | эта карточка |
-| **Quality (итог)** | **6** | doing; sandbox MCP run gap |
+| **Quality (итог)** | **6** | doing; MCP process spawn gap |

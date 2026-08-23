@@ -87,6 +87,8 @@ agent writes files in workspace
 
 Выбор изолятора (bubblewrap / gVisor / micro-VM) — code-wave; контракт одинаков.
 
+**As-built (2026-08-23):** materialize пишет `packages/{name}/.sandbox/run.json` (status `ready|invalid`, entry, tools) и блок `sandbox` в workspace `mcp.json`. Spawn процесса — hole.
+
 ---
 
 ## Связь с таблицами кабинета

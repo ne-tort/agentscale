@@ -110,6 +110,7 @@ class ProjectService:
             "mcp_config_path": mat.mcp_config_path,
             "status": mat.status,
             "package_names": list(mat.package_names),
+            "sandbox_packages": list(mat.sandbox_packages),
         }
         return out
 
@@ -166,6 +167,7 @@ class ProjectService:
             "mcp_config_path": mat.mcp_config_path,
             "status": mat.status,
             "package_names": list(mat.package_names),
+            "sandbox_packages": list(mat.sandbox_packages),
         }
 
     async def pause(

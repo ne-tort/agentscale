@@ -21,6 +21,7 @@ class MaterializeResult:
     mcp_config_path: str
     status: str = "materialized"
     package_names: tuple[str, ...] = ()
+    sandbox_packages: tuple[dict, ...] = ()
 
 
 class MaterializeProjectPort(Protocol):
@@ -65,7 +66,21 @@ class ProjectMaterializeService:
                 pkg_names.append(name)
             writer.extract_packages(artifacts)
 
-        writer.write_mcp_config(cabinet_id=cabinet_id, package_names=pkg_names)
+        sandbox_records = writer.prepare_package_sandboxes(pkg_names) if pkg_names else []
+        mcp_packages = [
+            {
+                "name": rec["name"],
+                "root": rec.get("root") or f"packages/{rec['name']}",
+                "sandbox": {
+                    "status": rec.get("status"),
+                    "entry": rec.get("entry"),
+                    "tools": rec.get("tools", []),
+                },
+            }
+            for rec in sandbox_records
+        ]
+
+        writer.write_mcp_config(cabinet_id=cabinet_id, packages=mcp_packages)
         root = writer.workspace_root
         return MaterializeResult(
             project_id=project_id,
@@ -74,6 +89,7 @@ class ProjectMaterializeService:
             mcp_config_path=str(writer.mcp_config_path),
             status="materialized",
             package_names=tuple(pkg_names),
+            sandbox_packages=tuple(sandbox_records),
         )
 
 

@@ -7,6 +7,7 @@ import shutil
 import zipfile
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 from prodavan.config.settings import settings
 
@@ -39,16 +40,24 @@ class WorkspaceLayoutWriter:
         (self._root / "AGENTS.md").write_text(text, encoding="utf-8")
         (self._root / "CLAUDE.md").write_text(text, encoding="utf-8")
 
-    def write_mcp_config(self, *, cabinet_id: str, package_names: list[str]) -> None:
+    def write_mcp_config(self, *, cabinet_id: str, packages: list[dict[str, Any]]) -> None:
         payload = {
             "version": 1,
             "platform": {
                 "cabinet_id": cabinet_id,
                 "tools_endpoint": f"/api/v1/cabinets/{cabinet_id}/mcp/call",
             },
-            "packages": [{"name": n, "root": f"packages/{n}"} for n in package_names],
+            "packages": packages,
         }
         self.mcp_config_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    def prepare_package_sandboxes(self, package_names: list[str]) -> list[dict[str, Any]]:
+        from prodavan.infrastructure.projects.mcp_sandbox import prepare_package_sandbox
+
+        records: list[dict[str, Any]] = []
+        for name in package_names:
+            records.append(prepare_package_sandbox(workspace_root=self._root, package_name=name))
+        return records
 
     def extract_packages(self, artifacts: list[tuple[str, bytes]]) -> list[str]:
         names: list[str] = []
