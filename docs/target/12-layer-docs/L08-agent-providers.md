@@ -7,7 +7,7 @@
 | Quality note | Port+events+fixture+budget+SSE+HITL; Node sidecar — gap |
 | Plan | [L08](../11-implementation-plan/L08-agent-providers.md) |
 | Canon | [08-agent-providers](../08-agent-providers/) |
-| Last updated | 2026-08-24 — ignore stale cancelled session_id on chat |
+| Last updated | 2026-08-24 — company suspend cancels sessions |
 | Owners | — |
 
 ---
@@ -33,6 +33,7 @@ AgentProviderPort + frozen AgentEvent; credentials только через L03 r
 | Chat text optional when attachment_refs present | |
 | `CompanySubscriptionGate` on session create/send → `COMPANY_SUSPENDED` | |
 | Pause: create_session / chat_turn blocked (`PROJECT_PAUSED`); cancel_session allowed; pause cancels ACTIVE; transcript falls back to latest cancelled + `session_status`; chat ignores stale cancelled session_id | |
+| Company suspend cancels ACTIVE sessions company-wide (`sessions_cancelled` on `company.suspended`) | |
 | Unit + integration tests | Golden JSON fixtures |
 
 ## Как сделано

@@ -49,4 +49,15 @@ void main() {
     expect(find.textContaining('High agent token usage'), findsOneWidget);
     expect(find.textContaining('Subscription expiring'), findsOneWidget);
   });
+
+  test('messagesFor ai keys expiring', () {
+    final msgs = AdminMetricsAlerts.messagesFor({
+      'ai_keys_expiring_soon': 2,
+      'next_key_renewal_at': '2026-09-01',
+      'employees_total': 1,
+      'ai_keys_bound': 1,
+      'subscription_lifetime': true,
+    });
+    expect(msgs, contains('2 AI key(s) renew soon · next 2026-09-01'));
+  });
 }

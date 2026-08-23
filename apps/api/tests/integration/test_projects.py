@@ -658,6 +658,14 @@ def test_company_suspended_emit_and_chat_gate(client: TestClient) -> None:
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
 
+    sess = client.post(
+        f"/api/v1/projects/{project_id}/agent/sessions",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={},
+    )
+    assert sess.status_code == 201, sess.text
+    session_id = sess.json()["id"]
+
     past = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     sub = client.put(
         f"/api/v1/admin/companies/{company_id}/subscription",
@@ -675,6 +683,15 @@ def test_company_suspended_emit_and_chat_gate(client: TestClient) -> None:
     items = events.json()["items"]
     assert len(items) >= 1
     assert items[0]["event_type"] == "company.suspended"
+    assert items[0]["payload"].get("sessions_cancelled", 0) >= 1
+
+    listed = client.get(
+        f"/api/v1/projects/{project_id}/agent/sessions",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert listed.status_code == 200, listed.text
+    sess_row = next(s for s in listed.json()["items"] if s["id"] == session_id)
+    assert sess_row["status"] == "cancelled"
 
     audit = client.get(
         f"/api/v1/cabinets/{cabinet_id}/audit-events",

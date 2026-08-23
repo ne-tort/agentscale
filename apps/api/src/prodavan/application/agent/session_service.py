@@ -552,7 +552,21 @@ class AgentSessionService:
             .where(AgentSessionRow.project_id == project_id)
             .where(AgentSessionRow.status == AgentSessionStatus.ACTIVE)
         )
-        rows = list(result.scalars().all())
+        return await self._cancel_session_rows(list(result.scalars().all()))
+
+    async def cancel_active_for_company(self, *, company_id: str) -> int:
+        """Best-effort cancel of ACTIVE sessions across company projects (subscription suspend)."""
+        from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+        result = await self._session.execute(
+            select(AgentSessionRow)
+            .join(ProjectRow, ProjectRow.id == AgentSessionRow.project_id)
+            .where(ProjectRow.company_id == company_id)
+            .where(AgentSessionRow.status == AgentSessionStatus.ACTIVE)
+        )
+        return await self._cancel_session_rows(list(result.scalars().all()))
+
+    async def _cancel_session_rows(self, rows: list[AgentSessionRow]) -> int:
         for row in rows:
             try:
                 adapter = get_agent_adapter(api_kind=row.api_kind)
@@ -564,7 +578,7 @@ class AgentSessionService:
                 )
                 await adapter.cancel(handle)
             except Exception:
-                # Pause must succeed even if vendor cancel fails.
+                # Lifecycle stop must succeed even if vendor cancel fails.
                 pass
             row.status = AgentSessionStatus.CANCELLED
         return len(rows)

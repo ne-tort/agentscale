@@ -54,8 +54,11 @@ class CompanySubscriptionGate:
         *,
         principal: Principal | None = None,
     ) -> None:
+        from prodavan.application.projects.pause_runtime import stop_company_runtime
         from prodavan.application.projects.platform_event_service import PlatformEventService
 
+        # Stop in-flight agent runtime (same surface as project pause).
+        cancelled = await stop_company_runtime(self._session, company_id=company_id)
         await PlatformEventService(self._session).emit(
             event_type="company.suspended",
             company_id=company_id,
@@ -63,6 +66,7 @@ class CompanySubscriptionGate:
             payload={
                 "subscription_ends_at": subscription.get("subscription_ends_at"),
                 "reason": "subscription_expired",
+                "sessions_cancelled": cancelled,
             },
         )
 
@@ -131,6 +135,10 @@ class CompanySubscriptionGate:
     async def require_active(self, company_id: str, *, principal: Principal | None = None) -> None:
         state = await self.subscription_state(company_id, principal=principal)
         if state.get("subscription_expired"):
+            from prodavan.application.projects.pause_runtime import stop_company_runtime
+
+            # Idempotent: cleans leftovers if suspend event already existed before cancel wiring.
+            await stop_company_runtime(self._session, company_id=company_id)
             raise AppError(
                 code="COMPANY_SUSPENDED",
                 title="Company suspended",

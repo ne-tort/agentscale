@@ -7,7 +7,7 @@
 | Quality note | Admin shell + starter catalog + subscription alerts |
 | Plan | [L04](../11-implementation-plan/L04-admin-company.md) |
 | Canon | [01-platform-admin](../01-platform-admin/), [03-companies](../03-companies/) |
-| Last updated | 2026-08-24 — AdminMetricsAlerts widget + tests |
+| Last updated | 2026-08-24 — suspend cancels company agent sessions |
 | Owners | — |
 
 ---
@@ -27,8 +27,8 @@ Platform Admin — компании, keys (L03), квоты/policy, metrics read
 | Agent policy UI incl. token budgets + max_attachment_mb + HMAC secrets + idle pause hours | USD authoritative billing sync |
 | Company contour: Overview / Employees / Cabinets | |
 | Invite employee full-page form | |
-| `PUT /admin/companies/{id}/subscription` → emits `company.suspended` on expire transition, `company.reactivated` on renew | |
-| Natural expiry: `subscription_state` lazy-emits `company.suspended` (dedupe by latest transition) | |
+| `PUT /admin/companies/{id}/subscription` → emits `company.suspended` on expire transition (cancels ACTIVE agent sessions), `company.reactivated` on renew | |
+| Natural expiry: `subscription_state` lazy-emits `company.suspended` (dedupe by latest transition; cancels sessions on emit) | |
 | Metrics: `subscription_ends_at`, expiring/expired flags | |
 | Starter bundle catalog API (`GET /admin/starter-bundles`) | |
 | AdminStarterBundlesPage read-only catalog tab | |
