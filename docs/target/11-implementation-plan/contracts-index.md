@@ -35,6 +35,10 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-23 | C-BUNDLE | L04 starter catalog + L05 import from catalog | no |
+| 2026-08-23 | C-META-DATA | `GET meta/tables/{slug}` columns for empty tables | no |
+| 2026-08-23 | C-EMP-SHELL | ProjectCreatePage full-page wiring | no |
+| 2026-08-23 | C-ADMIN-COMPANY | Admin Bundles tab + starter catalog API | no |
 | 2026-08-23 | C-META-DATA | L05 tables tab upsert/delete + row HTTP client | no |
 | 2026-08-23 | C-BUNDLE | export save to zip via FilePicker | no |
 | 2026-08-23 | C-ADMIN-COMPANY | subscription edit UI on company create/detail | no |

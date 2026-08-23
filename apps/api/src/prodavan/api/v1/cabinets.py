@@ -251,6 +251,22 @@ async def list_meta_tables(
     )
 
 
+@router.get("/{cabinet_id}/meta/tables/{table_slug}")
+async def get_meta_table(
+    cabinet_id: str,
+    table_slug: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await CabinetMetaService(session).get_table(
+        cabinet_id=cabinet_id,
+        table_slug=table_slug,
+        principal=principal,
+        employee=employee,
+    )
+
+
 @router.post("/{cabinet_id}/meta/tables", status_code=201)
 async def create_meta_table(
     cabinet_id: str,

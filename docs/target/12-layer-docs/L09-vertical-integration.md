@@ -19,13 +19,15 @@
 
 | Сделано | Gaps |
 |---------|------|
-| `test_e2e_smoke.py` — Admin→Company→Key→Cabinet→Project→Agent→metrics | CI nightly job |
+| `test_e2e_smoke.py` — Admin→Company→Key→Cabinet→Project→Agent→metrics | Flutter widget/integration test |
 | `POST /projects/{id}/chat` + `GET .../chat/transcript` | storage_bytes, last_activity |
-| Disabled employee 403 on chat | Flutter widget/integration test |
+| Disabled employee 403 on chat | |
 | Disabled AI key → `NO_AI_KEY` 404 | expired-by-date key path — done |
 | AGENT_BUDGET 429 on chat follow-up | done | test_e2e_agent_budget_blocks_followup |
 | Admin metrics list in smoke | done | GET /admin/metrics/companies |
 | SSE chat stream in smoke | done | POST /chat/stream + meta/tabs + bundle import |
+| `GET meta/tables/{slug}` in smoke | done | columns on table detail |
+| CI nightly workflow | done | `.github/workflows/ci-nightly.yml` |
 | `employees_active` in metrics | done | excludes disabled |
 | Admin metrics: agent_tokens_used, agent_messages, projects_total | |
 | Peer cabinet 403 in smoke | |
@@ -45,7 +47,7 @@ apps/api/src/prodavan/api/v1/admin_metrics.py
 
 | Требование | Статус |
 |------------|--------|
-| CI nightly | hole |
+| CI nightly | live (subset) | integration pytest on schedule |
 | Widget E2E | hole |
 | Release gate checklist automation | hole |
 

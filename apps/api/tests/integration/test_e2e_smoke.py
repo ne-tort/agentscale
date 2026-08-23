@@ -152,6 +152,20 @@ def test_e2e_smoke_admin_to_agent_ping(client: TestClient) -> None:
     assert "projects" in slugs
     assert all(t.get("view_slug") for t in tabs.json())
 
+    tables = client.get(f"/api/v1/cabinets/{cabinet_id}/meta/tables", headers=owner_h)
+    assert tables.status_code == 200, tables.text
+    table_list = tables.json()
+    if table_list:
+        first_slug = table_list[0]["slug"]
+        detail = client.get(
+            f"/api/v1/cabinets/{cabinet_id}/meta/tables/{first_slug}",
+            headers=owner_h,
+        )
+        assert detail.status_code == 200, detail.text
+        body = detail.json()
+        assert body["slug"] == first_slug
+        assert isinstance(body.get("columns"), list)
+
     exported = client.get(f"/api/v1/cabinets/{cabinet_id}/bundle", headers=owner_h)
     assert exported.status_code == 200, exported.text
     zip_b64 = exported.json()["zip_base64"]

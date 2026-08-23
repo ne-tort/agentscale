@@ -4,6 +4,7 @@ import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/features/employee/project_create_page.dart';
 import 'package:prodavan/features/employee/project_workspace_page.dart';
 
 /// Projects tab — list + chat workspace (L05/L09).
@@ -49,32 +50,12 @@ class _ProjectListPageState extends State<ProjectListPage> {
   }
 
   Future<void> _createProject() async {
-    final nameCtrl = TextEditingController(text: 'New project');
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Create project'),
-        content: TextField(
-          controller: nameCtrl,
-          decoration: const InputDecoration(labelText: 'Name'),
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Create')),
-        ],
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ProjectCreatePage(cabinetId: widget.cabinetId),
       ),
     );
-    if (ok != true) return;
-    final name = nameCtrl.text.trim();
-    if (name.isEmpty) return;
-    try {
-      await workContext.api.createProject(cabinetId: widget.cabinetId, name: name);
-      await _reload();
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _error = e.toString());
-    }
+    await _reload();
   }
 
   void _openProject(AppEntityRow row) {

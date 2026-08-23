@@ -64,6 +64,62 @@ class CabinetMetaService:
             for r in q.fetchall()
         ]
 
+    async def get_table(
+        self,
+        *,
+        cabinet_id: str,
+        table_slug: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        inst = await self._access.require_access(
+            cabinet_id=cabinet_id, principal=principal, employee=employee, write=False
+        )
+        qschema = qident(inst.schema_name)
+        tq = await self._session.execute(
+            text(
+                f"""
+                SELECT id, slug, label, storage_kind, status, created_at
+                FROM {qschema}.meta_tables
+                WHERE slug = :slug AND status = 'active'
+                """
+            ),
+            {"slug": table_slug},
+        )
+        table = tq.fetchone()
+        if table is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Table not found")
+        cq = await self._session.execute(
+            text(
+                f"""
+                SELECT name, col_type, required, unique_col, ref_table_slug
+                FROM {qschema}.meta_columns
+                WHERE table_id = :tid
+                ORDER BY name
+                """
+            ),
+            {"tid": table.id},
+        )
+        columns = [
+            {
+                "name": c.name,
+                "type": c.col_type,
+                "required": bool(c.required),
+                "unique": bool(c.unique_col),
+                "ref_table_slug": c.ref_table_slug,
+            }
+            for c in cq.fetchall()
+        ]
+        return {
+            "id": table.id,
+            "slug": table.slug,
+            "label": table.label,
+            "storage_kind": table.storage_kind,
+            "status": table.status,
+            "created_at": table.created_at.isoformat() if table.created_at else None,
+            "columns": columns,
+        }
+
     async def list_tabs(
         self,
         *,

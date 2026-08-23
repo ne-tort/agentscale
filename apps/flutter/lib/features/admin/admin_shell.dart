@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/features/admin/admin_metrics_overview_page.dart';
+import 'package:prodavan/features/admin/admin_starter_bundles_page.dart';
 import 'package:prodavan/features/admin/ai_key_list_page.dart';
 import 'package:prodavan/features/admin/company_list_page.dart';
 
@@ -21,6 +22,7 @@ class _AdminShellState extends State<AdminShell> {
       AdminMetricsOverviewPage(embedded: true),
       AdminCompanyListPage(embedded: true),
       AdminAiKeyListPage(embedded: true),
+      AdminStarterBundlesPage(embedded: true),
     ];
 
     return Scaffold(
@@ -32,6 +34,7 @@ class _AdminShellState extends State<AdminShell> {
           NavigationDestination(icon: Icon(Icons.dashboard_outlined), label: 'Overview'),
           NavigationDestination(icon: Icon(Icons.business_outlined), label: 'Companies'),
           NavigationDestination(icon: Icon(Icons.key_outlined), label: 'AI Keys'),
+          NavigationDestination(icon: Icon(Icons.inventory_2_outlined), label: 'Bundles'),
         ],
       ),
     );

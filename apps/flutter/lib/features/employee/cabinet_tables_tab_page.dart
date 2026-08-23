@@ -22,6 +22,7 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
   List<Map<String, dynamic>> _tables = const [];
   String? _selectedSlug;
   List<Map<String, dynamic>> _rows = const [];
+  List<Map<String, dynamic>> _columns = const [];
 
   static const _systemFields = {'id', 'created_at'};
 
@@ -59,13 +60,19 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
       _rows = const [];
     });
     try {
+      final meta = await workContext.api.getMetaTable(
+        cabinetId: widget.cabinetId,
+        tableSlug: slug,
+      );
       final result = await workContext.api.queryCabinetRows(
         cabinetId: widget.cabinetId,
         tableSlug: slug,
       );
       if (!mounted) return;
       final rows = result['rows'];
+      final cols = meta['columns'];
       setState(() {
+        _columns = cols is List ? cols.cast<Map<String, dynamic>>() : const [];
         _rows = rows is List ? rows.cast<Map<String, dynamic>>() : const [];
       });
     } catch (e) {
@@ -75,6 +82,9 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
   }
 
   Set<String> _fieldNames() {
+    if (_columns.isNotEmpty) {
+      return _columns.map((c) => c['name'] as String).where((n) => n.isNotEmpty).toSet();
+    }
     final names = <String>{};
     for (final row in _rows) {
       for (final key in row.keys) {

@@ -135,6 +135,17 @@ class AdminApi {
     return const [];
   }
 
+  Future<List<Map<String, dynamic>>> listStarterBundles() async {
+    final res = await http.get(_uri('/admin/starter-bundles'), headers: _headers);
+    _throwIfError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = body['items'];
+    if (items is List) {
+      return items.cast<Map<String, dynamic>>();
+    }
+    return const [];
+  }
+
   Future<List<Map<String, dynamic>>> listAiKeys() async {
     final res = await http.get(_uri('/admin/ai-keys'), headers: _headers);
     _throwIfError(res);

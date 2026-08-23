@@ -4,10 +4,10 @@
 |------|----------|
 | Status | doing |
 | Quality | 7 |
-| Quality note | Admin shell Overview + Companies + AI Keys + subscription alerts |
+| Quality note | Admin shell + starter catalog + subscription alerts |
 | Plan | [L04](../11-implementation-plan/L04-admin-company.md) |
 | Canon | [01-platform-admin](../01-platform-admin/), [03-companies](../03-companies/) |
-| Last updated | 2026-08-23 — subscription UI on create/detail |
+| Last updated | 2026-08-23 — starter bundle catalog API + Admin Bundles tab |
 | Owners | — |
 
 ---
@@ -20,7 +20,7 @@ Platform Admin — компании, keys (L03), квоты/policy, metrics read
 
 | Сделано | Gaps |
 |---------|------|
-| AdminShell NavigationBar: Overview + Companies + AI Keys | Starter bundle catalog |
+| AdminShell NavigationBar: Overview + Companies + AI Keys + Bundles | Starter bundle zip files not shipped |
 | Platform Overview tab + no-keys / key-expiring / subscription alerts | |
 | Create company full-page + quotas on create | |
 | AI Keys: list, create, bind, disable, renew, rotate | |
@@ -29,6 +29,8 @@ Platform Admin — компании, keys (L03), квоты/policy, metrics read
 | Invite employee full-page form | |
 | `PUT /admin/companies/{id}/subscription` | |
 | Metrics: `subscription_ends_at`, expiring/expired flags | |
+| Starter bundle catalog API (`GET /admin/starter-bundles`) | |
+| AdminStarterBundlesPage read-only catalog tab | |
 
 ## Карта кода
 
@@ -38,8 +40,12 @@ apps/flutter/lib/features/admin/
   admin_metrics_overview_page.dart
   admin_company_create_page.dart
   {company_list,company_detail,ai_key_list,ai_key_create,ai_key_detail,ai_key_rotate}_page.dart
+  admin_starter_bundles_page.dart
 apps/flutter/lib/features/company/company_invite_employee_page.dart
 apps/flutter/lib/core/api/admin_api.dart
+apps/api/src/prodavan/domain/admin/starter_catalog.py
+apps/api/src/prodavan/application/admin/starter_bundle_service.py
+apps/api/src/prodavan/api/v1/admin_starter_bundles.py
 apps/api/src/prodavan/domain/admin/types.py (subscription_read_model)
 apps/api/alembic/versions/2026082309_company_subscription.py
 ```
@@ -57,6 +63,8 @@ apps/api/alembic/versions/2026082309_company_subscription.py
 | Subscription expiring alert | done | subscription_expiring_soon + Flutter Overview |
 | Subscription expired alert | done | subscription_expired flag |
 | Subscription UI on create/edit | done | lifetime + ends_at |
+| Starter bundle catalog | live (subset) | metadata + Admin UI; zip files in `data/starter_bundles/` |
+| Starter bundle download | hole | 503 until zip shipped |
 | `storage_bytes` / `last_activity_at` | done | workspace scan + activity max |
 | E2E widget tests | hole | |
 

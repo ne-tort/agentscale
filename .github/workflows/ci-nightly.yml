@@ -1,0 +1,74 @@
+name: CI Nightly
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  integration:
+    runs-on: [self-hosted, linux, docker]
+    defaults:
+      run:
+        working-directory: apps/api
+    env:
+      DATABASE_URL: postgresql+asyncpg://prodavan_app:prodavan@127.0.0.1:55433/prodavan
+      PG_ADMIN_URL: postgresql+asyncpg://prodavan:prodavan@127.0.0.1:55433/prodavan
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start Postgres
+        run: |
+          docker rm -f prodavan-nightly-pg 2>/dev/null || true
+          docker run -d --name prodavan-nightly-pg \
+            -e POSTGRES_USER=prodavan \
+            -e POSTGRES_PASSWORD=prodavan \
+            -e POSTGRES_DB=prodavan \
+            -p 55433:5432 \
+            postgres:16
+          for i in $(seq 1 30); do
+            if docker exec prodavan-nightly-pg pg_isready -U prodavan -d prodavan; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Postgres did not become ready" >&2
+          exit 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Ensure app role
+        env:
+          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@127.0.0.1:55433/prodavan
+        run: |
+          python - <<'PY'
+          import asyncio
+          import asyncpg
+          async def main():
+              conn = await asyncpg.connect("postgresql://prodavan:prodavan@127.0.0.1:55433/prodavan")
+              try:
+                  await conn.execute("CREATE ROLE prodavan_app LOGIN PASSWORD 'prodavan'")
+              except Exception:
+                  pass
+              await conn.execute("GRANT ALL ON SCHEMA public TO prodavan_app")
+              await conn.execute("GRANT ALL ON DATABASE prodavan TO prodavan_app")
+              await conn.close()
+          asyncio.run(main())
+          PY
+
+      - name: Run migrations
+        env:
+          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@127.0.0.1:55433/prodavan
+        run: alembic upgrade head
+
+      - name: Pytest integration
+        run: pytest tests/integration/ -q
+
+      - name: Stop Postgres
+        if: always()
+        run: docker rm -f prodavan-nightly-pg 2>/dev/null || true

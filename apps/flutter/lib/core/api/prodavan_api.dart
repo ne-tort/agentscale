@@ -153,6 +153,38 @@ class ProdavanApi {
     }
   }
 
+  Future<Map<String, dynamic>> getMetaTable({
+    required String cabinetId,
+    required String tableSlug,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.get(_uri('/cabinets/$cabinetId/meta/tables/$tableSlug'), headers: _headers);
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> listStarterBundles() async {
+    final res = await http.get(_uri('/starter-bundles'), headers: _headers);
+    _throwIfError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = body['items'];
+    if (items is List) {
+      return items.cast<Map<String, dynamic>>();
+    }
+    return const [];
+  }
+
+  Future<Map<String, dynamic>> downloadStarterBundle(String bundleId) async {
+    final res = await http.get(_uri('/starter-bundles/$bundleId/bundle'), headers: _headers);
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<List<Map<String, dynamic>>> listCabinetMcpTools(String cabinetId) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;

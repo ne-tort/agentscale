@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
@@ -25,7 +27,35 @@ class _CabinetImportBundlePageState extends State<CabinetImportBundlePage> {
   List<int>? _zipBytes;
   String? _pickedFilename;
   bool _importing = false;
+  bool _loadingCatalog = true;
   String? _error;
+  List<Map<String, dynamic>> _starterBundles = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStarterCatalog();
+  }
+
+  Future<void> _loadStarterCatalog() async {
+    setState(() {
+      _loadingCatalog = true;
+      _error = null;
+    });
+    try {
+      final items = await workContext.api.listStarterBundles();
+      if (!mounted) return;
+      setState(() {
+        _starterBundles = items;
+        _loadingCatalog = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loadingCatalog = false;
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -55,6 +85,48 @@ class _CabinetImportBundlePageState extends State<CabinetImportBundlePage> {
         _nameCtrl.text = base.isEmpty ? 'Imported cabinet' : base;
       }
     });
+  }
+
+  Future<void> _importFromStarter(String bundleId, String defaultName) async {
+    final companyId = workContext.companyId;
+    if (companyId == null) {
+      setState(() => _error = 'No company_id from /me memberships');
+      return;
+    }
+    setState(() {
+      _importing = true;
+      _error = null;
+    });
+    try {
+      final payload = await workContext.api.downloadStarterBundle(bundleId);
+      final b64 = payload['zip_base64'] as String?;
+      if (b64 == null || b64.isEmpty) {
+        throw StateError('Starter bundle payload missing zip_base64');
+      }
+      final bytes = base64Decode(b64);
+      final name = payload['name'] as String? ?? defaultName;
+      final result = await workContext.api.importCabinetBundle(
+        companyId: companyId,
+        zipBytes: bytes,
+        name: name,
+      );
+      if (!mounted) return;
+      final cabinet = result['cabinet'] as Map<String, dynamic>? ?? result;
+      final cabinetId = cabinet['id'] as String;
+      final cabinetName = cabinet['name'] as String? ?? name;
+      workContext.enterCabinet(cabinetId);
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(
+          builder: (_) => DynamicCabinetShell(cabinetId: cabinetId, cabinetName: cabinetName),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _importing = false;
+      });
+    }
   }
 
   Future<void> _import() async {
@@ -112,6 +184,28 @@ class _CabinetImportBundlePageState extends State<CabinetImportBundlePage> {
             'Creates a new cabinet instance with a fresh schema.',
           ),
           const SizedBox(height: AppSpacing.md),
+          if (_loadingCatalog)
+            const Center(child: Padding(padding: EdgeInsets.all(AppSpacing.md), child: CircularProgressIndicator()))
+          else if (_starterBundles.isNotEmpty) ...[
+            const AppSectionHeader(title: 'Official starter bundles'),
+            ..._starterBundles.map((item) {
+              final id = item['id'] as String? ?? '';
+              final available = item['bundle_available'] == true;
+              return ListTile(
+                leading: Icon(available ? Icons.inventory_2_outlined : Icons.hourglass_empty),
+                title: Text(item['name'] as String? ?? id),
+                subtitle: Text(item['description'] as String? ?? ''),
+                trailing: available
+                    ? AppButton(
+                        label: _importing ? '…' : 'Import',
+                        onPressed: _importing ? null : () => _importFromStarter(id, item['name'] as String? ?? id),
+                      )
+                    : const Text('not shipped'),
+              );
+            }),
+            const SizedBox(height: AppSpacing.lg),
+            const AppSectionHeader(title: 'From file'),
+          ],
           AppForm(
             formKey: _formKey,
             children: [
