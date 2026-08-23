@@ -42,6 +42,8 @@ class CompanyAgentRuntimePolicy:
     max_attachment_mb: int = DEFAULT_MAX_ATTACHMENT_MB
     webhook_hmac_secret: str | None = None
     telegram_hmac_secret: str | None = None
+    # None or 0 = disabled (L09 idle pause; default off).
+    idle_pause_after_hours: int | None = None
 
     def validate(self) -> None:
         if self.tool_preset not in TOOL_PRESETS:
@@ -58,6 +60,13 @@ class CompanyAgentRuntimePolicy:
             raise ValueError("webhook_hmac_secret too long")
         if self.telegram_hmac_secret is not None and len(self.telegram_hmac_secret) > 256:
             raise ValueError("telegram_hmac_secret too long")
+        if self.idle_pause_after_hours is not None and (
+            self.idle_pause_after_hours < 0 or self.idle_pause_after_hours > 8760
+        ):
+            raise ValueError("idle_pause_after_hours must be 0..8760 (0/None = off)")
+
+    def idle_pause_enabled(self) -> bool:
+        return bool(self.idle_pause_after_hours and self.idle_pause_after_hours > 0)
 
 
 def attachment_max_bytes(policy: CompanyAgentRuntimePolicy) -> int:

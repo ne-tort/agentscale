@@ -45,6 +45,7 @@ class AgentPolicyBody(BaseModel):
     max_tokens_per_run: int | None = Field(default=None, ge=1)
     max_cost_usd_month: Decimal | None = Field(default=None, gt=0)
     max_attachment_mb: int = Field(default=20, ge=1, le=500)
+    idle_pause_after_hours: int | None = Field(default=None, ge=0, le=8760)
     webhook_hmac_secret: str | None = Field(default=None, max_length=256)
     telegram_hmac_secret: str | None = Field(default=None, max_length=256)
 
@@ -90,6 +91,8 @@ async def get_agent_policy(company_id: str, _: PlatformAdminDep, session: Sessio
         else None,
         "max_attachment_mb": policy.max_attachment_mb,
         "attachment_max_bytes": int(policy.max_attachment_mb) * 1024 * 1024,
+        "idle_pause_after_hours": policy.idle_pause_after_hours,
+        "idle_pause_enabled": policy.idle_pause_enabled(),
         "webhook_hmac_configured": bool(policy.webhook_hmac_secret),
         "telegram_hmac_configured": bool(policy.telegram_hmac_secret),
     }
@@ -112,6 +115,7 @@ async def set_agent_policy(
         max_tokens_per_run=body.max_tokens_per_run,
         max_cost_usd_month=body.max_cost_usd_month,
         max_attachment_mb=body.max_attachment_mb,
+        idle_pause_after_hours=body.idle_pause_after_hours,
         webhook_hmac_secret=fields.get("webhook_hmac_secret") if "webhook_hmac_secret" in fields else None,
         telegram_hmac_secret=fields.get("telegram_hmac_secret") if "telegram_hmac_secret" in fields else None,
     )
@@ -121,6 +125,17 @@ async def set_agent_policy(
         update_webhook_secret="webhook_hmac_secret" in fields,
         update_telegram_secret="telegram_hmac_secret" in fields,
     )
+
+
+@router.post("/{company_id}/idle-pause/sweep")
+async def sweep_idle_pause_company(
+    company_id: str,
+    admin: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    from prodavan.application.projects.idle_pause_service import IdlePauseService
+
+    return await IdlePauseService(session).sweep_company(company_id, principal=admin)
 
 
 @router.put("/{company_id}/subscription")

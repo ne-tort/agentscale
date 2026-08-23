@@ -54,6 +54,8 @@ def _policy_public(policy: CompanyAgentRuntimePolicy) -> dict:
         "attachment_max_bytes": attachment_max_bytes(policy),
         "webhook_hmac_configured": bool(policy.webhook_hmac_secret),
         "telegram_hmac_configured": bool(policy.telegram_hmac_secret),
+        "idle_pause_after_hours": policy.idle_pause_after_hours,
+        "idle_pause_enabled": policy.idle_pause_enabled(),
     }
 
 
@@ -141,6 +143,7 @@ class AdminCompanyService:
         row.max_tokens_per_run = policy.max_tokens_per_run
         row.max_cost_usd_month = policy.max_cost_usd_month
         row.max_attachment_mb = policy.max_attachment_mb
+        row.idle_pause_after_hours = policy.idle_pause_after_hours
         if update_webhook_secret:
             secret = policy.webhook_hmac_secret
             row.webhook_hmac_secret = (secret.strip() if secret else "") or None

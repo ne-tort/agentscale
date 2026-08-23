@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import mimetypes
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +13,11 @@ from prodavan.application.projects.access import ProjectAccessService
 from prodavan.domain.admin import attachment_max_bytes
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
-from prodavan.domain.projects import is_allowed_attachment_filename, is_forbidden_attachment_content
+from prodavan.domain.projects import (
+    is_allowed_attachment_filename,
+    is_forbidden_attachment_content,
+    sniff_attachment_content_type,
+)
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.projects import ProjectAttachmentRow
 from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
@@ -138,7 +141,7 @@ class ProjectAttachmentService:
                 status=422,
                 detail="executable or binary content not allowed for chat attachments",
             )
-        guessed = content_type or mimetypes.guess_type(safe_name)[0] or "application/octet-stream"
+        guessed = sniff_attachment_content_type(raw, filename=safe_name, fallback=content_type)
         writer = WorkspaceLayoutWriter(workspace_key=project.workspace_key)
         path = writer.store_inbox_attachment(filename=safe_name, raw=raw)
         storage_ref = f"file://projects/{project.workspace_key}/workspace/inbox/{path.name}"

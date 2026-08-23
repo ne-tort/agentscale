@@ -35,6 +35,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
   final _maxTokensPerRunCtrl = TextEditingController();
   final _maxCostUsdMonthCtrl = TextEditingController();
   final _maxAttachmentMbCtrl = TextEditingController(text: '20');
+  final _idlePauseHoursCtrl = TextEditingController();
   final _webhookSecretCtrl = TextEditingController();
   final _telegramSecretCtrl = TextEditingController();
   final _subscriptionEndsCtrl = TextEditingController();
@@ -71,6 +72,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
     _maxTokensPerRunCtrl.dispose();
     _maxCostUsdMonthCtrl.dispose();
     _maxAttachmentMbCtrl.dispose();
+    _idlePauseHoursCtrl.dispose();
     _webhookSecretCtrl.dispose();
     _telegramSecretCtrl.dispose();
     _subscriptionEndsCtrl.dispose();
@@ -104,6 +106,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
         _maxTokensPerRunCtrl.text = policy['max_tokens_per_run']?.toString() ?? '';
         _maxCostUsdMonthCtrl.text = policy['max_cost_usd_month']?.toString() ?? '';
         _maxAttachmentMbCtrl.text = policy['max_attachment_mb']?.toString() ?? '20';
+        _idlePauseHoursCtrl.text = policy['idle_pause_after_hours']?.toString() ?? '';
         _webhookHmacConfigured = policy['webhook_hmac_configured'] == true;
         _telegramHmacConfigured = policy['telegram_hmac_configured'] == true;
         _webhookSecretCtrl.clear();
@@ -206,6 +209,29 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
     }
   }
 
+  Future<void> _sweepIdlePause() async {
+    setState(() {
+      _drainingTriggers = true;
+      _error = null;
+    });
+    try {
+      final result = await adminContext.api.sweepIdlePause(companyId: widget.companyId);
+      await _load();
+      if (!mounted) return;
+      setState(() => _drainingTriggers = false);
+      final count = result['count'] ?? 0;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Idle-paused $count project(s)')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _drainingTriggers = false;
+      });
+    }
+  }
+
   Future<void> _savePolicy() async {
     setState(() {
       _savingPolicy = true;
@@ -224,6 +250,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
         maxTokensPerRun: _optionalPositiveInt(_maxTokensPerRunCtrl.text),
         maxCostUsdMonth: _optionalPositiveDouble(_maxCostUsdMonthCtrl.text),
         maxAttachmentMb: int.tryParse(_maxAttachmentMbCtrl.text.trim()) ?? 20,
+        idlePauseAfterHours: _optionalNonNegativeInt(_idlePauseHoursCtrl.text),
         webhookHmacSecret: webhookSecret.isEmpty ? null : webhookSecret,
         telegramHmacSecret: telegramSecret.isEmpty ? null : telegramSecret,
       );
@@ -367,6 +394,12 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                   onPressed: _drainingTriggers ? null : _drainTriggers,
                 ),
                 const SizedBox(height: AppSpacing.sm),
+                AppButton(
+                  label: _drainingTriggers ? 'Sweeping…' : 'Sweep idle pause',
+                  expanded: false,
+                  onPressed: _drainingTriggers ? null : _sweepIdlePause,
+                ),
+                const SizedBox(height: AppSpacing.sm),
                 if (_platformEvents.isEmpty)
                   Text(
                     'No platform events yet',
@@ -473,6 +506,12 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                   enabled: !_savingPolicy,
                   validator: (v) => _positiveInt(v, min: 1),
                 ),
+                AppTextField(
+                  controller: _idlePauseHoursCtrl,
+                  label: 'Idle pause after hours (empty/0 = off)',
+                  keyboardType: TextInputType.number,
+                  enabled: !_savingPolicy,
+                ),
                 Text(
                   _webhookHmacConfigured
                       ? 'Webhook HMAC: configured (leave blank to keep)'
@@ -518,6 +557,14 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
     if (trimmed.isEmpty) return null;
     final n = int.tryParse(trimmed);
     if (n == null || n < 1) return null;
+    return n;
+  }
+
+  int? _optionalNonNegativeInt(String value) {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return null;
+    final n = int.tryParse(trimmed);
+    if (n == null || n < 0) return null;
     return n;
   }
 

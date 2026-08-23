@@ -34,6 +34,37 @@ def test_forbidden_attachment_content_magic() -> None:
     assert not is_forbidden_attachment_content(b"%PDF-1.4")
 
 
+def test_sniff_attachment_content_type() -> None:
+    from prodavan.domain.projects import sniff_attachment_content_type
+
+    assert sniff_attachment_content_type(b"\x89PNG\r\n\x1a\n....") == "image/png"
+    assert sniff_attachment_content_type(b"\xff\xd8\xff\xe0") == "image/jpeg"
+    assert sniff_attachment_content_type(b"%PDF-1.7") == "application/pdf"
+    assert sniff_attachment_content_type(b"plain", filename="note.txt") == "text/plain"
+    assert sniff_attachment_content_type(b"x", fallback="application/json") == "application/json"
+
+
+def test_project_is_idle() -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from prodavan.domain.projects import project_is_idle
+
+    now = datetime(2026, 8, 23, 12, 0, tzinfo=UTC)
+    recent = now - timedelta(hours=1)
+    old = now - timedelta(hours=48)
+    assert not project_is_idle(last_activity_at=recent, now=now, idle_pause_after_hours=24)
+    assert project_is_idle(last_activity_at=old, now=now, idle_pause_after_hours=24)
+    assert not project_is_idle(last_activity_at=old, now=now, idle_pause_after_hours=0)
+    assert not project_is_idle(last_activity_at=None, now=now, idle_pause_after_hours=24)
+
+
+def test_idle_pause_policy_default_off() -> None:
+    policy = CompanyAgentRuntimePolicy()
+    assert policy.idle_pause_enabled() is False
+    on = CompanyAgentRuntimePolicy(idle_pause_after_hours=24)
+    assert on.idle_pause_enabled() is True
+
+
 def test_webhook_hmac_signature() -> None:
     from prodavan.domain.projects import verify_webhook_signature, webhook_signature
 

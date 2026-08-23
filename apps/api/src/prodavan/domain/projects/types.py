@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import mimetypes
 import re
 import uuid
+from datetime import datetime, timedelta
 from enum import StrEnum
 
 
@@ -74,6 +76,46 @@ _FORBIDDEN_MAGIC = (
     b"\xcf\xfa\xed\xfe",  # Mach-O 64
     b"\xce\xfa\xed\xfe",  # Mach-O 32
 )
+
+# Sniff common safe types when client omits/guesses wrong content_type.
+_CONTENT_MAGIC: tuple[tuple[bytes, str], ...] = (
+    (b"\x89PNG\r\n\x1a\n", "image/png"),
+    (b"\xff\xd8\xff", "image/jpeg"),
+    (b"GIF87a", "image/gif"),
+    (b"GIF89a", "image/gif"),
+    (b"%PDF", "application/pdf"),
+    (b"PK\x03\x04", "application/zip"),
+)
+
+
+def sniff_attachment_content_type(raw: bytes, *, filename: str = "", fallback: str | None = None) -> str:
+    """Best-effort content type from magic bytes, then filename, then fallback."""
+    head = raw[:16] if raw else b""
+    for magic, ctype in _CONTENT_MAGIC:
+        if head.startswith(magic):
+            return ctype
+    if filename:
+        guessed, _ = mimetypes.guess_type(filename)
+        if guessed:
+            return guessed
+    if fallback and fallback.strip():
+        return fallback.strip()
+    return "application/octet-stream"
+
+
+def project_is_idle(
+    *,
+    last_activity_at: datetime | None,
+    now: datetime,
+    idle_pause_after_hours: int,
+) -> bool:
+    """True when last activity is older than the idle threshold (hours > 0)."""
+    if idle_pause_after_hours <= 0 or last_activity_at is None:
+        return False
+    activity = last_activity_at
+    if activity.tzinfo is None and now.tzinfo is not None:
+        activity = activity.replace(tzinfo=now.tzinfo)
+    return activity + timedelta(hours=idle_pause_after_hours) <= now
 
 
 def attachment_extension(filename: str) -> str:

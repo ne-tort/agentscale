@@ -109,6 +109,7 @@ class AdminApi {
     int? maxTokensPerRun,
     double? maxCostUsdMonth,
     int maxAttachmentMb = 20,
+    int? idlePauseAfterHours,
     String? webhookHmacSecret,
     String? telegramHmacSecret,
   }) async {
@@ -124,10 +125,20 @@ class AdminApi {
         'max_tokens_per_run': maxTokensPerRun,
         'max_cost_usd_month': maxCostUsdMonth,
         'max_attachment_mb': maxAttachmentMb,
+        'idle_pause_after_hours': idlePauseAfterHours,
         if (webhookHmacSecret != null) 'webhook_hmac_secret': webhookHmacSecret,
         if (telegramHmacSecret != null) 'telegram_hmac_secret': telegramHmacSecret,
       }),
     );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> sweepIdlePause({String? companyId}) async {
+    final path = companyId == null || companyId.isEmpty
+        ? '/admin/triggers/idle-pause/sweep'
+        : '/admin/companies/$companyId/idle-pause/sweep';
+    final res = await http.post(_uri(path), headers: _headers);
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }

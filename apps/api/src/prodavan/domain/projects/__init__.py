@@ -12,7 +12,9 @@ from prodavan.domain.projects.types import (
     is_allowed_attachment_filename,
     is_forbidden_attachment_content,
     new_project_id,
+    project_is_idle,
     slugify_name,
+    sniff_attachment_content_type,
     workspace_key_for,
 )
 from prodavan.domain.projects.webhook_hmac import verify_webhook_signature, webhook_signature
@@ -29,7 +31,9 @@ __all__ = [
     "is_allowed_attachment_filename",
     "is_forbidden_attachment_content",
     "new_project_id",
+    "project_is_idle",
     "slugify_name",
+    "sniff_attachment_content_type",
     "verify_webhook_signature",
     "webhook_signature",
     "workspace_key_for",

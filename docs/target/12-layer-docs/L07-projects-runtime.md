@@ -7,7 +7,7 @@
 | Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain/worker; k8s isolator — gap |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-23 — handler stdout JSON + lazy suspend commit + cancel UX |
+| Last updated | 2026-08-23 — idle pause sweep + attachment magic MIME |
 | Owners | — |
 
 ---
@@ -27,7 +27,8 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 | Triggers: enqueue + list + dispatch + signed webhook/telegram ingress + admin drain + worker | External broker (Kafka/SQS) |
 | Outbox-lite: `attempts` / `lease_until` / `available_at` / `last_error` + SKIP LOCKED claim | |
 | Platform events bus + cabinet SPI deliver (audit) | MCP stdio handler protocol; bubblewrap |
-| Attachments: upload/list/delete + ref validation; size/type/magic policy | Full AV; image thumbnails |
+| Attachments: upload/list/delete + ref validation; size/type/magic policy + MIME sniff | Full AV; image thumbnails |
+| Idle pause: `idle_pause_after_hours` (default off) + admin sweep | Scheduled worker for idle sweep |
 | Integration tests lifecycle + FS layout + provider patch + admin drain | E2E with agent ping |
 
 ## Как сделано
@@ -39,12 +40,14 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 5. L06 `materialize-stub` → real FS (status `materialized`).
 6. Opt-in trigger worker (`TRIGGER_WORKER_ENABLED`) — in-process asyncio + `pg_try_advisory_lock` + row lease/SKIP LOCKED; hole: no external broker.
 7. `PlatformEventService` — subscription transitions + SPI fan-out. Package `platform_events` + opt-in `MCP_PLATFORM_EVENT_INVOKE` runs `src/on_platform_event.py` (stdin JSON event, optional stdout JSON `result`); full MCP stdio — hole.
-13. Lazy `company.suspended` emit commits inside `CompanySubscriptionGate` (no session auto-commit — SSE keeps the session open).
 8. `ProjectTriggerService.enqueue` + drain — `COMPANY_SUSPENDED` for runtime kinds; `project.prepare` exempt; queued triggers → `failed` on drain; dispatch errors → retry with backoff until max attempts.
 9. Project GET/list includes `company_subscription` read model (L04 → L05).
 10. Signed webhook ingress `POST .../webhooks/http` with company `webhook_hmac_secret` (not returned in GET; `webhook_hmac_configured` flag).
 11. Signed telegram ingress `POST .../webhooks/telegram` with company `telegram_hmac_secret` (`telegram_hmac_configured` flag).
 12. Trigger outbox lease columns (migration `2026082315`) — claim increments `attempts`, sets `lease_until`; crash → lease expiry → re-claim.
+13. Lazy `company.suspended` emit commits inside `CompanySubscriptionGate` (no session auto-commit — SSE keeps the session open).
+14. Idle pause — `idle_pause_after_hours` (0/None=off); admin/company sweep pauses stale projects (`reason=idle_pause`); hole: no dedicated cron worker.
+15. Attachment upload sniffs PNG/JPEG/GIF/PDF/ZIP magic for `content_type`.
 
 ## Контракты
 

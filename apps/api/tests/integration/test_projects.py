@@ -1110,3 +1110,102 @@ def test_natural_subscription_expiry_emits_suspended_on_read(client: TestClient)
     assert len(items) == 1
     assert items[0]["event_type"] == "company.suspended"
     assert items[0]["payload"].get("reason") == "subscription_expired"
+
+
+def _sql_backdate_project(project_id: str, updated_at: datetime) -> None:
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from tests.conftest import DATABASE_URL
+
+    async def _run() -> None:
+        engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("UPDATE projects SET updated_at = :ts, created_at = :ts WHERE id = :pid"),
+                {"ts": updated_at, "pid": project_id},
+            )
+        await engine.dispose()
+
+    def _runner() -> None:
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_run())
+        finally:
+            loop.close()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pool.submit(_runner).result(timeout=30)
+
+
+@requires_postgres
+def test_idle_pause_sweep_pauses_stale_project(client: TestClient) -> None:
+    admin = _token(sub="padmin-idle", platform_admin=True)
+    created_co = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "IdleCo", "admin_email": "owner@idleco.test"},
+    )
+    assert created_co.status_code == 201, created_co.text
+    company_id = created_co.json()["company"]["id"]
+    owner_tok = _token(sub="owner-idle", email="owner@idleco.test")
+
+    policy = client.put(
+        f"/api/v1/admin/companies/{company_id}/agent-policy",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"tool_preset": "workspace_dev", "idle_pause_after_hours": 24},
+    )
+    assert policy.status_code == 200, policy.text
+    assert policy.json()["idle_pause_enabled"] is True
+    assert policy.json()["idle_pause_after_hours"] == 24
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "IdleCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "IdleProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    noop = client.post(
+        f"/api/v1/admin/companies/{company_id}/idle-pause/sweep",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert noop.status_code == 200, noop.text
+    assert noop.json()["count"] == 0
+
+    stale = datetime.now(UTC) - timedelta(hours=48)
+    _sql_backdate_project(project_id, stale)
+
+    swept = client.post(
+        f"/api/v1/admin/companies/{company_id}/idle-pause/sweep",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert swept.status_code == 200, swept.text
+    assert swept.json()["count"] == 1
+    assert swept.json()["paused"][0]["project_id"] == project_id
+
+    got = client.get(
+        f"/api/v1/projects/{project_id}",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert got.status_code == 200, got.text
+    assert got.json()["status"] == "paused"
+
+    events = client.get(
+        f"/api/v1/admin/platform-events?company_id={company_id}&event_type=project.paused",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert events.status_code == 200, events.text
+    assert any(e.get("payload", {}).get("reason") == "idle_pause" for e in events.json()["items"])
