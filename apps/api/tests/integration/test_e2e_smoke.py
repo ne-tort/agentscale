@@ -794,6 +794,11 @@ def test_e2e_project_pause_blocks_chat(client: TestClient) -> None:
     assert blocked.status_code == 409, blocked.text
     assert blocked.json()["code"] == "PROJECT_PAUSED"
 
+    # Session create is runtime — blocked; cancel remains cleanup path.
+    sess_blocked = client.post(f"/api/v1/projects/{project_id}/agent/sessions", headers=owner_h, json={})
+    assert sess_blocked.status_code == 409
+    assert sess_blocked.json()["code"] == "PROJECT_PAUSED"
+
     resumed = client.post(f"/api/v1/projects/{project_id}/resume", headers=owner_h)
     assert resumed.status_code == 200, resumed.text
 

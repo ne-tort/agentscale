@@ -135,8 +135,9 @@ class AgentSessionService:
         employee: EmployeeRow | None,
         model: str | None = None,
     ) -> dict:
+        """Start an agent session — blocked while project is paused (runtime)."""
         project = await self._projects.require_access(
-            project_id=project_id, principal=principal, employee=employee, write=False
+            project_id=project_id, principal=principal, employee=employee, write=True
         )
         await self._subscription.require_active(project.company_id)
         company_policy = await AdminCompanyService(self._session).get_agent_policy(project.company_id)
@@ -477,8 +478,13 @@ class AgentSessionService:
         principal: Principal,
         employee: EmployeeRow | None,
     ) -> dict:
+        """Cancel an agent session — allowed while paused (cleanup / stop runtime)."""
         await self._projects.require_access(
-            project_id=project_id, principal=principal, employee=employee, write=True
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+            allow_paused=True,
         )
         row = await self.get_session(session_id=session_id)
         if row.project_id != project_id:
@@ -490,6 +496,30 @@ class AgentSessionService:
         await self._session.commit()
         await self._session.refresh(row)
         return _session_public(row)
+
+    async def cancel_active_for_project(self, *, project_id: str) -> int:
+        """Best-effort cancel of ACTIVE sessions (project pause). Caller already authorized."""
+        result = await self._session.execute(
+            select(AgentSessionRow)
+            .where(AgentSessionRow.project_id == project_id)
+            .where(AgentSessionRow.status == AgentSessionStatus.ACTIVE)
+        )
+        rows = list(result.scalars().all())
+        for row in rows:
+            try:
+                adapter = get_agent_adapter(api_kind=row.api_kind)
+                handle = AgentHandle(
+                    id=row.vendor_agent_id,
+                    provider=row.provider,
+                    cwd=row.cwd,
+                    model=row.model,
+                )
+                await adapter.cancel(handle)
+            except Exception:
+                # Pause must succeed even if vendor cancel fails.
+                pass
+            row.status = AgentSessionStatus.CANCELLED
+        return len(rows)
 
     async def list_pending_approvals(
         self,

@@ -7,7 +7,7 @@
 | Quality note | Port+events+fixture+budget+SSE+HITL; Node sidecar — gap |
 | Plan | [L08](../11-implementation-plan/L08-agent-providers.md) |
 | Canon | [08-agent-providers](../08-agent-providers/) |
-| Last updated | 2026-08-23 — outbox-lite sync + COMPANY_SUSPENDED |
+| Last updated | 2026-08-24 — pause cancels ACTIVE sessions; create blocked |
 | Owners | — |
 
 ---
@@ -32,13 +32,14 @@ AgentProviderPort + frozen AgentEvent; credentials только через L03 r
 | Trigger dispatch + drain (`?max=`) + regenerate/schedule/webhook/telegram + admin drain + opt-in worker (advisory lock + outbox lease) | External broker |
 | Chat text optional when attachment_refs present | |
 | `CompanySubscriptionGate` on session create/send → `COMPANY_SUSPENDED` | |
+| Pause: create_session / chat_turn blocked (`PROJECT_PAUSED`); cancel_session allowed; pause cancels ACTIVE sessions | |
 | Unit + integration tests | Golden JSON fixtures |
 
 ## Как сделано
 
 1. Domain `AgentEvent`, `CreateOpts`, `AgentToolPolicy` presets.
 2. `AgentPolicyService` — company preset + mcp.json ∩ policy.
-3. `AgentSessionService` — create/send/chat_turn/transcript; `AgentBudgetService` before turns.
+3. `AgentSessionService` — create/send/chat_turn/transcript; create uses write gate (blocks pause); cancel uses `allow_paused`; `AgentBudgetService` before turns.
 4. `AgentTriggerDispatcher` — dequeue trigger → session + send; `drain_all` for worker/admin.
 5. HTTP `/projects/{id}/agent/sessions`, `/chat`, `/chat/transcript`, `/triggers/dispatch`; admin `/admin/triggers/drain`.
 6. Chat attachment refs validated against project DB before send (C-ATTACH).

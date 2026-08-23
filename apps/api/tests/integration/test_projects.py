@@ -956,6 +956,136 @@ def test_webhook_ingress_blocked_when_project_paused(client: TestClient) -> None
 
 
 @requires_postgres
+def test_telegram_webhook_blocked_when_project_paused(client: TestClient) -> None:
+    from prodavan.domain.projects import webhook_signature
+
+    admin = _token(sub="padmin-tg-pause", platform_admin=True)
+    created_co = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "TgPauseCo", "admin_email": "owner@tgpause.test"},
+    )
+    assert created_co.status_code == 201, created_co.text
+    company_id = created_co.json()["company"]["id"]
+    owner_tok = _token(sub="owner-tg-pause", email="owner@tgpause.test")
+
+    policy = client.put(
+        f"/api/v1/admin/companies/{company_id}/agent-policy",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"tool_preset": "workspace_dev", "telegram_hmac_secret": "tg-pause-secret"},
+    )
+    assert policy.status_code == 200, policy.text
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "TgPauseCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "TgPauseProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    client.post(f"/api/v1/projects/{project_id}/pause", headers={"Authorization": f"Bearer {owner_tok}"})
+
+    body = b'{"text":"tg while paused"}'
+    blocked = client.post(
+        f"/api/v1/projects/{project_id}/webhooks/telegram",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Prodavan-Signature": webhook_signature("tg-pause-secret", body),
+        },
+    )
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["code"] == "PROJECT_PAUSED"
+
+
+@requires_postgres
+def test_queued_trigger_survives_pause_and_runs_after_resume(client: TestClient) -> None:
+    """Leave policy: enqueue → pause (claim skipped) → resume → dispatch runs."""
+    admin = _token(sub="padmin-leave-q", platform_admin=True)
+    created_co = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "LeaveQCo", "admin_email": "owner@leaveq.test"},
+    )
+    assert created_co.status_code == 201, created_co.text
+    company_id = created_co.json()["company"]["id"]
+    owner_tok = _token(sub="owner-leave-q", email="owner@leaveq.test")
+    owner_h = {"Authorization": f"Bearer {owner_tok}"}
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={
+            "name": "LeaveQ Key",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-leave-q",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "LeaveQCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "LeaveQProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    # Drain create-time prepare so queue is clean.
+    client.post(f"/api/v1/projects/{project_id}/triggers/dispatch?max=10", headers=owner_h)
+
+    queued = client.post(
+        f"/api/v1/projects/{project_id}/triggers",
+        headers=owner_h,
+        json={"kind": "webhook.http", "payload": {"source": "before-pause"}},
+    )
+    assert queued.status_code == 202, queued.text
+    trigger_id = queued.json()["id"]
+
+    client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
+
+    skipped = client.post(
+        f"/api/v1/projects/{project_id}/triggers/dispatch?max=5",
+        headers=owner_h,
+    )
+    assert skipped.status_code == 200, skipped.text
+    assert skipped.json().get("dispatched") is False
+
+    client.post(f"/api/v1/projects/{project_id}/resume", headers=owner_h)
+
+    ran = client.post(
+        f"/api/v1/projects/{project_id}/triggers/dispatch?max=5",
+        headers=owner_h,
+    )
+    assert ran.status_code == 200, ran.text
+    assert ran.json().get("dispatched") is True
+
+    listed = client.get(f"/api/v1/projects/{project_id}/triggers", headers=owner_h)
+    assert listed.status_code == 200
+    item = next(t for t in listed.json()["items"] if t["id"] == trigger_id)
+    assert item["status"] == "done"
+
+
+@requires_postgres
 def test_create_project_blocked_when_company_suspended(client: TestClient) -> None:
     admin = _token(sub="padmin-proj-sus", platform_admin=True)
     created_co = client.post(

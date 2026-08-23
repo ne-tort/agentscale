@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
+from prodavan.application.agent.session_service import AgentSessionService
 from prodavan.application.cabinets.access import CabinetAccessService
 from prodavan.application.projects.access import ProjectAccessService
 from prodavan.application.projects.materialize import get_materialize_service
@@ -310,6 +311,8 @@ class ProjectService:
         if row.status == ProjectStatus.PAUSED:
             return await self._project_public(row)
         row.status = ProjectStatus.PAUSED
+        # Stop in-flight runtime: cancel ACTIVE agent sessions (leave triggers queued).
+        await AgentSessionService(self._session).cancel_active_for_project(project_id=row.id)
         await self._platform_events.emit(
             event_type="project.paused",
             company_id=row.company_id,

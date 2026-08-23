@@ -815,3 +815,80 @@ def test_trigger_regenerate_and_webhook_ack(client: TestClient) -> None:
     assert ack.status_code == 200, ack.text
     assert ack.json().get("dispatched") is True
     assert ack.json().get("action") == "ack_webhook.http"
+
+
+@requires_postgres
+def test_agent_session_create_blocked_cancel_allowed_when_paused(client: TestClient) -> None:
+    admin = _token(sub="adm-sess-pause", platform_admin=True)
+    admin_h = {"Authorization": f"Bearer {admin}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "SessPauseCo", "admin_email": "owner@sesspause.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "SessPause Key",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-sess-pause",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = {"Authorization": f"Bearer {_token(sub='owner-sess-pause', email='owner@sesspause.test')}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "SessPauseCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "SessPauseProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    sess = client.post(f"/api/v1/projects/{project_id}/agent/sessions", headers=owner_h, json={})
+    assert sess.status_code == 201, sess.text
+    session_id = sess.json()["id"]
+
+    client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
+
+    # Pause auto-cancels ACTIVE sessions.
+    listed = client.get(f"/api/v1/projects/{project_id}/agent/sessions", headers=owner_h)
+    assert listed.status_code == 200, listed.text
+    sess_row = next(s for s in listed.json()["items"] if s["id"] == session_id)
+    assert sess_row["status"] == "cancelled"
+
+    blocked = client.post(f"/api/v1/projects/{project_id}/agent/sessions", headers=owner_h, json={})
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["code"] == "PROJECT_PAUSED"
+
+    # Chat without session_id must not create orphan session while paused.
+    chat = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "orphan?"},
+    )
+    assert chat.status_code == 409
+    assert chat.json()["code"] == "PROJECT_PAUSED"
+
+    # Explicit cancel remains allowed (idempotent cleanup).
+    cancelled = client.post(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/cancel",
+        headers=owner_h,
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["status"] == "cancelled"

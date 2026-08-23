@@ -7,7 +7,7 @@
 | Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain/worker; k8s isolator — gap |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-24 — paused blocks trigger enqueue/claim + webhook |
+| Last updated | 2026-08-24 — pause matrix: session create blocked; cancel + leave-queued |
 | Owners | — |
 
 ---
@@ -52,7 +52,7 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 16. MCP package deploy/disable rematerializes all non-deleted projects in the cabinet (L09 DoD).
 17. `GET .../attachments/{id}/content` — inline bytes for Flutter image/text preview (ACL read; works while paused).
 18. Manual rematerialize allowed while project is paused (maintenance; chat/upload still blocked).
-19. Paused write matrix: PATCH name/provider, rematerialize, attachment DELETE, idempotent pause — allowed; chat/upload/runtime triggers/webhook — blocked (`PROJECT_PAUSED`). `project.prepare` exempt; claim/dispatch skip non-ACTIVE projects.
+19. Paused write matrix: PATCH name/provider, rematerialize, attachment DELETE, agent session cancel, idempotent pause — allowed; chat/upload/create session/runtime triggers/webhook — blocked (`PROJECT_PAUSED`). `project.prepare` exempt; claim/dispatch skip non-ACTIVE projects; queued triggers left until resume (leave-queued). Pause cancels ACTIVE agent sessions (best-effort adapter.cancel).
 20. AV-lite attachment content: PE/ELF/Mach-O/WASM/shebang/PHP/`<%` prefixes (UTF-8 BOM stripped); not a virus scanner.
 
 ## Контракты
@@ -83,7 +83,7 @@ cwd/mcp.json → L08 AgentPort. Chat UI → triggers (L05/L09).
 - Materialize идемпотентен (re-materialize overwrites layout).
 - Delete purges workspace tree; pause keeps volume.
 - Project triggers scoped to `project_id`.
-- While `paused`: runtime writes (chat, upload, agent send) → `PROJECT_PAUSED`; metadata/cleanup (PATCH, rematerialize, attachment delete, delete project) allowed.
+- While `paused`: runtime writes (chat, upload, create session, agent send, enqueue runtime triggers) → `PROJECT_PAUSED`; metadata/cleanup (PATCH, rematerialize, attachment delete, cancel session, delete project) allowed; queued triggers stay until resume; pause cancels ACTIVE agent sessions.
 
 ## Карта кода
 
@@ -111,8 +111,8 @@ apps/api/.env.example
 |------------|--------|---------|
 | Project CRUD in cabinet | done | |
 | Materialize layout | done | AGENTS from `meta_workspace_docs` (slug=agents); empty → default |
-| Pause/resume/delete | done | pause idempotent; rematerialize/PATCH/att-delete while paused |
-| Trigger dispatch to agent | done | chat.message + chat.regenerate; schedule/webhook ack or run-if-text; advisory lock + row lease; paused project → no enqueue/claim |
+| Pause/resume/delete | done | pause idempotent; rematerialize/PATCH/att-delete/cancel-session while paused; leave-queued triggers; pause cancels ACTIVE sessions |
+| Trigger dispatch to agent | done | chat.message + chat.regenerate; schedule/webhook ack or run-if-text; advisory lock + row lease; paused → no enqueue/claim; resume drains queue |
 | MCP package sandbox run | live (subset) | prepare + opt-in local spawn (`MCP_SANDBOX_SPAWN`); k8s/bubblewrap — hole |
 | Platform vs project event bus split | live (subset) | fan-out; zip handler stdin JSON + optional stdout JSON result; full MCP stdio — hole |
 | Attachment refs scoped to project | done | normalize id/storage_ref before agent send |

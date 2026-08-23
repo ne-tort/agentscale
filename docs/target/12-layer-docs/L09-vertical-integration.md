@@ -6,7 +6,7 @@
 | Quality | 7 |
 | Quality note | API E2E incl. pause/rematerialize/idle; Flutter thumbnails + widget subset; full Widget E2E — gap |
 | Plan | [L09](../11-implementation-plan/L09-vertical-integration.md) |
-| Last updated | 2026-08-24 — E2E paused trigger/metadata matrix |
+| Last updated | 2026-08-24 — pause auto-cancel sessions + leave-queued |
 | Owners | — |
 
 ---
@@ -49,6 +49,7 @@
 | Text/JSON attachment content-type + download E2E | |
 | Platform idle-pause sweep-all E2E | |
 | Paused blocks triggers / allows PATCH E2E | |
+| Paused blocks session create; pause auto-cancels ACTIVE; cancel + leave-queued after resume | |
 
 ## Карта кода
 
