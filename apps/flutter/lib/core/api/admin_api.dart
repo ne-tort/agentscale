@@ -109,6 +109,8 @@ class AdminApi {
     int? maxTokensPerRun,
     double? maxCostUsdMonth,
     int maxAttachmentMb = 20,
+    String? webhookHmacSecret,
+    String? telegramHmacSecret,
   }) async {
     final res = await http.put(
       _uri('/admin/companies/$companyId/agent-policy'),
@@ -122,6 +124,8 @@ class AdminApi {
         'max_tokens_per_run': maxTokensPerRun,
         'max_cost_usd_month': maxCostUsdMonth,
         'max_attachment_mb': maxAttachmentMb,
+        if (webhookHmacSecret != null) 'webhook_hmac_secret': webhookHmacSecret,
+        if (telegramHmacSecret != null) 'telegram_hmac_secret': telegramHmacSecret,
       }),
     );
     _throwIfError(res);

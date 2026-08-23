@@ -46,7 +46,8 @@ def _token(
 def client() -> TestClient:
     reset_jwt_validator()
     reset_invite_client()
-    return TestClient(create_app())
+    with TestClient(create_app()) as client:
+        yield client
 
 
 @requires_postgres

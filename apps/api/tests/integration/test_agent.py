@@ -40,7 +40,8 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(settings, "secrets_dir", tmp_path)
     reset_jwt_validator()
     reset_invite_client()
-    return TestClient(create_app())
+    with TestClient(create_app()) as client:
+        yield client
 
 
 @requires_postgres

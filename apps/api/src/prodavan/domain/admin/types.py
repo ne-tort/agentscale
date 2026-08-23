@@ -41,6 +41,7 @@ class CompanyAgentRuntimePolicy:
     max_cost_usd_month: Decimal | None = None
     max_attachment_mb: int = DEFAULT_MAX_ATTACHMENT_MB
     webhook_hmac_secret: str | None = None
+    telegram_hmac_secret: str | None = None
 
     def validate(self) -> None:
         if self.tool_preset not in TOOL_PRESETS:
@@ -55,6 +56,8 @@ class CompanyAgentRuntimePolicy:
             raise ValueError(f"max_attachment_mb must be 1..{PLATFORM_MAX_ATTACHMENT_MB}")
         if self.webhook_hmac_secret is not None and len(self.webhook_hmac_secret) > 256:
             raise ValueError("webhook_hmac_secret too long")
+        if self.telegram_hmac_secret is not None and len(self.telegram_hmac_secret) > 256:
+            raise ValueError("telegram_hmac_secret too long")
 
 
 def attachment_max_bytes(policy: CompanyAgentRuntimePolicy) -> int:

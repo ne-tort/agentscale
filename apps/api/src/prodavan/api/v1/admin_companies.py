@@ -46,6 +46,7 @@ class AgentPolicyBody(BaseModel):
     max_cost_usd_month: Decimal | None = Field(default=None, gt=0)
     max_attachment_mb: int = Field(default=20, ge=1, le=500)
     webhook_hmac_secret: str | None = Field(default=None, max_length=256)
+    telegram_hmac_secret: str | None = Field(default=None, max_length=256)
 
 
 @router.get("")
@@ -90,6 +91,7 @@ async def get_agent_policy(company_id: str, _: PlatformAdminDep, session: Sessio
         "max_attachment_mb": policy.max_attachment_mb,
         "attachment_max_bytes": int(policy.max_attachment_mb) * 1024 * 1024,
         "webhook_hmac_configured": bool(policy.webhook_hmac_secret),
+        "telegram_hmac_configured": bool(policy.telegram_hmac_secret),
     }
 
 
@@ -111,11 +113,13 @@ async def set_agent_policy(
         max_cost_usd_month=body.max_cost_usd_month,
         max_attachment_mb=body.max_attachment_mb,
         webhook_hmac_secret=fields.get("webhook_hmac_secret") if "webhook_hmac_secret" in fields else None,
+        telegram_hmac_secret=fields.get("telegram_hmac_secret") if "telegram_hmac_secret" in fields else None,
     )
     return await AdminCompanyService(session).set_agent_policy(
         company_id,
         policy,
         update_webhook_secret="webhook_hmac_secret" in fields,
+        update_telegram_secret="telegram_hmac_secret" in fields,
     )
 
 
@@ -123,7 +127,7 @@ async def set_agent_policy(
 async def set_company_subscription(
     company_id: str,
     body: SubscriptionBody,
-    _: PlatformAdminDep,
+    principal: PlatformAdminDep,
     session: SessionDep,
 ) -> dict:
     ends_at: datetime | None = None
@@ -151,6 +155,7 @@ async def set_company_subscription(
         company_id,
         subscription_ends_at=ends_at,
         subscription_lifetime=body.subscription_lifetime,
+        principal=principal,
     )
 
 

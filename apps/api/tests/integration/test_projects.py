@@ -40,7 +40,8 @@ def _token(*, sub: str, email: str | None = None, platform_admin: bool = False) 
 def client() -> TestClient:
     reset_jwt_validator()
     reset_invite_client()
-    return TestClient(create_app())
+    with TestClient(create_app()) as client:
+        yield client
 
 
 def _setup_cabinet(client: TestClient) -> tuple[str, str, str]:
@@ -427,3 +428,98 @@ def test_delete_attachment_and_signed_webhook(client: TestClient) -> None:
     )
     assert ok.status_code == 202, ok.text
     assert ok.json()["kind"] == "webhook.http"
+
+    tg_policy = client.put(
+        f"/api/v1/admin/companies/{company_id}/agent-policy",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"tool_preset": "workspace_dev", "telegram_hmac_secret": "tg-secret"},
+    )
+    assert tg_policy.status_code == 200, tg_policy.text
+    assert tg_policy.json()["telegram_hmac_configured"] is True
+
+    tg_body = b'{"text":"from telegram"}'
+    tg_bad = client.post(
+        f"/api/v1/projects/{project_id}/webhooks/telegram",
+        content=tg_body,
+        headers={"Content-Type": "application/json", "X-Prodavan-Signature": "sha256=bad"},
+    )
+    assert tg_bad.status_code == 401
+
+    tg_ok = client.post(
+        f"/api/v1/projects/{project_id}/webhooks/telegram",
+        content=tg_body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Prodavan-Signature": webhook_signature("tg-secret", tg_body),
+        },
+    )
+    assert tg_ok.status_code == 202, tg_ok.text
+    assert tg_ok.json()["kind"] == "telegram.message"
+
+
+@requires_postgres
+def test_company_suspended_emit_and_chat_gate(client: TestClient) -> None:
+    admin = _token(sub="padmin-sus", platform_admin=True)
+    created_co = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "SusCo", "admin_email": "owner@susco.test"},
+    )
+    assert created_co.status_code == 201, created_co.text
+    company_id = created_co.json()["company"]["id"]
+    owner_tok = _token(sub="owner-sus", email="owner@susco.test")
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={
+            "name": "Cursor Sus",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-sus",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "SusCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "SusProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    past = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sub = client.put(
+        f"/api/v1/admin/companies/{company_id}/subscription",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"subscription_lifetime": False, "subscription_ends_at": past},
+    )
+    assert sub.status_code == 200, sub.text
+    assert sub.json()["subscription_expired"] is True
+
+    events = client.get(
+        f"/api/v1/admin/platform-events?company_id={company_id}&event_type=company.suspended",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert events.status_code == 200, events.text
+    items = events.json()["items"]
+    assert len(items) >= 1
+    assert items[0]["event_type"] == "company.suspended"
+
+    chat = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"text": "hello after suspend"},
+    )
+    assert chat.status_code == 403, chat.text
+    assert chat.json()["code"] == "COMPANY_SUSPENDED"

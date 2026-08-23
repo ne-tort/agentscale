@@ -39,7 +39,8 @@ def _token(*, sub: str, email: str | None = None, platform_admin: bool = False) 
 def client() -> TestClient:
     reset_jwt_validator()
     reset_invite_client()
-    return TestClient(create_app())
+    with TestClient(create_app()) as client:
+        yield client
 
 
 def test_cabinets_require_auth(client: TestClient) -> None:

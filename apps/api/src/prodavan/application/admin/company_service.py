@@ -18,7 +18,7 @@ from prodavan.domain.admin import (
 )
 from prodavan.domain.cabinets import CabinetStatus
 from prodavan.domain.errors import AppError
-from prodavan.domain.identity import EmployeeStatus
+from prodavan.domain.identity import EmployeeStatus, Principal
 from prodavan.domain.projects import ProjectStatus
 from prodavan.infrastructure.persistence.models.admin import (
     CompanyAgentRuntimePolicyRow,
@@ -53,6 +53,7 @@ def _policy_public(policy: CompanyAgentRuntimePolicy) -> dict:
         "max_attachment_mb": policy.max_attachment_mb,
         "attachment_max_bytes": attachment_max_bytes(policy),
         "webhook_hmac_configured": bool(policy.webhook_hmac_secret),
+        "telegram_hmac_configured": bool(policy.telegram_hmac_secret),
     }
 
 
@@ -124,6 +125,7 @@ class AdminCompanyService:
         policy: CompanyAgentRuntimePolicy,
         *,
         update_webhook_secret: bool = False,
+        update_telegram_secret: bool = False,
     ) -> dict:
         await self._require_company(company_id)
         policy.validate()
@@ -142,6 +144,9 @@ class AdminCompanyService:
         if update_webhook_secret:
             secret = policy.webhook_hmac_secret
             row.webhook_hmac_secret = (secret.strip() if secret else "") or None
+        if update_telegram_secret:
+            secret = policy.telegram_hmac_secret
+            row.telegram_hmac_secret = (secret.strip() if secret else "") or None
         await self._session.commit()
         await self._session.refresh(row)
         return _policy_public(row.to_domain())
@@ -271,7 +276,10 @@ class AdminCompanyService:
         *,
         subscription_ends_at: datetime | None,
         subscription_lifetime: bool,
+        principal: Principal | None = None,
     ) -> dict:
+        from prodavan.application.projects.platform_event_service import PlatformEventService
+
         company = await self._require_company(company_id)
         if subscription_lifetime:
             company.subscription_lifetime = True
@@ -279,14 +287,25 @@ class AdminCompanyService:
         else:
             company.subscription_lifetime = False
             company.subscription_ends_at = subscription_ends_at
-        await self._session.commit()
-        await self._session.refresh(company)
-        return subscription_read_model(
+        sub = subscription_read_model(
             ends_at=company.subscription_ends_at,
             lifetime=company.subscription_lifetime,
             now=datetime.now(UTC),
             expiring_days=settings.admin_metrics_subscription_expiring_days,
         )
+        if sub.get("subscription_expired"):
+            await PlatformEventService(self._session).emit(
+                event_type="company.suspended",
+                company_id=company_id,
+                principal=principal,
+                payload={
+                    "subscription_ends_at": sub.get("subscription_ends_at"),
+                    "reason": "subscription_expired",
+                },
+            )
+        await self._session.commit()
+        await self._session.refresh(company)
+        return sub
 
     async def list_companies_metrics(self) -> list[dict]:
         q = await self._session.execute(select(CompanyRow).order_by(CompanyRow.created_at.desc()))

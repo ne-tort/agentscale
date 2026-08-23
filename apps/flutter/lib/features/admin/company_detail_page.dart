@@ -35,6 +35,8 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
   final _maxTokensPerRunCtrl = TextEditingController();
   final _maxCostUsdMonthCtrl = TextEditingController();
   final _maxAttachmentMbCtrl = TextEditingController(text: '20');
+  final _webhookSecretCtrl = TextEditingController();
+  final _telegramSecretCtrl = TextEditingController();
   final _subscriptionEndsCtrl = TextEditingController();
 
   bool _loading = true;
@@ -46,6 +48,8 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
   Map<String, dynamic>? _metrics;
   String _toolPreset = 'workspace_dev';
   bool _platformFallback = true;
+  bool _webhookHmacConfigured = false;
+  bool _telegramHmacConfigured = false;
 
   static const _toolPresets = ['chat_readonly', 'workspace_dev', 'workspace_full'];
 
@@ -65,6 +69,8 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
     _maxTokensPerRunCtrl.dispose();
     _maxCostUsdMonthCtrl.dispose();
     _maxAttachmentMbCtrl.dispose();
+    _webhookSecretCtrl.dispose();
+    _telegramSecretCtrl.dispose();
     _subscriptionEndsCtrl.dispose();
     super.dispose();
   }
@@ -91,6 +97,10 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
         _maxTokensPerRunCtrl.text = policy['max_tokens_per_run']?.toString() ?? '';
         _maxCostUsdMonthCtrl.text = policy['max_cost_usd_month']?.toString() ?? '';
         _maxAttachmentMbCtrl.text = policy['max_attachment_mb']?.toString() ?? '20';
+        _webhookHmacConfigured = policy['webhook_hmac_configured'] == true;
+        _telegramHmacConfigured = policy['telegram_hmac_configured'] == true;
+        _webhookSecretCtrl.clear();
+        _telegramSecretCtrl.clear();
         final metrics = detail['metrics'] as Map<String, dynamic>? ?? const {};
         _subscriptionLifetime = metrics['subscription_lifetime'] == true;
         final endsAt = metrics['subscription_ends_at'];
@@ -173,6 +183,8 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
     });
     try {
       final provider = _preferredProviderCtrl.text.trim();
+      final webhookSecret = _webhookSecretCtrl.text.trim();
+      final telegramSecret = _telegramSecretCtrl.text.trim();
       await adminContext.api.setAgentPolicy(
         companyId: widget.companyId,
         toolPreset: _toolPreset,
@@ -182,6 +194,8 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
         maxTokensPerRun: _optionalPositiveInt(_maxTokensPerRunCtrl.text),
         maxCostUsdMonth: _optionalPositiveDouble(_maxCostUsdMonthCtrl.text),
         maxAttachmentMb: int.tryParse(_maxAttachmentMbCtrl.text.trim()) ?? 20,
+        webhookHmacSecret: webhookSecret.isEmpty ? null : webhookSecret,
+        telegramHmacSecret: telegramSecret.isEmpty ? null : telegramSecret,
       );
       await _load();
       if (!mounted) return;
@@ -400,6 +414,30 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                   keyboardType: TextInputType.number,
                   enabled: !_savingPolicy,
                   validator: (v) => _positiveInt(v, min: 1),
+                ),
+                Text(
+                  _webhookHmacConfigured
+                      ? 'Webhook HMAC: configured (leave blank to keep)'
+                      : 'Webhook HMAC: not set',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                AppTextField(
+                  controller: _webhookSecretCtrl,
+                  label: 'Webhook HMAC secret (optional write)',
+                  enabled: !_savingPolicy,
+                  obscureText: true,
+                ),
+                Text(
+                  _telegramHmacConfigured
+                      ? 'Telegram HMAC: configured (leave blank to keep)'
+                      : 'Telegram HMAC: not set',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                AppTextField(
+                  controller: _telegramSecretCtrl,
+                  label: 'Telegram HMAC secret (optional write)',
+                  enabled: !_savingPolicy,
+                  obscureText: true,
                 ),
                 AppButton(
                   label: _savingPolicy ? 'Saving…' : 'Save agent policy',

@@ -46,8 +46,13 @@ class _ChatLine {
 }
 
 class _PendingAttachment {
-  const _PendingAttachment({required this.ref, required this.filename});
+  const _PendingAttachment({
+    required this.id,
+    required this.ref,
+    required this.filename,
+  });
 
+  final String id;
   final String ref;
   final String filename;
 }
@@ -106,12 +111,13 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       );
       if (!mounted) return;
       final ref = uploaded['storage_ref'] as String?;
-      if (ref == null || ref.isEmpty) {
-        setState(() => _error = 'Upload missing storage_ref');
+      final id = uploaded['id'] as String?;
+      if (ref == null || ref.isEmpty || id == null || id.isEmpty) {
+        setState(() => _error = 'Upload missing id/storage_ref');
         return;
       }
       setState(() {
-        _pendingAttachments.add(_PendingAttachment(ref: ref, filename: filename));
+        _pendingAttachments.add(_PendingAttachment(id: id, ref: ref, filename: filename));
       });
     } catch (e) {
       if (!mounted) return;
@@ -121,8 +127,17 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     }
   }
 
-  void _removeAttachment(_PendingAttachment item) {
+  Future<void> _removeAttachment(_PendingAttachment item) async {
     setState(() => _pendingAttachments.remove(item));
+    try {
+      await workContext.api.deleteProjectAttachment(
+        projectId: widget.projectId,
+        attachmentId: item.id,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.toString());
+    }
   }
 
   String _attachmentLabel(String ref) {
@@ -561,7 +576,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                           for (final att in _pendingAttachments)
                             InputChip(
                               label: Text(att.filename, overflow: TextOverflow.ellipsis),
-                              onDeleted: _sending ? null : () => _removeAttachment(att),
+                              onDeleted: _sending ? null : () { _removeAttachment(att); },
                             ),
                         ],
                       ),

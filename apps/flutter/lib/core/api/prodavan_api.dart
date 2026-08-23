@@ -738,6 +738,23 @@ class ProdavanApi {
     }
   }
 
+  Future<void> deleteProjectAttachment({
+    required String projectId,
+    required String attachmentId,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await http.delete(
+        _uri('/projects/$projectId/attachments/$attachmentId'),
+        headers: _headers,
+      );
+      _throwIfError(res);
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
   /// SSE chat turn — abort via [ProjectChatStreamHandle.abort] (L05).
   ProjectChatStreamHandle projectChatStream({
     required String projectId,

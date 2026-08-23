@@ -36,7 +36,8 @@ def _token(*, sub: str, email: str | None = None, platform_admin: bool = False) 
 @pytest.fixture()
 def client() -> TestClient:
     reset_jwt_validator()
-    return TestClient(create_app())
+    with TestClient(create_app()) as client:
+        yield client
 
 
 def test_admin_list_starter_bundles(client: TestClient) -> None:

@@ -55,6 +55,7 @@ class CompanyAgentRuntimePolicyRow(Base):
     max_cost_usd_month: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
     max_attachment_mb: Mapped[int] = mapped_column(Integer, nullable=False, default=20, server_default="20")
     webhook_hmac_secret: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    telegram_hmac_secret: Mapped[str | None] = mapped_column(String(256), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
@@ -70,4 +71,5 @@ class CompanyAgentRuntimePolicyRow(Base):
             max_cost_usd_month=self.max_cost_usd_month,
             max_attachment_mb=self.max_attachment_mb,
             webhook_hmac_secret=self.webhook_hmac_secret,
+            telegram_hmac_secret=self.telegram_hmac_secret,
         )

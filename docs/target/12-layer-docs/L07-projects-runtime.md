@@ -7,7 +7,7 @@
 | Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain/worker; k8s isolator — gap |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-23 — platform SPI + webhook HMAC + delete attachment |
+| Last updated | 2026-08-23 — telegram HMAC ingress + company.suspended gate |
 | Owners | — |
 
 ---
@@ -24,7 +24,7 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 | CRUD: create/list/get/PATCH (name, agent_provider); pause/resume/delete | |
 | Materialize: AGENTS from cabinet workspace-docs + packages/sandbox | bubblewrap/k8s isolator |
 | `container_ref=local-ws:{workspace_key}` | |
-| Triggers: enqueue + list + dispatch + signed webhook ingress + admin drain + worker | Durable outbox; telegram bot HMAC |
+| Triggers: enqueue + list + dispatch + signed webhook/telegram ingress + admin drain + worker | Durable outbox |
 | Platform events bus + cabinet SPI deliver (audit) | package/MCP on_platform_event handlers |
 | Attachments: upload/list/delete + ref validation; size/type/magic policy | Full AV; image thumbnails |
 | Integration tests lifecycle + FS layout + provider patch + admin drain | E2E with agent ping |
@@ -39,6 +39,7 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 6. Opt-in trigger worker (`TRIGGER_WORKER_ENABLED`) — in-process asyncio + `pg_try_advisory_lock`; hole: not durable outbox.
 7. `PlatformEventService` — lifecycle bus; emit on project lifecycle + employee.disabled; cabinet SPI → meta_audit. Hole: package MCP handlers.
 8. Signed webhook ingress `POST .../webhooks/http` with company `webhook_hmac_secret` (not returned in GET; `webhook_hmac_configured` flag).
+9. Signed telegram ingress `POST .../webhooks/telegram` with company `telegram_hmac_secret` (`telegram_hmac_configured` flag).
 
 ## Контракты
 
@@ -98,9 +99,9 @@ apps/api/tests/unit/test_projects_domain.py
 | Attachment virus/size policy | live (subset) | max_attachment_mb + extension + magic sniff; AV — hole |
 | Project preferred_provider | done | `agent_provider` create/PATCH; resolve uses project override |
 | Attachment preview in chat UI | live (subset) | chips by filename; no image thumbnails |
-| telegram.message trigger | done | dispatch like chat.message; bot HMAC — hole |
+| telegram.message trigger | done | dispatch like chat.message; HMAC ingress like webhook |
 | Webhook HMAC ingress | done | company policy secret + X-Prodavan-Signature |
-| Attachment DELETE | done | DB + inbox file |
+| Attachment DELETE | done | DB + inbox file; Flutter pending remove calls DELETE |
 
 ## Проверка
 

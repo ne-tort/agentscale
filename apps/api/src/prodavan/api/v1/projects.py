@@ -15,8 +15,8 @@ from prodavan.application.projects import (
     ProjectTriggerService,
 )
 from prodavan.application.projects.access import ProjectAccessService
+from prodavan.application.projects.signed_ingress import enqueue_signed_trigger
 from prodavan.domain.errors import AppError
-from prodavan.domain.projects import ProjectStatus, verify_webhook_signature
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
 router = APIRouter(tags=["projects"])
@@ -252,45 +252,34 @@ async def ingress_signed_webhook(
 ) -> dict:
     """External webhook.http ingress — HMAC-SHA256 over raw body (company policy secret)."""
     project = await ProjectAccessService(session).get_project(project_id)
-    if project.status == ProjectStatus.DELETED:
-        raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Project not found")
     policy = await AdminCompanyService(session).get_agent_policy(project.company_id)
-    secret = policy.webhook_hmac_secret
-    if not secret:
-        raise AppError(
-            code="WEBHOOK_NOT_CONFIGURED",
-            title="Webhook not configured",
-            status=503,
-            detail="company webhook_hmac_secret not set",
-        )
-    raw = await request.body()
-    if not verify_webhook_signature(secret=secret, body=raw, header=x_prodavan_signature):
-        raise AppError(
-            code="WEBHOOK_SIGNATURE_INVALID",
-            title="Invalid signature",
-            status=401,
-            detail="X-Prodavan-Signature mismatch",
-        )
-    import json
-
-    try:
-        payload = json.loads(raw.decode("utf-8") or "{}")
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise AppError(
-            code="VALIDATION_ERROR",
-            title="Validation Error",
-            status=422,
-            detail="body must be JSON object",
-        ) from exc
-    if not isinstance(payload, dict):
-        raise AppError(
-            code="VALIDATION_ERROR",
-            title="Validation Error",
-            status=422,
-            detail="body must be JSON object",
-        )
-    result = await ProjectTriggerService(session).enqueue(
-        project_id=project_id, kind="webhook.http", payload=payload
+    return await enqueue_signed_trigger(
+        session,
+        project_id=project_id,
+        kind="webhook.http",
+        raw_body=await request.body(),
+        signature_header=x_prodavan_signature,
+        secret=policy.webhook_hmac_secret,
+        secret_name="webhook_hmac_secret",
     )
-    await session.commit()
-    return result
+
+
+@router.post("/projects/{project_id}/webhooks/telegram", status_code=202)
+async def ingress_signed_telegram(
+    project_id: str,
+    request: Request,
+    session: SessionDep,
+    x_prodavan_signature: Annotated[str | None, Header(alias="X-Prodavan-Signature")] = None,
+) -> dict:
+    """Telegram bot transport ingress — HMAC-SHA256 (company telegram_hmac_secret)."""
+    project = await ProjectAccessService(session).get_project(project_id)
+    policy = await AdminCompanyService(session).get_agent_policy(project.company_id)
+    return await enqueue_signed_trigger(
+        session,
+        project_id=project_id,
+        kind="telegram.message",
+        raw_body=await request.body(),
+        signature_header=x_prodavan_signature,
+        secret=policy.telegram_hmac_secret,
+        secret_name="telegram_hmac_secret",
+    )

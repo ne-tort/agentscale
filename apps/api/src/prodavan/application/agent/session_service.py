@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.company_service import AdminCompanyService
+from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.application.agent.adapter_registry import get_agent_adapter
 from prodavan.application.agent.budget_service import AgentBudgetService
 from prodavan.application.agent.policy_service import AgentPolicyService
@@ -124,6 +125,7 @@ class AgentSessionService:
         self._policy = AgentPolicyService(session)
         self._keys = AiKeysService(session)
         self._budget = AgentBudgetService(session)
+        self._subscription = CompanySubscriptionGate(session)
 
     async def create_session(
         self,
@@ -136,6 +138,7 @@ class AgentSessionService:
         project = await self._projects.require_access(
             project_id=project_id, principal=principal, employee=employee, write=False
         )
+        await self._subscription.require_active(project.company_id)
         company_policy = await AdminCompanyService(self._session).get_agent_policy(project.company_id)
         await self._budget.enforce_before_turn(
             company_id=project.company_id,
@@ -228,6 +231,7 @@ class AgentSessionService:
         project = await self._projects.require_access(
             project_id=project_id, principal=principal, employee=employee, write=True
         )
+        await self._subscription.require_active(project.company_id)
         row = await self.get_session(session_id=session_id)
         if row.project_id != project_id:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")

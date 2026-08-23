@@ -44,7 +44,8 @@ def _admin_token() -> str:
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(settings, "secrets_dir", tmp_path)
     reset_jwt_validator()
-    return TestClient(create_app())
+    with TestClient(create_app()) as client:
+        yield client
 
 
 @pytest.fixture()
