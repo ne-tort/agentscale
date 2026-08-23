@@ -91,6 +91,7 @@ cwd/mcp.json → L08 AgentPort. Chat UI → triggers (L05/L09).
 apps/api/src/prodavan/
   domain/projects/types.py
   application/projects/{project_service,materialize,trigger_service,attachment_service,access,pause_runtime,idle_pause_service}.py
+  # pause_runtime: stop_project_runtime + stop_company_runtime (L04 suspend)
   infrastructure/projects/workspace.py
   infrastructure/persistence/models/projects.py
   api/v1/projects.py
