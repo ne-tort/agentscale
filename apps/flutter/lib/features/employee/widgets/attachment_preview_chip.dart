@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/session/work_context.dart';
+import 'package:prodavan/features/employee/widgets/attachment_image_viewer.dart';
 
 bool attachmentIsImageContentType(String? contentType) {
   return contentType != null && contentType.startsWith('image/');
@@ -17,6 +18,7 @@ class AttachmentThumbnail extends StatefulWidget {
     this.contentType,
     this.size = 40,
     this.loadBytes,
+    this.onTap,
   });
 
   final String projectId;
@@ -24,6 +26,7 @@ class AttachmentThumbnail extends StatefulWidget {
   final String? contentType;
   final double size;
   final Future<Uint8List> Function()? loadBytes;
+  final VoidCallback? onTap;
 
   @override
   State<AttachmentThumbnail> createState() => _AttachmentThumbnailState();
@@ -76,8 +79,9 @@ class _AttachmentThumbnailState extends State<AttachmentThumbnail> {
 
   @override
   Widget build(BuildContext context) {
+    Widget child;
     if (_bytes != null) {
-      return ClipRRect(
+      child = ClipRRect(
         borderRadius: BorderRadius.circular(4),
         child: Image.memory(
           _bytes!,
@@ -87,20 +91,27 @@ class _AttachmentThumbnailState extends State<AttachmentThumbnail> {
           errorBuilder: (_, __, ___) => Icon(Icons.broken_image_outlined, size: widget.size * 0.5),
         ),
       );
-    }
-    if (_loading) {
-      return SizedBox(
+    } else if (_loading) {
+      child = SizedBox(
         width: widget.size,
         height: widget.size,
         child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
       );
+    } else {
+      child = Icon(Icons.insert_drive_file_outlined, size: widget.size * 0.55);
     }
-    return Icon(Icons.insert_drive_file_outlined, size: widget.size * 0.55);
+
+    if (widget.onTap == null) return child;
+    return InkWell(
+      onTap: widget.onTap,
+      borderRadius: BorderRadius.circular(4),
+      child: child,
+    );
   }
 }
 
 /// Compact attachment chip with optional image thumbnail (L05/L07).
-class AttachmentPreviewChip extends StatefulWidget {
+class AttachmentPreviewChip extends StatelessWidget {
   const AttachmentPreviewChip({
     super.key,
     required this.projectId,
@@ -108,6 +119,7 @@ class AttachmentPreviewChip extends StatefulWidget {
     required this.label,
     this.contentType,
     this.loadBytes,
+    this.onOpen,
   });
 
   final String projectId;
@@ -115,41 +127,59 @@ class AttachmentPreviewChip extends StatefulWidget {
   final String label;
   final String? contentType;
   final Future<Uint8List> Function()? loadBytes;
+  final VoidCallback? onOpen;
 
   static bool isImageContentType(String? contentType) =>
       attachmentIsImageContentType(contentType);
 
-  @override
-  State<AttachmentPreviewChip> createState() => _AttachmentPreviewChipState();
-}
-
-class _AttachmentPreviewChipState extends State<AttachmentPreviewChip> {
-  Widget? _leading() {
-    if (!AttachmentPreviewChip.isImageContentType(widget.contentType)) {
-      return const Icon(Icons.attach_file, size: 14);
-    }
-    return SizedBox(
-      width: 28,
-      height: 28,
-      child: AttachmentThumbnail(
-        projectId: widget.projectId,
-        attachmentId: widget.attachmentId,
-        contentType: widget.contentType,
-        size: 28,
-        loadBytes: widget.loadBytes,
-      ),
+  Future<void> _defaultOpen(BuildContext context) {
+    return AttachmentImageViewerPage.openIfImage(
+      context,
+      projectId: projectId,
+      attachmentId: attachmentId,
+      title: label,
+      contentType: contentType,
+      loadBytes: loadBytes,
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return Chip(
+    final open = onOpen ??
+        (AttachmentPreviewChip.isImageContentType(contentType)
+            ? () => _defaultOpen(context)
+            : null);
+
+    Widget? leading;
+    if (!AttachmentPreviewChip.isImageContentType(contentType)) {
+      leading = const Icon(Icons.attach_file, size: 14);
+    } else {
+      leading = SizedBox(
+        width: 28,
+        height: 28,
+        child: AttachmentThumbnail(
+          projectId: projectId,
+          attachmentId: attachmentId,
+          contentType: contentType,
+          size: 28,
+          loadBytes: loadBytes,
+        ),
+      );
+    }
+
+    if (open == null) {
+      return Chip(
+        visualDensity: VisualDensity.compact,
+        avatar: leading,
+        label: Text(label, overflow: TextOverflow.ellipsis),
+      );
+    }
+
+    return ActionChip(
       visualDensity: VisualDensity.compact,
-      avatar: _leading(),
-      label: Text(
-        widget.label,
-        overflow: TextOverflow.ellipsis,
-      ),
+      avatar: leading,
+      label: Text(label, overflow: TextOverflow.ellipsis),
+      onPressed: open,
     );
   }
 }

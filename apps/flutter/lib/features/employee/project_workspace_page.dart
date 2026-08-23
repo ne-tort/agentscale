@@ -7,6 +7,7 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/project_settings_page.dart';
 import 'package:prodavan/features/employee/tool_approve_page.dart';
+import 'package:prodavan/features/employee/widgets/attachment_image_viewer.dart';
 import 'package:prodavan/features/employee/widgets/attachment_preview_chip.dart';
 import 'package:prodavan/features/employee/widgets/project_status_banner.dart';
 
@@ -224,6 +225,18 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     );
   }
 
+  Future<void> _openAttachmentPreview(Map<String, dynamic> item) {
+    final id = item['id'] as String?;
+    if (id == null || id.isEmpty) return Future.value();
+    return AttachmentImageViewerPage.openIfImage(
+      context,
+      projectId: widget.projectId,
+      attachmentId: id,
+      title: (item['filename'] as String?) ?? 'attachment',
+      contentType: item['content_type'] as String?,
+    );
+  }
+
   Widget? _inboxLeading(Map<String, dynamic> item) {
     final id = item['id'] as String?;
     final contentType = item['content_type'] as String?;
@@ -235,6 +248,9 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       attachmentId: id,
       contentType: contentType,
       size: 40,
+      onTap: AttachmentPreviewChip.isImageContentType(contentType)
+          ? () => _openAttachmentPreview(item)
+          : null,
     );
   }
 
@@ -583,6 +599,11 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                       '${item['size_bytes'] ?? '?'} B',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
+                    onTap: AttachmentPreviewChip.isImageContentType(
+                      item['content_type'] as String?,
+                    )
+                        ? () => _openAttachmentPreview(item)
+                        : null,
                     trailing: IconButton(
                       icon: const Icon(Icons.delete_outline, size: 20),
                       tooltip: 'Delete',

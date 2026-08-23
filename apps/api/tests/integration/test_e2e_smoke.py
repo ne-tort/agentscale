@@ -908,3 +908,80 @@ def test_e2e_idle_pause_sweep_vertical(client: TestClient) -> None:
     )
     assert blocked.status_code == 409, blocked.text
     assert blocked.json()["code"] == "PROJECT_PAUSED"
+
+
+@requires_postgres
+def test_e2e_attachment_content_download_and_paused_read(client: TestClient) -> None:
+    """L07→L09: PNG content download; read still allowed when project paused."""
+    import base64
+
+    admin_h = {"Authorization": f"Bearer {_token(sub='e2e-att-admin', platform_admin=True)}"}
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "E2EAttCo", "admin_email": "owner@e2eatt.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-att-owner', email='owner@e2eatt.test')}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "E2EAttCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "E2EAttProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAD0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )
+    uploaded = client.post(
+        f"/api/v1/projects/{project_id}/attachments",
+        headers=owner_h,
+        json={
+            "filename": "dot.png",
+            "content_base64": base64.b64encode(png).decode("ascii"),
+        },
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    attachment_id = uploaded.json()["id"]
+    assert uploaded.json()["content_type"] == "image/png"
+
+    content = client.get(
+        f"/api/v1/projects/{project_id}/attachments/{attachment_id}/content",
+        headers=owner_h,
+    )
+    assert content.status_code == 200, content.text
+    assert content.content == png
+    assert content.headers["content-type"].startswith("image/png")
+
+    paused = client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
+    assert paused.status_code == 200, paused.text
+
+    # Read path must stay open while paused (viewer / transcript reload).
+    still = client.get(
+        f"/api/v1/projects/{project_id}/attachments/{attachment_id}/content",
+        headers=owner_h,
+    )
+    assert still.status_code == 200, still.text
+    assert still.content == png
+
+    blocked_upload = client.post(
+        f"/api/v1/projects/{project_id}/attachments",
+        headers=owner_h,
+        json={
+            "filename": "blocked.txt",
+            "content_base64": base64.b64encode(b"nope").decode("ascii"),
+        },
+    )
+    assert blocked_upload.status_code == 409, blocked_upload.text
+    assert blocked_upload.json()["code"] == "PROJECT_PAUSED"

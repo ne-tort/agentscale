@@ -6,7 +6,7 @@
 | Quality | 7 |
 | Quality note | API E2E incl. pause/rematerialize/idle; Flutter thumbnails + widget subset; full Widget E2E — gap |
 | Plan | [L09](../11-implementation-plan/L09-vertical-integration.md) |
-| Last updated | 2026-08-23 — widget tests subset + attachment download E2E path |
+| Last updated | 2026-08-23 — attachment content E2E + full-screen viewer widgets |
 | Owners | — |
 
 ---
@@ -37,13 +37,14 @@
 | Admin metrics: agent_tokens_used, agent_messages, projects_total | |
 | Peer cabinet 403 in smoke | |
 | Flutter ProjectWorkspacePage → SSE chat + transcript reload | |
-| Flutter widget tests — status banner + attachment chip | full navigation E2E — hole |
+| Flutter widget tests — status banner + attachment chip + image viewer | full navigation E2E — hole |
 | SSE cancel mid-stream → `(cancelled)` bubble + session cancel API | |
 | Release gate checklist | live (subset) | `tools/release_gate_check.py` wired in ci-api |
 | Company suspend E2E → COMPANY_SUSPENDED + platform_events | |
 | Project pause E2E → PROJECT_PAUSED + resume | |
 | MCP deploy rematerialize E2E | |
 | Idle pause sweep E2E (policy + admin sweep) | |
+| Attachment content download E2E (incl. read while paused) | |
 
 ## Карта кода
 
@@ -68,4 +69,4 @@ tools/release_gate_check.py
 | Idle pause policy | live (subset) | policy + admin sweep + opt-in `IDLE_PAUSE_WORKER_ENABLED` |
 | Rematerialize after MCP deploy | live | deploy/disable returns `rematerialized`; Flutter settings button |
 
-## Quality | **7** | doing — vertical E2E + Flutter paused UX; Widget E2E remains hole |
+## Quality | **7** | doing — vertical E2E + Flutter viewer widgets; full shell Widget E2E remains hole |
