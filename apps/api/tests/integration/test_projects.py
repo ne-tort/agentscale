@@ -1013,3 +1013,100 @@ def test_trigger_drain_fails_queued_when_company_suspended(client: TestClient) -
     )
     assert listed.status_code == 200, listed.text
     assert any(t.get("status") == "failed" for t in listed.json())
+
+
+def _sql_backdate_subscription(company_id: str, ends_at: datetime) -> None:
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    from tests.conftest import DATABASE_URL
+
+    async def _run() -> None:
+        engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE companies SET subscription_ends_at = :ends, subscription_lifetime = false "
+                    "WHERE id = :cid"
+                ),
+                {"ends": ends_at, "cid": company_id},
+            )
+        await engine.dispose()
+
+    def _runner() -> None:
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(_run())
+        finally:
+            loop.close()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pool.submit(_runner).result(timeout=30)
+
+
+@requires_postgres
+def test_natural_subscription_expiry_emits_suspended_on_read(client: TestClient) -> None:
+    admin = _token(sub="padmin-nat-exp", platform_admin=True)
+    created_co = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "NatExpCo", "admin_email": "owner@natexpco.test"},
+    )
+    assert created_co.status_code == 201, created_co.text
+    company_id = created_co.json()["company"]["id"]
+    owner_tok = _token(sub="owner-nat-exp", email="owner@natexpco.test")
+
+    future = (datetime.now(UTC) + timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    active = client.put(
+        f"/api/v1/admin/companies/{company_id}/subscription",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"subscription_lifetime": False, "subscription_ends_at": future},
+    )
+    assert active.status_code == 200, active.text
+    assert active.json()["subscription_expired"] is False
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "NatExpCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "NatExpProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    empty = client.get(
+        f"/api/v1/admin/platform-events?company_id={company_id}&event_type=company.suspended",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert empty.status_code == 200, empty.text
+    assert empty.json()["items"] == []
+
+    past = datetime.now(UTC) - timedelta(days=1)
+    _sql_backdate_subscription(company_id, past)
+
+    got = client.get(
+        f"/api/v1/projects/{project_id}",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert got.status_code == 200, got.text
+    assert got.json()["company_subscription"]["subscription_expired"] is True
+
+    events = client.get(
+        f"/api/v1/admin/platform-events?company_id={company_id}&event_type=company.suspended",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert events.status_code == 200, events.text
+    items = events.json()["items"]
+    assert len(items) == 1
+    assert items[0]["event_type"] == "company.suspended"
+    assert items[0]["payload"].get("reason") == "subscription_expired"

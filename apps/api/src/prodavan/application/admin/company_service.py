@@ -278,7 +278,7 @@ class AdminCompanyService:
         subscription_lifetime: bool,
         principal: Principal | None = None,
     ) -> dict:
-        from prodavan.application.projects.platform_event_service import PlatformEventService
+        from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 
         company = await self._require_company(company_id)
         now = datetime.now(UTC)
@@ -302,28 +302,14 @@ class AdminCompanyService:
             expiring_days=settings.admin_metrics_subscription_expiring_days,
         )
         now_expired = bool(sub.get("subscription_expired"))
-        events = PlatformEventService(self._session)
-        if now_expired and not was_expired:
-            await events.emit(
-                event_type="company.suspended",
-                company_id=company_id,
-                principal=principal,
-                payload={
-                    "subscription_ends_at": sub.get("subscription_ends_at"),
-                    "reason": "subscription_expired",
-                },
-            )
-        elif not now_expired and was_expired:
-            await events.emit(
-                event_type="company.reactivated",
-                company_id=company_id,
-                principal=principal,
-                payload={
-                    "subscription_ends_at": sub.get("subscription_ends_at"),
-                    "subscription_lifetime": sub.get("subscription_lifetime"),
-                    "reason": "subscription_renewed",
-                },
-            )
+        gate = CompanySubscriptionGate(self._session)
+        await gate.emit_transition_events(
+            company_id,
+            was_expired=was_expired,
+            now_expired=now_expired,
+            subscription=sub,
+            principal=principal,
+        )
         await self._session.commit()
         await self._session.refresh(company)
         return sub
