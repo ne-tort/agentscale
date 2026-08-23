@@ -166,7 +166,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     });
     _scrollToEnd();
 
-    final assistantIndex = _messages.length - 1;
+    var assistantIndex = _messages.length - 1;
     var assistantText = '';
 
     final handle = workContext.api.projectChatStream(
@@ -196,6 +196,16 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
               text: assistantText,
               streaming: true,
             );
+          });
+          _scrollToEnd();
+        } else if (type == 'tool_call') {
+          final name = payload['name'] as String? ?? 'tool';
+          setState(() {
+            _messages.insert(
+              assistantIndex,
+              _ChatLine(role: 'tool', text: name),
+            );
+            assistantIndex += 1;
           });
           _scrollToEnd();
         } else if (type == '_turn_complete') {
@@ -292,24 +302,55 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                         itemBuilder: (context, index) {
                           final msg = _messages[index];
                           final isUser = msg.role == 'user';
+                          final isTool = msg.role == 'tool';
                           return Align(
-                            alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                            alignment: isUser
+                                ? Alignment.centerRight
+                                : isTool
+                                    ? Alignment.center
+                                    : Alignment.centerLeft,
                             child: Container(
                               margin: const EdgeInsets.only(bottom: 8),
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              padding: EdgeInsets.symmetric(
+                                horizontal: isTool ? 10 : 12,
+                                vertical: isTool ? 4 : 8,
+                              ),
                               constraints: BoxConstraints(
-                                maxWidth: MediaQuery.sizeOf(context).width * 0.82,
+                                maxWidth: MediaQuery.sizeOf(context).width * (isTool ? 0.9 : 0.82),
                               ),
                               decoration: BoxDecoration(
-                                color: isUser
-                                    ? Theme.of(context).colorScheme.primaryContainer
-                                    : Theme.of(context).colorScheme.surfaceContainerHighest,
-                                borderRadius: BorderRadius.circular(12),
+                                color: isTool
+                                    ? Theme.of(context).colorScheme.surfaceContainerLow
+                                    : isUser
+                                        ? Theme.of(context).colorScheme.primaryContainer
+                                        : Theme.of(context).colorScheme.surfaceContainerHighest,
+                                borderRadius: BorderRadius.circular(isTool ? 8 : 12),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Flexible(child: Text(msg.text.isEmpty && msg.streaming ? '…' : msg.text)),
+                                  if (isTool) ...[
+                                    Icon(
+                                      Icons.build_outlined,
+                                      size: 14,
+                                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                    ),
+                                    const SizedBox(width: 4),
+                                  ],
+                                  Flexible(
+                                    child: Text(
+                                      isTool
+                                          ? msg.text
+                                          : msg.text.isEmpty && msg.streaming
+                                              ? '…'
+                                              : msg.text,
+                                      style: isTool
+                                          ? Theme.of(context).textTheme.labelSmall?.copyWith(
+                                                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                              )
+                                          : null,
+                                    ),
+                                  ),
                                   if (msg.streaming) ...[
                                     const SizedBox(width: 6),
                                     const SizedBox(
