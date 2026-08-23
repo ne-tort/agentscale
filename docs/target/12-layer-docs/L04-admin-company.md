@@ -7,7 +7,7 @@
 | Quality note | Admin shell Overview + Companies + AI Keys + subscription alerts |
 | Plan | [L04](../11-implementation-plan/L04-admin-company.md) |
 | Canon | [01-platform-admin](../01-platform-admin/), [03-companies](../03-companies/) |
-| Last updated | 2026-08-23 — subscription_ends_at metrics + Overview alerts |
+| Last updated | 2026-08-23 — subscription UI on create/detail |
 | Owners | — |
 
 ---
@@ -56,7 +56,7 @@ apps/api/alembic/versions/2026082309_company_subscription.py
 | High usage alert | done | high_agent_usage + ADMIN_METRICS_TOKEN_ALERT_THRESHOLD |
 | Subscription expiring alert | done | subscription_expiring_soon + Flutter Overview |
 | Subscription expired alert | done | subscription_expired flag |
-| Subscription UI on create/edit | hole | API only via PUT subscription |
+| Subscription UI on create/edit | done | lifetime + ends_at |
 | `storage_bytes` / `last_activity_at` | done | workspace scan + activity max |
 | E2E widget tests | hole | |
 

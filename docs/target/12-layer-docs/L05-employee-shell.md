@@ -7,7 +7,7 @@
 | Quality note | Dev shell + SSE chat + attachments + tab interpreters |
 | Plan | [L05](../11-implementation-plan/L05-employee-shell.md) |
 | Canon | [04-employees](../04-employees/), [session](../10-identity-keycloak/session.md) |
-| Last updated | 2026-08-23 — context tab interpreter + getCabinet API |
+| Last updated | 2026-08-23 — import bundle UI + export from context tab |
 | Owners | — |
 
 ---
@@ -23,8 +23,9 @@
 | `ProdavanApi` client (Bearer + work headers) | AppAuth OIDC login |
 | `WorkContext` singleton | ContourSelectorPage |
 | DevSessionPage (paste JWT) | Production secure storage |
-| CabinetListPage + create cabinet | Import bundle UI |
-| DynamicCabinetShell + `CabinetTabHost` by `view_slug` | Custom bundle tab views |
+| CabinetListPage + create cabinet | Custom bundle tab views |
+| Import bundle full-page (`CabinetImportBundlePage`) | |
+| Export bundle from Context tab | |
 | ProjectWorkspacePage — SSE chat + transcript reload | |
 | `uploadProjectAttachment` + attachment chips | |
 | `projectChatStream` abort via HTTP client close | |
@@ -53,7 +54,7 @@
 apps/flutter/lib/
   core/api/prodavan_api.dart
   core/session/work_context.dart
-  features/employee/{dev_session,cabinet_list,dynamic_cabinet_shell,cabinet_tab_host,
+  features/employee/{dev_session,cabinet_list,cabinet_import_bundle_page,dynamic_cabinet_shell,cabinet_tab_host,
     cabinet_context_tab_page,cabinet_tables_tab_page,cabinet_tools_tab_page,project_list,project_workspace}_page.dart
 ```
 
@@ -63,7 +64,8 @@ apps/flutter/lib/
 |------------|--------|---------|
 | OIDC login | todo | L01 |
 | Peer isolation UI test | hole | |
-| Import bundle UI | hole | |
+| Import bundle UI | live | file_picker → POST `/cabinets/import` |
+| Bundle export in UI | live | Context tab → GET `/cabinets/{id}/bundle` |
 | Chat streaming | live | SSE text_delta in workspace |
 | Attachment upload in chat | live | file_picker → POST `/attachments` → chips → `attachment_refs` |
 | In-flight SSE abort | live | `ProjectChatStreamHandle.abort()` closes HTTP client |

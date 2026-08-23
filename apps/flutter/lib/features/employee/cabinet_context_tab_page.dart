@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/session/work_context.dart';
+import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/core/widgets/stat_tile.dart';
 
@@ -62,6 +63,28 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
     }
   }
 
+  bool _exporting = false;
+
+  Future<void> _exportBundle() async {
+    setState(() {
+      _exporting = true;
+      _error = null;
+    });
+    try {
+      final exported = await workContext.api.exportCabinetBundle(widget.cabinetId);
+      if (!mounted) return;
+      final b64 = exported['zip_base64'] as String? ?? '';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Bundle exported (${b64.length} base64 chars)')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.toString());
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_loading) {
@@ -93,6 +116,12 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
               SizedBox(width: 140, child: StatTile(label: 'Meta tables', value: '$_tables')),
               SizedBox(width: 140, child: StatTile(label: 'MCP tools', value: '$_tools')),
             ],
+          ),
+          const SizedBox(height: 16),
+          AppButton(
+            label: _exporting ? 'Exporting…' : 'Export cabinet bundle',
+            expanded: false,
+            onPressed: _exporting ? null : _exportBundle,
           ),
           const SizedBox(height: 16),
           Text(

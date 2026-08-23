@@ -6,6 +6,7 @@ import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/features/employee/cabinet_import_bundle_page.dart';
 import 'package:prodavan/features/employee/dynamic_cabinet_shell.dart';
 
 /// Employee cabinet home — owned cabinets only (L05).
@@ -75,6 +76,12 @@ class _CabinetListPageState extends State<CabinetListPage> {
     }
   }
 
+  void _openImportBundle() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const CabinetImportBundlePage()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final rows = _cabinets
@@ -91,6 +98,7 @@ class _CabinetListPageState extends State<CabinetListPage> {
       title: const Text('Cabinets'),
       actions: [
         IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
+        IconButton(onPressed: _openImportBundle, icon: const Icon(Icons.upload_file), tooltip: 'Import bundle'),
         IconButton(onPressed: _createCabinet, icon: const Icon(Icons.add)),
       ],
       body: Column(

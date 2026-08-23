@@ -152,6 +152,17 @@ def test_e2e_smoke_admin_to_agent_ping(client: TestClient) -> None:
     assert "projects" in slugs
     assert all(t.get("view_slug") for t in tabs.json())
 
+    exported = client.get(f"/api/v1/cabinets/{cabinet_id}/bundle", headers=owner_h)
+    assert exported.status_code == 200, exported.text
+    zip_b64 = exported.json()["zip_base64"]
+    imported = client.post(
+        "/api/v1/cabinets/import",
+        headers=owner_h,
+        json={"company_id": company_id, "zip_base64": zip_b64, "name": "E2E Imported"},
+    )
+    assert imported.status_code == 201, imported.text
+    assert imported.json()["cabinet"]["id"] != cabinet_id
+
 
 @requires_postgres
 def test_e2e_disabled_employee_cannot_chat(client: TestClient) -> None:

@@ -55,6 +55,40 @@ class ProdavanApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> importCabinetBundle({
+    required String companyId,
+    required List<int> zipBytes,
+    String? name,
+  }) async {
+    final res = await http.post(
+      _uri('/cabinets/import'),
+      headers: _headers,
+      body: jsonEncode({
+        'company_id': companyId,
+        'zip_base64': base64Encode(zipBytes),
+        if (name != null && name.isNotEmpty) 'name': name,
+      }),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> exportCabinetBundle(
+    String cabinetId, {
+    bool includeData = true,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final query = includeData ? '' : '?include_data=false';
+      final res = await http.get(_uri('/cabinets/$cabinetId/bundle$query'), headers: _headers);
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
   Future<Map<String, dynamic>> getCabinet(String cabinetId) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;

@@ -35,7 +35,8 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
-| 2026-08-23 | C-ADMIN-COMPANY | subscription_ends_at + expiring/expired metrics + PUT subscription | no |
+| 2026-08-23 | C-BUNDLE | L05 Flutter import/export bundle UI wired | no |
+| 2026-08-23 | C-ADMIN-COMPANY | subscription edit UI on company create/detail | no |
 | 2026-08-23 | C-META-DATA | `GET meta/tabs` includes `view_slug` for L05 routing | no |
 | 2026-08-23 | C-PROJECT-CHAT | transcript collapse includes `role=tool` for tool_call | no |
 | 2026-08-23 | C-EMP-SHELL | CabinetTabHost interpreters: projects/tables/tools | no |

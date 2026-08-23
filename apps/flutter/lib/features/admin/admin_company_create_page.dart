@@ -25,8 +25,10 @@ class _AdminCompanyCreatePageState extends State<AdminCompanyCreatePage> {
   final _maxCabinetsCtrl = TextEditingController(text: '10');
   final _maxPackagesCtrl = TextEditingController(text: '20');
   final _maxBundleMbCtrl = TextEditingController(text: '50');
+  final _subscriptionEndsCtrl = TextEditingController();
 
   bool _saving = false;
+  bool _subscriptionLifetime = false;
   String? _error;
 
   static const _defaultMaxCabinets = 10;
@@ -41,6 +43,7 @@ class _AdminCompanyCreatePageState extends State<AdminCompanyCreatePage> {
     _maxCabinetsCtrl.dispose();
     _maxPackagesCtrl.dispose();
     _maxBundleMbCtrl.dispose();
+    _subscriptionEndsCtrl.dispose();
     super.dispose();
   }
 
@@ -91,6 +94,17 @@ class _AdminCompanyCreatePageState extends State<AdminCompanyCreatePage> {
           maxCabinets: maxCabinets,
           maxPackagesPerCabinet: maxPackages,
           maxBundleImportMb: maxBundleMb,
+        );
+      }
+
+      if (_subscriptionLifetime || _subscriptionEndsCtrl.text.trim().isNotEmpty) {
+        final endsRaw = _subscriptionEndsCtrl.text.trim();
+        await adminContext.api.setCompanySubscription(
+          companyId: companyId,
+          subscriptionLifetime: _subscriptionLifetime,
+          subscriptionEndsAt: _subscriptionLifetime
+              ? null
+              : (endsRaw.contains('T') ? endsRaw : '${endsRaw}T00:00:00Z'),
         );
       }
 
@@ -163,6 +177,18 @@ class _AdminCompanyCreatePageState extends State<AdminCompanyCreatePage> {
                 label: 'Max bundle import (MB)',
                 keyboardType: TextInputType.number,
                 validator: (v) => _parsePositive(v ?? '') == null ? 'Positive integer' : null,
+              ),
+              const AppSectionHeader(title: 'Prodavan subscription (optional)'),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Lifetime subscription'),
+                value: _subscriptionLifetime,
+                onChanged: _saving ? null : (v) => setState(() => _subscriptionLifetime = v),
+              ),
+              AppTextField(
+                controller: _subscriptionEndsCtrl,
+                label: 'Ends at (YYYY-MM-DD, if not lifetime)',
+                enabled: !_saving && !_subscriptionLifetime,
               ),
               AppButton(
                 label: _saving ? 'Creating…' : 'Create company',

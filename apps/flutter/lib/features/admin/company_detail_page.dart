@@ -33,10 +33,13 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
   final _preferredProviderCtrl = TextEditingController();
   final _maxTokensMonthCtrl = TextEditingController();
   final _maxTokensPerRunCtrl = TextEditingController();
+  final _subscriptionEndsCtrl = TextEditingController();
 
   bool _loading = true;
   bool _savingQuotas = false;
   bool _savingPolicy = false;
+  bool _savingSubscription = false;
+  bool _subscriptionLifetime = false;
   String? _error;
   Map<String, dynamic>? _metrics;
   String _toolPreset = 'workspace_dev';
@@ -58,6 +61,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
     _preferredProviderCtrl.dispose();
     _maxTokensMonthCtrl.dispose();
     _maxTokensPerRunCtrl.dispose();
+    _subscriptionEndsCtrl.dispose();
     super.dispose();
   }
 
@@ -81,6 +85,10 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
         _platformFallback = policy['platform_fallback'] as bool? ?? true;
         _maxTokensMonthCtrl.text = policy['max_agent_tokens_month']?.toString() ?? '';
         _maxTokensPerRunCtrl.text = policy['max_tokens_per_run']?.toString() ?? '';
+        final metrics = detail['metrics'] as Map<String, dynamic>? ?? const {};
+        _subscriptionLifetime = metrics['subscription_lifetime'] == true;
+        final endsAt = metrics['subscription_ends_at'];
+        _subscriptionEndsCtrl.text = endsAt is String ? endsAt.split('T').first : '';
         _loading = false;
       });
     } catch (e) {
@@ -114,6 +122,40 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
       setState(() {
         _error = e.toString();
         _savingQuotas = false;
+      });
+    }
+  }
+
+  Future<void> _saveSubscription() async {
+    if (!_subscriptionLifetime && _subscriptionEndsCtrl.text.trim().isEmpty) {
+      setState(() => _error = 'Set end date or enable lifetime subscription');
+      return;
+    }
+    setState(() {
+      _savingSubscription = true;
+      _error = null;
+    });
+    try {
+      final endsRaw = _subscriptionEndsCtrl.text.trim();
+      final endsAt = endsRaw.isEmpty
+          ? null
+          : endsRaw.contains('T')
+              ? endsRaw
+              : '${endsRaw}T00:00:00Z';
+      await adminContext.api.setCompanySubscription(
+        companyId: widget.companyId,
+        subscriptionLifetime: _subscriptionLifetime,
+        subscriptionEndsAt: _subscriptionLifetime ? null : endsAt,
+      );
+      await _load();
+      if (!mounted) return;
+      setState(() => _savingSubscription = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Subscription saved')));
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _savingSubscription = false;
       });
     }
   }
@@ -186,6 +228,13 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                   InlineErrorBanner(
                     message: 'High agent token usage (${_metric('agent_tokens_used')} tokens)',
                   ),
+                if (_metrics?['subscription_lifetime'] != true && _metrics?['subscription_expired'] == true)
+                  InlineErrorBanner(message: 'Subscription expired'),
+                if (_metrics?['subscription_lifetime'] != true &&
+                    _metrics?['subscription_expiring_soon'] == true)
+                  InlineErrorBanner(
+                    message: 'Subscription expiring · ${_metric('subscription_ends_at', fallback: '—')}',
+                  ),
                 const AppSectionHeader(title: 'Metrics'),
                 Wrap(
                   spacing: AppSpacing.sm,
@@ -238,6 +287,25 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                         ),
                       ),
                   ],
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                const AppSectionHeader(title: 'Prodavan subscription'),
+                SwitchListTile(
+                  title: const Text('Lifetime subscription'),
+                  value: _subscriptionLifetime,
+                  onChanged: _savingSubscription
+                      ? null
+                      : (v) => setState(() => _subscriptionLifetime = v),
+                ),
+                AppTextField(
+                  controller: _subscriptionEndsCtrl,
+                  label: 'Ends at (YYYY-MM-DD)',
+                  enabled: !_savingSubscription && !_subscriptionLifetime,
+                ),
+                AppButton(
+                  label: _savingSubscription ? 'Saving…' : 'Save subscription',
+                  expanded: false,
+                  onPressed: _savingSubscription ? null : _saveSubscription,
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 const AppSectionHeader(title: 'Cabinet quotas'),

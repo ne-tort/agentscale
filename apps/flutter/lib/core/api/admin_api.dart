@@ -62,6 +62,24 @@ class AdminApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> setCompanySubscription({
+    required String companyId,
+    required bool subscriptionLifetime,
+    String? subscriptionEndsAt,
+  }) async {
+    final res = await http.put(
+      _uri('/admin/companies/$companyId/subscription'),
+      headers: _headers,
+      body: jsonEncode({
+        'subscription_lifetime': subscriptionLifetime,
+        if (subscriptionEndsAt != null && subscriptionEndsAt.isNotEmpty)
+          'subscription_ends_at': subscriptionEndsAt,
+      }),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> setCabinetQuotas({
     required String companyId,
     required int maxCabinets,
