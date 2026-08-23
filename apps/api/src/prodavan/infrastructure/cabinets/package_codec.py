@@ -144,5 +144,9 @@ def build_minimal_package_zip(
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("manifest.json", json.dumps(manifest, indent=2))
         zf.writestr("mcp.json", json.dumps(mcp_json, indent=2))
-        zf.writestr("src/server.py", "def main():\n    pass\n")
+        zf.writestr("src/__init__.py", "")
+        zf.writestr(
+            "src/server.py",
+            "import time\n\ndef main():\n    while True:\n        time.sleep(3600)\n\nif __name__ == '__main__':\n    main()\n",
+        )
     return buf.getvalue()

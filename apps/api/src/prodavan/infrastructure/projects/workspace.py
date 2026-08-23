@@ -60,6 +60,9 @@ class WorkspaceLayoutWriter:
         return records
 
     def extract_packages(self, artifacts: list[tuple[str, bytes]]) -> list[str]:
+        from prodavan.infrastructure.projects.mcp_sandbox import stop_all_package_processes
+
+        stop_all_package_processes(workspace_root=self._root)
         names: list[str] = []
         for pkg_name, raw in artifacts:
             dest = self._root / "packages" / pkg_name
@@ -83,6 +86,10 @@ class WorkspaceLayoutWriter:
         return path
 
     def remove_project_tree(self) -> None:
+        from prodavan.infrastructure.projects.mcp_sandbox import stop_all_package_processes
+
+        if self._root.is_dir():
+            stop_all_package_processes(workspace_root=self._root)
         if self._project_root.is_dir():
             shutil.rmtree(self._project_root)
 

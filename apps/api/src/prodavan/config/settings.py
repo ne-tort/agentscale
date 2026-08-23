@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     admin_metrics_subscription_expiring_days: int = 30
     starter_bundles_dir: Path = _REPO_ROOT / "apps" / "api" / "fixtures" / "starter_bundles"
 
+    # L07 local-ws MCP package processes (opt-in; no bubblewrap/k8s yet)
+    mcp_sandbox_spawn: bool = False
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]

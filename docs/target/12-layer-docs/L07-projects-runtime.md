@@ -3,11 +3,11 @@
 | Поле | Значение |
 |------|----------|
 | Status | doing |
-| Quality | 6 |
-| Quality note | Project CRUD+lifecycle+materialize FS+triggers+attachments; k8s pod sandbox L08; AGENTS from UI — gap |
+| Quality | 7 |
+| Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain; k8s isolator / daemon worker — gaps |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-23 — L07 API + local-ws materialize |
+| Last updated | 2026-08-23 — local MCP spawn + trigger drain |
 | Owners | — |
 
 ---
@@ -21,10 +21,10 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 | Сделано | Gaps |
 |---------|------|
 | ORM projects / project_triggers / project_attachments + migration | k8s pod scheduler |
-| CRUD: create/list/get; pause/resume/delete | AgentProviderPort wiring (L08) |
-| Materialize: AGENTS.md + CLAUDE.md dual-write, mcp.json, packages/, inbox/out | MCP process spawn (bubblewrap/k8s) |
-| `container_ref=local-ws:{workspace_key}` | Sandbox MCP process start |
-| Triggers: enqueue + list (`chat.message`, `project.prepare`, …) | Background worker loop |
+| CRUD: create/list/get; pause/resume/delete | AGENTS text from cabinet UI meta |
+| Materialize: AGENTS.md + CLAUDE.md, mcp.json, packages/, local sandbox spawn | bubblewrap/k8s isolator |
+| `container_ref=local-ws:{workspace_key}` | |
+| Triggers: enqueue + list + dispatch/drain (`?max=`) | Background daemon worker |
 | Attachments: base64 upload → inbox + DB ref | Virus scan; company policy limits |
 | Integration tests lifecycle + FS layout | E2E with agent ping |
 
@@ -44,7 +44,7 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 |----|-------|--------|
 | C-PROJECT | entity + lifecycle API | **live** (subset) |
 | C-MATERIALIZE | FS layout + paths | **live** (local-ws; no pod) |
-| C-TRIGGERS | enqueue + list | **live** (subset; no worker) |
+| C-TRIGGERS | enqueue + list + dispatch/drain | **live** (subset; no daemon) |
 | C-ATTACH | upload + storage_ref | **live** (subset) |
 
 ### Потребляет
@@ -86,8 +86,8 @@ apps/api/tests/unit/test_projects_domain.py
 | Project CRUD in cabinet | done | |
 | Materialize layout | done | default AGENTS; UI meta later |
 | Pause/resume/delete | done | local-ws only |
-| Trigger dispatch to agent | done | POST triggers/dispatch → AgentTriggerDispatcher |
-| MCP package sandbox run | live (subset) | prepare `.sandbox/run.json` + mcp.json sandbox block; process spawn — hole |
+| Trigger dispatch to agent | done | POST triggers/dispatch + `?max=` drain |
+| MCP package sandbox run | live (subset) | prepare + opt-in local spawn (`MCP_SANDBOX_SPAWN`); k8s/bubblewrap — hole |
 | Platform vs project event bus split | partial | project_triggers table only |
 | Attachment virus/size policy | stub | ATTACHMENT_MAX_BYTES constant |
 
@@ -105,4 +105,4 @@ cd apps/api && ruff check src tests && pytest tests/unit/test_projects_domain.py
 | B. Контракты | 1 | C-PROJECT/MATERIALIZE live subset |
 | C. Инварианты и проверки | 1 | ACL + lifecycle tests |
 | D. As-built ясность | 2 | эта карточка |
-| **Quality (итог)** | **6** | doing; MCP process spawn gap |
+| **Quality (итог)** | **7** | doing; k8s isolator + daemon worker gaps |

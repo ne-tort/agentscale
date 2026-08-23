@@ -12,6 +12,9 @@ from prodavan.domain.projects import TriggerStatus
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.projects import ProjectTriggerRow
 
+_DEFAULT_DRAIN_MAX = 10
+_HARD_DRAIN_MAX = 50
+
 
 class AgentTriggerDispatcher:
     def __init__(self, session: AsyncSession) -> None:
@@ -29,6 +32,44 @@ class AgentTriggerDispatcher:
         await self._projects.require_access(
             project_id=project_id, principal=principal, employee=employee, write=True
         )
+        return await self._dispatch_one(project_id=project_id, principal=principal, employee=employee)
+
+    async def dispatch_batch(
+        self,
+        *,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        max_n: int = _DEFAULT_DRAIN_MAX,
+    ) -> dict:
+        """Drain up to max_n queued triggers (manual worker substitute)."""
+        await self._projects.require_access(
+            project_id=project_id, principal=principal, employee=employee, write=True
+        )
+        limit = max_n if 1 <= max_n <= _HARD_DRAIN_MAX else _DEFAULT_DRAIN_MAX
+        results: list[dict] = []
+        for _ in range(limit):
+            one = await self._dispatch_one(
+                project_id=project_id, principal=principal, employee=employee
+            )
+            if not one.get("dispatched"):
+                if not results and one.get("reason") == "no queued triggers":
+                    return {"dispatched": False, "reason": "no queued triggers", "items": []}
+                break
+            results.append(one)
+        return {
+            "dispatched": bool(results),
+            "count": len(results),
+            "items": results,
+        }
+
+    async def _dispatch_one(
+        self,
+        *,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
         q = await self._session.execute(
             select(ProjectTriggerRow)
             .where(

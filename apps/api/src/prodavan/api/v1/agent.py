@@ -260,7 +260,14 @@ async def dispatch_project_triggers(
     principal: PrincipalDep,
     session: SessionDep,
     employee: EmployeeDep,
+    max: int = 1,
 ) -> dict:
-    return await AgentTriggerDispatcher(session).dispatch_next(
-        project_id=project_id, principal=principal, employee=employee
+    """Dispatch one trigger (max=1) or drain up to max queued triggers."""
+    dispatcher = AgentTriggerDispatcher(session)
+    if max <= 1:
+        return await dispatcher.dispatch_next(
+            project_id=project_id, principal=principal, employee=employee
+        )
+    return await dispatcher.dispatch_batch(
+        project_id=project_id, principal=principal, employee=employee, max_n=max
     )

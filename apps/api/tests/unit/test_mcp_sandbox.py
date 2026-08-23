@@ -11,12 +11,18 @@ import pytest
 
 from prodavan.config.settings import settings
 from prodavan.infrastructure.cabinets.package_codec import build_minimal_package_zip
-from prodavan.infrastructure.projects.mcp_sandbox import prepare_package_sandbox
+from prodavan.infrastructure.projects.mcp_sandbox import (
+    _pid_alive,
+    prepare_package_sandbox,
+    start_package_process,
+    stop_package_process,
+)
 from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
 
 
 def test_prepare_sandbox_writes_ready_run_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "storage_root", tmp_path)
+    monkeypatch.setattr(settings, "mcp_sandbox_spawn", False)
     ws_key = "proj_test_sandbox"
     writer = WorkspaceLayoutWriter(workspace_key=str(ws_key))
     writer.ensure_dirs()
@@ -59,3 +65,35 @@ def test_prepare_sandbox_invalid_when_entry_missing(tmp_path: Path, monkeypatch:
     record = prepare_package_sandbox(workspace_root=writer.workspace_root, package_name="bad_entry")
     assert record["status"] == "invalid"
     assert "not found" in record.get("reason", "")
+
+
+def test_local_spawn_and_stop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "storage_root", tmp_path)
+    monkeypatch.setattr(settings, "mcp_sandbox_spawn", True)
+    writer = WorkspaceLayoutWriter(workspace_key="proj_spawn")
+    writer.ensure_dirs()
+    raw = build_minimal_package_zip(name="demo_sync", version="1.0.0")
+    writer.extract_packages([("demo_sync", raw)])
+
+    record = prepare_package_sandbox(workspace_root=writer.workspace_root, package_name="demo_sync")
+    assert record["status"] == "ready"
+    assert record["process"] == "running"
+    pid = record["pid"]
+    assert isinstance(pid, int) and _pid_alive(pid)
+
+    stopped = stop_package_process(workspace_root=writer.workspace_root, package_name="demo_sync")
+    assert stopped["process"] == "stopped"
+    assert not _pid_alive(pid)
+
+
+def test_start_skipped_when_spawn_disabled(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "storage_root", tmp_path)
+    monkeypatch.setattr(settings, "mcp_sandbox_spawn", False)
+    writer = WorkspaceLayoutWriter(workspace_key="proj_nospawn")
+    writer.ensure_dirs()
+    raw = build_minimal_package_zip(name="demo_sync", version="1.0.0")
+    writer.extract_packages([("demo_sync", raw)])
+    prepare_package_sandbox(workspace_root=writer.workspace_root, package_name="demo_sync")
+    again = start_package_process(workspace_root=writer.workspace_root, package_name="demo_sync")
+    assert again["process"] == "not_started"
+    assert again.get("spawn_skipped")

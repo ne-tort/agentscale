@@ -525,6 +525,9 @@ def test_trigger_dispatch_runs_chat_message(client: TestClient) -> None:
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
 
+    # Drain project.prepare from create before asserting chat.message id.
+    client.post(f"/api/v1/projects/{project_id}/triggers/dispatch?max=10", headers=owner_h)
+
     trig = client.post(
         f"/api/v1/projects/{project_id}/triggers",
         headers=owner_h,
@@ -547,3 +550,72 @@ def test_trigger_dispatch_runs_chat_message(client: TestClient) -> None:
     assert listed.status_code == 200
     done = next(t for t in listed.json()["items"] if t["id"] == trigger_id)
     assert done["status"] == "done"
+
+
+@requires_postgres
+def test_trigger_dispatch_drain_batch(client: TestClient) -> None:
+    admin_h = {"Authorization": f"Bearer {_token(sub='drain-admin', platform_admin=True)}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "DrainCo", "admin_email": "drain@agentco.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "Cursor",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-drain",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = {"Authorization": f"Bearer {_token(sub='drain-owner', email='drain@agentco.test')}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "DrainCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "DrainProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    for text in ("one", "two"):
+        r = client.post(
+            f"/api/v1/projects/{project_id}/triggers",
+            headers=owner_h,
+            json={"kind": "chat.message", "payload": {"text": text}},
+        )
+        assert r.status_code == 202, r.text
+
+    drained = client.post(
+        f"/api/v1/projects/{project_id}/triggers/dispatch?max=10",
+        headers=owner_h,
+    )
+    assert drained.status_code == 200, drained.text
+    body = drained.json()
+    assert body.get("dispatched") is True
+    assert body.get("count", 0) >= 2
+    assert all(item.get("dispatched") for item in body.get("items", []))
+
+    empty = client.post(
+        f"/api/v1/projects/{project_id}/triggers/dispatch?max=5",
+        headers=owner_h,
+    )
+    assert empty.status_code == 200
+    assert empty.json().get("dispatched") is False
+    assert empty.json().get("reason") == "no queued triggers"

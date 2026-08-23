@@ -75,6 +75,8 @@ class ProjectMaterializeService:
                     "status": rec.get("status"),
                     "entry": rec.get("entry"),
                     "tools": rec.get("tools", []),
+                    "process": rec.get("process"),
+                    "pid": rec.get("pid"),
                 },
             }
             for rec in sandbox_records
