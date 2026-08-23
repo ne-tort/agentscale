@@ -25,7 +25,7 @@
 
 | Поле | Смысл |
 |------|--------|
-| `Status` | `not_started` \| `partial` \| `done` \| `deprecated` |
+| `Status` | `not_started` \| `partial` \| `doing` \| `done` \| `deprecated` (`doing` = in-flight delivery; checklist sync) |
 | `Quality` | целое **0…10** — законченность/качество по [quality-score.md](quality-score.md) |
 | `Quality note` | 1–3 предложения обоснования балла |
 | `Plan` | Ссылка на `11/.../LNN-*.md` |

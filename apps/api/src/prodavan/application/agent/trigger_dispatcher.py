@@ -144,14 +144,21 @@ class AgentTriggerDispatcher:
         else:
             q = await self._session.execute(
                 select(AgentSessionRow)
-                .where(
-                    AgentSessionRow.project_id == project_id,
-                    AgentSessionRow.status == AgentSessionStatus.ACTIVE,
-                )
+                .where(AgentSessionRow.project_id == project_id)
+                .where(AgentSessionRow.status == AgentSessionStatus.ACTIVE)
                 .order_by(AgentSessionRow.updated_at.desc())
                 .limit(1)
             )
             session_row = q.scalar_one_or_none()
+            if session_row is None:
+                # After pause auto-cancel, regenerate still needs last user turn.
+                latest_q = await self._session.execute(
+                    select(AgentSessionRow)
+                    .where(AgentSessionRow.project_id == project_id)
+                    .order_by(AgentSessionRow.updated_at.desc())
+                    .limit(1)
+                )
+                session_row = latest_q.scalar_one_or_none()
         if session_row is None:
             return None, []
 
@@ -280,6 +287,12 @@ class AgentTriggerDispatcher:
                         refs = last_refs
                 if not text:
                     return await self._finish_hard_fail(trigger, "nothing to regenerate")
+                # Cancelled/closed sessions (e.g. after project pause) cannot accept send —
+                # recover text above, then open a fresh session.
+                if session_id:
+                    prior = await self._session.get(AgentSessionRow, session_id)
+                    if prior is None or prior.status != AgentSessionStatus.ACTIVE:
+                        session_id = None
                 result = await self._run_chat_turn(
                     project_id=project_id,
                     principal=principal,

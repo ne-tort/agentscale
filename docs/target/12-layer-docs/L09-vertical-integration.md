@@ -6,7 +6,7 @@
 | Quality | 7 |
 | Quality note | API E2E incl. pause/rematerialize/idle; Flutter thumbnails + widget subset; full Widget E2E — gap |
 | Plan | [L09](../11-implementation-plan/L09-vertical-integration.md) |
-| Last updated | 2026-08-24 — resume kick-drain + soft dispatch while paused |
+| Last updated | 2026-08-24 — regenerate after cancel; release_gate Status=done⇒Q≥8 |
 | Owners | — |
 
 ---
@@ -40,7 +40,7 @@
 | Flutter widget tests — status banner + image/text/PDF preview | full navigation E2E — hole |
 | Flutter admin widget tests — metrics alerts | full admin navigation — hole |
 | SSE cancel mid-stream → `(cancelled)` bubble + session cancel API | |
-| Release gate checklist | live (subset) | `tools/release_gate_check.py` wired in ci-api |
+| Release gate checklist | live (subset) | `tools/release_gate_check.py` — Quality drift + Status=done⇒Q≥8; wired in ci-api |
 | Company suspend E2E → COMPANY_SUSPENDED + platform_events | |
 | Project pause E2E → PROJECT_PAUSED + resume | |
 | MCP deploy rematerialize E2E | |

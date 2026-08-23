@@ -18,14 +18,16 @@ WORKFLOWS = ROOT / ".github" / "workflows"
 
 _LAYER_RE = re.compile(r"^L(\d{2})")
 _QUALITY_RE = re.compile(r"^\|\s*Quality\s*\|\s*(\d+)\s*\|", re.MULTILINE)
+_STATUS_RE = re.compile(r"^\|\s*Status\s*\|\s*([^\|]+?)\s*\|", re.MULTILINE)
 _CHECKLIST_ROW_RE = re.compile(
     r"\|\s*\[(L\d{2})\][^|]*\|\s*(\w+)\s*\|\s*(\d+)\s*\|",
     re.MULTILINE,
 )
 
 
-def _as_built_qualities() -> dict[str, int]:
-    out: dict[str, int] = {}
+def _as_built_cards() -> dict[str, tuple[int, str]]:
+    """layer → (quality, status)."""
+    out: dict[str, tuple[int, str]] = {}
     for path in sorted(AS_BUILT.glob("L*.md")):
         m = _LAYER_RE.match(path.stem)
         if not m:
@@ -33,8 +35,10 @@ def _as_built_qualities() -> dict[str, int]:
         layer = f"L{m.group(1)}"
         text = path.read_text(encoding="utf-8", errors="replace")
         qm = _QUALITY_RE.search(text)
+        sm = _STATUS_RE.search(text)
         if qm:
-            out[layer] = int(qm.group(1))
+            status = (sm.group(1).strip() if sm else "").lower()
+            out[layer] = (int(qm.group(1)), status)
     return out
 
 
@@ -48,7 +52,7 @@ def _checklist_rows() -> dict[str, tuple[str, int]]:
 
 def main() -> int:
     errors: list[str] = []
-    as_built = _as_built_qualities()
+    as_built = _as_built_cards()
     checklist = _checklist_rows()
 
     if not as_built:
@@ -56,15 +60,17 @@ def main() -> int:
     if not checklist:
         errors.append("no checklist-master layer rows found")
 
-    for layer, quality in sorted(as_built.items()):
+    for layer, (quality, status) in sorted(as_built.items()):
         if layer not in checklist:
             errors.append(f"{layer}: in as-built (Q={quality}) but missing from checklist-master")
             continue
-        status, cq = checklist[layer]
+        c_status, cq = checklist[layer]
         if cq != quality:
             errors.append(
-                f"{layer}: checklist Quality={cq} drifts from as-built Quality={quality} (status={status})"
+                f"{layer}: checklist Quality={cq} drifts from as-built Quality={quality} (status={c_status})"
             )
+        if status == "done" and quality < 8:
+            errors.append(f"{layer}: Status=done requires Quality >= 8 (got {quality})")
 
     for layer, (status, cq) in sorted(checklist.items()):
         if layer not in as_built:
@@ -87,9 +93,9 @@ def main() -> int:
         return 1
 
     print("release_gate_check OK")
-    for layer, quality in sorted(as_built.items()):
-        status, _ = checklist[layer]
-        print(f"  {layer}: Q={quality} status={status}")
+    for layer, (quality, status) in sorted(as_built.items()):
+        c_status, _ = checklist[layer]
+        print(f"  {layer}: Q={quality} as-built={status or '?'} checklist={c_status}")
     return 0
 
 
