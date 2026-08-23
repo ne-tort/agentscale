@@ -115,7 +115,7 @@ apps/flutter/lib/
 | Celery executor для background jobs | **partial** | stack `celery-worker`; default off → in-process fallback |
 | Middleware register в core | **done** (subset) | `register_cors` in `core/middleware.py` |
 | Redis cache facade | **done** (subset) | `core/infra/cache.py`; application usage still sparse |
-| Last updated | 2026-08-24 — stack compose brokers + hydrate + CORS/cache |
+
 ## Проверка
 
 ```text
