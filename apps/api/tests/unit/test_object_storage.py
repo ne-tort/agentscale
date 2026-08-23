@@ -66,3 +66,29 @@ async def test_workspace_writer_agents_via_object_store(tmp_path: Path, monkeypa
     mcp = json.loads((tmp_path / "projects/wk1/workspace/mcp.json").read_text(encoding="utf-8"))
     assert mcp["platform"]["cabinet_id"] == "cab_1"
     await mgr.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_ensure_package_tree_hydrates_from_object_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import zipfile
+    from io import BytesIO
+
+    set_object_storage(None)
+    mgr = ObjectStorageManager(backend="local", storage_root=tmp_path)
+    await mgr.startup()
+    monkeypatch.setattr("prodavan.infrastructure.projects.workspace.settings.storage_root", tmp_path)
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("tool.py", "print('ok')\n")
+    zip_bytes = buf.getvalue()
+    await mgr.put_bytes("projects/wk2/workspace/packages/demo.zip", zip_bytes, content_type="application/zip")
+    writer = WorkspaceLayoutWriter(workspace_key="wk2")
+    writer.ensure_dirs()
+    assert writer.ensure_package_tree("demo") is True
+    assert (tmp_path / "projects/wk2/workspace/packages/demo/tool.py").read_text(encoding="utf-8") == (
+        "print('ok')\n"
+    )
+    assert writer.ensure_package_tree("missing") is False
+    await mgr.shutdown()

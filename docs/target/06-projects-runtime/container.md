@@ -5,7 +5,7 @@
 Изолированное runtime-пространство проекта. Default: **per-project pod**.
 
 **Blobs / workspace files:** канон — **object store (MinIO / S3)** ([13-platform-infra](../13-platform-infra/)).  
-**Сейчас:** AGENTS/mcp/inbox/package.zip materialize через `ObjectStorageManager`; sandbox extract деревьев packages/ — ещё local FS (hole). `local-ws:` container_ref — transitional.
+**Сейчас:** AGENTS/mcp/inbox/package.zip через `ObjectStorageManager`; sandbox extract + **hydrate from zip** если дерево отсутствует; live mount из MinIO в pod — hole. `local-ws:` — transitional.
 
 Агент видит workspace + MCP: platform `cabinet.*` (scoped) + **enabled MCP packages** кабинета.
 

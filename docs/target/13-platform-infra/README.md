@@ -4,7 +4,7 @@
 |------|----------|
 | Priority | **P0** — закрывать в первую очередь |
 | Refactor | **Significant refactor allowed** (L00/L03/L07/L08 и смежные) |
-| Status | canon; код: **w1–w5 + harden** (materialize via store, consumer kick, `infra/docker-compose.dev.yml` Redpanda); holes: full cutover, sandbox-from-S3, stack compose |
+| Status | canon; код: **P0 managers + stack compose brokers/celery + sandbox hydrate**; holes: Kafka full cutover, k8s, app cache usage |
 | Plan | [P0-platform-infra](../11-implementation-plan/P0-platform-infra.md) |
 
 Канон платформенной инфраструктуры и backend core. Отклонение в коде — **дефект** относительно канона (как UI-принципы в §2 [00-principles](../00-principles.md)).

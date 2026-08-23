@@ -124,8 +124,10 @@ apps/api/.env.example
 | telegram.message trigger | done | dispatch like chat.message; HMAC ingress like webhook |
 | Webhook HMAC ingress | done | company policy secret + X-Prodavan-Signature |
 | Attachment DELETE | done | DB + inbox file; Flutter pending remove calls DELETE |
-| Object store (MinIO) как SoT blobs | **partial (P0)** | attach/packages + materialize AGENTS/mcp/package.zip via store; sandbox tree extract still local |
+| Object store (MinIO) как SoT blobs | **partial (P0)** | attach/packages + materialize + hydrate sandbox from zip; live MinIO mount — hole |
 | Durable bus = Kafka (triggers + platform events) | **partial (P0)** | dual-write + optional consumer→Celery drain kick; PG outbox/SPI still SoT |
+| Stack deploy brokers | **partial (P0)** | `docker-compose.stack.yml` Redis/MinIO/Redpanda/celery-worker; k8s — hole |
+
 | Celery jobs (drain / idle / rematerialize) | **partial (P0 w4)** | `WorkerManager` + `prodavan.jobs.*` tasks; in-process `TriggerWorkerResource` fallback when Celery off; deploy worker/beat — hole |
 
 ## Проверка

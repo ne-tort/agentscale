@@ -40,6 +40,9 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-24 | C-MATERIALIZE / C-OBJECT-STORE | ensure_package_tree hydrates sandbox from object-store zip | no |
+| 2026-08-24 | C-CACHE / L00 | cache_get/set helpers; CORS via core.middleware.register_cors | no |
+| 2026-08-24 | P0 deploy | stack compose: Redis/MinIO/Redpanda/celery-worker | no |
 | 2026-08-24 | C-MATERIALIZE / C-OBJECT-STORE | materialize AGENTS/mcp/package.zip via ObjectStorageManager | no |
 | 2026-08-24 | C-EVENT-BUS / C-JOBS | Kafka consumer opt-in kicks Celery trigger_drain (debounce) | no |
 | 2026-08-24 | C-EVENT-BUS | KafkaManager + EventEnvelope; dual-write from platform emit + trigger enqueue | no |

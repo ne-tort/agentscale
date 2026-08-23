@@ -1,13 +1,24 @@
 # P0 platform infra (local)
 
-Sidecar services for Redis / MinIO / Redpanda (Kafka API):
+## Sidecars only
 
 ```bash
 # from prodavan/
 docker compose -f infra/docker-compose.dev.yml up -d
 ```
 
-## Suggested API env (`apps/api/.env`)
+Redis `:6379`, MinIO `:9000`/console `:9001`, Redpanda Kafka `:19092`.
+
+## Full stack (API + UI + P0 brokers + Celery)
+
+```bash
+docker compose -f infra/docker-compose.stack.yml up --build -d
+```
+
+Stack wires API/Celery to Redis, MinIO (`prodavan` bucket via `minio-init`), Redpanda, and runs
+`celery-worker` with beat. Host Kafka port: `localhost:19092`.
+
+## Suggested local API env (sidecars / host uvicorn)
 
 ```text
 REDIS_URL=redis://localhost:6379/0
@@ -23,19 +34,8 @@ CELERY_ENABLED=true
 TRIGGER_WORKER_ENABLED=true
 ```
 
-Create MinIO bucket `prodavan` once (console http://localhost:9001).
-
-## Celery worker
-
-Separate process (with `PYTHONPATH=apps/api/src`):
-
-```bash
-celery -A prodavan.core.infra.worker_manager.celery_app worker -l info -B
-```
-
-When `CELERY_ENABLED=true`, API skips in-process trigger loop.
-
 ## Notes / holes
 
 - Kafka consumer only **kicks** Celery drain; PG outbox remains claim SoT until full cutover.
-- Stack compose (`docker-compose.stack.yml`) still Postgres-only for API UI; use `docker-compose.dev.yml` for P0 brokers.
+- Package sandbox trees hydrate from object-store zip when local dir missing; live mount-from-MinIO still a hole.
+- CORS registered via `prodavan.core.middleware.register_cors`.

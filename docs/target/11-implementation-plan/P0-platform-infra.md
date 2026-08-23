@@ -38,17 +38,14 @@ Postgres и Keycloak/Vault роли не меняются.
 - [x] Kafka: dual-write + optional consumer kick; **hole:** consumer replaces PG drain/SPI as sole path
 - [x] Контракты: `C-CACHE` + `C-OBJECT-STORE` + `C-JOBS` + `C-EVENT-BUS` → **live** (subset)
 - [x] As-built L00/L07/L08 обновлены (w1–w5 subset)
-- [ ] Checklist master: строка P0 → `done` (осталось: deploy Redis/MinIO/Kafka/Celery + materialize SoT + consumer cutover)
+- [ ] Checklist master: строка P0 → `done` (осталось: full Kafka cutover + k8s manifests + app cache usage)
 
 ## Дыры логики (следующая итерация)
 
 - Kafka consumer **kick-only** (Celery drain); не заменяет PG claim/SPI delivery как sole path.
-- Package **sandbox trees** всё ещё локальный extract (zip в object store есть; mount-from-MinIO — hole).
-- `docker-compose.stack.yml` ещё без Redis/MinIO/Kafka; local sidecars — `infra/docker-compose.dev.yml`.
-- Celery worker/beat не в compose как сервис (документирован ручной запуск).
-- `KAFKA_*` / `CELERY_*` / S3 default off.
-- CORS middleware ещё не через core register.
-- Redis cache/lock facade почти не используется application-кодом.
+- Package sandbox: hydrate-from-zip есть; **live mount** workspace из MinIO в pod — hole.
+- Application почти не вызывает `cache_get`/`cache_set` (фасад есть).
+- k3s/Helm charts для Redis/MinIO/Kafka/Celery ещё не канон-манифесты (compose stack — local).
 
 ## Волны реализации
 

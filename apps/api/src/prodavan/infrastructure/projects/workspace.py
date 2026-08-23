@@ -69,8 +69,30 @@ class WorkspaceLayoutWriter:
 
         records: list[dict[str, Any]] = []
         for name in package_names:
+            self.ensure_package_tree(name)
             records.append(prepare_package_sandbox(workspace_root=self._root, package_name=name))
         return records
+
+    def ensure_package_tree(self, pkg_name: str) -> bool:
+        """Ensure extracted package dir exists; hydrate from object-store zip if missing."""
+        safe = Path(pkg_name).name
+        dest = self._root / "packages" / safe
+        if dest.is_dir() and any(dest.iterdir()):
+            return True
+        key = workspace_object_key(
+            workspace_key=self._workspace_key,
+            relative_path=f"packages/{safe}.zip",
+        )
+        try:
+            raw = ensure_object_storage().get_bytes_sync(key)
+        except FileNotFoundError:
+            return False
+        if dest.exists():
+            shutil.rmtree(dest)
+        dest.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(BytesIO(raw)) as zf:
+            zf.extractall(dest)
+        return True
 
     def extract_packages(self, artifacts: list[tuple[str, bytes]]) -> list[str]:
         from prodavan.infrastructure.projects.mcp_sandbox import stop_all_package_processes

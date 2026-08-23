@@ -8,6 +8,8 @@ prodavan/
   core/             # P0: LifespanManager + infra managers (Redis, object store, Kafka, Celery)
     jobs/           # C-JOBS task names + Celery tasks + enqueue helpers
     events/         # C-EVENT-BUS envelopes + publish helpers
+    middleware.py   # register_cors (and future middleware register)
+    infra/cache.py  # C-CACHE helpers
   config/           # Settings / env
   main.py           # FastAPI factory (lifespan → core.wiring)
 ```

@@ -1,4 +1,4 @@
-# Full stack: Postgres + API + Flutter web (nginx).
+# Full stack: Postgres + P0 brokers + API + Celery + Flutter web.
 # From prodavan/:
 #   bash infra/scripts/docker-build-cached.sh ensure-builder
 #   export BUILDX_BUILDER=prodavan DOCKER_BUILDKIT=1
@@ -6,6 +6,10 @@
 #
 # UI:  http://localhost:8080
 # API: http://localhost:8000/api/v1/health
+# MinIO console: http://localhost:9001 (prodavan / prodavan123)
+# Kafka (host): localhost:19092
+#
+# P0 sidecars only (no API/UI): infra/docker-compose.dev.yml — see infra/README-p0-infra.md
 
 services:
   postgres:
@@ -25,6 +29,79 @@ services:
       timeout: 5s
       retries: 8
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - prodavan_stack_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 8
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: prodavan
+      MINIO_ROOT_PASSWORD: prodavan123
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - prodavan_stack_minio:/data
+
+  minio-init:
+    image: minio/mc:latest
+    restart: "no"
+    depends_on:
+      - minio
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        i=0
+        until mc alias set local http://minio:9000 prodavan prodavan123; do
+          i=$((i+1))
+          if [ "$i" -gt 30 ]; then exit 1; fi
+          sleep 1
+        done
+        mc mb -p local/prodavan || true
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.4
+    restart: unless-stopped
+    command:
+      - redpanda
+      - start
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:19092
+      - --pandaproxy-addr
+      - internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --advertise-pandaproxy-addr
+      - internal://redpanda:8082,external://localhost:18082
+      - --schema-registry-addr
+      - internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --rpc-addr
+      - redpanda:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+      - --mode
+      - dev-container
+      - --smp
+      - "1"
+      - --default-log-level=warn
+    ports:
+      - "19092:19092"
+    volumes:
+      - prodavan_stack_redpanda:/var/lib/redpanda/data
+
   api:
     build:
       context: ..
@@ -35,14 +112,29 @@ services:
         - type=local,dest=../.docker-cache/api,mode=max
     image: prodavan-api:stack
     restart: unless-stopped
-    environment:
+    environment: &api_env
       DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@postgres:5432/prodavan
       JWT_SECRET: stack-dev-change-me
+      AUTH_MODE: test
       STORAGE_ROOT: /data/storage
       PACKS_ROOT: /packages/cabinet-packs
       CORS_ORIGINS: >-
         http://localhost:8080,http://127.0.0.1:8080,http://localhost:3000
       RUN_MIGRATIONS: "1"
+      REDIS_URL: redis://redis:6379/0
+      CELERY_ENABLED: "true"
+      CELERY_BROKER_URL: redis://redis:6379/0
+      TRIGGER_WORKER_ENABLED: "true"
+      IDLE_PAUSE_WORKER_ENABLED: "false"
+      KAFKA_ENABLED: "true"
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      KAFKA_CONSUMER_ENABLED: "true"
+      OBJECT_STORE_BACKEND: s3
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_ACCESS_KEY: prodavan
+      S3_SECRET_KEY: prodavan123
+      S3_BUCKET: prodavan
+      OBJECT_STORE_MIRROR_LOCAL: "true"
     ports:
       - "8000:8000"
     volumes:
@@ -50,12 +142,42 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+      redpanda:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/health/live"]
       interval: 10s
       timeout: 5s
       retries: 12
-      start_period: 20s
+      start_period: 25s
+
+  celery-worker:
+    image: prodavan-api:stack
+    restart: unless-stopped
+    command:
+      - celery
+      - -A
+      - prodavan.core.infra.worker_manager.celery_app
+      - worker
+      - -l
+      - info
+      - -B
+    environment:
+      <<: *api_env
+      RUN_MIGRATIONS: "0"
+    volumes:
+      - prodavan_stack_storage:/data/storage
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_started
 
   web:
     build:
@@ -87,3 +209,6 @@ services:
 volumes:
   prodavan_stack_pg:
   prodavan_stack_storage:
+  prodavan_stack_redis:
+  prodavan_stack_minio:
+  prodavan_stack_redpanda:
