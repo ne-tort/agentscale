@@ -6,7 +6,7 @@
 | Quality | 6 |
 | Quality note | API E2E + release_gate_check + suspend; Widget E2E — gap |
 | Plan | [L09](../11-implementation-plan/L09-vertical-integration.md) |
-| Last updated | 2026-08-23 — idle pause policy subset + release_gate |
+| Last updated | 2026-08-23 — rematerialize-on-deploy + idle worker opt-in |
 | Owners | — |
 
 ---
@@ -60,6 +60,7 @@ tools/release_gate_check.py
 | CI nightly | live | `.github/workflows/ci-nightly.yml` |
 | Release gate checklist automation | live (subset) | `tools/release_gate_check.py` in ci-api |
 | Widget E2E | hole | |
-| Idle pause policy | live (subset) | policy + admin/company sweep; no dedicated cron worker |
+| Idle pause policy | live (subset) | policy + admin sweep + opt-in `IDLE_PAUSE_WORKER_ENABLED` |
+| Rematerialize after MCP deploy | live | deploy/disable returns `rematerialized`; Flutter settings button |
 
 ## Quality | **6** | doing — E2E + release_gate_check; Widget E2E remains hole |

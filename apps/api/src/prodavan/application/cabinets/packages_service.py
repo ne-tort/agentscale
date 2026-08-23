@@ -135,6 +135,9 @@ class CabinetPackagesService:
             },
         )
         await self._session.commit()
+        from prodavan.application.projects.project_service import ProjectService
+
+        remat = await ProjectService(self._session).rematerialize_for_cabinet(cabinet_id=cabinet_id)
         return {
             "id": pkg_id,
             "name": validated["name"],
@@ -144,6 +147,7 @@ class CabinetPackagesService:
             "content_hash": validated["content_hash"],
             "artifact_ref": artifact_ref,
             "tools": validated["tool_names"],
+            "rematerialized": remat,
         }
 
     async def deploy_base64(
@@ -200,7 +204,16 @@ class CabinetPackagesService:
         if row is None:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="package not found")
         await self._session.commit()
-        return {"id": row.id, "name": row.name, "version": row.version, "status": row.status}
+        from prodavan.application.projects.project_service import ProjectService
+
+        remat = await ProjectService(self._session).rematerialize_for_cabinet(cabinet_id=cabinet_id)
+        return {
+            "id": row.id,
+            "name": row.name,
+            "version": row.version,
+            "status": row.status,
+            "rematerialized": remat,
+        }
 
     async def export_base64(
         self,

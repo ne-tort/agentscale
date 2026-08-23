@@ -31,7 +31,9 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
   String? _agentProvider;
   bool _loading = true;
   bool _saving = false;
+  bool _rematerializing = false;
   String? _error;
+  String? _rematerializeInfo;
 
   @override
   void initState() {
@@ -92,6 +94,31 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
     }
   }
 
+  Future<void> _rematerialize() async {
+    setState(() {
+      _rematerializing = true;
+      _error = null;
+      _rematerializeInfo = null;
+    });
+    try {
+      final result = await workContext.api.rematerializeProject(widget.projectId);
+      if (!mounted) return;
+      final packages = (result['package_names'] as List?)?.join(', ') ?? '';
+      setState(() {
+        _rematerializing = false;
+        _rematerializeInfo = packages.isEmpty
+            ? 'Workspace rematerialized (no MCP packages)'
+            : 'Rematerialized packages: $packages';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _rematerializing = false;
+      });
+    }
+  }
+
   String _labelFor(String? value) {
     if (value == null) return 'Company default';
     return value;
@@ -138,8 +165,17 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
                     ),
                     AppButton(
                       label: _saving ? 'Saving…' : 'Save',
-                      onPressed: _saving ? null : _save,
+                      onPressed: _saving || _rematerializing ? null : _save,
                     ),
+                    AppButton(
+                      label: _rematerializing ? 'Rematerializing…' : 'Rematerialize workspace',
+                      onPressed: _saving || _rematerializing ? null : _rematerialize,
+                    ),
+                    if (_rematerializeInfo != null)
+                      Text(
+                        _rematerializeInfo!,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
                   ],
                 ),
               ],

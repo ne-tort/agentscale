@@ -1,9 +1,10 @@
-"""Opt-in background drain of project triggers (L07/L08).
+"""Opt-in background drain of project triggers + optional idle pause (L07/L08/L09).
 
-Enable via TRIGGER_WORKER_ENABLED=true. Prefer admin POST /admin/triggers/drain in CI.
+Enable via TRIGGER_WORKER_ENABLED and/or IDLE_PAUSE_WORKER_ENABLED.
+Prefer admin POST /admin/triggers/drain (and idle-pause/sweep) in CI.
 
 Safety layers:
-- process advisory lock (pg_try_advisory_lock) so one API process drains at a time
+- process advisory lock (pg_try_advisory_lock) so one API process runs at a time
 - row-level outbox lease + SKIP LOCKED on claim (crash → lease expires → re-claim)
 
 Still not a separate durable broker (Kafka/SQS) — hole noted in L07 as outbox-lite.
@@ -17,6 +18,7 @@ import logging
 from sqlalchemy import text
 
 from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
+from prodavan.application.projects.idle_pause_service import IdlePauseService
 from prodavan.config.settings import settings
 from prodavan.infrastructure.persistence.database import get_session_factory
 
@@ -28,6 +30,10 @@ _stop: asyncio.Event | None = None
 _task: asyncio.Task[None] | None = None
 
 
+def _worker_wanted() -> bool:
+    return bool(settings.trigger_worker_enabled or settings.idle_pause_worker_enabled)
+
+
 async def drain_once() -> dict:
     factory = get_session_factory()
     async with factory() as session:
@@ -35,10 +41,20 @@ async def drain_once() -> dict:
         if not locked.scalar():
             return {"dispatched": False, "reason": "lock_held", "count": 0, "projects": []}
         try:
-            return await AgentTriggerDispatcher(session).drain_all(
-                max_projects=settings.trigger_worker_max_projects,
-                max_per_project=settings.trigger_worker_batch_max,
-            )
+            out: dict = {
+                "dispatched": False,
+                "count": 0,
+                "projects": [],
+            }
+            if settings.trigger_worker_enabled:
+                out = await AgentTriggerDispatcher(session).drain_all(
+                    max_projects=settings.trigger_worker_max_projects,
+                    max_per_project=settings.trigger_worker_batch_max,
+                )
+            if settings.idle_pause_worker_enabled:
+                idle = await IdlePauseService(session).sweep_all()
+                out["idle_pause"] = idle
+            return out
         finally:
             await session.execute(text(f"SELECT pg_advisory_unlock({_LOCK_KEY_SQL})"))
 
@@ -46,10 +62,10 @@ async def drain_once() -> dict:
 async def _loop(stop: asyncio.Event) -> None:
     interval = max(1.0, float(settings.trigger_worker_interval_sec))
     logger.info(
-        "trigger worker started interval=%ss max_projects=%s batch=%s lease=%ss",
+        "trigger worker started interval=%ss drain=%s idle_pause=%s lease=%ss",
         interval,
-        settings.trigger_worker_max_projects,
-        settings.trigger_worker_batch_max,
+        settings.trigger_worker_enabled,
+        settings.idle_pause_worker_enabled,
         settings.trigger_outbox_lease_sec,
     )
     while not stop.is_set():
@@ -61,6 +77,10 @@ async def _loop(stop: asyncio.Event) -> None:
                 count = int(result.get("count") or 0)
                 if count:
                     logger.info("trigger worker drained count=%s", count)
+                idle = result.get("idle_pause") or {}
+                idle_count = int(idle.get("count") or 0)
+                if idle_count:
+                    logger.info("idle pause worker paused count=%s", idle_count)
         except Exception:
             logger.exception("trigger worker tick failed")
         try:
@@ -72,7 +92,7 @@ async def _loop(stop: asyncio.Event) -> None:
 
 def start_trigger_worker() -> None:
     global _stop, _task
-    if not settings.trigger_worker_enabled:
+    if not _worker_wanted():
         return
     if _task is not None and not _task.done():
         return

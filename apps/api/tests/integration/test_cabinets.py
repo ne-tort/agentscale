@@ -239,6 +239,7 @@ def test_mcp_tools_dispatch_and_ban_sql(client: TestClient) -> None:
     assert deployed.status_code == 201, deployed.text
     assert deployed.json()["name"] == "suppliers_sync"
     assert deployed.json()["status"] == "active"
+    assert deployed.json()["rematerialized"]["count"] == 0
 
     listed = client.get(
         f"/api/v1/cabinets/{cabinet_id}/mcp-packages",
@@ -253,6 +254,7 @@ def test_mcp_tools_dispatch_and_ban_sql(client: TestClient) -> None:
     )
     assert disabled.status_code == 200
     assert disabled.json()["status"] == "disabled"
+    assert disabled.json()["rematerialized"]["count"] == 0
 
 
 @requires_postgres

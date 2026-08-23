@@ -1209,3 +1209,66 @@ def test_idle_pause_sweep_pauses_stale_project(client: TestClient) -> None:
     )
     assert events.status_code == 200, events.text
     assert any(e.get("payload", {}).get("reason") == "idle_pause" for e in events.json()["items"])
+
+
+@requires_postgres
+def test_mcp_package_deploy_rematerializes_project(client: TestClient) -> None:
+    from prodavan.infrastructure.cabinets.package_codec import build_minimal_package_zip
+
+    admin = _token(sub="padmin-remat", platform_admin=True)
+    created_co = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "RematCo", "admin_email": "owner@rematco.test"},
+    )
+    assert created_co.status_code == 201, created_co.text
+    company_id = created_co.json()["company"]["id"]
+    owner_tok = _token(sub="owner-remat", email="owner@rematco.test")
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={
+            "name": "Remat Key",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-remat",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "RematCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "RematProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    pkg_b64 = base64.b64encode(build_minimal_package_zip(name="remat_pkg")).decode()
+    deployed = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/mcp-packages",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"zip_base64": pkg_b64},
+    )
+    assert deployed.status_code == 201, deployed.text
+    remat = deployed.json()["rematerialized"]
+    assert remat["count"] == 1
+    assert remat["projects"][0]["project_id"] == project_id
+    assert "remat_pkg" in remat["projects"][0]["package_names"]
+
+    manual = client.post(
+        f"/api/v1/projects/{project_id}/rematerialize",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert manual.status_code == 200, manual.text
+    assert "remat_pkg" in manual.json()["package_names"]

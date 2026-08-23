@@ -36,6 +36,7 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-23 | C-MCP-PKG / C-MATERIALIZE / L09 | rematerialize on package deploy/disable; IDLE_PAUSE_WORKER_ENABLED | no |
 | 2026-08-23 | C-ADMIN-POLICY / C-PROJECT / L09 | idle_pause_after_hours + sweep; attachment MIME sniff | no |
 | 2026-08-23 | C-ADMIN / L09 | release_gate_check + platform events admin UI + employee.disabled assert | no |
 | 2026-08-23 | C-CABINET-MCP / C-PLATFORM-EVENTS / L09 | stdin/stdout JSON handler result; lazy suspend commit; suspend E2E; SSE cancel UX | no |

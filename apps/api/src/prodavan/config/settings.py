@@ -80,6 +80,8 @@ class Settings(BaseSettings):
     trigger_outbox_lease_sec: int = 120
     trigger_outbox_max_attempts: int = 5
     trigger_outbox_backoff_sec: float = 5.0
+    # Idle pause sweep shares the trigger worker loop when enabled (default off).
+    idle_pause_worker_enabled: bool = False
 
     @property
     def cors_origin_list(self) -> list[str]:

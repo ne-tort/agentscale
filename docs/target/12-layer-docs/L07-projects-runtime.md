@@ -7,7 +7,7 @@
 | Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain/worker; k8s isolator — gap |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-23 — idle pause sweep + attachment magic MIME |
+| Last updated | 2026-08-23 — idle worker opt-in + rematerialize on package deploy |
 | Owners | — |
 
 ---
@@ -28,7 +28,8 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 | Outbox-lite: `attempts` / `lease_until` / `available_at` / `last_error` + SKIP LOCKED claim | |
 | Platform events bus + cabinet SPI deliver (audit) | MCP stdio handler protocol; bubblewrap |
 | Attachments: upload/list/delete + ref validation; size/type/magic policy + MIME sniff | Full AV; image thumbnails |
-| Idle pause: `idle_pause_after_hours` (default off) + admin sweep | Scheduled worker for idle sweep |
+| Idle pause: `idle_pause_after_hours` (default off) + admin sweep + opt-in worker | Dedicated external cron |
+| MCP package deploy/disable → rematerialize cabinet projects | |
 | Integration tests lifecycle + FS layout + provider patch + admin drain | E2E with agent ping |
 
 ## Как сделано
@@ -46,8 +47,9 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 11. Signed telegram ingress `POST .../webhooks/telegram` with company `telegram_hmac_secret` (`telegram_hmac_configured` flag).
 12. Trigger outbox lease columns (migration `2026082315`) — claim increments `attempts`, sets `lease_until`; crash → lease expiry → re-claim.
 13. Lazy `company.suspended` emit commits inside `CompanySubscriptionGate` (no session auto-commit — SSE keeps the session open).
-14. Idle pause — `idle_pause_after_hours` (0/None=off); admin/company sweep pauses stale projects (`reason=idle_pause`); hole: no dedicated cron worker.
+14. Idle pause — `idle_pause_after_hours` (0/None=off); admin/company sweep; opt-in `IDLE_PAUSE_WORKER_ENABLED` shares trigger worker loop.
 15. Attachment upload sniffs PNG/JPEG/GIF/PDF/ZIP magic for `content_type`.
+16. MCP package deploy/disable rematerializes all non-deleted projects in the cabinet (L09 DoD).
 
 ## Контракты
 

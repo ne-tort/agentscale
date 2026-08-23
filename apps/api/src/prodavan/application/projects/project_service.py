@@ -230,6 +230,33 @@ class ProjectService:
         await self._session.refresh(row)
         return await self._project_public(row)
 
+    async def rematerialize_for_cabinet(self, *, cabinet_id: str) -> dict:
+        """Rematerialize all non-deleted projects after cabinet MCP package change."""
+        q = await self._session.execute(
+            select(ProjectRow).where(
+                ProjectRow.cabinet_id == cabinet_id,
+                ProjectRow.status != ProjectStatus.DELETED,
+            )
+        )
+        projects: list[dict] = []
+        for row in q.scalars().all():
+            mat = await self._materialize.materialize_project(
+                session=self._session,
+                project_id=row.id,
+                cabinet_id=row.cabinet_id,
+                cabinet_name=None,
+                project_name=row.name,
+            )
+            projects.append(
+                {
+                    "project_id": row.id,
+                    "status": mat.status,
+                    "package_names": list(mat.package_names),
+                    "mcp_config_path": mat.mcp_config_path,
+                }
+            )
+        return {"cabinet_id": cabinet_id, "count": len(projects), "projects": projects}
+
     async def rematerialize(
         self,
         *,

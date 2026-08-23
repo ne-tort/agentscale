@@ -7,7 +7,7 @@
 | Quality note | Dev shell + SSE chat + tab interpreters + bundle I/O + meta columns |
 | Plan | [L05](../11-implementation-plan/L05-employee-shell.md) |
 | Canon | [04-employees](../04-employees/), [session](../10-identity-keycloak/session.md) |
-| Last updated | 2026-08-23 — SSE cancel marks (cancelled) bubble |
+| Last updated | 2026-08-23 — rematerialize workspace button |
 | Owners | — |
 
 ---
@@ -29,7 +29,7 @@
 | `CabinetCreatePage` full-page (no modal) | Custom bundle tab views (non-collection) |
 | `CabinetRowEditPage` full-page row edit | |
 | `ProjectCreatePage` full-page (no modal) + agent provider | |
-| `ProjectSettingsPage` — name + provider override | |
+| `ProjectSettingsPage` — name + provider override + rematerialize | |
 | Import/export bundle UI + starter catalog import | |
 | ProjectWorkspacePage — SSE chat + transcript + attachment chips + inbox list + suspend banner + HITL + cancel | Image thumbnails |
 | Tables tab — row upsert/delete + DangerConfirm delete | |

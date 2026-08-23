@@ -7,7 +7,7 @@
 | Quality note | API Runtime: instance+meta+rows+MCP+bundle+packages; UI interpreters L05; sandbox start L07; L04 quotas soft stub |
 | Plan | [L06](../11-implementation-plan/L06-cabinet-runtime.md) |
 | Canon | [05-cabinets](../05-cabinets/) |
-| Last updated | 2026-08-23 — platform handler stdout JSON result contract |
+| Last updated | 2026-08-23 — rematerialize on package deploy/disable |
 | Owners | ? |
 
 ---
@@ -28,7 +28,7 @@ CabinetInstance: schema-per-instance, meta?UI, cabinet.*, MCP packages, bundles.
 | cabinet.* MCP dispatcher | audit events (MCP + meta HTTP) |
 | platform_event SPI → meta_audit + manifest `platform_events`; opt-in `src/on_platform_event.py` (stdin/stdout JSON lite) | full MCP stdio protocol; bubblewrap |
 | Bundle v1 export/import ? new schema (+ packages) | |
-| MCP packages validate/deploy/list/disable/export | sandbox process start (L07 materialize) |
+| MCP packages validate/deploy/list/disable/export + rematerialize projects | sandbox process start (L07 materialize) |
 | Soft max 20 packages/cabinet | Company quotas (L04) ? wired via CompanyQuotaService |
 | Materialize via L07 project runtime | Real FS layout wired from L07 materialize |
 
