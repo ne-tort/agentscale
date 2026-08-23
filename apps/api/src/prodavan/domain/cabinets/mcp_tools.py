@@ -75,6 +75,23 @@ PLATFORM_TOOLS: tuple[ToolSpec, ...] = (
         },
     ),
     ToolSpec(
+        name="cabinet.columns.update",
+        description="Update column metadata or type (controlled DDL for physical tables).",
+        input_schema={
+            "type": "object",
+            "required": ["table_slug", "column_name"],
+            "properties": {
+                "table_slug": {"type": "string"},
+                "column_name": {"type": "string"},
+                "type": {"type": "string"},
+                "required": {"type": "boolean"},
+                "unique": {"type": "boolean"},
+                "ref_table_slug": {"type": "string"},
+            },
+            "additionalProperties": False,
+        },
+    ),
+    ToolSpec(
         name="cabinet.tabs.list",
         description="List cabinet tabs (including Base system tabs).",
         input_schema={"type": "object", "properties": {}, "additionalProperties": False},

@@ -167,6 +167,28 @@ class CabinetMcpDispatcher:
                 employee=employee,
             )
 
+        if tool == "cabinet.columns.update":
+            patch = {
+                k: args[k]
+                for k in ("type", "required", "unique", "ref_table_slug")
+                if k in args
+            }
+            if not patch:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail="empty patch",
+                )
+            return await self._meta.update_column(
+                cabinet_id=cabinet_id,
+                table_slug=str(args["table_slug"]),
+                column_name=str(args["column_name"]),
+                patch=patch,
+                principal=principal,
+                employee=employee,
+            )
+
         if tool == "cabinet.tabs.list":
             return {
                 "tabs": await self._meta.list_tabs(

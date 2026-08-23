@@ -295,6 +295,33 @@ class ProdavanApi {
     }
   }
 
+  Future<Map<String, dynamic>> updateMetaColumn({
+    required String cabinetId,
+    required String tableSlug,
+    required String columnName,
+    String? type,
+    bool? required,
+    bool? unique,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final body = <String, dynamic>{};
+      if (type != null) body['type'] = type;
+      if (required != null) body['required'] = required;
+      if (unique != null) body['unique'] = unique;
+      final res = await http.patch(
+        _uri('/cabinets/$cabinetId/meta/tables/$tableSlug/columns/$columnName'),
+        headers: _headers,
+        body: jsonEncode(body),
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
   Future<void> deleteMetaColumn({
     required String cabinetId,
     required String tableSlug,

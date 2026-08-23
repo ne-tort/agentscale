@@ -375,6 +375,15 @@ def test_meta_mutate_columns_views_tabs(client: TestClient) -> None:
     assert col.status_code == 201, col.text
     assert col.json()["name"] == "sku"
 
+    patched_col = client.patch(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tables/parts/columns/sku",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"type": "number", "required": True},
+    )
+    assert patched_col.status_code == 200, patched_col.text
+    assert patched_col.json()["type"] == "number"
+    assert patched_col.json()["required"] is True
+
     meta = client.get(
         f"/api/v1/cabinets/{cabinet_id}/meta/tables/parts",
         headers={"Authorization": f"Bearer {owner_tok}"},

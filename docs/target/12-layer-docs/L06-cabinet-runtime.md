@@ -24,7 +24,7 @@ CabinetInstance: schema-per-instance, meta?UI, cabinet.*, MCP packages, bundles.
 |---------|---------------------------|
 | Instance CRUD + schema-per-instance + Base tabs | UI interpreters (L05) |
 | Meta tables create + tabs list | columns/views mutate API (create/update/delete subset) |
-| Rows query/upsert/delete (physical + json_document) | column type change |
+| Rows query/upsert/delete (physical + json_document) | — |
 | cabinet.* MCP dispatcher | audit events (MCP + meta HTTP) |
 | Bundle v1 export/import ? new schema (+ packages) | |
 | MCP packages validate/deploy/list/disable/export | sandbox process start (L07 materialize) |
@@ -58,7 +58,7 @@ CabinetInstance: schema-per-instance, meta?UI, cabinet.*, MCP packages, bundles.
 | Package deploy + strict manifest | done | |
 | Sandbox start on materialize | hole | L07 |
 | Company/Admin quotas | done | L04 CompanyQuotaService |
-| columns/views CRUD | hole (column type change) |
+| columns/views CRUD | done | PATCH column type + metadata |
 | UI meta interpreters | live (subset) | tables settings + custom tabs + view edit |
 | Non-system tabs from bundle | done | import_bundle_views_and_tabs |
 

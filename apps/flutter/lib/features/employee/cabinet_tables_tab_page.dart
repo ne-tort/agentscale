@@ -7,6 +7,7 @@ import 'package:prodavan/core/widgets/danger_confirm_page.dart';
 import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/cabinet_column_add_page.dart';
+import 'package:prodavan/features/employee/cabinet_column_edit_page.dart';
 import 'package:prodavan/features/employee/cabinet_row_edit_page.dart';
 import 'package:prodavan/features/employee/cabinet_table_settings_page.dart';
 import 'package:prodavan/features/employee/cabinet_table_create_page.dart';
@@ -141,6 +142,31 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
       ),
     );
     if (added == true) {
+      await _loadRows(slug);
+    }
+  }
+
+  Future<void> _editColumn(Map<String, dynamic> column) async {
+    final slug = _selectedSlug;
+    if (slug == null) return;
+
+    final table = _tables.cast<Map<String, dynamic>?>().firstWhere(
+          (t) => t?['slug'] == slug,
+          orElse: () => null,
+        );
+    final label = table?['label'] as String? ?? slug;
+
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => CabinetColumnEditPage(
+          cabinetId: widget.cabinetId,
+          tableSlug: slug,
+          tableLabel: label,
+          column: column,
+        ),
+      ),
+    );
+    if (changed == true) {
       await _loadRows(slug);
     }
   }
@@ -293,6 +319,25 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
                   label: const Text('Add row'),
                 ),
               ],
+            ),
+          ),
+        if (_selectedSlug != null && _columns.isNotEmpty)
+          SizedBox(
+            height: 44,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              itemCount: _columns.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 6),
+              itemBuilder: (context, index) {
+                final col = _columns[index];
+                final name = col['name'] as String? ?? '';
+                final type = col['type'] as String? ?? '';
+                return ActionChip(
+                  label: Text('$name · $type'),
+                  onPressed: () => _editColumn(col),
+                );
+              },
             ),
           ),
         Expanded(

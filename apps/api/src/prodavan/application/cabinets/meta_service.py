@@ -44,6 +44,41 @@ def _parse_column_def(column: dict) -> tuple[str, str]:
     return name, col_type
 
 
+def _pg_using_clause(*, old_type: str, new_type: str, column_name: str) -> str | None:
+    """Return ALTER TYPE … USING suffix, or None when PG type unchanged."""
+    if old_type == new_type:
+        return None
+    old_pg = _PG_TYPE[old_type]
+    new_pg = _PG_TYPE[new_type]
+    if old_pg == new_pg:
+        return None
+    qn = qident(column_name)
+    if new_pg == "TEXT":
+        return f" USING {qn}::TEXT"
+    if old_pg == "TEXT" and new_pg == "NUMERIC":
+        return f" USING NULLIF({qn}::TEXT, '')::NUMERIC"
+    if old_pg == "TEXT" and new_pg == "BOOLEAN":
+        return f" USING ({qn}::TEXT IN ('true', 't', '1', 'yes', 'TRUE'))"
+    if old_pg == "NUMERIC" and new_pg == "TEXT":
+        return f" USING {qn}::TEXT"
+    if old_pg == "BOOLEAN" and new_pg == "TEXT":
+        return f" USING {qn}::TEXT"
+    if old_pg == "TIMESTAMPTZ" and new_pg == "TEXT":
+        return f" USING {qn}::TEXT"
+    if old_pg == "TEXT" and new_pg == "TIMESTAMPTZ":
+        return f" USING {qn}::TIMESTAMPTZ"
+    if old_pg == "JSONB" and new_pg == "TEXT":
+        return f" USING {qn}::TEXT"
+    if old_pg == "TEXT" and new_pg == "JSONB":
+        return f" USING {qn}::JSONB"
+    raise AppError(
+        code="CONFLICT",
+        title="Conflict",
+        status=409,
+        detail="incompatible column type change",
+    )
+
+
 class CabinetMetaService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -540,6 +575,103 @@ class CabinetMetaService:
             event_type="meta.column.delete",
             detail={"table_slug": table_slug, "column": name},
         )
+
+    async def update_column(
+        self,
+        *,
+        cabinet_id: str,
+        table_slug: str,
+        column_name: str,
+        patch: dict,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        inst = await self._access.require_access(
+            cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
+        )
+        name = column_name.strip()
+        if name in _PROTECTED_COLUMNS:
+            raise AppError(code="CONFLICT", title="Conflict", status=409, detail="protected column")
+
+        table = await self._require_table(schema_name=inst.schema_name, table_slug=table_slug)
+        qschema = qident(inst.schema_name)
+        cq = await self._session.execute(
+            text(
+                f"""
+                SELECT id, col_type, required, unique_col, ref_table_slug
+                FROM {qschema}.meta_columns
+                WHERE table_id = :tid AND name = :name
+                """
+            ),
+            {"tid": table.id, "name": name},
+        )
+        row = cq.fetchone()
+        if row is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="column not found")
+
+        old_type = str(row.col_type)
+        new_type = str(patch["type"]) if patch.get("type") is not None else old_type
+        if new_type not in COLUMN_TYPES:
+            raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="bad column type")
+
+        new_required = bool(patch["required"]) if patch.get("required") is not None else bool(row.required)
+        new_unique = bool(patch["unique"]) if patch.get("unique") is not None else bool(row.unique_col)
+        new_ref = patch["ref_table_slug"] if "ref_table_slug" in patch else row.ref_table_slug
+
+        await self._session.execute(
+            text(
+                f"""
+                UPDATE {qschema}.meta_columns
+                SET col_type = :ctype,
+                    required = :req,
+                    unique_col = :uniq,
+                    ref_table_slug = :ref
+                WHERE id = :id
+                """
+            ),
+            {
+                "id": row.id,
+                "ctype": new_type,
+                "req": new_required,
+                "uniq": new_unique,
+                "ref": new_ref,
+            },
+        )
+
+        if table.storage_kind == StorageKind.PHYSICAL:
+            fq = qualified(inst.schema_name, data_table_slug(table_slug))
+            qn = qident(name)
+            if new_type != old_type:
+                new_pg = _PG_TYPE[new_type]
+                using = _pg_using_clause(old_type=old_type, new_type=new_type, column_name=name)
+                if using is not None:
+                    await self._session.execute(
+                        text(f"ALTER TABLE {fq} ALTER COLUMN {qn} TYPE {new_pg}{using}")
+                    )
+            if new_required != bool(row.required):
+                nn = "SET NOT NULL" if new_required else "DROP NOT NULL"
+                await self._session.execute(text(f"ALTER TABLE {fq} ALTER COLUMN {qn} {nn}"))
+
+        await self._session.commit()
+        result = {
+            "name": name,
+            "type": new_type,
+            "required": new_required,
+            "unique": new_unique,
+            "ref_table_slug": new_ref,
+        }
+        await self._emit_audit(
+            cabinet_id=cabinet_id,
+            principal=principal,
+            event_type="meta.column.update",
+            detail={
+                "table_slug": table_slug,
+                "column": name,
+                "from_type": old_type,
+                "to_type": new_type,
+            },
+        )
+        return result
 
     async def list_views(
         self,

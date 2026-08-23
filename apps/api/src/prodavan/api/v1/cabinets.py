@@ -70,6 +70,15 @@ class AddColumnBody(BaseModel):
     ref_table_slug: str | None = None
 
 
+class UpdateColumnBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    type: str | None = None
+    required: bool | None = None
+    unique: bool | None = None
+    ref_table_slug: str | None = None
+
+
 class CreateViewBody(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -403,6 +412,34 @@ async def add_meta_column(
         cabinet_id=cabinet_id,
         table_slug=table_slug,
         column=body.model_dump(),
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.patch("/{cabinet_id}/meta/tables/{table_slug}/columns/{column_name}")
+async def update_meta_column(
+    cabinet_id: str,
+    table_slug: str,
+    column_name: str,
+    body: UpdateColumnBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    patch = body.model_dump(exclude_unset=True)
+    if not patch:
+        raise AppError(
+            code="VALIDATION_ERROR",
+            title="Validation Error",
+            status=422,
+            detail="empty patch",
+        )
+    return await CabinetMetaService(session).update_column(
+        cabinet_id=cabinet_id,
+        table_slug=table_slug,
+        column_name=column_name,
+        patch=patch,
         principal=principal,
         employee=employee,
     )
