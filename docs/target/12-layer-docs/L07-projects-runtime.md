@@ -21,8 +21,8 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 | Сделано | Gaps |
 |---------|------|
 | ORM projects / project_triggers / project_attachments + migration | k8s pod scheduler |
-| CRUD: create/list/get; pause/resume/delete | AGENTS text from cabinet UI meta |
-| Materialize: AGENTS.md + CLAUDE.md, mcp.json, packages/, local sandbox spawn | bubblewrap/k8s isolator |
+| CRUD: create/list/get; pause/resume/delete | |
+| Materialize: AGENTS from cabinet workspace-docs + packages/sandbox | bubblewrap/k8s isolator |
 | `container_ref=local-ws:{workspace_key}` | |
 | Triggers: enqueue + list + dispatch/drain (`?max=`) | Background daemon worker |
 | Attachments: base64 upload → inbox + DB ref | Virus scan; company policy limits |
@@ -84,7 +84,7 @@ apps/api/tests/unit/test_projects_domain.py
 | Требование | Статус | Заметка |
 |------------|--------|---------|
 | Project CRUD in cabinet | done | |
-| Materialize layout | done | default AGENTS; UI meta later |
+| Materialize layout | done | AGENTS from `meta_workspace_docs` (slug=agents); empty → default |
 | Pause/resume/delete | done | local-ws only |
 | Trigger dispatch to agent | done | POST triggers/dispatch + `?max=` drain |
 | MCP package sandbox run | live (subset) | prepare + opt-in local spawn (`MCP_SANDBOX_SPAWN`); k8s/bubblewrap — hole |

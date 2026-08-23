@@ -21,7 +21,8 @@ from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.infrastructure.persistence.models.ai_keys import AiProviderKeyRow, CompanyAiKeyBindingRow
 from prodavan.infrastructure.persistence.models.identity import CompanyRow
-from prodavan.infrastructure.secrets.file_store import FileSecretStore, new_key_id
+from prodavan.infrastructure.secrets.file_store import new_key_id
+from prodavan.infrastructure.secrets.store import SecretStore, get_secret_store
 
 PROVIDERS = frozenset({"cursor", "codex", "claude_code"})
 API_KINDS = frozenset(k.value for k in ApiKind)
@@ -44,9 +45,9 @@ def _add_months(dt: datetime, months: int) -> datetime:
 
 
 class AiKeysService:
-    def __init__(self, session: AsyncSession, secrets: FileSecretStore | None = None) -> None:
+    def __init__(self, session: AsyncSession, secrets: SecretStore | None = None) -> None:
         self._session = session
-        self._secrets = secrets or FileSecretStore()
+        self._secrets = secrets or get_secret_store()
         self._audit = AiKeyAuditService(session)
 
     async def _emit_audit(

@@ -36,6 +36,7 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-23 | C-MATERIALIZE / C-META-DATA | workspace-docs (AGENTS) API + materialize source; vault:// secret_ref routing | no |
 | 2026-08-23 | C-MATERIALIZE / C-TRIGGERS | opt-in local MCP package spawn; trigger dispatch drain `?max=` | no |
 | 2026-08-23 | C-MATERIALIZE / C-MCP-PKG | materialize prepares package sandbox run.json + mcp.json sandbox metadata | no |
 | 2026-08-23 | C-TRIGGERS / C-PROJECT-CHAT | integration tests for trigger dispatch + platform_fallback agent session | no |

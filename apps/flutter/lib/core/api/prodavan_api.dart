@@ -48,6 +48,44 @@ class ProdavanApi {
     }
   }
 
+  Future<Map<String, dynamic>> getWorkspaceDoc({
+    required String cabinetId,
+    required String slug,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.get(
+        _uri('/cabinets/$cabinetId/workspace-docs/$slug'),
+        headers: _headers,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
+  Future<Map<String, dynamic>> putWorkspaceDoc({
+    required String cabinetId,
+    required String slug,
+    required String body,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.put(
+        _uri('/cabinets/$cabinetId/workspace-docs/$slug'),
+        headers: _headers,
+        body: jsonEncode({'body': body}),
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
   Future<Map<String, dynamic>> me() async {
     final res = await http.get(_uri('/me'), headers: _headers);
     _throwIfError(res);

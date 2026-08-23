@@ -8,6 +8,7 @@ from typing import Protocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.cabinets.packages_service import CabinetPackagesService
+from prodavan.application.cabinets.workspace_docs_service import CabinetWorkspaceDocsService
 from prodavan.domain.projects import workspace_key_for
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
@@ -22,6 +23,7 @@ class MaterializeResult:
     status: str = "materialized"
     package_names: tuple[str, ...] = ()
     sandbox_packages: tuple[dict, ...] = ()
+    agents_source: str = "default"
 
 
 class MaterializeProjectPort(Protocol):
@@ -52,10 +54,17 @@ class ProjectMaterializeService:
         ws_key = workspace_key_for(project_id)
         writer = WorkspaceLayoutWriter(workspace_key=ws_key)
         writer.ensure_dirs()
-        writer.write_agents(cabinet_name=cab_name, project_name=proj_name, agents_md=None)
+
+        agents_md: str | None = None
+        agents_source = "default"
+        schema_name = inst.schema_name if inst else ""
+        if schema_name:
+            agents_md = await CabinetWorkspaceDocsService(session).load_agents_md(schema_name=schema_name)
+            if agents_md:
+                agents_source = "cabinet_meta"
+        writer.write_agents(cabinet_name=cab_name, project_name=proj_name, agents_md=agents_md)
 
         packages = CabinetPackagesService(session)
-        schema_name = inst.schema_name if inst else ""
         artifacts: list[tuple[str, bytes]] = []
         pkg_names: list[str] = []
         if schema_name:
@@ -92,6 +101,7 @@ class ProjectMaterializeService:
             status="materialized",
             package_names=tuple(pkg_names),
             sandbox_packages=tuple(sandbox_records),
+            agents_source=agents_source,
         )
 
 

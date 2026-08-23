@@ -17,6 +17,7 @@ from prodavan.application.cabinets import (
     CabinetMetaService,
     CabinetPackagesService,
     CabinetRowsService,
+    CabinetWorkspaceDocsService,
     get_materialize_port,
     list_platform_tools,
 )
@@ -123,6 +124,12 @@ class UpsertRowBody(BaseModel):
 
     values: dict = Field(default_factory=dict)
     id: str | None = Field(default=None, max_length=40)
+
+
+class WorkspaceDocBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    body: str = Field(default="", max_length=200_000)
 
 
 class McpCallBody(BaseModel):
@@ -706,6 +713,49 @@ async def list_audit_events(
         principal=principal,
         employee=employee,
         limit=limit,
+    )
+
+
+@router.get("/{cabinet_id}/workspace-docs")
+async def list_workspace_docs(
+    cabinet_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> list[dict]:
+    return await CabinetWorkspaceDocsService(session).list_docs(
+        cabinet_id=cabinet_id, principal=principal, employee=employee
+    )
+
+
+@router.get("/{cabinet_id}/workspace-docs/{slug}")
+async def get_workspace_doc(
+    cabinet_id: str,
+    slug: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await CabinetWorkspaceDocsService(session).get_doc(
+        cabinet_id=cabinet_id, slug=slug, principal=principal, employee=employee
+    )
+
+
+@router.put("/{cabinet_id}/workspace-docs/{slug}")
+async def put_workspace_doc(
+    cabinet_id: str,
+    slug: str,
+    body: WorkspaceDocBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await CabinetWorkspaceDocsService(session).put_doc(
+        cabinet_id=cabinet_id,
+        slug=slug,
+        body=body.body,
+        principal=principal,
+        employee=employee,
     )
 
 

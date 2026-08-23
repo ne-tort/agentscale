@@ -7,6 +7,7 @@ import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/core/widgets/stat_tile.dart';
+import 'package:prodavan/features/employee/cabinet_agents_edit_page.dart';
 import 'package:prodavan/features/employee/cabinet_audit_events_page.dart';
 import 'package:prodavan/features/employee/cabinet_meta_tabs_page.dart';
 
@@ -156,6 +157,18 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
             label: _exporting ? 'Exporting…' : 'Export cabinet bundle',
             expanded: false,
             onPressed: _exporting ? null : _exportBundle,
+          ),
+          const SizedBox(height: 8),
+          AppButton(
+            label: 'Edit AGENTS.md',
+            expanded: false,
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => CabinetAgentsEditPage(cabinetId: widget.cabinetId),
+                ),
+              );
+            },
           ),
           const SizedBox(height: 8),
           AppButton(

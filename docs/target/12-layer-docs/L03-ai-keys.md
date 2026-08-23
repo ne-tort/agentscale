@@ -4,7 +4,7 @@
 |------|----------|
 | Status | done |
 | Quality | 8 |
-| Quality note | CRUD+bindings+resolve+audit+platform pool; Vault backend — gap |
+| Quality note | CRUD+bindings+resolve+audit+platform pool+vault:// routing; live Vault ops — gap |
 | Plan | [L03](../11-implementation-plan/L03-ai-keys.md) |
 | Canon | [02-ai-provider-keys](../02-ai-provider-keys/) |
 | Last updated | 2026-08-23 — company_key_metrics in metrics API |
@@ -20,10 +20,11 @@
 
 | Сделано | Не сделано / Gaps |
 |---------|-------------------|
-| Таблицы ai_provider_keys, company_ai_key_bindings + Alembic ai_keys_001 | External Vault/KMS backend (file:// совместим по контракту) |
-| Admin CRUD /api/v1/admin/ai-keys без raw secret в response | Vault/KMS backend |
+| Таблицы ai_provider_keys, company_ai_key_bindings + Alembic ai_keys_001 | Project-level preferred_provider override (L07) |
+| Admin CRUD /api/v1/admin/ai-keys без raw secret в response | live Vault token/ops hardening |
 | list_keys returns company_ids per key | — |
-| FileSecretStore → SECRETS_DIR/ai_keys/*.secret | Project-level preferred_provider override (L07) |
+| FileSecretStore → SECRETS_DIR/ai_keys/*.secret | — |
+| Vault KV v2 backend (`vault://ai_keys/…`) via RoutingSecretStore | — |
 | Admin Flutter: list/create/bind/disable/renew/rotate (L04) | |
 | AiKeysService.resolve_credentials + ban cli_subscription | |
 | Lazy expire: next_renewal_at past → status expired on resolve + audit | |
@@ -35,7 +36,7 @@
 
 1. Domain enums AiProvider / ApiKind / RUNTIME_API_KINDS.
 2. ORM + FK на companies.id (L01).
-3. Create: secret → file store → DB только secret_ref; API отдаёт secret_ref_prefix.
+3. Create: secret → RoutingSecretStore (file:// or vault://) → DB только secret_ref; API отдаёт secret_ref_prefix.
 4. Resolve: active bindings → lazy expire by next_renewal_at → filter runtime kinds → preferred_provider → else first by created_at → else NO_AI_KEY.
 5. Renew: extends next_renewal_at; reactivates status expired → active.
 6. Тесты: unit (file store + kind ban); integration (CRUD+resolve+lazy expire) при Postgres.
@@ -92,8 +93,8 @@ apps/flutter/lib/features/admin/ai_key_{list,create,detail,rotate}_page.dart
 | Bind/unbind + resolve active | done | |
 | Lazy expire next_renewal_at | done | on resolve; renew reactivates expired |
 | Test cli_subscription → NO_AI_KEY | done | |
-| secret_ref only | done | file:// backend |
-| Vault production backend | hole | тот же secret_ref контракт |
+| secret_ref only | done | file:// + vault:// routing |
+| Vault production backend | live (subset) | VaultSecretStore when VAULT_ADDR set; live ops gap |
 | platform_fallback keys | done | unbound keys (empty company_ids) |
 | Audit ai_key.* | done | incl. ai_key.expired on lazy expire |
 | HTTP resolve endpoint | n/a | in-process для L08 (секрет не светить в admin HTTP) |
@@ -115,4 +116,4 @@ cd apps/api && ruff check src tests && pytest tests/unit/test_ai_keys_domain.py 
 | B. Контракты | 2 | C-KEY-ENTITY / C-KEY-RESOLVE live |
 | C. Инварианты и проверки | 2 | no secret leak; cli ban tested |
 | D. As-built ясность | 2 | эта карточка |
-| **Quality (итог)** | **8** | Vault backend = gap |
+| **Quality (итог)** | **8** | live Vault token/ops = gap |

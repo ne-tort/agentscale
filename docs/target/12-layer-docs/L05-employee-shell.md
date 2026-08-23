@@ -33,7 +33,7 @@
 | ProjectWorkspacePage — SSE chat + transcript reload + HITL approve | |
 | Tables tab — row upsert/delete + DangerConfirm delete | |
 | Chat tab → `ProjectListPage` | |
-| Context tab — stats + export save to file | |
+| Context tab — stats + export + AGENTS edit | |
 
 ## Gaps
 

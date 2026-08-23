@@ -56,6 +56,9 @@ class Settings(BaseSettings):
     keycloak_admin_client_secret: str | None = None
 
     vault_addr: str | None = None
+    vault_token: str | None = None
+    vault_kv_mount: str = "secret"
+    vault_kv_path_prefix: str = "prodavan/ai_keys"
     secrets_dir: Path = _REPO_ROOT / "data" / "secrets"
 
     # L04 admin metrics alerts (0 = disabled)

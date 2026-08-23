@@ -111,6 +111,7 @@ class ProjectService:
             "status": mat.status,
             "package_names": list(mat.package_names),
             "sandbox_packages": list(mat.sandbox_packages),
+            "agents_source": mat.agents_source,
         }
         return out
 
@@ -168,6 +169,7 @@ class ProjectService:
             "status": mat.status,
             "package_names": list(mat.package_names),
             "sandbox_packages": list(mat.sandbox_packages),
+            "agents_source": mat.agents_source,
         }
 
     async def pause(

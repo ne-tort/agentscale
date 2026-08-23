@@ -9,6 +9,7 @@ from prodavan.application.cabinets.mcp_dispatcher import CabinetMcpDispatcher, l
 from prodavan.application.cabinets.meta_service import CabinetMetaService
 from prodavan.application.cabinets.packages_service import CabinetPackagesService
 from prodavan.application.cabinets.rows_service import CabinetRowsService
+from prodavan.application.cabinets.workspace_docs_service import CabinetWorkspaceDocsService
 
 __all__ = [
     "CabinetAccessService",
@@ -19,6 +20,7 @@ __all__ = [
     "CabinetMetaService",
     "CabinetPackagesService",
     "CabinetRowsService",
+    "CabinetWorkspaceDocsService",
     "MaterializeResult",
     "get_materialize_port",
     "list_platform_tools",

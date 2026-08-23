@@ -130,6 +130,17 @@ class SchemaProvisioner:
                 """
             )
         )
+        await session.execute(
+            text(
+                f"""
+                CREATE TABLE IF NOT EXISTS {qschema}.meta_workspace_docs (
+                    slug TEXT PRIMARY KEY,
+                    body TEXT NOT NULL DEFAULT '',
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                )
+                """
+            )
+        )
 
         for title, order, slug in BASE_SYSTEM_TABS:
             view_id = _meta_id("view")
