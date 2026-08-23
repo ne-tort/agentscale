@@ -90,7 +90,7 @@ cwd/mcp.json → L08 AgentPort. Chat UI → triggers (L05/L09).
 ```text
 apps/api/src/prodavan/
   domain/projects/types.py
-  application/projects/{project_service,materialize,trigger_service,attachment_service,access}.py
+  application/projects/{project_service,materialize,trigger_service,attachment_service,access,pause_runtime,idle_pause_service}.py
   infrastructure/projects/workspace.py
   infrastructure/persistence/models/projects.py
   api/v1/projects.py

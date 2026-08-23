@@ -535,6 +535,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     required String toolName,
     Map<String, dynamic> toolInput = const {},
   }) async {
+    if (_chatBlocked) return;
     final sid = _sessionId;
     if (sid == null || approvalId.isEmpty) return;
     final decision = await Navigator.of(context).push<String>(
@@ -662,7 +663,9 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                                     ? Alignment.center
                                     : Alignment.centerLeft,
                             child: InkWell(
-                              onTap: isApproval && msg.approvalId != null
+                              onTap: isApproval &&
+                                      msg.approvalId != null &&
+                                      !_chatBlocked
                                   ? () => _openApproval(
                                         approvalId: msg.approvalId!,
                                         toolName: msg.toolName ?? 'tool',

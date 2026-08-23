@@ -32,7 +32,7 @@
 | `ProjectListPage` — status chip (paused/active) + open workspace | |
 | `ProjectSettingsPage` — name + provider override + pause/resume + rematerialize + status chip | |
 | Import/export bundle UI + starter catalog import | |
-| ProjectWorkspacePage — SSE chat + transcript + attachment preview + inbox (delete while paused) + suspend/paused banners + HITL + cancel | Real PDF renderer |
+| `ProjectWorkspacePage` — SSE chat + transcript + attachment preview + inbox (delete while paused) + suspend/paused banners (Resume) + HITL + cancel | Real PDF renderer |
 | Tables tab — row upsert/delete + DangerConfirm delete | |
 | Chat tab → `ProjectListPage` | |
 | Context tab — stats + export + AGENTS edit | |
