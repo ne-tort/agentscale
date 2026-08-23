@@ -35,6 +35,8 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-23 | C-META-DATA | POST columns/views/tabs + GET views; duplicate table slug 409 | no |
+| 2026-08-23 | C-EMP-SHELL | CabinetTableCreatePage (L05 full-page) | no |
 | 2026-08-23 | C-PROJECT-CHAT / C-AGENT-EVENT | HITL tool_approval_request + approve/deny API | no |
 | 2026-08-23 | C-USAGE / C-ADMIN-COMPANY | max_cost_usd_month agent policy + budget enforce | no |
 | 2026-08-23 | C-BUNDLE | E2E starter equipment-procurement import | no |

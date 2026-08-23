@@ -323,3 +323,110 @@ def test_bundle_export_import_new_schema(client: TestClient) -> None:
     )
     assert rows.status_code == 200
     assert any(r["title"] == "Widget" for r in rows.json()["rows"])
+
+
+@requires_postgres
+def test_meta_mutate_columns_views_tabs(client: TestClient) -> None:
+    admin = _token(sub="meta-admin", platform_admin=True)
+    created = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "MetaMutCo", "admin_email": "meta@cabco.test"},
+    )
+    assert created.status_code == 201, created.text
+    company_id = created.json()["company"]["id"]
+
+    owner_tok = _token(sub="meta-owner", email="meta@cabco.test")
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "Meta Mut Cab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    tbl = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tables",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={
+            "slug": "parts",
+            "label": "Parts",
+            "columns": [{"name": "name", "type": "text", "required": True}],
+        },
+    )
+    assert tbl.status_code == 201, tbl.text
+
+    dup_tbl = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tables",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={
+            "slug": "parts",
+            "label": "Parts dup",
+            "columns": [{"name": "name", "type": "text", "required": True}],
+        },
+    )
+    assert dup_tbl.status_code == 409
+
+    col = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tables/parts/columns",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "sku", "type": "text", "required": False},
+    )
+    assert col.status_code == 201, col.text
+    assert col.json()["name"] == "sku"
+
+    meta = client.get(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tables/parts",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert meta.status_code == 200
+    col_names = {c["name"] for c in meta.json()["columns"]}
+    assert {"name", "sku"}.issubset(col_names)
+
+    row = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/data/parts/rows",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"values": {"name": "Capacitor", "sku": "C-100"}},
+    )
+    assert row.status_code == 201, row.text
+
+    reserved = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/meta/views",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"slug": "projects", "table_slug": "parts", "ui_json": {"version": 1, "kind": "collection"}},
+    )
+    assert reserved.status_code == 409
+
+    view = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/meta/views",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={
+            "slug": "parts_list",
+            "table_slug": "parts",
+            "ui_json": {"version": 1, "kind": "collection", "title_field": "name"},
+        },
+    )
+    assert view.status_code == 201, view.text
+    assert view.json()["slug"] == "parts_list"
+
+    views = client.get(
+        f"/api/v1/cabinets/{cabinet_id}/meta/views",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert views.status_code == 200
+    assert any(v["slug"] == "parts_list" for v in views.json())
+
+    tab = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tabs",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"title": "Parts", "order": 50, "view_slug": "parts_list"},
+    )
+    assert tab.status_code == 201, tab.text
+    assert tab.json()["view_slug"] == "parts_list"
+
+    tabs = client.get(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tabs",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert tabs.status_code == 200
+    assert any(t["title"] == "Parts" and t.get("view_slug") == "parts_list" for t in tabs.json())

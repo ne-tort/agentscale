@@ -179,6 +179,13 @@ class CabinetMetaService:
             raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="columns required")
 
         qschema = qident(inst.schema_name)
+        dup = await self._session.execute(
+            text(f"SELECT 1 FROM {qschema}.meta_tables WHERE slug = :slug AND status = 'active'"),
+            {"slug": slug},
+        )
+        if dup.scalar_one_or_none() is not None:
+            raise AppError(code="CONFLICT", title="Conflict", status=409, detail="table slug already exists")
+
         table_id = f"tbl_{uuid.uuid4().hex[:12]}"
 
         await self._session.execute(
@@ -315,4 +322,237 @@ class CabinetMetaService:
 
         await self._session.commit()
         return {"views_imported": len(view_id_by_slug), "tabs_imported": tabs_added}
+
+    async def _require_table(
+        self,
+        *,
+        schema_name: str,
+        table_slug: str,
+    ):
+        qschema = qident(schema_name)
+        tq = await self._session.execute(
+            text(
+                f"""
+                SELECT id, slug, label, storage_kind
+                FROM {qschema}.meta_tables
+                WHERE slug = :slug AND status = 'active'
+                """
+            ),
+            {"slug": table_slug},
+        )
+        table = tq.fetchone()
+        if table is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Table not found")
+        return table
+
+    async def add_column(
+        self,
+        *,
+        cabinet_id: str,
+        table_slug: str,
+        column: dict,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        inst = await self._access.require_access(
+            cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
+        )
+        table = await self._require_table(schema_name=inst.schema_name, table_slug=table_slug)
+        name = str(column.get("name") or "").strip()
+        col_type = str(column.get("type") or "")
+        if not name.replace("_", "").isalnum():
+            raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="bad column name")
+        if col_type not in COLUMN_TYPES:
+            raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="bad column type")
+
+        qschema = qident(inst.schema_name)
+        cq = await self._session.execute(
+            text(
+                f"""
+                SELECT 1 FROM {qschema}.meta_columns
+                WHERE table_id = :tid AND name = :name
+                """
+            ),
+            {"tid": table.id, "name": name},
+        )
+        if cq.scalar_one_or_none() is not None:
+            raise AppError(code="CONFLICT", title="Conflict", status=409, detail="column already exists")
+
+        col_id = f"col_{uuid.uuid4().hex[:12]}"
+        await self._session.execute(
+            text(
+                f"""
+                INSERT INTO {qschema}.meta_columns
+                (id, table_id, name, col_type, required, unique_col, ref_table_slug)
+                VALUES (:id, :tid, :name, :ctype, :req, :uniq, :ref)
+                """
+            ),
+            {
+                "id": col_id,
+                "tid": table.id,
+                "name": name,
+                "ctype": col_type,
+                "req": bool(column.get("required")),
+                "uniq": bool(column.get("unique")),
+                "ref": column.get("ref_table_slug"),
+            },
+        )
+
+        if table.storage_kind == StorageKind.PHYSICAL:
+            pg = _PG_TYPE.get(col_type, "TEXT")
+            not_null = " NOT NULL" if column.get("required") else ""
+            fq = qualified(inst.schema_name, data_table_slug(table_slug))
+            await self._session.execute(
+                text(f"ALTER TABLE {fq} ADD COLUMN IF NOT EXISTS {qident(name)} {pg}{not_null}")
+            )
+
+        await self._session.commit()
+        return {
+            "name": name,
+            "type": col_type,
+            "required": bool(column.get("required")),
+            "unique": bool(column.get("unique")),
+            "ref_table_slug": column.get("ref_table_slug"),
+        }
+
+    async def list_views(
+        self,
+        *,
+        cabinet_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> list[dict]:
+        inst = await self._access.require_access(
+            cabinet_id=cabinet_id, principal=principal, employee=employee, write=False
+        )
+        qschema = qident(inst.schema_name)
+        q = await self._session.execute(
+            text(
+                f"""
+                SELECT id, slug, table_slug, ui_json, version, created_at
+                FROM {qschema}.meta_views
+                ORDER BY slug
+                """
+            )
+        )
+        out: list[dict] = []
+        for r in q.fetchall():
+            ui = r.ui_json
+            if isinstance(ui, str):
+                try:
+                    ui = json.loads(ui)
+                except json.JSONDecodeError:
+                    ui = {}
+            out.append(
+                {
+                    "id": r.id,
+                    "slug": r.slug,
+                    "table_slug": r.table_slug,
+                    "ui_json": ui if isinstance(ui, dict) else {},
+                    "version": r.version,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                }
+            )
+        return out
+
+    async def create_view(
+        self,
+        *,
+        cabinet_id: str,
+        slug: str,
+        table_slug: str | None,
+        ui_json: dict,
+        version: int,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        inst = await self._access.require_access(
+            cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
+        )
+        system_slugs = {s for _, _, s in BASE_SYSTEM_TABS}
+        if not slug.replace("_", "").isalnum() or not slug.islower():
+            raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="bad slug")
+        if slug in system_slugs:
+            raise AppError(code="CONFLICT", title="Conflict", status=409, detail="reserved view slug")
+
+        qschema = qident(inst.schema_name)
+        if table_slug:
+            await self._require_table(schema_name=inst.schema_name, table_slug=table_slug)
+
+        view_id = f"view_{uuid.uuid4().hex[:12]}"
+        try:
+            await self._session.execute(
+                text(
+                    f"""
+                    INSERT INTO {qschema}.meta_views (id, slug, table_slug, ui_json, version)
+                    VALUES (:id, :slug, :table_slug, CAST(:ui AS jsonb), :ver)
+                    """
+                ),
+                {
+                    "id": view_id,
+                    "slug": slug,
+                    "table_slug": table_slug,
+                    "ui": json.dumps(ui_json, ensure_ascii=False),
+                    "ver": version,
+                },
+            )
+        except Exception as exc:
+            if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
+                raise AppError(code="CONFLICT", title="Conflict", status=409, detail="view slug exists") from exc
+            raise
+
+        await self._session.commit()
+        return {
+            "id": view_id,
+            "slug": slug,
+            "table_slug": table_slug,
+            "ui_json": ui_json,
+            "version": version,
+        }
+
+    async def create_tab(
+        self,
+        *,
+        cabinet_id: str,
+        title: str,
+        order: int,
+        view_slug: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        inst = await self._access.require_access(
+            cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
+        )
+        qschema = qident(inst.schema_name)
+        vq = await self._session.execute(
+            text(f"SELECT id FROM {qschema}.meta_views WHERE slug = :slug"),
+            {"slug": view_slug},
+        )
+        view_id = vq.scalar_one_or_none()
+        if view_id is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="view not found")
+
+        tab_id = f"tab_{uuid.uuid4().hex[:12]}"
+        await self._session.execute(
+            text(
+                f"""
+                INSERT INTO {qschema}.meta_tabs (id, title, tab_order, view_id, system_tab)
+                VALUES (:id, :title, :ord, :vid, false)
+                """
+            ),
+            {
+                "id": tab_id,
+                "title": title.strip(),
+                "ord": order,
+                "vid": str(view_id),
+            },
+        )
+        await self._session.commit()
+        return {
+            "id": tab_id,
+            "title": title.strip(),
+            "order": order,
+            "view_slug": view_slug,
+            "system": False,
+        }
 

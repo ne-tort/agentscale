@@ -59,6 +59,33 @@ class CreateTableBody(BaseModel):
     columns: list[ColumnDef] = Field(min_length=1)
 
 
+class AddColumnBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    name: str = Field(min_length=1, max_length=64)
+    type: str
+    required: bool = False
+    unique: bool = False
+    ref_table_slug: str | None = None
+
+
+class CreateViewBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    slug: str = Field(min_length=1, max_length=64)
+    table_slug: str | None = Field(default=None, max_length=64)
+    ui_json: dict = Field(default_factory=lambda: {"version": 1, "kind": "collection", "title_field": "title"})
+    version: int = Field(default=1, ge=1)
+
+
+class CreateTabBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    title: str = Field(min_length=1, max_length=200)
+    order: int = Field(ge=0, le=9999)
+    view_slug: str = Field(min_length=1, max_length=64)
+
+
 class UpsertRowBody(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -281,6 +308,73 @@ async def create_meta_table(
         label=body.label,
         storage_kind=body.storage_kind,
         columns=[c.model_dump() for c in body.columns],
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.post("/{cabinet_id}/meta/tables/{table_slug}/columns", status_code=201)
+async def add_meta_column(
+    cabinet_id: str,
+    table_slug: str,
+    body: AddColumnBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await CabinetMetaService(session).add_column(
+        cabinet_id=cabinet_id,
+        table_slug=table_slug,
+        column=body.model_dump(),
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.get("/{cabinet_id}/meta/views")
+async def list_meta_views(
+    cabinet_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> list[dict]:
+    return await CabinetMetaService(session).list_views(
+        cabinet_id=cabinet_id, principal=principal, employee=employee
+    )
+
+
+@router.post("/{cabinet_id}/meta/views", status_code=201)
+async def create_meta_view(
+    cabinet_id: str,
+    body: CreateViewBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await CabinetMetaService(session).create_view(
+        cabinet_id=cabinet_id,
+        slug=body.slug,
+        table_slug=body.table_slug,
+        ui_json=body.ui_json,
+        version=body.version,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.post("/{cabinet_id}/meta/tabs", status_code=201)
+async def create_meta_tab(
+    cabinet_id: str,
+    body: CreateTabBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await CabinetMetaService(session).create_tab(
+        cabinet_id=cabinet_id,
+        title=body.title,
+        order=body.order,
+        view_slug=body.view_slug,
         principal=principal,
         employee=employee,
     )

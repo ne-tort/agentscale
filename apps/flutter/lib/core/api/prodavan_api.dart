@@ -133,6 +133,129 @@ class ProdavanApi {
     }
   }
 
+  Future<Map<String, dynamic>> createMetaTable({
+    required String cabinetId,
+    required String slug,
+    required String label,
+    required List<Map<String, dynamic>> columns,
+    String storageKind = 'physical',
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.post(
+        _uri('/cabinets/$cabinetId/meta/tables'),
+        headers: _headers,
+        body: jsonEncode({
+          'slug': slug,
+          'label': label,
+          'storage_kind': storageKind,
+          'columns': columns,
+        }),
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
+  Future<Map<String, dynamic>> addMetaColumn({
+    required String cabinetId,
+    required String tableSlug,
+    required String name,
+    required String type,
+    bool required = false,
+    bool unique = false,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.post(
+        _uri('/cabinets/$cabinetId/meta/tables/$tableSlug/columns'),
+        headers: _headers,
+        body: jsonEncode({
+          'name': name,
+          'type': type,
+          'required': required,
+          'unique': unique,
+        }),
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> listMetaViews(String cabinetId) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.get(_uri('/cabinets/$cabinetId/meta/views'), headers: _headers);
+      _throwIfError(res);
+      final body = jsonDecode(res.body);
+      if (body is List) {
+        return body.cast<Map<String, dynamic>>();
+      }
+      return const [];
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
+  Future<Map<String, dynamic>> createMetaView({
+    required String cabinetId,
+    required String slug,
+    String? tableSlug,
+    Map<String, dynamic>? uiJson,
+    int version = 1,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.post(
+        _uri('/cabinets/$cabinetId/meta/views'),
+        headers: _headers,
+        body: jsonEncode({
+          'slug': slug,
+          if (tableSlug != null) 'table_slug': tableSlug,
+          'ui_json': uiJson ?? const {'version': 1, 'kind': 'collection', 'title_field': 'title'},
+          'version': version,
+        }),
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
+  Future<Map<String, dynamic>> createMetaTab({
+    required String cabinetId,
+    required String title,
+    required int order,
+    required String viewSlug,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.post(
+        _uri('/cabinets/$cabinetId/meta/tabs'),
+        headers: _headers,
+        body: jsonEncode({
+          'title': title,
+          'order': order,
+          'view_slug': viewSlug,
+        }),
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
   Future<Map<String, dynamic>> queryCabinetRows({
     required String cabinetId,
     required String tableSlug,

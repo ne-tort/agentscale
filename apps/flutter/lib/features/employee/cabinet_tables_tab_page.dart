@@ -7,6 +7,7 @@ import 'package:prodavan/core/widgets/danger_confirm_page.dart';
 import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/cabinet_row_edit_page.dart';
+import 'package:prodavan/features/employee/cabinet_table_create_page.dart';
 
 /// Meta tables browser with row upsert/delete (L05/L06 interpreter).
 class CabinetTablesTabPage extends StatefulWidget {
@@ -91,6 +92,17 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
     }
   }
 
+  Future<void> _createTable() async {
+    final created = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => CabinetTableCreatePage(cabinetId: widget.cabinetId),
+      ),
+    );
+    if (created == true) {
+      await _loadTables();
+    }
+  }
+
   Future<void> _editRow({Map<String, dynamic>? existing}) async {
     final slug = _selectedSlug;
     if (slug == null) return;
@@ -149,13 +161,40 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
       return const Center(child: CircularProgressIndicator());
     }
     if (_tables.isEmpty) {
-      return const EmptyState(title: 'No meta tables in this cabinet yet.');
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (_error != null) InlineErrorBanner(message: _error!),
+          const Expanded(
+            child: EmptyState(title: 'No meta tables in this cabinet yet.'),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: TextButton.icon(
+              onPressed: _createTable,
+              icon: const Icon(Icons.add),
+              label: const Text('New table'),
+            ),
+          ),
+        ],
+      );
     }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (_error != null) InlineErrorBanner(message: _error!),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: _createTable,
+              icon: const Icon(Icons.table_rows),
+              label: const Text('New table'),
+            ),
+          ),
+        ),
         SizedBox(
           height: 52,
           child: ListView.separated(
