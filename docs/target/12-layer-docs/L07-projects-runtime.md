@@ -125,10 +125,10 @@ apps/api/.env.example
 | Webhook HMAC ingress | done | company policy secret + X-Prodavan-Signature |
 | Attachment DELETE | done | DB + inbox file; Flutter pending remove calls DELETE |
 | Object store (MinIO) как SoT blobs | **partial (P0)** | attach/packages + materialize + hydrate sandbox from zip; live MinIO mount — hole |
-| Durable bus = Kafka (triggers + platform events) | **partial (P0)** | dual-write + optional consumer→Celery drain kick; PG outbox/SPI still SoT |
-| Stack deploy brokers | **partial (P0)** | `docker-compose.stack.yml` Redis/MinIO/Redpanda/celery-worker; k8s — hole |
+| Durable bus = Kafka (triggers + platform events) | **partial (P0)** | dual-write + consumer `kick`\|`dispatch` (`claim_by_id`); PG outbox still claim SoT |
+| Stack deploy brokers | **partial (P0)** | compose stack + `deploy/k8s/{redis,minio,kafka,celery}` sketches; Helm/prod — hole |
 
-| Celery jobs (drain / idle / rematerialize) | **partial (P0 w4)** | `WorkerManager` + `prodavan.jobs.*` tasks; in-process `TriggerWorkerResource` fallback when Celery off; deploy worker/beat — hole |
+| Celery jobs (drain / dispatch / idle / rematerialize) | **partial (P0 w4)** | `WorkerManager` + `prodavan.jobs.*`; in-process fallback when Celery off |
 
 ## Проверка
 

@@ -5,7 +5,7 @@
 | Priority | **P0** (выше обычных LNN-волн при конфликте ресурсов) |
 | Canon | [13-platform-infra/](../13-platform-infra/) |
 | Refactor | **Significant refactor allowed** для L00, L03 (blob-adjacent), L07, L08 |
-| Status | `doing` (волны 1–5 subset: lifespan + Redis + ObjectStorage + Celery + Kafka dual-write) |
+| Status | `doing` (волны 1–5 subset + cache use + Kafka dispatch mode + k8s sketches) |
 
 ## Цель
 
@@ -26,7 +26,7 @@ Postgres и Keycloak/Vault роли не меняются.
 | 2 | Redis | **done** (subset) | URL optional; `REDIS_REQUIRED` для prod; нет docker-compose Redis в этом PR |
 | 3 | MinIO | **done** (subset) | ObjectStorage + attach/packages + materialize AGENTS/mcp/zip via store; sandbox extract local |
 | 4 | Celery | **done** (subset) | `WorkerManager` + tasks drain/idle/rematerialize; beat schedule; in-process skipped when Celery executor active |
-| 5 | Kafka | **done** (subset) | dual-write publish + optional consumer kick→Celery drain; PG claim still SoT |
+| 5 | Kafka | **done** (subset) | dual-write + consumer `kick`\|`dispatch` (`claim_by_id` + Celery `dispatch_trigger`); PG claim still SoT |
 
 ## Definition of Done
 
@@ -35,17 +35,17 @@ Postgres и Keycloak/Vault роли не меняются.
 - [x] Redis live (health + settings); Celery broker = Redis URL when Celery enabled
 - [x] MinIO/S3 manager + attachments/packages + materialize text/zip via object store; sandbox extract local — **hole**
 - [x] Celery: trigger drain / idle sweep / rematerialize tasks; in-process — transitional fallback
-- [x] Kafka: dual-write + optional consumer kick; **hole:** consumer replaces PG drain/SPI as sole path
+- [x] Kafka: dual-write + consumer kick|dispatch; **hole:** PG outbox still claim SoT (SPI delivery not Kafka-only)
 - [x] Контракты: `C-CACHE` + `C-OBJECT-STORE` + `C-JOBS` + `C-EVENT-BUS` → **live** (subset)
 - [x] As-built L00/L07/L08 обновлены (w1–w5 subset)
-- [ ] Checklist master: строка P0 → `done` (осталось: full Kafka cutover + k8s manifests + app cache usage)
+- [ ] Checklist master: строка P0 → `done` (осталось: full Kafka cutover без PG claim SoT + Helm/prod hardening)
 
 ## Дыры логики (следующая итерация)
 
-- Kafka consumer **kick-only** (Celery drain); не заменяет PG claim/SPI delivery как sole path.
+- Kafka consumer **ускоряет** Celery (`kick` drain или `dispatch` per-id); PG outbox остаётся claim SoT; SPI fan-out не Kafka-only.
 - Package sandbox: hydrate-from-zip есть; **live mount** workspace из MinIO в pod — hole.
-- Application почти не вызывает `cache_get`/`cache_set` (фасад есть).
-- k3s/Helm charts для Redis/MinIO/Kafka/Celery ещё не канон-манифесты (compose stack — local).
+- C-CACHE: company agent policy + subscription peek закэшированы; другие hot paths ещё без cache.
+- k8s sketches в `deploy/k8s/{redis,minio,kafka,celery}` — не Helm, без PVC/NetworkPolicy/TLS.
 
 ## Волны реализации
 
@@ -82,4 +82,4 @@ Postgres и Keycloak/Vault роли не меняются.
 
 ## Вне скоупа этого документа
 
-Helm/k3s manifests и реальный деплой кластера — следующая итерация после кода managers; канон стека уже зафиксирован в [stack.md](../13-platform-infra/stack.md).
+Prod Helm charts и hardening кластера — после sketches; канон стека в [stack.md](../13-platform-infra/stack.md). Sketches: [deploy/k8s/README.md](../../deploy/k8s/README.md).

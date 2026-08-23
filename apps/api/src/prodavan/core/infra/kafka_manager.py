@@ -6,12 +6,14 @@ import asyncio
 import json
 import logging
 from collections import deque
-from typing import Any
+from typing import Any, Literal
 
 from prodavan.core.events.envelope import EventEnvelope
 from prodavan.core.lifespan.resource import LifespanResource
 
 logger = logging.getLogger(__name__)
+
+ConsumerMode = Literal["kick", "dispatch"]
 
 _manager: KafkaManager | None = None
 
@@ -32,10 +34,13 @@ def set_kafka_manager(manager: KafkaManager | None) -> None:
 
 
 class KafkaManager(LifespanResource):
-    """Publish EventEnvelope to Kafka; optional consumer kicks Celery drain.
+    """Publish EventEnvelope to Kafka; optional consumer accelerates Celery.
 
     PG outbox remains claim/drain SoT until full consumer cutover (documented hole).
-    Consumer only accelerates ``prodavan.jobs.trigger_drain`` on project_trigger messages.
+
+    Consumer modes:
+    - ``kick`` (default): debounce → ``prodavan.jobs.trigger_drain``
+    - ``dispatch``: per message → ``prodavan.jobs.dispatch_trigger(event_id)``
     """
 
     def __init__(
@@ -51,6 +56,7 @@ class KafkaManager(LifespanResource):
         consumer_enabled: bool = False,
         consumer_group: str = "prodavan-api-triggers",
         drain_debounce_sec: float = 1.0,
+        consumer_mode: str = "kick",
     ) -> None:
         self._enabled = enabled
         self._bootstrap = (bootstrap_servers or "").strip() or None
@@ -61,12 +67,15 @@ class KafkaManager(LifespanResource):
         self._consumer_enabled = consumer_enabled
         self._consumer_group = consumer_group
         self._drain_debounce_sec = max(0.1, float(drain_debounce_sec))
+        mode = (consumer_mode or "kick").strip().lower()
+        self._consumer_mode: ConsumerMode = "dispatch" if mode == "dispatch" else "kick"
         self._producer: Any = None
         self._consumer: Any = None
         self._consume_task: asyncio.Task[None] | None = None
         self._stop: asyncio.Event | None = None
         self._buffer: deque[dict[str, Any]] = deque(maxlen=max(1, buffer_size))
         self._drain_kicks: int = 0
+        self._dispatch_enqueues: int = 0
 
     @property
     def name(self) -> str:
@@ -81,12 +90,20 @@ class KafkaManager(LifespanResource):
         return self._consume_task is not None and not self._consume_task.done()
 
     @property
+    def consumer_mode(self) -> ConsumerMode:
+        return self._consumer_mode
+
+    @property
     def buffering_only(self) -> bool:
         return not self.enabled
 
     @property
     def drain_kicks(self) -> int:
         return self._drain_kicks
+
+    @property
+    def dispatch_enqueues(self) -> int:
+        return self._dispatch_enqueues
 
     def topic_for(self, bus: str) -> str:
         if bus == "platform":
@@ -131,14 +148,20 @@ class KafkaManager(LifespanResource):
         self._drain_kicks += 1
         logger.info("kafka consumer: kick trigger_drain enqueued=%s", result.get("enqueued"))
 
-    async def _consume_loop(self, stop: asyncio.Event) -> None:
+    def _enqueue_dispatch(self, trigger_id: str) -> None:
+        from prodavan.core.jobs.enqueue import enqueue_dispatch_trigger
+
+        result = enqueue_dispatch_trigger(trigger_id)
+        self._dispatch_enqueues += 1
+        logger.info(
+            "kafka consumer: dispatch_trigger id=%s enqueued=%s",
+            trigger_id,
+            result.get("enqueued"),
+        )
+
+    async def _consume_loop_kick(self, stop: asyncio.Event) -> None:
         assert self._consumer is not None
         pending_kick = False
-        logger.info(
-            "kafka: consumer started topic=%s group=%s",
-            self._topic_triggers,
-            self._consumer_group,
-        )
         try:
             while not stop.is_set():
                 try:
@@ -164,7 +187,6 @@ class KafkaManager(LifespanResource):
                         if data.get("bus") == "project_trigger":
                             pending_kick = True
                 if pending_kick:
-                    # Debounce: wait briefly for more messages, then one drain kick.
                     try:
                         await asyncio.wait_for(stop.wait(), timeout=self._drain_debounce_sec)
                         break
@@ -172,7 +194,53 @@ class KafkaManager(LifespanResource):
                         self._kick_drain()
                         pending_kick = False
         finally:
-            logger.info("kafka: consumer loop stopped kicks=%s", self._drain_kicks)
+            logger.info("kafka: kick consumer stopped kicks=%s", self._drain_kicks)
+
+    async def _consume_loop_dispatch(self, stop: asyncio.Event) -> None:
+        assert self._consumer is not None
+        try:
+            while not stop.is_set():
+                try:
+                    batch = await self._consumer.getmany(timeout_ms=500, max_records=50)
+                except Exception:
+                    if stop.is_set():
+                        break
+                    logger.exception("kafka: consumer getmany failed")
+                    await asyncio.sleep(1.0)
+                    continue
+                if not batch:
+                    continue
+                for _tp, messages in batch.items():
+                    for msg in messages:
+                        try:
+                            data = json.loads(msg.value.decode("utf-8"))
+                        except Exception:
+                            logger.warning("kafka: skip bad message offset=%s", msg.offset)
+                            continue
+                        if data.get("bus") != "project_trigger":
+                            continue
+                        event_id = str(data.get("event_id") or "").strip()
+                        if not event_id:
+                            logger.warning("kafka: project_trigger without event_id offset=%s", msg.offset)
+                            continue
+                        self._enqueue_dispatch(event_id)
+        finally:
+            logger.info(
+                "kafka: dispatch consumer stopped enqueues=%s",
+                self._dispatch_enqueues,
+            )
+
+    async def _consume_loop(self, stop: asyncio.Event) -> None:
+        logger.info(
+            "kafka: consumer started topic=%s group=%s mode=%s",
+            self._topic_triggers,
+            self._consumer_group,
+            self._consumer_mode,
+        )
+        if self._consumer_mode == "dispatch":
+            await self._consume_loop_dispatch(stop)
+        else:
+            await self._consume_loop_kick(stop)
 
     async def startup(self) -> None:
         set_kafka_manager(self)

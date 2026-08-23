@@ -32,14 +32,17 @@
 | C-USAGE | L08 | usage records | L04 metrics | [usage-metrics](../08-agent-providers/usage-metrics.md) | **live** (subset) |
 | C-PROJECT-CHAT | L08 | `POST /chat`, `POST /chat/stream` (SSE), `GET /chat/transcript` | L05 UI, L09 | adapter-port | **live** (subset) |
 | C-OBJECT-STORE | P0 / L00 | MinIO/S3 put/get/delete + object refs (no local SoT) | L07 attach/materialize, L06 packages | [13 stack](../13-platform-infra/stack.md) | **live** (subset: manager + attach/packages; materialize FS hole) |
-| C-EVENT-BUS | P0 / L00 | Kafka envelopes: project triggers + platform events | L07, L06 SPI, L09 | [13](../13-platform-infra/), [triggers](../06-projects-runtime/triggers.md) | **live** (subset: dual-write publish; consumer hole) |
-| C-JOBS | P0 / L00 | Celery tasks: drain / idle / rematerialize (+ idempotency) | L07, L08 | [13](../13-platform-infra/), [P0](P0-platform-infra.md) | **live** (subset: WorkerManager + tasks; deploy hole) |
-| C-CACHE | P0 / L00 | Redis cache / short locks / Celery broker conventions | L00 core, workers | [13](../13-platform-infra/) | **live** (subset: manager+health; no Celery yet) |
+| C-EVENT-BUS | P0 / L00 | Kafka envelopes: project triggers + platform events | L07, L06 SPI, L09 | [13](../13-platform-infra/), [triggers](../06-projects-runtime/triggers.md) | **live** (subset: dual-write + kick\|dispatch consumer; PG claim SoT) |
+| C-JOBS | P0 / L00 | Celery tasks: drain / dispatch_trigger / idle / rematerialize | L07, L08 | [13](../13-platform-infra/), [P0](P0-platform-infra.md) | **live** (subset: WorkerManager + tasks; Helm hole) |
+| C-CACHE | P0 / L00 | Redis cache / short locks / Celery broker conventions | L00 core, workers | [13](../13-platform-infra/) | **live** (subset: manager + company runtime cache) |
 
 ## Compatibility log
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-24 | C-EVENT-BUS / C-JOBS / C-TRIGGERS | Kafka `KAFKA_CONSUMER_MODE=dispatch` → Celery `dispatch_trigger` + `claim_by_id` | no |
+| 2026-08-24 | C-CACHE / C-ADMIN-POLICY | company agent policy + subscription Redis peek; invalidate on admin writes | no |
+| 2026-08-24 | P0 deploy | k8s sketches redis/minio/kafka/celery under `deploy/k8s/` | no |
 | 2026-08-24 | C-MATERIALIZE / C-OBJECT-STORE | ensure_package_tree hydrates sandbox from object-store zip | no |
 | 2026-08-24 | C-CACHE / L00 | cache_get/set helpers; CORS via core.middleware.register_cors | no |
 | 2026-08-24 | P0 deploy | stack compose: Redis/MinIO/Redpanda/celery-worker | no |

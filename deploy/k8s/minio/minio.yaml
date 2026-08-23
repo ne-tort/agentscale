@@ -1,0 +1,78 @@
+# Sketch — MinIO (S3 API) for C-OBJECT-STORE (P0).
+# Create bucket `prodavan` via Job or console. API env:
+#   OBJECT_STORE_BACKEND=s3
+#   S3_ENDPOINT_URL=http://prodavan-minio:9000
+#   S3_ACCESS_KEY / S3_SECRET_KEY / S3_BUCKET=prodavan
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: prodavan-minio
+  labels:
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: minio
+stringData:
+  root-user: prodavan
+  root-password: CHANGE_ME
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prodavan-minio
+  labels:
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: minio
+spec:
+  ports:
+    - name: s3
+      port: 9000
+      targetPort: 9000
+    - name: console
+      port: 9001
+      targetPort: 9001
+  selector:
+    app.kubernetes.io/name: prodavan-minio
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prodavan-minio
+  labels:
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prodavan-minio
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prodavan-minio
+        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/component: minio
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          args: ["server", "/data", "--console-address", ":9001"]
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: prodavan-minio
+                  key: root-user
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: prodavan-minio
+                  key: root-password
+          ports:
+            - containerPort: 9000
+            - containerPort: 9001
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir: {}

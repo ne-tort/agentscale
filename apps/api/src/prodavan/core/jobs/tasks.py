@@ -30,6 +30,21 @@ def register_tasks(app) -> None:
         logger.info("celery task %s", job_names.TRIGGER_DRAIN)
         return run_async(drain_once())
 
+    @app.task(name=job_names.DISPATCH_TRIGGER, bind=False)
+    def dispatch_trigger(trigger_id: str) -> dict[str, Any]:
+        from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        async def _run() -> dict[str, Any]:
+            factory = get_session_factory()
+            async with factory() as session:
+                return await AgentTriggerDispatcher(session).dispatch_trigger_id(
+                    trigger_id=trigger_id
+                )
+
+        logger.info("celery task %s trigger_id=%s", job_names.DISPATCH_TRIGGER, trigger_id)
+        return run_async(_run())
+
     @app.task(name=job_names.IDLE_PAUSE_SWEEP, bind=False)
     def idle_pause_sweep() -> dict[str, Any]:
         from prodavan.application.projects.idle_pause_service import IdlePauseService

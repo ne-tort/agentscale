@@ -10,7 +10,11 @@
 | **Platform events** | Company / employee / project lifecycle | `company.suspended`, `employee.disabled`, `project.created` |
 
 **Durable bus (канон):** обе шины — **Kafka** ([13-platform-infra](../13-platform-infra/)).  
-**Сейчас (P0):** dual-write `EventEnvelope` при enqueue/emit; optional `KAFKA_CONSUMER_ENABLED` → kick Celery `trigger_drain` (debounce). PG outbox-lite / SPI — transitional SoT до полного consumer cutover.
+**Сейчас (P0):** dual-write `EventEnvelope` при enqueue/emit; optional `KAFKA_CONSUMER_ENABLED` + `KAFKA_CONSUMER_MODE`:
+- `kick` (default) → debounce Celery `trigger_drain`
+- `dispatch` → Celery `dispatch_trigger(event_id)` + PG `claim_by_id`
+
+PG outbox-lite / SPI — transitional SoT до полного consumer cutover (Kafka sole path).
 
 Project triggers: `POST /api/v1/projects/{id}/triggers`.  
 Platform events: emit → PG + SPI (+ Kafka dual-write) → cabinet `on_platform_event`.

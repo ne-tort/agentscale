@@ -113,10 +113,12 @@ class Settings(BaseSettings):
     kafka_topic_platform_events: str = "prodavan.platform.events"
     kafka_topic_project_triggers: str = "prodavan.project.triggers"
     kafka_required: bool = False
-    # Optional consumer: kick Celery drain on project_trigger messages (PG still SoT).
+    # Optional consumer: kick Celery drain, or per-id dispatch (PG claim still SoT).
     kafka_consumer_enabled: bool = False
     kafka_consumer_group: str = "prodavan-api-triggers"
     kafka_drain_debounce_sec: float = 1.0
+    # kick = debounce → trigger_drain; dispatch = enqueue dispatch_trigger(event_id).
+    kafka_consumer_mode: str = "kick"
 
     @property
     def cors_origin_list(self) -> list[str]:

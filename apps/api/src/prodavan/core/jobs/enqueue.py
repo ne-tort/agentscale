@@ -21,6 +21,20 @@ def enqueue_trigger_drain() -> dict[str, Any]:
     return {"enqueued": True, "task": job_names.TRIGGER_DRAIN}
 
 
+def enqueue_dispatch_trigger(trigger_id: str) -> dict[str, Any]:
+    """Enqueue per-id trigger dispatch (Kafka consumer cutover mode)."""
+    from prodavan.core.infra.worker_manager import get_worker_manager
+
+    tid = (trigger_id or "").strip()
+    if not tid:
+        return {"enqueued": False, "reason": "missing_trigger_id"}
+    mgr = get_worker_manager()
+    if mgr is None or not mgr.enabled:
+        return {"enqueued": False, "reason": "celery_disabled", "trigger_id": tid}
+    mgr.send_task(job_names.DISPATCH_TRIGGER, args=[tid])
+    return {"enqueued": True, "task": job_names.DISPATCH_TRIGGER, "trigger_id": tid}
+
+
 def enqueue_idle_pause_sweep() -> dict[str, Any]:
     from prodavan.core.infra.worker_manager import get_worker_manager
 

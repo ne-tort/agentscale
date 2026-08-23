@@ -1,0 +1,59 @@
+# Sketch — Celery worker (+ beat) for C-JOBS (P0).
+# Reuses API image; requires Redis broker + same DB/object-store/Kafka env as API.
+# Replace image and Secret refs for your cluster.
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prodavan-celery-worker
+  labels:
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: celery
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prodavan-celery-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prodavan-celery-worker
+        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/component: celery
+    spec:
+      containers:
+        - name: worker
+          image: prodavan-api:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - celery
+            - -A
+            - prodavan.core.infra.worker_manager.celery_app
+            - worker
+            - -B
+            - --loglevel=INFO
+          env:
+            - name: CELERY_ENABLED
+              value: "true"
+            - name: REDIS_URL
+              value: redis://prodavan-redis:6379/0
+            - name: CELERY_BROKER_URL
+              value: redis://prodavan-redis:6379/0
+            - name: OBJECT_STORE_BACKEND
+              value: s3
+            - name: S3_ENDPOINT_URL
+              value: http://prodavan-minio:9000
+            - name: S3_BUCKET
+              value: prodavan
+            - name: KAFKA_ENABLED
+              value: "true"
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: prodavan-kafka:9092
+            # DATABASE_URL, S3_* secrets, Keycloak — from existing API Secret/ConfigMap
+          envFrom:
+            - secretRef:
+                name: prodavan-api
+                optional: true
+            - configMapRef:
+                name: prodavan-api
+                optional: true

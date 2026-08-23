@@ -148,6 +148,38 @@ class ProjectTriggerService:
         await self._session.flush()
         return row
 
+    async def claim_by_id(
+        self,
+        *,
+        trigger_id: str,
+        worker_id: str | None = None,
+    ) -> ProjectTriggerRow | None:
+        """Claim a specific queued trigger by id (Kafka per-id cutover path)."""
+        now = datetime.now(UTC)
+        lease_sec = max(15, int(settings.trigger_outbox_lease_sec))
+        q = await self._session.execute(
+            select(ProjectTriggerRow)
+            .where(
+                ProjectTriggerRow.id == trigger_id,
+                ProjectTriggerRow.status == TriggerStatus.QUEUED,
+                or_(ProjectTriggerRow.available_at.is_(None), ProjectTriggerRow.available_at <= now),
+                or_(ProjectTriggerRow.lease_until.is_(None), ProjectTriggerRow.lease_until < now),
+            )
+            .with_for_update(skip_locked=True)
+        )
+        row = q.scalar_one_or_none()
+        if row is None:
+            return None
+        project = await self._session.get(ProjectRow, row.project_id)
+        if project is None or project.status != ProjectStatus.ACTIVE:
+            return None
+        row.attempts = int(row.attempts or 0) + 1
+        row.lease_until = now + timedelta(seconds=lease_sec)
+        row.leased_by = (worker_id or f"worker_{uuid.uuid4().hex[:8]}")[:64]
+        row.last_error = None
+        await self._session.flush()
+        return row
+
     async def mark_done(self, row: ProjectTriggerRow) -> None:
         row.status = TriggerStatus.DONE
         row.lease_until = None

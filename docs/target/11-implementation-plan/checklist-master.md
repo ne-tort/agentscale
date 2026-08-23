@@ -7,7 +7,7 @@
 
 | Слой | Статус | Quality | As-built | Доказательство (PR / suite) | Блокеры |
 |------|--------|---------|----------|----------------------------|---------|
-| [P0 platform-infra](P0-platform-infra.md) | doing | n/a | [13](../13-platform-infra/) + [L00](../12-layer-docs/L00-platform-skeleton.md) | stack compose brokers+celery; hydrate sandbox; CORS/cache facades | Kafka full cutover; k8s; app cache usage |
+| [P0 platform-infra](P0-platform-infra.md) | doing | n/a | [13](../13-platform-infra/) + [L00](../12-layer-docs/L00-platform-skeleton.md) | stack compose; k8s sketches; company cache; Kafka dispatch mode | Kafka sole-path cutover; Helm/prod hardening |
 | [L00](L00-platform-skeleton.md) | done | 8 | [12](../12-layer-docs/L00-platform-skeleton.md) | L00 skeleton commit | |
 | [L01](L01-identity.md) | partial | 7 | [12](../12-layer-docs/L01-identity.md) | identity + JWT tests | live KC Admin/realm |
 | [L02](L02-ui-core.md) | done | 8 | [12](../12-layer-docs/L02-ui-core.md) | L02 UI core commit | |

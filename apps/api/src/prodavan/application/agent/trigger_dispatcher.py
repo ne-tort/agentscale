@@ -238,6 +238,34 @@ class AgentTriggerDispatcher:
             "attempts": trigger.attempts,
         }
 
+    async def dispatch_trigger_id(self, *, trigger_id: str) -> dict:
+        """Claim and dispatch one trigger by id (Kafka consumer cutover)."""
+        trigger = await self._triggers.claim_by_id(trigger_id=trigger_id, worker_id="kafka_disp")
+        if trigger is None:
+            return {"dispatched": False, "reason": "not_claimable", "trigger_id": trigger_id}
+        if trigger.project_id:
+            project = await self._projects.get_project(trigger.project_id)
+            if project.status == ProjectStatus.PAUSED:
+                await self._triggers.release_for_retry(trigger, reason="project_paused")
+                await self._session.commit()
+                return {
+                    "dispatched": False,
+                    "reason": "project_paused",
+                    "trigger_id": trigger.id,
+                    "retried": True,
+                }
+            owner = await self._session.get(EmployeeRow, project.owner_employee_id)
+            if owner is None:
+                return await self._finish_hard_fail(trigger, "owner missing")
+            principal = Principal(sub=owner.keycloak_sub or owner.id, email=owner.email)
+            return await self._dispatch_claimed(
+                trigger=trigger,
+                project_id=trigger.project_id,
+                principal=principal,
+                employee=owner,
+            )
+        return await self._finish_hard_fail(trigger, "missing project_id")
+
     async def _dispatch_one(
         self,
         *,
@@ -251,7 +279,21 @@ class AgentTriggerDispatcher:
         )
         if trigger is None:
             return {"dispatched": False, "reason": "no queued triggers"}
+        return await self._dispatch_claimed(
+            trigger=trigger,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+        )
 
+    async def _dispatch_claimed(
+        self,
+        *,
+        trigger: ProjectTriggerRow,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
         if trigger.kind not in SUBSCRIPTION_EXEMPT_TRIGGER_KINDS:
             project = await self._projects.get_project(project_id)
             state = await self._subscription.subscription_state(project.company_id)

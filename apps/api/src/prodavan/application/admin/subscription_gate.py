@@ -105,6 +105,9 @@ class CompanySubscriptionGate:
         await self._emit_suspended(company_id, subscription, principal=principal)
         # Persist even on read paths (GET project) — session has no auto-commit (SSE).
         await self._session.commit()
+        from prodavan.application.admin.company_runtime_cache import invalidate_company_runtime_cache
+
+        await invalidate_company_runtime_cache(company_id)
         return True
 
     async def emit_transition_events(
@@ -127,8 +130,18 @@ class CompanySubscriptionGate:
         *,
         principal: Principal | None = None,
     ) -> dict[str, object]:
-        company = await self._company_row(company_id)
-        state = self._read_model(company)
+        from prodavan.application.admin.company_runtime_cache import (
+            get_cached_subscription,
+            set_cached_subscription,
+        )
+
+        cached = await get_cached_subscription(company_id)
+        if cached is not None:
+            state = cached
+        else:
+            company = await self._company_row(company_id)
+            state = self._read_model(company)
+            await set_cached_subscription(company_id, state)
         await self.ensure_suspended_platform_event(company_id, state, principal=principal)
         return state
 

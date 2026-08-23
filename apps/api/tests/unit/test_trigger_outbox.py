@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from prodavan.application.projects.trigger_service import ProjectTriggerService
-from prodavan.domain.projects import TriggerStatus
+from prodavan.domain.projects import ProjectStatus, TriggerStatus
 
 
 @pytest.mark.asyncio
@@ -81,3 +81,62 @@ async def test_mark_done_clears_lease() -> None:
     assert row.leased_by is None
     assert row.available_at is None
     assert row.last_error is None
+
+
+@pytest.mark.asyncio
+async def test_claim_by_id_leases_when_project_active() -> None:
+    session = AsyncMock()
+    session.flush = AsyncMock()
+    now = datetime.now(UTC)
+    row = SimpleNamespace(
+        id="trg_1",
+        project_id="proj_1",
+        status=TriggerStatus.QUEUED,
+        attempts=0,
+        available_at=None,
+        lease_until=None,
+        leased_by=None,
+        last_error="old",
+    )
+    project = SimpleNamespace(status=ProjectStatus.ACTIVE)
+    result = AsyncMock()
+    result.scalar_one_or_none = lambda: row
+    session.execute = AsyncMock(return_value=result)
+    session.get = AsyncMock(return_value=project)
+    gate = ProjectTriggerService(session)
+    with patch("prodavan.application.projects.trigger_service.settings") as settings:
+        settings.trigger_outbox_lease_sec = 30
+        claimed = await gate.claim_by_id(trigger_id="trg_1", worker_id="kafka_disp")
+    assert claimed is row
+    assert row.attempts == 1
+    assert row.leased_by == "kafka_disp"
+    assert row.lease_until is not None
+    assert row.lease_until > now
+    assert row.last_error is None
+
+
+@pytest.mark.asyncio
+async def test_claim_by_id_skips_paused_project() -> None:
+    session = AsyncMock()
+    session.flush = AsyncMock()
+    row = SimpleNamespace(
+        id="trg_2",
+        project_id="proj_2",
+        status=TriggerStatus.QUEUED,
+        attempts=0,
+        available_at=None,
+        lease_until=None,
+        leased_by=None,
+        last_error=None,
+    )
+    project = SimpleNamespace(status=ProjectStatus.PAUSED)
+    result = AsyncMock()
+    result.scalar_one_or_none = lambda: row
+    session.execute = AsyncMock(return_value=result)
+    session.get = AsyncMock(return_value=project)
+    gate = ProjectTriggerService(session)
+    with patch("prodavan.application.projects.trigger_service.settings") as settings:
+        settings.trigger_outbox_lease_sec = 30
+        claimed = await gate.claim_by_id(trigger_id="trg_2")
+    assert claimed is None
+    assert row.attempts == 0

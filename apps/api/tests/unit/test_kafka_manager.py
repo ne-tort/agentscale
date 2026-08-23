@@ -78,3 +78,27 @@ def test_kafka_kick_drain_increments(monkeypatch: pytest.MonkeyPatch) -> None:
     mgr._kick_drain()
     assert mgr.drain_kicks == 1
     assert len(calls) == 1
+
+
+def test_kafka_dispatch_enqueue_increments(monkeypatch: pytest.MonkeyPatch) -> None:
+    set_kafka_manager(None)
+    mgr = KafkaManager(enabled=False, consumer_mode="dispatch")
+    assert mgr.consumer_mode == "dispatch"
+    calls: list[str] = []
+
+    def _fake_dispatch(trigger_id: str) -> dict:
+        calls.append(trigger_id)
+        return {"enqueued": False, "reason": "celery_disabled", "trigger_id": trigger_id}
+
+    monkeypatch.setattr(
+        "prodavan.core.jobs.enqueue.enqueue_dispatch_trigger",
+        _fake_dispatch,
+    )
+    mgr._enqueue_dispatch("trg_abc")
+    assert mgr.dispatch_enqueues == 1
+    assert calls == ["trg_abc"]
+
+
+def test_kafka_consumer_mode_defaults_to_kick() -> None:
+    mgr = KafkaManager(enabled=False, consumer_mode="weird")
+    assert mgr.consumer_mode == "kick"

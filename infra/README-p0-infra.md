@@ -30,12 +30,15 @@ S3_BUCKET=prodavan
 KAFKA_ENABLED=true
 KAFKA_BOOTSTRAP_SERVERS=localhost:19092
 KAFKA_CONSUMER_ENABLED=true
+# KAFKA_CONSUMER_MODE=kick   # or dispatch (per-id Celery task)
 CELERY_ENABLED=true
 TRIGGER_WORKER_ENABLED=true
 ```
 
 ## Notes / holes
 
-- Kafka consumer only **kicks** Celery drain; PG outbox remains claim SoT until full cutover.
+- Kafka consumer: `kick` (debounce drain) or `dispatch` (`claim_by_id` via Celery); PG outbox remains claim SoT until full cutover.
 - Package sandbox trees hydrate from object-store zip when local dir missing; live mount-from-MinIO still a hole.
+- k8s sketches: `deploy/k8s/{redis,minio,kafka,celery}` (not Helm).
 - CORS registered via `prodavan.core.middleware.register_cors`.
+- Company agent policy + subscription peek use Redis cache (`company_runtime_cache`).

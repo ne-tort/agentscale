@@ -116,10 +116,18 @@ class AdminCompanyService:
         return _quota_public(row.to_domain())
 
     async def get_agent_policy(self, company_id: str) -> CompanyAgentRuntimePolicy:
+        from prodavan.application.admin.company_runtime_cache import (
+            get_cached_agent_policy,
+            set_cached_agent_policy,
+        )
+
+        cached = await get_cached_agent_policy(company_id)
+        if cached is not None:
+            return cached
         row = await self._session.get(CompanyAgentRuntimePolicyRow, company_id)
-        if row is None:
-            return CompanyAgentRuntimePolicy()
-        return row.to_domain()
+        policy = CompanyAgentRuntimePolicy() if row is None else row.to_domain()
+        await set_cached_agent_policy(company_id, policy)
+        return policy
 
     async def get_agent_policy_public(self, company_id: str) -> dict:
         await self._require_company(company_id)
@@ -156,6 +164,9 @@ class AdminCompanyService:
             row.telegram_hmac_secret = (secret.strip() if secret else "") or None
         await self._session.commit()
         await self._session.refresh(row)
+        from prodavan.application.admin.company_runtime_cache import invalidate_company_runtime_cache
+
+        await invalidate_company_runtime_cache(company_id)
         return _policy_public(row.to_domain())
 
     async def _last_activity_at(self, company_id: str) -> datetime | None:
@@ -319,6 +330,9 @@ class AdminCompanyService:
         )
         await self._session.commit()
         await self._session.refresh(company)
+        from prodavan.application.admin.company_runtime_cache import invalidate_company_runtime_cache
+
+        await invalidate_company_runtime_cache(company_id)
         return sub
 
     async def list_companies_metrics(self) -> list[dict]:
