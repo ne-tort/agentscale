@@ -55,13 +55,23 @@ PLATFORM_TOOLS: tuple[ToolSpec, ...] = (
         },
     ),
     ToolSpec(
+        name="cabinet.tables.archive",
+        description="Soft-archive a meta table (blocks if views reference it).",
+        input_schema={
+            "type": "object",
+            "required": ["table_slug"],
+            "properties": {"table_slug": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    ),
+    ToolSpec(
         name="cabinet.tabs.list",
         description="List cabinet tabs (including Base system tabs).",
         input_schema={"type": "object", "properties": {}, "additionalProperties": False},
     ),
     ToolSpec(
         name="cabinet.rows.query",
-        description="Query rows from a physical data table.",
+        description="Query rows from a physical or json_document data table.",
         input_schema={
             "type": "object",
             "required": ["table_slug"],

@@ -562,3 +562,104 @@ def test_json_document_rows(client: TestClient) -> None:
         headers={"Authorization": f"Bearer {owner_tok}"},
     )
     assert deleted.status_code == 204
+
+
+@requires_postgres
+def test_meta_table_archive_and_rename(client: TestClient) -> None:
+    admin = _token(sub="tbl-arch-admin", platform_admin=True)
+    created = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "TblArchCo", "admin_email": "tblarch@cabco.test"},
+    )
+    assert created.status_code == 201, created.text
+    company_id = created.json()["company"]["id"]
+
+    owner_tok = _token(sub="tbl-arch-owner", email="tblarch@cabco.test")
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "Tbl Arch Cab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    tbl = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tables",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={
+            "slug": "vendors",
+            "label": "Vendors",
+            "columns": [{"name": "name", "type": "text", "required": True}],
+        },
+    )
+    assert tbl.status_code == 201, tbl.text
+
+    renamed = client.patch(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tables/vendors",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"label": "Vendor list"},
+    )
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["label"] == "Vendor list"
+
+    view = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/meta/views",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={
+            "slug": "vendors_view",
+            "table_slug": "vendors",
+            "ui_json": {"version": 1, "kind": "collection", "title_field": "name"},
+        },
+    )
+    assert view.status_code == 201, view.text
+
+    blocked = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tables/vendors/archive",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert blocked.status_code == 409
+
+    client.delete(
+        f"/api/v1/cabinets/{cabinet_id}/meta/views/vendors_view",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+
+    archived = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tables/vendors/archive",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert archived.status_code == 200, archived.text
+    assert archived.json()["status"] == "archived"
+
+    listed = client.get(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tables",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert listed.status_code == 200
+    assert not any(t["slug"] == "vendors" for t in listed.json())
+
+    mcp = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/mcp/call",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"tool": "cabinet.tables.archive", "arguments": {"table_slug": "vendors"}},
+    )
+    assert mcp.status_code == 404
+
+    spare = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tables",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={
+            "slug": "spare",
+            "label": "Spare",
+            "columns": [{"name": "title", "type": "text", "required": True}],
+        },
+    )
+    assert spare.status_code == 201
+    mcp_ok = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/mcp/call",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"tool": "cabinet.tables.archive", "arguments": {"table_slug": "spare"}},
+    )
+    assert mcp_ok.status_code == 200, mcp_ok.text
+    assert mcp_ok.json()["result"]["status"] == "archived"

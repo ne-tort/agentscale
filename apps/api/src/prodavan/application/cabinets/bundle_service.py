@@ -218,7 +218,7 @@ class CabinetBundleService:
                 SELECT c.id, c.table_id, t.slug AS table_slug, c.name, c.col_type,
                        c.required, c.unique_col, c.ref_table_slug
                 FROM {qschema}.meta_columns c
-                JOIN {qschema}.meta_tables t ON t.id = c.table_id
+                JOIN {qschema}.meta_tables t ON t.id = c.table_id AND t.status = 'active'
                 ORDER BY t.slug, c.name
                 """
             )

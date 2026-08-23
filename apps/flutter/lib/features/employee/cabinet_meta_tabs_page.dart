@@ -10,6 +10,7 @@ import 'package:prodavan/core/widgets/danger_confirm_page.dart';
 import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/cabinet_meta_tab_create_page.dart';
+import 'package:prodavan/features/employee/cabinet_meta_view_edit_page.dart';
 
 /// Manage non-system cabinet tabs (L06 meta views/tabs).
 class CabinetMetaTabsPage extends StatefulWidget {
@@ -62,6 +63,40 @@ class _CabinetMetaTabsPageState extends State<CabinetMetaTabsPage> {
     if (created == true) {
       workContext.notifyCabinetMetaChanged();
       await _load();
+    }
+  }
+
+  Future<void> _editView(Map<String, dynamic> tab) async {
+    final viewSlug = tab['view_slug'] as String?;
+    if (viewSlug == null || viewSlug.isEmpty) return;
+
+    try {
+      final views = await workContext.api.listMetaViews(widget.cabinetId);
+      final view = views.cast<Map<String, dynamic>?>().firstWhere(
+            (v) => v?['slug'] == viewSlug,
+            orElse: () => null,
+          );
+      if (view == null) {
+        setState(() => _error = 'View not found');
+        return;
+      }
+      final ui = view['ui_json'];
+      if (ui is! Map<String, dynamic>) return;
+
+      if (!mounted) return;
+      final saved = await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(
+          builder: (_) => CabinetMetaViewEditPage(
+            cabinetId: widget.cabinetId,
+            viewSlug: viewSlug,
+            uiJson: ui,
+          ),
+        ),
+      );
+      if (saved == true) await _load();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.toString());
     }
   }
 
@@ -125,6 +160,7 @@ class _CabinetMetaTabsPageState extends State<CabinetMetaTabsPage> {
                           subtitle: Text(
                             'view: ${tab['view_slug'] ?? '—'} · table: ${tab['table_slug'] ?? '—'}',
                           ),
+                          onTap: () => _editView(tab),
                           trailing: IconButton(
                             icon: const Icon(Icons.delete_outline),
                             onPressed: () => _deleteTab(tab),

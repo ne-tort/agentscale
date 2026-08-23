@@ -107,6 +107,14 @@ class CabinetMcpDispatcher:
                 employee=employee,
             )
 
+        if tool == "cabinet.tables.archive":
+            return await self._meta.archive_table(
+                cabinet_id=cabinet_id,
+                table_slug=str(args["table_slug"]),
+                principal=principal,
+                employee=employee,
+            )
+
         if tool == "cabinet.tabs.list":
             return {
                 "tabs": await self._meta.list_tabs(

@@ -810,3 +810,89 @@ class CabinetMetaService:
         )
         await self._session.commit()
 
+    async def update_table(
+        self,
+        *,
+        cabinet_id: str,
+        table_slug: str,
+        patch: dict,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        inst = await self._access.require_access(
+            cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
+        )
+        table = await self._require_table(schema_name=inst.schema_name, table_slug=table_slug)
+        qschema = qident(inst.schema_name)
+
+        if "label" not in patch:
+            raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="empty patch")
+
+        label = str(patch["label"]).strip()
+        if not label:
+            raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="label required")
+
+        await self._session.execute(
+            text(f"UPDATE {qschema}.meta_tables SET label = :label WHERE id = :id"),
+            {"label": label, "id": table.id},
+        )
+        await self._session.commit()
+        tq = await self._session.execute(
+            text(
+                f"""
+                SELECT id, slug, label, storage_kind, status
+                FROM {qschema}.meta_tables
+                WHERE id = :id
+                """
+            ),
+            {"id": table.id},
+        )
+        row = tq.fetchone()
+        return {
+            "id": row.id,
+            "slug": row.slug,
+            "label": row.label,
+            "storage_kind": row.storage_kind,
+            "status": row.status,
+        }
+
+    async def archive_table(
+        self,
+        *,
+        cabinet_id: str,
+        table_slug: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        inst = await self._access.require_access(
+            cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
+        )
+        table = await self._require_table(schema_name=inst.schema_name, table_slug=table_slug)
+        qschema = qident(inst.schema_name)
+
+        refs = await self._session.execute(
+            text(
+                f"""
+                SELECT slug FROM {qschema}.meta_views
+                WHERE table_slug = :slug
+                LIMIT 1
+                """
+            ),
+            {"slug": table_slug},
+        )
+        ref_slug = refs.scalar_one_or_none()
+        if ref_slug is not None:
+            raise AppError(
+                code="CONFLICT",
+                title="Conflict",
+                status=409,
+                detail=f"view '{ref_slug}' references table",
+            )
+
+        await self._session.execute(
+            text(f"UPDATE {qschema}.meta_tables SET status = 'archived' WHERE id = :id"),
+            {"id": table.id},
+        )
+        await self._session.commit()
+        return {"slug": table_slug, "status": "archived"}
+

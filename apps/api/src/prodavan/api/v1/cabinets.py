@@ -102,6 +102,12 @@ class UpdateTabBody(BaseModel):
     view_slug: str | None = Field(default=None, min_length=1, max_length=64)
 
 
+class UpdateTableBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    label: str = Field(min_length=1, max_length=200)
+
+
 class UpsertRowBody(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -324,6 +330,40 @@ async def create_meta_table(
         label=body.label,
         storage_kind=body.storage_kind,
         columns=[c.model_dump() for c in body.columns],
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.patch("/{cabinet_id}/meta/tables/{table_slug}")
+async def update_meta_table(
+    cabinet_id: str,
+    table_slug: str,
+    body: UpdateTableBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await CabinetMetaService(session).update_table(
+        cabinet_id=cabinet_id,
+        table_slug=table_slug,
+        patch=body.model_dump(exclude_unset=True),
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.post("/{cabinet_id}/meta/tables/{table_slug}/archive")
+async def archive_meta_table(
+    cabinet_id: str,
+    table_slug: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await CabinetMetaService(session).archive_table(
+        cabinet_id=cabinet_id,
+        table_slug=table_slug,
         principal=principal,
         employee=employee,
     )

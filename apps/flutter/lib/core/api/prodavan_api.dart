@@ -160,6 +160,70 @@ class ProdavanApi {
     }
   }
 
+  Future<Map<String, dynamic>> updateMetaTable({
+    required String cabinetId,
+    required String tableSlug,
+    required String label,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.patch(
+        _uri('/cabinets/$cabinetId/meta/tables/$tableSlug'),
+        headers: _headers,
+        body: jsonEncode({'label': label}),
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
+  Future<Map<String, dynamic>> archiveMetaTable({
+    required String cabinetId,
+    required String tableSlug,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.post(
+        _uri('/cabinets/$cabinetId/meta/tables/$tableSlug/archive'),
+        headers: _headers,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
+  Future<Map<String, dynamic>> updateMetaView({
+    required String cabinetId,
+    required String viewSlug,
+    Map<String, dynamic>? uiJson,
+    String? tableSlug,
+    int? version,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final body = <String, dynamic>{};
+      if (uiJson != null) body['ui_json'] = uiJson;
+      if (tableSlug != null) body['table_slug'] = tableSlug;
+      if (version != null) body['version'] = version;
+      final res = await http.patch(
+        _uri('/cabinets/$cabinetId/meta/views/$viewSlug'),
+        headers: _headers,
+        body: jsonEncode(body),
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
   Future<Map<String, dynamic>> addMetaColumn({
     required String cabinetId,
     required String tableSlug,

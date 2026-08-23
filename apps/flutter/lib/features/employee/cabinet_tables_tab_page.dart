@@ -8,6 +8,7 @@ import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/cabinet_column_add_page.dart';
 import 'package:prodavan/features/employee/cabinet_row_edit_page.dart';
+import 'package:prodavan/features/employee/cabinet_table_settings_page.dart';
 import 'package:prodavan/features/employee/cabinet_table_create_page.dart';
 
 /// Meta tables browser with row upsert/delete (L05/L06 interpreter).
@@ -90,6 +91,33 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());
+    }
+  }
+
+  Future<void> _tableSettings() async {
+    final slug = _selectedSlug;
+    if (slug == null) return;
+
+    final table = _tables.cast<Map<String, dynamic>?>().firstWhere(
+          (t) => t?['slug'] == slug,
+          orElse: () => null,
+        );
+    final label = table?['label'] as String? ?? slug;
+
+    final changed = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => CabinetTableSettingsPage(
+          cabinetId: widget.cabinetId,
+          tableSlug: slug,
+          tableLabel: label,
+        ),
+      ),
+    );
+    if (changed == true) {
+      await _loadTables();
+      if (_selectedSlug == slug) {
+        setState(() => _selectedSlug = null);
+      }
     }
   }
 
@@ -247,6 +275,12 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
+                TextButton.icon(
+                  onPressed: _tableSettings,
+                  icon: const Icon(Icons.settings_outlined),
+                  label: const Text('Settings'),
+                ),
+                const SizedBox(width: 8),
                 TextButton.icon(
                   onPressed: _addColumn,
                   icon: const Icon(Icons.view_column_outlined),

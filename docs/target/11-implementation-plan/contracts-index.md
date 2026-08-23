@@ -35,7 +35,8 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
-| 2026-08-23 | C-META-DATA | json_document rows API + bundle export/import data | no |
+| 2026-08-23 | C-META-DATA / C-CABINET-MCP | meta table archive+rename; cabinet.tables.archive MCP | no |
+| 2026-08-23 | C-EMP-SHELL | CabinetTableSettingsPage + CabinetMetaViewEditPage | no |
 | 2026-08-23 | C-EMP-SHELL | Custom tabs UI (CabinetMetaTabsPage) + shell reload epoch | no |
 | 2026-08-23 | C-META-DATA | PATCH/DELETE views/tabs/columns; duplicate table slug 409 | no |
 | 2026-08-23 | C-EMP-SHELL | CabinetColumnAddPage for meta column mutate | no |
