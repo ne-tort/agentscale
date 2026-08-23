@@ -28,7 +28,6 @@ from prodavan.infrastructure.persistence.models.agent import AgentEventRow, Agen
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 from prodavan.infrastructure.persistence.models.identity import CompanyRow, EmployeeRow, MembershipRow
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
-from prodavan.infrastructure.projects.workspace import workspace_tree_bytes
 
 
 def _quota_public(quota: CompanyCabinetQuota) -> dict:
@@ -222,13 +221,21 @@ class AdminCompanyService:
         return max(times) if times else None
 
     async def _storage_bytes(self, company_id: str) -> int:
+        from prodavan.application.admin.storage_metrics import company_blob_storage_bytes
+
         keys_q = await self._session.execute(
             select(ProjectRow.workspace_key).where(
                 ProjectRow.company_id == company_id,
                 ProjectRow.status != ProjectStatus.DELETED,
             )
         )
-        return sum(workspace_tree_bytes(key) for key in keys_q.scalars().all())
+        cabinet_q = await self._session.execute(
+            select(CabinetInstanceRow.id).where(CabinetInstanceRow.company_id == company_id)
+        )
+        return company_blob_storage_bytes(
+            workspace_keys=list(keys_q.scalars().all()),
+            cabinet_ids=list(cabinet_q.scalars().all()),
+        )
 
     async def get_metrics(self, company_id: str) -> dict:
         company = await self._require_company(company_id)

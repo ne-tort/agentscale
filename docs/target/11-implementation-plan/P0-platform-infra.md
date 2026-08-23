@@ -44,9 +44,9 @@ Postgres и Keycloak/Vault роли не меняются.
 
 - Kafka consumer **ускоряет** Celery (`kick`/`dispatch`); PG outbox остаётся claim SoT; SPI fan-out не Kafka-only.
 - Package sandbox: hydrate-from-zip есть; **live mount** workspace из MinIO в pod — hole.
-- `workspace_tree_bytes` / admin storage metrics — через `prefix_size` (S3 без mirror OK); cabinet package blobs вне project prefix — hole.
+- `workspace_tree_bytes` / admin `storage_bytes` — project workspace + cabinet MCP packages via `prefix_size`; orphaned package keys after cabinet delete — hole.
 - Dual-write Kafka publish **после** PG commit (`core/events/deferred.py`); ghost envelopes при rollback сняты.
-- k8s sketches: PVC/NetworkPolicy/TLS/Helm ещё hole (minio-init Job есть).
+- k8s sketches: PVC for redis/minio/kafka; NetworkPolicy/TLS/Helm ещё hole.
 
 ## Волны реализации
 

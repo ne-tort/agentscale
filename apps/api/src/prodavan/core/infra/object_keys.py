@@ -28,6 +28,11 @@ def cabinet_package_object_key(*, cabinet_id: str, name: str, version: str) -> s
     return f"cabinet_packages/{cabinet_id}/{name}-{version}.zip"
 
 
+def cabinet_packages_prefix(cabinet_id: str) -> str:
+    """Prefix for all MCP package zips of one cabinet instance."""
+    return f"cabinet_packages/{cabinet_id}/"
+
+
 def parse_storage_ref(ref: str) -> str:
     """Map storage_ref → object key.
 

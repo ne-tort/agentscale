@@ -41,7 +41,8 @@
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
 | 2026-08-24 | C-EVENT-BUS | deferred Kafka publish after PG commit (no ghost on rollback) | no |
-| 2026-08-24 | C-OBJECT-STORE | `prefix_size` + admin `storage_bytes` via object store | no |
+| 2026-08-24 | C-OBJECT-STORE / L04 | admin storage_bytes includes cabinet package prefixes | no |
+| 2026-08-24 | P0 deploy | k8s PVC sketches for redis/minio/kafka | no |
 | 2026-08-24 | C-JOBS | Celery CLI import bootstrap; idle beat from `IDLE_PAUSE_WORKER_ENABLED` | no |
 | 2026-08-24 | C-CACHE | quota peek; no HMAC in Redis; subscription flags recompute on hit | no |
 | 2026-08-24 | C-OBJECT-STORE | `delete_prefix` + project tree wipe; k8s minio-init Job | no |

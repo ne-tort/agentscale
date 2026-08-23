@@ -16,6 +16,20 @@ stringData:
   root-password: CHANGE_ME
 ---
 apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prodavan-minio-data
+  labels:
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: minio
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
 kind: Service
 metadata:
   name: prodavan-minio
@@ -75,7 +89,8 @@ spec:
               mountPath: /data
       volumes:
         - name: data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: prodavan-minio-data
 ---
 # Parity with infra/docker-compose.stack.yml minio-init
 apiVersion: batch/v1

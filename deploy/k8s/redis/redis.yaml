@@ -1,6 +1,19 @@
 # Sketch — Redis for C-CACHE / Celery broker (P0).
-# Not production-hardened (no PVC sizing, NetworkPolicy, or auth). Align env with API:
-#   REDIS_URL=redis://prodavan-redis:6379/0
+# Align env with API: REDIS_URL=redis://prodavan-redis:6379/0
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prodavan-redis-data
+  labels:
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: redis
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
 ---
 apiVersion: v1
 kind: Service
@@ -41,8 +54,15 @@ spec:
           image: redis:7-alpine
           ports:
             - containerPort: 6379
+          volumeMounts:
+            - name: data
+              mountPath: /data
           readinessProbe:
             exec:
               command: ["redis-cli", "ping"]
             initialDelaySeconds: 2
             periodSeconds: 5
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: prodavan-redis-data
