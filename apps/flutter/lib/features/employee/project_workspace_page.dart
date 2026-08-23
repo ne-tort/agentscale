@@ -312,7 +312,9 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         }
       }
       setState(() {
-        _sessionId = result['session_id'] as String?;
+        final status = result['session_status'] as String?;
+        // Only keep sendable session; cancelled leftovers after pause must not be reused.
+        _sessionId = status == 'active' ? result['session_id'] as String? : null;
         _companySuspended = sub['subscription_expired'] == true;
         _projectPaused = (project['status'] as String?) == 'paused';
         _messages
@@ -332,6 +334,19 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         _error = e.toString();
         _loading = false;
       });
+    }
+  }
+
+  Future<void> _regenerateLast() async {
+    if (_sending || _chatBlocked) return;
+    for (var i = _messages.length - 1; i >= 0; i--) {
+      final msg = _messages[i];
+      if (msg.role != 'user') continue;
+      final text = msg.text.trim();
+      if (text.isEmpty || text == '(attachment)') return;
+      _composer.text = text;
+      await _send();
+      return;
     }
   }
 
@@ -737,6 +752,23 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                                           width: 12,
                                           height: 12,
                                           child: CircularProgressIndicator(strokeWidth: 2),
+                                        ),
+                                      ],
+                                      if (!isUser &&
+                                          !isTool &&
+                                          !isApproval &&
+                                          !msg.streaming &&
+                                          index == _messages.length - 1 &&
+                                          !_sending &&
+                                          !_chatBlocked) ...[
+                                        const SizedBox(width: 4),
+                                        IconButton(
+                                          visualDensity: VisualDensity.compact,
+                                          padding: EdgeInsets.zero,
+                                          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                                          tooltip: 'Regenerate',
+                                          icon: const Icon(Icons.refresh, size: 16),
+                                          onPressed: _regenerateLast,
                                         ),
                                       ],
                                     ],

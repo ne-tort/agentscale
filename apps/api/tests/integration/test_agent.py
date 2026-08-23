@@ -897,6 +897,18 @@ def test_agent_session_create_blocked_cancel_allowed_when_paused(client: TestCli
     transcript = client.get(f"/api/v1/projects/{project_id}/chat/transcript", headers=owner_h)
     assert transcript.status_code == 200, transcript.text
     assert transcript.json()["session_id"] == session_id
+    assert transcript.json().get("session_status") == "cancelled"
+
+    client.post(f"/api/v1/projects/{project_id}/resume", headers=owner_h)
+
+    # Stale cancelled session_id must not block chat after resume.
+    after = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "after resume", "session_id": session_id},
+    )
+    assert after.status_code == 200, after.text
+    assert after.json()["session_id"] != session_id
 
 
 @requires_postgres

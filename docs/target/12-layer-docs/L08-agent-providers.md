@@ -7,7 +7,7 @@
 | Quality note | Port+events+fixture+budget+SSE+HITL; Node sidecar — gap |
 | Plan | [L08](../11-implementation-plan/L08-agent-providers.md) |
 | Canon | [08-agent-providers](../08-agent-providers/) |
-| Last updated | 2026-08-24 — regenerate after cancelled session; lazy package imports |
+| Last updated | 2026-08-24 — ignore stale cancelled session_id on chat |
 | Owners | — |
 
 ---
@@ -32,14 +32,14 @@ AgentProviderPort + frozen AgentEvent; credentials только через L03 r
 | Trigger dispatch + drain (`?max=`) + regenerate/schedule/webhook/telegram + admin drain + opt-in worker (advisory lock + outbox lease); regenerate recovers text from cancelled sessions | External broker |
 | Chat text optional when attachment_refs present | |
 | `CompanySubscriptionGate` on session create/send → `COMPANY_SUSPENDED` | |
-| Pause: create_session / chat_turn blocked (`PROJECT_PAUSED`); cancel_session allowed; pause cancels ACTIVE; transcript falls back to latest cancelled | |
+| Pause: create_session / chat_turn blocked (`PROJECT_PAUSED`); cancel_session allowed; pause cancels ACTIVE; transcript falls back to latest cancelled + `session_status`; chat ignores stale cancelled session_id | |
 | Unit + integration tests | Golden JSON fixtures |
 
 ## Как сделано
 
 1. Domain `AgentEvent`, `CreateOpts`, `AgentToolPolicy` presets.
 2. `AgentPolicyService` — company preset + mcp.json ∩ policy.
-3. `AgentSessionService` — create/send/chat_turn/transcript; create uses write gate (blocks pause); cancel uses `allow_paused`; `AgentBudgetService` before turns.
+3. `AgentSessionService` — create/send/chat_turn/transcript; create uses write gate (blocks pause); cancel uses `allow_paused`; chat/SSE ignore non-ACTIVE `session_id` (stale after pause) and open a fresh session; transcript returns `session_status`; `AgentBudgetService` before turns.
 4. `AgentTriggerDispatcher` — dequeue trigger → session + send; regenerate falls back to latest/cancelled session text then opens a new ACTIVE session if needed; `drain_all` for worker/admin.
 5. HTTP `/projects/{id}/agent/sessions`, `/chat`, `/chat/transcript`, `/triggers/dispatch`; admin `/admin/triggers/drain`.
 6. Chat attachment refs validated against project DB before send (C-ATTACH).

@@ -7,7 +7,7 @@
 | Quality note | Dev shell + SSE chat + tab interpreters + bundle I/O + meta columns |
 | Plan | [L05](../11-implementation-plan/L05-employee-shell.md) |
 | Canon | [04-employees](../04-employees/), [session](../10-identity-keycloak/session.md) |
-| Last updated | 2026-08-24 — paused banner Resume in workspace |
+| Last updated | 2026-08-24 — regenerate button; ignore cancelled session on send |
 | Owners | — |
 
 ---
@@ -32,7 +32,7 @@
 | `ProjectListPage` — status chip (paused/active) + open workspace | |
 | `ProjectSettingsPage` — name + provider override + pause/resume + rematerialize + status chip | |
 | Import/export bundle UI + starter catalog import | |
-| `ProjectWorkspacePage` — SSE chat + transcript + attachment preview + inbox (delete while paused) + suspend/paused banners (Resume) + HITL + cancel | Real PDF renderer |
+| `ProjectWorkspacePage` — SSE chat + transcript + regenerate (last user text) + attachment preview + inbox (delete while paused) + suspend/paused banners (Resume) + HITL + cancel; ignores cancelled session_id after pause | Real PDF renderer |
 | Tables tab — row upsert/delete + DangerConfirm delete | |
 | Chat tab → `ProjectListPage` | |
 | Context tab — stats + export + AGENTS edit | |
@@ -50,7 +50,7 @@
 | Custom bundle views | live (subset) | collection tabs via `table_slug` |
 | Starter bundle import | live | catalog + shipped equipment-procurement zip |
 | HITL tool approval UI | live | `ToolApprovePage` on `tool_approval_request` |
-| Widget tests (status banner + Resume + image/text/PDF preview chips) | live (subset) | full workspace navigation E2E — hole |
+| Regenerate via `chat.regenerate` trigger from UI | hole | UI re-sends last user text over SSE; trigger path remains API/worker |
 
 ## Карта кода
 

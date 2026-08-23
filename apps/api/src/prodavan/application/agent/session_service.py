@@ -316,8 +316,9 @@ class AgentSessionService:
         """One-shot chat: reuse active session or create, then send (L05/L09)."""
         if employee is None:
             raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
-        sid = session_id or await self._resolve_active_session_id(
+        sid = await self._resolve_sendable_session_id(
             project_id=project_id,
+            session_id=session_id,
             principal=principal,
             employee=employee,
             model=model,
@@ -348,8 +349,9 @@ class AgentSessionService:
         """SSE event stream for L05 workspace — persists like send_message."""
         if employee is None:
             raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
-        sid = session_id or await self._resolve_active_session_id(
+        sid = await self._resolve_sendable_session_id(
             project_id=project_id,
+            session_id=session_id,
             principal=principal,
             employee=employee,
             model=model,
@@ -380,6 +382,34 @@ class AgentSessionService:
                 "pending_approvals": _pending_approvals_from_events(events),
             },
         }
+
+    async def _resolve_sendable_session_id(
+        self,
+        *,
+        project_id: str,
+        session_id: str | None,
+        principal: Principal,
+        employee: EmployeeRow,
+        model: str | None,
+    ) -> str:
+        """Use ACTIVE session_id if valid; ignore cancelled/closed leftovers from UI after pause."""
+        if session_id:
+            row = await self.get_session(session_id=session_id)
+            if row.project_id != project_id:
+                raise AppError(
+                    code="NOT_FOUND",
+                    title="Not Found",
+                    status=404,
+                    detail="Agent session not found",
+                )
+            if row.status == AgentSessionStatus.ACTIVE:
+                return row.id
+        return await self._resolve_active_session_id(
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            model=model,
+        )
 
     async def _resolve_active_session_id(
         self,
@@ -479,7 +509,12 @@ class AgentSessionService:
             employee=employee,
             limit=limit,
         )
-        return {"session_id": sid, "messages": events_to_transcript(events)}
+        row = await self.get_session(session_id=sid)
+        return {
+            "session_id": sid,
+            "session_status": row.status,
+            "messages": events_to_transcript(events),
+        }
 
     async def cancel_session(
         self,
