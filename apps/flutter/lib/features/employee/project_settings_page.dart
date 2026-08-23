@@ -7,6 +7,7 @@ import 'package:prodavan/core/widgets/app_form.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/features/employee/widgets/project_status_chip.dart';
 
 /// Project settings — name + preferred agent provider override (L07/L03).
 class ProjectSettingsPage extends StatefulWidget {
@@ -188,15 +189,11 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
                 if (_projectStatus != null)
                   ListTile(
                     contentPadding: EdgeInsets.zero,
-                    leading: Icon(
-                      _projectStatus == 'paused'
-                          ? Icons.pause_circle_filled
-                          : Icons.play_circle_outline,
-                    ),
-                    title: Text('Status: ${_projectStatus!}'),
-                    subtitle: _projectStatus == 'paused'
+                    leading: ProjectStatusChip(status: _projectStatus!),
+                    title: const Text('Project status'),
+                    subtitle: ProjectStatusChip.isPaused(_projectStatus)
                         ? const Text('Chat and uploads are disabled while paused')
-                        : null,
+                        : Text(_projectStatus!),
                   ),
                 AppForm(
                   formKey: _formKey,

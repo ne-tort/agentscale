@@ -6,6 +6,7 @@ import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/project_create_page.dart';
 import 'package:prodavan/features/employee/project_workspace_page.dart';
+import 'package:prodavan/features/employee/widgets/project_status_chip.dart';
 
 /// Projects tab — list + chat workspace (L05/L09).
 class ProjectListPage extends StatefulWidget {
@@ -75,11 +76,17 @@ class _ProjectListPageState extends State<ProjectListPage> {
   Widget build(BuildContext context) {
     final rows = _projects
         .map(
-          (p) => AppEntityRow(
-            id: p['id'] as String,
-            title: p['name'] as String? ?? p['id'] as String,
-            subtitle: p['status'] as String?,
-          ),
+          (p) {
+            final status = p['status'] as String? ?? 'active';
+            return AppEntityRow(
+              id: p['id'] as String,
+              title: p['name'] as String? ?? p['id'] as String,
+              subtitle: ProjectStatusChip.isPaused(status)
+                  ? 'Paused — chat and uploads disabled'
+                  : status,
+              trailing: ProjectStatusChip(status: status),
+            );
+          },
         )
         .toList();
 

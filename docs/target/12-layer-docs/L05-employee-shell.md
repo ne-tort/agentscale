@@ -7,7 +7,7 @@
 | Quality note | Dev shell + SSE chat + tab interpreters + bundle I/O + meta columns |
 | Plan | [L05](../11-implementation-plan/L05-employee-shell.md) |
 | Canon | [04-employees](../04-employees/), [session](../10-identity-keycloak/session.md) |
-| Last updated | 2026-08-23 — text/JSON preview + PDF stub viewer |
+| Last updated | 2026-08-24 — project status chip in list + settings |
 | Owners | — |
 
 ---
@@ -29,7 +29,8 @@
 | `CabinetCreatePage` full-page (no modal) | Custom bundle tab views (non-collection) |
 | `CabinetRowEditPage` full-page row edit | |
 | `ProjectCreatePage` full-page (no modal) + agent provider | |
-| `ProjectSettingsPage` — name + provider override + pause/resume + rematerialize | |
+| `ProjectListPage` — status chip (paused/active) + open workspace | |
+| `ProjectSettingsPage` — name + provider override + pause/resume + rematerialize + status chip | |
 | Import/export bundle UI + starter catalog import | |
 | ProjectWorkspacePage — SSE chat + transcript + attachment preview (image/text/JSON + PDF stub) + inbox + suspend/paused banners + HITL + cancel | Real PDF renderer |
 | Tables tab — row upsert/delete + DangerConfirm delete | |
@@ -64,6 +65,7 @@ apps/flutter/lib/features/employee/
   project_settings_page.dart
   project_list_page.dart
   project_workspace_page.dart
+  widgets/project_status_chip.dart
   widgets/attachment_preview_kinds.dart
   widgets/attachment_preview_chip.dart
   widgets/attachment_image_viewer.dart

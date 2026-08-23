@@ -221,7 +221,31 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
       setState(() => _drainingTriggers = false);
       final count = result['count'] ?? 0;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Idle-paused $count project(s)')),
+        SnackBar(content: Text('Idle-paused $count project(s) in this company')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _drainingTriggers = false;
+      });
+    }
+  }
+
+  Future<void> _sweepIdlePauseAll() async {
+    setState(() {
+      _drainingTriggers = true;
+      _error = null;
+    });
+    try {
+      final result = await adminContext.api.sweepIdlePause();
+      await _load();
+      if (!mounted) return;
+      setState(() => _drainingTriggers = false);
+      final count = result['count'] ?? 0;
+      final companies = (result['companies'] is List) ? (result['companies'] as List).length : 0;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Platform idle sweep: $count project(s) ($companies companies with policy)')),
       );
     } catch (e) {
       if (!mounted) return;
@@ -398,6 +422,13 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                   label: _drainingTriggers ? 'Sweeping…' : 'Sweep idle pause',
                   expanded: false,
                   onPressed: _drainingTriggers ? null : _sweepIdlePause,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                AppButton(
+                  label: _drainingTriggers ? 'Sweeping…' : 'Sweep idle pause (all companies)',
+                  expanded: false,
+                  variant: AppButtonVariant.outlined,
+                  onPressed: _drainingTriggers ? null : _sweepIdlePauseAll,
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 if (_platformEvents.isEmpty)

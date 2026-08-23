@@ -9,6 +9,7 @@ import 'package:prodavan/features/employee/widgets/attachment_image_viewer.dart'
 import 'package:prodavan/features/employee/widgets/attachment_preview_chip.dart';
 import 'package:prodavan/features/employee/widgets/attachment_preview_kinds.dart';
 import 'package:prodavan/features/employee/widgets/project_status_banner.dart';
+import 'package:prodavan/features/employee/widgets/project_status_chip.dart';
 
 Widget themed(Widget child) {
   return MaterialApp(theme: AppTheme.light, home: Scaffold(body: child));
@@ -32,6 +33,18 @@ void main() {
     expect(attachmentCanPreview('application/pdf'), isTrue);
     expect(attachmentCanPreview('application/zip'), isFalse);
     expect(attachmentIsTextContentType('text/csv'), isTrue);
+  });
+
+  testWidgets('project status chip marks paused', (tester) async {
+    await tester.pumpWidget(themed(const ProjectStatusChip(status: 'paused')));
+    expect(find.text('paused'), findsOneWidget);
+    expect(ProjectStatusChip.isPaused('paused'), isTrue);
+    expect(ProjectStatusChip.isPaused('active'), isFalse);
+  });
+
+  testWidgets('project status chip marks active', (tester) async {
+    await tester.pumpWidget(themed(const ProjectStatusChip(status: 'active')));
+    expect(find.text('active'), findsOneWidget);
   });
 
   testWidgets('project paused banner renders', (tester) async {

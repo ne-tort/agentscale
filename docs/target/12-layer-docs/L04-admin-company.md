@@ -7,7 +7,7 @@
 | Quality note | Admin shell + starter catalog + subscription alerts |
 | Plan | [L04](../11-implementation-plan/L04-admin-company.md) |
 | Canon | [01-platform-admin](../01-platform-admin/), [03-companies](../03-companies/) |
-| Last updated | 2026-08-23 — idle_pause_after_hours policy + sweep |
+| Last updated | 2026-08-24 — platform-wide idle sweep button |
 | Owners | — |
 
 ---
@@ -32,7 +32,7 @@ Platform Admin — компании, keys (L03), квоты/policy, metrics read
 | Metrics: `subscription_ends_at`, expiring/expired flags | |
 | Starter bundle catalog API (`GET /admin/starter-bundles`) | |
 | AdminStarterBundlesPage read-only catalog tab | |
-| Company detail: platform events list + drain triggers + idle sweep | |
+| Company detail: platform events list + drain triggers + company/platform idle sweep | |
 
 ## Карта кода
 

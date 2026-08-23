@@ -1058,3 +1058,56 @@ def test_e2e_text_json_attachment_content_types(client: TestClient) -> None:
     assert js_body.status_code == 200
     assert js_body.content == payload
     assert js_body.headers["content-type"].startswith("application/json")
+
+
+@requires_postgres
+def test_e2e_platform_idle_pause_sweep_all(client: TestClient) -> None:
+    """L04→L07→L09: POST /admin/triggers/idle-pause/sweep across companies."""
+    admin_h = {"Authorization": f"Bearer {_token(sub='e2e-idle-all-admin', platform_admin=True)}"}
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "E2EIdleAllCo", "admin_email": "owner@e2eidleall.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    policy = client.put(
+        f"/api/v1/admin/companies/{company_id}/agent-policy",
+        headers=admin_h,
+        json={"tool_preset": "workspace_dev", "idle_pause_after_hours": 12},
+    )
+    assert policy.status_code == 200, policy.text
+
+    owner_h = {
+        "Authorization": f"Bearer {_token(sub='e2e-idle-all-owner', email='owner@e2eidleall.test')}"
+    }
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "E2EIdleAllCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "E2EIdleAllProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    sql_backdate_project(project_id, datetime.now(UTC) - timedelta(hours=48))
+
+    swept = client.post("/api/v1/admin/triggers/idle-pause/sweep", headers=admin_h)
+    assert swept.status_code == 200, swept.text
+    body = swept.json()
+    assert body["count"] >= 1
+    assert any(
+        c.get("company_id") == company_id and c.get("count", 0) >= 1 for c in body["companies"]
+    )
+
+    got = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
+    assert got.status_code == 200
+    assert got.json()["status"] == "paused"

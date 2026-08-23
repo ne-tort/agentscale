@@ -6,7 +6,7 @@
 | Quality | 7 |
 | Quality note | API E2E incl. pause/rematerialize/idle; Flutter thumbnails + widget subset; full Widget E2E — gap |
 | Plan | [L09](../11-implementation-plan/L09-vertical-integration.md) |
-| Last updated | 2026-08-23 — text/json attachment content E2E + preview widgets |
+| Last updated | 2026-08-24 — platform idle sweep E2E + ops cron hooks |
 | Owners | — |
 
 ---
@@ -46,6 +46,7 @@
 | Idle pause sweep E2E (policy + admin sweep) | |
 | Attachment content download E2E (incl. read while paused) | |
 | Text/JSON attachment content-type + download E2E | |
+| Platform idle-pause sweep-all E2E | |
 
 ## Карта кода
 
@@ -57,6 +58,7 @@ apps/flutter/test/employee_widgets_test.dart
 apps/api/src/prodavan/application/admin/company_service.py (metrics)
 apps/api/src/prodavan/api/v1/admin_metrics.py
 tools/release_gate_check.py
+docs/target/12-layer-docs/ops-cron-hooks.md
 .github/workflows/{ci-api,ci-nightly}.yml
 ```
 
@@ -67,7 +69,7 @@ tools/release_gate_check.py
 | CI nightly | live | `.github/workflows/ci-nightly.yml` |
 | Release gate checklist automation | live (subset) | `tools/release_gate_check.py` in ci-api |
 | Widget E2E | hole (subset) | `employee_widgets_test.dart` — banner + chip; no full shell navigation |
-| Idle pause policy | live (subset) | policy + admin sweep + opt-in `IDLE_PAUSE_WORKER_ENABLED` |
+| Idle pause policy | live (subset) | policy + company/platform admin sweep + opt-in worker; ops curl in `ops-cron-hooks.md` |
 | Rematerialize after MCP deploy | live | deploy/disable returns `rematerialized`; Flutter settings button |
 
 ## Quality | **7** | doing — vertical E2E + Flutter viewer widgets; full shell Widget E2E remains hole |
