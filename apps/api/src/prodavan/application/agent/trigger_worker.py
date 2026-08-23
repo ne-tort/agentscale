@@ -1,10 +1,12 @@
 """Opt-in background drain of project triggers (L07/L08).
 
-Not a durable queue worker — asyncio loop in API process. Enable via
-TRIGGER_WORKER_ENABLED=true. Prefer admin POST /admin/triggers/drain in CI.
+Enable via TRIGGER_WORKER_ENABLED=true. Prefer admin POST /admin/triggers/drain in CI.
 
-Multi-replica safety: pg_try_advisory_lock so only one API process drains
-at a time (still not a durable outbox — hole documented in L07).
+Safety layers:
+- process advisory lock (pg_try_advisory_lock) so one API process drains at a time
+- row-level outbox lease + SKIP LOCKED on claim (crash → lease expires → re-claim)
+
+Still not a separate durable broker (Kafka/SQS) — hole noted in L07 as outbox-lite.
 """
 
 from __future__ import annotations
@@ -44,10 +46,11 @@ async def drain_once() -> dict:
 async def _loop(stop: asyncio.Event) -> None:
     interval = max(1.0, float(settings.trigger_worker_interval_sec))
     logger.info(
-        "trigger worker started interval=%ss max_projects=%s batch=%s",
+        "trigger worker started interval=%ss max_projects=%s batch=%s lease=%ss",
         interval,
         settings.trigger_worker_max_projects,
         settings.trigger_worker_batch_max,
+        settings.trigger_outbox_lease_sec,
     )
     while not stop.is_set():
         try:

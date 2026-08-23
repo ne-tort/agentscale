@@ -36,6 +36,7 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-23 | C-TRIGGERS / C-ATTACH | outbox-lite lease on project_triggers; Flutter inbox list/delete | no |
 | 2026-08-23 | C-ADMIN-SUBSCRIPTION / C-PLATFORM-EVENTS | lazy natural-expiry company.suspended via subscription gate | no |
 | 2026-08-23 | C-PROJECT / C-ATTACH / C-TRIGGERS | company_subscription on project GET; attachment gate; drain fail queued on suspend | no |
 | 2026-08-23 | C-CABINET-MCP / C-PROJECT | MCP_PLATFORM_EVENT_INVOKE zip handler; project create COMPANY_SUSPENDED gate | no |

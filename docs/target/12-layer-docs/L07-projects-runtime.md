@@ -7,7 +7,7 @@
 | Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain/worker; k8s isolator — gap |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-23 — company_subscription on project + attachment/trigger suspend |
+| Last updated | 2026-08-23 — trigger outbox lease + Flutter inbox list |
 | Owners | — |
 
 ---
@@ -24,7 +24,8 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 | CRUD: create/list/get/PATCH (name, agent_provider); pause/resume/delete | |
 | Materialize: AGENTS from cabinet workspace-docs + packages/sandbox | bubblewrap/k8s isolator |
 | `container_ref=local-ws:{workspace_key}` | |
-| Triggers: enqueue + list + dispatch + signed webhook/telegram ingress + admin drain + worker | Durable outbox |
+| Triggers: enqueue + list + dispatch + signed webhook/telegram ingress + admin drain + worker | External broker (Kafka/SQS) |
+| Outbox-lite: `attempts` / `lease_until` / `available_at` / `last_error` + SKIP LOCKED claim | |
 | Platform events bus + cabinet SPI deliver (audit) | MCP stdio handler protocol; bubblewrap |
 | Attachments: upload/list/delete + ref validation; size/type/magic policy | Full AV; image thumbnails |
 | Integration tests lifecycle + FS layout + provider patch + admin drain | E2E with agent ping |
@@ -36,12 +37,13 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 3. `WorkspaceLayoutWriter` — container.md layout; extracts enabled package zips.
 4. HTTP: `/cabinets/{id}/projects`, `/projects/{id}/*` per project-contract; `POST /admin/triggers/drain`.
 5. L06 `materialize-stub` → real FS (status `materialized`).
-6. Opt-in trigger worker (`TRIGGER_WORKER_ENABLED`) — in-process asyncio + `pg_try_advisory_lock`; hole: not durable outbox.
+6. Opt-in trigger worker (`TRIGGER_WORKER_ENABLED`) — in-process asyncio + `pg_try_advisory_lock` + row lease/SKIP LOCKED; hole: no external broker.
 7. `PlatformEventService` — subscription transitions + SPI fan-out. Package `platform_events` + opt-in `MCP_PLATFORM_EVENT_INVOKE` runs `src/on_platform_event.py` from zip; MCP stdio — hole.
-8. `ProjectTriggerService.enqueue` + drain — `COMPANY_SUSPENDED` for runtime kinds; `project.prepare` exempt; queued triggers → `failed` on drain.
+8. `ProjectTriggerService.enqueue` + drain — `COMPANY_SUSPENDED` for runtime kinds; `project.prepare` exempt; queued triggers → `failed` on drain; dispatch errors → retry with backoff until max attempts.
 9. Project GET/list includes `company_subscription` read model (L04 → L05).
-9. Signed webhook ingress `POST .../webhooks/http` with company `webhook_hmac_secret` (not returned in GET; `webhook_hmac_configured` flag).
-10. Signed telegram ingress `POST .../webhooks/telegram` with company `telegram_hmac_secret` (`telegram_hmac_configured` flag).
+10. Signed webhook ingress `POST .../webhooks/http` with company `webhook_hmac_secret` (not returned in GET; `webhook_hmac_configured` flag).
+11. Signed telegram ingress `POST .../webhooks/telegram` with company `telegram_hmac_secret` (`telegram_hmac_configured` flag).
+12. Trigger outbox lease columns (migration `2026082315`) — claim increments `attempts`, sets `lease_until`; crash → lease expiry → re-claim.
 
 ## Контракты
 
@@ -51,7 +53,7 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 |----|-------|--------|
 | C-PROJECT | entity + lifecycle API | **live** (subset) |
 | C-MATERIALIZE | FS layout + paths | **live** (local-ws; no pod) |
-| C-TRIGGERS | enqueue + list + dispatch/drain + admin drain + opt-in worker | **live** (subset; in-process worker) |
+| C-TRIGGERS | enqueue + list + dispatch/drain + admin drain + opt-in worker + outbox lease | **live** (subset; outbox-lite) |
 | C-ATTACH | upload + list + storage_ref validation on chat | **live** (subset) |
 
 ### Потребляет
@@ -83,8 +85,10 @@ apps/api/src/prodavan/
   api/v1/projects.py
 apps/api/alembic/versions/2026082306_projects.py
 apps/api/alembic/versions/2026082312_platform_events.py
+apps/api/alembic/versions/2026082315_trigger_outbox_lease.py
 apps/api/tests/integration/test_projects.py
 apps/api/tests/unit/test_projects_domain.py
+apps/api/tests/unit/test_trigger_outbox.py
 ```
 
 ## Gaps vs канон / DoD
@@ -94,13 +98,13 @@ apps/api/tests/unit/test_projects_domain.py
 | Project CRUD in cabinet | done | |
 | Materialize layout | done | AGENTS from `meta_workspace_docs` (slug=agents); empty → default |
 | Pause/resume/delete | done | local-ws only |
-| Trigger dispatch to agent | done | chat.message + chat.regenerate; schedule/webhook ack or run-if-text; advisory lock on worker |
+| Trigger dispatch to agent | done | chat.message + chat.regenerate; schedule/webhook ack or run-if-text; advisory lock + row lease |
 | MCP package sandbox run | live (subset) | prepare + opt-in local spawn (`MCP_SANDBOX_SPAWN`); k8s/bubblewrap — hole |
 | Platform vs project event bus split | live (subset) | fan-out; zip handler invoke opt-in; MCP stdio — hole |
 | Attachment refs scoped to project | done | normalize id/storage_ref before agent send |
 | Attachment virus/size policy | live (subset) | max_attachment_mb + extension + magic sniff; AV — hole |
 | Project preferred_provider | done | `agent_provider` create/PATCH; resolve uses project override |
-| Attachment preview in chat UI | live (subset) | chips by filename; no image thumbnails |
+| Attachment preview in chat UI | live (subset) | chips + inbox ExpansionTile list/delete; no image thumbnails |
 | telegram.message trigger | done | dispatch like chat.message; HMAC ingress like webhook |
 | Webhook HMAC ingress | done | company policy secret + X-Prodavan-Signature |
 | Attachment DELETE | done | DB + inbox file; Flutter pending remove calls DELETE |
@@ -119,4 +123,4 @@ cd apps/api && ruff check src tests && pytest tests/unit/test_projects_domain.py
 | B. Контракты | 2 | C-PROJECT/MATERIALIZE/TRIGGERS live subset |
 | C. Инварианты и проверки | 1 | ACL + lifecycle + patch/drain tests |
 | D. As-built ясность | 2 | эта карточка |
-| **Quality (итог)** | **7** | doing; k8s isolator + durable outbox gaps |
+| **Quality (итог)** | **7** | doing; k8s isolator + external broker gaps |

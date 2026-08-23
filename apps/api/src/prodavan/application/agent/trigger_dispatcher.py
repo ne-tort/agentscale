@@ -8,9 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.application.agent.session_service import AgentSessionService
 from prodavan.application.projects.access import ProjectAccessService
+from prodavan.application.projects.trigger_service import ProjectTriggerService
 from prodavan.domain.agent import PLATFORM_EVENT_USER_MESSAGE, AgentSessionStatus
 from prodavan.domain.identity import Principal
-from prodavan.domain.projects import TriggerStatus
 from prodavan.domain.projects.types import SUBSCRIPTION_EXEMPT_TRIGGER_KINDS
 from prodavan.infrastructure.persistence.models.agent import AgentEventRow, AgentSessionRow
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
@@ -29,6 +29,7 @@ class AgentTriggerDispatcher:
         self._sessions = AgentSessionService(session)
         self._projects = ProjectAccessService(session)
         self._subscription = CompanySubscriptionGate(session)
+        self._triggers = ProjectTriggerService(session)
 
     async def dispatch_next(
         self,
@@ -61,13 +62,19 @@ class AgentTriggerDispatcher:
                 project_id=project_id, principal=principal, employee=employee
             )
             if not one.get("dispatched"):
-                if not results and one.get("reason") == "no queued triggers":
-                    return {"dispatched": False, "reason": "no queued triggers", "items": []}
-                break
+                if one.get("reason") == "no queued triggers":
+                    if not results:
+                        return {"dispatched": False, "reason": "no queued triggers", "items": []}
+                    break
+                results.append(one)
+                # Whole project blocked — stop draining this project.
+                if one.get("reason") == "company_suspended":
+                    break
+                continue
             results.append(one)
         return {
-            "dispatched": bool(results),
-            "count": len(results),
+            "dispatched": any(r.get("dispatched") for r in results),
+            "count": sum(1 for r in results if r.get("dispatched")),
             "items": results,
         }
 
@@ -78,13 +85,9 @@ class AgentTriggerDispatcher:
         max_per_project: int = _DEFAULT_DRAIN_MAX,
     ) -> dict:
         """Drain queued triggers across active projects (background worker / admin)."""
-        from prodavan.application.projects.trigger_service import ProjectTriggerService
-
         limit_projects = max(1, min(max_projects, 100))
         limit_each = max_per_project if 1 <= max_per_project <= _HARD_DRAIN_MAX else _DEFAULT_DRAIN_MAX
-        project_ids = await ProjectTriggerService(self._session).list_active_project_ids_with_queued(
-            limit=limit_projects
-        )
+        project_ids = await self._triggers.list_active_project_ids_with_queued(limit=limit_projects)
         projects: list[dict] = []
         total = 0
         for project_id in project_ids:
@@ -188,6 +191,33 @@ class AgentTriggerDispatcher:
             employee=employee,
         )
 
+    async def _finish_ok(self, trigger: ProjectTriggerRow, result: dict) -> dict:
+        await self._triggers.mark_done(trigger)
+        await self._session.commit()
+        return {"dispatched": True, "trigger_id": trigger.id, "kind": trigger.kind, **result}
+
+    async def _finish_hard_fail(self, trigger: ProjectTriggerRow, reason: str) -> dict:
+        await self._triggers.mark_failed(trigger, reason=reason)
+        await self._session.commit()
+        return {
+            "dispatched": False,
+            "trigger_id": trigger.id,
+            "kind": trigger.kind,
+            "reason": reason,
+        }
+
+    async def _finish_soft_or_hard(self, trigger: ProjectTriggerRow, reason: str) -> dict:
+        retried = await self._triggers.release_for_retry(trigger, reason=reason)
+        await self._session.commit()
+        return {
+            "dispatched": False,
+            "trigger_id": trigger.id,
+            "kind": trigger.kind,
+            "reason": reason,
+            "retried": retried,
+            "attempts": trigger.attempts,
+        }
+
     async def _dispatch_one(
         self,
         *,
@@ -195,16 +225,10 @@ class AgentTriggerDispatcher:
         principal: Principal,
         employee: EmployeeRow | None,
     ) -> dict:
-        q = await self._session.execute(
-            select(ProjectTriggerRow)
-            .where(
-                ProjectTriggerRow.project_id == project_id,
-                ProjectTriggerRow.status == TriggerStatus.QUEUED,
-            )
-            .order_by(ProjectTriggerRow.created_at)
-            .limit(1)
+        trigger = await self._triggers.claim_next(
+            project_id=project_id,
+            worker_id=f"disp_{principal.sub[:24]}",
         )
-        trigger = q.scalar_one_or_none()
         if trigger is None:
             return {"dispatched": False, "reason": "no queued triggers"}
 
@@ -212,67 +236,13 @@ class AgentTriggerDispatcher:
             project = await self._projects.get_project(project_id)
             state = await self._subscription.subscription_state(project.company_id)
             if state.get("subscription_expired"):
-                trigger.status = TriggerStatus.FAILED
-                await self._session.commit()
-                return {
-                    "dispatched": False,
-                    "trigger_id": trigger.id,
-                    "kind": trigger.kind,
-                    "reason": "company_suspended",
-                }
+                return await self._finish_hard_fail(trigger, "company_suspended")
 
         payload = trigger.payload or {}
 
-        if trigger.kind in {"chat.message", "telegram.message"}:
-            text = str(payload.get("text") or "")
-            refs = payload.get("attachment_refs") or []
-            result = await self._run_chat_turn(
-                project_id=project_id,
-                principal=principal,
-                employee=employee,
-                text=text,
-                attachment_refs=list(refs) if isinstance(refs, list) else [],
-            )
-            trigger.status = TriggerStatus.DONE
-            await self._session.commit()
-            return {"dispatched": True, "trigger_id": trigger.id, "kind": trigger.kind, "run": result}
-
-        if trigger.kind == "chat.regenerate":
-            session_id = payload.get("session_id")
-            session_id = str(session_id) if session_id else None
-            text = str(payload.get("text") or "").strip()
-            refs = payload.get("attachment_refs") or []
-            if not text:
-                last_text, last_refs = await self._last_user_turn(
-                    project_id=project_id, session_id=session_id
-                )
-                text = (last_text or "").strip()
-                if not refs and last_refs:
-                    refs = last_refs
-            if not text:
-                trigger.status = TriggerStatus.FAILED
-                await self._session.commit()
-                return {
-                    "dispatched": False,
-                    "trigger_id": trigger.id,
-                    "reason": "nothing to regenerate",
-                }
-            result = await self._run_chat_turn(
-                project_id=project_id,
-                principal=principal,
-                employee=employee,
-                text=text,
-                attachment_refs=list(refs) if isinstance(refs, list) else [],
-                session_id=session_id,
-            )
-            trigger.status = TriggerStatus.DONE
-            await self._session.commit()
-            return {"dispatched": True, "trigger_id": trigger.id, "run": result}
-
-        if trigger.kind in _ACK_ONLY_KINDS:
-            # schedule/webhook may carry text to kick agent; otherwise ack-only.
-            text = str(payload.get("text") or "").strip()
-            if text:
+        try:
+            if trigger.kind in {"chat.message", "telegram.message"}:
+                text = str(payload.get("text") or "")
                 refs = payload.get("attachment_refs") or []
                 result = await self._run_chat_turn(
                     project_id=project_id,
@@ -281,22 +251,48 @@ class AgentTriggerDispatcher:
                     text=text,
                     attachment_refs=list(refs) if isinstance(refs, list) else [],
                 )
-                trigger.status = TriggerStatus.DONE
-                await self._session.commit()
-                return {
-                    "dispatched": True,
-                    "trigger_id": trigger.id,
-                    "action": f"run_{trigger.kind}",
-                    "run": result,
-                }
-            trigger.status = TriggerStatus.DONE
-            await self._session.commit()
-            return {
-                "dispatched": True,
-                "trigger_id": trigger.id,
-                "action": f"ack_{trigger.kind}",
-            }
+                return await self._finish_ok(trigger, {"run": result})
 
-        trigger.status = TriggerStatus.FAILED
-        await self._session.commit()
-        return {"dispatched": False, "trigger_id": trigger.id, "reason": f"unsupported kind {trigger.kind}"}
+            if trigger.kind == "chat.regenerate":
+                session_id = payload.get("session_id")
+                session_id = str(session_id) if session_id else None
+                text = str(payload.get("text") or "").strip()
+                refs = payload.get("attachment_refs") or []
+                if not text:
+                    last_text, last_refs = await self._last_user_turn(
+                        project_id=project_id, session_id=session_id
+                    )
+                    text = (last_text or "").strip()
+                    if not refs and last_refs:
+                        refs = last_refs
+                if not text:
+                    return await self._finish_hard_fail(trigger, "nothing to regenerate")
+                result = await self._run_chat_turn(
+                    project_id=project_id,
+                    principal=principal,
+                    employee=employee,
+                    text=text,
+                    attachment_refs=list(refs) if isinstance(refs, list) else [],
+                    session_id=session_id,
+                )
+                return await self._finish_ok(trigger, {"run": result})
+
+            if trigger.kind in _ACK_ONLY_KINDS:
+                text = str(payload.get("text") or "").strip()
+                if text:
+                    refs = payload.get("attachment_refs") or []
+                    result = await self._run_chat_turn(
+                        project_id=project_id,
+                        principal=principal,
+                        employee=employee,
+                        text=text,
+                        attachment_refs=list(refs) if isinstance(refs, list) else [],
+                    )
+                    return await self._finish_ok(
+                        trigger, {"action": f"run_{trigger.kind}", "run": result}
+                    )
+                return await self._finish_ok(trigger, {"action": f"ack_{trigger.kind}"})
+
+            return await self._finish_hard_fail(trigger, f"unsupported kind {trigger.kind}")
+        except Exception as exc:  # noqa: BLE001 — outbox must not leave lease stuck forever
+            return await self._finish_soft_or_hard(trigger, f"dispatch_error: {exc}")

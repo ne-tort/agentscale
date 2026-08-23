@@ -62,6 +62,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   final _scroll = ScrollController();
   final _messages = <_ChatLine>[];
   final _pendingAttachments = <_PendingAttachment>[];
+  final _inboxAttachments = <Map<String, dynamic>>[];
   String? _sessionId;
   late String _projectName;
   bool _loading = true;
@@ -120,6 +121,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       setState(() {
         _pendingAttachments.add(_PendingAttachment(id: id, ref: ref, filename: filename));
       });
+      await _loadInbox();
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());
@@ -135,6 +137,41 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         projectId: widget.projectId,
         attachmentId: item.id,
       );
+      await _loadInbox();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.toString());
+    }
+  }
+
+  Future<void> _deleteInboxAttachment(Map<String, dynamic> item) async {
+    final id = item['id'] as String?;
+    if (id == null || id.isEmpty) return;
+    setState(() {
+      _inboxAttachments.removeWhere((a) => a['id'] == id);
+      _pendingAttachments.removeWhere((a) => a.id == id);
+    });
+    try {
+      await workContext.api.deleteProjectAttachment(
+        projectId: widget.projectId,
+        attachmentId: id,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _error = e.toString());
+      await _loadInbox();
+    }
+  }
+
+  Future<void> _loadInbox() async {
+    try {
+      final items = await workContext.api.listProjectAttachments(widget.projectId);
+      if (!mounted) return;
+      setState(() {
+        _inboxAttachments
+          ..clear()
+          ..addAll(items);
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _error = e.toString());
@@ -193,6 +230,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         _loading = false;
       });
       _scrollToEnd();
+      await _loadInbox();
       await _openPendingApprovalsIfAny();
     } catch (e) {
       if (!mounted) return;
@@ -454,6 +492,33 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
               actions: const [SizedBox.shrink()],
             ),
           if (_error != null) InlineErrorBanner(message: _error!),
+          if (_inboxAttachments.isNotEmpty)
+            ExpansionTile(
+              initiallyExpanded: false,
+              title: Text('Inbox (${_inboxAttachments.length})'),
+              leading: const Icon(Icons.folder_open_outlined, size: 20),
+              children: [
+                for (final item in _inboxAttachments)
+                  ListTile(
+                    dense: true,
+                    title: Text(
+                      (item['filename'] as String?) ?? 'file',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      '${item['size_bytes'] ?? '?'} B',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 20),
+                      tooltip: 'Delete',
+                      onPressed: _sending || _companySuspended
+                          ? null
+                          : () => _deleteInboxAttachment(item),
+                    ),
+                  ),
+              ],
+            ),
           Expanded(
             child: _loading
                 ? const Center(child: CircularProgressIndicator())

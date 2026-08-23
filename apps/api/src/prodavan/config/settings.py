@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     trigger_worker_interval_sec: float = 5.0
     trigger_worker_max_projects: int = 20
     trigger_worker_batch_max: int = 10
+    # Row-level outbox lease (crash recovery without external broker)
+    trigger_outbox_lease_sec: int = 120
+    trigger_outbox_max_attempts: int = 5
+    trigger_outbox_backoff_sec: float = 5.0
 
     @property
     def cors_origin_list(self) -> list[str]:
