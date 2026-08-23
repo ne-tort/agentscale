@@ -14,6 +14,7 @@ from prodavan.application.agent.budget_service import AgentBudgetService
 from prodavan.application.agent.policy_service import AgentPolicyService
 from prodavan.application.ai_keys.service import AiKeysService
 from prodavan.application.projects.access import ProjectAccessService
+from prodavan.application.projects.attachment_service import ProjectAttachmentService
 from prodavan.domain.agent import (
     PLATFORM_EVENT_TOOL_APPROVAL_DECISION,
     PLATFORM_EVENT_USER_MESSAGE,
@@ -238,7 +239,11 @@ class AgentSessionService:
 
         adapter = get_agent_adapter(api_kind=row.api_kind)
         handle = AgentHandle(id=row.vendor_agent_id, provider=row.provider, cwd=row.cwd, model=row.model)
-        refs = tuple(attachment_refs or ())
+        normalized_refs = await ProjectAttachmentService(self._session).normalize_refs(
+            project_id=project_id,
+            refs=list(attachment_refs or ()),
+        )
+        refs = tuple(normalized_refs)
         message = ChatMessage(text=text, attachment_refs=refs)
 
         seq_q = await self._session.execute(

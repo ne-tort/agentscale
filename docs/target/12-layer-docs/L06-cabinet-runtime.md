@@ -7,7 +7,7 @@
 | Quality note | API Runtime: instance+meta+rows+MCP+bundle+packages; UI interpreters L05; sandbox start L07; L04 quotas soft stub |
 | Plan | [L06](../11-implementation-plan/L06-cabinet-runtime.md) |
 | Canon | [05-cabinets](../05-cabinets/) |
-| Last updated | 2026-08-23 ? MCP packages |
+| Last updated | 2026-08-23 — L07 materialize consumer |
 | Owners | ? |
 
 ---
@@ -29,7 +29,7 @@ CabinetInstance: schema-per-instance, meta?UI, cabinet.*, MCP packages, bundles.
 | Bundle v1 export/import ? new schema (+ packages) | |
 | MCP packages validate/deploy/list/disable/export | sandbox process start (L07 materialize) |
 | Soft max 20 packages/cabinet | Company quotas (L04) ? wired via CompanyQuotaService |
-| Materialize stub port | Real FS layout (L07) |
+| Materialize via L07 project runtime | Real FS layout wired from L07 materialize |
 
 ## ??? ???????
 
@@ -49,7 +49,7 @@ CabinetInstance: schema-per-instance, meta?UI, cabinet.*, MCP packages, bundles.
 | C-CABINET-MCP | dispatcher | **live** (subset) |
 | C-BUNDLE | export/import v1 | **live** |
 | C-MCP-PKG | deploy/list/disable/export | **live** (registry; no sandbox run) |
-| C-MATERIALIZE | stub port | **live** (stub) |
+| C-MATERIALIZE | consumed from L07 | **live** (L07 local-ws) |
 
 ## Gaps vs ????? / DoD
 

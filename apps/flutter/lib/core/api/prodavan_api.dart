@@ -696,6 +696,23 @@ class ProdavanApi {
     }
   }
 
+  Future<List<Map<String, dynamic>>> listProjectAttachments(String projectId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await http.get(_uri('/projects/$projectId/attachments'), headers: _headers);
+      _throwIfError(res);
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final items = body['items'];
+      if (items is List) {
+        return items.cast<Map<String, dynamic>>();
+      }
+      return const [];
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
   Future<Map<String, dynamic>> uploadProjectAttachment({
     required String projectId,
     required String filename,

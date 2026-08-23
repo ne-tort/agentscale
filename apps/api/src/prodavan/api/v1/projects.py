@@ -193,6 +193,19 @@ async def list_triggers(
     return {"items": items}
 
 
+@router.get("/projects/{project_id}/attachments")
+async def list_attachments(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    items = await ProjectAttachmentService(session).list_for_project(
+        project_id=project_id, principal=principal, employee=employee
+    )
+    return {"items": items}
+
+
 @router.post("/projects/{project_id}/attachments", status_code=201)
 async def upload_attachment(
     project_id: str,

@@ -36,6 +36,7 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-23 | C-ATTACH / C-PROJECT-CHAT | list attachments; validate refs on chat (id or storage_ref) | no |
 | 2026-08-23 | C-ATTACH / C-ADMIN-COMPANY | company max_attachment_mb + upload extension allowlist; project limits in API | no |
 | 2026-08-23 | C-PROJECT / C-TRIGGERS / C-KEY-RESOLVE | PATCH project agent_provider; admin trigger drain; opt-in TRIGGER_WORKER_* | no |
 | 2026-08-23 | C-MATERIALIZE / C-META-DATA | workspace-docs (AGENTS) API + materialize source; vault:// secret_ref routing | no |

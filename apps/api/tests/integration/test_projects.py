@@ -266,3 +266,34 @@ def test_attachment_respects_company_policy_and_extension(client: TestClient) ->
         },
     )
     assert ok.status_code == 201, ok.text
+
+
+@requires_postgres
+def test_list_project_attachments(client: TestClient) -> None:
+    _, cabinet_id, owner_tok = _setup_cabinet(client)
+    created = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "List Attach"},
+    )
+    assert created.status_code == 201, created.text
+    project_id = created.json()["id"]
+
+    att = client.post(
+        f"/api/v1/projects/{project_id}/attachments",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={
+            "filename": "note.txt",
+            "content_base64": base64.b64encode(b"listed").decode("ascii"),
+        },
+    )
+    assert att.status_code == 201, att.text
+
+    listed = client.get(
+        f"/api/v1/projects/{project_id}/attachments",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert listed.status_code == 200, listed.text
+    items = listed.json()["items"]
+    assert len(items) == 1
+    assert items[0]["filename"] == "note.txt"

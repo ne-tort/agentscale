@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import mimetypes
 
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.company_service import AdminCompanyService
@@ -18,6 +19,17 @@ from prodavan.infrastructure.persistence.models.projects import ProjectAttachmen
 from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
 
 
+def _attachment_public(row: ProjectAttachmentRow) -> dict:
+    return {
+        "id": row.id,
+        "filename": row.filename,
+        "content_type": row.content_type,
+        "size_bytes": row.size_bytes,
+        "storage_ref": row.storage_ref,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
 class ProjectAttachmentService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -27,6 +39,56 @@ class ProjectAttachmentService:
     async def _max_bytes(self, company_id: str) -> int:
         policy = await self._companies.get_agent_policy(company_id)
         return attachment_max_bytes(policy)
+
+    async def list_for_project(
+        self,
+        *,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        limit: int = 50,
+    ) -> list[dict]:
+        await self._access.require_access(
+            project_id=project_id, principal=principal, employee=employee, write=False
+        )
+        q = await self._session.execute(
+            select(ProjectAttachmentRow)
+            .where(ProjectAttachmentRow.project_id == project_id)
+            .order_by(ProjectAttachmentRow.created_at.desc())
+            .limit(max(1, min(limit, 200)))
+        )
+        return [_attachment_public(r) for r in q.scalars().all()]
+
+    async def normalize_refs(self, *, project_id: str, refs: list[str]) -> list[str]:
+        """Validate refs belong to project; accept id or storage_ref; return storage_refs."""
+        if not refs:
+            return []
+        ordered = list(dict.fromkeys(str(r).strip() for r in refs if str(r).strip()))
+        if not ordered:
+            return []
+        q = await self._session.execute(
+            select(ProjectAttachmentRow).where(
+                ProjectAttachmentRow.project_id == project_id,
+                or_(
+                    ProjectAttachmentRow.storage_ref.in_(ordered),
+                    ProjectAttachmentRow.id.in_(ordered),
+                ),
+            )
+        )
+        by_ref = {row.storage_ref: row for row in q.scalars().all()}
+        by_id = {row.id: row for row in by_ref.values()}
+        out: list[str] = []
+        for ref in ordered:
+            row = by_ref.get(ref) or by_id.get(ref)
+            if row is None:
+                raise AppError(
+                    code="ATTACHMENT_NOT_FOUND",
+                    title="Attachment not found",
+                    status=422,
+                    detail=f"attachment ref not found in project: {ref}",
+                )
+            out.append(row.storage_ref)
+        return out
 
     async def upload_base64(
         self,
@@ -80,11 +142,4 @@ class ProjectAttachmentService:
         self._session.add(row)
         await self._session.commit()
         await self._session.refresh(row)
-        return {
-            "id": row.id,
-            "filename": row.filename,
-            "content_type": row.content_type,
-            "size_bytes": row.size_bytes,
-            "storage_ref": row.storage_ref,
-            "created_at": row.created_at.isoformat() if row.created_at else None,
-        }
+        return _attachment_public(row)

@@ -39,8 +39,9 @@ AgentProviderPort + frozen AgentEvent; credentials только через L03 r
 3. `AgentSessionService` — create/send/chat_turn/transcript; `AgentBudgetService` before turns.
 4. `AgentTriggerDispatcher` — dequeue trigger → session + send; `drain_all` for worker/admin.
 5. HTTP `/projects/{id}/agent/sessions`, `/chat`, `/chat/transcript`, `/triggers/dispatch`; admin `/admin/triggers/drain`.
-6. Opt-in `TRIGGER_WORKER_ENABLED` asyncio loop in API lifespan (not multi-replica safe).
-7. `user_message` — platform envelope only (not in frozen adapter AgentEvent stream).
+6. Chat attachment refs validated against project DB before send (C-ATTACH).
+7. Opt-in `TRIGGER_WORKER_ENABLED` asyncio loop in API lifespan (not multi-replica safe).
+8. `user_message` — platform envelope only (not in frozen adapter AgentEvent stream).
 
 ## Контракты
 

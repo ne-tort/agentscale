@@ -433,6 +433,124 @@ def test_chat_with_attachment_refs_emits_tool_call(client: TestClient) -> None:
 
 
 @requires_postgres
+def test_chat_rejects_unknown_attachment_ref(client: TestClient) -> None:
+    import base64
+
+    admin = _token(sub="ref-admin", platform_admin=True)
+    admin_h = {"Authorization": f"Bearer {admin}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "RefCo", "admin_email": "ref@agentco.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "Cursor",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-ref",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = {"Authorization": f"Bearer {_token(sub='ref-owner', email='ref@agentco.test')}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "RefCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "RefProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    bad = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "nope", "attachment_refs": ["file://projects/other/inbox/x.txt"]},
+    )
+    assert bad.status_code == 422
+    assert bad.json()["code"] == "ATTACHMENT_NOT_FOUND"
+
+
+@requires_postgres
+def test_chat_accepts_attachment_id_ref(client: TestClient) -> None:
+    import base64
+
+    admin = _token(sub="id-ref-admin", platform_admin=True)
+    admin_h = {"Authorization": f"Bearer {admin}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "IdRefCo", "admin_email": "idref@agentco.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "Cursor",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-idref",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = {"Authorization": f"Bearer {_token(sub='idref-owner', email='idref@agentco.test')}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "IdRefCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "IdRefProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    uploaded = client.post(
+        f"/api/v1/projects/{project_id}/attachments",
+        headers=owner_h,
+        json={
+            "filename": "note.txt",
+            "content_base64": base64.b64encode(b"by id").decode("ascii"),
+        },
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    attachment_id = uploaded.json()["id"]
+
+    turn = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "use id", "attachment_refs": [attachment_id]},
+    )
+    assert turn.status_code == 200, turn.text
+
+
+@requires_postgres
 def test_agent_session_uses_platform_fallback_pool(client: TestClient) -> None:
     admin_h = {"Authorization": f"Bearer {_token(sub='fb-admin', platform_admin=True)}"}
 
