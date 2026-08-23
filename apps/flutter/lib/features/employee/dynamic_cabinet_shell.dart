@@ -24,12 +24,22 @@ class _DynamicCabinetShellState extends State<DynamicCabinetShell> with SingleTi
   TabController? _tabs;
   List<Map<String, dynamic>> _metaTabs = const [];
   String? _error;
+  int _metaEpoch = 0;
 
   @override
   void initState() {
     super.initState();
     workContext.enterCabinet(widget.cabinetId);
+    workContext.addListener(_onWorkContext);
+    _metaEpoch = workContext.cabinetMetaEpoch;
     _loadTabs();
+  }
+
+  void _onWorkContext() {
+    if (workContext.cabinetMetaEpoch != _metaEpoch) {
+      _metaEpoch = workContext.cabinetMetaEpoch;
+      _loadTabs();
+    }
   }
 
   Future<void> _loadTabs() async {
@@ -50,6 +60,7 @@ class _DynamicCabinetShellState extends State<DynamicCabinetShell> with SingleTi
 
   @override
   void dispose() {
+    workContext.removeListener(_onWorkContext);
     _tabs?.dispose();
     super.dispose();
   }

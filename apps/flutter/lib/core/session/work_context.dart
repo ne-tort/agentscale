@@ -34,6 +34,14 @@ class WorkContext extends ChangeNotifier {
     notifyListeners();
   }
 
+  int _cabinetMetaEpoch = 0;
+  int get cabinetMetaEpoch => _cabinetMetaEpoch;
+
+  void notifyCabinetMetaChanged() {
+    _cabinetMetaEpoch += 1;
+    notifyListeners();
+  }
+
   void enterProject(String id) {
     projectId = id;
     notifyListeners();

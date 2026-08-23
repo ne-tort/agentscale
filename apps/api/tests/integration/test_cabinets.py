@@ -496,3 +496,69 @@ def test_meta_mutate_columns_views_tabs(client: TestClient) -> None:
         headers={"Authorization": f"Bearer {owner_tok}"},
     )
     assert blocked_tab.status_code == 409
+
+
+@requires_postgres
+def test_json_document_rows(client: TestClient) -> None:
+    admin = _token(sub="json-admin", platform_admin=True)
+    created = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "JsonDocCo", "admin_email": "json@cabco.test"},
+    )
+    assert created.status_code == 201, created.text
+    company_id = created.json()["company"]["id"]
+
+    owner_tok = _token(sub="json-owner", email="json@cabco.test")
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "Json Cab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    tbl = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/meta/tables",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={
+            "slug": "notes",
+            "label": "Notes",
+            "storage_kind": "json_document",
+            "columns": [
+                {"name": "title", "type": "text", "required": True},
+                {"name": "done", "type": "bool", "required": False},
+            ],
+        },
+    )
+    assert tbl.status_code == 201, tbl.text
+    assert tbl.json()["storage_kind"] == "json_document"
+
+    row = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/data/notes/rows",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"values": {"title": "Buy milk", "done": True}},
+    )
+    assert row.status_code == 201, row.text
+    row_id = row.json()["id"]
+
+    rows = client.get(
+        f"/api/v1/cabinets/{cabinet_id}/data/notes/rows",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert rows.status_code == 200
+    body = rows.json()["rows"]
+    assert any(r["title"] == "Buy milk" and r["done"] is True for r in body)
+
+    updated = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/data/notes/rows",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"id": row_id, "values": {"title": "Buy oat milk"}},
+    )
+    assert updated.status_code == 200
+
+    deleted = client.delete(
+        f"/api/v1/cabinets/{cabinet_id}/data/notes/rows/{row_id}",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert deleted.status_code == 204

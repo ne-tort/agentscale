@@ -7,6 +7,7 @@ import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/core/widgets/stat_tile.dart';
+import 'package:prodavan/features/employee/cabinet_meta_tabs_page.dart';
 
 /// Cabinet context summary — projects, meta tables, MCP tools (L05/L06).
 class CabinetContextTabPage extends StatefulWidget {
@@ -138,6 +139,18 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
             label: _exporting ? 'Exporting…' : 'Export cabinet bundle',
             expanded: false,
             onPressed: _exporting ? null : _exportBundle,
+          ),
+          const SizedBox(height: 8),
+          AppButton(
+            label: 'Manage custom tabs',
+            expanded: false,
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => CabinetMetaTabsPage(cabinetId: widget.cabinetId),
+                ),
+              );
+            },
           ),
           const SizedBox(height: 16),
           Text(

@@ -274,6 +274,40 @@ class ProdavanApi {
     }
   }
 
+  Future<void> deleteMetaTab({
+    required String cabinetId,
+    required String tabId,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.delete(
+        _uri('/cabinets/$cabinetId/meta/tabs/$tabId'),
+        headers: _headers,
+      );
+      _throwIfError(res);
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
+  Future<void> deleteMetaView({
+    required String cabinetId,
+    required String viewSlug,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await http.delete(
+        _uri('/cabinets/$cabinetId/meta/views/$viewSlug'),
+        headers: _headers,
+      );
+      _throwIfError(res);
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
   Future<Map<String, dynamic>> queryCabinetRows({
     required String cabinetId,
     required String tableSlug,

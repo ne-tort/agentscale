@@ -33,6 +33,7 @@ class _CabinetTableCreatePageState extends State<CabinetTableCreatePage> {
   final _slug = TextEditingController();
   final _label = TextEditingController();
   final _columns = [_ColumnDraft(name: 'name', type: 'text', required: true)];
+  String _storageKind = 'physical';
   bool _saving = false;
   String? _error;
 
@@ -87,6 +88,7 @@ class _CabinetTableCreatePageState extends State<CabinetTableCreatePage> {
         slug: slug,
         label: label,
         columns: columns,
+        storageKind: _storageKind,
       );
       if (!mounted) return;
       Navigator.of(context).pop(true);
@@ -128,6 +130,15 @@ class _CabinetTableCreatePageState extends State<CabinetTableCreatePage> {
                 label: 'Label',
                 enabled: !_saving,
                 validator: (v) => (v ?? '').trim().isEmpty ? 'Required' : null,
+              ),
+              DropdownButtonFormField<String>(
+                value: _storageKind,
+                decoration: const InputDecoration(labelText: 'Storage'),
+                items: const [
+                  DropdownMenuItem(value: 'physical', child: Text('physical')),
+                  DropdownMenuItem(value: 'json_document', child: Text('json_document')),
+                ],
+                onChanged: _saving ? null : (v) => setState(() => _storageKind = v ?? 'physical'),
               ),
               const SizedBox(height: AppSpacing.md),
               Text('Columns', style: Theme.of(context).textTheme.titleSmall),

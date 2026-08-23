@@ -243,6 +243,19 @@ class CabinetMetaService:
         if storage_kind == StorageKind.PHYSICAL:
             fq = qualified(inst.schema_name, data_table_slug(slug))
             await self._session.execute(text(f"CREATE TABLE IF NOT EXISTS {fq} ({', '.join(ddl_cols)})"))
+        elif storage_kind == StorageKind.JSON_DOCUMENT:
+            fq = qualified(inst.schema_name, data_table_slug(slug))
+            await self._session.execute(
+                text(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS {fq} (
+                        "id" TEXT PRIMARY KEY,
+                        "created_at" TIMESTAMPTZ NOT NULL DEFAULT now(),
+                        "document" JSONB NOT NULL DEFAULT '{{}}'::jsonb
+                    )
+                    """
+                )
+            )
 
         await self._session.commit()
         return {"id": table_id, "slug": slug, "label": label.strip(), "storage_kind": storage_kind}

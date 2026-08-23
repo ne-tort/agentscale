@@ -308,27 +308,52 @@ class CabinetBundleService:
         data_by_slug: dict[str, list[dict]] = {}
         if include_data:
             for table in tables:
-                if table["storage_kind"] != "physical":
-                    continue
                 slug = table["slug"]
-                col_names = [c["name"] for c in columns if c["table_slug"] == slug]
-                select_cols = ["id", "created_at"] + col_names
+                storage = table["storage_kind"]
                 fq = qualified(schema_name, data_table_slug(slug))
-                try:
-                    rq = await self._session.execute(
-                        text(f"SELECT {', '.join(qident(c) for c in select_cols)} FROM {fq}")
-                    )
-                except Exception:
+                if storage == "physical":
+                    col_names = [c["name"] for c in columns if c["table_slug"] == slug]
+                    select_cols = ["id", "created_at"] + col_names
+                    try:
+                        rq = await self._session.execute(
+                            text(f"SELECT {', '.join(qident(c) for c in select_cols)} FROM {fq}")
+                        )
+                    except Exception:
+                        continue
+                    rows = []
+                    for row in rq.fetchall():
+                        item: dict[str, Any] = {}
+                        for i, name in enumerate(select_cols):
+                            val = row[i]
+                            if hasattr(val, "isoformat"):
+                                val = val.isoformat()
+                            item[name] = val
+                        rows.append(item)
+                elif storage == "json_document":
+                    try:
+                        rq = await self._session.execute(
+                            text(f"SELECT id, created_at, document FROM {fq}")
+                        )
+                    except Exception:
+                        continue
+                    rows = []
+                    for row in rq.fetchall():
+                        doc = row.document
+                        if isinstance(doc, str):
+                            try:
+                                doc = json.loads(doc)
+                            except json.JSONDecodeError:
+                                doc = {}
+                        if not isinstance(doc, dict):
+                            doc = {}
+                        item = {
+                            "id": row.id,
+                            "created_at": row.created_at.isoformat() if row.created_at else None,
+                            **doc,
+                        }
+                        rows.append(item)
+                else:
                     continue
-                rows = []
-                for row in rq.fetchall():
-                    item: dict[str, Any] = {}
-                    for i, name in enumerate(select_cols):
-                        val = row[i]
-                        if hasattr(val, "isoformat"):
-                            val = val.isoformat()
-                        item[name] = val
-                    rows.append(item)
                 if rows:
                     data_by_slug[slug] = rows
 
