@@ -164,6 +164,86 @@ def test_rematerialize_allowed_when_paused(client: TestClient) -> None:
 
 
 @requires_postgres
+def test_paused_allows_patch_and_attachment_delete_blocks_upload(client: TestClient) -> None:
+    """Paused: metadata/cleanup OK; runtime uploads still PROJECT_PAUSED; pause idempotent."""
+    _, cabinet_id, owner_tok = _setup_cabinet(client)
+    owner_h = {"Authorization": f"Bearer {owner_tok}"}
+    created = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "Pause Matrix"},
+    )
+    assert created.status_code == 201, created.text
+    project_id = created.json()["id"]
+
+    att = client.post(
+        f"/api/v1/projects/{project_id}/attachments",
+        headers=owner_h,
+        json={
+            "filename": "keep.txt",
+            "content_base64": base64.b64encode(b"keep me").decode("ascii"),
+        },
+    )
+    assert att.status_code == 201, att.text
+    attachment_id = att.json()["id"]
+
+    paused = client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
+    assert paused.status_code == 200
+    again = client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
+    assert again.status_code == 200
+    assert again.json()["status"] == "paused"
+
+    patched = client.patch(
+        f"/api/v1/projects/{project_id}",
+        headers=owner_h,
+        json={"name": "Pause Matrix Renamed"},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["name"] == "Pause Matrix Renamed"
+    assert patched.json()["status"] == "paused"
+
+    deleted = client.delete(
+        f"/api/v1/projects/{project_id}/attachments/{attachment_id}",
+        headers=owner_h,
+    )
+    assert deleted.status_code == 200, deleted.text
+
+    blocked = client.post(
+        f"/api/v1/projects/{project_id}/attachments",
+        headers=owner_h,
+        json={
+            "filename": "nope.txt",
+            "content_base64": base64.b64encode(b"nope").decode("ascii"),
+        },
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["code"] == "PROJECT_PAUSED"
+
+
+@requires_postgres
+def test_attachment_rejects_shebang_script(client: TestClient) -> None:
+    _, cabinet_id, owner_tok = _setup_cabinet(client)
+    created = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "Shebang Proj"},
+    )
+    assert created.status_code == 201, created.text
+    project_id = created.json()["id"]
+
+    bad = client.post(
+        f"/api/v1/projects/{project_id}/attachments",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={
+            "filename": "note.txt",
+            "content_base64": base64.b64encode(b"#!/bin/bash\nrm -rf /\n").decode("ascii"),
+        },
+    )
+    assert bad.status_code == 422, bad.text
+    assert bad.json()["code"] == "ATTACHMENT_CONTENT_FORBIDDEN"
+
+
+@requires_postgres
 def test_project_patch_agent_provider(client: TestClient) -> None:
     _, cabinet_id, owner_tok = _setup_cabinet(client)
     created = client.post(

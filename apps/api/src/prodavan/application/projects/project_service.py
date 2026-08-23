@@ -212,7 +212,11 @@ class ProjectService:
     ) -> dict:
         """Update mutable project fields. ``agent_provider`` overrides company preferred_provider."""
         row = await self._access.require_access(
-            project_id=project_id, principal=principal, employee=employee, write=True
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+            allow_paused=True,
         )
         if name is not None:
             trimmed = name.strip()
@@ -297,8 +301,14 @@ class ProjectService:
         employee: EmployeeRow | None,
     ) -> dict:
         row = await self._access.require_access(
-            project_id=project_id, principal=principal, employee=employee, write=True
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+            allow_paused=True,
         )
+        if row.status == ProjectStatus.PAUSED:
+            return await self._project_public(row)
         row.status = ProjectStatus.PAUSED
         await self._platform_events.emit(
             event_type="project.paused",

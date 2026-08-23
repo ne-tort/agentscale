@@ -69,13 +69,18 @@ ATTACHMENT_ALLOWED_EXTENSIONS = frozenset(
     }
 )
 
-# Magic prefixes that must never appear in chat uploads (lightweight content policy).
+# Magic prefixes that must never appear in chat uploads (lightweight content policy / AV-lite).
+# Not a virus scanner — blocks obvious executables and script entrypoints.
 _FORBIDDEN_MAGIC = (
     b"MZ",  # PE / DOS
     b"\x7fELF",  # ELF
-    b"\xca\xfe\xba\xbe",  # Mach-O fat
+    b"\xca\xfe\xba\xbe",  # Mach-O fat / Java class
     b"\xcf\xfa\xed\xfe",  # Mach-O 64
     b"\xce\xfa\xed\xfe",  # Mach-O 32
+    b"\0asm",  # WebAssembly
+    b"#!",  # shell/script shebang (bypass via .txt/.md)
+    b"<?php",  # PHP
+    b"<%",  # ASP / JSP-ish
 )
 
 # Sniff common safe types when client omits/guesses wrong content_type.
@@ -132,11 +137,13 @@ def is_allowed_attachment_filename(filename: str) -> bool:
 
 
 def is_forbidden_attachment_content(raw: bytes) -> bool:
-    """Return True if bytes look like an executable (not a full virus scanner)."""
+    """Return True if bytes look like an executable or script entrypoint (not a full AV)."""
     if not raw:
         return False
-    head = raw[:8]
-    return any(head.startswith(magic) for magic in _FORBIDDEN_MAGIC)
+    # Strip UTF-8 BOM so shebang/PHP still match.
+    head = raw[3:] if raw.startswith(b"\xef\xbb\xbf") else raw
+    sample = head[:16]
+    return any(sample.startswith(magic) for magic in _FORBIDDEN_MAGIC)
 
 
 def new_project_id() -> str:

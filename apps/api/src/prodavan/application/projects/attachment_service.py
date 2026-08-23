@@ -166,7 +166,11 @@ class ProjectAttachmentService:
         employee: EmployeeRow | None,
     ) -> dict:
         project = await self._access.require_access(
-            project_id=project_id, principal=principal, employee=employee, write=True
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+            allow_paused=True,
         )
         row = await self._session.get(ProjectAttachmentRow, attachment_id)
         if row is None or row.project_id != project_id:

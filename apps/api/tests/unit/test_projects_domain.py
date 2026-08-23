@@ -31,8 +31,13 @@ def test_forbidden_attachment_content_magic() -> None:
 
     assert is_forbidden_attachment_content(b"MZ\x90\x00")
     assert is_forbidden_attachment_content(b"\x7fELF\x01\x01")
+    assert is_forbidden_attachment_content(b"\0asm\x01\x00")
+    assert is_forbidden_attachment_content(b"#!/bin/sh\necho hi")
+    assert is_forbidden_attachment_content(b"\xef\xbb\xbf#!/usr/bin/env python3\n")
+    assert is_forbidden_attachment_content(b"<?php echo 1;")
     assert not is_forbidden_attachment_content(b"hello text")
     assert not is_forbidden_attachment_content(b"%PDF-1.4")
+    assert not is_forbidden_attachment_content(b"# markdown heading\n")
 
 
 def test_sniff_attachment_content_type() -> None:

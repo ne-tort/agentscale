@@ -7,7 +7,7 @@
 | Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain/worker; k8s isolator — gap |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-24 — rematerialize while paused + k8s CronJob manifests |
+| Last updated | 2026-08-24 — paused write matrix + AV-lite shebang/WASM |
 | Owners | — |
 
 ---
@@ -27,7 +27,7 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 | Triggers: enqueue + list + dispatch + signed webhook/telegram ingress + admin drain + worker | External broker (Kafka/SQS) |
 | Outbox-lite: `attempts` / `lease_until` / `available_at` / `last_error` + SKIP LOCKED claim | |
 | Platform events bus + cabinet SPI deliver (audit) | MCP stdio handler protocol; bubblewrap |
-| Attachments: upload/list/delete/download + ref validation; size/type/magic policy + MIME sniff (+`.json`) | Full AV; real PDF renderer |
+| Attachments: upload/list/delete/download + ref validation; size/type/magic + AV-lite (exec/shebang/WASM/PHP) | Full AV scanner; real PDF renderer |
 | Idle pause: `idle_pause_after_hours` (default off) + admin company/platform sweep + opt-in worker + k8s CronJob examples | External broker |
 | MCP package deploy/disable → rematerialize cabinet projects | |
 | Integration tests lifecycle + FS layout + provider patch + admin drain | E2E with agent ping |
@@ -52,6 +52,8 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 16. MCP package deploy/disable rematerializes all non-deleted projects in the cabinet (L09 DoD).
 17. `GET .../attachments/{id}/content` — inline bytes for Flutter image/text preview (ACL read; works while paused).
 18. Manual rematerialize allowed while project is paused (maintenance; chat/upload still blocked).
+19. Paused write matrix: PATCH name/provider, rematerialize, attachment DELETE, idempotent pause — allowed; chat/upload/triggers runtime — blocked (`PROJECT_PAUSED`).
+20. AV-lite attachment content: PE/ELF/Mach-O/WASM/shebang/PHP/`<%` prefixes (UTF-8 BOM stripped); not a virus scanner.
 
 ## Контракты
 
@@ -81,6 +83,7 @@ cwd/mcp.json → L08 AgentPort. Chat UI → triggers (L05/L09).
 - Materialize идемпотентен (re-materialize overwrites layout).
 - Delete purges workspace tree; pause keeps volume.
 - Project triggers scoped to `project_id`.
+- While `paused`: runtime writes (chat, upload, agent send) → `PROJECT_PAUSED`; metadata/cleanup (PATCH, rematerialize, attachment delete, delete project) allowed.
 
 ## Карта кода
 
@@ -108,12 +111,12 @@ apps/api/.env.example
 |------------|--------|---------|
 | Project CRUD in cabinet | done | |
 | Materialize layout | done | AGENTS from `meta_workspace_docs` (slug=agents); empty → default |
-| Pause/resume/delete | done | local-ws only |
+| Pause/resume/delete | done | pause idempotent; rematerialize/PATCH/att-delete while paused |
 | Trigger dispatch to agent | done | chat.message + chat.regenerate; schedule/webhook ack or run-if-text; advisory lock + row lease |
 | MCP package sandbox run | live (subset) | prepare + opt-in local spawn (`MCP_SANDBOX_SPAWN`); k8s/bubblewrap — hole |
 | Platform vs project event bus split | live (subset) | fan-out; zip handler stdin JSON + optional stdout JSON result; full MCP stdio — hole |
 | Attachment refs scoped to project | done | normalize id/storage_ref before agent send |
-| Attachment virus/size policy | live (subset) | max_attachment_mb + extension + magic sniff; AV — hole |
+| Attachment virus/size policy | live (subset) | max_attachment_mb + extension + magic sniff + AV-lite; full AV scanner — hole |
 | Project preferred_provider | done | `agent_provider` create/PATCH; resolve uses project override |
 | Attachment preview in chat UI | live (subset) | image + text/JSON selectable preview + PDF stub; real PDF renderer — hole |
 | telegram.message trigger | done | dispatch like chat.message; HMAC ingress like webhook |

@@ -7,7 +7,7 @@
 | Quality note | Dev shell + SSE chat + tab interpreters + bundle I/O + meta columns |
 | Plan | [L05](../11-implementation-plan/L05-employee-shell.md) |
 | Canon | [04-employees](../04-employees/), [session](../10-identity-keycloak/session.md) |
-| Last updated | 2026-08-24 — project status chip in list + settings |
+| Last updated | 2026-08-24 — inbox delete allowed while project paused |
 | Owners | — |
 
 ---
@@ -32,7 +32,7 @@
 | `ProjectListPage` — status chip (paused/active) + open workspace | |
 | `ProjectSettingsPage` — name + provider override + pause/resume + rematerialize + status chip | |
 | Import/export bundle UI + starter catalog import | |
-| ProjectWorkspacePage — SSE chat + transcript + attachment preview (image/text/JSON + PDF stub) + inbox + suspend/paused banners + HITL + cancel | Real PDF renderer |
+| ProjectWorkspacePage — SSE chat + transcript + attachment preview + inbox (delete while paused) + suspend/paused banners + HITL + cancel | Real PDF renderer |
 | Tables tab — row upsert/delete + DangerConfirm delete | |
 | Chat tab → `ProjectListPage` | |
 | Context tab — stats + export + AGENTS edit | |

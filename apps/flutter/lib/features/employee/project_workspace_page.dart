@@ -78,6 +78,8 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   ProjectChatStreamHandle? _activeStream;
 
   bool get _chatBlocked => _companySuspended || _projectPaused;
+  /// Inbox cleanup allowed while paused; blocked only when company suspended.
+  bool get _inboxMutationsBlocked => _companySuspended;
 
   @override
   void initState() {
@@ -607,7 +609,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                     trailing: IconButton(
                       icon: const Icon(Icons.delete_outline, size: 20),
                       tooltip: 'Delete',
-                      onPressed: _sending || _chatBlocked
+                      onPressed: _sending || _inboxMutationsBlocked
                           ? null
                           : () => _deleteInboxAttachment(item),
                     ),
