@@ -6,7 +6,7 @@
 | Quality | 7 |
 | Quality note | API E2E incl. pause/rematerialize/idle; Flutter thumbnails + widget subset; full Widget E2E — gap |
 | Plan | [L09](../11-implementation-plan/L09-vertical-integration.md) |
-| Last updated | 2026-08-24 — pause auto-cancel sessions + leave-queued |
+| Last updated | 2026-08-24 — resume kick-drain + soft dispatch while paused |
 | Owners | — |
 
 ---
