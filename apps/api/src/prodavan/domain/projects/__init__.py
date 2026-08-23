@@ -15,6 +15,7 @@ from prodavan.domain.projects.types import (
     slugify_name,
     workspace_key_for,
 )
+from prodavan.domain.projects.webhook_hmac import verify_webhook_signature, webhook_signature
 
 __all__ = [
     "ATTACHMENT_ALLOWED_EXTENSIONS",
@@ -29,5 +30,7 @@ __all__ = [
     "is_forbidden_attachment_content",
     "new_project_id",
     "slugify_name",
+    "verify_webhook_signature",
+    "webhook_signature",
     "workspace_key_for",
 ]

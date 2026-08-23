@@ -7,7 +7,7 @@
 | Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain/worker; k8s isolator — gap |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-23 — platform_events bus + telegram.message + magic sniff |
+| Last updated | 2026-08-23 — platform SPI + webhook HMAC + delete attachment |
 | Owners | — |
 
 ---
@@ -24,9 +24,9 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 | CRUD: create/list/get/PATCH (name, agent_provider); pause/resume/delete | |
 | Materialize: AGENTS from cabinet workspace-docs + packages/sandbox | bubblewrap/k8s isolator |
 | `container_ref=local-ws:{workspace_key}` | |
-| Triggers: enqueue + list + dispatch (incl. telegram.message) + admin drain + opt-in worker with advisory lock | Durable outbox; bot HMAC auth |
-| Platform events bus (`platform_events` + admin list) | cabinet `on_platform_event` SPI |
-| Attachments: upload + list + ref validation; size/type/magic policy | Full AV scan; image thumbnails |
+| Triggers: enqueue + list + dispatch + signed webhook ingress + admin drain + worker | Durable outbox; telegram bot HMAC |
+| Platform events bus + cabinet SPI deliver (audit) | package/MCP on_platform_event handlers |
+| Attachments: upload/list/delete + ref validation; size/type/magic policy | Full AV; image thumbnails |
 | Integration tests lifecycle + FS layout + provider patch + admin drain | E2E with agent ping |
 
 ## Как сделано
@@ -37,7 +37,8 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 4. HTTP: `/cabinets/{id}/projects`, `/projects/{id}/*` per project-contract; `POST /admin/triggers/drain`.
 5. L06 `materialize-stub` → real FS (status `materialized`).
 6. Opt-in trigger worker (`TRIGGER_WORKER_ENABLED`) — in-process asyncio + `pg_try_advisory_lock`; hole: not durable outbox.
-7. `PlatformEventService` — lifecycle bus separate from `project_triggers`; emit on create/pause/resume/delete; admin list. Hole: cabinet SPI consumer.
+7. `PlatformEventService` — lifecycle bus; emit on project lifecycle + employee.disabled; cabinet SPI → meta_audit. Hole: package MCP handlers.
+8. Signed webhook ingress `POST .../webhooks/http` with company `webhook_hmac_secret` (not returned in GET; `webhook_hmac_configured` flag).
 
 ## Контракты
 
@@ -92,12 +93,14 @@ apps/api/tests/unit/test_projects_domain.py
 | Pause/resume/delete | done | local-ws only |
 | Trigger dispatch to agent | done | chat.message + chat.regenerate; schedule/webhook ack or run-if-text; advisory lock on worker |
 | MCP package sandbox run | live (subset) | prepare + opt-in local spawn (`MCP_SANDBOX_SPAWN`); k8s/bubblewrap — hole |
-| Platform vs project event bus split | live (subset) | platform_events table + emit; cabinet on_platform_event SPI — hole |
+| Platform vs project event bus split | live (subset) | platform_events + cabinet SPI audit deliver; package handlers — hole |
 | Attachment refs scoped to project | done | normalize id/storage_ref before agent send |
-| Attachment virus/size policy | live (subset) | max_attachment_mb + extension allowlist + magic sniff (PE/ELF); AV — hole |
+| Attachment virus/size policy | live (subset) | max_attachment_mb + extension + magic sniff; AV — hole |
 | Project preferred_provider | done | `agent_provider` create/PATCH; resolve uses project override |
-| Attachment preview in chat UI | live (subset) | chips by filename from refs; no image thumbnails |
+| Attachment preview in chat UI | live (subset) | chips by filename; no image thumbnails |
 | telegram.message trigger | done | dispatch like chat.message; bot HMAC — hole |
+| Webhook HMAC ingress | done | company policy secret + X-Prodavan-Signature |
+| Attachment DELETE | done | DB + inbox file |
 
 ## Проверка
 

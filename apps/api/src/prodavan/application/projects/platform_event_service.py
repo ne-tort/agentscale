@@ -42,7 +42,18 @@ class PlatformEventService:
         )
         self._session.add(row)
         await self._session.flush()
-        return {
+        delivered: dict | None = None
+        if cabinet_id:
+            from prodavan.application.cabinets.platform_event_spi import CabinetPlatformEventSpi
+
+            delivered = await CabinetPlatformEventSpi(self._session).deliver(
+                cabinet_id=cabinet_id,
+                event_id=row.id,
+                event_type=event_type,
+                actor_sub=principal.sub if principal else None,
+                payload=payload or {},
+            )
+        out = {
             "id": row.id,
             "event_type": row.event_type,
             "company_id": row.company_id,
@@ -52,6 +63,9 @@ class PlatformEventService:
             "payload": row.payload,
             "created_at": row.created_at.isoformat() if row.created_at else None,
         }
+        if delivered is not None:
+            out["cabinet_delivery"] = delivered
+        return out
 
     async def list_events(
         self,

@@ -150,7 +150,10 @@ async def disable_employee(
         target_companies = {m.company_id for m in target.memberships}
         if not actor_companies.intersection(target_companies):
             raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="forbidden")
-    emp = await IdentityCommandService(session, get_invite_client()).disable_employee(employee_id=employee_id)
+    emp = await IdentityCommandService(session, get_invite_client()).disable_employee(
+        employee_id=employee_id,
+        principal=principal,
+    )
     return {"id": emp.id, "status": emp.status}
 
 

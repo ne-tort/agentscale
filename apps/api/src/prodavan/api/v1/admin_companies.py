@@ -45,6 +45,7 @@ class AgentPolicyBody(BaseModel):
     max_tokens_per_run: int | None = Field(default=None, ge=1)
     max_cost_usd_month: Decimal | None = Field(default=None, gt=0)
     max_attachment_mb: int = Field(default=20, ge=1, le=500)
+    webhook_hmac_secret: str | None = Field(default=None, max_length=256)
 
 
 @router.get("")
@@ -88,6 +89,7 @@ async def get_agent_policy(company_id: str, _: PlatformAdminDep, session: Sessio
         else None,
         "max_attachment_mb": policy.max_attachment_mb,
         "attachment_max_bytes": int(policy.max_attachment_mb) * 1024 * 1024,
+        "webhook_hmac_configured": bool(policy.webhook_hmac_secret),
     }
 
 
@@ -98,6 +100,7 @@ async def set_agent_policy(
     _: PlatformAdminDep,
     session: SessionDep,
 ) -> dict:
+    fields = body.model_dump(exclude_unset=True)
     policy = CompanyAgentRuntimePolicy(
         tool_preset=body.tool_preset,
         preferred_provider=body.preferred_provider,
@@ -107,8 +110,13 @@ async def set_agent_policy(
         max_tokens_per_run=body.max_tokens_per_run,
         max_cost_usd_month=body.max_cost_usd_month,
         max_attachment_mb=body.max_attachment_mb,
+        webhook_hmac_secret=fields.get("webhook_hmac_secret") if "webhook_hmac_secret" in fields else None,
     )
-    return await AdminCompanyService(session).set_agent_policy(company_id, policy)
+    return await AdminCompanyService(session).set_agent_policy(
+        company_id,
+        policy,
+        update_webhook_secret="webhook_hmac_secret" in fields,
+    )
 
 
 @router.put("/{company_id}/subscription")

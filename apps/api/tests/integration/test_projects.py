@@ -343,3 +343,87 @@ def test_attachment_rejects_executable_magic(client: TestClient) -> None:
     )
     assert pe.status_code == 422
     assert pe.json()["code"] == "ATTACHMENT_CONTENT_FORBIDDEN"
+
+
+@requires_postgres
+def test_delete_attachment_and_signed_webhook(client: TestClient) -> None:
+    admin = _token(sub="padmin", platform_admin=True)
+    created_co = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "HookCo", "admin_email": "owner@hookco.test"},
+    )
+    assert created_co.status_code == 201, created_co.text
+    company_id = created_co.json()["company"]["id"]
+    owner_tok = _token(sub="owner-sub", email="owner@hookco.test")
+
+    policy = client.put(
+        f"/api/v1/admin/companies/{company_id}/agent-policy",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"tool_preset": "workspace_dev", "webhook_hmac_secret": "hook-secret"},
+    )
+    assert policy.status_code == 200, policy.text
+    assert policy.json()["webhook_hmac_configured"] is True
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "HookCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={"name": "HookProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    # SPI delivery should have written cabinet audit for project.created
+    audit = client.get(
+        f"/api/v1/cabinets/{cabinet_id}/audit-events",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert audit.status_code == 200, audit.text
+    assert any(e.get("event_type") == "platform_event.delivered" for e in audit.json())
+
+    att = client.post(
+        f"/api/v1/projects/{project_id}/attachments",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+        json={
+            "filename": "note.txt",
+            "content_base64": base64.b64encode(b"bye").decode("ascii"),
+        },
+    )
+    assert att.status_code == 201, att.text
+    attachment_id = att.json()["id"]
+
+    deleted = client.delete(
+        f"/api/v1/projects/{project_id}/attachments/{attachment_id}",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["deleted"] is True
+
+    from prodavan.domain.projects import webhook_signature
+
+    body = b'{"text":"from webhook"}'
+    bad = client.post(
+        f"/api/v1/projects/{project_id}/webhooks/http",
+        content=body,
+        headers={"Content-Type": "application/json", "X-Prodavan-Signature": "sha256=bad"},
+    )
+    assert bad.status_code == 401
+
+    ok = client.post(
+        f"/api/v1/projects/{project_id}/webhooks/http",
+        content=body,
+        headers={
+            "Content-Type": "application/json",
+            "X-Prodavan-Signature": webhook_signature("hook-secret", body),
+        },
+    )
+    assert ok.status_code == 202, ok.text
+    assert ok.json()["kind"] == "webhook.http"

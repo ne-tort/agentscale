@@ -34,6 +34,16 @@ def test_forbidden_attachment_content_magic() -> None:
     assert not is_forbidden_attachment_content(b"%PDF-1.4")
 
 
+def test_webhook_hmac_signature() -> None:
+    from prodavan.domain.projects import verify_webhook_signature, webhook_signature
+
+    body = b'{"text":"hi"}'
+    sig = webhook_signature("s3cret", body)
+    assert sig.startswith("sha256=")
+    assert verify_webhook_signature(secret="s3cret", body=body, header=sig)
+    assert not verify_webhook_signature(secret="s3cret", body=body, header="sha256=dead")
+
+
 def test_attachment_max_bytes_from_policy() -> None:
     policy = CompanyAgentRuntimePolicy(max_attachment_mb=5)
     assert attachment_max_bytes(policy) == 5 * 1024 * 1024

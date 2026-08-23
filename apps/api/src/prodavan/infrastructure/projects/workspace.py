@@ -85,6 +85,14 @@ class WorkspaceLayoutWriter:
             pass
         return path
 
+    def remove_inbox_attachment(self, *, filename: str) -> bool:
+        safe = Path(filename).name
+        path = self._root / "inbox" / safe
+        if not path.is_file():
+            return False
+        path.unlink()
+        return True
+
     def remove_project_tree(self) -> None:
         from prodavan.infrastructure.projects.mcp_sandbox import stop_all_package_processes
 

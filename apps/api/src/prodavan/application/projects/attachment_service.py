@@ -150,3 +150,30 @@ class ProjectAttachmentService:
         await self._session.commit()
         await self._session.refresh(row)
         return _attachment_public(row)
+
+    async def delete(
+        self,
+        *,
+        project_id: str,
+        attachment_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        project = await self._access.require_access(
+            project_id=project_id, principal=principal, employee=employee, write=True
+        )
+        row = await self._session.get(ProjectAttachmentRow, attachment_id)
+        if row is None or row.project_id != project_id:
+            raise AppError(
+                code="NOT_FOUND",
+                title="Not Found",
+                status=404,
+                detail="Attachment not found",
+            )
+        public = _attachment_public(row)
+        WorkspaceLayoutWriter(workspace_key=project.workspace_key).remove_inbox_attachment(
+            filename=row.filename
+        )
+        await self._session.delete(row)
+        await self._session.commit()
+        return {"deleted": True, **public}

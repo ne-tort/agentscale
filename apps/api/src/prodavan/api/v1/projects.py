@@ -4,16 +4,19 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header, Request
 from pydantic import BaseModel, Field
 
 from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
+from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.projects import (
     ProjectAttachmentService,
     ProjectService,
     ProjectTriggerService,
 )
+from prodavan.application.projects.access import ProjectAccessService
 from prodavan.domain.errors import AppError
+from prodavan.domain.projects import ProjectStatus, verify_webhook_signature
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
 router = APIRouter(tags=["projects"])
@@ -222,3 +225,72 @@ async def upload_attachment(
         principal=principal,
         employee=employee,
     )
+
+
+@router.delete("/projects/{project_id}/attachments/{attachment_id}")
+async def delete_attachment(
+    project_id: str,
+    attachment_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await ProjectAttachmentService(session).delete(
+        project_id=project_id,
+        attachment_id=attachment_id,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.post("/projects/{project_id}/webhooks/http", status_code=202)
+async def ingress_signed_webhook(
+    project_id: str,
+    request: Request,
+    session: SessionDep,
+    x_prodavan_signature: Annotated[str | None, Header(alias="X-Prodavan-Signature")] = None,
+) -> dict:
+    """External webhook.http ingress — HMAC-SHA256 over raw body (company policy secret)."""
+    project = await ProjectAccessService(session).get_project(project_id)
+    if project.status == ProjectStatus.DELETED:
+        raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Project not found")
+    policy = await AdminCompanyService(session).get_agent_policy(project.company_id)
+    secret = policy.webhook_hmac_secret
+    if not secret:
+        raise AppError(
+            code="WEBHOOK_NOT_CONFIGURED",
+            title="Webhook not configured",
+            status=503,
+            detail="company webhook_hmac_secret not set",
+        )
+    raw = await request.body()
+    if not verify_webhook_signature(secret=secret, body=raw, header=x_prodavan_signature):
+        raise AppError(
+            code="WEBHOOK_SIGNATURE_INVALID",
+            title="Invalid signature",
+            status=401,
+            detail="X-Prodavan-Signature mismatch",
+        )
+    import json
+
+    try:
+        payload = json.loads(raw.decode("utf-8") or "{}")
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise AppError(
+            code="VALIDATION_ERROR",
+            title="Validation Error",
+            status=422,
+            detail="body must be JSON object",
+        ) from exc
+    if not isinstance(payload, dict):
+        raise AppError(
+            code="VALIDATION_ERROR",
+            title="Validation Error",
+            status=422,
+            detail="body must be JSON object",
+        )
+    result = await ProjectTriggerService(session).enqueue(
+        project_id=project_id, kind="webhook.http", payload=payload
+    )
+    await session.commit()
+    return result

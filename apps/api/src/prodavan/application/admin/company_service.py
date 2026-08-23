@@ -52,6 +52,7 @@ def _policy_public(policy: CompanyAgentRuntimePolicy) -> dict:
         else None,
         "max_attachment_mb": policy.max_attachment_mb,
         "attachment_max_bytes": attachment_max_bytes(policy),
+        "webhook_hmac_configured": bool(policy.webhook_hmac_secret),
     }
 
 
@@ -117,7 +118,13 @@ class AdminCompanyService:
             return CompanyAgentRuntimePolicy()
         return row.to_domain()
 
-    async def set_agent_policy(self, company_id: str, policy: CompanyAgentRuntimePolicy) -> dict:
+    async def set_agent_policy(
+        self,
+        company_id: str,
+        policy: CompanyAgentRuntimePolicy,
+        *,
+        update_webhook_secret: bool = False,
+    ) -> dict:
         await self._require_company(company_id)
         policy.validate()
         row = await self._session.get(CompanyAgentRuntimePolicyRow, company_id)
@@ -132,6 +139,9 @@ class AdminCompanyService:
         row.max_tokens_per_run = policy.max_tokens_per_run
         row.max_cost_usd_month = policy.max_cost_usd_month
         row.max_attachment_mb = policy.max_attachment_mb
+        if update_webhook_secret:
+            secret = policy.webhook_hmac_secret
+            row.webhook_hmac_secret = (secret.strip() if secret else "") or None
         await self._session.commit()
         await self._session.refresh(row)
         return _policy_public(row.to_domain())

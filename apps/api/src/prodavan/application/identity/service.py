@@ -190,12 +190,28 @@ class IdentityCommandService:
         await self._session.refresh(employee)
         return employee
 
-    async def disable_employee(self, *, employee_id: str) -> EmployeeRow:
-        emp = await self._session.get(EmployeeRow, employee_id)
+    async def disable_employee(self, *, employee_id: str, principal: Principal | None = None) -> EmployeeRow:
+        from prodavan.application.projects.platform_event_service import PlatformEventService
+
+        q = await self._session.execute(
+            select(EmployeeRow)
+            .where(EmployeeRow.id == employee_id)
+            .options(selectinload(EmployeeRow.memberships))
+        )
+        emp = q.scalar_one_or_none()
         if emp is None:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Employee not found")
         emp.status = EmployeeStatus.DISABLED
         await self._invites.disable_user(keycloak_user_id=emp.keycloak_sub, email=emp.email)
+        actor = principal or Principal(sub="system")
+        events = PlatformEventService(self._session)
+        for membership in emp.memberships:
+            await events.emit(
+                event_type="employee.disabled",
+                company_id=membership.company_id,
+                principal=actor,
+                payload={"employee_id": emp.id, "email": emp.email},
+            )
         await self._session.commit()
         await self._session.refresh(emp)
         return emp
