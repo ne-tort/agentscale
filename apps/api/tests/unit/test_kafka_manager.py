@@ -102,3 +102,42 @@ def test_kafka_dispatch_enqueue_increments(monkeypatch: pytest.MonkeyPatch) -> N
 def test_kafka_consumer_mode_defaults_to_kick() -> None:
     mgr = KafkaManager(enabled=False, consumer_mode="weird")
     assert mgr.consumer_mode == "kick"
+
+
+@pytest.mark.asyncio
+async def test_kafka_ensure_topics_creates_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    mgr = KafkaManager(
+        enabled=True,
+        bootstrap_servers="localhost:9092",
+        topic_platform_events="plat",
+        topic_project_triggers="trig",
+    )
+    created: list[str] = []
+
+    class _Admin:
+        async def start(self) -> None:
+            return None
+
+        async def list_topics(self) -> set[str]:
+            return {"plat"}
+
+        async def create_topics(self, topics: list) -> None:
+            created.extend(t.name for t in topics)
+
+        async def close(self) -> None:
+            return None
+
+    class _NewTopic:
+        def __init__(self, name: str, num_partitions: int, replication_factor: int) -> None:
+            self.name = name
+
+    import sys
+    from types import ModuleType
+
+    admin_mod = ModuleType("aiokafka.admin")
+    admin_mod.AIOKafkaAdminClient = lambda **kwargs: _Admin()  # type: ignore[attr-defined]
+    admin_mod.NewTopic = _NewTopic  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "aiokafka.admin", admin_mod)
+
+    await mgr._ensure_topics()
+    assert created == ["trig"]

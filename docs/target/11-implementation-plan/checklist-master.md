@@ -7,7 +7,7 @@
 
 | Слой | Статус | Quality | As-built | Доказательство (PR / suite) | Блокеры |
 |------|--------|---------|----------|----------------------------|---------|
-| [P0 platform-infra](P0-platform-infra.md) | doing | n/a | [13](../13-platform-infra/) + [L00](../12-layer-docs/L00-platform-skeleton.md) | storage_bytes projects+packages; k8s PVC sketches | Kafka sole-path; Helm/TLS; live MinIO mount |
+| [P0 platform-infra](P0-platform-infra.md) | doing | n/a | [13](../13-platform-infra/) + [L00](../12-layer-docs/L00-platform-skeleton.md) | package blob lifecycle; readiness required; topic ensure; NetworkPolicy | Kafka sole-path; Helm/TLS; live MinIO mount |
 | [L00](L00-platform-skeleton.md) | done | 8 | [12](../12-layer-docs/L00-platform-skeleton.md) | L00 skeleton commit | |
 | [L01](L01-identity.md) | partial | 7 | [12](../12-layer-docs/L01-identity.md) | identity + JWT tests | live KC Admin/realm |
 | [L02](L02-ui-core.md) | done | 8 | [12](../12-layer-docs/L02-ui-core.md) | L02 UI core commit | |

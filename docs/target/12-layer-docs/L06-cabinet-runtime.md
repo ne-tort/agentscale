@@ -58,7 +58,7 @@ CabinetInstance: schema-per-instance, meta+UI, cabinet.*, MCP packages, bundles.
 
 | Требование | Статус | Заметка |
 |------------|--------|---------|
-| Package deploy + strict manifest | done | |
+| Package deploy + strict manifest | done | object-store read/write; replace deletes old zip; archive wipes prefix |
 | Sandbox start on materialize | live (subset) | L07 prepare + opt-in local spawn; k8s hole |
 | Company/Admin quotas | done | L04 CompanyQuotaService on create/import/packages |
 | columns/views CRUD | done | PATCH column type + metadata |

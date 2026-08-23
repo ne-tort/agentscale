@@ -17,7 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.cabinets.packages_service import CabinetPackagesService
 from prodavan.config.settings import settings
-from prodavan.infrastructure.cabinets.platform_event_handler import invoke_platform_event_from_artifact
+from prodavan.infrastructure.cabinets.platform_event_handler import (
+    invoke_platform_event_from_artifact,
+    invoke_platform_event_from_bytes,
+)
 from prodavan.infrastructure.cabinets.sql import qident
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 
@@ -149,13 +152,23 @@ class CabinetPlatformEventSpi:
 
             handler_result: dict[str, Any] = {"action": "stub"}
             if settings.mcp_platform_event_invoke:
-                artifact_path = CabinetPackagesService._path_from_ref(row.artifact_ref)
-                handler_result = await asyncio.to_thread(
-                    invoke_platform_event_from_artifact,
-                    artifact_path=artifact_path,
-                    package_name=row.name,
-                    event=event_body,
-                )
+                try:
+                    zip_bytes = CabinetPackagesService.read_artifact_bytes(row.artifact_ref)
+                    handler_result = await asyncio.to_thread(
+                        invoke_platform_event_from_bytes,
+                        zip_bytes=zip_bytes,
+                        package_name=row.name,
+                        event=event_body,
+                    )
+                except Exception:
+                    # Fallback: legacy local path when mirror still has the zip.
+                    artifact_path = CabinetPackagesService._path_from_ref(row.artifact_ref)
+                    handler_result = await asyncio.to_thread(
+                        invoke_platform_event_from_artifact,
+                        artifact_path=artifact_path,
+                        package_name=row.name,
+                        event=event_body,
+                    )
 
             handler_detail = {
                 **event_body,

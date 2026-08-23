@@ -43,6 +43,28 @@ def _parse_stdout_result(stdout: str) -> dict[str, Any] | None:
     return parsed if isinstance(parsed, dict) else None
 
 
+def invoke_platform_event_from_bytes(
+    *,
+    zip_bytes: bytes,
+    package_name: str,
+    event: dict[str, Any],
+    timeout_sec: float = _DEFAULT_TIMEOUT_SEC,
+) -> dict[str, Any]:
+    """Run handler from in-memory zip (object-store SoT without local mirror)."""
+    with tempfile.NamedTemporaryFile(suffix=".zip", delete=False) as tmp:
+        tmp.write(zip_bytes)
+        path = Path(tmp.name)
+    try:
+        return invoke_platform_event_from_artifact(
+            artifact_path=path,
+            package_name=package_name,
+            event=event,
+            timeout_sec=timeout_sec,
+        )
+    finally:
+        path.unlink(missing_ok=True)
+
+
 def invoke_platform_event_from_artifact(
     *,
     artifact_path: Path,

@@ -86,3 +86,37 @@ spec:
         - name: data
           persistentVolumeClaim:
             claimName: prodavan-kafka-data
+---
+# Parity with API KafkaManager._ensure_topics / MinIO init Job
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: prodavan-kafka-init
+  labels:
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: kafka-init
+spec:
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prodavan-kafka-init
+        app.kubernetes.io/part-of: prodavan
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: rpk
+          image: docker.redpanda.com/redpandadata/redpanda:v24.2.4
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              i=0
+              until rpk cluster info -X brokers=prodavan-kafka:9092; do
+                i=$((i+1))
+                if [ "$i" -gt 30 ]; then exit 1; fi
+                sleep 1
+              done
+              rpk topic create prodavan.platform.events -X brokers=prodavan-kafka:9092 || true
+              rpk topic create prodavan.project.triggers -X brokers=prodavan-kafka:9092 || true

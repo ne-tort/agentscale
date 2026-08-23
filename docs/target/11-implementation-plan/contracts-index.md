@@ -41,6 +41,10 @@
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
 | 2026-08-24 | C-EVENT-BUS | deferred Kafka publish after PG commit (no ghost on rollback) | no |
+| 2026-08-24 | C-OBJECT-STORE / L06 | archive wipe package prefix; replace deletes old artifact; read via object store | no |
+| 2026-08-24 | C-API-HEALTH | readiness 503 when KAFKA_REQUIRED / OBJECT_STORE_REQUIRED | no |
+| 2026-08-24 | C-EVENT-BUS | KafkaManager ensure topics on startup; k8s kafka-init Job | no |
+| 2026-08-24 | P0 deploy | NetworkPolicy sketches for redis/minio/kafka | no |
 | 2026-08-24 | C-OBJECT-STORE / L04 | admin storage_bytes includes cabinet package prefixes | no |
 | 2026-08-24 | P0 deploy | k8s PVC sketches for redis/minio/kafka | no |
 | 2026-08-24 | C-JOBS | Celery CLI import bootstrap; idle beat from `IDLE_PAUSE_WORKER_ENABLED` | no |

@@ -127,8 +127,7 @@ class ObjectStorageManager(LifespanResource):
 
     def prefix_size_sync(self, prefix: str) -> int:
         assert self._primary is not None
-        if self._backend_name == "s3" and self._mirror_local:
-            return self._local.prefix_size(prefix)
+        # Always measure primary SoT (S3 when enabled), not local mirror.
         return self._primary.prefix_size(prefix)
 
     def exists_sync(self, key: str) -> bool:

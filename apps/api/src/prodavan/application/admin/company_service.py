@@ -230,7 +230,10 @@ class AdminCompanyService:
             )
         )
         cabinet_q = await self._session.execute(
-            select(CabinetInstanceRow.id).where(CabinetInstanceRow.company_id == company_id)
+            select(CabinetInstanceRow.id).where(
+                CabinetInstanceRow.company_id == company_id,
+                CabinetInstanceRow.status == CabinetStatus.ACTIVE,
+            )
         )
         return company_blob_storage_bytes(
             workspace_keys=list(keys_q.scalars().all()),

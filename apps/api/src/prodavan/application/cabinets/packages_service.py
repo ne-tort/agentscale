@@ -85,7 +85,7 @@ class CabinetPackagesService:
         existing = await self._session.execute(
             text(
                 f"""
-                SELECT id, name, version, status FROM {qschema}.meta_mcp_packages
+                SELECT id, name, version, status, artifact_ref FROM {qschema}.meta_mcp_packages
                 WHERE name = :name
                 """
             ),
@@ -111,7 +111,14 @@ class CabinetPackagesService:
         manifest_json = json.dumps(validated["manifest"], ensure_ascii=False, default=str)
 
         if rows and replace_if_name:
+            store = ensure_object_storage()
             for old in rows:
+                old_ref = getattr(old, "artifact_ref", None)
+                if old_ref:
+                    try:
+                        store.delete_sync(parse_storage_ref(str(old_ref)))
+                    except Exception:
+                        pass
                 await self._session.execute(
                     text(f"DELETE FROM {qschema}.meta_mcp_packages WHERE id = :id"),
                     {"id": old.id},
@@ -244,10 +251,12 @@ class CabinetPackagesService:
         row = q.fetchone()
         if row is None:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="package not found")
-        path = self._path_from_ref(row.artifact_ref)
-        if not path.is_file():
-            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="artifact missing on disk")
-        raw = path.read_bytes()
+        try:
+            raw = self.read_artifact_bytes(row.artifact_ref)
+        except FileNotFoundError as exc:
+            raise AppError(
+                code="NOT_FOUND", title="Not Found", status=404, detail="artifact missing"
+            ) from exc
         return {
             "name": name,
             "version": row.version,
@@ -270,15 +279,10 @@ class CabinetPackagesService:
             )
         )
         out: list[tuple[str, bytes]] = []
-        store = ensure_object_storage()
         for r in q.fetchall():
             try:
-                key = parse_storage_ref(r.artifact_ref)
-            except ValueError:
-                continue
-            try:
-                raw = store.get_bytes_sync(key)
-            except FileNotFoundError:
+                raw = self.read_artifact_bytes(r.artifact_ref)
+            except (ValueError, FileNotFoundError, AppError):
                 continue
             safe = f"{r.name}-{r.version}.zip"
             out.append((safe, raw))
@@ -290,8 +294,19 @@ class CabinetPackagesService:
         return object_ref(key)
 
     @staticmethod
+    def read_artifact_bytes(artifact_ref: str) -> bytes:
+        """Load package zip via C-OBJECT-STORE (canonical)."""
+        try:
+            key = parse_storage_ref(artifact_ref)
+        except ValueError as exc:
+            raise AppError(
+                code="PACKAGE_INVALID", title="Invalid package", status=500, detail="bad artifact_ref"
+            ) from exc
+        return ensure_object_storage().get_bytes_sync(key)
+
+    @staticmethod
     def _path_from_ref(artifact_ref: str) -> Path:
-        """Legacy helper for callers expecting a local path; prefer object store get."""
+        """Legacy local path helper; prefer ``read_artifact_bytes``."""
         from prodavan.config.settings import settings
 
         try:

@@ -133,4 +133,12 @@ class CabinetInstanceService:
         inst.status = CabinetStatus.ARCHIVED
         await self._session.commit()
         await self._session.refresh(inst)
+        # Wipe MCP package blobs (C-OBJECT-STORE); schema rows stay until hard-delete.
+        try:
+            from prodavan.core.infra.object_keys import cabinet_packages_prefix
+            from prodavan.core.infra.object_storage_manager import ensure_object_storage
+
+            ensure_object_storage().delete_prefix_sync(cabinet_packages_prefix(cabinet_id))
+        except Exception:
+            pass
         return _public(inst)

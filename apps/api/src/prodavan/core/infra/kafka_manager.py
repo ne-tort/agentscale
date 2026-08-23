@@ -230,6 +230,32 @@ class KafkaManager(LifespanResource):
                 self._dispatch_enqueues,
             )
 
+    async def _ensure_topics(self) -> None:
+        """Best-effort create platform + project_trigger topics (parity with MinIO ensure_bucket)."""
+        topics = [self._topic_platform, self._topic_triggers]
+        try:
+            from aiokafka.admin import AIOKafkaAdminClient, NewTopic
+
+            admin = AIOKafkaAdminClient(
+                bootstrap_servers=self._bootstrap,
+                client_id=f"{self._client_id}-admin",
+            )
+            await admin.start()
+            try:
+                existing = await admin.list_topics()
+                missing = [t for t in topics if t not in existing]
+                if not missing:
+                    return
+                await admin.create_topics(
+                    [NewTopic(name=t, num_partitions=1, replication_factor=1) for t in missing]
+                )
+                logger.info("kafka: created topics %s", missing)
+            finally:
+                await admin.close()
+        except Exception:
+            # Dev Redpanda often auto-creates on first produce; do not fail startup.
+            logger.warning("kafka: topic ensure skipped (will rely on auto-create)", exc_info=True)
+
     async def _consume_loop(self, stop: asyncio.Event) -> None:
         logger.info(
             "kafka: consumer started topic=%s group=%s mode=%s",
@@ -262,6 +288,7 @@ class KafkaManager(LifespanResource):
                 acks="all",
             )
             await self._producer.start()
+            await self._ensure_topics()
             logger.info(
                 "kafka: producer started servers=%s topics=%s,%s",
                 self._bootstrap,

@@ -37,7 +37,7 @@ async def liveness() -> dict[str, str]:
 
 @router.get("/health/ready")
 async def readiness(request: Request) -> dict[str, Any]:
-    """k3s readinessProbe — DB (+ Redis when configured/required)."""
+    """k3s readinessProbe — DB + required infra managers."""
     checks: dict[str, str] = {}
 
     try:
@@ -76,6 +76,27 @@ async def readiness(request: Request) -> dict[str, Any]:
     extras: dict[str, Any] = {}
     if lifespan is not None:
         report = await lifespan.health_report()
-        extras["resources"] = {k: ("ok" if v is True else "fail" if v is False else "n/a") for k, v in report.items()}
+        extras["resources"] = {
+            k: ("ok" if v is True else "fail" if v is False else "n/a") for k, v in report.items()
+        }
+        required_resources: list[tuple[str, bool]] = [
+            ("kafka", settings.kafka_required),
+            ("object_storage", settings.object_store_required),
+        ]
+        for name, required in required_resources:
+            if not required:
+                continue
+            status = report.get(name)
+            if status is not True:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "code": "NOT_READY",
+                        "message": f"{name}: unavailable",
+                        "checks": {**checks, name: "fail"},
+                        **extras,
+                    },
+                )
+            checks[name] = "ok"
 
     return {"status": "ok", **_build_meta(), "checks": checks, **extras}
