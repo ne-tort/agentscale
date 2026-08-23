@@ -26,10 +26,10 @@ AgentProviderPort + frozen AgentEvent; credentials только через L03 r
 | `FixtureCursorAdapter` (cursor_sdk) + `FakeAgentAdapter` | Codex/Claude real adapters |
 | ORM agent_sessions / agent_events / agent_usage | Codex/Claude real adapters |
 | `POST /projects/{id}/chat` + `/chat/stream` (SSE) | Node sidecar (real Cursor SDK) |
-| `GET .../chat/transcript` + list sessions; user + tool bubbles | Platform fallback key pool |
+| `GET .../chat/transcript` + list sessions; user + tool bubbles | Background worker loop |
 | `AgentBudgetService` — monthly tokens + USD + per-run token hard-stop | Node sidecar (real Cursor SDK) |
 | HITL `tool_approval_request` + approve/deny API + L05 ToolApprovePage | Codex/Claude real adapters |
-| Trigger dispatch (`chat.message` → agent run) | Background worker loop |
+| Trigger dispatch (`chat.message` → agent run) | done | POST /triggers/dispatch |
 | Unit + integration tests | Golden JSON fixtures |
 
 ## Как сделано
@@ -56,7 +56,7 @@ AgentProviderPort + frozen AgentEvent; credentials только через L03 r
 
 | ID | Откуда | Статус |
 |----|--------|--------|
-| C-KEY-RESOLVE | L03 | live |
+| C-KEY-RESOLVE | L03 | live (incl. platform_fallback from L04 policy) |
 | C-PROJECT / C-MATERIALIZE | L07 | live |
 | C-ADMIN-COMPANY policy | L04 | live (preset + token budgets) |
 

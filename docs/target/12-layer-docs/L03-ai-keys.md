@@ -27,7 +27,7 @@
 | Admin Flutter: list/create/bind/disable/renew/rotate (L04) | |
 | AiKeysService.resolve_credentials + ban cli_subscription | |
 | Lazy expire: next_renewal_at past → status expired on resolve + audit | |
-| platform_fallback → unbound keys pool on resolve | |
+| platform_fallback → unbound keys pool on resolve | L08 create_session reads company policy |
 | company_key_metrics(company_id) for L04 alerts | |
 | Bind/unbind companies; renew months 1..12; rotate-secret | |
 

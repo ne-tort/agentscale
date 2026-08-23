@@ -430,3 +430,120 @@ def test_chat_with_attachment_refs_emits_tool_call(client: TestClient) -> None:
     msgs = transcript.json()["messages"]
     assert any(m.get("role") == "user" and "process file" in m.get("text", "") for m in msgs)
     assert any(m.get("role") == "tool" and "mcp.cabinet.info" in m.get("text", "") for m in msgs)
+
+
+@requires_postgres
+def test_agent_session_uses_platform_fallback_pool(client: TestClient) -> None:
+    admin_h = {"Authorization": f"Bearer {_token(sub='fb-admin', platform_admin=True)}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "FallbackAgentCo", "admin_email": "fb@agentco.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    pool = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "Platform pool",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-platform-pool",
+            "company_ids": [],
+        },
+    )
+    assert pool.status_code == 201, pool.text
+
+    owner_h = {"Authorization": f"Bearer {_token(sub='fb-owner', email='fb@agentco.test')}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "FbCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "FbProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    sess = client.post(
+        f"/api/v1/projects/{project_id}/agent/sessions",
+        headers=owner_h,
+        json={},
+    )
+    assert sess.status_code == 201, sess.text
+    assert sess.json()["provider"] == "cursor"
+
+
+@requires_postgres
+def test_trigger_dispatch_runs_chat_message(client: TestClient) -> None:
+    admin_h = {"Authorization": f"Bearer {_token(sub='trig-admin', platform_admin=True)}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "TrigCo", "admin_email": "trig@agentco.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "Cursor",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-trig",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = {"Authorization": f"Bearer {_token(sub='trig-owner', email='trig@agentco.test')}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "TrigCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "TrigProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    trig = client.post(
+        f"/api/v1/projects/{project_id}/triggers",
+        headers=owner_h,
+        json={"kind": "chat.message", "payload": {"text": "from trigger"}},
+    )
+    assert trig.status_code == 202, trig.text
+    trigger_id = trig.json()["id"]
+
+    dispatched = client.post(
+        f"/api/v1/projects/{project_id}/triggers/dispatch",
+        headers=owner_h,
+    )
+    assert dispatched.status_code == 200, dispatched.text
+    body = dispatched.json()
+    assert body.get("dispatched") is True
+    assert body.get("trigger_id") == trigger_id
+    assert body.get("run", {}).get("session_id")
+
+    listed = client.get(f"/api/v1/projects/{project_id}/triggers", headers=owner_h)
+    assert listed.status_code == 200
+    done = next(t for t in listed.json()["items"] if t["id"] == trigger_id)
+    assert done["status"] == "done"
