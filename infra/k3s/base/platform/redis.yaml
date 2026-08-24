@@ -61,6 +61,8 @@ spec:
             - redis-server
             - --appendonly
             - "yes"
+            - --appendfsync
+            - everysec
             - --save
             - "60"
             - "1"

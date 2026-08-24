@@ -297,6 +297,7 @@ class KafkaManager(LifespanResource):
                 bootstrap_servers=self._bootstrap,
                 client_id=self._client_id,
                 acks="all",
+                enable_idempotence=True,
             )
             await self._producer.start()
             await self._ensure_topics()

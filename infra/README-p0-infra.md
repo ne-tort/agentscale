@@ -78,7 +78,7 @@ pwsh infra/scripts/build_local_app_images.ps1
 bash infra/scripts/acceptance_local.sh          # recover + smoke + seed chat + project sandbox
 BROKER_RECOVER_TEST=1 bash infra/scripts/acceptance_local.sh   # + redis/minio/kafka/pg/api pod recover
 TEST_WORKLOADS=1 bash infra/scripts/test_k3d_recover.sh   # k3d stop/start + recover
-bash infra/scripts/test_broker_pod_recover.sh   # redis/minio/kafka/postgres/api pod recover only
+bash infra/scripts/test_broker_pod_recover.sh   # redis/minio/kafka/postgres/api/celery
 ```
 
 ## Terraform (local, one shot)
@@ -90,7 +90,7 @@ bash infra/scripts/terraform_apply_local.sh   # Windows build + terraform apply 
 ## Notes / holes
 
 - Kafka consumer kick|dispatch; PG outbox still claim SoT.
-- Redpanda single-node `--overprovisioned` for k3d; HA/TLS/Helm — hole (I9). `verify_kafka.sh` checks topics + write cache off.
+- Redpanda single-node `--overprovisioned` for k3d; HA/TLS/Helm — hole (I9). `verify_kafka.sh` includes produce/consume on `prodavan.ops.health`.
 - Argo local Application: **prune=false**; recover does not require Synced if GitHub TLS ComparisonError and workloads are Ready (I19).
 - **Dev images:** `overlays/dev` tag is `:local` (k3d import). SHA-pin breaks GitOps if GHCR has no digest (I18).
 - AUTH_MODE=test in cluster ConfigMap (Keycloak-in-cluster — hole).

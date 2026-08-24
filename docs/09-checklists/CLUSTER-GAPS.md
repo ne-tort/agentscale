@@ -25,7 +25,7 @@
 | I2 | CORS для Ingress origin | done | CORS_ORIGINS env |
 | I3 | Flutter refresh token | done | SessionStore + AuthApi.refresh |
 | I4 | OpenAPI stub ≪ runtime | open | не блокер k3s; sync later |
-| I5 | Redis/MinIO/Kafka/Celery in k3s | **done** (subset) | Redpanda PVC+headless, no `dev-container`, `write_caching_default=false`, `auto_create_topics_enabled=false`, RF=1 topics; `verify_kafka.sh` |
+| I5 | Redis/MinIO/Kafka/Celery in k3s | **done** (subset) | Redpanda durability + `prodavan.ops.health` roundtrip; Redis AOF `everysec`; Celery readiness `inspect ping` |
 | I6 | Базовые экраны projects/runs/variants | done | Flutter screens для отладки |
 | I7 | docker-compose.stack.yml (api+web+pg+P0) | done | smoke без кластера |
 | I8 | Project sandbox Pod/Job isolator | **open** | **as-built:** `container_ref=object-ws:{key}` → `WorkspaceLayoutWriter` dual-write MinIO+PVC (`OBJECT_STORE_MIRROR_LOCAL`); `verify_project_sandbox.sh` green; k8s Pod/Job isolator deferred |
@@ -40,6 +40,8 @@
 | I17 | API image rebuild without network | **done** (ops) | Dockerfile без apt/curl; `bridge_docker_desktop_image.sh` + verify alembic/celery |
 | I18 | SHA-pin `overlays/dev` without GHCR | **done** (policy) | `kustomization.yaml` stays `newTag: local`. |
 | I19 | Argo repo-server → GitHub TLS | **done** (ops subset) | `reposerver.git.request.timeout=90s` + git retries; wait/recover accept Healthy+ComparisonError if core pods Ready; local Application `prune: false` |
+| I20 | Celery readiness vs broker | **done** | `inspect ping` readiness; liveness is PID 1 only (avoid restart storm when Redis blips) |
+| I21 | Celery worker+beat in one pod | **open** (local) | `-B` in `prodavan-celery-worker` is fine on single-node; split beat before multi-replica |
 
 ## Nice / later
 
@@ -67,4 +69,4 @@ Broker/API pod failure: `bash infra/scripts/test_broker_pod_recover.sh` (redis/m
 
 Terraform (local): `bash infra/scripts/terraform_apply_local.sh` или `bootstrap_gitops=true` → verify_touchable_ui; Windows: `build_local_app_images.ps1` first.
 
-Обновлено: 2026-08-24 (I19 Argo git timeout + prune=false local)
+Обновлено: 2026-08-24 (celery probes + kafka produce/consume probe)

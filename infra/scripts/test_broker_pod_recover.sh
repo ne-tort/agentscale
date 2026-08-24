@@ -31,5 +31,6 @@ done
 
 recover_deploy prodavan-postgres
 recover_deploy prodavan-api
+recover_deploy prodavan-celery-worker
 
 echo "test_broker_pod_recover OK"

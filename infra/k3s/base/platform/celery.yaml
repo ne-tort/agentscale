@@ -23,11 +23,13 @@ spec:
         app.kubernetes.io/part-of: prodavan
         app.kubernetes.io/component: celery
     spec:
+      terminationGracePeriodSeconds: 90
       containers:
         - name: worker
           image: ghcr.io/ne-tort/prodavan-api:latest
           imagePullPolicy: IfNotPresent
           # command replaces image ENTRYPOINT; python -m avoids missing console_script PATH issues.
+          # Local: worker+beat in one process (prod should split beat — I21).
           command:
             - python
             - -m
@@ -50,6 +52,32 @@ spec:
             # Same RWO PVC as API — safe on single-node k3d; needed for rematerialize mirror.
             - name: storage
               mountPath: /data/storage
+          readinessProbe:
+            exec:
+              command:
+                - python
+                - -m
+                - celery
+                - -A
+                - prodavan.core.infra.worker_manager.celery_app
+                - inspect
+                - ping
+                - --timeout
+                - "8"
+            initialDelaySeconds: 20
+            periodSeconds: 25
+            timeoutSeconds: 15
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import os; os.kill(1, 0)"
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
           resources:
             requests:
               cpu: 100m
