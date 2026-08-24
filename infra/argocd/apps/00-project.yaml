@@ -1,0 +1,17 @@
+# Dedicated AppProject — do not use Argo `default` (any repo, any namespace).
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: prodavan
+  namespace: argocd
+spec:
+  description: Prodavan local k3d (repo + namespace scoped)
+  sourceRepos:
+    - https://github.com/ne-tort/prodavan.git
+  destinations:
+    - namespace: prodavan
+      server: https://kubernetes.default.svc
+  # Overlay includes Namespace; CreateNamespace=true also needs this.
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace

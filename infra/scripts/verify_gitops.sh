@@ -26,7 +26,16 @@ echo "prune=${prune} selfHeal=${heal}"
 
 rev="$(kubectl -n argocd get application prodavan-dev -o jsonpath='{.spec.source.targetRevision}')"
 path="$(kubectl -n argocd get application prodavan-dev -o jsonpath='{.spec.source.path}')"
-echo "targetRevision=${rev} path=${path}"
+proj="$(kubectl -n argocd get application prodavan-dev -o jsonpath='{.spec.project}')"
+echo "project=${proj} targetRevision=${rev} path=${path}"
 [[ "$path" == "infra/k3s/overlays/dev" ]] || { echo "FAIL: unexpected Application path ${path}" >&2; exit 1; }
+[[ "$proj" == "prodavan" ]] || { echo "FAIL: Application project must be prodavan not ${proj:-empty}" >&2; exit 1; }
+
+ns="$(kubectl -n argocd get appproject prodavan -o jsonpath='{.spec.destinations[0].namespace}')"
+repo="$(kubectl -n argocd get appproject prodavan -o jsonpath='{.spec.sourceRepos[0]}')"
+echo "AppProject dest.namespace=${ns} sourceRepos=${repo}"
+[[ "$ns" == "prodavan" ]] || { echo "FAIL: AppProject destination namespace ${ns}" >&2; exit 1; }
+[[ "$repo" == "https://github.com/ne-tort/prodavan.git" ]] \
+  || { echo "FAIL: AppProject sourceRepos ${repo}" >&2; exit 1; }
 
 echo "verify_gitops OK"

@@ -51,7 +51,7 @@ echo "Waiting for argocd-application-controller..."
 kubectl -n argocd rollout status statefulset/argocd-application-controller --timeout=300s || true
 kubectl -n argocd wait --for=condition=Ready pod -l app.kubernetes.io/name=argocd-application-controller --timeout=180s || true
 
-kubectl apply -f "${ROOT}/infra/argocd/apps/prodavan-dev.yaml"
+kubectl apply -f "${ROOT}/infra/argocd/apps/"
 
 if [[ -n "${ARGOCD_REPO_TOKEN:-}" ]]; then
   echo "==> Argo CD repository credentials"

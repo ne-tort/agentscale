@@ -68,6 +68,13 @@ spec:
             - "1"
             - --dir
             - /data
+            # Celery broker: never evict task keys. Cap below the 256Mi limit.
+            - --maxmemory
+            - 192mb
+            - --maxmemory-policy
+            - noeviction
+            - --tcp-keepalive
+            - "60"
           ports:
             - name: redis
               containerPort: 6379

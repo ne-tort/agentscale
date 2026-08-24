@@ -37,6 +37,12 @@ echo "$topics" | grep -q 'prodavan.platform.events' \
 echo "$topics" | grep -q 'prodavan.project.triggers' \
   || { echo "FAIL: missing topic prodavan.project.triggers" >&2; exit 1; }
 
+echo "==> topic replica factor (single-node: all REPLICAS=1)"
+while read -r name _parts replicas; do
+  [[ -n "$name" && "$name" != "NAME" ]] || continue
+  [[ "$replicas" == "1" ]] || { echo "FAIL: topic ${name} replicas=${replicas} want 1" >&2; exit 1; }
+done < <(rpk topic list --internal)
+
 auto="$(rpk cluster config get auto_create_topics_enabled 2>/dev/null || true)"
 echo "auto_create_topics_enabled=${auto}"
 auto_norm="$(printf '%s' "$auto" | tr -d '"' | tr '[:upper:]' '[:lower:]')"
