@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "prodavan-ops"
+version = "0.1.0"
+description = "Declarative GitOps companion CLI for Prodavan (no shell scripts)."
+authors = ["Prodavan"]
+packages = [{ include = "prodavan_ops", from = "src" }]
+
+[tool.poetry.dependencies]
+python = "^3.12"
+typer = { extras = ["all"], version = "^0.15.1" }
+httpx = "^0.28.1"
+kubernetes = "^32.0.0"
+pyyaml = "^6.0.2"
+
+[tool.poetry.scripts]
+prodavan-ops = "prodavan_ops.cli:app"
+
+[tool.poetry.group.dev.dependencies]
+ruff = "^0.9.0"
+
+[build-system]
+requires = ["poetry-core>=2.0.0"]
+build-backend = "poetry.core.masonry.api"

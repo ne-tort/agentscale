@@ -1,0 +1,65 @@
+name: Verify Dev
+
+# Not a deploy orchestrator: Argo CD syncs from git + GHCR pulls.
+# This workflow only waits for Application health and smokes HTTP.
+
+on:
+  workflow_run:
+    workflows: ["CI Images"]
+    types: [completed]
+    branches: [main]
+  push:
+    branches: [main]
+    paths:
+      - "infra/k3s/**"
+      - "infra/argocd/**"
+      - "infra/ops/**"
+      - ".github/workflows/verify-dev.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: verify-dev
+  cancel-in-progress: false
+
+env:
+  HTTP_PORT: "8088"
+  KUBECONFIG: ${{ github.workspace }}/infra/.kube/prodavan-k3d.yaml
+  SMOKE_ADDR: "127.0.0.1"
+
+jobs:
+  wait-smoke:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.event != 'pull_request')
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Python venv + Poetry
+        run: |
+          python3 -m venv "${{ runner.temp }}/ops-venv"
+          echo "${{ runner.temp }}/ops-venv/bin" >> "${GITHUB_PATH}"
+          "${{ runner.temp }}/ops-venv/bin/python" -m pip install -U pip poetry
+
+      - name: Install prodavan-ops
+        working-directory: infra/ops
+        run: poetry install --no-interaction
+
+      # ghcr-pull must already exist (SealedSecret / operator bootstrap). CI does not mint it.
+
+      - name: Wait Argo Application
+        working-directory: infra/ops
+        run: poetry run prodavan-ops wait --app prodavan-dev --timeout 900
+
+      - name: Smoke HTTP
+        working-directory: infra/ops
+        run: poetry run prodavan-ops smoke --addr 127.0.0.1 --port 8088

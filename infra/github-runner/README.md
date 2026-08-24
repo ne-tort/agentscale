@@ -2,64 +2,44 @@
 
 ## Канон: процесс на Kali WSL (не Docker)
 
-На этой машине:
-
-1. **Docker Desktop** — TLS к GitHub ломается (`SSL connection could not be established` / EOF). DNS при этом резолвит — проблема не в nameserver.
-2. **Контейнер на Kali `network_mode: host`** — TLS OK, но listener **умирает mid-job** → GitHub `Session Conflict` / offline busy.
-3. **Хост Kali** — TLS OK, jobs стабильны. Docker-задачи (Postgres CI, terraform image) идут через `/var/run/docker.sock`.
+1. **Docker Desktop** — TLS к GitHub ломается (EOF). DNS при этом ок.
+2. **Контейнер host-net** — TLS OK, но listener умирает mid-job → Session Conflict.
+3. **Хост Kali** — канон. Docker-задачи через `/var/run/docker.sock`.
 
 ```bash
-# из Kali
-export PATH=/home/www/.local/bin:/usr/bin:/bin
-cd /mnt/c/Users/qwerty/git/Commerce/prodavan/infra/github-runner
-# .env: REPO_URL + ACCESS_TOKEN, RUNNER_NAME=wsl-prodavan-host
-# jq в ~/.local/bin; Python через venv в workflow (PEP 668)
-bash start-kali-host.sh
-tail -f ~/prodavan-actions-runner/runner.out
+export PATH="${HOME}/.local/bin:/usr/bin:/bin"
+mkdir -p ~/prodavan-actions-runner && cd ~/prodavan-actions-runner
+# extract actions-runner-linux-x64-2.336.0.tar.gz
+printf 'DISABLE_RUNNER_UPDATE=1\n' > .env
+./config.sh --url https://github.com/ne-tort/prodavan --token <REG_TOKEN> \
+  --name wsl-prodavan-host --labels self-hosted,linux,docker,wsl-dev \
+  --work _work --unattended --replace
+nohup env PATH="${HOME}/.local/bin:/usr/bin:/bin" ./run.sh >runner.out 2>&1 &
 ```
 
 Ожидать: `Listening for Jobs` на `2.336.0`.  
-`DISABLE_RUNNER_UPDATE=1` в `~/prodavan-actions-runner/.env`.
+`KUBECONFIG` → `infra/.kube/prodavan-k3d.yaml`. kubectl на `127.0.0.1:6443`.
 
-Тот же Docker, что и k3d → Deploy: `k3d image import`, kubectl `127.0.0.1:6443`.
+**Инструменты на PATH раннера** (бинарники на хосте, не через Docker): `kubectl`, `kustomize`, `terraform`.  
+Раннер **вне** k3s; кластер про Docker не знает — kubelet тянет образы из GHCR по `ghcr-pull`.
 
-## Fallback: Docker host-net (только если host runner недоступен)
+## Ops CLI (Poetry)
 
-`bash start-kali.sh` — см. скрипт; не канон на этой машине.
+```bash
+cd infra/ops
+poetry install
+poetry run prodavan-ops validate
+poetry run prodavan-ops wait
+poetry run prodavan-ops smoke
+poetry run prodavan-ops seed
+```
 
-## Не использовать Docker Desktop для runner
-
-`desktop-linux` + host net: SSL EOF к github.com / broker.actions.githubusercontent.com.
+Под `infra/` **нет** `.sh`.
 
 ## Session conflict
 
-Если GitHub показывает runner busy/offline и `A session for this runner already exists`:
-
-1. Не крутить cancel-in-progress на единственном runner (в Gate уже `false`).
-2. Новый `RUNNER_NAME`, удалить offline runner через API, подождать ~3–5 мин.
-3. `gh api repos/ne-tort/prodavan/actions/runners`.
-
-## Token
-
-```powershell
-gh api -X POST repos/ne-tort/prodavan/actions/runners/registration-token --jq .token
-# или ACCESS_TOKEN= (PAT, manage runners) в .env
-```
-
-## Verify
-
-```bash
-gh api repos/ne-tort/prodavan/actions/runners --jq '.runners[] | {name,status,busy}'
-docker exec prodavan-gha-runner curl -fsS -o /dev/null -w '%{http_code}\n' https://api.github.com/zen
-```
-
-## После reboot WSL
-
-```bash
-# Kali dockerd + k3d
-bash infra/scripts/ensure_k3d_cluster.sh
-export PATH=/usr/bin:/bin
-docker start prodavan-gha-runner || (cd infra/github-runner && bash start-kali.sh)
-```
+1. `cancel-in-progress: false` на единственном runner.
+2. Новый `RUNNER_NAME`, удалить offline через API, подождать.
+3. `gh api repos/ne-tort/prodavan/actions/runners`
 
 Ранбук: [`docs/07-infrastructure/runbook.md`](../../docs/07-infrastructure/runbook.md).

@@ -25,22 +25,48 @@ jobs:
       tag: ${{ steps.meta.outputs.tag }}
       push: ${{ steps.meta.outputs.push }}
       owner: ${{ steps.meta.outputs.owner }}
+      api: ${{ steps.meta.outputs.api }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Image names
         id: meta
         run: |
-          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          echo "owner=${OWNER}" >> "$GITHUB_OUTPUT"
-          echo "api=${{ env.REGISTRY }}/${OWNER}/prodavan-api" >> "$GITHUB_OUTPUT"
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "tag=pr-${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
-            echo "push=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-            echo "push=true" >> "$GITHUB_OUTPUT"
-          fi
+          python3 - <<'PY'
+          import os
+          owner = os.environ["GITHUB_REPOSITORY_OWNER"].lower()
+          registry = os.environ["REGISTRY"]
+          sha = os.environ["GITHUB_SHA"][:12]
+          event = os.environ.get("GITHUB_EVENT_NAME", "")
+          out = os.environ["GITHUB_OUTPUT"]
+          lines = [
+              f"owner={owner}",
+              f"api={registry}/{owner}/prodavan-api",
+          ]
+          if event == "pull_request":
+              lines += ["tag=pr-local", "push=false"]
+          else:
+              lines += [f"tag={sha}", "push=true"]
+          with open(out, "a", encoding="utf-8") as f:
+              f.write("\n".join(lines) + "\n")
+          PY
+
+      - name: Sanitize Docker config
+        run: |
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path.home() / ".docker" / "config.json"
+          path.parent.mkdir(parents=True, exist_ok=True)
+          cfg = {}
+          if path.is_file():
+              cfg = json.loads(path.read_text(encoding="utf-8"))
+          cfg.pop("credsStore", None)
+          cfg.pop("credHelpers", None)
+          cfg.setdefault("auths", {})
+          path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+          print("sanitized", path)
+          PY
 
       - uses: docker/setup-buildx-action@v3
 
@@ -85,8 +111,15 @@ jobs:
 
       - name: Rotate cache
         run: |
-          rm -rf /tmp/.buildx-cache-api
-          mv /tmp/.buildx-cache-api-new /tmp/.buildx-cache-api || true
+          python3 - <<'PY'
+          import shutil
+          from pathlib import Path
+          old, new = Path("/tmp/.buildx-cache-api"), Path("/tmp/.buildx-cache-api-new")
+          if old.exists():
+              shutil.rmtree(old, ignore_errors=True)
+          if new.exists():
+              new.rename(old)
+          PY
 
   build-web:
     runs-on: [self-hosted, linux, docker]
@@ -96,15 +129,38 @@ jobs:
       - name: Image names
         id: meta
         run: |
-          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          echo "web=${{ env.REGISTRY }}/${OWNER}/prodavan-web" >> "$GITHUB_OUTPUT"
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "tag=pr-${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
-            echo "push=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-            echo "push=true" >> "$GITHUB_OUTPUT"
-          fi
+          python3 - <<'PY'
+          import os
+          owner = os.environ["GITHUB_REPOSITORY_OWNER"].lower()
+          registry = os.environ["REGISTRY"]
+          sha = os.environ["GITHUB_SHA"][:12]
+          event = os.environ.get("GITHUB_EVENT_NAME", "")
+          out = os.environ["GITHUB_OUTPUT"]
+          lines = [f"web={registry}/{owner}/prodavan-web"]
+          if event == "pull_request":
+              lines += ["tag=pr-local", "push=false"]
+          else:
+              lines += [f"tag={sha}", "push=true"]
+          with open(out, "a", encoding="utf-8") as f:
+              f.write("\n".join(lines) + "\n")
+          PY
+
+      - name: Sanitize Docker config
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path.home() / ".docker" / "config.json"
+          path.parent.mkdir(parents=True, exist_ok=True)
+          cfg = {}
+          if path.is_file():
+              cfg = json.loads(path.read_text(encoding="utf-8"))
+          cfg.pop("credsStore", None)
+          cfg.pop("credHelpers", None)
+          cfg.setdefault("auths", {})
+          path.write_text(json.dumps(cfg, indent=2) + "\n", encoding="utf-8")
+          print("sanitized", path)
+          PY
 
       - uses: docker/setup-buildx-action@v3
 
@@ -155,5 +211,12 @@ jobs:
 
       - name: Rotate cache
         run: |
-          rm -rf /tmp/.buildx-cache-web
-          mv /tmp/.buildx-cache-web-new /tmp/.buildx-cache-web || true
+          python3 - <<'PY'
+          import shutil
+          from pathlib import Path
+          old, new = Path("/tmp/.buildx-cache-web"), Path("/tmp/.buildx-cache-web-new")
+          if old.exists():
+              shutil.rmtree(old, ignore_errors=True)
+          if new.exists():
+              new.rename(old)
+          PY

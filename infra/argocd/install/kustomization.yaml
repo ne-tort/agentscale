@@ -1,0 +1,9 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: argocd
+resources:
+  # Official Argo CD install (pinned). Apply once or via root Application.
+  - https://raw.githubusercontent.com/argoproj/argo-cd/v2.13.3/manifests/install.yaml
+patches:
+  - path: patch-repo-server-timeout.yaml
+  - path: patch-pull-policy.yaml

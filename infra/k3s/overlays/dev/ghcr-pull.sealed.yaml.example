@@ -1,0 +1,14 @@
+# Template: after sealing, replace this file with kubeseal output and rename to ghcr-pull.sealed.yaml
+# Then add to kustomization resources. Do not commit plaintext dockerconfigjson.
+apiVersion: bitnami.com/v1alpha1
+kind: SealedSecret
+metadata:
+  name: ghcr-pull
+  namespace: prodavan
+spec:
+  encryptedData: {}
+  template:
+    metadata:
+      name: ghcr-pull
+      namespace: prodavan
+    type: kubernetes.io/dockerconfigjson

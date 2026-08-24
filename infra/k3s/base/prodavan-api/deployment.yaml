@@ -1,3 +1,5 @@
+# API: migrations in initContainer; main process is uvicorn only.
+# Celery/worker overrides command and does not run this Deployment.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -33,10 +35,30 @@ spec:
       automountServiceAccountToken: true
       imagePullSecrets:
         - name: ghcr-pull
+      initContainers:
+        - name: migrate
+          image: ghcr.io/ne-tort/prodavan-api:latest
+          imagePullPolicy: IfNotPresent
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: prodavan-config
+            - secretRef:
+                name: prodavan-api-secrets
+          volumeMounts:
+            - name: storage
+              mountPath: /data/storage
       containers:
         - name: api
           image: ghcr.io/ne-tort/prodavan-api:latest
           imagePullPolicy: IfNotPresent
+          command:
+            - uvicorn
+            - prodavan.main:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8000"
           ports:
             - name: http
               containerPort: 8000

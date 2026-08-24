@@ -20,8 +20,29 @@ jobs:
     runs-on: [self-hosted, linux, docker]
     steps:
       - uses: actions/checkout@v4
-      - name: Validate kustomize, image pins, terraform
-        run: bash infra/scripts/ci_infra_validate.sh
+      - name: Install kustomize
+        run: |
+          curl -sL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/v5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" \
+            | tar xz -C "${{ runner.temp }}"
+          echo "${{ runner.temp }}" >> "${GITHUB_PATH}"
+          kustomize version
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+      - name: Python venv + Poetry
+        run: |
+          python3 -m venv "${{ runner.temp }}/ops-venv"
+          echo "${{ runner.temp }}/ops-venv/bin" >> "${GITHUB_PATH}"
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+          echo "/usr/local/bin" >> "${GITHUB_PATH}"
+          "${{ runner.temp }}/ops-venv/bin/python" -m pip install -U pip poetry
+      - name: Validate (kustomize, pins, terraform, no .sh)
+        working-directory: infra/ops
+        env:
+          POETRY_VIRTUALENVS_IN_PROJECT: "true"
+        run: |
+          poetry install --no-interaction
+          poetry run prodavan-ops validate
 
   api:
     name: api
@@ -43,10 +64,22 @@ jobs:
     steps:
       - name: All required jobs green
         run: |
-          set -euo pipefail
-          echo "infra=${{ needs.infra.result }} api=${{ needs.api.result }} flutter=${{ needs.flutter.result }} schemas=${{ needs.schemas.result }}"
-          [[ "${{ needs.infra.result }}" == "success" ]]
-          [[ "${{ needs.api.result }}" == "success" ]]
-          [[ "${{ needs.flutter.result }}" == "success" ]]
-          [[ "${{ needs.schemas.result }}" == "success" ]]
-          echo "CI Gate OK"
+          python3 - <<'PY'
+          import os, sys
+          checks = {
+              "infra": os.environ["INFRA"],
+              "api": os.environ["API"],
+              "flutter": os.environ["FLUTTER"],
+              "schemas": os.environ["SCHEMAS"],
+          }
+          print(checks)
+          bad = [k for k, v in checks.items() if v != "success"]
+          if bad:
+              sys.exit(f"CI Gate failed: {bad}")
+          print("CI Gate OK")
+          PY
+        env:
+          INFRA: ${{ needs.infra.result }}
+          API: ${{ needs.api.result }}
+          FLUTTER: ${{ needs.flutter.result }}
+          SCHEMAS: ${{ needs.schemas.result }}
