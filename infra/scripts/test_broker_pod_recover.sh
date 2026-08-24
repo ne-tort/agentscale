@@ -25,9 +25,12 @@ recover_deploy() {
   echo "ok deploy/${dep}"
 }
 
-for p in prodavan-redis-0 prodavan-minio-0 prodavan-kafka-0; do
+for p in prodavan-redis-0 prodavan-minio-0; do
   recover_pod "$p"
 done
+
+echo "==> kafka PVC retain + fsync (not just Ready)"
+bash "${SCRIPT_DIR}/verify_kafka_pvc_retain.sh"
 
 recover_deploy prodavan-postgres
 recover_deploy prodavan-api

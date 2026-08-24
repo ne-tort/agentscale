@@ -45,6 +45,14 @@ if [[ "$auto_norm" != "false" ]]; then
   exit 1
 fi
 
+internal_rf="$(rpk cluster config get internal_topic_replication_factor 2>/dev/null || true)"
+echo "internal_topic_replication_factor=${internal_rf}"
+internal_norm="$(printf '%s' "$internal_rf" | tr -d '"' | tr -d '[:space:]')"
+if [[ "$internal_norm" != "1" ]]; then
+  echo "FAIL: internal_topic_replication_factor must be 1 on single-node (got ${internal_rf})" >&2
+  exit 1
+fi
+
 echo "==> produce/consume probe (prodavan.ops.health, isolated from app consumer group)"
 if ! echo "$topics" | grep -q 'prodavan.ops.health'; then
   rpk topic create prodavan.ops.health -p 1 -r 1 >/dev/null 2>&1 || true

@@ -35,7 +35,7 @@
 | I12 | GHCR API/web image lag | **done** (ops path) | **dev overlay MUST be `:local`** + k3d import. SHA-pin without GHCR publish → ImagePullBackOff (I18). |
 | I13 | Terraform apply = full stack | **done** (subset) | `bootstrap_gitops=true` → verify_touchable_ui; Windows: `build_local_app_images.ps1` first |
 | I14 | Recover after reboot | **done** | `recover_local_stack.sh` (Argo refresh) + `test_k3d_recover.sh TEST_WORKLOADS=1` + `test_broker_pod_recover.sh` + `acceptance_local.sh` (`BROKER_RECOVER_TEST=1`) |
-| I15 | Argo Job churn / selfHeal fight | **done** (subset) | Sync hooks + ignoreDifferences; **RespectIgnoreDifferences**; **no ApplyOutOfSyncOnly**. Local `prune: false`. |
+| I15 | Argo Job churn / selfHeal fight | **done** (subset) | Sync hooks + ignoreDifferences; **RespectIgnoreDifferences**; **no ApplyOutOfSyncOnly**. Local `prune: false`. `verify_gitops.sh` |
 | I16 | Secrets in git (dev) | open | SealedSecrets/SOPS deferred; rotate before shared cluster |
 | I17 | API image rebuild without network | **done** (ops) | Dockerfile без apt/curl; `bridge_docker_desktop_image.sh` + verify alembic/celery |
 | I18 | SHA-pin `overlays/dev` without GHCR | **done** (policy) | `kustomization.yaml` stays `newTag: local`. |
@@ -45,6 +45,7 @@
 | I22 | `kubectl apply -k` immutable hook Jobs | **done** (ops) | `apply_overlay_safe.sh` deletes fixed-name init Jobs before apply (kafka/minio) |
 | I23 | RollingUpdate + shared RWO PVC (API/Celery) | **done** | Recreate on api/celery-worker; beat **does not** mount PVC |
 | I24 | Redpanda fsync bypass via rpk start | **done** | `rpk start --check=false` injected `--unsafe-bypass-fsync=true`; now exec binary + ConfigMap `developer_mode: false` |
+| I25 | Single-node internal RF + Kafka PVC retain | **done** | `internal_topic_replication_factor=1` (default 3 breaks idempotent producer). `verify_kafka_pvc_retain.sh` produce→delete pod→consume |
 
 ## Nice / later
 
@@ -68,8 +69,8 @@ bash infra/scripts/verify_touchable_ui.sh
 
 После reboot хоста: `bash infra/scripts/recover_local_stack.sh` (печатает JWT для UI).
 
-Broker/API pod failure: `bash infra/scripts/test_broker_pod_recover.sh` (redis/minio/kafka/postgres/api/celery-worker/celery-beat).
+Broker/API pod failure: `bash infra/scripts/test_broker_pod_recover.sh` (redis/minio/kafka PVC retain/postgres/api/celery-worker/celery-beat).
 
 Terraform (local): `bash infra/scripts/terraform_apply_local.sh` или `bootstrap_gitops=true` → verify_touchable_ui; Windows: `build_local_app_images.ps1` first.
 
-Обновлено: 2026-08-24 (I24 Redpanda fsync; beat without PVC; Argo Application re-apply on refresh)
+Обновлено: 2026-08-24 (I25 internal RF=1 + Kafka PVC retain; verify_gitops)

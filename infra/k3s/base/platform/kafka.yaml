@@ -8,7 +8,7 @@
 # - overprovisioned + no rpk syschecks (k3d); developer_mode:false in ConfigMap
 # - Single-node empty_seed_starts_cluster=true so the STS can form a cluster;
 #   HA (I9) must set it false + identical seed_servers
-# - write_caching_default=false via init Job (Admin API :9644)
+# - write_caching_default=false + internal_topic_replication_factor=1 via init Job (Admin API :9644)
 # - API KafkaManager also ensure_topics on startup; init Job is belt-and-suspenders
 #
 # Prod HA needs ≥3 brokers + anti-affinity + no overprovisioned — hole (Helm/operator).
@@ -203,6 +203,9 @@ spec:
               rpk cluster config set write_caching_default false -X brokers=$BROKERS -X admin.hosts=$ADMIN
               rpk cluster config set auto_create_topics_enabled false -X brokers=$BROKERS -X admin.hosts=$ADMIN
               rpk cluster config set default_topic_replications 1 -X brokers=$BROKERS -X admin.hosts=$ADMIN
+              # Single-node: default 3 would leave __consumer_offsets / tx coordinator under-replicated
+              # and break idempotent producers (API uses acks=all + enable_idempotence).
+              rpk cluster config set internal_topic_replication_factor 1 -X brokers=$BROKERS -X admin.hosts=$ADMIN
               rpk cluster config set log_retention_ms 604800000 -X brokers=$BROKERS -X admin.hosts=$ADMIN
               rpk cluster config set log_segment_ms 86400000 -X brokers=$BROKERS -X admin.hosts=$ADMIN
               rpk topic alter-config prodavan.platform.events --set cleanup.policy=delete -X brokers=$BROKERS || true
