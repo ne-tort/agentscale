@@ -1,7 +1,7 @@
-# Terraform → WSL SSH
+# Host SSH (optional, cloud terraform only)
 
-1. On WSL: `bash infra/scripts/setup_wsl_sshd.sh` (rootless sshd on `127.0.0.1:2222`).
-2. Key is copied here as `prodavan_tf` (gitignored).
-3. From Windows: `terraform -chdir=infra/terraform/environments/local apply` with `connection_type=ssh`.
+Local dev cluster uses **k3s on host** — no SSH provisioner.
 
-Private key must stay out of git.
+For future cloud `infra/terraform/environments/*` apply from Windows → remote VM, keep operator SSH keys here (gitignored).
+
+Private keys must stay out of git.

@@ -38,7 +38,7 @@ jobs:
           echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
           echo "/usr/local/bin" >> "${GITHUB_PATH}"
           "${{ runner.temp }}/ops-venv/bin/python" -m pip install -U pip poetry
-      - name: Validate (kustomize, pins, no .sh / compose / k3d)
+      - name: Validate (kustomize, pins, no legacy deploy paths)
         working-directory: infra/ops
         env:
           POETRY_VIRTUALENVS_IN_PROJECT: "true"

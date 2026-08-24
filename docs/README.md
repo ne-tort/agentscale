@@ -33,4 +33,4 @@
 | Checklists | [09-checklists/](09-checklists/) | Doc/Impl gates (исторические) |
 | Implementation | [10-implementation/](10-implementation/) | Roadmap I0–I9, gaps |
 
-Инфра-runbook'и в `07-infrastructure/` (k3d, Argo, runner) остаются рабочими для деплоя; доменная модель ролей/UI в них не канон.
+Инфра-runbook'и в `07-infrastructure/` (k3s, Argo, runner) — as-built для деплоя; доменная модель ролей/UI в них не канон.

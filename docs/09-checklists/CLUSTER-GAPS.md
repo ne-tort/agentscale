@@ -13,7 +13,7 @@
 | B1 | Dockerfile API | done | `apps/api/Dockerfile` (no shell entrypoint; alembic initContainer) |
 | B2 | Dockerfile Flutter web | done | `apps/flutter/Dockerfile` |
 | B3 | Каталог `infra/k3s/` manifests | done | base + overlays/dev + platform brokers |
-| B4 | Stub path `infra/k8s` vs docs `infra/k3s` | done | k8s README → redirect |
+| B4 | Stub path `infra/k8s` vs docs `infra/k3s` | done | `infra/k8s` и `deploy/k8s` удалены; канон только `infra/k3s` |
 | B5 | CI build/push images | done | `.github/workflows/ci-images.yml` (`:latest` + SHA) |
 | B6 | PVC / persistent storage для API | done | PVC + STORAGE_ROOT env |
 

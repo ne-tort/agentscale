@@ -111,17 +111,18 @@ def assert_no_shell_scripts() -> None:
 
 
 def assert_no_compose_or_k3d() -> None:
-    """Cluster path is k3s+Argo only — no compose-as-cluster, no k3d configs in git."""
-    root = repo_root() / "infra"
+    """Cluster path is k3s+Argo only — no compose-as-cluster, no k3d, no duplicate deploy trees."""
+    root = repo_root()
     banned: list[Path] = []
-    for p in root.rglob("docker-compose*.yml"):
-        banned.append(p.relative_to(repo_root()))
-    k3d = root / "k3d"
-    if k3d.exists():
-        banned.append(k3d.relative_to(repo_root()))
+    for p in (root / "infra").rglob("docker-compose*.yml"):
+        banned.append(p.relative_to(root))
+    for rel in ("infra/k3d", "infra/k8s", "deploy/k8s", "deploy"):
+        p = root / rel
+        if p.exists():
+            banned.append(p.relative_to(root))
     if banned:
-        listing = "\n".join(f"  - {p}" for p in sorted(set(banned)))
-        raise RuntimeError(f"forbidden compose/k3d under infra/:\n{listing}")
+        listing = "\n".join(f"  - {x}" for x in sorted(set(banned)))
+        raise RuntimeError(f"forbidden legacy deploy paths:\n{listing}")
 
 
 def validate_all() -> None:
@@ -129,7 +130,7 @@ def validate_all() -> None:
     assert_no_shell_scripts()
     print("ok")
 
-    print("==> no docker-compose / k3d under infra/")
+    print("==> no legacy deploy paths (compose/k3d/deploy/k8s)")
     assert_no_compose_or_k3d()
     print("ok")
 

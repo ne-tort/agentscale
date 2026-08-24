@@ -50,7 +50,7 @@ Postgres и Keycloak/Vault роли не меняются.
 - Cabinet hard-delete + orphan schema/blob GC; soft-deleted projects keep rows → blobs not orphan.
 - Dual-write Kafka publish **после** PG commit; ghost envelopes при rollback сняты.
 - **k3s GitOps** (`infra/k3s/base/platform`): Redis AOF + MinIO persist (`verify_minio_pvc_retain.sh`) + Redpanda STS (`--unsafe-bypass-fsync=false`, `internal_topic_replication_factor=1`, topic `min.insync.replicas=1` via init; rpk 24.2 `describe -c` may omit the key — default 1) + Celery; HA/TLS/Helm/Keycloak — hole.
-- **Alembic:** legacy cluster PVC on `20260808*`/`2026082101` incompatible with stub_bootstrap chain — use `infra/scripts/reset_dev_postgres.sh` (dev wipe).
+- **Alembic:** legacy cluster PVC on `20260808*`/`2026082101` incompatible with stub_bootstrap chain — wipe `prodavan-postgres-data` PVC and let Argo recreate (dev only).
 - C-CACHE / C-JOBS call sites as prior; C-MATERIALIZE object-ws + backfill as prior.
 
 ## Волны реализации
