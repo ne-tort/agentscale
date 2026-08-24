@@ -32,7 +32,7 @@
 | I9 | Redpanda HA (≥3 / anti-affinity) | deferred | local uses overprovisioned single node |
 | I10 | Keycloak in-cluster | open | AUTH_MODE=test + `seed_dev_identity.sh` (company+AI key+cabinet+e2e chat) |
 | I11 | Alembic history rewrite vs old PVC | **done** (ops) | `reset_dev_postgres.sh` for legacy `20260808*`/`2026082101` → stub chain |
-| I12 | GHCR API/web image lag | **done** (ops path) | Overlay first-party **`:latest`** + k3d import (`IfNotPresent`). SHA-pin without GHCR digest → ImagePullBackOff (I18). |
+| I12 | GHCR API/web image lag | **done** | Overlay `:latest` + `imagePullPolicy: Always` + `ghcr-pull`. Deploy rollout restart; k3d import не нужен. SHA-pin overlay → I18. |
 | I13 | Terraform apply = full stack | **done** (subset) | `bootstrap_gitops=true` → verify_touchable_ui; Windows: `build_local_app_images.ps1` first |
 | I14 | Recover after reboot | **done** | `recover_local_stack.sh` (Argo refresh) + `test_k3d_recover.sh TEST_WORKLOADS=1` + `test_broker_pod_recover.sh` (minio/redis/kafka/pg object+row retain) + `acceptance_local.sh` (`BROKER_RECOVER_TEST=1`) |
 | I15 | Argo Job churn / selfHeal fight | **done** (subset) | AppProject `prodavan` (not `default`); RespectIgnoreDifferences; no ApplyOutOfSyncOnly; local `prune: false`. `verify_gitops.sh` |
@@ -50,7 +50,7 @@
 | I27 | MinIO object retain + bucket hardening | **done** | `verify_minio_pvc_retain.sh` (S3 put/get via API). Init: `mc ready`, anonymous none, version suspend. STS: fsGroup 1000, `MINIO_UPDATE=off`. **Hole:** Argo selfHeal reverts uncommitted STS until push; verify waits ingress not Deploy Available (I18 SHA race) |
 | I28 | Postgres PVC retain after pod delete | **done** | `verify_postgres_pvc_retain.sh` INSERT→delete→SELECT; Recreate + `pg_ctl` preStop already |
 | I29 | Argo AppProject kind whitelist + orphans | **done** | `namespaceResourceWhitelist` pin; AppProject `orphanedResources.warn=true` (not Application — Argo 3.x) |
-| I30 | Deploy CI создаёт второй k3d | **done** | `REQUIRE_EXISTING_CLUSTER=1`; terraform apply не в Deploy; runner должен видеть тот же Docker, что и workstation k3d |
+| I30 | Deploy CI создаёт второй k3d | **done** | Не создаём. Desktop-раннер ≠ Kali docker; kubectl через `host.docker.internal:6443` (`attach_ci_kubeconfig.sh`) |
 | I32 | API integration pytest red on PG 16.15 | open | ~19 failing (`ResourceClosedError`, event-loop, 404 rematerialize). PR Gate = `tests/unit`; full integration = `ci-nightly` |
 
 ## Nice / later

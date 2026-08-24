@@ -15,7 +15,7 @@ feature branch
   → dispatch CI Images  (GITHUB_TOKEN merge не триггерит push-workflows)
   → CI Images: build/push ghcr.io/<owner>/prodavan-api|web :latest и :SHA12
        overlay kustomize остаётся :latest (не бампать SHA в git)
-  → Deploy Dev k3s: только существующий k3d, import overlay, Argo, smoke
+  → Deploy Dev k3s: kubectl к API k3d (host.docker.internal), GHCR Always + rollout, smoke
 ```
 
 Первый PR, который **добавляет** `auto-merge.yml`, мержить вручную: `workflow_run` читает workflow только с default branch.
@@ -31,21 +31,24 @@ feature branch
 | `ci-flutter.yml` | `workflow_call` + `push` `apps/flutter/**` | analyze + test |
 | `ci-schemas.yml` | `workflow_call` + `push` | `tools/validate_schemas.py` |
 | `ci-images.yml` | `push`/`workflow_dispatch` на `main` (пути apps/packages) | GHCR `:latest` + `:SHA12`. На PR не собираем — один self-hosted runner, Gate важнее |
-| `deploy-dev-k3s.yml` | успешный CI Images на `main` (не PR) | `REQUIRE_EXISTING_CLUSTER=1`, без terraform apply |
+| `deploy-dev-k3s.yml` | успешный CI Images на `main` (не PR) | kubectl к workstation k3d; образы с GHCR, не k3d import |
 | `auto-merge.yml` | успешный CI Gate (`pull_request`) | squash + dispatch Images |
 | `ci-nightly.yml` | cron 02:00 UTC | интеграция API, Postgres 16.15 |
 
 ## Deploy: воспроизводимость
 
-Job **не** вызывает Terraform и **не** создаёт k3d. Если runner не видит кластер `prodavan-dev` в том же Docker engine, скрипт падает с явным отказом (раньше CI пытался поднять второй кластер и ловил занятый `:6443`).
+Раннер (Docker Desktop) и k3d (Docker в Kali WSL) часто **разные демоны**. Раннеру не нужно быть в кластере.
 
-Локально кластер поднимает оператор (`ensure_k3d_cluster.sh` / Terraform local), не GitHub Actions.
+- **CI Images** пушит `:latest` в GHCR.
+- **k3s** тянет GHCR (`imagePullPolicy: Always` + secret `ghcr-pull`).
+- **Deploy** не делает `k3d image import` и не создаёт второй кластер. `attach_ci_kubeconfig.sh` ходит на `https://host.docker.internal:6443` (`tls-server-name: 127.0.0.1`) по `infra/.kube/prodavan-k3d.yaml` (пишет `ensure_k3d_cluster.sh` в том WSL, где k3d).
+- Smoke с раннера: `http://host.docker.internal:8088/` (`Host: prodavan.local`).
 
-Smoke: Ingress `http://prodavan.local:8088/` (`Host: prodavan.local`). JWT: `bash infra/scripts/seed_dev_identity.sh`.
+Пока k3d запущен, цикл PR → merge → GHCR → rollout ручных шагов не требует. После reboot хоста — `recover_local_stack.sh` (кластер long-lived).
 
 ## Образы
 
-- First-party API/web: overlay **`:latest`**, CI дополнительно тегает immutable SHA.
+- First-party API/web: overlay **`:latest`**, kubelet **Always**; CI дополнительно тегает immutable SHA.
 - Third-party: замороженные теги (`verify_image_pins.sh`, `ci_infra_validate.sh`).
 - Не SHA-пинить overlay — ImagePullBackOff на k3d без digest (I18).
 

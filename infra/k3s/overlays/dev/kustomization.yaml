@@ -6,7 +6,7 @@ resources:
   - postgres.yaml
 patches:
   - path: patch-dev.yaml
-# First-party: movable :latest (CI push + local k3d import). Never SHA-pin here (I18).
+# First-party: movable :latest, kubelet Always-pull from GHCR after CI push (I12). Never SHA-pin (I18).
 # Third-party brokers are version-pinned in base/platform + postgres.yaml — not :latest.
 images:
   - name: ghcr.io/ne-tort/prodavan-api

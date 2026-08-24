@@ -29,7 +29,7 @@ spec:
       containers:
         - name: worker
           image: ghcr.io/ne-tort/prodavan-api:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           # command replaces image ENTRYPOINT; python -m avoids missing console_script PATH issues.
           command:
             - python
@@ -120,7 +120,7 @@ spec:
       containers:
         - name: beat
           image: ghcr.io/ne-tort/prodavan-api:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           command:
             - python
             - -m

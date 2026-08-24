@@ -14,10 +14,11 @@ services:
       RUNNER_NAME: ${RUNNER_NAME:-wsl-prodavan}
       LABELS: ${LABELS:-self-hosted,linux,docker,wsl-dev}
       KUBECONFIG: /kube/prodavan-k3d.yaml
+      KUBECONFIG_REWRITE_HOST: host.docker.internal
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - runner-home:/opt/actions-runner
-      # Passwordless kubeconfig from host (no /etc/rancher/k3s/k3s.yaml sudo)
+      # k3d API is on Windows/Kali loopback; from Desktop VM use host.docker.internal (see attach_ci_kubeconfig.sh).
       - ../.kube:/kube:ro
       # Optional preload (avoids flaky GitHub download):
       - ./actions-runner-linux-x64-2.328.0.tar.gz:/tmp/actions-runner-linux-x64-2.328.0.tar.gz:ro

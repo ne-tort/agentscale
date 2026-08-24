@@ -22,16 +22,11 @@ If GitHub shows the runner **busy/offline** with a stuck `in_progress` job and c
 `A session for this runner already exists`, cancel/force-cancel that run, then register under a
 **new** `RUNNER_NAME` (wipe the `runner-home` volume). Do not leave two listeners on the same name.
 
-## Kubeconfig (local k3d, no sudo)
+## Kubeconfig (local k3d)
 
-Deploy jobs need cluster access without `/etc/rancher/k3s/k3s.yaml`.
+`ensure_k3d_cluster.sh` (в WSL, где k3d) пишет `infra/.kube/prodavan-k3d.yaml`. Compose монтирует это в `/kube`.
 
-1. Create cluster: `bash infra/scripts/bootstrap_local_cluster.sh` (or terraform local apply).
-2. Export: `bash infra/scripts/k3d_kubeconfig_for_runner.sh` → `infra/.kube/prodavan-k3d.yaml`.
-3. Compose mounts `../.kube` → `/kube` and sets `KUBECONFIG=/kube/prodavan-k3d.yaml`.
-4. `network_mode: host` so the container reaches k3d API on `127.0.0.1:6443`.
-
-See [local-cluster-e2e.md](../../docs/07-infrastructure/local-cluster-e2e.md).
+Раннер в Docker Desktop **не** видит loopback Kali: API — `host.docker.internal:6443`. Deploy вызывает `attach_ci_kubeconfig.sh` (переписывает server + `tls-server-name: 127.0.0.1`). Образы приложений идут из GHCR, не через `k3d image import`.
 
 ## Labels
 

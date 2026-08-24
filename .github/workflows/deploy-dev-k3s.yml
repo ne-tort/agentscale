@@ -1,6 +1,14 @@
 name: Deploy Dev k3s
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/k3s/**"
+      - "infra/scripts/attach_ci_kubeconfig.sh"
+      - "infra/scripts/rollout_latest_from_ghcr.sh"
+      - "infra/scripts/smoke_ingress.sh"
+      - ".github/workflows/deploy-dev-k3s.yml"
   workflow_run:
     workflows: ["CI Images"]
     types: [completed]
@@ -18,15 +26,17 @@ concurrency:
 env:
   HTTP_PORT: "8088"
   KUBECONFIG: ${{ github.workspace }}/infra/.kube/prodavan-k3d.yaml
-  # Never create a second k3d from CI (port clash with the workstation cluster).
+  # k3d may live in another WSL Docker; never create a second cluster from Desktop.
   REQUIRE_EXISTING_CLUSTER: "1"
   CREATE_CLUSTER: "0"
   WARM_K3D_IMAGES: "0"
+  SMOKE_ADDR: host.docker.internal
 
 jobs:
   deploy-smoke:
     if: >
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'push' ||
       (github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.head_branch == 'main' &&
        github.event.workflow_run.event != 'pull_request')
@@ -36,8 +46,8 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-      - name: Attach existing k3d (do not create)
-        run: bash infra/scripts/ensure_k3d_cluster.sh
+      - name: Attach workstation k3d API (no create, no shared Docker required)
+        run: bash infra/scripts/attach_ci_kubeconfig.sh
 
       - name: Ensure GHCR pull secret
         env:
@@ -45,11 +55,8 @@ jobs:
           GHCR_USERNAME: ${{ github.actor }}
         run: bash infra/scripts/create_ghcr_pull_secret.sh
 
-      - name: Import overlay images into k3d
-        env:
-          GHCR_TOKEN: ${{ secrets.GHCR_PULL_TOKEN || secrets.GITHUB_TOKEN }}
-          GHCR_USERNAME: ${{ github.actor }}
-        run: bash infra/scripts/import_overlay_images.sh
+      - name: Pull :latest from GHCR (restart pods)
+        run: bash infra/scripts/rollout_latest_from_ghcr.sh
 
       - name: Ensure Argo CD + Application
         env:
