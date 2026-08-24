@@ -1,67 +1,61 @@
 # Self-hosted GitHub Actions runner (OUTSIDE k3s)
 
-Docker Compose runner for building `ci-images` / `deploy-dev-k3s` with Docker socket access.
+## Канон: Kali WSL docker + `network_mode: host`
 
-## Prefer Docker Desktop (Windows)
+На этой машине **Docker Desktop host-net ломает TLS к GitHub**: TCP к `:443` есть, handshake обрывается (`unexpected eof` / runner `SSL connection could not be established`). DNS при этом резолвит нормально — проблема не в nameserver.
 
-Run compose via **Windows** `docker.exe` / context `desktop-linux`, not Kali’s nested `dockerd`.
-Nested WSL dockerd dies with “Session terminated, killing shell” when the WSL session ends.
+Kali host и контейнер с `--network host` на Kali: `https://api.github.com/zen` → 200.
 
-```powershell
-$env:DOCKER_CONTEXT = "desktop-linux"
-cd c:\Users\qwerty\git\Commerce\prodavan\infra\github-runner
-copy .env.example .env   # fill ACCESS_TOKEN or RUNNER_TOKEN
-docker compose build
-docker compose up -d
+```bash
+# из Kali (PATH без Docker Desktop wrappers)
+export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+cd /mnt/c/Users/qwerty/git/Commerce/prodavan/infra/github-runner
+# .env: ACCESS_TOKEN или RUNNER_TOKEN, RUNNER_NAME=wsl-prodavan-kali3
+# Скрипт: build --network=host, preload 2.336.0, fresh volume, DISABLE_RUNNER_UPDATE
+bash start-kali.sh
 docker logs -f prodavan-gha-runner
 ```
 
-Expect a stable line: `Listening for Jobs`.
+Ожидать: `GitHub TLS OK`, затем `Listening for Jobs` на версии `2.336.0`.
 
-If GitHub shows the runner **busy/offline** with a stuck `in_progress` job and compose logs
-`A session for this runner already exists`, cancel/force-cancel that run, then register under a
-**new** `RUNNER_NAME` (wipe the `runner-home` volume). Do not leave two listeners on the same name.
+Тот же Docker, что и k3d → Deploy может `k3d image import`, kubectl на `127.0.0.1:6443`.
 
-## Kubeconfig (local k3d)
+Entrypoint: `FORCE_PUBLIC_DNS` (1.1.1.1/8.8.8.8), `wait_github_tls`, пишет `DISABLE_RUNNER_UPDATE=1` в `/opt/actions-runner/.env` (docker `-e` недостаточно).
 
-`ensure_k3d_cluster.sh` (в WSL, где k3d) пишет `infra/.kube/prodavan-k3d.yaml`. Compose монтирует это в `/kube`.
+## Не использовать Docker Desktop для runner на этой машине
 
-Раннер в Docker Desktop **не** видит loopback Kali: API — `host.docker.internal:6443`. Deploy вызывает `attach_ci_kubeconfig.sh` (переписывает server + `tls-server-name: 127.0.0.1`). Образы приложений идут из GHCR, не через `k3d image import`.
+`desktop-linux` + host net: SSL EOF к github.com / broker.actions.githubusercontent.com.  
+Если когда-нибудь Desktop TLS починится — можно снова, но сейчас канон = Kali.
 
-## Labels
+## Session conflict
 
-`self-hosted`, `linux`, `docker`, `wsl-dev`
+Если GitHub показывает runner busy/offline и лог `A session for this runner already exists`:
 
-Default compose name: `wsl-prodavan` (or `wsl-prodavan-2` after a stuck-session recovery).
+1. Cancel stuck workflow run.
+2. Новый `RUNNER_NAME` в `.env`, wipe volume `github-runner_runner-home`.
+3. Удалить offline runners: `gh api repos/ne-tort/prodavan/actions/runners`.
 
 ## Token
 
 ```powershell
-# one-shot registration token
 gh api -X POST repos/ne-tort/prodavan/actions/runners/registration-token --jq .token
-
-# or put a PAT (repo admin) in .env as ACCESS_TOKEN=
+# или ACCESS_TOKEN= (PAT, manage runners) в .env
 ```
-
-Optional: place `actions-runner-linux-x64-2.328.0.tar.gz` next to compose to skip download.
 
 ## Verify
 
-```powershell
-gh api repos/ne-tort/prodavan/actions/runners --jq '.runners[] | {name,status,busy,labels:[.labels[].name]}'
+```bash
+gh api repos/ne-tort/prodavan/actions/runners --jq '.runners[] | {name,status,busy}'
+docker exec prodavan-gha-runner curl -fsS -o /dev/null -w '%{http_code}\n' https://api.github.com/zen
 ```
 
-## Stop / remove
+## После reboot WSL
 
-```powershell
-$env:DOCKER_CONTEXT = "desktop-linux"
-docker compose down
-gh api repos/ne-tort/prodavan/actions/runners --jq '.runners[] | select(.name=="wsl-prodavan") | .id'
-# gh api -X DELETE repos/ne-tort/prodavan/actions/runners/<id>
+```bash
+# Kali dockerd + k3d
+bash infra/scripts/ensure_k3d_cluster.sh
+export PATH=/usr/bin:/bin
+docker start prodavan-gha-runner || (cd infra/github-runner && bash start-kali.sh)
 ```
 
-## Notes
-
-- `network_mode: host` helps Desktop/WSL DNS reach `broker.actions.githubusercontent.com`.
-- Do not commit `.env` or the runner tarball credentials.
-- For pure Linux WSL without Desktop: keep a long-lived WSL session (`sleep infinity`) if using distro dockerd.
+Ранбук: [`docs/07-infrastructure/runbook.md`](../../docs/07-infrastructure/runbook.md).

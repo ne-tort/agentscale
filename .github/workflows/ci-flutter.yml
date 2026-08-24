@@ -20,12 +20,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ensure xz for Flutter SDK extract
+      - name: Ensure jq/xz for Flutter SDK extract
         run: |
-          if ! command -v xz >/dev/null 2>&1; then
-            sudo apt-get update -qq
-            sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xz-utils
+          set -euo pipefail
+          mkdir -p "${HOME}/.local/bin"
+          export PATH="${HOME}/.local/bin:${PATH}"
+          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
+          if ! command -v jq >/dev/null 2>&1; then
+            curl -fsSL -o "${HOME}/.local/bin/jq" \
+              https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64
+            chmod +x "${HOME}/.local/bin/jq"
           fi
+          if ! command -v xz >/dev/null 2>&1; then
+            echo "xz required but missing; install xz-utils on the runner host" >&2
+            exit 1
+          fi
+          jq --version
+          xz --version | head -1
 
       - uses: subosito/flutter-action@v2
         with:

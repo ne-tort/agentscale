@@ -6,7 +6,8 @@ resources:
   - postgres.yaml
 patches:
   - path: patch-dev.yaml
-# First-party: movable :latest, kubelet Always-pull from GHCR after CI push (I12). Never SHA-pin (I18).
+# First-party: movable :latest. IfNotPresent survives WSL reboot (node cache).
+# New bits: GHCR + import on the Docker engine that owns k3d (I12). Never SHA-pin (I18).
 # Third-party brokers are version-pinned in base/platform + postgres.yaml — not :latest.
 images:
   - name: ghcr.io/ne-tort/prodavan-api

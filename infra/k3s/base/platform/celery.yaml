@@ -26,10 +26,12 @@ spec:
         app.kubernetes.io/component: celery
     spec:
       terminationGracePeriodSeconds: 90
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: worker
           image: ghcr.io/ne-tort/prodavan-api:latest
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           # command replaces image ENTRYPOINT; python -m avoids missing console_script PATH issues.
           command:
             - python
@@ -117,10 +119,12 @@ spec:
         app.kubernetes.io/component: celery
     spec:
       terminationGracePeriodSeconds: 60
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: beat
           image: ghcr.io/ne-tort/prodavan-api:latest
-          imagePullPolicy: Always
+          imagePullPolicy: IfNotPresent
           command:
             - python
             - -m

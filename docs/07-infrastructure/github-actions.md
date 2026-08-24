@@ -1,5 +1,7 @@
 # GitHub Actions (as-built)
 
+Операторский сценарий (PR, ребут, GHCR): **[`runbook.md`](runbook.md)**.
+
 Репозиторий: [ne-tort/prodavan](https://github.com/ne-tort/prodavan) (private). Runner: **self-hosted** `linux,docker` (github-hosted `ubuntu-latest` в этой org ломается пустыми job’ами).
 
 GitHub Free + private **не даёт branch protection** (403). Вместо required checks: workflow **CI Gate** на каждый PR и **Auto-merge** после зелёного Gate. Прямой push в `main` — только авария.
@@ -31,24 +33,23 @@ feature branch
 | `ci-flutter.yml` | `workflow_call` + `push` `apps/flutter/**` | analyze + test |
 | `ci-schemas.yml` | `workflow_call` + `push` | `tools/validate_schemas.py` |
 | `ci-images.yml` | `push`/`workflow_dispatch` на `main` (пути apps/packages) | GHCR `:latest` + `:SHA12`. На PR не собираем — один self-hosted runner, Gate важнее |
-| `deploy-dev-k3s.yml` | успешный CI Images на `main` (не PR) | kubectl к workstation k3d; образы с GHCR, не k3d import |
+| `deploy-dev-k3s.yml` | успешный CI Images / push overlay-скриптов | attach k3d; import только если тот же Docker |
 | `auto-merge.yml` | успешный CI Gate (`pull_request`) | squash + dispatch Images |
 | `ci-nightly.yml` | cron 02:00 UTC | интеграция API, Postgres 16.15 |
 
 ## Deploy: воспроизводимость
 
-Раннер (Docker Desktop) и k3d (Docker в Kali WSL) часто **разные демоны**. Раннеру не нужно быть в кластере.
+Канон: runner и k3d на **одном Kali dockerd** (`network_mode: host` для runner). Тогда Deploy видит `127.0.0.1:6443` и может `k3d image import`. Docker Desktop для runner на этой машине не использовать (TLS EOF к GitHub).
 
 - **CI Images** пушит `:latest` в GHCR.
-- **k3s** тянет GHCR (`imagePullPolicy: Always` + secret `ghcr-pull`).
-- **Deploy** не делает `k3d image import` и не создаёт второй кластер. `attach_ci_kubeconfig.sh` ходит на `https://host.docker.internal:6443` (`tls-server-name: 127.0.0.1`) по `infra/.kube/prodavan-k3d.yaml` (пишет `ensure_k3d_cluster.sh` в том WSL, где k3d).
-- Smoke с раннера: `http://host.docker.internal:8088/` (`Host: prodavan.local`).
+- **k3s** берёт слой с ноды (`IfNotPresent`) после `k3d image import`; secret `ghcr-pull` для kubelet, если pull проходит.
+- **Deploy** не создаёт второй кластер. Если runner всё же на другом демоне — `attach_ci_kubeconfig.sh` → `host.docker.internal:6443`.
 
 Пока k3d запущен, цикл PR → merge → GHCR → rollout ручных шагов не требует. После reboot хоста — `recover_local_stack.sh` (кластер long-lived).
 
 ## Образы
 
-- First-party API/web: overlay **`:latest`**, kubelet **Always**; CI дополнительно тегает immutable SHA.
+- First-party API/web: overlay **`:latest`**, kubelet **IfNotPresent**; свежий слой — `k3d image import` на хосте k3d. CI дополнительно тегает SHA.
 - Third-party: замороженные теги (`verify_image_pins.sh`, `ci_infra_validate.sh`).
 - Не SHA-пинить overlay — ImagePullBackOff на k3d без digest (I18).
 

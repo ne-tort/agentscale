@@ -7,6 +7,8 @@ ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 export PATH="${HOME}/.local/bin:/usr/local/bin:${PATH}"
 
 need() { command -v "$1" >/dev/null || { echo "FAIL: missing $1" >&2; exit 1; }; }
+export PATH="${HOME}/.local/bin:/usr/local/bin:${PATH}"
+bash "${SCRIPT_DIR}/install_cli_tools.sh"
 need kubectl
 if ! command -v terraform >/dev/null 2>&1; then
   need docker
@@ -35,6 +37,8 @@ tf() {
     return
   fi
   docker run --rm \
+    --user "$(id -u):$(id -g)" \
+    -e HOME=/tmp \
     -v "${ROOT}:/workspace" \
     -w /workspace/infra/terraform/environments/local \
     "${TF_IMAGE}" "$@"
@@ -45,6 +49,14 @@ echo "==> terraform validate (local env, no apply)"
   cd "${ROOT}/infra/terraform/environments/local"
   tf init -backend=false -input=false
   tf validate
+  # docker terraform runs as root and leaves .terraform root-owned;
+  # that breaks the next job's actions/checkout clean on this self-hosted runner.
+  if [[ -d .terraform ]]; then
+    if [[ -n "${SUDO_USER:-}" ]] || command -v sudo >/dev/null 2>&1; then
+      sudo chown -R "$(id -u):$(id -g)" .terraform 2>/dev/null || true
+    fi
+    rm -rf .terraform .terraform.lock.hcl 2>/dev/null || true
+  fi
 )
 
 echo "ci_infra_validate OK"

@@ -10,7 +10,9 @@ on:
 
 concurrency:
   group: ci-gate-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # Single self-hosted runner: cancel mid-job leaves a zombie session (Conflict)
+  # for minutes and blocks the queue. Prefer queue over cancel.
+  cancel-in-progress: false
 
 jobs:
   infra:

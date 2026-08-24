@@ -105,6 +105,6 @@ bash infra/scripts/terraform_apply_local.sh   # Windows build + terraform apply 
 - `verify_celery.sh` validates worker `inspect ping` and that beat pod really runs `celery ... beat`.
 - Argo local Application: **prune=false**; AppProject kind whitelist + `orphanedResources.warn`; overlay first-party **`:latest`**. Recover does not require Synced if GitHub TLS ComparisonError and workloads are Ready (I19).
 - Local emergency apply uses `apply_overlay_safe.sh` to delete fixed-name init Jobs before `kubectl apply -k` (avoids immutable Job template errors).
-- **Dev images:** first-party `:latest` + `Always` from GHCR (CI rollout). Infra: postgres `16.15`, redis `7.4.11-alpine`, MinIO/mc RELEASE, Redpanda `v24.2.4`. SHA-pin overlay breaks GitOps if GHCR has no digest (I18). `verify_image_pins.sh`.
+- **Dev images:** first-party `:latest` + IfNotPresent; import on k3d host. Infra: postgres `16.15`, redis `7.4.11-alpine`, MinIO/mc RELEASE, Redpanda `v24.2.4`. SHA-pin overlay → I18. `verify_image_pins.sh`. Ops: [`docs/07-infrastructure/runbook.md`](../docs/07-infrastructure/runbook.md).
 - AUTH_MODE=test in cluster ConfigMap (Keycloak-in-cluster — hole).
 - Secrets still in git for local (I16); MinIO root + API S3 keys must stay aligned if rotated.

@@ -13,9 +13,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      # setup-python has no Kali builds; Debian/Kali PEP 668 blocks --user pip.
+      - name: Python venv (self-hosted)
+        run: |
+          set -euo pipefail
+          python3 --version
+          python3 -m venv "${{ runner.temp }}/venv"
+          echo "${{ runner.temp }}/venv/bin" >> "${GITHUB_PATH}"
+          "${{ runner.temp }}/venv/bin/python" -m pip install -U pip
 
       - name: Install jsonschema
         run: pip install jsonschema

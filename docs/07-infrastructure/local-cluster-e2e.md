@@ -1,6 +1,6 @@
 # Local cluster E2E (k3d + Terraform + Argo + CI smoke)
 
-Цель: на **Docker Desktop / WSL** прогнать цепочку без облачных VM.
+Актуальный операторский сценарий: **[`runbook.md`](runbook.md)**. Ниже — детали bootstrap Terraform/WSL.
 
 ```text
 Terraform local → k3d (prodavan-dev)

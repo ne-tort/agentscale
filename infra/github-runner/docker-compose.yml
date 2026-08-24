@@ -4,24 +4,28 @@ services:
     image: prodavan-gha-runner:local
     container_name: prodavan-gha-runner
     restart: unless-stopped
-    # Prefer host net: bridge DNS on Desktop/WSL often fails for broker.actions.githubusercontent.com
-    # Also required so kubectl can reach k3d API on 127.0.0.1:6443 without sudo.
+    # REQUIRED: host net. Bridge on Docker Desktop/WSL breaks GitHub TLS
+    # (TCP connects, handshake EOF). Kali host curl + host-net container: OK.
     network_mode: host
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
     env_file:
       - .env
     environment:
       REPO_URL: ${REPO_URL:-https://github.com/ne-tort/prodavan}
-      RUNNER_NAME: ${RUNNER_NAME:-wsl-prodavan}
+      RUNNER_NAME: ${RUNNER_NAME:-wsl-prodavan-kali}
       LABELS: ${LABELS:-self-hosted,linux,docker,wsl-dev}
       KUBECONFIG: /kube/prodavan-k3d.yaml
-      KUBECONFIG_REWRITE_HOST: host.docker.internal
+      # Same Docker as k3d (Kali): leave empty so attach uses 127.0.0.1.
+      # Only set host.docker.internal if runner is on Docker Desktop.
+      KUBECONFIG_REWRITE_HOST: ${KUBECONFIG_REWRITE_HOST:-}
+      GITHUB_TLS_PROBE_URL: https://api.github.com/zen
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - runner-home:/opt/actions-runner
-      # k3d API is on Windows/Kali loopback; from Desktop VM use host.docker.internal (see attach_ci_kubeconfig.sh).
       - ../.kube:/kube:ro
-      # Optional preload (avoids flaky GitHub download):
-      - ./actions-runner-linux-x64-2.328.0.tar.gz:/tmp/actions-runner-linux-x64-2.328.0.tar.gz:ro
+      - ./actions-runner-linux-x64-2.336.0.tar.gz:/tmp/actions-runner-linux-x64-2.336.0.tar.gz:ro
 
 volumes:
   runner-home:

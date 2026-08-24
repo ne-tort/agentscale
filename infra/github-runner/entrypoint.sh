@@ -4,7 +4,7 @@ set -euo pipefail
 : "${REPO_URL:?}"
 : "${RUNNER_NAME:=wsl-prodavan}"
 : "${LABELS:=self-hosted,linux,docker,wsl-dev}"
-: "${RUNNER_VERSION:=2.328.0}"
+: "${RUNNER_VERSION:=2.336.0}"
 
 HOME_DIR=/opt/actions-runner
 mkdir -p "${HOME_DIR}"
@@ -26,11 +26,36 @@ run_as_runner() {
   runuser -u runner -- "$@"
 }
 
+# Prefer public resolvers — Docker Desktop/WSL host DNS sometimes times out.
+if [[ "${FORCE_PUBLIC_DNS:-1}" == "1" ]]; then
+  printf 'nameserver 1.1.1.1\nnameserver 8.8.8.8\noptions timeout:2 attempts:3\n' >/etc/resolv.conf || true
+fi
+
+# Fail fast if GitHub TLS is broken (Desktop VM path often EOF mid-handshake).
+wait_github_tls() {
+  local i url="${GITHUB_TLS_PROBE_URL:-https://api.github.com/zen}"
+  echo "Probing GitHub TLS (${url})..."
+  for i in $(seq 1 30); do
+    if curl -fsS --connect-timeout 5 --max-time 15 -o /dev/null "$url"; then
+      echo "GitHub TLS OK"
+      return 0
+    fi
+    echo "  TLS not ready (${i}/30) — retry in 5s"
+    sleep 5
+  done
+  echo "ERROR: cannot establish TLS to GitHub from this network namespace." >&2
+  echo "Use Kali WSL docker with network_mode:host (Desktop host-net often breaks TLS)." >&2
+  echo "resolv.conf:" >&2
+  cat /etc/resolv.conf >&2 || true
+  return 1
+}
+
 if [[ ! -x ./run.sh ]]; then
   echo "Installing actions-runner ${RUNNER_VERSION}..."
   TGZ="/tmp/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
   if [[ ! -s "${TGZ}" ]]; then
-    curl -fL --retry 5 --retry-delay 5 --connect-timeout 30 \
+    wait_github_tls
+    curl -fL --retry 5 --retry-delay 5 --retry-all-errors --connect-timeout 30 \
       -o "${TGZ}" \
       "https://github.com/actions/runner/releases/download/v${RUNNER_VERSION}/actions-runner-linux-x64-${RUNNER_VERSION}.tar.gz"
   else
@@ -55,7 +80,8 @@ fetch_token() {
   fi
   if [[ -n "${ACCESS_TOKEN:-}" ]]; then
     OWNER_REPO="${REPO_URL#https://github.com/}"
-    curl -fsSL -X POST \
+    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --connect-timeout 20 \
+      -X POST \
       -H "Authorization: Bearer ${ACCESS_TOKEN}" \
       -H "Accept: application/vnd.github+json" \
       "https://api.github.com/repos/${OWNER_REPO}/actions/runners/registration-token" \
@@ -65,6 +91,12 @@ fetch_token() {
   echo "Set RUNNER_TOKEN or ACCESS_TOKEN" >&2
   exit 1
 }
+
+wait_github_tls
+
+# Official knob — must live in runner home .env (docker -e alone is not enough).
+printf 'DISABLE_RUNNER_UPDATE=1\n' > "${HOME_DIR}/.env"
+chown runner:runner "${HOME_DIR}/.env"
 
 if [[ ! -f .runner ]]; then
   TOKEN="$(fetch_token)"
@@ -78,5 +110,14 @@ if [[ ! -f .runner ]]; then
     --replace
 fi
 
-# exec so SIGTERM reaches the listener; keep .runner across restarts (no deregister loop).
-exec runuser -u runner -- ./run.sh
+# Keep container alive across job-cancel / listener exits. Instant restart with the
+# same runner name resets GitHub's session Conflict timer — backoff before retry.
+trap 'echo "entrypoint: got signal, stopping"; exit 0' TERM INT
+while true; do
+  set +e
+  runuser -u runner -- ./run.sh
+  rc=$?
+  set -e
+  echo "run.sh exited rc=${rc} — backoff 90s before reconnect (avoids SessionConflict thrash)"
+  sleep 90
+done
