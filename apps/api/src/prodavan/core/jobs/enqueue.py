@@ -137,3 +137,35 @@ def enqueue_gc_orphan_cabinet_schemas(*, dry_run: bool = False, limit: int = 50)
         "dry_run": bool(dry_run),
         "limit": int(limit),
     }
+
+
+def enqueue_gc_orphan_blobs(
+    *,
+    dry_run: bool = False,
+    limit: int = 50,
+    scan_limit: int = 500,
+) -> dict[str, Any]:
+    """Enqueue singleton orphan blob prefix GC."""
+    from prodavan.core.infra.worker_manager import get_worker_manager
+
+    mgr = get_worker_manager()
+    if mgr is None or not mgr.enabled:
+        return {"enqueued": False, "reason": "celery_disabled"}
+    task_id = job_names.GC_ORPHAN_BLOBS
+    mgr.send_task(
+        job_names.GC_ORPHAN_BLOBS,
+        kwargs={
+            "dry_run": bool(dry_run),
+            "limit": int(limit),
+            "scan_limit": int(scan_limit),
+        },
+        task_id=task_id,
+    )
+    return {
+        "enqueued": True,
+        "task": job_names.GC_ORPHAN_BLOBS,
+        "task_id": task_id,
+        "dry_run": bool(dry_run),
+        "limit": int(limit),
+        "scan_limit": int(scan_limit),
+    }

@@ -40,6 +40,7 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-24 | C-OBJECT-STORE / C-JOBS | orphan blob GC (`list_child_prefixes` + admin/Celery/CronJob) | no |
 | 2026-08-24 | C-CABINET / C-JOBS | orphan `cab_inst_*` schema GC (admin + Celery + CronJob) | no |
 | 2026-08-24 | C-CACHE | shared `enforce_rate_limit`; admin ops + MCP call rate limits | no |
 | 2026-08-24 | C-CABINET / C-OBJECT-STORE | `DELETE /cabinets/{id}` hard-delete archived (DROP SCHEMA + wipe) | no |

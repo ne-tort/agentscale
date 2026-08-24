@@ -145,6 +145,10 @@ class ObjectStorageManager(LifespanResource):
         assert self._primary is not None
         return self._primary.list_prefix(prefix, limit=limit)
 
+    def list_child_prefixes_sync(self, prefix: str, *, limit: int = 1000) -> list[str]:
+        assert self._primary is not None
+        return self._primary.list_child_prefixes(prefix, limit=limit)
+
     def exists_sync(self, key: str) -> bool:
         assert self._primary is not None
         if self._primary.exists(key):
@@ -170,6 +174,9 @@ class ObjectStorageManager(LifespanResource):
 
     async def list_prefix(self, prefix: str, *, limit: int = 1000) -> list[str]:
         return await asyncio.to_thread(self.list_prefix_sync, prefix, limit=limit)
+
+    async def list_child_prefixes(self, prefix: str, *, limit: int = 1000) -> list[str]:
+        return await asyncio.to_thread(self.list_child_prefixes_sync, prefix, limit=limit)
 
     async def exists(self, key: str) -> bool:
         return await asyncio.to_thread(self.exists_sync, key)

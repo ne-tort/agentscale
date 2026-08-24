@@ -120,3 +120,21 @@ def test_enqueue_gc_orphan_schemas_singleton_task_id(monkeypatch: pytest.MonkeyP
     out = enqueue_mod.enqueue_gc_orphan_cabinet_schemas(dry_run=False, limit=10)
     assert out["task_id"] == job_names.GC_ORPHAN_CABINET_SCHEMAS
     assert sent[0]["kwargs"] == {"dry_run": False, "limit": 10}
+
+
+def test_enqueue_gc_orphan_blobs_singleton_task_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[dict] = []
+
+    class _Mgr:
+        enabled = True
+
+        def send_task(self, name, args=None, kwargs=None, *, task_id=None):
+            sent.append({"name": name, "kwargs": kwargs, "task_id": task_id})
+
+    monkeypatch.setattr(
+        "prodavan.core.infra.worker_manager.get_worker_manager",
+        lambda: _Mgr(),
+    )
+    out = enqueue_mod.enqueue_gc_orphan_blobs(dry_run=True, limit=5, scan_limit=100)
+    assert out["task_id"] == job_names.GC_ORPHAN_BLOBS
+    assert sent[0]["kwargs"]["scan_limit"] == 100

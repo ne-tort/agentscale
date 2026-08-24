@@ -111,7 +111,7 @@ apps/flutter/lib/
 | `LifespanManager` + `LifespanResource` register | **done** (P0 w1) | `core/lifespan/`; see [13](../13-platform-infra/core-managers.md) |
 | Infra managers в `prodavan.core` | **partial** | Redis + ObjectStorage + Worker + Kafka; hole: Kafka sole-path cutover |
 | Redis обязателен во всех окружениях | **partial** | stack compose + k8s sketch set REDIS_URL; default local still empty |
-| Object store SoT для всех blobs | **partial** | materialize + hydrate + verified wipes (cabinet + project) + Celery retry; live MinIO mount — hole |
+| Object store SoT для всех blobs | **partial** | materialize + hydrate + verified wipes + orphan blob GC; live MinIO mount — hole |
 | Celery executor для background jobs | **partial** | CLI + beat + task_id + job locks; wipe_cabinet_packages + wipe_project_tree; default off → in-process |
 | Middleware register в core | **done** (subset) | `register_cors` in `core/middleware.py` |
 | Redis cache facade | **done** (subset) | get/set + lock + rate_limit; ingress + admin ops + MCP call RL; kafka kick + Celery job locks; policy/sub/quota peek |

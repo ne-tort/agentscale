@@ -142,3 +142,38 @@ def register_tasks(app) -> None:
             limit,
         )
         return run_async(_run())
+
+    @app.task(name=job_names.GC_ORPHAN_BLOBS, bind=False)
+    def gc_orphan_blobs(
+        dry_run: bool = False,
+        limit: int = 50,
+        scan_limit: int = 500,
+    ) -> dict[str, Any]:
+        from prodavan.application.infra.blob_gc import gc_orphan_blobs as gc_fn
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        async def _run() -> dict[str, Any]:
+            async def _gc() -> dict[str, Any]:
+                factory = get_session_factory()
+                async with factory() as session:
+                    return await gc_fn(
+                        session,
+                        dry_run=bool(dry_run),
+                        limit=int(limit),
+                        scan_limit=int(scan_limit),
+                    )
+
+            return await run_with_job_lock(
+                "gc_orphan_blobs",
+                ttl_sec=300,
+                fn=_gc,
+            )
+
+        logger.info(
+            "celery task %s dry_run=%s limit=%s scan_limit=%s",
+            job_names.GC_ORPHAN_BLOBS,
+            dry_run,
+            limit,
+            scan_limit,
+        )
+        return run_async(_run())

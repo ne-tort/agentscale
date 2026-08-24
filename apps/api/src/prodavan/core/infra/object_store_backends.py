@@ -32,6 +32,10 @@ class ObjectStoreBackend(ABC):
         """List object keys under prefix (best-effort, capped)."""
         raise NotImplementedError
 
+    def list_child_prefixes(self, prefix: str, *, limit: int = 1000) -> list[str]:
+        """List immediate child directory prefixes under ``prefix`` (trailing slash)."""
+        raise NotImplementedError
+
     def delete_prefix(self, prefix: str) -> int:
         """Delete all keys under prefix. Returns number of objects removed."""
         raise NotImplementedError
@@ -124,6 +128,23 @@ class LocalFsObjectStore(ObjectStoreBackend):
                 continue
             rel = path.relative_to(self._root).as_posix()
             out.append(rel)
+            if len(out) >= cap:
+                break
+        return out
+
+    def list_child_prefixes(self, prefix: str, *, limit: int = 1000) -> list[str]:
+        safe = prefix.lstrip("/").replace("\\", "/").rstrip("/")
+        if not safe or ".." in Path(safe).parts:
+            raise ValueError(f"unsafe object prefix: {prefix}")
+        base = self._root / safe
+        if not base.is_dir():
+            return []
+        out: list[str] = []
+        cap = max(1, int(limit))
+        for child in sorted(base.iterdir()):
+            if not child.is_dir():
+                continue
+            out.append(f"{safe}/{child.name}/")
             if len(out) >= cap:
                 break
         return out
@@ -235,6 +256,27 @@ class S3ObjectStore(ObjectStoreBackend):
                         return out
         except Exception:
             logger.exception("s3 list_prefix failed: %s", safe)
+        return out
+
+    def list_child_prefixes(self, prefix: str, *, limit: int = 1000) -> list[str]:
+        safe = prefix.lstrip("/").replace("\\", "/")
+        if not safe or ".." in Path(safe).parts:
+            raise ValueError(f"unsafe object prefix: {prefix}")
+        if not safe.endswith("/"):
+            safe = f"{safe}/"
+        out: list[str] = []
+        cap = max(1, int(limit))
+        paginator = self._client.get_paginator("list_objects_v2")
+        try:
+            for page in paginator.paginate(Bucket=self._bucket, Prefix=safe, Delimiter="/"):
+                for common in page.get("CommonPrefixes") or []:
+                    pref = common.get("Prefix")
+                    if pref:
+                        out.append(str(pref))
+                    if len(out) >= cap:
+                        return out
+        except Exception:
+            logger.exception("s3 list_child_prefixes failed: %s", safe)
         return out
 
     def health(self) -> bool:
