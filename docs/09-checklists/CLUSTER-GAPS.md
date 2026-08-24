@@ -28,7 +28,7 @@
 | I5 | Redis/MinIO/Kafka/Celery in k3s | **done** (subset) | Init Job sets durability via **admin.hosts:9644** (not localhost). `prodavan.ops.health` roundtrip. Celery `inspect ping` readiness. |
 | I6 | Базовые экраны projects/runs/variants | done | Flutter screens для отладки |
 | I7 | docker-compose.stack.yml (api+web+pg+P0) | done | smoke без кластера |
-| I8 | Project sandbox Pod/Job isolator | **open** | as-built object-ws + PVC + MinIO SoT (`verify_project_sandbox.sh` checks AGENTS.md in object store); k8s isolator deferred |
+| I8 | Project sandbox Pod/Job isolator | **in_progress** | as-built object-ws + MinIO/PVC; **slice 1:** SA `prodavan-sandbox` + Job PVC probe (`verify_sandbox_job.sh`). **Holes:** API does not spawn Jobs; no per-project Pod; live MinIO→/workspace mount; RWO PVC shared mount is single-node only |
 | I9 | Redpanda HA (≥3 / anti-affinity) | deferred | local uses overprovisioned single node |
 | I10 | Keycloak in-cluster | open | AUTH_MODE=test + `seed_dev_identity.sh` (company+AI key+cabinet+e2e chat) |
 | I11 | Alembic history rewrite vs old PVC | **done** (ops) | `reset_dev_postgres.sh` for legacy `20260808*`/`2026082101` → stub chain |
@@ -41,7 +41,7 @@
 | I18 | SHA-pin `overlays/dev` without GHCR | **done** (policy) | `kustomization.yaml` stays `newTag: local`. |
 | I19 | Argo repo-server → GitHub TLS | **done** (ops subset) | `reposerver.git.request.timeout=90s` + git retries; wait/recover accept Healthy+ComparisonError if core pods Ready; local Application `prune: false` |
 | I20 | Celery readiness vs broker | **done** | `inspect ping` readiness; liveness is PID 1 only (avoid restart storm when Redis blips); `verify_celery.sh` added |
-| I21 | Celery worker+beat in one pod | **done** (local) | split into `prodavan-celery-worker` + `prodavan-celery-beat`; broker-recover test covers both deployments |
+| I21 | Celery worker+beat in one pod | **done** | k3s + `docker-compose.stack.yml` split worker/beat |
 | I22 | `kubectl apply -k` immutable hook Jobs | **done** (ops) | `apply_overlay_safe.sh` deletes fixed-name init Jobs before apply (kafka/minio) |
 
 ## Nice / later
@@ -58,10 +58,10 @@
 ## Acceptance (итерация platform brokers)
 
 ```text
-kubectl apply -k infra/k3s/overlays/dev
-kubectl -n prodavan get sts,deploy,pvc
-kubectl -n prodavan rollout status sts/prodavan-kafka
-curl -sS -H 'Host: prodavan.local' http://127.0.0.1:8088/health/ready
+bash infra/scripts/apply_overlay_safe.sh
+kubectl -n prodavan get sts,deploy,pvc,sa
+kubectl -n prodavan get sa prodavan-sandbox
+bash infra/scripts/verify_touchable_ui.sh
 ```
 
 После reboot хоста: `bash infra/scripts/recover_local_stack.sh` (печатает JWT для UI).
@@ -70,4 +70,4 @@ Broker/API pod failure: `bash infra/scripts/test_broker_pod_recover.sh` (redis/m
 
 Terraform (local): `bash infra/scripts/terraform_apply_local.sh` или `bootstrap_gitops=true` → verify_touchable_ui; Windows: `build_local_app_images.ps1` first.
 
-Обновлено: 2026-08-24 (verify_celery + safe reset_dev_postgres apply)
+Обновлено: 2026-08-24 (I8 sandbox Job PVC probe + compose beat split)

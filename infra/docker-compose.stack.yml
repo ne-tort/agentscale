@@ -166,7 +166,6 @@ services:
   celery-worker:
     image: prodavan-api:stack
     restart: unless-stopped
-    # entrypoint passes $@ through when args are set (see docker-entrypoint.sh)
     command:
       - python
       - -m
@@ -176,7 +175,31 @@ services:
       - worker
       - -l
       - info
-      - -B
+    environment:
+      <<: *api_env
+      RUN_MIGRATIONS: "0"
+    volumes:
+      - prodavan_stack_storage:/data/storage
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      redpanda:
+        condition: service_started
+
+  celery-beat:
+    image: prodavan-api:stack
+    restart: unless-stopped
+    command:
+      - python
+      - -m
+      - celery
+      - -A
+      - prodavan.core.infra.worker_manager.celery_app
+      - beat
+      - -l
+      - info
     environment:
       <<: *api_env
       RUN_MIGRATIONS: "0"

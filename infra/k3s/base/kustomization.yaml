@@ -11,5 +11,6 @@ resources:
   - prodavan-api/service.yaml
   - prodavan-web/deployment.yaml
   - prodavan-web/service.yaml
+  - prodavan-sandbox/rbac.yaml
   - ingress.yaml
-# Deferred: mcp-gateway, project sandbox Jobs/Pods, agent-worker (see CLUSTER-GAPS + P0 holes)
+# Deferred: mcp-gateway, per-project isolator spawn, agent-worker (I8 slice 1 = RBAC + Job PVC probe)

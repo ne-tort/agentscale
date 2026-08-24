@@ -118,4 +118,4 @@ async def main() -> None:
 asyncio.run(main())
 PY
 
-echo "verify_project_sandbox OK (object-ws + materialize; no k8s Pod isolator — I8)"
+echo "verify_project_sandbox OK (object-ws + materialize; I8 isolator spawn not wired — see verify_sandbox_job.sh)"

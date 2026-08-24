@@ -1,0 +1,43 @@
+# I8 slice 1: ServiceAccount + Role for a future per-project Job isolator.
+# API does not spawn Jobs yet (container_ref stays object-ws). verify_sandbox_job.sh
+# proves a Job can mount the same RWO PVC as API/Celery on single-node k3d.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prodavan-sandbox
+  labels:
+    app.kubernetes.io/name: prodavan-sandbox
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: sandbox
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: prodavan-sandbox
+  labels:
+    app.kubernetes.io/name: prodavan-sandbox
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: sandbox
+rules:
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: prodavan-sandbox
+  labels:
+    app.kubernetes.io/name: prodavan-sandbox
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: sandbox
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: prodavan-sandbox
+subjects:
+  - kind: ServiceAccount
+    name: prodavan-sandbox

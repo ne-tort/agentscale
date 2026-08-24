@@ -49,6 +49,21 @@ spec:
         - name: worker
           imagePullPolicy: IfNotPresent
 ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prodavan-celery-beat
+  namespace: prodavan
+spec:
+  replicas: 1
+  template:
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: beat
+          imagePullPolicy: IfNotPresent
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:

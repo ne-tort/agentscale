@@ -92,7 +92,7 @@ for sts in prodavan-redis prodavan-minio prodavan-kafka; do
   fi
 done
 kubectl -n "$NS_APP" wait --for=condition=Ready pods \
-  -l 'app.kubernetes.io/part-of=prodavan,app.kubernetes.io/component!=kafka-init,app.kubernetes.io/component!=minio-init' \
+  -l 'app.kubernetes.io/part-of=prodavan,app.kubernetes.io/component!=kafka-init,app.kubernetes.io/component!=minio-init,app.kubernetes.io/component!=sandbox-probe' \
   --timeout=360s 2>/dev/null \
   || kubectl -n "$NS_APP" wait --for=condition=Ready \
     -l 'app in (prodavan-api,prodavan-web,prodavan-postgres,prodavan-celery-worker,prodavan-celery-beat)' \
