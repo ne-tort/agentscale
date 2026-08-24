@@ -25,6 +25,8 @@ have_image "${API_IMAGE}" && need_api=0
 have_image "${WEB_IMAGE}" && need_web=0
 
 if [[ "$need_api" == "0" && "$need_web" == "0" ]]; then
+  echo "==> verify API image alembic head"
+  bash "${SCRIPT_DIR}/verify_api_image_alembic.sh"
   echo "==> import existing local API/web tags into k3d"
   BUILD=0 bash "${SCRIPT_DIR}/import_local_app_images_k3d.sh"
   exit 0
@@ -38,3 +40,4 @@ fi
 
 echo "==> build + import API/web (no GHCR_TOKEN; BUILD_LOCAL_IMAGES=1)"
 BUILD=1 API_BASE="$API_BASE" bash "${SCRIPT_DIR}/import_local_app_images_k3d.sh"
+bash "${SCRIPT_DIR}/verify_api_image_alembic.sh"

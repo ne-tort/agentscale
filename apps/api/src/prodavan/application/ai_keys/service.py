@@ -350,7 +350,7 @@ class AiKeysService:
                 CompanyAiKeyBindingRow.company_id == company_id,
                 AiProviderKeyRow.status == KeyStatus.ACTIVE,
             )
-            .order_by(AiProviderKeyRow.created_at)
+            .order_by(AiProviderKeyRow.created_at.desc())
         )
         bound_rows = list(q.scalars().all())
         runtime, expired_ids = self._pick_runtime_rows(

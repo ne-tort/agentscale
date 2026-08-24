@@ -97,22 +97,27 @@ PY
 [[ -n "$COMPANY_ID" ]] || { echo "ERROR: no company_id from /me"; exit 1; }
 echo "company_id=${COMPANY_ID}"
 
-echo "==> AI key (cursor_sdk → FixtureCursorAdapter)"
+echo "==> AI key (cursor_sdk → FixtureCursorAdapter; ensure newest key + secret on disk)"
 CODE="$(api "$ADMIN_TOKEN" GET /admin/ai-keys)"
-HAS_KEY="$(python3 - <<'PY'
+while read -r old_id; do
+  [[ -n "$old_id" ]] || continue
+  del_code="$(curl -sS -o /dev/null -w '%{http_code}' -X DELETE \
+    -H "Host: ${HOST}" -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+    "${API}/admin/ai-keys/${old_id}" || echo 000)"
+  echo "DELETE /admin/ai-keys/${old_id} -> ${del_code}"
+done < <(python3 - <<'PY'
 import json
 d=json.load(open("/tmp/prodavan_seed_http.json"))
 items=d if isinstance(d, list) else d.get("items") or []
-print("1" if any(k.get("provider")=="cursor" for k in items) else "")
+for k in items:
+    if k.get("provider") == "cursor":
+        print(k["id"])
 PY
-)"
-if [[ -n "$HAS_KEY" ]]; then
-  echo "GET /admin/ai-keys — cursor key already present, skip create"
-else
-  CODE="$(api "$ADMIN_TOKEN" POST /admin/ai-keys "{\"name\":\"Dev Cursor Fixture\",\"provider\":\"cursor\",\"api_kind\":\"cursor_sdk\",\"secret\":\"dev-fixture-cursor-secret\",\"company_ids\":[\"${COMPANY_ID}\"]}")"
-  echo "POST /admin/ai-keys -> ${CODE}"
-  cat /tmp/prodavan_seed_http.json; echo
-fi
+)
+CODE="$(api "$ADMIN_TOKEN" POST /admin/ai-keys "{\"name\":\"Dev Cursor Fixture\",\"provider\":\"cursor\",\"api_kind\":\"cursor_sdk\",\"secret\":\"dev-fixture-cursor-secret\",\"company_ids\":[\"${COMPANY_ID}\"]}")"
+echo "POST /admin/ai-keys -> ${CODE}"
+cat /tmp/prodavan_seed_http.json; echo
+[[ "$CODE" == "201" || "$CODE" == "200" ]] || { echo "ERROR: AI key create failed"; exit 1; }
 
 echo "==> cabinet"
 CODE="$(api "$EMP_TOKEN" GET /cabinets)"
@@ -150,6 +155,20 @@ d=json.load(open("/tmp/prodavan_seed_http.json"))
 print(d.get("id") or "")
 PY
 )"
+  if [[ -z "$PROJECT_ID" && "$CODE" == "409" ]]; then
+    CODE="$(api "$EMP_TOKEN" GET "/cabinets/${CABINET_ID}/projects")"
+    PROJECT_ID="$(python3 - <<'PY'
+import json
+d=json.load(open("/tmp/prodavan_seed_http.json"))
+items=d.get("items") or []
+for p in items:
+    if p.get("slug") == "seed-chat-project":
+        print(p["id"])
+        break
+PY
+)"
+    echo "reuse existing project_id=${PROJECT_ID}"
+  fi
   if [[ -n "$PROJECT_ID" ]]; then
     CODE="$(api "$EMP_TOKEN" POST "/projects/${PROJECT_ID}/chat" '{"text":"hello from seed e2e"}')"
     echo "POST chat -> ${CODE}"
