@@ -65,6 +65,19 @@ docker build -f apps/api/Dockerfile -t ghcr.io/ne-tort/prodavan-api:local .
 
 WSL picks it up via `bridge_docker_desktop_image.sh` inside `import_local_app_images_k3d.sh`.
 
+Or one-shot on Windows:
+
+```powershell
+pwsh infra/scripts/build_local_app_images.ps1
+```
+
+## Acceptance
+
+```bash
+bash infra/scripts/acceptance_local.sh          # recover + smoke + seed chat
+TEST_WORKLOADS=1 bash infra/scripts/test_k3d_recover.sh   # k3d stop/start + recover
+```
+
 ## Notes / holes
 
 - Kafka consumer kick|dispatch; PG outbox still claim SoT.

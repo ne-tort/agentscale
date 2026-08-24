@@ -95,7 +95,7 @@ resource "terraform_data" "gitops_local" {
   input = {
     cluster = var.cluster_name
     # Bump to re-run: terraform apply -replace=terraform_data.gitops_local[0]
-    rev     = "gitops-v3-seed-ui"
+    rev     = "gitops-v4-verify-ui"
   }
 
   depends_on = [module.k3s_local]
@@ -119,7 +119,7 @@ resource "terraform_data" "gitops_ssh" {
 
   input = {
     cluster = var.cluster_name
-    rev     = "gitops-v3-seed-ui"
+    rev     = "gitops-v4-verify-ui"
   }
 
   depends_on = [module.k3s_local]

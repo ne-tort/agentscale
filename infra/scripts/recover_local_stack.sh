@@ -30,13 +30,12 @@ bash "${SCRIPT_DIR}/ensure_argocd.sh"
 echo "==> 5/7 wait workloads"
 bash "${SCRIPT_DIR}/wait_prodavan_ready.sh"
 
-echo "==> 6/7 smoke"
-bash "${SCRIPT_DIR}/smoke_ingress.sh"
-
 if [[ "${SKIP_SEED:-0}" != "1" && "${SEED_UI:-1}" == "1" ]]; then
-  echo "==> 7/7 UI seed"
-  bash "${SCRIPT_DIR}/seed_dev_identity.sh"
+  echo "==> 6-7/7 touchable UI (smoke + seed + chat)"
+  bash "${SCRIPT_DIR}/verify_touchable_ui.sh"
 else
+  echo "==> 6/7 smoke"
+  bash "${SCRIPT_DIR}/smoke_ingress.sh"
   echo "==> 7/7 UI seed skipped"
 fi
 

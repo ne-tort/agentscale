@@ -1,12 +1,10 @@
 #!/usr/bin/env bash
-# Bootstrap / recover local k3d + Argo + workload (idempotent after reboot).
+# Bootstrap / recover local k3d + GitOps (legacy entry → recover_local_stack).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 TF_DIR="${ROOT}/infra/terraform/environments/local"
-CLUSTER="${K3D_CLUSTER:-prodavan-dev}"
-HTTP_PORT="${HTTP_PORT:-8088}"
 
 TF=""
 if command -v terraform >/dev/null 2>&1; then
@@ -17,45 +15,14 @@ elif [[ -x "${ROOT}/tools/terraform.exe" ]]; then
   TF="${ROOT}/tools/terraform.exe"
 fi
 
-echo "==> Ensure k3d cluster (create/start + kubeconfig)"
-bash "${SCRIPT_DIR}/ensure_k3d_cluster.sh"
-export KUBECONFIG="${KUBECONFIG_OUT:-${ROOT}/infra/.kube/prodavan-k3d.yaml}"
-
 if [[ -n "$TF" ]]; then
-  echo "==> Terraform state sync (optional; ensure script is source of truth for runtime)"
+  echo "==> Terraform state sync (cluster only; GitOps via recover_local_stack)"
   (
     cd "$TF_DIR"
     "$TF" init -input=false
-    # Avoid nested gitops from TF when this script already runs the full chain.
-    "$TF" apply -auto-approve -input=false -var=bootstrap_gitops=false || echo "WARN: terraform apply failed — cluster already ensured"
+    "$TF" apply -auto-approve -input=false -var=bootstrap_gitops=false \
+      || echo "WARN: terraform apply failed — cluster may already exist"
   )
-else
-  echo "WARN: terraform not found — skipped state sync"
 fi
 
-export KUBECONFIG="${ROOT}/infra/.kube/prodavan-k3d.yaml"
-
-echo "==> Platform broker images"
-bash "${SCRIPT_DIR}/import_platform_images_k3d.sh" || echo "WARN: platform image import failed"
-
-if [[ -n "${GHCR_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
-  echo "==> GHCR pull secret"
-  bash "${SCRIPT_DIR}/create_ghcr_pull_secret.sh"
-  echo "==> Import overlay images into k3d"
-  bash "${SCRIPT_DIR}/import_overlay_images.sh" || echo "WARN: import_overlay_images failed"
-else
-  echo "WARN: GHCR_TOKEN/GITHUB_TOKEN unset — private pulls need secret ghcr-pull"
-fi
-
-echo "==> Argo CD"
-bash "${SCRIPT_DIR}/ensure_argocd.sh"
-
-echo "==> Wait workload"
-bash "${SCRIPT_DIR}/wait_prodavan_ready.sh"
-
-echo "==> Smoke"
-bash "${SCRIPT_DIR}/smoke_ingress.sh" || echo "WARN: smoke failed — check imagePullSecrets / GHCR"
-
-echo "Done. Cluster=${CLUSTER} KUBECONFIG=${KUBECONFIG}"
-echo "After reboot: bash infra/scripts/recover_local_stack.sh"
-echo "UI seed: bash infra/scripts/seed_dev_identity.sh"
+exec bash "${SCRIPT_DIR}/recover_local_stack.sh"
