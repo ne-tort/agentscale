@@ -37,6 +37,7 @@
 | I14 | Recover after reboot | **done** (subset) | `recover_local_stack.sh`: platform import + Argo + smoke + **seed** |
 | I15 | Argo Job churn / selfHeal fight | **done** (subset) | Sync hooks + ignoreDifferences; wait script no longer apply -k by default |
 | I16 | Secrets in git (dev) | open | SealedSecrets/SOPS deferred; rotate before shared cluster |
+| I17 | API image rebuild without network | open | `:local` tag + `verify_api_image_alembic.sh`; stale import → alembic crash; `BUILD=1` when Docker apt works |
 
 ## Nice / later
 
