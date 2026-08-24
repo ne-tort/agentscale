@@ -1,6 +1,6 @@
-# I8 slice 1: ServiceAccount + Role for a future per-project Job isolator.
-# API does not spawn Jobs yet (container_ref stays object-ws). verify_sandbox_job.sh
-# proves a Job can mount the same RWO PVC as API/Celery on single-node k3d.
+# I8 slice 1–2: SA for Job isolator + API in-cluster token.
+# API uses this SA but SANDBOX_K8S_JOBS=false — create path stays object-ws.
+# verify_sandbox_job.sh / POST /admin/projects/sandbox-k8s/pvc-probe prove PVC mount.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -22,6 +22,9 @@ rules:
   - apiGroups: ["batch"]
     resources: ["jobs"]
     verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: ["batch"]
+    resources: ["jobs/status"]
+    verbs: ["get"]
   - apiGroups: [""]
     resources: ["pods", "pods/log"]
     verbs: ["get", "list", "watch"]

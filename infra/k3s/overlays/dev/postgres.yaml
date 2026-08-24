@@ -38,6 +38,8 @@ spec:
         app.kubernetes.io/name: prodavan-postgres
     spec:
       terminationGracePeriodSeconds: 60
+      securityContext:
+        fsGroup: 999
       containers:
         - name: postgres
           image: postgres:16

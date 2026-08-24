@@ -4,10 +4,10 @@
 |------|----------|
 | Status | doing |
 | Quality | 7 |
-| Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain/worker; k8s isolator — gap |
+| Quality note | Project CRUD+lifecycle+materialize+local MCP spawn; k8s isolator — Job PVC probe + SA on API, spawn not on create |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-24 — object-ws refs + project wipe retry |
+| Last updated | 2026-08-24 — I8 SA on API + Job spec in code; create path object-ws |
 | Owners | — |
 
 ---
@@ -22,8 +22,9 @@ Project = workspace + `object-ws:{key}` container ref (legacy `local-ws:` still 
 |---------|------|
 | ORM projects / project_triggers / project_attachments + migration | k8s pod scheduler |
 | CRUD: create/list/get/PATCH (name, agent_provider); pause/resume/delete | |
-| Materialize: AGENTS from cabinet workspace-docs + packages/sandbox | bubblewrap/k8s isolator |
-| `container_ref=object-ws:{workspace_key}` (parse accepts `local-ws:`; Alembic+admin backfill) | |
+| Materialize: AGENTS from cabinet workspace-docs + packages/sandbox | bubblewrap; per-project k8s Pod; live MinIO mount |
+| `container_ref=object-ws:{workspace_key}` (parse accepts `local-ws:`; Alembic+admin backfill) | SANDBOX_K8S_JOBS spawn on create |
+| In-cluster Job client + SA `prodavan-sandbox` + PVC probe Job | |
 | Triggers: enqueue + list + dispatch + signed webhook/telegram ingress + admin drain + worker | External broker (Kafka/SQS) |
 | Outbox-lite: `attempts` / `lease_until` / `available_at` / `last_error` + SKIP LOCKED claim | |
 | Platform events bus + cabinet SPI deliver (audit) | MCP stdio handler protocol; bubblewrap |
@@ -62,7 +63,7 @@ Project = workspace + `object-ws:{key}` container ref (legacy `local-ws:` still 
 | ID | Форма | Статус |
 |----|-------|--------|
 | C-PROJECT | entity + lifecycle API | **live** (subset) |
-| C-MATERIALIZE | FS layout + paths | **live** (object-ws + local sandbox extract; no pod) |
+| C-MATERIALIZE | FS layout + paths | **live** (object-ws + Job PVC probe; no pod on create) |
 | C-TRIGGERS | enqueue + list + dispatch/drain + admin drain + opt-in worker + outbox lease; pause-gated runtime kinds | **live** (subset; outbox-lite) |
 | C-ATTACH | upload + list + download + storage_ref validation on chat | **live** (subset) |
 

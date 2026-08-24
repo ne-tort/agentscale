@@ -92,6 +92,10 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+          lifecycle:
+            preStop:
+              exec:
+                command: ["/bin/sh", "-c", "sleep 5"]
           readinessProbe:
             httpGet:
               path: /minio/health/ready

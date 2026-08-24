@@ -1,0 +1,43 @@
+# Single-replica local: refuse voluntary eviction so PVC brokers are not drained mid-write.
+# k3d host reboot still SIGTERM's the node — preStop + PVC cover that path (I14).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: prodavan-kafka
+  labels:
+    app.kubernetes.io/name: prodavan-kafka
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: kafka
+spec:
+  maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prodavan-kafka
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: prodavan-redis
+  labels:
+    app.kubernetes.io/name: prodavan-redis
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: redis
+spec:
+  maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prodavan-redis
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: prodavan-minio
+  labels:
+    app.kubernetes.io/name: prodavan-minio
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: minio
+spec:
+  maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prodavan-minio

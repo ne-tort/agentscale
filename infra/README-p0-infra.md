@@ -32,7 +32,10 @@ Brokers live under `infra/k3s/base/platform/` (StatefulSets + PVC). API ConfigMa
 ## Project sandbox reality check
 
 - **Not** creating per-project Kubernetes containers yet (`CLUSTER-GAPS` I8).
-- I8 slice 1: SA `prodavan-sandbox` + `verify_sandbox_job.sh` (Job mounts API PVC). Product create path stays `object-ws`.
+- I8: SA `prodavan-sandbox` on **API** (token for future Jobs). Create path stays `object-ws`.
+- `verify_sandbox_job.sh` applies `infra/k3s/base/prodavan-sandbox/probe-job.yaml` (Job mounts API PVC).
+- Admin `GET /admin/projects/sandbox-k8s` + flag-gated `POST .../sandbox-k8s/pvc-probe` (in git; cluster image until next `:local` rebuild).
+- **Holes:** no per-project Pod; no spawn on create; live MinIO→/workspace; RWO single-node.
 - Create project → `container_ref=object-ws:{key}` (`domain/projects/types.py`) → sync materialize via `ProjectMaterializeService` → `WorkspaceLayoutWriter` writes to MinIO (SoT) + local mirror on **API PVC** when `OBJECT_STORE_MIRROR_LOCAL=true`.
 - Celery worker mounts the **same** PVC on single-node k3d so rematerialize jobs see the mirror.
 - MCP packages: zip hydrate; `MCP_SANDBOX_SPAWN=false` in cluster (fixture agent chat does not need a live MCP process).

@@ -84,6 +84,11 @@ class Settings(BaseSettings):
 
     # L07 local-ws MCP package processes (opt-in; no bubblewrap/k8s yet)
     mcp_sandbox_spawn: bool = False
+    # I8: API may POST Jobs via in-cluster SA. Off by default — create path stays object-ws.
+    sandbox_k8s_jobs: bool = False
+    sandbox_k8s_namespace: str = "prodavan"
+    sandbox_k8s_pvc: str = "prodavan-api-storage"
+    sandbox_k8s_job_image: str = "ghcr.io/ne-tort/prodavan-api:local"
     # L06/L07 invoke src/on_platform_event.py from package zip on platform_events (opt-in)
     mcp_platform_event_invoke: bool = False
 

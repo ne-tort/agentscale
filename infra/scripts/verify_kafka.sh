@@ -37,6 +37,14 @@ echo "$topics" | grep -q 'prodavan.platform.events' \
 echo "$topics" | grep -q 'prodavan.project.triggers' \
   || { echo "FAIL: missing topic prodavan.project.triggers" >&2; exit 1; }
 
+auto="$(rpk cluster config get auto_create_topics_enabled 2>/dev/null || true)"
+echo "auto_create_topics_enabled=${auto}"
+auto_norm="$(printf '%s' "$auto" | tr -d '"' | tr '[:upper:]' '[:lower:]')"
+if [[ "$auto_norm" != "false" ]]; then
+  echo "FAIL: auto_create_topics_enabled must be false (got ${auto})" >&2
+  exit 1
+fi
+
 echo "==> produce/consume probe (prodavan.ops.health, isolated from app consumer group)"
 if ! echo "$topics" | grep -q 'prodavan.ops.health'; then
   rpk topic create prodavan.ops.health -p 1 -r 1 >/dev/null 2>&1 || true

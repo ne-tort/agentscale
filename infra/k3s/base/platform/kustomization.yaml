@@ -5,3 +5,4 @@ resources:
   - minio.yaml
   - kafka.yaml
   - celery.yaml
+  - pdb.yaml

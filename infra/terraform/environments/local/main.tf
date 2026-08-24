@@ -95,7 +95,7 @@ resource "terraform_data" "gitops_local" {
   input = {
     cluster = var.cluster_name
     # Bump to re-run: terraform apply -replace=terraform_data.gitops_local[0]
-    rev     = "gitops-v13-sandbox-job-probe"
+    rev     = "gitops-v14-i8-sa-kafka-pdb"
   }
 
   depends_on = [module.k3s_local]
@@ -119,7 +119,7 @@ resource "terraform_data" "gitops_ssh" {
 
   input = {
     cluster = var.cluster_name
-    rev     = "gitops-v13-sandbox-job-probe"
+    rev     = "gitops-v14-i8-sa-kafka-pdb"
   }
 
   depends_on = [module.k3s_local]

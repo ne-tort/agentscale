@@ -13,4 +13,5 @@ resources:
   - prodavan-web/service.yaml
   - prodavan-sandbox/rbac.yaml
   - ingress.yaml
-# Deferred: mcp-gateway, per-project isolator spawn, agent-worker (I8 slice 1 = RBAC + Job PVC probe)
+# Deferred: mcp-gateway, per-project isolator spawn, agent-worker
+# (I8: SA on API + Job PVC probe; create path remains object-ws)

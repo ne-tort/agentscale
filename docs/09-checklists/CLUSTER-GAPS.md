@@ -25,24 +25,24 @@
 | I2 | CORS для Ingress origin | done | CORS_ORIGINS env |
 | I3 | Flutter refresh token | done | SessionStore + AuthApi.refresh |
 | I4 | OpenAPI stub ≪ runtime | open | не блокер k3s; sync later |
-| I5 | Redis/MinIO/Kafka/Celery in k3s | **done** (subset) | Init Job sets durability via **admin.hosts:9644** (not localhost). `prodavan.ops.health` roundtrip. Celery `inspect ping` readiness. |
+| I5 | Redis/MinIO/Kafka/Celery in k3s | **done** (subset) | Kafka startupProbe :9644; PDB maxUnavailable=0 on brokers; init Job durability via **admin.hosts:9644**. `prodavan.ops.health` roundtrip. Celery `inspect ping`. |
 | I6 | Базовые экраны projects/runs/variants | done | Flutter screens для отладки |
 | I7 | docker-compose.stack.yml (api+web+pg+P0) | done | smoke без кластера |
-| I8 | Project sandbox Pod/Job isolator | **in_progress** | as-built object-ws + MinIO/PVC; **slice 1:** SA `prodavan-sandbox` + Job PVC probe (`verify_sandbox_job.sh`). **Holes:** API does not spawn Jobs; no per-project Pod; live MinIO→/workspace mount; RWO PVC shared mount is single-node only |
+| I8 | Project sandbox Pod/Job isolator | **in_progress** | object-ws create path; SA on API; kubectl Job PVC probe; in-cluster Job client + admin `/sandbox-k8s` (flag off; live after next `:local` rebuild). **Holes:** no spawn on create; no per-project Pod; no MinIO→/workspace; RWO single-node; empty_seed true (I9) |
 | I9 | Redpanda HA (≥3 / anti-affinity) | deferred | local uses overprovisioned single node |
 | I10 | Keycloak in-cluster | open | AUTH_MODE=test + `seed_dev_identity.sh` (company+AI key+cabinet+e2e chat) |
 | I11 | Alembic history rewrite vs old PVC | **done** (ops) | `reset_dev_postgres.sh` for legacy `20260808*`/`2026082101` → stub chain |
 | I12 | GHCR API/web image lag | **done** (ops path) | **dev overlay MUST be `:local`** + k3d import. SHA-pin without GHCR publish → ImagePullBackOff (I18). |
 | I13 | Terraform apply = full stack | **done** (subset) | `bootstrap_gitops=true` → verify_touchable_ui; Windows: `build_local_app_images.ps1` first |
 | I14 | Recover after reboot | **done** | `recover_local_stack.sh` (Argo refresh) + `test_k3d_recover.sh TEST_WORKLOADS=1` + `test_broker_pod_recover.sh` + `acceptance_local.sh` (`BROKER_RECOVER_TEST=1`) |
-| I15 | Argo Job churn / selfHeal fight | **done** (subset) | Sync hooks + ignoreDifferences; **no ApplyOutOfSyncOnly** (it skipped Celery probes). Local `prune: false`. Wait script does not `kubectl apply -k` by default |
+| I15 | Argo Job churn / selfHeal fight | **done** (subset) | Sync hooks + ignoreDifferences; **RespectIgnoreDifferences**; **no ApplyOutOfSyncOnly**. Local `prune: false`. |
 | I16 | Secrets in git (dev) | open | SealedSecrets/SOPS deferred; rotate before shared cluster |
 | I17 | API image rebuild without network | **done** (ops) | Dockerfile без apt/curl; `bridge_docker_desktop_image.sh` + verify alembic/celery |
 | I18 | SHA-pin `overlays/dev` without GHCR | **done** (policy) | `kustomization.yaml` stays `newTag: local`. |
 | I19 | Argo repo-server → GitHub TLS | **done** (ops subset) | `reposerver.git.request.timeout=90s` + git retries; wait/recover accept Healthy+ComparisonError if core pods Ready; local Application `prune: false` |
 | I20 | Celery readiness vs broker | **done** | `inspect ping` readiness; liveness is PID 1 only (avoid restart storm when Redis blips); `verify_celery.sh` added |
 | I21 | Celery worker+beat in one pod | **done** | k3s + `docker-compose.stack.yml` split worker/beat |
-| I22 | `kubectl apply -k` immutable hook Jobs | **done** (ops) | `apply_overlay_safe.sh` deletes fixed-name init Jobs before apply (kafka/minio) |
+| I23 | RollingUpdate + shared RWO PVC (API/Celery) | **done** | Recreate strategy on api/celery-worker/celery-beat — RollingUpdate hung waiting for second pod + PVC |
 
 ## Nice / later
 
@@ -70,4 +70,4 @@ Broker/API pod failure: `bash infra/scripts/test_broker_pod_recover.sh` (redis/m
 
 Terraform (local): `bash infra/scripts/terraform_apply_local.sh` или `bootstrap_gitops=true` → verify_touchable_ui; Windows: `build_local_app_images.ps1` first.
 
-Обновлено: 2026-08-24 (I8 sandbox Job PVC probe + compose beat split)
+Обновлено: 2026-08-24 (I8 API SA + Job client; Kafka PDB/startupProbe; Argo RespectIgnoreDifferences)

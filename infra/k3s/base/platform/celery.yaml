@@ -12,6 +12,8 @@ metadata:
     argocd.argoproj.io/sync-wave: "20"
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: prodavan-celery-worker
@@ -101,6 +103,8 @@ metadata:
     argocd.argoproj.io/sync-wave: "20"
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: prodavan-celery-beat

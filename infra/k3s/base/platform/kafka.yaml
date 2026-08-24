@@ -4,7 +4,10 @@
 # - StatefulSet + PVC so topic data survives pod/node reboot
 # - Do NOT use --mode dev-container (bundles --unsafe-bypass-fsync → data loss on crash)
 # - Do NOT use fictional --mode empty (rpk only documents: help / dev-container)
-# - Explicit overprovisioned + check=false for shared k3d CPU; still fsyncs (durable enough for local)
+# - Explicit overprovisioned + check=false for shared k3d CPU (not full production tuners)
+# - Single-node keeps default empty_seed_starts_cluster=true so the STS can form a cluster;
+#   HA (I9) must set it false + identical seed_servers
+# - write_caching_default=false via init Job (Admin API :9644), not --mode dev-container
 # - API KafkaManager also ensure_topics on startup; init Job is belt-and-suspenders
 #
 # Prod HA needs ≥3 brokers + anti-affinity + no overprovisioned — hole (Helm/operator).
@@ -102,6 +105,11 @@ spec:
                   - |
                     # Readiness fails first; brief drain before SIGTERM (HA: use maintenance mode).
                     sleep 10
+          startupProbe:
+            tcpSocket:
+              port: admin
+            failureThreshold: 30
+            periodSeconds: 2
           readinessProbe:
             exec:
               command:
