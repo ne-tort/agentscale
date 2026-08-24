@@ -30,6 +30,9 @@ bash "${SCRIPT_DIR}/ensure_argocd.sh"
 echo "==> 5/7 wait workloads"
 bash "${SCRIPT_DIR}/wait_prodavan_ready.sh"
 
+echo "==> 5b/7 Argo hard refresh"
+bash "${SCRIPT_DIR}/refresh_argocd_prodavan.sh" || echo "WARN: argo refresh failed"
+
 if [[ "${SKIP_SEED:-0}" != "1" && "${SEED_UI:-1}" == "1" ]]; then
   echo "==> 6-7/7 touchable UI (smoke + seed + chat)"
   bash "${SCRIPT_DIR}/verify_touchable_ui.sh"

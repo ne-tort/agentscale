@@ -68,6 +68,7 @@ spec:
         app.kubernetes.io/part-of: prodavan
         app.kubernetes.io/component: minio
     spec:
+      terminationGracePeriodSeconds: 60
       containers:
         - name: minio
           image: minio/minio:RELEASE.2024-10-02T17-50-41Z

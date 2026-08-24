@@ -53,6 +53,7 @@ spec:
         app.kubernetes.io/part-of: prodavan
         app.kubernetes.io/component: redis
     spec:
+      terminationGracePeriodSeconds: 30
       containers:
         - name: redis
           image: redis:7-alpine
@@ -71,6 +72,10 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+          lifecycle:
+            preStop:
+              exec:
+                command: ["redis-cli", "SHUTDOWN", "SAVE"]
           readinessProbe:
             exec:
               command: ["redis-cli", "ping"]

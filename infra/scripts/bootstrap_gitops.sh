@@ -33,6 +33,9 @@ bash "${SCRIPT_DIR}/ensure_argocd.sh"
 echo "==> Wait workloads"
 bash "${SCRIPT_DIR}/wait_prodavan_ready.sh"
 
+echo "==> Argo hard refresh (pick up latest main manifests)"
+bash "${SCRIPT_DIR}/refresh_argocd_prodavan.sh" || echo "WARN: argo refresh failed — continuing"
+
 if [[ "${SKIP_SEED:-0}" != "1" && "${SEED_UI:-1}" == "1" ]]; then
   echo "==> Touchable UI (smoke + seed + chat e2e)"
   bash "${SCRIPT_DIR}/verify_touchable_ui.sh"

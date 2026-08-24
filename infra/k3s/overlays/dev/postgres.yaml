@@ -37,6 +37,7 @@ spec:
         app: prodavan-postgres
         app.kubernetes.io/name: prodavan-postgres
     spec:
+      terminationGracePeriodSeconds: 60
       containers:
         - name: postgres
           image: postgres:16
@@ -56,6 +57,13 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+          lifecycle:
+            preStop:
+              exec:
+                command:
+                  - /bin/sh
+                  - -c
+                  - pg_ctl stop -D "$PGDATA" -m fast -w || true
           readinessProbe:
             exec:
               command: ["pg_isready", "-U", "prodavan", "-d", "prodavan"]
