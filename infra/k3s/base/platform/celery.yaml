@@ -1,4 +1,4 @@
-# Celery worker+beat — C-JOBS (P0). Same image/config as API.
+# Celery worker + beat — C-JOBS (P0). Same image/config as API.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -29,7 +29,6 @@ spec:
           image: ghcr.io/ne-tort/prodavan-api:latest
           imagePullPolicy: IfNotPresent
           # command replaces image ENTRYPOINT; python -m avoids missing console_script PATH issues.
-          # Local: worker+beat in one process (prod should split beat — I21).
           command:
             - python
             - -m
@@ -37,7 +36,6 @@ spec:
             - -A
             - prodavan.core.infra.worker_manager.celery_app
             - worker
-            - -B
             - --loglevel=INFO
           envFrom:
             - configMapRef:
@@ -85,6 +83,76 @@ spec:
             limits:
               cpu: "1"
               memory: 1Gi
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: prodavan-api-storage
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prodavan-celery-beat
+  labels:
+    app: prodavan-celery-beat
+    app.kubernetes.io/name: prodavan-celery-beat
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: celery
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prodavan-celery-beat
+  template:
+    metadata:
+      labels:
+        app: prodavan-celery-beat
+        app.kubernetes.io/name: prodavan-celery-beat
+        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/component: celery
+    spec:
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: beat
+          image: ghcr.io/ne-tort/prodavan-api:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - python
+            - -m
+            - celery
+            - -A
+            - prodavan.core.infra.worker_manager.celery_app
+            - beat
+            - --loglevel=INFO
+          envFrom:
+            - configMapRef:
+                name: prodavan-config
+            - secretRef:
+                name: prodavan-api-secrets
+          env:
+            - name: RUN_MIGRATIONS
+              value: "0"
+          volumeMounts:
+            - name: storage
+              mountPath: /data/storage
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - "import os; os.kill(1, 0)"
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 512Mi
       volumes:
         - name: storage
           persistentVolumeClaim:

@@ -76,7 +76,7 @@ if kubectl -n "$NS_APP" get pods --no-headers 2>/dev/null | grep -q ImagePullBac
   bash "${SCRIPT_DIR}/ensure_local_app_images_k3d.sh" || echo "WARN: image rescue failed"
   kubectl -n "$NS_APP" delete pods --field-selector=status.phase=Pending --ignore-not-found || true
 fi
-for dep in prodavan-postgres prodavan-api prodavan-web prodavan-celery-worker; do
+for dep in prodavan-postgres prodavan-api prodavan-web prodavan-celery-worker prodavan-celery-beat; do
   if kubectl -n "$NS_APP" get deploy "$dep" >/dev/null 2>&1; then
     paused="$(kubectl -n "$NS_APP" get deploy "$dep" -o jsonpath='{.spec.paused}' 2>/dev/null || echo false)"
     if [[ "$paused" == "true" ]]; then
@@ -95,7 +95,7 @@ kubectl -n "$NS_APP" wait --for=condition=Ready pods \
   -l 'app.kubernetes.io/part-of=prodavan,app.kubernetes.io/component!=kafka-init,app.kubernetes.io/component!=minio-init' \
   --timeout=360s 2>/dev/null \
   || kubectl -n "$NS_APP" wait --for=condition=Ready \
-    -l 'app in (prodavan-api,prodavan-web,prodavan-postgres,prodavan-celery-worker)' \
+    -l 'app in (prodavan-api,prodavan-web,prodavan-postgres,prodavan-celery-worker,prodavan-celery-beat)' \
     pods --timeout=120s \
   || true
 # StatefulSets may not share the app= label — best-effort Ready on named pods.

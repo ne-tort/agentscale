@@ -41,7 +41,7 @@
 | I18 | SHA-pin `overlays/dev` without GHCR | **done** (policy) | `kustomization.yaml` stays `newTag: local`. |
 | I19 | Argo repo-server → GitHub TLS | **done** (ops subset) | `reposerver.git.request.timeout=90s` + git retries; wait/recover accept Healthy+ComparisonError if core pods Ready; local Application `prune: false` |
 | I20 | Celery readiness vs broker | **done** | `inspect ping` readiness; liveness is PID 1 only (avoid restart storm when Redis blips) |
-| I21 | Celery worker+beat in one pod | **open** (local) | `-B` in `prodavan-celery-worker` is fine on single-node; split beat before multi-replica |
+| I21 | Celery worker+beat in one pod | **done** (local) | split into `prodavan-celery-worker` + `prodavan-celery-beat`; broker-recover test covers both deployments |
 
 ## Nice / later
 
@@ -65,8 +65,8 @@ curl -sS -H 'Host: prodavan.local' http://127.0.0.1:8088/health/ready
 
 После reboot хоста: `bash infra/scripts/recover_local_stack.sh` (печатает JWT для UI).
 
-Broker/API pod failure: `bash infra/scripts/test_broker_pod_recover.sh` (redis/minio/kafka/postgres/api).
+Broker/API pod failure: `bash infra/scripts/test_broker_pod_recover.sh` (redis/minio/kafka/postgres/api/celery-worker/celery-beat).
 
 Terraform (local): `bash infra/scripts/terraform_apply_local.sh` или `bootstrap_gitops=true` → verify_touchable_ui; Windows: `build_local_app_images.ps1` first.
 
-Обновлено: 2026-08-24 (kafka admin wait + sandbox MinIO check + Argo ApplyOutOfSyncOnly off)
+Обновлено: 2026-08-24 (celery worker/beat split + recover coverage)
