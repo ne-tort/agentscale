@@ -25,7 +25,7 @@
 | I2 | CORS для Ingress origin | done | CORS_ORIGINS env |
 | I3 | Flutter refresh token | done | SessionStore + AuthApi.refresh |
 | I4 | OpenAPI stub ≪ runtime | open | не блокер k3s; sync later |
-| I5 | Redis/MinIO/Kafka/Celery in k3s | **done** (subset) | Redpanda durability + `prodavan.ops.health` roundtrip; Redis AOF `everysec`; Celery readiness `inspect ping` |
+| I5 | Redis/MinIO/Kafka/Celery in k3s | **done** (subset) | Init Job sets durability via **admin.hosts:9644** (not localhost). `prodavan.ops.health` roundtrip. Celery `inspect ping` readiness. |
 | I6 | Базовые экраны projects/runs/variants | done | Flutter screens для отладки |
 | I7 | docker-compose.stack.yml (api+web+pg+P0) | done | smoke без кластера |
 | I8 | Project sandbox Pod/Job isolator | **open** | **as-built:** `container_ref=object-ws:{key}` → `WorkspaceLayoutWriter` dual-write MinIO+PVC (`OBJECT_STORE_MIRROR_LOCAL`); `verify_project_sandbox.sh` green; k8s Pod/Job isolator deferred |
