@@ -7,7 +7,8 @@ on:
       - "infra/k3s/**"
       - "infra/scripts/attach_ci_kubeconfig.sh"
       - "infra/scripts/rollout_latest_from_ghcr.sh"
-      - "infra/scripts/smoke_ingress.sh"
+      - "infra/scripts/ensure_argocd.sh"
+      - "infra/scripts/lib/common.sh"
       - ".github/workflows/deploy-dev-k3s.yml"
   workflow_run:
     workflows: ["CI Images"]

@@ -26,10 +26,13 @@ else
   echo "argocd already installed (deploy+CRDs present) — skip full SSA reinstall"
 fi
 
-# Preload quay/ecr into k3d (kubelet Always+TLS timeout → ImagePullBackOff otherwise)
-if command -v k3d >/dev/null 2>&1 && command -v docker >/dev/null 2>&1; then
-  echo "==> Warm Argo CD images into k3d"
+# Preload quay/ecr into k3d only when this Docker engine owns the cluster.
+if command -v k3d >/dev/null 2>&1 && command -v docker >/dev/null 2>&1 \
+  && k3d cluster list 2>/dev/null | awk 'NR>1 {print $1}' | grep -qx "${K3D_CLUSTER:-prodavan-dev}"; then
+  echo "==> Warm Argo CD images into k3d (same Docker engine)"
   bash "${SCRIPT_DIR}/warm_argocd_images.sh"
+else
+  echo "==> Skip k3d image import (cluster not in this Docker engine; kubelet pulls registries)"
 fi
 
 wait_nodes_schedulable 60
