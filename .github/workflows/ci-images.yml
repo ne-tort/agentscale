@@ -125,9 +125,12 @@ jobs:
           rm -rf /tmp/.buildx-cache-web
           mv /tmp/.buildx-cache-web-new /tmp/.buildx-cache-web || true
 
+  # I18: local k3d overlay is pinned to :local. SHA-bumping kustomization.yaml on every
+  # main push ImagePullBackOff's clusters that never published that digest to GHCR.
+  # Re-enable only when GHCR publish + image-updater/prod overlay exist.
   bump-k3s-dev:
     needs: [build-api, build-web]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: false
     runs-on: [self-hosted, linux, docker]
     steps:
       - uses: actions/checkout@v4

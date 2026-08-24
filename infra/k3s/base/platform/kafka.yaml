@@ -199,7 +199,6 @@ spec:
               rpk topic create prodavan.platform.events -p 1 -r 1 -X brokers=$BROKERS || true
               rpk topic create prodavan.project.triggers -p 1 -r 1 -X brokers=$BROKERS || true
               rpk topic create prodavan.ops.health -p 1 -r 1 -X brokers=$BROKERS || true
-              rpk topic alter-config prodavan.ops.health --set cleanup.policy=delete --set retention.ms=86400000 -X brokers=$BROKERS || true
               rpk cluster config set write_caching_default false -X brokers=$BROKERS -X admin.hosts=$ADMIN
               rpk cluster config set auto_create_topics_enabled false -X brokers=$BROKERS -X admin.hosts=$ADMIN
               rpk cluster config set default_topic_replications 1 -X brokers=$BROKERS -X admin.hosts=$ADMIN
@@ -208,5 +207,11 @@ spec:
               rpk cluster config set internal_topic_replication_factor 1 -X brokers=$BROKERS -X admin.hosts=$ADMIN
               rpk cluster config set log_retention_ms 604800000 -X brokers=$BROKERS -X admin.hosts=$ADMIN
               rpk cluster config set log_segment_ms 86400000 -X brokers=$BROKERS -X admin.hosts=$ADMIN
-              rpk topic alter-config prodavan.platform.events --set cleanup.policy=delete -X brokers=$BROKERS || true
-              rpk topic alter-config prodavan.project.triggers --set cleanup.policy=delete -X brokers=$BROKERS || true
+              # RF=1 → min.isr must be 1 or acks=all producers stall (API enable_idempotence).
+              for t in prodavan.platform.events prodavan.project.triggers prodavan.ops.health; do
+                rpk topic alter-config "$t" \
+                  --set cleanup.policy=delete \
+                  --set min.insync.replicas=1 \
+                  -X brokers=$BROKERS || true
+              done
+              rpk topic alter-config prodavan.ops.health --set retention.ms=86400000 -X brokers=$BROKERS || true

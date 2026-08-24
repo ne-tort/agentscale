@@ -1,20 +1,11 @@
 #!/usr/bin/env bash
-# Simulate broker/API pod failure: delete pod → wait Ready → smoke.
+# Simulate broker/API pod failure: durable retain tests + deploy restarts + smoke.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 export KUBECONFIG="${KUBECONFIG:-${ROOT}/infra/.kube/prodavan-k3d.yaml}"
 NS="${PRODAVAN_NS:-prodavan}"
-
-recover_pod() {
-  local pod="$1"
-  echo "==> delete pod/${pod} (expect reschedule + PVC retain)"
-  kubectl -n "$NS" delete "pod/${pod}" --ignore-not-found --wait=false
-  kubectl -n "$NS" wait --for=condition=Ready "pod/${pod}" --timeout=240s
-  bash "${SCRIPT_DIR}/smoke_ingress.sh"
-  echo "ok pod/${pod}"
-}
 
 recover_deploy() {
   local dep="$1"
@@ -25,9 +16,8 @@ recover_deploy() {
   echo "ok deploy/${dep}"
 }
 
-for p in prodavan-minio-0; do
-  recover_pod "$p"
-done
+echo "==> minio object retain (S3 put/get via API, not just Ready)"
+bash "${SCRIPT_DIR}/verify_minio_pvc_retain.sh"
 
 echo "==> redis PVC retain + noeviction"
 bash "${SCRIPT_DIR}/verify_redis_pvc_retain.sh"
@@ -35,7 +25,9 @@ bash "${SCRIPT_DIR}/verify_redis_pvc_retain.sh"
 echo "==> kafka PVC retain + fsync (not just Ready)"
 bash "${SCRIPT_DIR}/verify_kafka_pvc_retain.sh"
 
-recover_deploy prodavan-postgres
+echo "==> postgres PVC retain (INSERT/SELECT)"
+bash "${SCRIPT_DIR}/verify_postgres_pvc_retain.sh"
+
 recover_deploy prodavan-api
 recover_deploy prodavan-celery-worker
 recover_deploy prodavan-celery-beat

@@ -15,3 +15,44 @@ spec:
   clusterResourceWhitelist:
     - group: ""
       kind: Namespace
+  # Empty whitelist = allow all namespaced kinds. Pin to what overlays/dev actually ships.
+  namespaceResourceWhitelist:
+    - group: ""
+      kind: ConfigMap
+    - group: ""
+      kind: Secret
+    - group: ""
+      kind: Service
+    - group: ""
+      kind: ServiceAccount
+    - group: ""
+      kind: PersistentVolumeClaim
+    - group: apps
+      kind: Deployment
+    - group: apps
+      kind: StatefulSet
+    - group: batch
+      kind: Job
+    - group: policy
+      kind: PodDisruptionBudget
+    - group: rbac.authorization.k8s.io
+      kind: Role
+    - group: rbac.authorization.k8s.io
+      kind: RoleBinding
+    - group: networking.k8s.io
+      kind: Ingress
+  # Orphan monitoring is AppProject-scoped (not Application.spec) — warn only, no auto-delete.
+  orphanedResources:
+    warn: true
+    ignore:
+      - group: ""
+        kind: Endpoints
+      - group: discovery.k8s.io
+        kind: EndpointSlice
+      - group: ""
+        kind: Event
+      - group: ""
+        kind: Pod
+      - group: batch
+        kind: Job
+        name: prodavan-sandbox-probe

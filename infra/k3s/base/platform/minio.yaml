@@ -69,10 +69,14 @@ spec:
         app.kubernetes.io/component: minio
     spec:
       terminationGracePeriodSeconds: 60
+      # MinIO image user is uid 1000; fsGroup so PVC files are group-writable after reschedule.
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: minio
           image: minio/minio:RELEASE.2024-10-02T17-50-41Z
-          args: ["server", "/data", "--console-address", ":9001"]
+          args: ["server", "/data", "--address", ":9000", "--console-address", ":9001"]
           env:
             - name: MINIO_ROOT_USER
               valueFrom:
@@ -84,6 +88,11 @@ spec:
                 secretKeyRef:
                   name: prodavan-minio
                   key: root-password
+            # Local k3d: no phone-home. Browser console stays on :9001 for ops.
+            - name: MINIO_UPDATE
+              value: "off"
+            - name: MINIO_BROWSER
+              value: "on"
           ports:
             - name: s3
               containerPort: 9000
@@ -95,13 +104,15 @@ spec:
           lifecycle:
             preStop:
               exec:
-                command: ["/bin/sh", "-c", "sleep 5"]
+                # No graceful CLI; give endpoints time to fail readiness before SIGTERM.
+                command: ["/bin/sh", "-c", "sleep 10"]
           readinessProbe:
             httpGet:
               path: /minio/health/ready
               port: s3
             initialDelaySeconds: 5
             periodSeconds: 5
+            failureThreshold: 6
           livenessProbe:
             httpGet:
               path: /minio/health/live
@@ -166,4 +177,14 @@ spec:
                 if [ "$i" -gt 60 ]; then exit 1; fi
                 sleep 2
               done
+              j=0
+              until mc ready local; do
+                j=$((j+1))
+                if [ "$j" -gt 60 ]; then exit 1; fi
+                sleep 2
+              done
               mc mb -p local/prodavan || true
+              # App bucket must stay private (no anonymous download of workspaces).
+              mc anonymous set none local/prodavan || true
+              # Local SoT uses overwrite semantics; versioning off keeps PVC lean.
+              mc version suspend local/prodavan || true

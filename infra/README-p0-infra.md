@@ -95,10 +95,12 @@ bash infra/scripts/terraform_apply_local.sh   # Windows build + terraform apply 
 ## Notes / holes
 
 - Kafka consumer kick|dispatch; PG outbox still claim SoT.
-- Redpanda single-node `--overprovisioned` for k3d; HA/TLS/Helm — hole (I9). `verify_kafka.sh` includes produce/consume on `prodavan.ops.health`.
+- Redpanda single-node `--overprovisioned` for k3d; HA/TLS/Helm — hole (I9). `verify_kafka.sh` includes produce/consume + `min.insync.replicas=1` on app topics.
+- Broker PVC retain: `verify_minio_pvc_retain.sh` / `verify_redis_pvc_retain.sh` / `verify_kafka_pvc_retain.sh` / `verify_postgres_pvc_retain.sh` (wired into `test_broker_pod_recover.sh`).
 - Celery runs as two Deployments: `prodavan-celery-worker` and `prodavan-celery-beat` (local-compatible split).
 - `verify_celery.sh` validates worker `inspect ping` and that beat pod really runs `celery ... beat`.
-- Argo local Application: **prune=false**; recover does not require Synced if GitHub TLS ComparisonError and workloads are Ready (I19).
+- Argo local Application: **prune=false**; AppProject kind whitelist + `orphanedResources.warn`; **kustomize.images force `:local`** (I18 — CI must not SHA-pin the live cluster). Recover does not require Synced if GitHub TLS ComparisonError and workloads are Ready (I19).
 - Local emergency apply uses `apply_overlay_safe.sh` to delete fixed-name init Jobs before `kubectl apply -k` (avoids immutable Job template errors).
 - **Dev images:** `overlays/dev` tag is `:local` (k3d import). SHA-pin breaks GitOps if GHCR has no digest (I18).
 - AUTH_MODE=test in cluster ConfigMap (Keycloak-in-cluster — hole).
+- Secrets still in git for local (I16); MinIO root + API S3 keys must stay aligned if rotated.

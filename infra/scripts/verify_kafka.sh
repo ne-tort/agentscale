@@ -59,9 +59,27 @@ if [[ "$internal_norm" != "1" ]]; then
   exit 1
 fi
 
+echo "==> min.insync.replicas=1 on app topics (acks=all / single-node RF=1)"
+for t in prodavan.platform.events prodavan.project.triggers prodavan.ops.health; do
+  if ! echo "$topics" | grep -q "$t"; then
+    continue
+  fi
+  # Default -c omits some Kafka keys; -a prints defaults including min.insync.replicas.
+  cfg="$(rpk topic describe "$t" -c -a 2>/dev/null || rpk topic describe "$t" -c 2>/dev/null || true)"
+  line="$(printf '%s\n' "$cfg" | grep -E '^min\.insync\.replicas[[:space:]]' || true)"
+  if [[ -z "$line" ]]; then
+    echo "WARN: ${t} min.insync.replicas not listed even with -a (treating as default 1)"
+    continue
+  fi
+  val="$(printf '%s' "$line" | awk '{print $2}')"
+  echo "${t} min.insync.replicas=${val}"
+  [[ "$val" == "1" ]] || { echo "FAIL: ${t} min.insync.replicas must be 1" >&2; echo "$cfg" >&2; exit 1; }
+done
+
 echo "==> produce/consume probe (prodavan.ops.health, isolated from app consumer group)"
 if ! echo "$topics" | grep -q 'prodavan.ops.health'; then
   rpk topic create prodavan.ops.health -p 1 -r 1 >/dev/null 2>&1 || true
+  rpk topic alter-config prodavan.ops.health --set min.insync.replicas=1 >/dev/null 2>&1 || true
 fi
 PROBE="probe-$(date +%s)-$$"
 ok=0

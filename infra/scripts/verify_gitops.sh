@@ -31,11 +31,29 @@ echo "project=${proj} targetRevision=${rev} path=${path}"
 [[ "$path" == "infra/k3s/overlays/dev" ]] || { echo "FAIL: unexpected Application path ${path}" >&2; exit 1; }
 [[ "$proj" == "prodavan" ]] || { echo "FAIL: Application project must be prodavan not ${proj:-empty}" >&2; exit 1; }
 
+imgs="$(kubectl -n argocd get application prodavan-dev -o jsonpath='{.spec.source.kustomize.images}')"
+echo "kustomize.images=${imgs}"
+printf '%s' "$imgs" | grep -q 'prodavan-api:local' \
+  || { echo "FAIL: Application must force ghcr.io/ne-tort/prodavan-api:local (I18)" >&2; exit 1; }
+printf '%s' "$imgs" | grep -q 'prodavan-web:local' \
+  || { echo "FAIL: Application must force ghcr.io/ne-tort/prodavan-web:local (I18)" >&2; exit 1; }
+
 ns="$(kubectl -n argocd get appproject prodavan -o jsonpath='{.spec.destinations[0].namespace}')"
 repo="$(kubectl -n argocd get appproject prodavan -o jsonpath='{.spec.sourceRepos[0]}')"
 echo "AppProject dest.namespace=${ns} sourceRepos=${repo}"
 [[ "$ns" == "prodavan" ]] || { echo "FAIL: AppProject destination namespace ${ns}" >&2; exit 1; }
 [[ "$repo" == "https://github.com/ne-tort/prodavan.git" ]] \
   || { echo "FAIL: AppProject sourceRepos ${repo}" >&2; exit 1; }
+
+whitelist="$(kubectl -n argocd get appproject prodavan -o jsonpath='{.spec.namespaceResourceWhitelist[*].kind}')"
+echo "namespaceResourceWhitelist=${whitelist}"
+printf '%s' "$whitelist" | grep -q 'StatefulSet' \
+  || { echo "FAIL: AppProject missing namespaceResourceWhitelist (must pin kinds)" >&2; exit 1; }
+printf '%s' "$whitelist" | grep -q 'Ingress' \
+  || { echo "FAIL: AppProject whitelist missing Ingress" >&2; exit 1; }
+
+orphaned="$(kubectl -n argocd get appproject prodavan -o jsonpath='{.spec.orphanedResources.warn}')"
+echo "AppProject orphanedResources.warn=${orphaned}"
+[[ "$orphaned" == "true" ]] || { echo "FAIL: AppProject orphanedResources.warn must be true" >&2; exit 1; }
 
 echo "verify_gitops OK"
