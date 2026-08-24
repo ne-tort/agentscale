@@ -57,8 +57,19 @@ for img in "${IMAGES[@]}"; do
   bash "${SCRIPT_DIR}/bridge_docker_desktop_image.sh" "$img" || true
 done
 
+DESKTOP_TAR="${DESKTOP_IMAGE_TAR:-/mnt/c/Temp/prodavan-docker-bridge.tar}"
 if [[ "${VERIFY_ALEMBIC:-1}" == "1" ]]; then
-  API_IMAGE="$API_IMAGE" bash "${SCRIPT_DIR}/verify_api_image_alembic.sh"
+  if ! API_IMAGE="$API_IMAGE" bash "${SCRIPT_DIR}/verify_api_image_alembic.sh"; then
+    if [[ -f "$DESKTOP_TAR" ]]; then
+      echo "==> stale :local — reload ${DESKTOP_TAR}"
+      docker rmi "${API_IMAGE}" "${WEB_IMAGE}" 2>/dev/null || true
+      docker load -i "$DESKTOP_TAR"
+      IMAGES=("${WEB_IMAGE}" "${API_IMAGE}")
+      API_IMAGE="$API_IMAGE" bash "${SCRIPT_DIR}/verify_api_image_alembic.sh"
+    else
+      exit 1
+    fi
+  fi
 fi
 
 echo "==> k3d image import → ${CLUSTER}: ${IMAGES[*]}"

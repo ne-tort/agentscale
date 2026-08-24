@@ -39,7 +39,9 @@ if [[ -z "$actual" ]]; then
 fi
 if [[ "$expected" != "$actual" ]]; then
   echo "ERROR: API image alembic head=${actual}, repo head=${expected}" >&2
-  echo "Run BUILD=1 bash infra/scripts/import_local_app_images_k3d.sh (WSL apt may fail — build via Docker Desktop + bridge)." >&2
+  echo "Stale :local tag is common when docker load skips retag. Untag then load the Desktop tar:" >&2
+  echo "  docker rmi ${API_IMAGE}; docker load -i /mnt/c/Temp/prodavan-docker-bridge.tar" >&2
+  echo "Or: powershell.exe -File infra/scripts/build_local_app_images.ps1" >&2
   exit 1
 fi
 if ! verify_celery; then

@@ -8,15 +8,12 @@ IMAGE="${1:?usage: bridge_docker_desktop_image.sh <image:tag>}"
 TAR_WIN='C:\Temp\prodavan-docker-bridge.tar'
 TAR_WSL="/mnt/c/Temp/prodavan-docker-bridge.tar"
 
+# Prefer Windows host via cmd.exe interop. Direct /mnt/c/Windows/.../cmd.exe
+# often fails with "Exec format error" when WSL binfmt/interop is off.
 win_docker_save() {
   mkdir -p /mnt/c/Temp
-  # Prefer cmd.exe — avoids WSL "Exec format error" on some powershell.exe shims.
-  if command -v cmd.exe >/dev/null 2>&1; then
+  if command -v cmd.exe >/dev/null 2>&1 && cmd.exe /c "echo ok" >/dev/null 2>&1; then
     cmd.exe /c "docker save ${IMAGE} -o ${TAR_WIN}" && return 0
-  fi
-  local ps="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
-  if [[ -f "$ps" ]]; then
-    "$ps" -NoProfile -Command "New-Item -ItemType Directory -Force C:\Temp | Out-Null; docker save '${IMAGE}' -o '${TAR_WIN}'" && return 0
   fi
   return 1
 }

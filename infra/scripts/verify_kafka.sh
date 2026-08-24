@@ -20,8 +20,9 @@ echo "ok cluster reachable"
 
 cfg="$(rpk cluster config get write_caching_default 2>/dev/null || true)"
 echo "write_caching_default=${cfg}"
-if echo "$cfg" | grep -qi 'true'; then
-  echo "FAIL: write_caching_default must be false on local (durability)" >&2
+norm="$(printf '%s' "$cfg" | tr -d '"' | tr '[:upper:]' '[:lower:]')"
+if [[ "$norm" != "false" ]]; then
+  echo "FAIL: write_caching_default must be false on local (got ${cfg})" >&2
   exit 1
 fi
 

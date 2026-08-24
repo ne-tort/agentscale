@@ -23,4 +23,4 @@ docker build -f "$Root/apps/flutter/Dockerfile" --target runtime `
   -t prodavan-web:local `
   "$Root"
 
-Write-Host "ok — import in WSL: BUILD=0 bash infra/scripts/import_local_app_images_k3d.sh"
+Write-Host "ok - import in WSL: BUILD=0 bash infra/scripts/import_local_app_images_k3d.sh"
