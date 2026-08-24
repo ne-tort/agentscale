@@ -64,7 +64,8 @@ CabinetInstance: schema-per-instance, meta+UI, cabinet.*, MCP packages, bundles.
 | columns/views CRUD | done | PATCH column type + metadata |
 | UI meta interpreters | live (subset) | tables settings + custom tabs + view edit |
 | Non-system tabs from bundle | done | import_bundle_views_and_tabs |
-| Hard-delete archived instance | **done** (subset) | `DELETE /cabinets/{id}` DROP SCHEMA + wipe; async durable GC — hole |
+| Hard-delete archived instance | **done** (subset) | `DELETE /cabinets/{id}` DROP SCHEMA + wipe; orphan schema GC admin/Celery/CronJob |
+| Redis cache / rate limits | **done** (subset) | MCP call RL + admin ops RL (C-CACHE) |
 
 ## Проверка
 

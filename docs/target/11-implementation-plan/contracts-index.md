@@ -40,6 +40,8 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-24 | C-CABINET / C-JOBS | orphan `cab_inst_*` schema GC (admin + Celery + CronJob) | no |
+| 2026-08-24 | C-CACHE | shared `enforce_rate_limit`; admin ops + MCP call rate limits | no |
 | 2026-08-24 | C-CABINET / C-OBJECT-STORE | `DELETE /cabinets/{id}` hard-delete archived (DROP SCHEMA + wipe) | no |
 | 2026-08-24 | C-MATERIALIZE | Alembic `2026082317` + `POST /admin/projects/container-refs/backfill-object-ws` | no |
 | 2026-08-24 | C-MATERIALIZE / C-OBJECT-STORE | new `container_ref=object-ws:`; dual-read `local-ws:` | no |

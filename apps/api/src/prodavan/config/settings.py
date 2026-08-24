@@ -124,6 +124,9 @@ class Settings(BaseSettings):
 
     # External webhook/telegram ingress rate limit (C-CACHE); 0 = disabled.
     ingress_rate_limit_per_minute: int = 120
+    # Admin ops (drain/sweep/gc) and MCP call rate limits; 0 = disabled.
+    admin_ops_rate_limit_per_minute: int = 60
+    mcp_call_rate_limit_per_minute: int = 180
 
     @property
     def cors_origin_list(self) -> list[str]:

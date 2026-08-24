@@ -114,7 +114,7 @@ apps/flutter/lib/
 | Object store SoT для всех blobs | **partial** | materialize + hydrate + verified wipes (cabinet + project) + Celery retry; live MinIO mount — hole |
 | Celery executor для background jobs | **partial** | CLI + beat + task_id + job locks; wipe_cabinet_packages + wipe_project_tree; default off → in-process |
 | Middleware register в core | **done** (subset) | `register_cors` in `core/middleware.py` |
-| Redis cache facade | **done** (subset) | get/set + lock + rate_limit; ingress RL + kafka kick + Celery job locks; policy/sub/quota peek |
+| Redis cache facade | **done** (subset) | get/set + lock + rate_limit; ingress + admin ops + MCP call RL; kafka kick + Celery job locks; policy/sub/quota peek |
 
 ## Проверка
 

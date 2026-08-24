@@ -313,21 +313,12 @@ async def ingress_signed_telegram(
 
 
 async def _enforce_ingress_rate_limit(project_id: str, *, channel: str) -> None:
+    from prodavan.api.rate_limit import enforce_rate_limit
     from prodavan.config.settings import settings
-    from prodavan.core.infra.cache import cache_key, rate_limit_allow
+    from prodavan.core.infra.cache import cache_key
 
-    limit = int(settings.ingress_rate_limit_per_minute or 0)
-    if limit < 1:
-        return
-    allowed = await rate_limit_allow(
+    await enforce_rate_limit(
         cache_key("rl", "ingress", channel, project_id),
-        limit=limit,
-        window_sec=60,
+        limit=int(settings.ingress_rate_limit_per_minute or 0),
+        detail=f"{channel} ingress rate limit exceeded",
     )
-    if not allowed:
-        raise AppError(
-            code="RATE_LIMITED",
-            title="Too Many Requests",
-            status=429,
-            detail=f"{channel} ingress rate limit exceeded",
-        )

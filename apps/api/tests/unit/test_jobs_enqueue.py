@@ -93,7 +93,7 @@ def test_enqueue_wipe_project_tree_passes_task_id(monkeypatch: pytest.MonkeyPatc
         enabled = True
 
         def send_task(self, name, args=None, kwargs=None, *, task_id=None):
-            sent.append({"name": name, "args": args, "task_id": task_id})
+            sent.append({"name": name, "args": args, "kwargs": kwargs, "task_id": task_id})
 
     monkeypatch.setattr(
         "prodavan.core.infra.worker_manager.get_worker_manager",
@@ -102,3 +102,21 @@ def test_enqueue_wipe_project_tree_passes_task_id(monkeypatch: pytest.MonkeyPatc
     out = enqueue_mod.enqueue_wipe_project_tree("ws-1")
     assert out["task_id"] == wipe_project_tree_task_id("ws-1")
     assert sent[0]["name"] == job_names.WIPE_PROJECT_TREE
+
+
+def test_enqueue_gc_orphan_schemas_singleton_task_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[dict] = []
+
+    class _Mgr:
+        enabled = True
+
+        def send_task(self, name, args=None, kwargs=None, *, task_id=None):
+            sent.append({"name": name, "kwargs": kwargs, "task_id": task_id})
+
+    monkeypatch.setattr(
+        "prodavan.core.infra.worker_manager.get_worker_manager",
+        lambda: _Mgr(),
+    )
+    out = enqueue_mod.enqueue_gc_orphan_cabinet_schemas(dry_run=False, limit=10)
+    assert out["task_id"] == job_names.GC_ORPHAN_CABINET_SCHEMAS
+    assert sent[0]["kwargs"] == {"dry_run": False, "limit": 10}

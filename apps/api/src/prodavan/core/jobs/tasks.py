@@ -117,3 +117,28 @@ def register_tasks(app) -> None:
 
         logger.info("celery task %s workspace_key=%s", job_names.WIPE_PROJECT_TREE, workspace_key)
         return wipe_fn(workspace_key)
+
+    @app.task(name=job_names.GC_ORPHAN_CABINET_SCHEMAS, bind=False)
+    def gc_orphan_cabinet_schemas(dry_run: bool = False, limit: int = 50) -> dict[str, Any]:
+        from prodavan.application.cabinets.schema_gc import gc_orphan_cabinet_schemas as gc_fn
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        async def _run() -> dict[str, Any]:
+            async def _gc() -> dict[str, Any]:
+                factory = get_session_factory()
+                async with factory() as session:
+                    return await gc_fn(session, dry_run=bool(dry_run), limit=int(limit))
+
+            return await run_with_job_lock(
+                "gc_orphan_cabinet_schemas",
+                ttl_sec=120,
+                fn=_gc,
+            )
+
+        logger.info(
+            "celery task %s dry_run=%s limit=%s",
+            job_names.GC_ORPHAN_CABINET_SCHEMAS,
+            dry_run,
+            limit,
+        )
+        return run_async(_run())

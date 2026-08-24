@@ -703,6 +703,15 @@ async def mcp_call(
     employee: EmployeeDep,
 ) -> dict:
     """Invoke a platform cabinet.* tool — same surface agents get after materialize."""
+    from prodavan.api.rate_limit import enforce_rate_limit
+    from prodavan.config.settings import settings
+    from prodavan.core.infra.cache import cache_key
+
+    await enforce_rate_limit(
+        cache_key("rl", "mcp", "call", cabinet_id),
+        limit=int(settings.mcp_call_rate_limit_per_minute or 0),
+        detail="mcp call rate limit exceeded",
+    )
     result = await CabinetMcpDispatcher(session).call(
         cabinet_id=cabinet_id,
         tool=body.tool,

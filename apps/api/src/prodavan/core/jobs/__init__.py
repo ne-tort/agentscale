@@ -3,6 +3,7 @@
 from prodavan.core.jobs import names
 from prodavan.core.jobs.enqueue import (
     enqueue_dispatch_trigger,
+    enqueue_gc_orphan_cabinet_schemas,
     enqueue_idle_pause_sweep,
     enqueue_rematerialize_project,
     enqueue_trigger_drain,
@@ -12,6 +13,7 @@ from prodavan.core.jobs.enqueue import (
 
 __all__ = [
     "enqueue_dispatch_trigger",
+    "enqueue_gc_orphan_cabinet_schemas",
     "enqueue_idle_pause_sweep",
     "enqueue_rematerialize_project",
     "enqueue_trigger_drain",
