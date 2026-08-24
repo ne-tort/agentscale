@@ -51,7 +51,7 @@ spec:
             - name: RUN_MIGRATIONS
               value: "0"
           volumeMounts:
-            # Same RWO PVC as API — safe on single-node k3d; needed for rematerialize mirror.
+            # Same RWO PVC as API — safe on single-node k3s; needed for rematerialize mirror.
             - name: storage
               mountPath: /data/storage
           readinessProbe:

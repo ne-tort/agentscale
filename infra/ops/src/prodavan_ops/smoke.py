@@ -15,7 +15,7 @@ def smoke(
     sleep_sec: float = 5.0,
 ) -> None:
     port = port or int(os.environ.get("HTTP_PORT", "8088"))
-    addr = addr or os.environ.get("SMOKE_ADDR") or _pick_addr(port)
+    addr = addr or os.environ.get("SMOKE_ADDR") or "127.0.0.1"
     base = f"http://{addr}:{port}"
     paths = ["/health/live", "/health/ready", "/api/v1/auth/config", "/"]
     headers = {"Host": host_header}
@@ -36,12 +36,3 @@ def smoke(
             if not ok:
                 raise RuntimeError(f"smoke failed for {path} at {base}")
     print(f"smoke OK {base} (Host: {host_header})")
-
-
-def _pick_addr(port: int) -> str:
-    with httpx.Client(timeout=3.0) as client:
-        try:
-            client.get(f"http://127.0.0.1:{port}/health/live")
-            return "127.0.0.1"
-        except httpx.HTTPError:
-            return "host.docker.internal"

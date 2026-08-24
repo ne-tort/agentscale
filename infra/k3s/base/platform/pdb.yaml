@@ -1,5 +1,5 @@
 # Single-replica local: refuse voluntary eviction so PVC brokers are not drained mid-write.
-# k3d host reboot still SIGTERM's the node — preStop + PVC cover that path (I14).
+# Node reboot still SIGTERM's the node — preStop + PVC cover that path (I14).
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:

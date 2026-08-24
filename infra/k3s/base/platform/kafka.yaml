@@ -1,11 +1,11 @@
 # Redpanda (Kafka API) — C-EVENT-BUS (P0).
 #
-# Local/single-node pattern (k3d):
+# Local/single-node pattern (k3s):
 # - StatefulSet + PVC so topic data survives pod/node reboot
 # - Do NOT use `rpk redpanda start --check=false` / `--mode dev-container`: both end up
 #   passing --unsafe-bypass-fsync=true (data loss on crash). Exec the binary instead.
 # - Do NOT use fictional --mode empty (rpk only documents: help / dev-container)
-# - overprovisioned + no rpk syschecks (k3d); developer_mode:false in ConfigMap
+# - overprovisioned + no rpk syschecks; developer_mode:false in ConfigMap
 # - Single-node empty_seed_starts_cluster=true so the STS can form a cluster;
 #   HA (I9) must set it false + identical seed_servers
 # - write_caching_default=false + internal_topic_replication_factor=1 via init Job (Admin API :9644)

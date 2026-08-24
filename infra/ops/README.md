@@ -1,15 +1,13 @@
 # prodavan-ops
 
-Python/Poetry CLI for Prodavan GitOps. **No shell scripts.**
+Companion CLI for GitOps. **No shell scripts. No apply. No cluster create.**
 
 ```bash
 cd infra/ops
 poetry install
-poetry run prodavan-ops validate
-poetry run prodavan-ops wait
-poetry run prodavan-ops smoke
-poetry run prodavan-ops seed
-poetry run prodavan-ops ensure-ghcr-secret
+poetry run prodavan-ops validate   # no .sh / no compose / no k3d; kustomize + image pins
+poetry run prodavan-ops wait       # Argo Application Synced+Healthy
+poetry run prodavan-ops smoke      # HTTP live/ready/auth/UI
 ```
 
-Does **not**: create k3d clusters, `kubectl apply -k` overlays, or `k3d image import` in the happy path.
+Secrets (`ghcr-pull`) — SealedSecret, see `infra/k3s/overlays/dev/SECRETS.md`.

@@ -51,7 +51,6 @@ def wait_argo_app(
         if sync == "Synced" and health == "Healthy":
             print(f"Argo Application {name} OK")
             return
-        # nudge refresh
         try:
             meta = obj.setdefault("metadata", {})
             ann = meta.setdefault("annotations", {})
@@ -68,47 +67,3 @@ def wait_argo_app(
             pass
         time.sleep(poll_sec)
     raise TimeoutError(f"Argo Application {name} not ready within {timeout_sec}s ({last})")
-
-
-def ensure_ghcr_pull_secret(
-    namespace: str = "prodavan",
-    name: str = "ghcr-pull",
-    server: str = "ghcr.io",
-) -> None:
-    """Bootstrap docker-registry pull secret from env (not stored in git)."""
-    token = os.environ.get("GHCR_TOKEN") or os.environ.get("GITHUB_TOKEN")
-    username = os.environ.get("GHCR_USERNAME") or os.environ.get("GITHUB_ACTOR") or "token"
-    if not token:
-        raise RuntimeError("set GHCR_TOKEN or GITHUB_TOKEN to create ghcr-pull secret")
-    load_kube()
-    v1 = client.CoreV1Api()
-    import base64
-    import json
-
-    auth = base64.b64encode(f"{username}:{token}".encode()).decode()
-    docker_config = {
-        "auths": {
-            server: {
-                "username": username,
-                "password": token,
-                "auth": auth,
-            }
-        }
-    }
-    data = {
-        ".dockerconfigjson": base64.b64encode(json.dumps(docker_config).encode()).decode()
-    }
-    body = client.V1Secret(
-        metadata=client.V1ObjectMeta(name=name, namespace=namespace),
-        type="kubernetes.io/dockerconfigjson",
-        data=data,
-    )
-    try:
-        v1.read_namespaced_secret(name, namespace)
-        v1.replace_namespaced_secret(name, namespace, body)
-        print(f"updated secret {namespace}/{name}")
-    except ApiException as exc:
-        if exc.status != 404:
-            raise
-        v1.create_namespaced_secret(namespace, body)
-        print(f"created secret {namespace}/{name}")

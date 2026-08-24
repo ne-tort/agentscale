@@ -3,14 +3,13 @@ from __future__ import annotations
 import typer
 
 from prodavan_ops import __version__
-from prodavan_ops.k8s import ensure_ghcr_pull_secret, wait_argo_app
-from prodavan_ops.seed import seed
+from prodavan_ops.k8s import wait_argo_app
 from prodavan_ops.smoke import smoke
 from prodavan_ops.validate import validate_all
 
 app = typer.Typer(
     name="prodavan-ops",
-    help="GitOps companion CLI (Python-only). No cluster create / no kustomize apply.",
+    help="GitOps companion: validate / wait / smoke. No apply, no cluster create, no secrets.",
     no_args_is_help=True,
 )
 
@@ -22,7 +21,7 @@ def version_cmd() -> None:
 
 @app.command("validate")
 def validate_cmd() -> None:
-    """Cluster-free: no .sh, kustomize render, image pins, terraform validate."""
+    """Cluster-free: no .sh under infra/, kustomize render, image pins."""
     validate_all()
 
 
@@ -43,19 +42,6 @@ def smoke_cmd(
     host: str = typer.Option("prodavan.local", "--host"),
 ) -> None:
     smoke(addr=addr, port=port, host_header=host)
-
-
-@app.command("seed")
-def seed_cmd(
-    skip_e2e: bool = typer.Option(False, "--skip-e2e"),
-) -> None:
-    seed(skip_e2e=skip_e2e)
-
-
-@app.command("ensure-ghcr-secret")
-def ensure_ghcr_secret_cmd() -> None:
-    """One-time bootstrap of ghcr-pull from GHCR_TOKEN (secret not stored in git)."""
-    ensure_ghcr_pull_secret()
 
 
 if __name__ == "__main__":

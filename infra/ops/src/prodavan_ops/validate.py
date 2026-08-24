@@ -4,12 +4,11 @@ import os
 import re
 import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 
 import yaml
 
-from prodavan_ops.paths import overlay_dev, repo_root, terraform_local
+from prodavan_ops.paths import overlay_dev, repo_root
 
 FIRST_PARTY_LATEST = {
     "ghcr.io/ne-tort/prodavan-api:latest",
@@ -47,16 +46,13 @@ def _run(cmd: list[str], *, cwd: Path | None = None, env: dict | None = None) ->
 
 
 def render_overlay() -> str:
-    """Render overlays/dev via kubectl or kustomize on PATH (host tools, no containers)."""
+    """Render overlays/dev via kubectl or kustomize on PATH (host tools)."""
     path = overlay_dev()
     if shutil.which("kubectl"):
         return _run(["kubectl", "kustomize", str(path)])
     if shutil.which("kustomize"):
         return _run(["kustomize", "build", str(path)])
-    raise RuntimeError(
-        "need kubectl or kustomize on PATH for validate "
-        "(install on runner host; cluster is k3s-only, no docker fallback)"
-    )
+    raise RuntimeError("need kubectl or kustomize on PATH for validate")
 
 
 def _images_from_manifest(manifest: str) -> list[str]:
@@ -66,7 +62,6 @@ def _images_from_manifest(manifest: str) -> list[str]:
             continue
         for img in _walk_images(doc):
             images.append(img)
-    # fallback regex for kustomize image: lines if yaml miss
     for m in re.finditer(r"(?m)^[ \t]+image:[ \t]+(\S+)\s*$", manifest):
         images.append(m.group(1))
     return images
@@ -107,44 +102,35 @@ def verify_image_pins(manifest: str) -> None:
 
 
 def assert_no_shell_scripts() -> None:
-    """Enforce GitOps contract: no .sh under infra/ (ops is Python-only)."""
+    """Enforce GitOps contract: no .sh under infra/."""
     root = repo_root() / "infra"
-    banned: list[Path] = []
-    for p in root.rglob("*.sh"):
-        # allow nothing
-        banned.append(p.relative_to(repo_root()))
+    banned = [p.relative_to(repo_root()) for p in root.rglob("*.sh")]
     if banned:
         listing = "\n".join(f"  - {p}" for p in sorted(banned))
         raise RuntimeError(f"forbidden .sh under infra/:\n{listing}")
 
 
-def terraform_validate() -> None:
-    tf_dir = terraform_local()
-    tf_bin = shutil.which("terraform")
-    if not tf_bin:
-        raise RuntimeError(
-            "need terraform on PATH for validate "
-            "(install on runner host; no docker fallback)"
-        )
-    with tempfile.TemporaryDirectory(prefix="prodavan-tf-") as tmp:
-        # Copy only .tf files to avoid polluting workspace with root-owned .terraform
-        work = Path(tmp) / "local"
-        work.mkdir()
-        for f in tf_dir.glob("*.tf"):
-            shutil.copy2(f, work / f.name)
-    _run([tf_bin, f"-chdir={tf_dir}", "init", "-backend=false", "-input=false"])
-    _run([tf_bin, f"-chdir={tf_dir}", "validate"])
-    tf_meta = tf_dir / ".terraform"
-    if tf_meta.exists():
-        shutil.rmtree(tf_meta, ignore_errors=True)
-    lock = tf_dir / ".terraform.lock.hcl"
-    if lock.exists():
-        lock.unlink(missing_ok=True)
+def assert_no_compose_or_k3d() -> None:
+    """Cluster path is k3s+Argo only — no compose-as-cluster, no k3d configs in git."""
+    root = repo_root() / "infra"
+    banned: list[Path] = []
+    for p in root.rglob("docker-compose*.yml"):
+        banned.append(p.relative_to(repo_root()))
+    k3d = root / "k3d"
+    if k3d.exists():
+        banned.append(k3d.relative_to(repo_root()))
+    if banned:
+        listing = "\n".join(f"  - {p}" for p in sorted(set(banned)))
+        raise RuntimeError(f"forbidden compose/k3d under infra/:\n{listing}")
 
 
 def validate_all() -> None:
     print("==> no .sh under infra/")
     assert_no_shell_scripts()
+    print("ok")
+
+    print("==> no docker-compose / k3d under infra/")
+    assert_no_compose_or_k3d()
     print("ok")
 
     print("==> kustomize overlays/dev")
@@ -154,10 +140,6 @@ def validate_all() -> None:
 
     print("==> image pins")
     verify_image_pins(manifest)
-    print("ok")
-
-    print("==> terraform validate (local env, no apply)")
-    terraform_validate()
     print("ok")
 
     print("prodavan-ops validate OK")

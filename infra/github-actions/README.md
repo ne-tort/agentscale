@@ -1,16 +1,16 @@
 # GitHub Actions
 
-Спецификация: [`docs/07-infrastructure/github-actions.md`](../../docs/07-infrastructure/github-actions.md).
+Спецификация: [`docs/07-infrastructure/github-actions.md`](../../docs/07-infrastructure/github-actions.md).  
+E2E: [`docs/07-infrastructure/local-cluster-e2e.md`](../../docs/07-infrastructure/local-cluster-e2e.md).
 
-Локальный k3s E2E: [`docs/07-infrastructure/local-cluster-e2e.md`](../../docs/07-infrastructure/local-cluster-e2e.md).
+| Workflow | Purpose |
+|----------|---------|
+| `ci-gate.yml` | PR gate: `prodavan-ops validate` + api/flutter/schemas |
+| `ci-api.yml` | ruff, pytest |
+| `ci-schemas.yml` | pack + profile schema |
+| `ci-images.yml` | buildx → GHCR `:latest` + SHA |
+| `ci-flutter.yml` | analyze + palette guards |
+| `verify-dev.yml` | Argo wait + HTTP smoke (no deploy) |
+| `auto-merge.yml` | squash after Gate |
 
-| Workflow | Status | Purpose |
-|----------|--------|---------|
-| `ci-api.yml` | active | ruff, pytest health |
-| `ci-schemas.yml` | active | validate pack + cabinet-profile schema |
-| `ci-images.yml` | active | self-hosted build/push GHCR + k3s tag bump |
-| `ci-flutter.yml` | active | analyze + palette hex guard |
-| `deploy-dev-k3s.yml` | active (local-dev) | after Images: terraform/k3d, Argo wait, curl smoke `:8088` |
-| `deploy-staging.yml` | planned | cloud staging Argo sync |
-
-**Commerce submodule:** в CI Commerce-репо — `git submodule update --init prodavan` перед docs lint.
+Нет deploy-orchestrator workflow. Day-2 = Argo sync from `main`.

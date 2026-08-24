@@ -1,6 +1,6 @@
 name: Verify Dev
 
-# Not a deploy orchestrator: Argo CD syncs from git + GHCR pulls.
+# Not a deploy orchestrator: Argo CD syncs from git; kubelet pulls GHCR.
 # This workflow only waits for Application health and smokes HTTP.
 
 on:
@@ -27,7 +27,6 @@ concurrency:
 
 env:
   HTTP_PORT: "8088"
-  KUBECONFIG: ${{ github.workspace }}/infra/.kube/prodavan-k3d.yaml
   SMOKE_ADDR: "127.0.0.1"
 
 jobs:
@@ -44,6 +43,23 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
+      - name: Resolve kubeconfig (host, not checkout)
+        run: |
+          set -euo pipefail
+          if [ -n "${KUBECONFIG:-}" ] && [ -f "${KUBECONFIG}" ]; then
+            echo "using existing KUBECONFIG=${KUBECONFIG}"
+            exit 0
+          fi
+          for c in "${HOME}/.kube/prodavan-dev.yaml" "${HOME}/.kube/config"; do
+            if [ -f "$c" ]; then
+              echo "KUBECONFIG=$c" >> "${GITHUB_ENV}"
+              echo "using $c"
+              exit 0
+            fi
+          done
+          echo "No kubeconfig: set KUBECONFIG on the runner or place ~/.kube/prodavan-dev.yaml" >&2
+          exit 1
+
       - name: Python venv + Poetry
         run: |
           python3 -m venv "${{ runner.temp }}/ops-venv"
@@ -54,7 +70,7 @@ jobs:
         working-directory: infra/ops
         run: poetry install --no-interaction
 
-      # ghcr-pull must already exist (SealedSecret / operator bootstrap). CI does not mint it.
+      # ghcr-pull must already exist (SealedSecret). CI does not mint secrets.
 
       - name: Wait Argo Application
         working-directory: infra/ops

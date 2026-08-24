@@ -1,29 +1,26 @@
 # Self-hosted GitHub Actions runner (OUTSIDE k3s)
 
-## Канон: процесс на Kali WSL (не Docker)
+## Канон: процесс на хосте
 
-1. **Docker Desktop** — TLS к GitHub ломается (EOF). DNS при этом ок.
-2. **Контейнер host-net** — TLS OK, но listener умирает mid-job → Session Conflict.
-3. **Хост Kali** — канон. Docker-задачи через `/var/run/docker.sock`.
+Раннер — обычный Actions runner. Кластер (k3s) о нём не знает.  
+Docker на раннере нужен только для **CI Images** (buildx) и api/nightly Postgres fixture — не для GitOps validate/wait.
 
 ```bash
 export PATH="${HOME}/.local/bin:/usr/bin:/bin"
 mkdir -p ~/prodavan-actions-runner && cd ~/prodavan-actions-runner
-# extract actions-runner-linux-x64-2.336.0.tar.gz
-printf 'DISABLE_RUNNER_UPDATE=1\n' > .env
+# extract actions-runner-linux-x64-*.tar.gz
+printf 'DISABLE_RUNNER_UPDATE=1\nKUBECONFIG=%s/.kube/prodavan-dev.yaml\n' "$HOME" > .env
 ./config.sh --url https://github.com/ne-tort/prodavan --token <REG_TOKEN> \
   --name wsl-prodavan-host --labels self-hosted,linux,docker,wsl-dev \
   --work _work --unattended --replace
 nohup env PATH="${HOME}/.local/bin:/usr/bin:/bin" ./run.sh >runner.out 2>&1 &
 ```
 
-Ожидать: `Listening for Jobs` на `2.336.0`.  
-`KUBECONFIG` → `infra/.kube/prodavan-k3d.yaml`. kubectl на `127.0.0.1:6443`.
+Ожидать: `Listening for Jobs`.  
+На PATH: `kubectl`/`kustomize` (для Gate).  
+`KUBECONFIG` → `~/.kube/prodavan-dev.yaml` (kubeconfig **не** в git).
 
-**Инструменты на PATH раннера** (бинарники на хосте, не через Docker): `kubectl`, `kustomize`, `terraform`.  
-Раннер **вне** k3s; кластер про Docker не знает — kubelet тянет образы из GHCR по `ghcr-pull`.
-
-## Ops CLI (Poetry)
+## Ops CLI
 
 ```bash
 cd infra/ops
@@ -31,10 +28,9 @@ poetry install
 poetry run prodavan-ops validate
 poetry run prodavan-ops wait
 poetry run prodavan-ops smoke
-poetry run prodavan-ops seed
 ```
 
-Под `infra/` **нет** `.sh`.
+Под `infra/` **нет** `.sh`, нет docker-compose кластера, нет k3d.
 
 ## Session conflict
 

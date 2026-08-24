@@ -31,9 +31,6 @@ jobs:
           tar xz -C "$dest" -f "${{ runner.temp }}/kustomize.tgz"
           echo "$dest" >> "${GITHUB_PATH}"
           "$dest/kustomize" version
-      - uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: 1.9.8
       - name: Python venv + Poetry
         run: |
           python3 -m venv "${{ runner.temp }}/ops-venv"
@@ -41,13 +38,12 @@ jobs:
           echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
           echo "/usr/local/bin" >> "${GITHUB_PATH}"
           "${{ runner.temp }}/ops-venv/bin/python" -m pip install -U pip poetry
-      - name: Validate (kustomize, pins, terraform, no .sh)
+      - name: Validate (kustomize, pins, no .sh / compose / k3d)
         working-directory: infra/ops
         env:
           POETRY_VIRTUALENVS_IN_PROJECT: "true"
         run: |
           command -v kustomize
-          command -v terraform
           poetry install --no-interaction
           poetry run prodavan-ops validate
 

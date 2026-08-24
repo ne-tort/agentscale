@@ -5,7 +5,7 @@ metadata:
   name: prodavan
   namespace: argocd
 spec:
-  description: Prodavan local k3d (repo + namespace scoped)
+  description: Prodavan k3s (repo + namespace scoped)
   sourceRepos:
     - https://github.com/ne-tort/prodavan.git
   destinations:
@@ -27,6 +27,8 @@ spec:
       kind: ServiceAccount
     - group: ""
       kind: PersistentVolumeClaim
+    - group: bitnami.com
+      kind: SealedSecret
     - group: apps
       kind: Deployment
     - group: apps

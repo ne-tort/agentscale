@@ -23,9 +23,9 @@
 **Ранбук:** [`docs/07-infrastructure/runbook.md`](docs/07-infrastructure/runbook.md).
 
 - Поставка: PR → **CI Gate** → Auto-merge → **CI Images** → Argo CD sync → **Verify Dev** (`wait`/`smoke`).
-- Императив только **`infra/ops`** (Poetry): `poetry run prodavan-ops …`.
-- **Запрещены** `.sh` под `infra/` и shell-оркестраторы recover/deploy.
-- Кластер: declarative [`infra/k3d/prodavan-dev.yaml`](infra/k3d/prodavan-dev.yaml); после reboot — Docker restart + Argo selfHeal.
+- Императив только **`infra/ops`**: `validate` / `wait` / `smoke`.
+- **Запрещены** `.sh` под `infra/`, docker-compose как кластер, k3d в git, recover/deploy shell.
+- Кластер: **k3s** + Argo (`infra/argocd` → `infra/k3s/overlays/dev`). После reboot — k3s systemd + Argo selfHeal.
 
 ## Суть продукта
 

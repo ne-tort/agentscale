@@ -88,7 +88,7 @@ spec:
                 secretKeyRef:
                   name: prodavan-minio
                   key: root-password
-            # Local k3d: no phone-home. Browser console stays on :9001 for ops.
+            # Local k3s: no phone-home. Browser console stays on :9001 for ops.
             - name: MINIO_UPDATE
               value: "off"
             - name: MINIO_BROWSER

@@ -1,4 +1,4 @@
-# Longer git fetch timeout for flaky TLS on local WSL/k3d (was patch_argocd_git_timeout.sh).
+# Longer git fetch timeout for flaky TLS on local WSL/k3s (was patch_argocd_git_timeout.sh).
 apiVersion: apps/v1
 kind: Deployment
 metadata:

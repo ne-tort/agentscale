@@ -27,21 +27,21 @@
 | I4 | OpenAPI stub ≪ runtime | open | не блокер k3s |
 | I5 | Redis/MinIO/Kafka/Celery in k3s | **done** (subset) | platform StatefulSets |
 | I6 | Базовые экраны projects/runs/variants | done | Flutter screens |
-| I7 | docker-compose.stack.yml | done | smoke без кластера |
+| I7 | docker-compose.stack.yml | **done** (removed) | compose-as-cluster удалён; только k3s+Argo |
 | I8 | Project sandbox Pod/Job isolator | **in_progress** | SA + PVC probe; holes remain |
 | I9 | Redpanda HA | deferred | local single node |
-| I10 | Keycloak in-cluster | open | AUTH_MODE=test + `prodavan-ops seed` |
+| I10 | Keycloak in-cluster | open | AUTH_MODE=test; seed — out of GitOps CLI |
 | I11 | Alembic history rewrite vs old PVC | **done** (ops) | wipe PVC manually if legacy revisions |
-| I12 | GHCR API/web image lag | **done** | `:latest` + IfNotPresent; kubelet pull + SealedSecret/`ensure-ghcr-secret` |
-| I13 | Terraform apply = full stack | **done** (subset) | TF metadata only; bootstrap via k3d config + Argo |
-| I14 | Recover after reboot | **done** | Docker restart + Argo selfHeal; **no** recover shell |
+| I12 | GHCR API/web image lag | **done** | `:latest` + IfNotPresent; kubelet + SealedSecret |
+| I13 | Terraform apply = full stack | **done** (removed local) | local TF удалён; cloud skeletons only |
+| I14 | Recover after reboot | **done** | k3s systemd + Argo selfHeal; **no** recover shell |
 | I15 | Argo Job churn / selfHeal | **done** | AppProject + RespectIgnoreDifferences; prune enabled |
 | I16 | Secrets in git (dev) | **in_progress** | Sealed Secrets controller + seal workflow; plaintext forbidden |
 | I17 | API image rebuild | **done** | Dockerfile без apt/curl |
 | I18 | SHA-pin overlay | **done** (policy) | First-party `:latest`; infra frozen tags; `prodavan-ops validate` |
 | I19 | Argo repo-server → GitHub TLS | **done** | install patches (timeout/retries) |
 | I20–I29 | Celery/PVC/Kafka/MinIO/Redis retain | **done** | manifests + prior verification |
-| I30 | Deploy CI второй k3d | **done** | Deploy orchestrator removed; Verify Dev only wait/smoke |
+| I30 | Deploy CI второй k3d | **done** | Deploy/k3d убраны; Verify Dev = wait/smoke |
 | I31 | PR + CI Gate | **done** | runbook GitOps |
 | I32 | API integration pytest on PG 16.15 | open | Gate = unit; nightly = integration |
 
@@ -49,7 +49,7 @@
 
 | ID | Gap | Status | Notes |
 |----|-----|--------|-------|
-| N1 | Terraform modules | done | skeleton + validate |
+| N1 | Terraform modules | done | cloud skeletons (local env removed) |
 | N2 | Argo CD | done | install kustomize + root-app + apps |
 | N3 | ExternalSecrets / SOPS | deferred | Sealed Secrets preferred path for ghcr-pull |
 | N4–N6 | mcp / vault / Flutter inventory | deferred | |
@@ -60,9 +60,8 @@
 cd infra/ops && poetry run prodavan-ops validate
 kubectl -n prodavan get sts,deploy,pvc,sa
 poetry run prodavan-ops wait && poetry run prodavan-ops smoke
-poetry run prodavan-ops seed
 ```
 
-После reboot: без shell recover — Docker + Argo. Ранбук: `docs/07-infrastructure/runbook.md`.
+После reboot: k3s + Argo selfHeal, без shell recover. Ранбук: `docs/07-infrastructure/runbook.md`.
 
-Обновлено: 2026-08-24 (GitOps no-shell rewrite)
+Обновлено: 2026-08-24 (k3s-only GitOps; no compose/k3d/seed CLI)

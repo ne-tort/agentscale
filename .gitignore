@@ -49,7 +49,7 @@ tools/.terraform-bin/
 tools/terraform
 tools/terraform.exe
 
-# Local k3d kubeconfig (mounted into github-runner)
+# Local k3s kubeconfig (host only — never commit)
 infra/.kube/*
 !infra/.kube/.gitkeep
 !infra/.kube/README.md

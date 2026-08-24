@@ -1,7 +1,8 @@
 # Ранбук DevOps (Prodavan) — GitOps
 
-Канон: **git → Argo CD → cluster**. Императив только через `poetry run prodavan-ops …`.  
-**`.sh` под `infra/` запрещены.**
+Канон: **git → Argo CD → kustomize → k3s**.  
+Императив только `poetry run prodavan-ops {validate|wait|smoke}`.  
+**Запрещены:** `.sh` под `infra/`, docker-compose как кластер, k3d-конфиги в git, recover/deploy shell.
 
 Репозиторий: [ne-tort/prodavan](https://github.com/ne-tort/prodavan).  
 UI: `http://prodavan.local:8088/` (`Host: prodavan.local`).
@@ -12,22 +13,22 @@ UI: `http://prodavan.local:8088/` (`Host: prodavan.local`).
 
 | Компонент | Где |
 |-----------|-----|
-| k3s `prodavan-dev` | нативный кластер, манифесты [`infra/k3s/overlays/dev`](../../infra/k3s/overlays/dev) |
-| Argo CD | `kubectl apply -k infra/argocd/install` затем `kubectl apply -f infra/argocd/root-app.yaml` |
-| Workloads | Application `prodavan-dev` → `infra/k3s/overlays/dev` |
-| GHA runner | процесс на Kali host ([`infra/github-runner/README.md`](../../infra/github-runner/README.md)) |
-| Ops CLI | [`infra/ops`](../../infra/ops) (Poetry) |
+| Кластер | **k3s** (kubelet + API). Workloads только из git. |
+| Argo CD | `infra/argocd/install` → `root-app.yaml` → `apps/` → `infra/k3s/overlays/dev` |
+| Sealed Secrets | `infra/argocd/sealed-secrets` + `overlays/dev/SECRETS.md` |
+| GHA runner | процесс на хосте, **вне** k3s ([`infra/github-runner/README.md`](../../infra/github-runner/README.md)) |
+| Ops CLI | [`infra/ops`](../../infra/ops): `validate` / `wait` / `smoke` |
 
-Не использовать Docker Desktop для runner (TLS EOF). Не контейнер host-net (Session Conflict).
+Docker нужен **только** для сборки образов в CI Images (и опционально для самого runner-процесса). Кластер, Argo и validate от Docker **не зависят**.
 
-Образы first-party: `ghcr.io/ne-tort/prodavan-{api,web}:latest`, `imagePullPolicy: IfNotPresent`, secret `ghcr-pull` (SealedSecret / bootstrap `prodavan-ops ensure-ghcr-secret`).
+Образы: `ghcr.io/ne-tort/prodavan-{api,web}:latest`, `imagePullPolicy: IfNotPresent`, secret `ghcr-pull` (SealedSecret).
 
 ---
 
 ## 1. Git: только PR
 
 ```text
-ветка от main → gh pr create → CI Gate → Auto-merge squash
+ветка → PR → CI Gate → Auto-merge squash
   → CI Images (push GHCR)
   → Argo sync / Verify Dev (wait + smoke)
 ```
@@ -39,30 +40,34 @@ UI: `http://prodavan.local:8088/` (`Host: prodavan.local`).
 ## 2. Bootstrap кластера (один раз)
 
 ```bash
-k3d cluster create --config infra/k3d/prodavan-dev.yaml
-# kubeconfig → infra/.kube/prodavan-k3d.yaml
+# 1) k3s уже установлен и работает (systemd). kubeconfig:
+#    sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/prodavan-dev.yaml
+#    # поправить server: https://127.0.0.1:6443 при необходимости
+export KUBECONFIG=~/.kube/prodavan-dev.yaml
+
+# 2) Control plane в git
 kubectl apply -k infra/argocd/install
 kubectl apply -k infra/argocd/sealed-secrets
 kubectl apply -f infra/argocd/root-app.yaml
+
+# 3) Secret pull (декларативно — см. overlays/dev/SECRETS.md)
+
+# 4) Проверка
 cd infra/ops && poetry install
-# seal & apply ghcr-pull (see overlays/dev/SECRETS.md) OR:
-export GHCR_TOKEN=… GHCR_USERNAME=…
-poetry run prodavan-ops ensure-ghcr-secret
 poetry run prodavan-ops wait
 poetry run prodavan-ops smoke
-poetry run prodavan-ops seed
 ```
 
-Terraform `environments/local` — только метаданные/outputs, **без** shell provisioners.
+Day-2 деплой: **только** merge в `main` + Argo selfHeal. Не `kubectl apply -k infra/k3s/...` руками.
 
 ---
 
 ## 3. Reboot
 
-1. k3s поднимается (systemd / install script — см. bootstrap).
+1. k3s поднимается через systemd.
 2. Argo selfHeal → workloads.
-3. PVC Retain → данные на месте.
-4. Нет `recover_*.sh`. Если ImagePullBackOff: проверить `ghcr-pull` (SealedSecret / `prodavan-ops ensure-ghcr-secret`) — kubelet сам тянет из GHCR.
+3. PVC на local-path остаются на диске узла (поды Recreate / STS пересоздаются).
+4. Нет `recover_*.sh`. ImagePullBackOff → SealedSecret `ghcr-pull`, не image import.
 
 ---
 
@@ -70,13 +75,7 @@ Terraform `environments/local` — только метаданные/outputs, **
 
 | Workflow | Роль |
 |----------|------|
-| CI Gate | `poetry run prodavan-ops validate` + api/flutter/schemas |
-| CI Images | buildx → GHCR `:latest` + SHA |
-| Verify Dev | `wait` + `smoke` (не создаёт secret, не деплоит) |
+| CI Gate | `prodavan-ops validate` + api/flutter/schemas |
+| CI Images | buildx → GHCR (единственное легитимное использование Docker в поставке) |
+| Verify Dev | `wait` + `smoke` (не деплоит, не создаёт secrets) |
 | Auto-merge | squash после Gate |
-
----
-
-## 5. API migrations
-
-`initContainer: alembic upgrade head` в Deployment `prodavan-api`. Образ без shell entrypoint.

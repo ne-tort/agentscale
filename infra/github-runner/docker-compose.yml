@@ -1,3 +1,0 @@
-# Deprecated. Canonical runner is a Kali host process (README.md).
-# Kept so `docker compose` does not accidentally resurrect shell entrypoints.
-services: {}
