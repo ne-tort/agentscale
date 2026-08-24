@@ -41,7 +41,7 @@
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
 | 2026-08-24 | P0 deploy / C-* | `infra/k3s/base/platform` Redis+MinIO+Redpanda StatefulSet+Celery; API ConfigMap P0 env | no |
-| 2026-08-24 | C-EVENT-BUS | Redpanda `--mode empty` + PVC (not `dev-container`) for reboot durability | no |
+| 2026-08-24 | C-EVENT-BUS | Redpanda PVC + headless advertise; avoid `dev-container`/`--mode empty` (fsync / invalid mode) | no |
 | 2026-08-24 | C-OBJECT-STORE / C-JOBS | orphan blob GC (`list_child_prefixes` + admin/Celery/CronJob) | no |
 | 2026-08-24 | C-CABINET / C-JOBS | orphan `cab_inst_*` schema GC (admin + Celery + CronJob) | no |
 | 2026-08-24 | C-CACHE | shared `enforce_rate_limit`; admin ops + MCP call rate limits | no |
