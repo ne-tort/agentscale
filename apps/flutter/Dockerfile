@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # Flutter web → nginx (build context = prodavan/ repo root)
 #
 # Targets:

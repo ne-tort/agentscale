@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # Build context = prodavan/ repo root.
 # Migrations: Kubernetes initContainer (alembic), not an entrypoint shell.
 
