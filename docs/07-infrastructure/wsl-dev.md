@@ -39,6 +39,14 @@ poetry run prodavan-ops wait && poetry run prodavan-ops smoke
 
 UI: `http://prodavan.local:8088/` (`Host: prodavan.local`).
 
+**Windows browser:** в `hosts` одна строка `127.0.0.1 prodavan.local`. Traefik слушает **0.0.0.0:8088** в WSL (`hostNetwork` + `hostPort`). На Win10 WSL2 NAT `localhostForwarding` часто **не пробрасывает** порт — скрипт сам настроит portproxy и откроет браузер (IP WSL вручную не нужен):
+
+```powershell
+.\tools\win-wsl-portforward.ps1
+```
+
+После reboot WSL подожди 2–3 мин, пока k3s и Argo поднимут workloads. Не привязывай `prodavan.local` к IP WSL в `hosts`.
+
 ---
 
 ## API / Flutter without cluster
@@ -66,6 +74,7 @@ Runner (outside k3s): [`infra/github-runner/README.md`](../../infra/github-runne
 
 | Issue | Fix |
 |-------|-----|
+| Windows: `prodavan.local:8088` connection refused | Подожди 2–3 мин после boot WSL; `systemctl status k3s`; `.wslconfig`: `localhostForwarding=true` |
 | kubectl connection refused | k3s running? `sudo systemctl status k3s` |
 | Argo OutOfSync | merge to `main`; check Application `prodavan-dev` |
 | ImagePullBackOff | SealedSecret `ghcr-pull` — [`SECRETS.md`](../../infra/k3s/overlays/dev/SECRETS.md) |

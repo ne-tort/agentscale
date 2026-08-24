@@ -41,6 +41,10 @@ spec:
             - prodavan.core.infra.worker_manager.celery_app
             - worker
             - --loglevel=INFO
+            # Default concurrency = CPU count → prefork OOM in 1Gi cgroup on multi-core nodes.
+            - --concurrency=1
+            - --prefetch-multiplier=1
+            - --max-memory-per-child=350000
           envFrom:
             - configMapRef:
                 name: prodavan-config
@@ -58,17 +62,11 @@ spec:
             exec:
               command:
                 - python
-                - -m
-                - celery
-                - -A
-                - prodavan.core.infra.worker_manager.celery_app
-                - inspect
-                - ping
-                - --timeout
-                - "8"
-            initialDelaySeconds: 20
-            periodSeconds: 25
-            timeoutSeconds: 15
+                - -c
+                - "import os; os.kill(1, 0)"
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            timeoutSeconds: 3
             failureThreshold: 6
           livenessProbe:
             exec:
@@ -83,10 +81,10 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 256Mi
+              memory: 384Mi
             limits:
               cpu: "1"
-              memory: 1Gi
+              memory: 768Mi
       volumes:
         - name: storage
           persistentVolumeClaim:
