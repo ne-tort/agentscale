@@ -1,12 +1,14 @@
-# Terraform — cloud skeletons only
+# Terraform
 
-Local cluster is **not** provisioned by Terraform.  
-Dev path: k3s + Argo — [`docs/07-infrastructure/runbook.md`](../../docs/07-infrastructure/runbook.md).
+Cloud skeletons: `environments/dev`, `environments/staging`, `modules/*`.
 
-```text
-infra/terraform/
-├── environments/{dev,staging}/   # cloud (aspirational)
-└── modules/{network,k3s-cluster,postgres,object-storage}
+**Local dev cluster (native k3s on WSL):**
+
+```bash
+cd infra/terraform/environments/local
+TF_VAR_ghcr_token=$(gh auth token) terraform apply -auto-approve
 ```
 
-`environments/local` и `modules/k3s-local` удалены (были hint-only вокруг k3d).
+See [`environments/local/README.md`](environments/local/README.md).
+
+Day-2 deploy: git → Argo CD (`docs/07-infrastructure/runbook.md`). Terraform is bootstrap/destroy only.

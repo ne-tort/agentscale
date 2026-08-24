@@ -22,6 +22,7 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - RespectIgnoreDifferences=true
+      - Wait=false
     retry:
       limit: 5
       backoff:

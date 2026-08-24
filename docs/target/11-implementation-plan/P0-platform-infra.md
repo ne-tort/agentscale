@@ -88,4 +88,4 @@ Postgres и Keycloak/Vault роли не меняются.
 
 ## Вне скоупа этого документа
 
-Prod Helm charts и hardening кластера — после sketches; канон стека в [stack.md](../13-platform-infra/stack.md). Sketches: [deploy/k8s/README.md](../../deploy/k8s/README.md).
+Prod Helm charts и hardening кластера — после cutover; канон стека в [stack.md](../13-platform-infra/stack.md). Dev manifests: [`infra/k3s/`](../../infra/k3s/README.md) via Argo CD.

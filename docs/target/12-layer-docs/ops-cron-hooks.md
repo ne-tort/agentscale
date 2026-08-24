@@ -28,16 +28,9 @@ curl -X POST "$API/api/v1/admin/triggers/drain" \
   -H "Authorization: Bearer $TOKEN"
 ```
 
-## Kubernetes CronJob examples
+## Kubernetes CronJob (future)
 
-Manifests: [`deploy/k8s/cron/ops-hooks.yaml`](../../deploy/k8s/cron/ops-hooks.yaml)
-
-```bash
-kubectl apply -f deploy/k8s/cron/ops-token.secret.example.yaml  # edit token first
-kubectl apply -f deploy/k8s/cron/ops-hooks.yaml
-```
-
-- `prodavan-idle-pause-sweep` — hourly platform sweep
-- `prodavan-trigger-drain` — every 5 minutes
+Ops CronJobs (idle-pause sweep, trigger drain) are **not** in `infra/k3s/overlays/dev` yet.  
+When added, they ship via GitOps under `infra/k3s/base/` like other platform resources — not a separate `deploy/` tree.
 
 Prefer CronJobs over in-process `TRIGGER_WORKER_ENABLED` / `IDLE_PAUSE_WORKER_ENABLED` when running multiple API replicas.

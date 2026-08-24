@@ -55,6 +55,16 @@ def render_overlay() -> str:
     raise RuntimeError("need kubectl or kustomize on PATH for validate")
 
 
+def render_argocd_install() -> str:
+    """Render Argo CD install kustomize (remote upstream + patches)."""
+    path = repo_root() / "infra" / "argocd" / "install"
+    if shutil.which("kubectl"):
+        return _run(["kubectl", "kustomize", str(path)])
+    if shutil.which("kustomize"):
+        return _run(["kustomize", "build", str(path)])
+    raise RuntimeError("need kubectl or kustomize on PATH for validate")
+
+
 def _images_from_manifest(manifest: str) -> list[str]:
     images: list[str] = []
     for doc in yaml.safe_load_all(manifest):
@@ -138,6 +148,15 @@ def validate_all() -> None:
     manifest = render_overlay()
     lines = manifest.count("\n") + (1 if manifest and not manifest.endswith("\n") else 0)
     print(f"ok kustomize ({lines} lines)")
+
+    print("==> kustomize argocd/install")
+    argo_manifest = render_argocd_install()
+    argo_lines = argo_manifest.count("\n") + (
+        1 if argo_manifest and not argo_manifest.endswith("\n") else 0
+    )
+    if "kind: Deployment" not in argo_manifest or "argocd-server" not in argo_manifest:
+        raise RuntimeError("argocd/install render missing expected Deployments")
+    print(f"ok kustomize ({argo_lines} lines)")
 
     print("==> image pins")
     verify_image_pins(manifest)

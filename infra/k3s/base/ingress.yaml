@@ -5,6 +5,7 @@ metadata:
   name: prodavan
   namespace: prodavan
   annotations:
+    argocd.argoproj.io/sync-wave: "25"
     traefik.ingress.kubernetes.io/router.entrypoints: web
 spec:
   ingressClassName: traefik

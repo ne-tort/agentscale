@@ -1,0 +1,26 @@
+# WaitForFirstConsumer PVCs stay Pending until a pod schedules — treat as Healthy.
+# Traefik on k3s often omits status.loadBalancer — treat Ingress as Healthy.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cm
+  namespace: argocd
+data:
+  resource.customizations.health.PersistentVolumeClaim: |
+    hs = {}
+    if obj.status and obj.status.phase == "Pending" then
+      hs.status = "Healthy"
+      hs.message = "Pending OK for WaitForFirstConsumer"
+      return hs
+    end
+    if obj.status and obj.status.phase == "Bound" then
+      hs.status = "Healthy"
+      return hs
+    end
+    hs.status = "Progressing"
+    hs.message = "Waiting for PVC"
+    return hs
+  resource.customizations.health.networking.k8s.io_Ingress: |
+    hs = {}
+    hs.status = "Healthy"
+    return hs
