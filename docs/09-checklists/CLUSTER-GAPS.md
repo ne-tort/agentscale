@@ -28,13 +28,13 @@
 | I5 | Redis/MinIO/Kafka/Celery in k3s | **done** (subset) | `base/platform/`; Redpanda PVC+headless, no `dev-container` fsync bypass |
 | I6 | Базовые экраны projects/runs/variants | done | Flutter screens для отладки |
 | I7 | docker-compose.stack.yml (api+web+pg+P0) | done | smoke без кластера |
-| I8 | Project sandbox Pod/Job isolator | **open** | object-ws + API PVC mirror enough for sync create/chat; Celery shares PVC on single-node k3d |
+| I8 | Project sandbox Pod/Job isolator | **open** | `verify_project_sandbox.sh`: object-ws + PVC mirror OK; k8s isolator deferred |
 | I9 | Redpanda HA (≥3 / anti-affinity) | deferred | local uses overprovisioned single node |
 | I10 | Keycloak in-cluster | open | AUTH_MODE=test + `seed_dev_identity.sh` (company+AI key+cabinet+e2e chat) |
 | I11 | Alembic history rewrite vs old PVC | **done** (ops) | `reset_dev_postgres.sh` for legacy `20260808*`/`2026082101` → stub chain |
 | I12 | GHCR API/web image lag | **done** (ops path) | dev overlay `:local` tag + `import_local_app_images_k3d.sh`; GHCR pulls `:latest` → retag `:local` |
 | I13 | Terraform apply = full stack | **done** (subset) | `bootstrap_gitops=true` → verify_touchable_ui; Windows: `build_local_app_images.ps1` first |
-| I14 | Recover after reboot | **done** | `recover_local_stack.sh` + `test_k3d_recover.sh TEST_WORKLOADS=1` + `acceptance_local.sh` |
+| I14 | Recover after reboot | **done** | `recover_local_stack.sh` + `test_k3d_recover.sh TEST_WORKLOADS=1` + `test_broker_pod_recover.sh` + `acceptance_local.sh` |
 | I15 | Argo Job churn / selfHeal fight | **done** (subset) | Sync hooks + ignoreDifferences; wait script no longer apply -k by default |
 | I16 | Secrets in git (dev) | open | SealedSecrets/SOPS deferred; rotate before shared cluster |
 | I17 | API image rebuild without network | **done** (ops) | Dockerfile без apt/curl; `bridge_docker_desktop_image.sh` + verify alembic/celery |
@@ -61,6 +61,8 @@ curl -sS -H 'Host: prodavan.local' http://127.0.0.1:8088/health/ready
 
 После reboot хоста: `bash infra/scripts/recover_local_stack.sh` (печатает JWT для UI).
 
-Terraform (local, WSL): `bootstrap_gitops=true` → GitOps + smoke + seed + `BUILD_LOCAL_IMAGES` без GHCR.
+Broker/API pod failure: `bash infra/scripts/test_broker_pod_recover.sh` (redis/minio/kafka/postgres/api).
 
-Обновлено: 2026-08-24 (gitops-v3 seed chain)
+Terraform (local): `bash infra/scripts/terraform_apply_local.sh` или `bootstrap_gitops=true` → verify_touchable_ui; Windows: `build_local_app_images.ps1` first.
+
+Обновлено: 2026-08-24 (broker pod recover + project sandbox verify)

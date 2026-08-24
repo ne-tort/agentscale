@@ -15,4 +15,7 @@ bash "${SCRIPT_DIR}/seed_dev_identity.sh" | tee /tmp/prodavan_verify_ui.log
 grep -q 'POST chat -> 200' /tmp/prodavan_verify_ui.log \
   || { echo "FAIL: chat e2e missing in seed output" >&2; exit 1; }
 
+echo "==> project sandbox (object-ws materialize)"
+bash "${SCRIPT_DIR}/verify_project_sandbox.sh"
+
 echo "verify_touchable_ui OK — http://${SMOKE_HOST:-prodavan.local}:${HTTP_PORT:-8088}/"

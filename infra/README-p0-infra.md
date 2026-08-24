@@ -74,8 +74,15 @@ pwsh infra/scripts/build_local_app_images.ps1
 ## Acceptance
 
 ```bash
-bash infra/scripts/acceptance_local.sh          # recover + smoke + seed chat
+bash infra/scripts/acceptance_local.sh          # recover + smoke + seed chat + project sandbox
 TEST_WORKLOADS=1 bash infra/scripts/test_k3d_recover.sh   # k3d stop/start + recover
+bash infra/scripts/test_broker_pod_recover.sh   # redis/minio/kafka/postgres/api pod recover
+```
+
+## Terraform (local, one shot)
+
+```bash
+bash infra/scripts/terraform_apply_local.sh   # Windows build + terraform apply + GitOps + UI
 ```
 
 ## Notes / holes
