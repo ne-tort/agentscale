@@ -6,4 +6,4 @@
 
 - [ ] `CI Gate` green (infra + api + flutter + schemas)
 - [ ] If images changed: `CI Images` on main pushed `:latest` to GHCR
-- [ ] If cluster deploy: smoke `http://prodavan.local:8088/` (`Host: prodavan.local`)
+- [ ] If cluster deploy: smoke `http://localhost:8088/`

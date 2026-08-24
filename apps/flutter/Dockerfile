@@ -67,7 +67,7 @@ RUN --mount=type=cache,target=/root/.pub-cache \
 
 COPY apps/flutter/ ./
 
-ARG API_BASE=http://prodavan.local:8088/api/v1
+ARG API_BASE=http://localhost:8088/api/v1
 ARG BUILD_ID=dev
 ARG BUILD_NAME=1.0.0
 ARG BUILD_NUMBER=0

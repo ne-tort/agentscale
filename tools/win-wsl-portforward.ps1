@@ -1,45 +1,55 @@
-# Win10 WSL2: opens http://prodavan.local:8088 from Windows (127.0.0.1).
-# hosts: 127.0.0.1 prodavan.local
-# Tries localhostForwarding first; falls back to auto portproxy (no manual WSL IP).
+#Requires -RunAsAdministrator
+# Win10 WSL2: open http://localhost:8088 (auto portproxy if localhostForwarding fails).
 
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Continue'
 $port = 8088
 
-function Test-ProdavanHttp {
-    $code = '000'
-    try {
-        $code = (curl.exe -sS -m 8 -o NUL -w '%{http_code}' -H 'Host: prodavan.local' "http://127.0.0.1:${port}/health/live" 2>$null)
-    } catch {
-        $code = '000'
-    }
+function Get-WslIp {
+    $raw = (wsl.exe -u www -e ip -4 -o addr show eth0 2>$null) | Out-String
+    if ($raw -match 'inet (\d+\.\d+\.\d+\.\d+)') { return $Matches[1] }
+    return $null
+}
+
+function Set-PortProxy([string]$wslIp) {
+    netsh interface portproxy delete v4tov4 listenaddress=127.0.0.1 listenport=$port 2>$null | Out-Null
+    netsh interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport=$port connectaddress=$wslIp connectport=$port | Out-Null
+    netsh advfirewall firewall delete rule name="Prodavan WSL 8088" 2>$null | Out-Null
+    netsh advfirewall firewall add rule name="Prodavan WSL 8088" dir=in action=allow protocol=TCP localport=$port | Out-Null
+    Write-Host "portproxy 127.0.0.1:$port -> ${wslIp}:$port"
+}
+
+function Test-Http {
+    $out = Join-Path $env:TEMP 'prodavan-http-code.txt'
+    $err = Join-Path $env:TEMP 'prodavan-http-err.txt'
+    Start-Process -FilePath curl.exe -ArgumentList @(
+        '-sS', '-m', '8', '-o', 'NUL', '-w', '%{http_code}',
+        "http://127.0.0.1:${port}/health/live"
+    ) -Wait -NoNewWindow -RedirectStandardOutput $out -RedirectStandardError $err | Out-Null
+    $code = Get-Content $out -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $code) { return '000' }
     return $code
 }
 
-function Enable-WslPortProxy {
-    $raw = (wsl.exe -e ip -4 -o addr show eth0 2>$null) | Out-String
-    if ($raw -notmatch 'inet (\d+\.\d+\.\d+\.\d+)') {
-        Write-Error 'WSL not running. Start WSL first.'
-    }
-    $wslIp = $Matches[1]
-    netsh interface portproxy reset | Out-Null
-    netsh interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport=$port connectaddress=$wslIp connectport=$port | Out-Null
-    Write-Host "portproxy 127.0.0.1:${port} -> ${wslIp}:${port}"
-}
-
-$code = Test-ProdavanHttp
+$code = Test-Http
 if ($code -ne '200') {
-    Enable-WslPortProxy
+    $wslIp = Get-WslIp
+    if (-not $wslIp) { Write-Error 'WSL not running.'; exit 1 }
+    Set-PortProxy $wslIp
 }
 
-$deadline = (Get-Date).AddMinutes(3)
+$deadline = (Get-Date).AddMinutes(4)
 while ((Get-Date) -lt $deadline) {
-    $code = Test-ProdavanHttp
+    $code = Test-Http
     if ($code -eq '200') { break }
-    Write-Host "Waiting for k3s/Traefik (HTTP $code)..."
-    Start-Sleep -Seconds 10
+    $newIp = Get-WslIp
+    if ($newIp) { Set-PortProxy $newIp }
+    Write-Host "Waiting k3s/Traefik (HTTP $code)..."
+    Start-Sleep -Seconds 5
 }
 if ($code -ne '200') {
-    Write-Error "HTTP check failed after 3 min (last: $code). In WSL: systemctl status k3s; prodavan-ops smoke."
+    Write-Error "Still HTTP $code after 4 min. In WSL: sudo systemctl restart k3s"
+    exit 1
 }
-Write-Host "OK -> http://prodavan.local:${port}/"
-Start-Process "http://prodavan.local:${port}/"
+
+Write-Host "OK -> http://localhost:${port}/"
+Start-Process "http://localhost:${port}/"

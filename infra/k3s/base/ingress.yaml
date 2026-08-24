@@ -1,4 +1,4 @@
-# Traefik (bundled with k3s) IngressRoute via networking.k8s.io Ingress
+# Traefik Ingress — no host filter so http://localhost:8088/ works from Windows/WSL.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -10,8 +10,7 @@ metadata:
 spec:
   ingressClassName: traefik
   rules:
-    - host: prodavan.local
-      http:
+    - http:
         paths:
           - path: /api
             pathType: Prefix

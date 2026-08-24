@@ -10,7 +10,7 @@ def smoke(
     *,
     addr: str | None = None,
     port: int | None = None,
-    host_header: str = "prodavan.local",
+    host_header: str = "localhost",
     attempts: int = 24,
     sleep_sec: float = 5.0,
 ) -> None:

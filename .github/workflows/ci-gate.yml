@@ -10,43 +10,62 @@ on:
 
 concurrency:
   group: ci-gate-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  # Single self-hosted runner: cancel mid-job leaves a zombie session (Conflict)
-  # for minutes and blocks the queue. Prefer queue over cancel.
+  # Single self-hosted runner. true + rapid pushes cancel infra mid-flight (empty logs).
+  # Stuck group: gh api -X POST repos/.../actions/runs/<id>/force-cancel
   cancel-in-progress: false
 
 jobs:
   infra:
     name: infra
     runs-on: [self-hosted, linux, docker]
+    timeout-minutes: 15
+    env:
+      PYTHONUNBUFFERED: "1"
+      POETRY_VIRTUALENVS_IN_PROJECT: "true"
     steps:
       - uses: actions/checkout@v4
-      - name: Install kustomize (host binary into runner.temp)
+
+      - name: Ensure kustomize on PATH
         run: |
           set -euo pipefail
+          echo "==> looking for kustomize"
+          if command -v kustomize >/dev/null 2>&1; then
+            kustomize version
+            exit 0
+          fi
           dest="${{ runner.temp }}/kustomize-bin"
           mkdir -p "$dest"
-          curl -fsSL \
+          echo "==> downloading kustomize v5.4.3"
+          curl -fsSL --connect-timeout 15 --max-time 120 \
             "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" \
             -o "${{ runner.temp }}/kustomize.tgz"
           tar xz -C "$dest" -f "${{ runner.temp }}/kustomize.tgz"
           echo "$dest" >> "${GITHUB_PATH}"
           "$dest/kustomize" version
+
       - name: Python venv + Poetry
         run: |
+          set -euo pipefail
+          echo "==> creating venv"
           python3 -m venv "${{ runner.temp }}/ops-venv"
           echo "${{ runner.temp }}/ops-venv/bin" >> "${GITHUB_PATH}"
           echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
           echo "/usr/local/bin" >> "${GITHUB_PATH}"
+          echo "==> pip install poetry"
           "${{ runner.temp }}/ops-venv/bin/python" -m pip install -U pip poetry
+          echo "==> poetry ready"
+          "${{ runner.temp }}/ops-venv/bin/poetry" --version
+
       - name: Validate (kustomize, pins, no legacy deploy paths)
         working-directory: infra/ops
-        env:
-          POETRY_VIRTUALENVS_IN_PROJECT: "true"
         run: |
-          command -v kustomize
+          set -euo pipefail
+          echo "==> which kustomize: $(command -v kustomize)"
+          echo "==> poetry install"
           poetry install --no-interaction
+          echo "==> prodavan-ops validate"
           poetry run prodavan-ops validate
-
+          echo "==> infra OK"
   api:
     name: api
     uses: ./.github/workflows/ci-api.yml
@@ -64,6 +83,7 @@ jobs:
     needs: [infra, api, flutter, schemas]
     if: always()
     runs-on: [self-hosted, linux, docker]
+    timeout-minutes: 5
     steps:
       - name: All required jobs green
         run: |

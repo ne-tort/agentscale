@@ -5,7 +5,7 @@
 **Запрещены:** `.sh` под `infra/`, docker-compose как кластер, k3d-конфиги в git, recover/deploy shell.
 
 Репозиторий: [ne-tort/prodavan](https://github.com/ne-tort/prodavan).  
-UI: `http://prodavan.local:8088/` (`Host: prodavan.local`).
+UI: `http://localhost:8088/`.
 
 ---
 

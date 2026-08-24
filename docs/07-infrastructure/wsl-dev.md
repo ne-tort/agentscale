@@ -37,15 +37,15 @@ cd infra/ops && poetry install
 poetry run prodavan-ops wait && poetry run prodavan-ops smoke
 ```
 
-UI: `http://prodavan.local:8088/` (`Host: prodavan.local`).
+UI: `http://localhost:8088/`.
 
-**Windows browser:** в `hosts` одна строка `127.0.0.1 prodavan.local`. Traefik слушает **0.0.0.0:8088** в WSL (`hostNetwork` + `hostPort`). На Win10 WSL2 NAT `localhostForwarding` часто **не пробрасывает** порт — скрипт сам настроит portproxy и откроет браузер (IP WSL вручную не нужен):
+**Windows browser (Win10 + WSL2):** Traefik слушает `0.0.0.0:8088` в WSL. Ingress без `host` — любой Host (`localhost` / `127.0.0.1`). После reboot WSL подожди 2–3 мин. Если `http://localhost:8088/` не открывается (NAT без localhostForwarding), Admin PowerShell:
 
 ```powershell
 .\tools\win-wsl-portforward.ps1
 ```
 
-После reboot WSL подожди 2–3 мин, пока k3s и Argo поднимут workloads. Не привязывай `prodavan.local` к IP WSL в `hosts`.
+Скрипт сам пробросит `127.0.0.1:8088 → WSL` и откроет браузер. `hosts` / `prodavan.local` не нужны.
 
 ---
 
@@ -74,7 +74,7 @@ Runner (outside k3s): [`infra/github-runner/README.md`](../../infra/github-runne
 
 | Issue | Fix |
 |-------|-----|
-| Windows: `prodavan.local:8088` connection refused | Подожди 2–3 мин после boot WSL; `systemctl status k3s`; `.wslconfig`: `localhostForwarding=true` |
+| Windows: `localhost:8088` connection refused | Подожди 2–3 мин; `.\tools\win-wsl-portforward.ps1` (Admin); `systemctl status k3s` |
 | kubectl connection refused | k3s running? `sudo systemctl status k3s` |
 | Argo OutOfSync | merge to `main`; check Application `prodavan-dev` |
 | ImagePullBackOff | SealedSecret `ghcr-pull` — [`SECRETS.md`](../../infra/k3s/overlays/dev/SECRETS.md) |

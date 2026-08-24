@@ -184,17 +184,6 @@ jobs:
       - name: Warm base images (WSL TLS flakiness)
         run: |
           set -euo pipefail
-          for img in python:3.12-slim-bookworm; do
-            for i in 1 2 3 4 5; do
-              docker pull "$img" && break
-              echo "retry $i $img"
-              sleep 10
-            done
-          done
-
-      - name: Warm base images (WSL TLS flakiness)
-        run: |
-          set -euo pipefail
           for img in nginx:1.27-alpine debian:bookworm-slim; do
             for i in 1 2 3 4 5; do
               docker pull "$img" && break
@@ -240,7 +229,7 @@ jobs:
           provenance: false
           sbom: false
           build-args: |
-            API_BASE=http://prodavan.local:8088/api/v1
+            API_BASE=http://localhost:8088/api/v1
             BUILD_ID=${{ github.sha }}
             BUILD_NAME=1.0.0
             BUILD_NUMBER=${{ github.run_number }}

@@ -73,7 +73,7 @@ data:
   STORAGE_ROOT: /data/storage
   SECRETS_DIR: /data/storage/secrets
   PACKS_ROOT: /packages/cabinet-packs
-  CORS_ORIGINS: "http://prodavan.local,http://localhost:8080,http://127.0.0.1:8080,http://localhost:8088,http://127.0.0.1:8088"
+  CORS_ORIGINS: "http://localhost:8088,http://127.0.0.1:8088,http://localhost:8080,http://127.0.0.1:8080"
   RUN_MIGRATIONS: "1"
   API_V1_PREFIX: /api/v1
   APP_ENV: dev

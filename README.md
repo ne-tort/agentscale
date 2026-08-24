@@ -30,7 +30,7 @@ cd infra/ops && poetry install
 poetry run prodavan-ops wait && poetry run prodavan-ops smoke
 ```
 
-UI: `http://prodavan.local:8088/` (`Host: prodavan.local`).
+UI: `http://localhost:8088/`.
 
 Day-2: PR → CI Gate → merge → CI Images → Argo sync → Verify Dev.
 

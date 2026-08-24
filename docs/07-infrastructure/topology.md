@@ -129,7 +129,7 @@ Worker **never** calls S4B directly.
 
 | Env | Cluster | Domain | Data |
 |-----|---------|--------|------|
-| dev | local **k3s + Argo** (GitOps) | prodavan.local:8088 | in-cluster PVC |
+| dev | local **k3s + Argo** (GitOps) | localhost:8088 | in-cluster PVC |
 | staging | k3s single node | staging.prodavan.local | Managed PG staging |
 | prod | k3s HA (3 control + N workers) | api.prodavan.ru | Managed PG + S3 |
 

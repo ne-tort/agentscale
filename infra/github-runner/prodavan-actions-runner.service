@@ -1,0 +1,24 @@
+[Unit]
+Description=Prodavan GitHub Actions runner (host, outside k3s)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=www
+Group=www
+WorkingDirectory=/home/www/prodavan-actions-runner
+Environment=PATH=/home/www/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/home/www
+EnvironmentFile=-/home/www/prodavan-actions-runner/.env
+ExecStart=/home/www/prodavan-actions-runner/run.sh
+Restart=always
+RestartSec=15
+KillMode=control-group
+TimeoutStopSec=30
+KillSignal=SIGTERM
+FinalKillSignal=SIGKILL
+SendSIGKILL=yes
+
+[Install]
+WantedBy=multi-user.target

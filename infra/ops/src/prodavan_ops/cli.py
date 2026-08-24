@@ -39,7 +39,7 @@ def wait_cmd(
 def smoke_cmd(
     addr: str | None = typer.Option(None, "--addr"),
     port: int | None = typer.Option(None, "--port"),
-    host: str = typer.Option("prodavan.local", "--host"),
+    host: str = typer.Option("localhost", "--host"),
 ) -> None:
     smoke(addr=addr, port=port, host_header=host)
 
