@@ -15,7 +15,7 @@ locals {
 
 resource "null_resource" "sshd" {
   triggers = {
-    rev              = "v3"
+    rev              = "v4"
     ssh_port         = tostring(var.ssh_port)
     ssh_user         = var.ssh_user
     sshd_config_hash = filesha256("${path.module}/../../../.ssh/sshd_config.tpl")
@@ -52,7 +52,7 @@ resource "null_resource" "sshd" {
       "sudo -n mv /tmp/prodavan-sshd.service /etc/systemd/system/prodavan-sshd.service",
       "sudo -n systemctl daemon-reload",
       "sudo -n systemctl enable prodavan-sshd.service",
-      "if ss -tln | grep -q \":${var.ssh_port} \"; then sudo -n systemctl reload prodavan-sshd.service || true; else sudo -n systemctl start prodavan-sshd.service; fi",
+      "if systemctl is-active --quiet prodavan-sshd.service; then sudo -n systemctl reload prodavan-sshd.service || true; elif ! ss -tln | grep -q \":${var.ssh_port} \"; then sudo -n systemctl reset-failed prodavan-sshd.service || true; sudo -n systemctl start prodavan-sshd.service; fi",
       "ss -tln | grep -q \":${var.ssh_port} \"'",
     ]
   }
