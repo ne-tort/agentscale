@@ -77,4 +77,4 @@ Broker/API pod failure: `bash infra/scripts/test_broker_pod_recover.sh` (minio o
 
 Terraform (local): `bash infra/scripts/terraform_apply_local.sh` или `bootstrap_gitops=true` → verify_touchable_ui; Windows: `build_local_app_images.ps1` first.
 
-Обновлено: 2026-08-24 (I27 MinIO object retain; I28 Postgres PVC; I29 AppProject whitelist + orphans; Kafka min.isr=1)
+Обновлено: 2026-08-24 (I27–I29 persist+GitOps; I18 overlay `:local` + Argo kustomize.images; CI bump-k3s-dev off)
