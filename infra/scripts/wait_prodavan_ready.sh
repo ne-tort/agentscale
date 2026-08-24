@@ -77,5 +77,15 @@ for sts in prodavan-redis prodavan-minio prodavan-kafka; do
     kubectl -n "$NS_APP" rollout status "sts/${sts}" --timeout=300s || true
   fi
 done
-kubectl -n "$NS_APP" wait --for=condition=Ready pods --all --timeout=360s || true
+kubectl -n "$NS_APP" wait --for=condition=Ready pods \
+  -l 'app.kubernetes.io/part-of=prodavan,app.kubernetes.io/component!=kafka-init,app.kubernetes.io/component!=minio-init' \
+  --timeout=360s 2>/dev/null \
+  || kubectl -n "$NS_APP" wait --for=condition=Ready \
+    -l 'app in (prodavan-api,prodavan-web,prodavan-postgres,prodavan-celery-worker)' \
+    pods --timeout=120s \
+  || true
+# StatefulSets may not share the app= label — best-effort Ready on named pods.
+for p in prodavan-redis-0 prodavan-minio-0 prodavan-kafka-0; do
+  kubectl -n "$NS_APP" wait --for=condition=Ready "pod/${p}" --timeout=60s 2>/dev/null || true
+done
 kubectl -n "$NS_APP" get pods,pvc
