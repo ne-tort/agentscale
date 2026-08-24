@@ -28,11 +28,11 @@
 | I5 | Redis/MinIO/Kafka/Celery in k3s | **done** (subset) | `base/platform/`; Redpanda PVC+headless, no `dev-container` fsync bypass |
 | I6 | Базовые экраны projects/runs/variants | done | Flutter screens для отладки |
 | I7 | docker-compose.stack.yml (api+web+pg+P0) | done | smoke без кластера |
-| I8 | Project sandbox Pod/Job isolator | **open** | local-ws process only; MCP_SANDBOX_SPAWN off in cluster |
+| I8 | Project sandbox Pod/Job isolator | **open** | object-ws + API PVC mirror enough for sync create/chat; Celery shares PVC on single-node k3d |
 | I9 | Redpanda HA (≥3 / anti-affinity) | deferred | local uses overprovisioned single node |
-| I10 | Keycloak in-cluster | open | AUTH_MODE=test + `seed_dev_identity.sh` |
+| I10 | Keycloak in-cluster | open | AUTH_MODE=test + `seed_dev_identity.sh` (company+AI key+cabinet+e2e chat) |
 | I11 | Alembic history rewrite vs old PVC | **done** (ops) | `reset_dev_postgres.sh` for legacy `20260808*`/`2026082101` → stub chain |
-| I12 | GHCR API image lag (celery) | open | rebuild+`k3d image import`; CI push must include celery deps |
+| I12 | GHCR API/web image lag | open | web Dockerfile: `lib/main.dart` check + `API_BASE=http://prodavan.local:8088/api/v1`; rebuild+import still ops |
 | I13 | Terraform apply = full stack | **done** (subset) | `bootstrap_gitops=true` → from_scratch_local; cloud modules still skeletons |
 | I14 | Recover after reboot | **done** (subset) | `recover_local_stack.sh`: platform import + Argo + smoke |
 | I15 | Argo Job churn / selfHeal fight | **done** (subset) | Sync hooks + ignoreDifferences; wait script no longer apply -k by default |

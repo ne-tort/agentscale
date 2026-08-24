@@ -161,3 +161,6 @@ spec:
               done
               rpk topic create prodavan.platform.events -X brokers=prodavan-kafka:9092 || true
               rpk topic create prodavan.project.triggers -X brokers=prodavan-kafka:9092 || true
+              # Local durability knobs (safe on single-node; override later for HA).
+              rpk cluster config set log_retention_ms 604800000 -X brokers=prodavan-kafka:9092 || true
+              rpk cluster config set log_segment_ms 86400000 -X brokers=prodavan-kafka:9092 || true

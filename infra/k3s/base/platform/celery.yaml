@@ -46,6 +46,10 @@ spec:
             # Workers must not race API on alembic (entrypoint also respects this).
             - name: RUN_MIGRATIONS
               value: "0"
+          volumeMounts:
+            # Same RWO PVC as API — safe on single-node k3d; needed for rematerialize mirror.
+            - name: storage
+              mountPath: /data/storage
           resources:
             requests:
               cpu: 100m
@@ -53,3 +57,7 @@ spec:
             limits:
               cpu: "1"
               memory: 1Gi
+      volumes:
+        - name: storage
+          persistentVolumeClaim:
+            claimName: prodavan-api-storage

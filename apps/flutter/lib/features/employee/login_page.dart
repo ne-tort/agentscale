@@ -22,7 +22,7 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
-  final _baseCtrl = TextEditingController(text: workContext.baseUrl);
+  final _baseCtrl = TextEditingController(text: WorkContext.defaultBaseUrl);
   final _tokenCtrl = TextEditingController();
   bool _loadingConfig = true;
   bool _connecting = false;

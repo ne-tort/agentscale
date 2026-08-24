@@ -31,10 +31,21 @@ Brokers live under `infra/k3s/base/platform/` (StatefulSets + PVC). API ConfigMa
 
 ## Project sandbox reality check
 
-- **Not** creating per-project Kubernetes containers yet.
-- Materialize → object-store keys + optional local mirror under `STORAGE_ROOT`.
-- MCP packages: zip hydrate + optional **local** `subprocess` when `MCP_SANDBOX_SPAWN=true` (cluster default **false**).
+- **Not** creating per-project Kubernetes containers yet (`CLUSTER-GAPS` I8).
+- Create project → `container_ref=object-ws:{key}` → materialize to MinIO + local mirror on **API PVC**.
+- Celery worker mounts the **same** PVC on single-node k3d so rematerialize jobs see the mirror.
+- MCP packages: zip hydrate; `MCP_SANDBOX_SPAWN=false` in cluster (fixture agent chat does not need a live MCP process).
+- Agent chat in seed/e2e uses **FixtureCursorAdapter** (`cursor` + `cursor_sdk`) — not real Cursor SDK.
 - Next: k8s Job/Pod isolator + live MinIO volume mount (documented hole).
+
+## Touchable local UI
+
+```bash
+bash infra/scripts/seed_dev_identity.sh
+# Open http://prodavan.local:8088/
+# API base URL: http://prodavan.local:8088/api/v1
+# Paste employee JWT → cabinet → create project → chat
+```
 
 ## Notes / holes
 
