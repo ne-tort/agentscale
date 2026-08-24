@@ -140,24 +140,14 @@ class CabinetInstanceService:
         # Wipe MCP package blobs (C-OBJECT-STORE); schema rows stay until hard-delete.
         wipe: dict = {"ok": False, "deleted": 0, "remaining": 0}
         try:
-            from prodavan.core.infra.object_keys import cabinet_packages_prefix
-            from prodavan.core.infra.object_storage_manager import ensure_object_storage
+            from prodavan.application.cabinets.package_wipe import wipe_cabinet_packages
+            from prodavan.core.jobs.enqueue import enqueue_wipe_cabinet_packages
 
-            store = ensure_object_storage()
-            prefix = cabinet_packages_prefix(cabinet_id)
-            deleted = store.delete_prefix_sync(prefix)
-            remaining = store.list_prefix_sync(prefix, limit=1)
-            wipe = {
-                "ok": len(remaining) == 0,
-                "deleted": int(deleted),
-                "remaining": len(remaining),
-            }
-            if remaining:
-                logger.warning(
-                    "cabinet archive: packages wipe incomplete cabinet_id=%s remaining=%s",
-                    cabinet_id,
-                    remaining,
-                )
+            wipe = wipe_cabinet_packages(cabinet_id)
+            if not wipe.get("ok"):
+                retry = enqueue_wipe_cabinet_packages(cabinet_id)
+                wipe["retry_enqueued"] = bool(retry.get("enqueued"))
+                wipe["retry"] = retry
         except Exception:
             logger.exception("cabinet archive: packages wipe failed cabinet_id=%s", cabinet_id)
         out = _public(inst)

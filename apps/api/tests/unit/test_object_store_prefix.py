@@ -38,3 +38,16 @@ def test_local_list_prefix_lists_keys(tmp_path: Path) -> None:
         "cabinet_packages/cab1/b.zip",
     ]
     assert len(store.list_prefix("cabinet_packages/cab1/", limit=1)) == 1
+
+
+def test_delete_prefix_verified_reports_ok(tmp_path: Path) -> None:
+    from prodavan.core.infra.object_storage_manager import ObjectStorageManager
+
+    mgr = ObjectStorageManager(backend="local", storage_root=tmp_path, mirror_local=False)
+    mgr._primary = LocalFsObjectStore(tmp_path)
+    mgr._local = LocalFsObjectStore(tmp_path)
+    mgr.put_bytes_sync("cabinet_packages/cab1/a.zip", b"a")
+    out = mgr.delete_prefix_verified_sync("cabinet_packages/cab1/")
+    assert out["ok"] is True
+    assert out["deleted"] >= 1
+    assert out["remaining"] == 0

@@ -7,7 +7,7 @@
 
 | Слой | Статус | Quality | As-built | Доказательство (PR / suite) | Блокеры |
 |------|--------|---------|----------|----------------------------|---------|
-| [P0 platform-infra](P0-platform-infra.md) | doing | n/a | [13](../13-platform-infra/) + [L00](../12-layer-docs/L00-platform-skeleton.md) | ingress RL + kick lock; Celery task_id; egress/API sketches; wipe remaining | Kafka sole-path; Helm/TLS; live MinIO mount; PG/Keycloak egress |
+| [P0 platform-infra](P0-platform-infra.md) | doing | n/a | [13](../13-platform-infra/) + [L00](../12-layer-docs/L00-platform-skeleton.md) | wipe retry task; job locks; PG/KC egress placeholders; docs sync | Kafka sole-path; Helm/TLS; live MinIO mount; hard-delete schema |
 | [L00](L00-platform-skeleton.md) | done | 8 | [12](../12-layer-docs/L00-platform-skeleton.md) | L00 skeleton commit | |
 | [L01](L01-identity.md) | partial | 7 | [12](../12-layer-docs/L01-identity.md) | identity + JWT tests | live KC Admin/realm |
 | [L02](L02-ui-core.md) | done | 8 | [12](../12-layer-docs/L02-ui-core.md) | L02 UI core commit | |

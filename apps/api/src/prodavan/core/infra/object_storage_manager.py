@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from prodavan.core.infra.object_store_backends import (
     LocalFsObjectStore,
@@ -124,6 +124,17 @@ class ObjectStorageManager(LifespanResource):
         elif self._backend_name == "s3":
             self._local.delete_prefix(prefix)
         return deleted
+
+    def delete_prefix_verified_sync(self, prefix: str) -> dict[str, Any]:
+        """delete_prefix then list_prefix(limit=1) — report leftovers for GC/retry."""
+        deleted = self.delete_prefix_sync(prefix)
+        remaining = self.list_prefix_sync(prefix, limit=1)
+        return {
+            "ok": len(remaining) == 0,
+            "deleted": int(deleted),
+            "remaining": len(remaining),
+            "prefix": prefix,
+        }
 
     def prefix_size_sync(self, prefix: str) -> int:
         assert self._primary is not None

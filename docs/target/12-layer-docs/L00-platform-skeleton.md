@@ -111,10 +111,10 @@ apps/flutter/lib/
 | `LifespanManager` + `LifespanResource` register | **done** (P0 w1) | `core/lifespan/`; see [13](../13-platform-infra/core-managers.md) |
 | Infra managers в `prodavan.core` | **partial** | Redis + ObjectStorage + Worker + Kafka; hole: Kafka sole-path cutover |
 | Redis обязателен во всех окружениях | **partial** | stack compose + k8s sketch set REDIS_URL; default local still empty |
-| Object store SoT для всех blobs | **partial** | materialize + hydrate + delete_prefix; archive wipe + remaining verify; readiness when required; live MinIO mount — hole |
-| Celery executor для background jobs | **partial** | CLI bootstrap + beat drain/idle; stable task_id dispatch/rematerialize; stack/k8s worker; default off → in-process |
+| Object store SoT для всех blobs | **partial** | materialize + hydrate + delete_prefix_verified; archive wipe + Celery retry; live MinIO mount — hole; project soft-delete tree wipe — hole |
+| Celery executor для background jobs | **partial** | CLI + beat + task_id + job locks (drain/idle); wipe_cabinet_packages; default off → in-process |
 | Middleware register в core | **done** (subset) | `register_cors` in `core/middleware.py` |
-| Redis cache facade | **done** (subset) | get/set + lock + rate_limit; ingress RL + kafka kick lock; policy/sub/quota peek; HMAC never in Redis |
+| Redis cache facade | **done** (subset) | get/set + lock + rate_limit; ingress RL + kafka kick + Celery job locks; policy/sub/quota peek |
 
 ## Проверка
 

@@ -62,3 +62,23 @@ def test_enqueue_dispatch_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
     out = enqueue_mod.enqueue_dispatch_trigger("t-1")
     assert out["enqueued"] is False
     assert out["reason"] == "celery_disabled"
+
+
+def test_enqueue_wipe_cabinet_packages_passes_task_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    from prodavan.core.jobs.idempotency import wipe_cabinet_packages_task_id
+
+    sent: list[dict] = []
+
+    class _Mgr:
+        enabled = True
+
+        def send_task(self, name, args=None, kwargs=None, *, task_id=None):
+            sent.append({"name": name, "args": args, "task_id": task_id})
+
+    monkeypatch.setattr(
+        "prodavan.core.infra.worker_manager.get_worker_manager",
+        lambda: _Mgr(),
+    )
+    out = enqueue_mod.enqueue_wipe_cabinet_packages("cab-1")
+    assert out["task_id"] == wipe_cabinet_packages_task_id("cab-1")
+    assert sent[0]["name"] == job_names.WIPE_CABINET_PACKAGES

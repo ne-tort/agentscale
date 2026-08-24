@@ -10,6 +10,7 @@ from typing import Any
 
 from prodavan.core.jobs import names as job_names
 from prodavan.core.jobs.async_runner import run_async
+from prodavan.core.jobs.locks import run_with_job_lock
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +27,17 @@ def register_tasks(app) -> None:
     @app.task(name=job_names.TRIGGER_DRAIN, bind=False)
     def trigger_drain() -> dict[str, Any]:
         from prodavan.application.agent.trigger_worker import drain_once
+        from prodavan.config.settings import settings
+
+        async def _run() -> dict[str, Any]:
+            return await run_with_job_lock(
+                "trigger_drain",
+                ttl_sec=max(30, int(float(settings.trigger_worker_interval_sec or 5) * 2)),
+                fn=drain_once,
+            )
 
         logger.info("celery task %s", job_names.TRIGGER_DRAIN)
-        return run_async(drain_once())
+        return run_async(_run())
 
     @app.task(name=job_names.DISPATCH_TRIGGER, bind=False)
     def dispatch_trigger(trigger_id: str) -> dict[str, Any]:
@@ -48,12 +57,20 @@ def register_tasks(app) -> None:
     @app.task(name=job_names.IDLE_PAUSE_SWEEP, bind=False)
     def idle_pause_sweep() -> dict[str, Any]:
         from prodavan.application.projects.idle_pause_service import IdlePauseService
+        from prodavan.config.settings import settings
         from prodavan.infrastructure.persistence.database import get_session_factory
 
-        async def _run() -> dict[str, Any]:
+        async def _sweep() -> dict[str, Any]:
             factory = get_session_factory()
             async with factory() as session:
                 return await IdlePauseService(session).sweep_all()
+
+        async def _run() -> dict[str, Any]:
+            return await run_with_job_lock(
+                "idle_pause_sweep",
+                ttl_sec=max(30, int(float(settings.trigger_worker_interval_sec or 5) * 2)),
+                fn=_sweep,
+            )
 
         logger.info("celery task %s", job_names.IDLE_PAUSE_SWEEP)
         return run_async(_run())
@@ -86,3 +103,10 @@ def register_tasks(app) -> None:
 
         logger.info("celery task %s project_id=%s", job_names.REMATERIALIZE_PROJECT, project_id)
         return run_async(_run())
+
+    @app.task(name=job_names.WIPE_CABINET_PACKAGES, bind=False)
+    def wipe_cabinet_packages(cabinet_id: str) -> dict[str, Any]:
+        from prodavan.application.cabinets.package_wipe import wipe_cabinet_packages as wipe_fn
+
+        logger.info("celery task %s cabinet_id=%s", job_names.WIPE_CABINET_PACKAGES, cabinet_id)
+        return wipe_fn(cabinet_id)

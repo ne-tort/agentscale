@@ -1,7 +1,7 @@
 # Sketch — egress for API/Celery pods (P0).
 # Restricts outbound traffic to DNS + in-namespace brokers (Redis/MinIO/Kafka).
-# Postgres / Keycloak / LLM egress are NOT listed — open those before production
-# (CIDR or externalName + separate NetworkPolicy). Apply after brokers-allow.
+# Postgres / Keycloak / LLM egress: see egress-postgres-keycloak.yaml (CIDR placeholders).
+# Apply after brokers-allow.
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

@@ -1,0 +1,62 @@
+# Sketch — egress placeholders for Postgres / Keycloak (P0).
+# Fill CIDRs or ExternalName targets before enforcing egress-api-celery in prod.
+# Without these rules, API/Celery cannot reach DB / OIDC when egress is locked down.
+#
+# Replace 10.0.0.0/8 with your VPC / managed-service CIDRs (or use NetworkPolicy
+# IPBlock + DNS allow already in egress-api-celery for kube-dns).
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: prodavan-egress-postgres
+  labels:
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: network
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - prodavan-api
+          - prodavan-celery-worker
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            # PLACEHOLDER — replace with Postgres CIDR or peer VPC range
+            cidr: 10.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: prodavan-egress-keycloak
+  labels:
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: network
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: In
+        values:
+          - prodavan-api
+          - prodavan-celery-worker
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            # PLACEHOLDER — replace with Keycloak / IdP CIDR
+            cidr: 10.0.0.0/8
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 8080
+        - protocol: TCP
+          port: 8089

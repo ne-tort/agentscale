@@ -4,7 +4,7 @@
 |------|----------|
 | Priority | **P0** — закрывать в первую очередь |
 | Refactor | **Significant refactor allowed** (L00/L03/L07/L08 и смежные) |
-| Status | canon; код: **P0 managers + stack compose brokers/celery + sandbox hydrate**; holes: Kafka full cutover, k8s, app cache usage |
+| Status | canon; код: **P0 managers + stack/k8s sketches + cache callers (ingress/kick) + Celery task_id/locks**; holes: Kafka full cutover, live MinIO mount, Helm/TLS, real PG/KC egress CIDRs |
 | Plan | [P0-platform-infra](../11-implementation-plan/P0-platform-infra.md) |
 
 Канон платформенной инфраструктуры и backend core. Отклонение в коде — **дефект** относительно канона (как UI-принципы в §2 [00-principles](../00-principles.md)).
