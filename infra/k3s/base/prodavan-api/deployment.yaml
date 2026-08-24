@@ -5,6 +5,9 @@ metadata:
   namespace: prodavan
   labels:
     app: prodavan-api
+    app.kubernetes.io/name: prodavan-api
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: api
 spec:
   replicas: 1
   selector:
@@ -14,6 +17,9 @@ spec:
     metadata:
       labels:
         app: prodavan-api
+        app.kubernetes.io/name: prodavan-api
+        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/component: api
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "8000"

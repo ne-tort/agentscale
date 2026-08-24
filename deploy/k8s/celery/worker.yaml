@@ -29,6 +29,8 @@ spec:
           image: prodavan-api:latest
           imagePullPolicy: IfNotPresent
           command:
+            - python
+            - -m
             - celery
             - -A
             - prodavan.core.infra.worker_manager.celery_app

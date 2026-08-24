@@ -3,6 +3,7 @@ kind: Kustomization
 namespace: prodavan
 resources:
   - namespace.yaml
+  - platform
   - prodavan-api/configmap.yaml
   - prodavan-api/secret.yaml
   - prodavan-api/pvc.yaml
@@ -11,4 +12,4 @@ resources:
   - prodavan-web/deployment.yaml
   - prodavan-web/service.yaml
   - ingress.yaml
-# Deferred (I6 / MCP): mcp-gateway, prodavan-ws SSE split, agent-worker
+# Deferred: mcp-gateway, project sandbox Jobs/Pods, agent-worker (see CLUSTER-GAPS + P0 holes)

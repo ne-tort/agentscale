@@ -6,6 +6,12 @@ metadata:
 spec:
   replicas: 1
   template:
+    metadata:
+      labels:
+        app: prodavan-api
+        app.kubernetes.io/name: prodavan-api
+        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/component: api
     spec:
       imagePullSecrets:
         - name: ghcr-pull
@@ -28,6 +34,21 @@ spec:
         - name: web
           imagePullPolicy: IfNotPresent
 ---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prodavan-celery-worker
+  namespace: prodavan
+spec:
+  replicas: 1
+  template:
+    spec:
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: worker
+          imagePullPolicy: IfNotPresent
+---
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -39,3 +60,24 @@ data:
   CORS_ORIGINS: "http://prodavan.local,http://localhost:8080,http://127.0.0.1:8080,http://localhost:8088,http://127.0.0.1:8088"
   RUN_MIGRATIONS: "1"
   API_V1_PREFIX: /api/v1
+  APP_ENV: dev
+  AUTH_MODE: test
+  REDIS_URL: redis://prodavan-redis:6379/0
+  REDIS_REQUIRED: "true"
+  CELERY_ENABLED: "true"
+  CELERY_BROKER_URL: redis://prodavan-redis:6379/0
+  TRIGGER_WORKER_ENABLED: "true"
+  IDLE_PAUSE_WORKER_ENABLED: "true"
+  OBJECT_STORE_BACKEND: s3
+  S3_ENDPOINT_URL: http://prodavan-minio:9000
+  S3_BUCKET: prodavan
+  S3_REGION: us-east-1
+  OBJECT_STORE_REQUIRED: "true"
+  OBJECT_STORE_MIRROR_LOCAL: "true"
+  KAFKA_ENABLED: "true"
+  KAFKA_BOOTSTRAP_SERVERS: prodavan-kafka:9092
+  KAFKA_CONSUMER_ENABLED: "true"
+  KAFKA_CONSUMER_MODE: kick
+  KAFKA_REQUIRED: "true"
+  CELERY_REQUIRED: "false"
+  MCP_SANDBOX_SPAWN: "false"

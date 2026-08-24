@@ -43,13 +43,12 @@ Postgres и Keycloak/Vault роли не меняются.
 ## Дыры логики (следующая итерация)
 
 - Kafka consumer **ускоряет** Celery (`kick`/`dispatch`); PG outbox остаётся claim SoT; SPI fan-out не Kafka-only.
-- Package sandbox: hydrate-from-zip есть; **live mount** workspace из MinIO в pod — hole.
-- Cabinet hard-delete + orphan schema GC + **orphan blob GC** (`/admin/object-store/gc-orphan-blobs`); soft-deleted projects (`status=deleted`) keep rows → blobs not treated as orphan (by design until explicit purge).
-- Dual-write Kafka publish **после** PG commit (`core/events/deferred.py`); ghost envelopes при rollback сняты.
-- k8s sketches: PVC + allow/default-deny + egress + PG/KC CIDR placeholders + readiness REQUIRED; TLS/Helm/real CIDRs — hole.
-- C-CACHE: ingress RL + admin ops RL + MCP call RL + Kafka kick lock + Celery job locks; still not universal.
-- C-JOBS: stable Celery `task_id` for dispatch / rematerialize / wipe_* / singleton orphan GC (schemas+blobs).
-- C-MATERIALIZE: new `object-ws:`; Alembic `2026082317` + admin backfill for legacy `local-ws:`.
+- Package sandbox: hydrate-from-zip есть; **live MinIO mount / per-project k8s Pod** — hole (`MCP_SANDBOX_SPAWN` local-only; off in cluster ConfigMap).
+- Cabinet hard-delete + orphan schema/blob GC; soft-deleted projects keep rows → blobs not orphan.
+- Dual-write Kafka publish **после** PG commit; ghost envelopes при rollback сняты.
+- **k3s GitOps** (`infra/k3s/base/platform`): Redis AOF + MinIO + Redpanda StatefulSet (PVC, no `dev-container`/`--mode empty`) + Celery wired; Redpanda HA (≥3) / TLS / Helm / Keycloak-in-cluster — hole.
+- **Alembic:** legacy cluster PVC on `20260808*`/`2026082101` incompatible with stub_bootstrap chain — use `infra/scripts/reset_dev_postgres.sh` (dev wipe).
+- C-CACHE / C-JOBS call sites as prior; C-MATERIALIZE object-ws + backfill as prior.
 
 ## Волны реализации
 

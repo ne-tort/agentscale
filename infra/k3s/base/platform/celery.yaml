@@ -1,0 +1,53 @@
+# Celery worker+beat — C-JOBS (P0). Same image/config as API.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prodavan-celery-worker
+  labels:
+    app: prodavan-celery-worker
+    app.kubernetes.io/name: prodavan-celery-worker
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: celery
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prodavan-celery-worker
+  template:
+    metadata:
+      labels:
+        app: prodavan-celery-worker
+        app.kubernetes.io/name: prodavan-celery-worker
+        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/component: celery
+    spec:
+      containers:
+        - name: worker
+          image: ghcr.io/ne-tort/prodavan-api:latest
+          imagePullPolicy: IfNotPresent
+          # command replaces image ENTRYPOINT; python -m avoids missing console_script PATH issues.
+          command:
+            - python
+            - -m
+            - celery
+            - -A
+            - prodavan.core.infra.worker_manager.celery_app
+            - worker
+            - -B
+            - --loglevel=INFO
+          envFrom:
+            - configMapRef:
+                name: prodavan-config
+            - secretRef:
+                name: prodavan-api-secrets
+          env:
+            # Workers must not race API on alembic (entrypoint also respects this).
+            - name: RUN_MIGRATIONS
+              value: "0"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi

@@ -7,7 +7,7 @@
 
 | Слой | Статус | Quality | As-built | Доказательство (PR / suite) | Блокеры |
 |------|--------|---------|----------|----------------------------|---------|
-| [P0 platform-infra](P0-platform-infra.md) | doing | n/a | [13](../13-platform-infra/) + [L00](../12-layer-docs/L00-platform-skeleton.md) | orphan blob GC + list_child_prefixes; schema/blob cron | Kafka sole-path; Helm/TLS; live MinIO mount |
+| [P0 platform-infra](P0-platform-infra.md) | doing | n/a | [13](../13-platform-infra/) + [L00](../12-layer-docs/L00-platform-skeleton.md) | k3s platform brokers (Redis/MinIO/Redpanda/Celery); Redpanda PVC without unsafe fsync bypass | Kafka sole-path; project Pod isolator; Redpanda HA; Helm/TLS/KC |
 | [L00](L00-platform-skeleton.md) | done | 8 | [12](../12-layer-docs/L00-platform-skeleton.md) | L00 skeleton commit | |
 | [L01](L01-identity.md) | partial | 7 | [12](../12-layer-docs/L01-identity.md) | identity + JWT tests | live KC Admin/realm |
 | [L02](L02-ui-core.md) | done | 8 | [12](../12-layer-docs/L02-ui-core.md) | L02 UI core commit | |

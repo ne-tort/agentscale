@@ -45,12 +45,17 @@ else
 fi
 
 echo "==> Rollout status"
-# Deployments may still be rolling after node restart; wait for available replicas.
-for dep in prodavan-postgres prodavan-api prodavan-web; do
+# Deployments / StatefulSets may still be rolling after node restart.
+for dep in prodavan-postgres prodavan-api prodavan-web prodavan-celery-worker; do
   if kubectl -n "$NS_APP" get deploy "$dep" >/dev/null 2>&1; then
     kubectl -n "$NS_APP" rollout status "deploy/${dep}" --timeout=300s || true
   fi
 done
+for sts in prodavan-redis prodavan-minio prodavan-kafka; do
+  if kubectl -n "$NS_APP" get sts "$sts" >/dev/null 2>&1; then
+    kubectl -n "$NS_APP" rollout status "sts/${sts}" --timeout=300s || true
+  fi
+done
 # Prefer Ready pods over mere rollout return codes.
-kubectl -n "$NS_APP" wait --for=condition=Ready pods --all --timeout=300s || true
-kubectl -n "$NS_APP" get pods
+kubectl -n "$NS_APP" wait --for=condition=Ready pods --all --timeout=360s || true
+kubectl -n "$NS_APP" get pods,pvc
