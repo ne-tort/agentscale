@@ -6,10 +6,13 @@ resources:
   - postgres.yaml
 patches:
   - path: patch-dev.yaml
+# Local k3d GitOps: pin :local and k3d-import (IfNotPresent).
+# Do NOT SHA-pin this overlay unless CI has pushed that digest to GHCR —
+# Argo selfHeal will roll ImagePullBackOff and Degrade the app (I12/I18).
 images:
   - name: ghcr.io/ne-tort/prodavan-api
     newName: ghcr.io/ne-tort/prodavan-api
-    newTag: 3d3878f09fa8
+    newTag: local
   - name: ghcr.io/ne-tort/prodavan-web
     newName: ghcr.io/ne-tort/prodavan-web
-    newTag: 3d3878f09fa8
+    newTag: local

@@ -21,7 +21,14 @@ if [[ -n "${GHCR_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
   bash "${SCRIPT_DIR}/import_overlay_images.sh" || echo "WARN: import_overlay_images failed"
 else
   echo "==> 3/7 local API/web images (no GHCR_TOKEN)"
-  bash "${SCRIPT_DIR}/ensure_local_app_images_k3d.sh" || echo "WARN: local app images unavailable"
+  if ! bash "${SCRIPT_DIR}/ensure_local_app_images_k3d.sh"; then
+    echo "WARN: local app image ensure failed — continuing if cluster already has Ready app pods"
+    if kubectl -n "${PRODAVAN_NS:-prodavan}" get pods --no-headers 2>/dev/null | grep -q ImagePullBackOff; then
+      echo "ERROR: ImagePullBackOff with no importable :local images" >&2
+      kubectl -n "${PRODAVAN_NS:-prodavan}" get pods
+      exit 1
+    fi
+  fi
 fi
 
 echo "==> 4/7 Argo CD"

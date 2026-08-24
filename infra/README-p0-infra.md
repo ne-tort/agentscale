@@ -90,5 +90,6 @@ bash infra/scripts/terraform_apply_local.sh   # Windows build + terraform apply 
 ## Notes / holes
 
 - Kafka consumer kick|dispatch; PG outbox still claim SoT.
-- Redpanda single-node `--overprovisioned` for k3d; HA/TLS/Helm — hole.
+- Redpanda single-node `--overprovisioned` for k3d; HA/TLS/Helm — hole (I9). `verify_kafka.sh` checks topics + write cache off.
+- **Dev images:** `overlays/dev` tag is `:local` (k3d import). SHA-pin breaks GitOps if GHCR has no digest (I18).
 - AUTH_MODE=test in cluster ConfigMap (Keycloak-in-cluster — hole).

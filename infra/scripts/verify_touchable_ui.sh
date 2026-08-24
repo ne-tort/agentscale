@@ -9,6 +9,9 @@ export KUBECONFIG="${KUBECONFIG:-${ROOT}/infra/.kube/prodavan-k3d.yaml}"
 echo "==> smoke"
 bash "${SCRIPT_DIR}/smoke_ingress.sh"
 
+echo "==> kafka topics + durability knobs"
+bash "${SCRIPT_DIR}/verify_kafka.sh"
+
 echo "==> seed + e2e chat"
 bash "${SCRIPT_DIR}/seed_dev_identity.sh" | tee /tmp/prodavan_verify_ui.log
 

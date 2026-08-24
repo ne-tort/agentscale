@@ -67,6 +67,11 @@ else
 fi
 
 echo "==> Rollout status"
+if kubectl -n "$NS_APP" get pods --no-headers 2>/dev/null | grep -q ImagePullBackOff; then
+  echo "==> ImagePullBackOff detected — import :local app images (dev overlay, no GHCR SHA)"
+  bash "${SCRIPT_DIR}/ensure_local_app_images_k3d.sh" || echo "WARN: image rescue failed"
+  kubectl -n "$NS_APP" delete pods --field-selector=status.phase=Pending --ignore-not-found || true
+fi
 for dep in prodavan-postgres prodavan-api prodavan-web prodavan-celery-worker; do
   if kubectl -n "$NS_APP" get deploy "$dep" >/dev/null 2>&1; then
     paused="$(kubectl -n "$NS_APP" get deploy "$dep" -o jsonpath='{.spec.paused}' 2>/dev/null || echo false)"

@@ -168,10 +168,16 @@ spec:
                 if [ "$i" -gt 60 ]; then exit 1; fi
                 sleep 2
               done
-              rpk topic create prodavan.platform.events -X brokers=prodavan-kafka:9092 || true
-              rpk topic create prodavan.project.triggers -X brokers=prodavan-kafka:9092 || true
-              # Local durability knobs (safe on single-node; override later for HA).
-              rpk cluster config set log_retention_ms 604800000 -X brokers=prodavan-kafka:9092 || true
-              rpk cluster config set log_segment_ms 86400000 -X brokers=prodavan-kafka:9092 || true
-              # Prefer fsync durability over low-latency write cache on single node.
-              rpk cluster config set write_caching_default false -X brokers=prodavan-kafka:9092 || true
+              BROKERS=prodavan-kafka:9092
+              # Explicit RF=1 / 1 partition — required on single-node; HA overlay must raise both.
+              rpk topic create prodavan.platform.events -p 1 -r 1 -X brokers=$BROKERS || true
+              rpk topic create prodavan.project.triggers -p 1 -r 1 -X brokers=$BROKERS || true
+              # Durability over latency (local). HA: raise default_topic_replications + min_insync.
+              rpk cluster config set write_caching_default false -X brokers=$BROKERS || true
+              rpk cluster config set auto_create_topics_enabled false -X brokers=$BROKERS || true
+              rpk cluster config set default_topic_replications 1 -X brokers=$BROKERS || true
+              rpk cluster config set log_retention_ms 604800000 -X brokers=$BROKERS || true
+              rpk cluster config set log_segment_ms 86400000 -X brokers=$BROKERS || true
+              # cleanup.policy=delete (not compact) — events/triggers are a log, not a KV store.
+              rpk topic alter-config prodavan.platform.events --set cleanup.policy=delete -X brokers=$BROKERS || true
+              rpk topic alter-config prodavan.project.triggers --set cleanup.policy=delete -X brokers=$BROKERS || true
