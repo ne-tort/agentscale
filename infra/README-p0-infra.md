@@ -57,6 +57,14 @@ bash infra/scripts/seed_dev_identity.sh                 # seed alone
 bash infra/scripts/import_local_app_images_k3d.sh       # rebuild web+api + import
 ```
 
+WSL `docker build` may fail on `apt-get` (debian mirror timeout). Build on **Docker Desktop** (Windows), then import:
+
+```powershell
+docker build -f apps/api/Dockerfile -t ghcr.io/ne-tort/prodavan-api:local .
+```
+
+WSL picks it up via `bridge_docker_desktop_image.sh` inside `import_local_app_images_k3d.sh`.
+
 ## Notes / holes
 
 - Kafka consumer kick|dispatch; PG outbox still claim SoT.

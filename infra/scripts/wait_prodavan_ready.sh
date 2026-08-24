@@ -69,6 +69,11 @@ fi
 echo "==> Rollout status"
 for dep in prodavan-postgres prodavan-api prodavan-web prodavan-celery-worker; do
   if kubectl -n "$NS_APP" get deploy "$dep" >/dev/null 2>&1; then
+    paused="$(kubectl -n "$NS_APP" get deploy "$dep" -o jsonpath='{.spec.paused}' 2>/dev/null || echo false)"
+    if [[ "$paused" == "true" ]]; then
+      echo "Resuming paused deployment/${dep}"
+      kubectl -n "$NS_APP" rollout resume "deploy/${dep}" || true
+    fi
     kubectl -n "$NS_APP" rollout status "deploy/${dep}" --timeout=300s || true
   fi
 done

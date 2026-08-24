@@ -22,6 +22,10 @@ image_head() {
   docker run --rm --entrypoint alembic "$API_IMAGE" heads 2>/dev/null | awk '{print $1; exit}'
 }
 
+verify_celery() {
+  docker run --rm --entrypoint python "$API_IMAGE" -m celery --version >/dev/null 2>&1
+}
+
 if ! docker image inspect "$API_IMAGE" >/dev/null 2>&1; then
   echo "verify_api_image_alembic: image ${API_IMAGE} not found — build required"
   exit 1
@@ -35,7 +39,11 @@ if [[ -z "$actual" ]]; then
 fi
 if [[ "$expected" != "$actual" ]]; then
   echo "ERROR: API image alembic head=${actual}, repo head=${expected}" >&2
-  echo "Run BUILD=1 bash infra/scripts/import_local_app_images_k3d.sh (needs network)." >&2
+  echo "Run BUILD=1 bash infra/scripts/import_local_app_images_k3d.sh (WSL apt may fail — build via Docker Desktop + bridge)." >&2
   exit 1
 fi
-echo "ok — ${API_IMAGE} alembic head ${actual}"
+if ! verify_celery; then
+  echo "ERROR: ${API_IMAGE} missing celery module (stale image)" >&2
+  exit 1
+fi
+echo "ok — ${API_IMAGE} alembic head ${actual}, celery present"

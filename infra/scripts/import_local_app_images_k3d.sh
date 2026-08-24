@@ -12,13 +12,14 @@ WEB_IMAGE="${WEB_IMAGE:-ghcr.io/ne-tort/prodavan-web:local}"
 
 if [[ "${BUILD:-1}" == "1" ]]; then
   echo "==> build api"
+  build_ok=0
   if docker buildx version >/dev/null 2>&1 && docker buildx inspect prodavan >/dev/null 2>&1; then
-    bash "${SCRIPT_DIR}/docker-build-cached.sh" api || \
-      docker build -f "${ROOT}/apps/api/Dockerfile" \
-        -t prodavan-api:local -t "${API_IMAGE}" "${ROOT}"
-  else
+    bash "${SCRIPT_DIR}/docker-build-cached.sh" api && build_ok=1 || true
+  fi
+  if [[ "$build_ok" != "1" ]]; then
     docker build -f "${ROOT}/apps/api/Dockerfile" \
-      -t prodavan-api:local -t "${API_IMAGE}" "${ROOT}"
+      -t prodavan-api:local -t "${API_IMAGE}" "${ROOT}" \
+      || bash "${SCRIPT_DIR}/bridge_docker_desktop_image.sh" "${API_IMAGE}" || true
   fi
 
   echo "==> build web (API_BASE=${API_BASE})"
@@ -51,6 +52,14 @@ for img in "${WEB_IMAGE}" "${API_IMAGE}"; do
 done
 
 [[ ${#IMAGES[@]} -gt 0 ]] || { echo "no local API/web images to import"; exit 1; }
+
+for img in "${IMAGES[@]}"; do
+  bash "${SCRIPT_DIR}/bridge_docker_desktop_image.sh" "$img" || true
+done
+
+if [[ "${VERIFY_ALEMBIC:-1}" == "1" ]]; then
+  API_IMAGE="$API_IMAGE" bash "${SCRIPT_DIR}/verify_api_image_alembic.sh"
+fi
 
 echo "==> k3d image import → ${CLUSTER}: ${IMAGES[*]}"
 k3d image import "${IMAGES[@]}" -c "$CLUSTER"

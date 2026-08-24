@@ -4,10 +4,6 @@
 
 FROM python:3.12-slim-bookworm AS base
 
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends curl \
-  && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
@@ -42,6 +38,6 @@ RUN chmod +x /docker-entrypoint.sh \
 EXPOSE 8000
 
 HEALTHCHECK --interval=15s --timeout=5s --retries=3 \
-  CMD curl -fsS http://127.0.0.1:8000/health/live || exit 1
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3)" || exit 1
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
