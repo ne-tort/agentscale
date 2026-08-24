@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Wait for Argo Application Healthy+Synced; fallback to kubectl apply -k; wait rollouts.
+# Wait for Argo Application Healthy+Synced; refresh if stuck; apply -k only if Argo absent.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -14,8 +14,20 @@ ensure_kubeconfig_env
 export KUBECONFIG="${KUBECONFIG:-${ROOT}/infra/.kube/prodavan-k3d.yaml}"
 
 apply_fallback() {
-  echo "Fallback: kubectl apply -k infra/k3s/overlays/dev"
-  kubectl apply -k "${ROOT}/infra/k3s/overlays/dev"
+  if [[ "${ALLOW_KUSTOMIZE_FALLBACK:-0}" == "1" ]]; then
+    echo "Fallback: kubectl apply -k (ALLOW_KUSTOMIZE_FALLBACK=1; Argo selfHeal may revert)"
+    kubectl apply -k "${ROOT}/infra/k3s/overlays/dev"
+    return 0
+  fi
+  echo "Argo Application not Healthy/Synced — refusing kubectl apply -k (selfHeal would fight)."
+  echo "Fix: push main, kubectl -n argocd annotate application prodavan-dev argocd.argoproj.io/refresh=hard --overwrite"
+  echo "Or set ALLOW_KUSTOMIZE_FALLBACK=1 for emergency local apply."
+  return 1
+}
+
+refresh_argo() {
+  kubectl -n argocd annotate application prodavan-dev \
+    argocd.argoproj.io/refresh=hard --overwrite >/dev/null 2>&1 || true
 }
 
 wait_argo() {
@@ -32,20 +44,29 @@ wait_argo() {
     if [[ "$health" == "Healthy" && "$sync" == "Synced" ]]; then
       return 0
     fi
+    # Hard refresh mid-wait so new main commits / Jobs get picked up.
+    if (( i == 3 || i == 15 || i == 30 )); then
+      refresh_argo
+    fi
     sleep "$ARGO_SLEEP_SEC"
   done
   return 1
 }
 
-echo "==> Wait Argo / apply overlay"
-if wait_argo; then
-  echo "Argo Application Healthy+Synced"
+echo "==> Wait Argo / optional fallback"
+if kubectl -n argocd get application prodavan-dev >/dev/null 2>&1; then
+  refresh_argo
+  if wait_argo; then
+    echo "Argo Application Healthy+Synced"
+  else
+    apply_fallback
+  fi
 else
-  apply_fallback
+  echo "No Argo Application — applying overlay once (bootstrap before Argo)"
+  kubectl apply -k "${ROOT}/infra/k3s/overlays/dev"
 fi
 
 echo "==> Rollout status"
-# Deployments / StatefulSets may still be rolling after node restart.
 for dep in prodavan-postgres prodavan-api prodavan-web prodavan-celery-worker; do
   if kubectl -n "$NS_APP" get deploy "$dep" >/dev/null 2>&1; then
     kubectl -n "$NS_APP" rollout status "deploy/${dep}" --timeout=300s || true
@@ -56,6 +77,5 @@ for sts in prodavan-redis prodavan-minio prodavan-kafka; do
     kubectl -n "$NS_APP" rollout status "sts/${sts}" --timeout=300s || true
   fi
 done
-# Prefer Ready pods over mere rollout return codes.
 kubectl -n "$NS_APP" wait --for=condition=Ready pods --all --timeout=360s || true
 kubectl -n "$NS_APP" get pods,pvc

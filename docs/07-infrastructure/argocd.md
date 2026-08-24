@@ -1,5 +1,11 @@
 # ArgoCD GitOps
 
+> **As-built (2026-08-24):** живой Application — `infra/argocd/apps/prodavan-dev.yaml`
+> (`path: infra/k3s/overlays/dev`, `targetRevision: main`, automated prune+selfHeal,
+> Job Sync hooks, `ignoreDifferences` for Job/Deployment/StatefulSet status).
+> Install: `infra/scripts/ensure_argocd.sh` (не `bootstrap/install.yaml` как единственный путь).
+> Ниже — целевой дизайн (App-of-Apps / staging/prod); то, чего ещё нет в дереве, помечено aspirational.
+
 Деплой Prodavan в k3s через **ArgoCD** — declarative sync из git repo `infra/k3s/`.
 
 ---

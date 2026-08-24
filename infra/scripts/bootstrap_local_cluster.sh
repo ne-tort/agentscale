@@ -26,13 +26,17 @@ if [[ -n "$TF" ]]; then
   (
     cd "$TF_DIR"
     "$TF" init -input=false
-    "$TF" apply -auto-approve -input=false || echo "WARN: terraform apply failed — cluster already ensured"
+    # Avoid nested gitops from TF when this script already runs the full chain.
+    "$TF" apply -auto-approve -input=false -var=bootstrap_gitops=false || echo "WARN: terraform apply failed — cluster already ensured"
   )
 else
   echo "WARN: terraform not found — skipped state sync"
 fi
 
 export KUBECONFIG="${ROOT}/infra/.kube/prodavan-k3d.yaml"
+
+echo "==> Platform broker images"
+bash "${SCRIPT_DIR}/import_platform_images_k3d.sh" || echo "WARN: platform image import failed"
 
 if [[ -n "${GHCR_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
   echo "==> GHCR pull secret"
@@ -54,3 +58,4 @@ bash "${SCRIPT_DIR}/smoke_ingress.sh" || echo "WARN: smoke failed — check imag
 
 echo "Done. Cluster=${CLUSTER} KUBECONFIG=${KUBECONFIG}"
 echo "After reboot: bash infra/scripts/recover_local_stack.sh"
+echo "UI seed: bash infra/scripts/seed_dev_identity.sh"

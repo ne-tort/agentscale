@@ -16,7 +16,7 @@ smoke_once() {
   [[ "$code" == "200" ]]
 }
 
-for path in /health /; do
+for path in /health/live /health/ready /api/v1/auth/config /; do
   ok=0
   for i in $(seq 1 "$ATTEMPTS"); do
     if smoke_once "$path"; then

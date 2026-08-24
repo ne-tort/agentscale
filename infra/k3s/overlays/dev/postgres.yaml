@@ -3,6 +3,8 @@ kind: PersistentVolumeClaim
 metadata:
   name: prodavan-postgres-data
   namespace: prodavan
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   accessModes:
     - ReadWriteOnce
@@ -17,8 +19,15 @@ metadata:
   namespace: prodavan
   labels:
     app: prodavan-postgres
+    app.kubernetes.io/name: prodavan-postgres
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: postgres
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: prodavan-postgres
@@ -26,6 +35,7 @@ spec:
     metadata:
       labels:
         app: prodavan-postgres
+        app.kubernetes.io/name: prodavan-postgres
     spec:
       containers:
         - name: postgres
@@ -40,6 +50,9 @@ spec:
               value: prodavan
             - name: POSTGRES_DB
               value: prodavan
+            # Official image refuses non-empty mount dir without PGDATA subdir.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
@@ -47,6 +60,11 @@ spec:
             exec:
               command: ["pg_isready", "-U", "prodavan", "-d", "prodavan"]
             periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "prodavan", "-d", "prodavan"]
+            initialDelaySeconds: 20
+            periodSeconds: 20
           resources:
             requests:
               cpu: 100m
@@ -63,6 +81,8 @@ kind: Service
 metadata:
   name: prodavan-postgres
   namespace: prodavan
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
 spec:
   selector:
     app: prodavan-postgres

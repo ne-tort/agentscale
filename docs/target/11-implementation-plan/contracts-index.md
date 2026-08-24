@@ -40,6 +40,7 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-24 | P0 deploy / GitOps | TF `bootstrap_gitops`; recover imports platform images + Argo; Job Sync hooks; seed_dev_identity | no |
 | 2026-08-24 | P0 deploy / C-* | `infra/k3s/base/platform` Redis+MinIO+Redpanda StatefulSet+Celery; API ConfigMap P0 env | no |
 | 2026-08-24 | C-EVENT-BUS | Redpanda PVC + headless advertise; avoid `dev-container`/`--mode empty` (fsync / invalid mode) | no |
 | 2026-08-24 | C-OBJECT-STORE / C-JOBS | orphan blob GC (`list_child_prefixes` + admin/Celery/CronJob) | no |

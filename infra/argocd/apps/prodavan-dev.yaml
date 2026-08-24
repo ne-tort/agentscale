@@ -21,4 +21,26 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - PruneLast=true
-  ignoreDifferences: []
+      - ApplyOutOfSyncOnly=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  # Fixed-name Jobs + controller status fields churn under selfHeal without this.
+  ignoreDifferences:
+    - group: batch
+      kind: Job
+      jsonPointers:
+        - /status
+        - /spec/selector
+        - /spec/template/metadata/labels
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /status
+    - group: apps
+      kind: StatefulSet
+      jsonPointers:
+        - /status

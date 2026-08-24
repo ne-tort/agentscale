@@ -38,6 +38,8 @@ metadata:
     app.kubernetes.io/name: prodavan-redis
     app.kubernetes.io/part-of: prodavan
     app.kubernetes.io/component: redis
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   serviceName: prodavan-redis
   replicas: 1

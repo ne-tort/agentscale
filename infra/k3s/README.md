@@ -30,7 +30,13 @@ kubectl -n prodavan get pods,pvc
 curl -sS -H 'Host: prodavan.local' http://127.0.0.1:8088/health/ready
 ```
 
-**Argo CD** Application `prodavan-dev` auto-syncs `main` → `infra/k3s/overlays/dev` with selfHeal. Local `kubectl apply` without push will be reverted — commit+push first.
+**Argo CD** Application `prodavan-dev` auto-syncs `main` → `infra/k3s/overlays/dev` with selfHeal.
+Local `kubectl apply -k` without push will be reverted — commit+push first.
+`wait_prodavan_ready.sh` refreshes Argo and **does not** apply -k unless `ALLOW_KUSTOMIZE_FALLBACK=1`.
+
+Init Jobs (kafka/minio) use Argo Sync hooks + `BeforeHookCreation`. Sync-waves: postgres/redis/minio/kafka → api → web/celery.
+
+UI seed (test auth): `bash infra/scripts/seed_dev_identity.sh`
 
 ## Persistence / reboot
 

@@ -5,6 +5,10 @@ metadata:
   namespace: prodavan
   labels:
     app: prodavan-web
+    app.kubernetes.io/name: prodavan-web
+    app.kubernetes.io/part-of: prodavan
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
 spec:
   replicas: 1
   selector:

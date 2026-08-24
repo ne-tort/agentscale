@@ -35,6 +35,8 @@ metadata:
     app.kubernetes.io/name: prodavan-kafka
     app.kubernetes.io/part-of: prodavan
     app.kubernetes.io/component: kafka
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   serviceName: prodavan-kafka
   replicas: 1
@@ -129,6 +131,10 @@ metadata:
     app.kubernetes.io/name: prodavan-kafka-init
     app.kubernetes.io/part-of: prodavan
     app.kubernetes.io/component: kafka-init
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "5"
 spec:
   ttlSecondsAfterFinished: 600
   backoffLimit: 8

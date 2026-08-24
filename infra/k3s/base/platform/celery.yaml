@@ -8,6 +8,8 @@ metadata:
     app.kubernetes.io/name: prodavan-celery-worker
     app.kubernetes.io/part-of: prodavan
     app.kubernetes.io/component: celery
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
 spec:
   replicas: 1
   selector:

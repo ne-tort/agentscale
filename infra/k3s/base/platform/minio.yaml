@@ -53,6 +53,8 @@ metadata:
     app.kubernetes.io/name: prodavan-minio
     app.kubernetes.io/part-of: prodavan
     app.kubernetes.io/component: minio
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
 spec:
   serviceName: prodavan-minio
   replicas: 1
@@ -120,6 +122,10 @@ metadata:
     app.kubernetes.io/name: prodavan-minio-init
     app.kubernetes.io/part-of: prodavan
     app.kubernetes.io/component: minio-init
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/sync-wave: "5"
 spec:
   ttlSecondsAfterFinished: 600
   backoffLimit: 6
