@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,6 +29,8 @@ from prodavan.domain.projects import (
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
 from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
+
+logger = logging.getLogger(__name__)
 
 _ALLOWED_PROVIDERS = frozenset(p.value for p in AiProvider)
 
@@ -396,7 +400,23 @@ class ProjectService:
             payload={"purge_workspace": purge_workspace},
         )
         await self._session.commit()
+        wipe: dict = {"ok": True, "skipped": True}
         if purge_workspace:
-            WorkspaceLayoutWriter(workspace_key=row.workspace_key).remove_project_tree()
+            try:
+                from prodavan.core.jobs.enqueue import enqueue_wipe_project_tree
+
+                wipe = WorkspaceLayoutWriter(workspace_key=row.workspace_key).remove_project_tree()
+                if not wipe.get("ok"):
+                    retry = enqueue_wipe_project_tree(row.workspace_key)
+                    wipe["retry_enqueued"] = bool(retry.get("enqueued"))
+                    wipe["retry"] = retry
+            except Exception:
+                logger.exception(
+                    "project delete: workspace wipe failed project_id=%s",
+                    project_id,
+                )
+                wipe = {"ok": False, "deleted": 0, "remaining": 0, "error": "wipe_failed"}
         await self._session.refresh(row)
-        return await self._project_public(row)
+        out = await self._project_public(row)
+        out["workspace_wipe"] = wipe
+        return out

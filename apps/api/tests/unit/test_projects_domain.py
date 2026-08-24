@@ -14,8 +14,16 @@ def test_slugify_name() -> None:
 
 
 def test_workspace_and_container_ref() -> None:
+    from prodavan.domain.projects import (
+        parse_container_ref,
+        workspace_key_from_container_ref,
+    )
+
     assert workspace_key_for("proj_abc123") == "abc123"
-    assert container_ref_for("abc123") == "local-ws:abc123"
+    assert container_ref_for("abc123") == "object-ws:abc123"
+    assert parse_container_ref("object-ws:abc123") == ("object-ws", "abc123")
+    assert parse_container_ref("local-ws:legacy") == ("local-ws", "legacy")
+    assert workspace_key_from_container_ref("local-ws:legacy") == "legacy"
 
 
 def test_pause_exempt_trigger_kinds() -> None:

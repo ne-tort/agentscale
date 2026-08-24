@@ -25,3 +25,8 @@ def rematerialize_project_task_id(project_id: str) -> str:
 def wipe_cabinet_packages_task_id(cabinet_id: str) -> str:
     cid = (cabinet_id or "").strip()
     return f"{job_names.WIPE_CABINET_PACKAGES}:{cid}"
+
+
+def wipe_project_tree_task_id(workspace_key: str) -> str:
+    key = (workspace_key or "").strip()
+    return f"{job_names.WIPE_PROJECT_TREE}:{key}"

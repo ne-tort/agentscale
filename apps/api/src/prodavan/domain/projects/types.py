@@ -174,4 +174,25 @@ def workspace_key_for(project_id: str) -> str:
 
 
 def container_ref_for(workspace_key: str) -> str:
-    return f"local-ws:{workspace_key}"
+    """Canonical workspace container ref (object-store-backed).
+
+    Legacy rows may still store ``local-ws:{key}`` — accept both via
+    :func:`parse_container_ref` / :func:`workspace_key_from_container_ref`.
+    """
+    return f"object-ws:{workspace_key}"
+
+
+def parse_container_ref(ref: str) -> tuple[str, str]:
+    """Return ``(scheme, workspace_key)`` for ``object-ws:`` / ``local-ws:``."""
+    raw = (ref or "").strip()
+    for scheme in ("object-ws:", "local-ws:"):
+        if raw.startswith(scheme):
+            key = raw.removeprefix(scheme).strip()
+            if not key:
+                raise ValueError(f"empty workspace key in container_ref: {ref!r}")
+            return scheme.rstrip(":"), key
+    raise ValueError(f"unsupported container_ref scheme: {raw[:32]!r}")
+
+
+def workspace_key_from_container_ref(ref: str) -> str:
+    return parse_container_ref(ref)[1]

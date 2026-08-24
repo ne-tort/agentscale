@@ -7,14 +7,14 @@
 | Quality note | Project CRUD+lifecycle+materialize+local MCP spawn+trigger drain/worker; k8s isolator — gap |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-24 — soft dispatch while paused; resume kick-drain |
+| Last updated | 2026-08-24 — object-ws refs + project wipe retry |
 | Owners | — |
 
 ---
 
 ## Семантика
 
-Project = workspace + `local-ws:{key}` container ref внутри CabinetInstance. Materialize из cabinet meta + enabled MCP packages. Triggers — project-scoped queue; attachments → inbox.
+Project = workspace + `object-ws:{key}` container ref (legacy `local-ws:` still parsed) внутри CabinetInstance. Materialize из cabinet meta + enabled MCP packages. Triggers — project-scoped queue; attachments → inbox.
 
 ## Что сделано
 
@@ -23,7 +23,7 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 | ORM projects / project_triggers / project_attachments + migration | k8s pod scheduler |
 | CRUD: create/list/get/PATCH (name, agent_provider); pause/resume/delete | |
 | Materialize: AGENTS from cabinet workspace-docs + packages/sandbox | bubblewrap/k8s isolator |
-| `container_ref=local-ws:{workspace_key}` | |
+| `container_ref=object-ws:{workspace_key}` (parse accepts `local-ws:`) | |
 | Triggers: enqueue + list + dispatch + signed webhook/telegram ingress + admin drain + worker | External broker (Kafka/SQS) |
 | Outbox-lite: `attempts` / `lease_until` / `available_at` / `last_error` + SKIP LOCKED claim | |
 | Platform events bus + cabinet SPI deliver (audit) | MCP stdio handler protocol; bubblewrap |
@@ -62,7 +62,7 @@ Project = workspace + `local-ws:{key}` container ref внутри CabinetInstanc
 | ID | Форма | Статус |
 |----|-------|--------|
 | C-PROJECT | entity + lifecycle API | **live** (subset) |
-| C-MATERIALIZE | FS layout + paths | **live** (local-ws; no pod) |
+| C-MATERIALIZE | FS layout + paths | **live** (object-ws + local sandbox extract; no pod) |
 | C-TRIGGERS | enqueue + list + dispatch/drain + admin drain + opt-in worker + outbox lease; pause-gated runtime kinds | **live** (subset; outbox-lite) |
 | C-ATTACH | upload + list + download + storage_ref validation on chat | **live** (subset) |
 
@@ -124,11 +124,11 @@ apps/api/.env.example
 | telegram.message trigger | done | dispatch like chat.message; HMAC ingress like webhook |
 | Webhook HMAC ingress | done | company policy secret + X-Prodavan-Signature |
 | Attachment DELETE | done | DB + inbox file; Flutter pending remove calls DELETE |
-| Object store (MinIO) как SoT blobs | **partial (P0)** | attach/packages + materialize + hydrate + delete_prefix; storage_bytes projects+packages; live MinIO mount — hole |
+| Object store (MinIO) как SoT blobs | **partial (P0)** | attach/packages + materialize + hydrate; delete wipe verified + Celery retry (cabinet packages + project tree); live MinIO mount — hole |
 | Durable bus = Kafka (triggers + platform events) | **partial (P0)** | dual-write + consumer `kick`\|`dispatch` (`claim_by_id`); PG outbox still claim SoT |
-| Stack deploy brokers | **partial (P0)** | compose stack + k8s sketches + minio-init Job; Helm/prod — hole |
+| Stack deploy brokers | **partial (P0)** | compose stack + k8s sketches + readiness REQUIRED envs; Helm/prod — hole |
 
-| Celery jobs (drain / dispatch / idle / rematerialize) | **partial (P0 w4)** | CLI bootstrap + beat from settings; in-process fallback when Celery off |
+| Celery jobs (drain / dispatch / idle / rematerialize / wipe) | **partial (P0 w4)** | CLI + beat + job locks + wipe retries; in-process fallback when Celery off |
 
 ## Проверка
 

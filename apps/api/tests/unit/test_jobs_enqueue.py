@@ -82,3 +82,23 @@ def test_enqueue_wipe_cabinet_packages_passes_task_id(monkeypatch: pytest.Monkey
     out = enqueue_mod.enqueue_wipe_cabinet_packages("cab-1")
     assert out["task_id"] == wipe_cabinet_packages_task_id("cab-1")
     assert sent[0]["name"] == job_names.WIPE_CABINET_PACKAGES
+
+
+def test_enqueue_wipe_project_tree_passes_task_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    from prodavan.core.jobs.idempotency import wipe_project_tree_task_id
+
+    sent: list[dict] = []
+
+    class _Mgr:
+        enabled = True
+
+        def send_task(self, name, args=None, kwargs=None, *, task_id=None):
+            sent.append({"name": name, "args": args, "task_id": task_id})
+
+    monkeypatch.setattr(
+        "prodavan.core.infra.worker_manager.get_worker_manager",
+        lambda: _Mgr(),
+    )
+    out = enqueue_mod.enqueue_wipe_project_tree("ws-1")
+    assert out["task_id"] == wipe_project_tree_task_id("ws-1")
+    assert sent[0]["name"] == job_names.WIPE_PROJECT_TREE

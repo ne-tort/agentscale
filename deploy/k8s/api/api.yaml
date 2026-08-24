@@ -48,6 +48,14 @@ spec:
               value: prodavan-kafka:9092
             - name: INGRESS_RATE_LIMIT_PER_MINUTE
               value: "120"
+            - name: REDIS_REQUIRED
+              value: "true"
+            - name: OBJECT_STORE_REQUIRED
+              value: "true"
+            - name: CELERY_REQUIRED
+              value: "true"
+            - name: KAFKA_REQUIRED
+              value: "true"
           envFrom:
             - secretRef:
                 name: prodavan-api

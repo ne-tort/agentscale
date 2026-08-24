@@ -56,6 +56,14 @@ spec:
               value: "true"
             - name: KAFKA_BOOTSTRAP_SERVERS
               value: prodavan-kafka:9092
+            - name: REDIS_REQUIRED
+              value: "true"
+            - name: OBJECT_STORE_REQUIRED
+              value: "true"
+            - name: CELERY_REQUIRED
+              value: "true"
+            - name: KAFKA_REQUIRED
+              value: "true"
             # DATABASE_URL, S3_* secrets, Keycloak — from existing API Secret/ConfigMap
           envFrom:
             - secretRef:

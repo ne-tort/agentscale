@@ -75,7 +75,7 @@ def test_project_create_materialize_lifecycle(client: TestClient) -> None:
     body = created.json()
     project_id = body["id"]
     assert body["status"] == "active"
-    assert body["container_ref"].startswith("local-ws:")
+    assert body["container_ref"].startswith("object-ws:")
     ws_root = Path(body["materialize"]["workspace_root"])
     assert ws_root.is_dir()
     assert (ws_root / "AGENTS.md").is_file()

@@ -33,6 +33,14 @@ def cabinet_packages_prefix(cabinet_id: str) -> str:
     return f"cabinet_packages/{cabinet_id}/"
 
 
+def project_tree_prefix(workspace_key: str) -> str:
+    """Prefix for all blobs of one project workspace tree."""
+    key = (workspace_key or "").strip().strip("/")
+    if not key or ".." in key.split("/"):
+        raise ValueError(f"unsafe workspace_key: {workspace_key!r}")
+    return f"projects/{key}/"
+
+
 def parse_storage_ref(ref: str) -> str:
     """Map storage_ref → object key.
 

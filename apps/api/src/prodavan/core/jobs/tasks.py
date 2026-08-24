@@ -110,3 +110,10 @@ def register_tasks(app) -> None:
 
         logger.info("celery task %s cabinet_id=%s", job_names.WIPE_CABINET_PACKAGES, cabinet_id)
         return wipe_fn(cabinet_id)
+
+    @app.task(name=job_names.WIPE_PROJECT_TREE, bind=False)
+    def wipe_project_tree(workspace_key: str) -> dict[str, Any]:
+        from prodavan.application.projects.project_wipe import wipe_project_tree as wipe_fn
+
+        logger.info("celery task %s workspace_key=%s", job_names.WIPE_PROJECT_TREE, workspace_key)
+        return wipe_fn(workspace_key)

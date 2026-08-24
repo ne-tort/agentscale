@@ -7,6 +7,7 @@ from prodavan.core.jobs.enqueue import (
     enqueue_rematerialize_project,
     enqueue_trigger_drain,
     enqueue_wipe_cabinet_packages,
+    enqueue_wipe_project_tree,
 )
 
 __all__ = [
@@ -15,5 +16,6 @@ __all__ = [
     "enqueue_rematerialize_project",
     "enqueue_trigger_drain",
     "enqueue_wipe_cabinet_packages",
+    "enqueue_wipe_project_tree",
     "names",
 ]

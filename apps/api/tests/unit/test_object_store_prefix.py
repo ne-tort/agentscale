@@ -51,3 +51,20 @@ def test_delete_prefix_verified_reports_ok(tmp_path: Path) -> None:
     assert out["ok"] is True
     assert out["deleted"] >= 1
     assert out["remaining"] == 0
+
+
+def test_project_tree_prefix_and_wipe(tmp_path: Path) -> None:
+    from prodavan.application.projects.project_wipe import wipe_project_tree
+    from prodavan.core.infra.object_keys import project_tree_prefix
+    from prodavan.core.infra.object_storage_manager import ObjectStorageManager, set_object_storage
+
+    assert project_tree_prefix("ws1") == "projects/ws1/"
+    mgr = ObjectStorageManager(backend="local", storage_root=tmp_path, mirror_local=False)
+    mgr._primary = LocalFsObjectStore(tmp_path)
+    mgr._local = LocalFsObjectStore(tmp_path)
+    set_object_storage(mgr)
+    mgr.put_bytes_sync("projects/ws1/workspace/inbox/a.txt", b"a")
+    out = wipe_project_tree("ws1")
+    assert out["ok"] is True
+    assert out["remaining"] == 0
+    set_object_storage(None)

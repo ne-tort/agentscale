@@ -31,15 +31,18 @@
 | C-AGENT-EVENT | L08 | frozen `AgentEvent` | L09 UI, L04 metrics | adapter-port | **live** (subset) |
 | C-USAGE | L08 | usage records | L04 metrics | [usage-metrics](../08-agent-providers/usage-metrics.md) | **live** (subset) |
 | C-PROJECT-CHAT | L08 | `POST /chat`, `POST /chat/stream` (SSE), `GET /chat/transcript` | L05 UI, L09 | adapter-port | **live** (subset) |
-| C-OBJECT-STORE | P0 / L00 | MinIO/S3 put/get/delete + object refs (no local SoT) | L07 attach/materialize, L06 packages | [13 stack](../13-platform-infra/stack.md) | **live** (subset: manager + attach/packages/materialize; live mount hole) |
+| C-OBJECT-STORE | P0 / L00 | MinIO/S3 put/get/delete + object refs (no local SoT) | L07 attach/materialize, L06 packages | [13 stack](../13-platform-infra/stack.md) | **live** (subset: manager + attach/packages/materialize/wipes; live mount hole) |
 | C-EVENT-BUS | P0 / L00 | Kafka envelopes: project triggers + platform events | L07, L06 SPI, L09 | [13](../13-platform-infra/), [triggers](../06-projects-runtime/triggers.md) | **live** (subset: dual-write after commit + kick\|dispatch consumer) |
-| C-JOBS | P0 / L00 | Celery tasks: drain / dispatch_trigger / idle / rematerialize / wipe | L07, L08 | [13](../13-platform-infra/), [P0](P0-platform-infra.md) | **live** (subset: CLI + beat + task_id + job locks; Helm hole) |
+| C-JOBS | P0 / L00 | Celery tasks: drain / dispatch / idle / rematerialize / wipe_* | L07, L08 | [13](../13-platform-infra/), [P0](P0-platform-infra.md) | **live** (subset: CLI + beat + task_id + job locks; Helm hole) |
 | C-CACHE | P0 / L00 | Redis cache / short locks / Celery broker conventions | L00 core, workers | [13](../13-platform-infra/) | **live** (subset: get/set + lock + rate_limit; ingress + kick + job locks) |
 
 ## Compatibility log
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-24 | C-MATERIALIZE / C-OBJECT-STORE | new `container_ref=object-ws:`; dual-read `local-ws:` | no |
+| 2026-08-24 | C-OBJECT-STORE / C-JOBS | project delete wipe verified + Celery `wipe_project_tree` retry | no |
+| 2026-08-24 | P0 deploy | API/Celery sketches set REDIS/OBJECT_STORE/CELERY/KAFKA_REQUIRED | no |
 | 2026-08-24 | C-OBJECT-STORE / C-JOBS | `delete_prefix_verified` + Celery `wipe_cabinet_packages` retry on archive | no |
 | 2026-08-24 | C-JOBS / C-CACHE | Redis job lock coalesce inside trigger_drain / idle_pause_sweep | no |
 | 2026-08-24 | P0 deploy | Postgres/Keycloak egress NetworkPolicy CIDR placeholders | no |

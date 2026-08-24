@@ -10,6 +10,7 @@ from prodavan.core.jobs.idempotency import (
     dispatch_trigger_task_id,
     rematerialize_project_task_id,
     wipe_cabinet_packages_task_id,
+    wipe_project_tree_task_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,5 +93,25 @@ def enqueue_wipe_cabinet_packages(cabinet_id: str) -> dict[str, Any]:
         "enqueued": True,
         "task": job_names.WIPE_CABINET_PACKAGES,
         "cabinet_id": cid,
+        "task_id": task_id,
+    }
+
+
+def enqueue_wipe_project_tree(workspace_key: str) -> dict[str, Any]:
+    """Retry GC for project object-store tree after incomplete delete wipe."""
+    from prodavan.core.infra.worker_manager import get_worker_manager
+
+    key = (workspace_key or "").strip()
+    if not key:
+        return {"enqueued": False, "reason": "missing_workspace_key"}
+    mgr = get_worker_manager()
+    if mgr is None or not mgr.enabled:
+        return {"enqueued": False, "reason": "celery_disabled", "workspace_key": key}
+    task_id = wipe_project_tree_task_id(key)
+    mgr.send_task(job_names.WIPE_PROJECT_TREE, args=[key], task_id=task_id)
+    return {
+        "enqueued": True,
+        "task": job_names.WIPE_PROJECT_TREE,
+        "workspace_key": key,
         "task_id": task_id,
     }
