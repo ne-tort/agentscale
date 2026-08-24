@@ -32,9 +32,9 @@
 | I9 | Redpanda HA (≥3 / anti-affinity) | deferred | local uses overprovisioned single node |
 | I10 | Keycloak in-cluster | open | AUTH_MODE=test + `seed_dev_identity.sh` (company+AI key+cabinet+e2e chat) |
 | I11 | Alembic history rewrite vs old PVC | **done** (ops) | `reset_dev_postgres.sh` for legacy `20260808*`/`2026082101` → stub chain |
-| I12 | GHCR API/web image lag | **done** (ops path) | CI `API_BASE=http://prodavan.local:8088/api/v1`; `import_local_app_images_k3d.sh` for local rebuild |
-| I13 | Terraform apply = full stack | **done** (subset) | `bootstrap_gitops=true` → from_scratch_local; cloud modules still skeletons |
-| I14 | Recover after reboot | **done** (subset) | `recover_local_stack.sh`: platform import + Argo + smoke |
+| I12 | GHCR API/web image lag | **done** (ops path) | dev overlay `:local` tag + `import_local_app_images_k3d.sh`; GHCR pulls `:latest` → retag `:local` |
+| I13 | Terraform apply = full stack | **done** (subset) | `bootstrap_gitops=true` → from_scratch_local → smoke + **SEED_UI** + local image build |
+| I14 | Recover after reboot | **done** (subset) | `recover_local_stack.sh`: platform import + Argo + smoke + **seed** |
 | I15 | Argo Job churn / selfHeal fight | **done** (subset) | Sync hooks + ignoreDifferences; wait script no longer apply -k by default |
 | I16 | Secrets in git (dev) | open | SealedSecrets/SOPS deferred; rotate before shared cluster |
 
@@ -58,6 +58,8 @@ kubectl -n prodavan rollout status sts/prodavan-kafka
 curl -sS -H 'Host: prodavan.local' http://127.0.0.1:8088/health/ready
 ```
 
-После reboot хоста: `bash infra/scripts/recover_local_stack.sh`.
+После reboot хоста: `bash infra/scripts/recover_local_stack.sh` (печатает JWT для UI).
 
-Обновлено: 2026-08-24
+Terraform (local, WSL): `bootstrap_gitops=true` → GitOps + smoke + seed + `BUILD_LOCAL_IMAGES` без GHCR.
+
+Обновлено: 2026-08-24 (gitops-v3 seed chain)

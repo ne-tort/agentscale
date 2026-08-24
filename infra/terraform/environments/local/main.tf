@@ -95,7 +95,7 @@ resource "terraform_data" "gitops_local" {
   input = {
     cluster = var.cluster_name
     # Bump to re-run: terraform apply -replace=terraform_data.gitops_local[0]
-    rev     = "gitops-v2"
+    rev     = "gitops-v3-seed-ui"
   }
 
   depends_on = [module.k3s_local]
@@ -103,10 +103,12 @@ resource "terraform_data" "gitops_local" {
   provisioner "local-exec" {
     interpreter = ["bash", "-c"]
     environment = {
-      KUBECONFIG     = local.kubeconfig_path
-      K3D_CLUSTER    = var.cluster_name
-      FROM_TERRAFORM = "1"
-      HTTP_PORT      = tostring(var.http_port)
+      KUBECONFIG           = local.kubeconfig_path
+      K3D_CLUSTER          = var.cluster_name
+      FROM_TERRAFORM       = "1"
+      HTTP_PORT            = tostring(var.http_port)
+      SEED_UI              = "1"
+      BUILD_LOCAL_IMAGES   = "1"
     }
     command = "bash '${local.remote_repo_path}/infra/scripts/from_scratch_local.sh'"
   }
@@ -117,7 +119,7 @@ resource "terraform_data" "gitops_ssh" {
 
   input = {
     cluster = var.cluster_name
-    rev     = "gitops-v2"
+    rev     = "gitops-v3-seed-ui"
   }
 
   depends_on = [module.k3s_local]
@@ -139,6 +141,8 @@ resource "terraform_data" "gitops_ssh" {
       "export K3D_CLUSTER='${var.cluster_name}'",
       "export HTTP_PORT='${var.http_port}'",
       "export FROM_TERRAFORM=1",
+      "export SEED_UI=1",
+      "export BUILD_LOCAL_IMAGES=1",
       "bash '${local.remote_repo_path}/infra/scripts/from_scratch_local.sh'",
     ]
   }

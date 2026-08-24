@@ -31,8 +31,8 @@ kubectl wait --for=condition=Ready nodes --all --timeout=60s
 echo "PASS: k3d recover after stop"
 
 if [[ "${TEST_WORKLOADS:-0}" == "1" ]]; then
-  echo "TEST 4: workloads + smoke"
-  bash "${SCRIPT_DIR}/wait_prodavan_ready.sh"
-  bash "${SCRIPT_DIR}/smoke_ingress.sh"
+  echo "TEST 4: workloads + smoke + seed"
+  export SEED_UI=1
+  bash "${SCRIPT_DIR}/recover_local_stack.sh"
   echo "PASS: workloads after recover"
 fi

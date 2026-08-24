@@ -47,11 +47,20 @@ fi
 
 pulled=()
 for img in "${IMAGES[@]}"; do
-  echo "docker pull ${img}"
-  if docker pull "$img"; then
+  pull_ref="$img"
+  if [[ "$img" == *":local" ]]; then
+    pull_ref="${img%:local}:latest"
+    echo "docker pull ${pull_ref} (tag → ${img})"
+  else
+    echo "docker pull ${pull_ref}"
+  fi
+  if docker pull "$pull_ref"; then
+    if [[ "$pull_ref" != "$img" ]]; then
+      docker tag "$pull_ref" "$img"
+    fi
     pulled+=("$img")
   else
-    echo "WARN: pull failed ${img}" >&2
+    echo "WARN: pull failed ${pull_ref}" >&2
   fi
 done
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GitOps layer only (Argo + images + wait + smoke). Cluster must already exist.
+# GitOps layer only (Argo + images + wait + smoke + optional UI seed). Cluster must already exist.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,13 +23,8 @@ if [[ -n "${GHCR_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
   bash "${SCRIPT_DIR}/import_overlay_images.sh" || echo "WARN: import incomplete"
   wait_nodes_schedulable 60
 else
-  echo "WARN: GHCR_TOKEN unset — private image pulls may fail; importing local tags if present"
-  CLUSTER="${K3D_CLUSTER:-prodavan-dev}"
-  for img in ghcr.io/ne-tort/prodavan-api:latest ghcr.io/ne-tort/prodavan-web:latest; do
-    if docker image inspect "$img" >/dev/null 2>&1; then
-      k3d image import "$img" -c "$CLUSTER" || true
-    fi
-  done
+  echo "==> Local app images (no GHCR_TOKEN)"
+  bash "${SCRIPT_DIR}/ensure_local_app_images_k3d.sh"
 fi
 
 echo "==> Argo CD + Application"
@@ -41,5 +36,12 @@ bash "${SCRIPT_DIR}/wait_prodavan_ready.sh"
 echo "==> Smoke"
 bash "${SCRIPT_DIR}/smoke_ingress.sh"
 
+if [[ "${SKIP_SEED:-0}" != "1" && "${SEED_UI:-1}" == "1" ]]; then
+  echo "==> UI seed (SEED_UI=1)"
+  bash "${SCRIPT_DIR}/seed_dev_identity.sh"
+else
+  echo "UI seed skipped (SEED_UI=${SEED_UI:-0} SKIP_SEED=${SKIP_SEED:-0})"
+fi
+
 echo "GitOps bootstrap OK (KUBECONFIG=${KUBECONFIG})"
-echo "Optional UI seed: bash infra/scripts/seed_dev_identity.sh"
+echo "UI: http://${SMOKE_HOST:-prodavan.local}:${HTTP_PORT:-8088}/"

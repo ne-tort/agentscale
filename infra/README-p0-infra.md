@@ -40,13 +40,21 @@ Brokers live under `infra/k3s/base/platform/` (StatefulSets + PVC). API ConfigMa
 
 ## Touchable local UI
 
+One-shot after cluster is up (included in `bootstrap_gitops.sh` / `recover_local_stack.sh` when `SEED_UI=1`):
+
 ```bash
-bash infra/scripts/seed_dev_identity.sh
-# Optional: rebuild web with correct API_BASE and import into k3d
-bash infra/scripts/import_local_app_images_k3d.sh
+bash infra/scripts/recover_local_stack.sh
+# or terraform: bootstrap_gitops=true → from_scratch_local (SEED_UI=1, BUILD_LOCAL_IMAGES=1)
 # Open http://prodavan.local:8088/
-# API base URL: http://prodavan.local:8088/api/v1
-# Home → Platform Admin / Company admin / Employee — paste JWT from seed
+# Paste JWTs printed by seed_dev_identity.sh
+```
+
+Manual seed only:
+
+```bash
+SKIP_SEED=1 bash infra/scripts/recover_local_stack.sh   # stack without seed
+bash infra/scripts/seed_dev_identity.sh                 # seed alone
+bash infra/scripts/import_local_app_images_k3d.sh       # rebuild web+api + import
 ```
 
 ## Notes / holes

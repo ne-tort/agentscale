@@ -9,7 +9,7 @@ patches:
 images:
   - name: ghcr.io/ne-tort/prodavan-api
     newName: ghcr.io/ne-tort/prodavan-api
-    newTag: latest
+    newTag: local
   - name: ghcr.io/ne-tort/prodavan-web
     newName: ghcr.io/ne-tort/prodavan-web
-    newTag: latest
+    newTag: local
