@@ -42,6 +42,7 @@
 | I19 | Argo repo-server → GitHub TLS | **done** (ops subset) | `reposerver.git.request.timeout=90s` + git retries; wait/recover accept Healthy+ComparisonError if core pods Ready; local Application `prune: false` |
 | I20 | Celery readiness vs broker | **done** | `inspect ping` readiness; liveness is PID 1 only (avoid restart storm when Redis blips) |
 | I21 | Celery worker+beat in one pod | **done** (local) | split into `prodavan-celery-worker` + `prodavan-celery-beat`; broker-recover test covers both deployments |
+| I22 | `kubectl apply -k` immutable hook Jobs | **done** (ops) | `apply_overlay_safe.sh` deletes fixed-name init Jobs before apply (kafka/minio) |
 
 ## Nice / later
 
@@ -69,4 +70,4 @@ Broker/API pod failure: `bash infra/scripts/test_broker_pod_recover.sh` (redis/m
 
 Terraform (local): `bash infra/scripts/terraform_apply_local.sh` или `bootstrap_gitops=true` → verify_touchable_ui; Windows: `build_local_app_images.ps1` first.
 
-Обновлено: 2026-08-24 (celery worker/beat split + recover coverage)
+Обновлено: 2026-08-24 (celery split + safe apply for hook jobs)

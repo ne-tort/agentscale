@@ -42,9 +42,17 @@ if ! echo "$topics" | grep -q 'prodavan.ops.health'; then
   rpk topic create prodavan.ops.health -p 1 -r 1 >/dev/null 2>&1 || true
 fi
 PROBE="probe-$(date +%s)-$$"
-printf '%s\n' "$PROBE" | rpk_in topic produce prodavan.ops.health >/dev/null
-got="$(rpk topic consume prodavan.ops.health --num 1 --offset -1 --format '%v' --fetch-max-wait 8s 2>/dev/null | tr -d '\r' | tail -1 || true)"
-if [[ "$got" != "$PROBE" ]]; then
+ok=0
+for i in 1 2 3; do
+  printf '%s\n' "$PROBE" | rpk_in topic produce prodavan.ops.health >/dev/null 2>&1 || true
+  got="$(rpk topic consume prodavan.ops.health --num 1 --offset -1 --format '%v' --fetch-max-wait 8s 2>/dev/null | tr -d '\r' | tail -1 || true)"
+  if [[ "$got" == "$PROBE" ]]; then
+    ok=1
+    break
+  fi
+  sleep 2
+done
+if [[ "$ok" != "1" ]]; then
   echo "FAIL: kafka probe roundtrip got=${got} want=${PROBE}" >&2
   exit 1
 fi

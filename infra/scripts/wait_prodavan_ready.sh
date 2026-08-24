@@ -17,8 +17,8 @@ export KUBECONFIG="${KUBECONFIG:-${ROOT}/infra/.kube/prodavan-k3d.yaml}"
 
 apply_fallback() {
   if [[ "${ALLOW_KUSTOMIZE_FALLBACK:-0}" == "1" ]]; then
-    echo "Fallback: kubectl apply -k (ALLOW_KUSTOMIZE_FALLBACK=1; Argo selfHeal may revert)"
-    kubectl apply -k "${ROOT}/infra/k3s/overlays/dev"
+    echo "Fallback: safe apply -k (ALLOW_KUSTOMIZE_FALLBACK=1; Argo selfHeal may revert)"
+    bash "${SCRIPT_DIR}/apply_overlay_safe.sh"
     return 0
   fi
   echo "Argo Application not Healthy/Synced — refusing kubectl apply -k (selfHeal would fight)."
@@ -67,7 +67,7 @@ if kubectl -n argocd get application prodavan-dev >/dev/null 2>&1; then
   fi
 else
   echo "No Argo Application — applying overlay once (bootstrap before Argo)"
-  kubectl apply -k "${ROOT}/infra/k3s/overlays/dev"
+  bash "${SCRIPT_DIR}/apply_overlay_safe.sh"
 fi
 
 echo "==> Rollout status"
