@@ -12,6 +12,9 @@ bash "${SCRIPT_DIR}/smoke_ingress.sh"
 echo "==> kafka topics + durability knobs"
 bash "${SCRIPT_DIR}/verify_kafka.sh"
 
+echo "==> celery worker + beat"
+bash "${SCRIPT_DIR}/verify_celery.sh"
+
 echo "==> seed + e2e chat"
 bash "${SCRIPT_DIR}/seed_dev_identity.sh" | tee /tmp/prodavan_verify_ui.log
 
