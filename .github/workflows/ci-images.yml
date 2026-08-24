@@ -44,6 +44,26 @@ jobs:
 
       - uses: docker/setup-buildx-action@v3
 
+      - name: Sanitize Docker config (no desktop.exe credsStore)
+        run: |
+          set -euo pipefail
+          mkdir -p "${HOME}/.docker"
+          python3 - <<'PY'
+          import json, os
+          path = os.path.expanduser("~/.docker/config.json")
+          cfg = {}
+          if os.path.isfile(path):
+              with open(path, encoding="utf-8") as f:
+                  cfg = json.load(f)
+          cfg.pop("credsStore", None)
+          cfg.pop("credHelpers", None)
+          cfg.setdefault("auths", {})
+          with open(path, "w", encoding="utf-8") as f:
+              json.dump(cfg, f, indent=2)
+              f.write("\n")
+          print("docker config sanitized:", path)
+          PY
+
       - uses: docker/login-action@v3
         if: steps.meta.outputs.push == 'true'
         with:
@@ -87,6 +107,26 @@ jobs:
           fi
 
       - uses: docker/setup-buildx-action@v3
+
+      - name: Sanitize Docker config (no desktop.exe credsStore)
+        run: |
+          set -euo pipefail
+          mkdir -p "${HOME}/.docker"
+          python3 - <<'PY'
+          import json, os
+          path = os.path.expanduser("~/.docker/config.json")
+          cfg = {}
+          if os.path.isfile(path):
+              with open(path, encoding="utf-8") as f:
+                  cfg = json.load(f)
+          cfg.pop("credsStore", None)
+          cfg.pop("credHelpers", None)
+          cfg.setdefault("auths", {})
+          with open(path, "w", encoding="utf-8") as f:
+              json.dump(cfg, f, indent=2)
+              f.write("\n")
+          print("docker config sanitized:", path)
+          PY
 
       - uses: docker/login-action@v3
         if: steps.meta.outputs.push == 'true'

@@ -1,39 +1,43 @@
 # Self-hosted GitHub Actions runner (OUTSIDE k3s)
 
-## Канон: Kali WSL docker + `network_mode: host`
+## Канон: процесс на Kali WSL (не Docker)
 
-На этой машине **Docker Desktop host-net ломает TLS к GitHub**: TCP к `:443` есть, handshake обрывается (`unexpected eof` / runner `SSL connection could not be established`). DNS при этом резолвит нормально — проблема не в nameserver.
+На этой машине:
 
-Kali host и контейнер с `--network host` на Kali: `https://api.github.com/zen` → 200.
+1. **Docker Desktop** — TLS к GitHub ломается (`SSL connection could not be established` / EOF). DNS при этом резолвит — проблема не в nameserver.
+2. **Контейнер на Kali `network_mode: host`** — TLS OK, но listener **умирает mid-job** → GitHub `Session Conflict` / offline busy.
+3. **Хост Kali** — TLS OK, jobs стабильны. Docker-задачи (Postgres CI, terraform image) идут через `/var/run/docker.sock`.
 
 ```bash
-# из Kali (PATH без Docker Desktop wrappers)
-export PATH=/usr/bin:/bin:/usr/sbin:/sbin
+# из Kali
+export PATH=/home/www/.local/bin:/usr/bin:/bin
 cd /mnt/c/Users/qwerty/git/Commerce/prodavan/infra/github-runner
-# .env: ACCESS_TOKEN или RUNNER_TOKEN, RUNNER_NAME=wsl-prodavan-kali3
-# Скрипт: build --network=host, preload 2.336.0, fresh volume, DISABLE_RUNNER_UPDATE
-bash start-kali.sh
-docker logs -f prodavan-gha-runner
+# .env: REPO_URL + ACCESS_TOKEN, RUNNER_NAME=wsl-prodavan-host
+# jq в ~/.local/bin; Python через venv в workflow (PEP 668)
+bash start-kali-host.sh
+tail -f ~/prodavan-actions-runner/runner.out
 ```
 
-Ожидать: `GitHub TLS OK`, затем `Listening for Jobs` на версии `2.336.0`.
+Ожидать: `Listening for Jobs` на `2.336.0`.  
+`DISABLE_RUNNER_UPDATE=1` в `~/prodavan-actions-runner/.env`.
 
-Тот же Docker, что и k3d → Deploy может `k3d image import`, kubectl на `127.0.0.1:6443`.
+Тот же Docker, что и k3d → Deploy: `k3d image import`, kubectl `127.0.0.1:6443`.
 
-Entrypoint: `FORCE_PUBLIC_DNS` (1.1.1.1/8.8.8.8), `wait_github_tls`, пишет `DISABLE_RUNNER_UPDATE=1` в `/opt/actions-runner/.env` (docker `-e` недостаточно).
+## Fallback: Docker host-net (только если host runner недоступен)
 
-## Не использовать Docker Desktop для runner на этой машине
+`bash start-kali.sh` — см. скрипт; не канон на этой машине.
 
-`desktop-linux` + host net: SSL EOF к github.com / broker.actions.githubusercontent.com.  
-Если когда-нибудь Desktop TLS починится — можно снова, но сейчас канон = Kali.
+## Не использовать Docker Desktop для runner
+
+`desktop-linux` + host net: SSL EOF к github.com / broker.actions.githubusercontent.com.
 
 ## Session conflict
 
-Если GitHub показывает runner busy/offline и лог `A session for this runner already exists`:
+Если GitHub показывает runner busy/offline и `A session for this runner already exists`:
 
-1. Cancel stuck workflow run.
-2. Новый `RUNNER_NAME` в `.env`, wipe volume `github-runner_runner-home`.
-3. Удалить offline runners: `gh api repos/ne-tort/prodavan/actions/runners`.
+1. Не крутить cancel-in-progress на единственном runner (в Gate уже `false`).
+2. Новый `RUNNER_NAME`, удалить offline runner через API, подождать ~3–5 мин.
+3. `gh api repos/ne-tort/prodavan/actions/runners`.
 
 ## Token
 

@@ -11,13 +11,14 @@ UI: `http://prodavan.local:8088/` (`Host: prodavan.local`). JWT: `bash infra/scr
 
 | Компонент | Где | Docker |
 |-----------|-----|--------|
-| Self-hosted GHA runner `prodavan-gha-runner` | **Kali WSL**, `network_mode: host` | dockerd Kali |
+| Self-hosted GHA runner | **Kali WSL host** (`~/prodavan-actions-runner`, `start-kali-host.sh`) | Docker socket → dockerd Kali |
 | k3d `prodavan-dev` | Kali WSL | тот же dockerd |
+| ~~Runner в Docker (host-net)~~ | **не канон** | контейнер убивался mid-job → Session Conflict |
 | ~~Runner на Docker Desktop~~ | **не использовать** | TLS handshake EOF к GitHub (DNS ок, TCP ок) |
 
-Почему Kali: `curl https://api.github.com` с Desktop host-net и Windows schannel падает; с Kali host / host-net контейнера — 200. Entrypoint проверяет TLS до `Listening for Jobs`.
+Почему Kali host (не Docker Desktop): TLS к GitHub с Desktop/schannel падает. Почему не контейнер на host-net: listener стабильно умирал при старте job (Conflict). Канон: процесс на хосте Kali + `/var/run/docker.sock` для CI Postgres/terraform.
 
-Запуск раннера: [`infra/github-runner/README.md`](../../infra/github-runner/README.md).
+Запуск: `bash infra/github-runner/start-kali-host.sh` — см. [`infra/github-runner/README.md`](../../infra/github-runner/README.md).
 
 Проверено 2026-08-24: `test_k3d_recover.sh` — stop → ensure → nodes Ready (~36s). Контейнеры k3d: `restart=unless-stopped`.
 
