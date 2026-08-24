@@ -69,6 +69,19 @@ jobs:
           PY
 
       - uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+
+      - name: Warm base images (WSL TLS flakiness)
+        run: |
+          set -euo pipefail
+          for img in python:3.12-slim-bookworm; do
+            for i in 1 2 3 4 5; do
+              docker pull "$img" && break
+              echo "retry $i $img"
+              sleep 10
+            done
+          done
 
       - name: Sanitize Docker config (no desktop.exe credsStore)
         run: |
@@ -103,6 +116,8 @@ jobs:
           context: .
           file: apps/api/Dockerfile
           push: ${{ steps.meta.outputs.push }}
+          provenance: false
+          sbom: false
           tags: |
             ${{ steps.meta.outputs.api }}:${{ steps.meta.outputs.tag }}
             ${{ steps.meta.outputs.api }}:latest
@@ -163,6 +178,30 @@ jobs:
           PY
 
       - uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: network=host
+
+      - name: Warm base images (WSL TLS flakiness)
+        run: |
+          set -euo pipefail
+          for img in python:3.12-slim-bookworm; do
+            for i in 1 2 3 4 5; do
+              docker pull "$img" && break
+              echo "retry $i $img"
+              sleep 10
+            done
+          done
+
+      - name: Warm base images (WSL TLS flakiness)
+        run: |
+          set -euo pipefail
+          for img in nginx:1.27-alpine debian:bookworm-slim; do
+            for i in 1 2 3 4 5; do
+              docker pull "$img" && break
+              echo "retry $i $img"
+              sleep 10
+            done
+          done
 
       - name: Sanitize Docker config (no desktop.exe credsStore)
         run: |
@@ -198,6 +237,8 @@ jobs:
           file: apps/flutter/Dockerfile
           target: runtime
           push: ${{ steps.meta.outputs.push }}
+          provenance: false
+          sbom: false
           build-args: |
             API_BASE=http://prodavan.local:8088/api/v1
             BUILD_ID=${{ github.sha }}
