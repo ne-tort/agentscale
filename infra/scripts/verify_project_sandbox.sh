@@ -86,4 +86,36 @@ PY
 kubectl -n "$NS" exec deploy/prodavan-api -- test -d "/data/storage/projects/${KEY}/workspace" \
   && echo "ok PVC mirror /data/storage/projects/${KEY}/workspace"
 
+echo "==> MinIO SoT (AGENTS.md via S3 backend, not local fallback)"
+kubectl -n "$NS" exec -i deploy/prodavan-api -- python - <<PY
+import asyncio
+from prodavan.config.settings import settings
+from prodavan.core.infra.object_keys import workspace_object_key
+from prodavan.core.infra.object_storage_manager import ObjectStorageManager
+
+async def main() -> None:
+    mgr = ObjectStorageManager(
+        backend="s3",
+        storage_root=settings.storage_root,
+        s3_endpoint_url=settings.s3_endpoint_url,
+        s3_access_key=settings.s3_access_key,
+        s3_secret_key=settings.s3_secret_key,
+        s3_bucket=settings.s3_bucket,
+        s3_region=settings.s3_region,
+        mirror_local=False,
+        required=True,
+    )
+    await mgr.startup()
+    if mgr.backend_name != "s3":
+        raise SystemExit(f"FAIL: backend={mgr.backend_name} (expected s3)")
+    key = workspace_object_key(workspace_key="${KEY}", relative_path="AGENTS.md")
+    raw = mgr.get_bytes_sync(key)
+    if not raw:
+        raise SystemExit("FAIL: empty AGENTS.md in MinIO")
+    print("ok minio", key, "bytes", len(raw))
+    await mgr.shutdown()
+
+asyncio.run(main())
+PY
+
 echo "verify_project_sandbox OK (object-ws + materialize; no k8s Pod isolator — I8)"

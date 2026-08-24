@@ -174,9 +174,18 @@ spec:
                 sleep 2
               done
               BROKERS=prodavan-kafka:9092
-              # Admin API is not on Kafka 9092. Init Job is a different pod — must use admin.hosts
-              # (rpk defaults to 127.0.0.1:9644 and silently failed until this).
               ADMIN=prodavan-kafka-0.prodavan-kafka.prodavan.svc.cluster.local:9644
+              # Wait for pod DNS + Admin API (9644). cluster info on :9092 can succeed
+              # before advertised hostname / admin.hosts is reachable from this Job.
+              j=0
+              until rpk cluster config get write_caching_default -X brokers=$BROKERS -X admin.hosts=$ADMIN >/dev/null 2>&1; do
+                j=$((j+1))
+                if [ "$j" -gt 60 ]; then
+                  echo "FAIL: admin API not reachable at $ADMIN" >&2
+                  exit 1
+                fi
+                sleep 2
+              done
               rpk topic create prodavan.platform.events -p 1 -r 1 -X brokers=$BROKERS || true
               rpk topic create prodavan.project.triggers -p 1 -r 1 -X brokers=$BROKERS || true
               rpk topic create prodavan.ops.health -p 1 -r 1 -X brokers=$BROKERS || true

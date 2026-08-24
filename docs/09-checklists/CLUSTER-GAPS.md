@@ -28,14 +28,14 @@
 | I5 | Redis/MinIO/Kafka/Celery in k3s | **done** (subset) | Init Job sets durability via **admin.hosts:9644** (not localhost). `prodavan.ops.health` roundtrip. Celery `inspect ping` readiness. |
 | I6 | Базовые экраны projects/runs/variants | done | Flutter screens для отладки |
 | I7 | docker-compose.stack.yml (api+web+pg+P0) | done | smoke без кластера |
-| I8 | Project sandbox Pod/Job isolator | **open** | **as-built:** `container_ref=object-ws:{key}` → `WorkspaceLayoutWriter` dual-write MinIO+PVC (`OBJECT_STORE_MIRROR_LOCAL`); `verify_project_sandbox.sh` green; k8s Pod/Job isolator deferred |
+| I8 | Project sandbox Pod/Job isolator | **open** | as-built object-ws + PVC + MinIO SoT (`verify_project_sandbox.sh` checks AGENTS.md in object store); k8s isolator deferred |
 | I9 | Redpanda HA (≥3 / anti-affinity) | deferred | local uses overprovisioned single node |
 | I10 | Keycloak in-cluster | open | AUTH_MODE=test + `seed_dev_identity.sh` (company+AI key+cabinet+e2e chat) |
 | I11 | Alembic history rewrite vs old PVC | **done** (ops) | `reset_dev_postgres.sh` for legacy `20260808*`/`2026082101` → stub chain |
 | I12 | GHCR API/web image lag | **done** (ops path) | **dev overlay MUST be `:local`** + k3d import. SHA-pin without GHCR publish → ImagePullBackOff (I18). |
 | I13 | Terraform apply = full stack | **done** (subset) | `bootstrap_gitops=true` → verify_touchable_ui; Windows: `build_local_app_images.ps1` first |
 | I14 | Recover after reboot | **done** | `recover_local_stack.sh` (Argo refresh) + `test_k3d_recover.sh TEST_WORKLOADS=1` + `test_broker_pod_recover.sh` + `acceptance_local.sh` (`BROKER_RECOVER_TEST=1`) |
-| I15 | Argo Job churn / selfHeal fight | **done** (subset) | Sync hooks + ignoreDifferences; wait script no longer apply -k by default |
+| I15 | Argo Job churn / selfHeal fight | **done** (subset) | Sync hooks + ignoreDifferences; **no ApplyOutOfSyncOnly** (it skipped Celery probes). Local `prune: false`. Wait script does not `kubectl apply -k` by default |
 | I16 | Secrets in git (dev) | open | SealedSecrets/SOPS deferred; rotate before shared cluster |
 | I17 | API image rebuild without network | **done** (ops) | Dockerfile без apt/curl; `bridge_docker_desktop_image.sh` + verify alembic/celery |
 | I18 | SHA-pin `overlays/dev` without GHCR | **done** (policy) | `kustomization.yaml` stays `newTag: local`. |
@@ -69,4 +69,4 @@ Broker/API pod failure: `bash infra/scripts/test_broker_pod_recover.sh` (redis/m
 
 Terraform (local): `bash infra/scripts/terraform_apply_local.sh` или `bootstrap_gitops=true` → verify_touchable_ui; Windows: `build_local_app_images.ps1` first.
 
-Обновлено: 2026-08-24 (celery probes + kafka produce/consume probe)
+Обновлено: 2026-08-24 (kafka admin wait + sandbox MinIO check + Argo ApplyOutOfSyncOnly off)

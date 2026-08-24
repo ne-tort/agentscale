@@ -38,10 +38,12 @@ echo "$topics" | grep -q 'prodavan.project.triggers' \
   || { echo "FAIL: missing topic prodavan.project.triggers" >&2; exit 1; }
 
 echo "==> produce/consume probe (prodavan.ops.health, isolated from app consumer group)"
-rpk topic create prodavan.ops.health -p 1 -r 1 >/dev/null || true
+if ! echo "$topics" | grep -q 'prodavan.ops.health'; then
+  rpk topic create prodavan.ops.health -p 1 -r 1 >/dev/null 2>&1 || true
+fi
 PROBE="probe-$(date +%s)-$$"
 printf '%s\n' "$PROBE" | rpk_in topic produce prodavan.ops.health >/dev/null
-got="$(rpk topic consume prodavan.ops.health --num 1 --offset -1 --format '%v' --fetch-max-wait 8s 2>/dev/null | tr -d '\r' | tail -1)"
+got="$(rpk topic consume prodavan.ops.health --num 1 --offset -1 --format '%v' --fetch-max-wait 8s 2>/dev/null | tr -d '\r' | tail -1 || true)"
 if [[ "$got" != "$PROBE" ]]; then
   echo "FAIL: kafka probe roundtrip got=${got} want=${PROBE}" >&2
   exit 1
