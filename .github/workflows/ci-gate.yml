@@ -1,0 +1,50 @@
+name: CI Gate
+
+# Required-style check for pull requests (GitHub Free private cannot enforce
+# branch protection). Auto-merge waits for this workflow via workflow_run.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-gate-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  infra:
+    name: infra
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate kustomize, image pins, terraform
+        run: bash infra/scripts/ci_infra_validate.sh
+
+  api:
+    name: api
+    uses: ./.github/workflows/ci-api.yml
+
+  flutter:
+    name: flutter
+    uses: ./.github/workflows/ci-flutter.yml
+
+  schemas:
+    name: schemas
+    uses: ./.github/workflows/ci-schemas.yml
+
+  gate:
+    name: gate
+    needs: [infra, api, flutter, schemas]
+    if: always()
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: All required jobs green
+        run: |
+          set -euo pipefail
+          echo "infra=${{ needs.infra.result }} api=${{ needs.api.result }} flutter=${{ needs.flutter.result }} schemas=${{ needs.schemas.result }}"
+          [[ "${{ needs.infra.result }}" == "success" ]]
+          [[ "${{ needs.api.result }}" == "success" ]]
+          [[ "${{ needs.flutter.result }}" == "success" ]]
+          [[ "${{ needs.schemas.result }}" == "success" ]]
+          echo "CI Gate OK"

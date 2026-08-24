@@ -14,7 +14,7 @@
 | B2 | Dockerfile Flutter web | done | `apps/flutter/Dockerfile` |
 | B3 | Каталог `infra/k3s/` manifests | done | base + overlays/dev + platform brokers |
 | B4 | Stub path `infra/k8s` vs docs `infra/k3s` | done | k8s README → redirect |
-| B5 | CI build/push images | done | `.github/workflows/ci-images.yml` |
+| B5 | CI build/push images | done | `.github/workflows/ci-images.yml` (`:latest` + SHA; overlay не бампается) |
 | B6 | PVC / persistent storage для API | done | PVC + STORAGE_ROOT env |
 
 ## Important
@@ -38,7 +38,7 @@
 | I15 | Argo Job churn / selfHeal fight | **done** (subset) | AppProject `prodavan` (not `default`); RespectIgnoreDifferences; no ApplyOutOfSyncOnly; local `prune: false`. `verify_gitops.sh` |
 | I16 | Secrets in git (dev) | open | SealedSecrets/SOPS deferred; rotate before shared cluster. **Hole:** `prodavan-minio` / API S3 keys must stay in sync if rotated |
 | I17 | API image rebuild without network | **done** (ops) | Dockerfile без apt/curl; `bridge_docker_desktop_image.sh` + verify alembic/celery |
-| I18 | SHA-pin `overlays/dev` without GHCR | **done** (policy) | First-party **`:latest`** (CI also pushes SHA as extra tag). CI `bump-k3s-dev` disabled. Infra frozen: postgres `16.15`, redis `7.4.11-alpine`, minio/mc RELEASE, redpanda `v24.2.4`. `verify_image_pins.sh` |
+| I18 | SHA-pin `overlays/dev` without GHCR | **done** (policy) | First-party **`:latest`** (CI also pushes SHA as extra tag). Job `bump-k3s-dev` удалён. Infra frozen: postgres `16.15`, redis `7.4.11-alpine`, minio/mc RELEASE, redpanda `v24.2.4`. `verify_image_pins.sh` |
 | I19 | Argo repo-server → GitHub TLS | **done** (ops subset) | `reposerver.git.request.timeout=90s` + git retries; wait/recover accept Healthy+ComparisonError if core pods Ready; local Application `prune: false` |
 | I20 | Celery readiness vs broker | **done** | `inspect ping` readiness; liveness is PID 1 only (avoid restart storm when Redis blips); `verify_celery.sh` added |
 | I21 | Celery worker+beat in one pod | **done** | k3s + `docker-compose.stack.yml` split worker/beat |
@@ -50,6 +50,8 @@
 | I27 | MinIO object retain + bucket hardening | **done** | `verify_minio_pvc_retain.sh` (S3 put/get via API). Init: `mc ready`, anonymous none, version suspend. STS: fsGroup 1000, `MINIO_UPDATE=off`. **Hole:** Argo selfHeal reverts uncommitted STS until push; verify waits ingress not Deploy Available (I18 SHA race) |
 | I28 | Postgres PVC retain after pod delete | **done** | `verify_postgres_pvc_retain.sh` INSERT→delete→SELECT; Recreate + `pg_ctl` preStop already |
 | I29 | Argo AppProject kind whitelist + orphans | **done** | `namespaceResourceWhitelist` pin; AppProject `orphanedResources.warn=true` (not Application — Argo 3.x) |
+| I30 | Deploy CI создаёт второй k3d | **done** | `REQUIRE_EXISTING_CLUSTER=1`; terraform apply не в Deploy; runner должен видеть тот же Docker, что и workstation k3d |
+| I32 | API integration pytest red on PG 16.15 | open | ~19 failing (`ResourceClosedError`, event-loop, 404 rematerialize). PR Gate = `tests/unit`; full integration = `ci-nightly` |
 
 ## Nice / later
 
@@ -77,4 +79,4 @@ Broker/API pod failure: `bash infra/scripts/test_broker_pod_recover.sh` (minio o
 
 Terraform (local): `bash infra/scripts/terraform_apply_local.sh` или `bootstrap_gitops=true` → verify_touchable_ui; Windows: `build_local_app_images.ps1` first.
 
-Обновлено: 2026-08-24 (I18 first-party `:latest`; infra postgres 16.15 / redis 7.4.11-alpine; Postgres PDB)
+Обновлено: 2026-08-24 (I31 PR/CI Gate/auto-merge; I30 deploy attach-only; I18 no bump-k3s-dev)

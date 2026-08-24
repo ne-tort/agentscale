@@ -18,32 +18,26 @@ concurrency:
 env:
   HTTP_PORT: "8088"
   KUBECONFIG: ${{ github.workspace }}/infra/.kube/prodavan-k3d.yaml
+  # Never create a second k3d from CI (port clash with the workstation cluster).
+  REQUIRE_EXISTING_CLUSTER: "1"
+  CREATE_CLUSTER: "0"
+  WARM_K3D_IMAGES: "0"
 
 jobs:
   deploy-smoke:
     if: >
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push')
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.event != 'pull_request')
     runs-on: [self-hosted, linux, docker]
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
-      - name: Ensure k3d (create/start after reboot)
-        run: |
-          set -euo pipefail
-          bash infra/scripts/ensure_k3d_cluster.sh
-          TF=""
-          if command -v terraform >/dev/null 2>&1; then TF=terraform
-          elif [[ -x tools/terraform ]]; then TF=./tools/terraform
-          elif [[ -x tools/terraform.exe ]]; then TF=./tools/terraform.exe
-          fi
-          if [[ -n "$TF" ]]; then
-            (cd infra/terraform/environments/local && "$TF" init -input=false && "$TF" apply -auto-approve -input=false) || true
-          fi
-          echo "KUBECONFIG=${GITHUB_WORKSPACE}/infra/.kube/prodavan-k3d.yaml" >> "$GITHUB_ENV"
+      - name: Attach existing k3d (do not create)
+        run: bash infra/scripts/ensure_k3d_cluster.sh
 
       - name: Ensure GHCR pull secret
         env:
@@ -62,7 +56,7 @@ jobs:
           ARGOCD_REPO_TOKEN: ${{ secrets.ARGOCD_REPO_TOKEN }}
         run: bash infra/scripts/ensure_argocd.sh
 
-      - name: Wait rollout (Argo or kubectl apply -k)
+      - name: Wait rollout
         run: bash infra/scripts/wait_prodavan_ready.sh
 
       - name: Smoke HTTP via ingress

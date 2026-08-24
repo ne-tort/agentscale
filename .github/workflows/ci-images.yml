@@ -8,18 +8,11 @@ on:
       - "apps/flutter/**"
       - "packages/cabinet-packs/**"
       - "packages/schemas/**"
-      - "infra/k3s/**"
-      - ".github/workflows/ci-images.yml"
-  pull_request:
-    branches: [main]
-    paths:
-      - "apps/api/**"
-      - "apps/flutter/**"
       - ".github/workflows/ci-images.yml"
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
   packages: write
 
 env:
@@ -124,39 +117,3 @@ jobs:
         run: |
           rm -rf /tmp/.buildx-cache-web
           mv /tmp/.buildx-cache-web-new /tmp/.buildx-cache-web || true
-
-  # Overlay first-party tags stay :latest (CI also pushes SHA as an extra immutable
-  # tag). SHA-bumping kustomization.yaml ImagePullBackOff's k3d that never pulled
-  # that digest. Prod overlay + image-updater can pin digests later.
-  bump-k3s-dev:
-    needs: [build-api, build-web]
-    if: false
-    runs-on: [self-hosted, linux, docker]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Bump overlay image tags
-        run: |
-          if command -v python3 >/dev/null 2>&1; then
-            PY=python3
-          elif command -v python >/dev/null 2>&1; then
-            PY=python
-          else
-            echo "Python required for bump_k3s_dev_images.py" >&2
-            exit 1
-          fi
-          "$PY" infra/scripts/bump_k3s_dev_images.py \
-            --owner "${{ needs.build-api.outputs.owner }}" \
-            --tag "${{ needs.build-api.outputs.tag }}"
-
-      - name: Commit and push
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add infra/k3s/overlays/dev/kustomization.yaml
-          if git diff --cached --quiet; then
-            echo "No tag change"
-            exit 0
-          fi
-          git commit -m "chore(k3s): bump dev images to ${{ needs.build-api.outputs.tag }}"
-          git push

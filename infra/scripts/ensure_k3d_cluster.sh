@@ -143,6 +143,9 @@ main() {
       start_cluster
     fi
   else
+    if [[ "${REQUIRE_EXISTING_CLUSTER:-0}" == "1" || "${CREATE_CLUSTER:-1}" == "0" ]]; then
+      die "k3d cluster ${CLUSTER} is not in this Docker engine. CI deploy must attach to the workstation cluster (same docker context as k3d). Refusing to create a second cluster (port 6443/8088 clash)."
+    fi
     create_cluster
   fi
 

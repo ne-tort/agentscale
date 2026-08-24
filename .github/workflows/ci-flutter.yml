@@ -1,12 +1,8 @@
 name: CI Flutter
 
 on:
+  workflow_call:
   push:
-    branches: [main]
-    paths:
-      - "apps/flutter/**"
-      - ".github/workflows/ci-flutter.yml"
-  pull_request:
     branches: [main]
     paths:
       - "apps/flutter/**"

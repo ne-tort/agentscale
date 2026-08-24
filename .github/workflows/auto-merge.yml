@@ -1,0 +1,53 @@
+name: Auto-merge
+
+# GitHub Free + private repo cannot require branch protection.
+# After CI Gate succeeds on a PR, squash-merge and dispatch CI Images
+# (GITHUB_TOKEN merge does not trigger push workflows).
+
+on:
+  workflow_run:
+    workflows: ["CI Gate"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: auto-merge
+  cancel-in-progress: false
+
+jobs:
+  squash:
+    if: >
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch != 'main'
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Squash-merge PR
+        env:
+          GH_TOKEN: ${{ secrets.AUTO_MERGE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          PR="$(gh api "repos/${{ github.repository }}/commits/${{ github.event.workflow_run.head_sha }}/pulls" \
+            --jq '.[0].number')"
+          if [[ -z "$PR" || "$PR" == "null" ]]; then
+            echo "No PR for sha ${{ github.event.workflow_run.head_sha }}"
+            exit 0
+          fi
+          echo "Merging PR #${PR}"
+          draft="$(gh pr view "$PR" --repo "${{ github.repository }}" --json isDraft --jq .isDraft)"
+          if [[ "$draft" == "true" ]]; then
+            echo "Draft PR — skip"
+            exit 0
+          fi
+          labels="$(gh pr view "$PR" --repo "${{ github.repository }}" --json labels --jq '[.labels[].name]|join(",")')"
+          if [[ "$labels" == *do-not-merge* ]]; then
+            echo "label do-not-merge — skip"
+            exit 0
+          fi
+          gh pr merge "$PR" --repo "${{ github.repository }}" --squash --delete-branch
+          gh workflow run "CI Images" --repo "${{ github.repository }}" --ref main
+          echo "Merged #${PR} and dispatched CI Images"

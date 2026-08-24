@@ -69,13 +69,13 @@ def _wipe_public_tables() -> None:
     async def _wipe() -> None:
         engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
         async with engine.begin() as conn:
-            rows = await conn.execute(
+            result = await conn.execute(
                 text(
                     "SELECT tablename FROM pg_tables "
                     "WHERE schemaname = 'public' AND tablename <> 'alembic_version'"
                 )
             )
-            tables = [r[0] for r in rows]
+            tables = [r[0] for r in result.all()]
             if tables:
                 quoted = ", ".join(f'"{t}"' for t in tables)
                 await conn.execute(text(f"TRUNCATE {quoted} CASCADE"))
@@ -100,10 +100,7 @@ def clean_engine_cache():
     db._engine = None
     db._session_factory = None
     if _postgres_available():
-        try:
-            _wipe_public_tables()
-        except Exception:
-            pass
+        _wipe_public_tables()
     yield
     db._engine = None
     db._session_factory = None

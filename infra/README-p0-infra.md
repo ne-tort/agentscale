@@ -92,6 +92,10 @@ bash infra/scripts/test_broker_pod_recover.sh   # redis/minio/kafka/postgres/api
 bash infra/scripts/terraform_apply_local.sh   # Windows build + terraform apply + GitOps + UI
 ```
 
+## CI / GitOps images
+
+Не пушить в `main`. PR → **CI Gate** → squash (Auto-merge на `main`) → **CI Images** (`:latest` в GHCR) → **Deploy Dev k3s** (существующий k3d). Подробно: [`docs/07-infrastructure/github-actions.md`](../docs/07-infrastructure/github-actions.md).
+
 ## Notes / holes
 
 - Kafka consumer kick|dispatch; PG outbox still claim SoT.

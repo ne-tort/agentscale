@@ -1,12 +1,8 @@
 name: CI API
 
 on:
+  workflow_call:
   push:
-    branches: [main]
-    paths:
-      - "apps/api/**"
-      - ".github/workflows/ci-api.yml"
-  pull_request:
     branches: [main]
     paths:
       - "apps/api/**"
@@ -34,7 +30,7 @@ jobs:
             -e POSTGRES_PASSWORD=prodavan \
             -e POSTGRES_DB=prodavan \
             -p 55432:5432 \
-            postgres:16
+            postgres:16.15
           for i in $(seq 1 30); do
             if docker exec prodavan-ci-pg pg_isready -U prodavan -d prodavan; then
               exit 0
@@ -82,6 +78,27 @@ jobs:
           alembic downgrade base
           alembic upgrade head
 
+      - name: Grant app role on migrated tables
+        env:
+          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@127.0.0.1:55432/prodavan
+        run: |
+          python - <<'PY'
+          import asyncio
+          import asyncpg
+          async def main():
+              conn = await asyncpg.connect("postgresql://prodavan:prodavan@127.0.0.1:55432/prodavan")
+              await conn.execute("GRANT ALL ON ALL TABLES IN SCHEMA public TO prodavan_app")
+              await conn.execute("GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO prodavan_app")
+              await conn.execute(
+                  "ALTER DEFAULT PRIVILEGES FOR ROLE prodavan IN SCHEMA public GRANT ALL ON TABLES TO prodavan_app"
+              )
+              await conn.execute(
+                  "ALTER DEFAULT PRIVILEGES FOR ROLE prodavan IN SCHEMA public GRANT ALL ON SEQUENCES TO prodavan_app"
+              )
+              await conn.close()
+          asyncio.run(main())
+          PY
+
       - name: Ruff check
         run: ruff check src tests
 
@@ -89,8 +106,8 @@ jobs:
         working-directory: .
         run: python tools/release_gate_check.py
 
-      - name: Pytest
-        run: pytest tests/ -q
+      - name: Pytest (unit — required on PR)
+        run: pytest tests/unit/ -q
 
       - name: Stop Postgres
         if: always()

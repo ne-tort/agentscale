@@ -34,6 +34,18 @@
 4. В том же изменении: as-built (семантика, что/как, контракты, Gaps, **Quality**).
 5. Слой `done` только по DoD + veto + Quality ≥ 8 — не «минимальный прототип».
 
+## Git / CI (не пушить в `main`)
+
+Репозиторий **private на GitHub Free** — native branch protection недоступен. Контракт всё равно такой:
+
+1. Ветка `ci/…` / `fix/…` / `feat/…` от `origin/main`.
+2. `git push -u origin HEAD` → `gh pr create` (squash).
+3. **CI Gate** (kustomize + image pins + terraform validate + API **unit** pytest + Flutter + schemas) должен быть зелёным. Integration API — nightly (I32).
+4. На `main` workflow **Auto-merge** squash’ит PR после Gate и диспатчит **CI Images** (`:latest` + SHA-тег в GHCR). Черновик или label `do-not-merge` — не мержит. Первый PR с самими workflow’ами мержить вручную (`gh pr merge --squash`), пока Auto-merge ещё не на default branch.
+5. **CI Images** на `main` (push или dispatch) → **Deploy Dev k3s** цепляется к **уже существующему** k3d в Docker runner’а (не создаёт второй кластер, не делает terraform apply).
+
+Прямой `git push origin main` — только авария. As-built CI: [`docs/07-infrastructure/github-actions.md`](docs/07-infrastructure/github-actions.md).
+
 ## Суть продукта (якорь)
 
 Admin → Company → Employee → **динамический Cabinet** (meta+UI+MCP packages, schema-per-instance) → **Project** (агент, materialize из кабинета).  

@@ -1,235 +1,71 @@
-# GitHub Actions CI/CD
+# GitHub Actions (as-built)
 
-Pipeline непрерывной интеграции и доставки Prodavan. Workflows: `.github/workflows/`.
+Репозиторий: [ne-tort/prodavan](https://github.com/ne-tort/prodavan) (private). Runner: **self-hosted** `linux,docker` (github-hosted `ubuntu-latest` в этой org ломается пустыми job’ами).
 
----
+GitHub Free + private **не даёт branch protection** (403). Вместо required checks: workflow **CI Gate** на каждый PR и **Auto-merge** после зелёного Gate. Прямой push в `main` — только авария.
 
-## Workflow overview
+## Поток
 
-```mermaid
-flowchart LR
-    PR[Pull Request] --> LINT[lint-test]
-    LINT --> BUILD[build-images]
-    MERGE[Merge main] --> BUILD
-    BUILD --> PUSH[push ghcr.io]
-    PUSH --> DEPLOY[update k8s manifests]
-    DEPLOY --> ARGO[ArgoCD sync]
-    MERGE --> MIGRATE[alembic staging]
+```text
+feature branch
+  → PR в main
+  → CI Gate: infra + API pytest + Flutter + schemas
+  → Auto-merge (squash, удалить ветку)
+       черновик или label do-not-merge → skip
+  → dispatch CI Images  (GITHUB_TOKEN merge не триггерит push-workflows)
+  → CI Images: build/push ghcr.io/<owner>/prodavan-api|web :latest и :SHA12
+       overlay kustomize остаётся :latest (не бампать SHA в git)
+  → Deploy Dev k3s: только существующий k3d, import overlay, Argo, smoke
 ```
 
-См. также [alembic.md](alembic.md) (stub bootstrap, cutover).
+Первый PR, который **добавляет** `auto-merge.yml`, мержить вручную: `workflow_run` читает workflow только с default branch.
 
----
-
-## Local-dev deploy (active)
-
-`deploy-dev-k3s.yml` — после успешного **CI Images** на `main` (или `workflow_dispatch`): self-hosted runner поднимает/проверяет k3d через Terraform `environments/local`, ждёт Argo Application `prodavan-dev` (fallback `kubectl apply -k`), smoke на `http://127.0.0.1:8088` с `Host: prodavan.local`.
-
-Runbook: [local-cluster-e2e.md](local-cluster-e2e.md).
-
----
+Опционально secret `AUTO_MERGE_TOKEN` (PAT с `repo` + `workflow`): тогда merge от пользователя может триггерить native `push`. Без PAT Auto-merge сам делает `gh workflow run "CI Images"`.
 
 ## Workflows
 
-### `ci.yml` — on every PR
+| Файл | Когда | Что |
+|------|--------|-----|
+| `ci-gate.yml` | `pull_request` → `main` | kustomize, pins, terraform validate (Docker `hashicorp/terraform:1.9.8` если нет CLI) |
+| `ci-api.yml` | `workflow_call` + `push` `apps/api/**` | Postgres **16.15**, alembic, ruff, **unit** pytest. Integration — `ci-nightly` (сейчас 19 красных на 16.15, I32) |
+| `ci-flutter.yml` | `workflow_call` + `push` `apps/flutter/**` | analyze + test |
+| `ci-schemas.yml` | `workflow_call` + `push` | `tools/validate_schemas.py` |
+| `ci-images.yml` | `push`/`workflow_dispatch` на `main` (пути apps/packages) | GHCR `:latest` + `:SHA12`. На PR не собираем — один self-hosted runner, Gate важнее |
+| `deploy-dev-k3s.yml` | успешный CI Images на `main` (не PR) | `REQUIRE_EXISTING_CLUSTER=1`, без terraform apply |
+| `auto-merge.yml` | успешный CI Gate (`pull_request`) | squash + dispatch Images |
+| `ci-nightly.yml` | cron 02:00 UTC | интеграция API, Postgres 16.15 |
 
-```yaml
-name: CI
-on:
-  pull_request:
-    branches: [main, develop]
+## Deploy: воспроизводимость
 
-jobs:
-  api-lint-test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: pip install -e "apps/api[dev]"
-      - run: ruff check apps/api
-      - run: pytest apps/api/tests -q
+Job **не** вызывает Terraform и **не** создаёт k3d. Если runner не видит кластер `prodavan-dev` в том же Docker engine, скрипт падает с явным отказом (раньше CI пытался поднять второй кластер и ловил занятый `:6443`).
 
-  flutter-analyze:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: subosito/flutter-action@v2
-      - run: cd apps/flutter && flutter analyze && flutter test
+Локально кластер поднимает оператор (`ensure_k3d_cluster.sh` / Terraform local), не GitHub Actions.
 
-  openapi-validate:
-    runs-on: ubuntu-latest
-    steps:
-      - run: npx @redocly/cli lint apps/api/openapi/openapi.yaml
+Smoke: Ingress `http://prodavan.local:8088/` (`Host: prodavan.local`). JWT: `bash infra/scripts/seed_dev_identity.sh`.
+
+## Образы
+
+- First-party API/web: overlay **`:latest`**, CI дополнительно тегает immutable SHA.
+- Third-party: замороженные теги (`verify_image_pins.sh`, `ci_infra_validate.sh`).
+- Не SHA-пинить overlay — ImagePullBackOff на k3d без digest (I18).
+
+## Настройки репозитория (ручные / `gh`)
+
+```bash
+gh api -X PATCH repos/ne-tort/prodavan \
+  -f allow_squash_merge=true \
+  -f allow_merge_commit=false \
+  -f allow_rebase_merge=false \
+  -f delete_branch_on_merge=true
 ```
 
----
+Когда репозиторий станет public или появится GitHub Pro: включить branch protection на `main` (required **CI Gate** / job `gate`, no force-push). До тех пор контракт соблюдается workflow’ами и дисциплиной PR.
 
-### `build.yml` — on push main / tags
+## Локальный аналог Gate
 
-```yaml
-name: Build & Push
-on:
-  push:
-    branches: [main]
-    tags: ["v*"]
-
-jobs:
-  build-api:
-    runs-on: ubuntu-latest
-    permissions:
-      packages: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v5
-        with:
-          context: apps/api
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}/prodavan-api:${{ github.sha }}
-            ghcr.io/${{ github.repository }}/prodavan-api:latest
-
-  build-mcp-gateway:
-    # similar
-
-  build-agent-worker:
-    # includes Node bridge + Python tools
+```bash
+bash infra/scripts/ci_infra_validate.sh
+# API tests — как в ci-api.yml (Postgres 16.15)
+# Flutter: cd apps/flutter && flutter analyze && flutter test
+python tools/validate_schemas.py
 ```
-
----
-
-### `deploy-staging.yml` — after build
-
-```yaml
-name: Deploy Staging
-on:
-  workflow_run:
-    workflows: [Build & Push]
-    types: [completed]
-    branches: [main]
-
-jobs:
-  deploy:
-    runs-on: [self-hosted, linux, staging]  # OUTSIDE k3s — see github-runner-local.md
-    steps:
-      - uses: actions/checkout@v4
-      - name: Update image tags
-        run: |
-          cd infra/k3s/overlays/staging
-          kustomize edit set image ghcr.io/org/prodavan-api=${{ github.sha }}
-      - name: Commit manifest bump
-        run: |
-          git config user.name "github-actions"
-          git commit -am "deploy(staging): ${{ github.sha }}"
-          git push
-      - name: Wait for ArgoCD
-        run: argocd app wait prodavan-api --timeout 300
-```
-
----
-
-### `deploy-prod.yml` — manual
-
-```yaml
-name: Deploy Production
-on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: "Image tag (git sha or semver)"
-        required: true
-
-jobs:
-  deploy:
-    runs-on: [self-hosted, linux, prod]
-    environment: production  # requires approval
-    steps:
-      # same as staging, overlay prod
-```
-
----
-
-### `db-migrate-staging.yml`
-
-```yaml
-name: DB Migrate Staging
-on:
-  workflow_run:
-    workflows: [Deploy Staging]
-jobs:
-  migrate:
-    runs-on: ubuntu-latest
-    steps:
-      - run: alembic upgrade head
-        env:
-          DATABASE_URL: ${{ secrets.STAGING_DATABASE_URL }}
-        working-directory: apps/api
-```
-
-Prod migrations: ArgoCD PreSync hook — см. [argocd.md](argocd.md).
-
----
-
-## Secrets (GitHub)
-
-| Secret | Used in |
-|--------|---------|
-| `STAGING_DATABASE_URL` | db migrate |
-| `KUBECONFIG_STAGING` | optional kubectl debug |
-| `ARGOCD_AUTH_TOKEN` | deploy wait |
-| `CURSOR_API_KEY` | optional integration job |
-
-**Not in GHA:** production DB URL — only on self-hosted runner or External Secrets.
-
----
-
-## Integration tests (nightly)
-
-```yaml
-name: Nightly Integration
-on:
-  schedule:
-    - cron: "0 2 * * *"
-jobs:
-  agent-smoke:
-    runs-on: [self-hosted, linux, staging]
-    steps:
-      - run: pytest tests/integration/agent_session_test.py
-        env:
-          STAGING_API_URL: https://api.staging.prodavan.local
-```
-
----
-
-## Branch protection
-
-`main`:
-- Required: CI pass
-- Required: 1 review
-- No direct push
-
-`release/*`:
-- Tag from main only
-- Prod deploy manual
-
----
-
-## Caching
-
-- pip: `actions/cache` keyed on `pyproject.toml` hash
-- Docker: GitHub Actions cache / buildkit
-- Flutter: pub cache
-
----
-
-## Связанные документы
-
-- [github-runner-local.md](github-runner-local.md)
-- [argocd.md](argocd.md)
-- [env-matrix.md](env-matrix.md)
