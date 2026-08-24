@@ -20,12 +20,17 @@ jobs:
     runs-on: [self-hosted, linux, docker]
     steps:
       - uses: actions/checkout@v4
-      - name: Install kustomize
+      - name: Install kustomize (host binary into runner.temp)
         run: |
-          curl -sL "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize/v5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" \
-            | tar xz -C "${{ runner.temp }}"
-          echo "${{ runner.temp }}" >> "${GITHUB_PATH}"
-          kustomize version
+          set -euo pipefail
+          dest="${{ runner.temp }}/kustomize-bin"
+          mkdir -p "$dest"
+          curl -fsSL \
+            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" \
+            -o "${{ runner.temp }}/kustomize.tgz"
+          tar xz -C "$dest" -f "${{ runner.temp }}/kustomize.tgz"
+          echo "$dest" >> "${GITHUB_PATH}"
+          "$dest/kustomize" version
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: 1.9.8
@@ -41,6 +46,8 @@ jobs:
         env:
           POETRY_VIRTUALENVS_IN_PROJECT: "true"
         run: |
+          command -v kustomize
+          command -v terraform
           poetry install --no-interaction
           poetry run prodavan-ops validate
 
