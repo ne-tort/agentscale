@@ -67,7 +67,7 @@ fi
 echo "ok produce/consume ${PROBE}"
 
 echo "==> fsync durability (rpk start --check=false must not sneak --unsafe-bypass-fsync=true)"
-cmd="$(kubectl -n "$NS" exec "$POD" -- tr '\0' ' ' < /proc/1/cmdline)"
+cmd="$(kubectl -n "$NS" exec "$POD" -- sh -c "tr '\\0' ' ' < /proc/1/cmdline")"
 echo "cmdline=${cmd}"
 if printf '%s' "$cmd" | grep -q 'unsafe-bypass-fsync=true'; then
   echo "FAIL: Redpanda PID 1 has --unsafe-bypass-fsync=true (data loss on crash)" >&2
@@ -77,7 +77,7 @@ if ! printf '%s' "$cmd" | grep -q 'unsafe-bypass-fsync=false'; then
   echo "FAIL: Redpanda PID 1 missing --unsafe-bypass-fsync=false" >&2
   exit 1
 fi
-devmode="$(kubectl -n "$NS" exec "$POD" -- grep -E 'developer_mode:' /etc/redpanda/redpanda.yaml | head -1 | awk '{print $2}' || true)"
+devmode="$(kubectl -n "$NS" exec "$POD" -- grep -E '^[[:space:]]*developer_mode:' /etc/redpanda/redpanda.yaml | awk '{print $2}' | tr -d '"' | head -1 || true)"
 echo "developer_mode=${devmode}"
 if [[ "$(printf '%s' "$devmode" | tr -d '"' | tr '[:upper:]' '[:lower:]')" != "false" ]]; then
   echo "FAIL: developer_mode must be false in node yaml (got ${devmode})" >&2

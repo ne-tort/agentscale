@@ -1,9 +1,8 @@
-# Node config for Redpanda. Cluster properties (write_caching_default, auto_create_topics)
+# Node config for Redpanda. Cluster knobs (write caching, auto-create topics)
 # are set by the init Job via Admin API — do not pin them here.
 #
-# rpk redpanda start --check=false writes developer_mode:true and passes
-# --unsafe-bypass-fsync=true to the binary (same durability hole as --mode dev-container).
-# We exec the binary ourselves with --unsafe-bypass-fsync=false.
+# Do not use `rpk redpanda start --check=false`: it enables Seastar fsync bypass.
+# STS execs libexec with --unsafe-bypass-fsync=false instead.
 redpanda:
   data_directory: /var/lib/redpanda/data
   node_id: 0
