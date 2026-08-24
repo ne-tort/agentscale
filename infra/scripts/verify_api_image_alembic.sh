@@ -4,7 +4,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-API_IMAGE="${API_IMAGE:-ghcr.io/ne-tort/prodavan-api:local}"
+API_IMAGE="${API_IMAGE:-ghcr.io/ne-tort/prodavan-api:latest}"
 
 repo_head() {
   python3 - <<'PY' "$ROOT/apps/api/alembic/versions"

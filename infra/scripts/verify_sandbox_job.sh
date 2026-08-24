@@ -7,7 +7,7 @@ ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 export KUBECONFIG="${KUBECONFIG:-${ROOT}/infra/.kube/prodavan-k3d.yaml}"
 NS="${PRODAVAN_NS:-prodavan}"
 JOB="prodavan-sandbox-probe"
-API_IMAGE="${API_IMAGE:-ghcr.io/ne-tort/prodavan-api:local}"
+API_IMAGE="${API_IMAGE:-ghcr.io/ne-tort/prodavan-api:latest}"
 MANIFEST="${ROOT}/infra/k3s/base/prodavan-sandbox/probe-job.yaml"
 
 kubectl -n "$NS" get sa prodavan-sandbox >/dev/null \

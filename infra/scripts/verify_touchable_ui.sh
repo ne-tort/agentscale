@@ -12,6 +12,9 @@ bash "${SCRIPT_DIR}/smoke_ingress.sh"
 echo "==> GitOps Application contract"
 bash "${SCRIPT_DIR}/verify_gitops.sh"
 
+echo "==> image pins (first-party :latest, infra frozen)"
+bash "${SCRIPT_DIR}/verify_image_pins.sh"
+
 echo "==> kafka topics + durability knobs"
 bash "${SCRIPT_DIR}/verify_kafka.sh"
 

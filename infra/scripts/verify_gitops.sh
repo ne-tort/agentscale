@@ -31,12 +31,22 @@ echo "project=${proj} targetRevision=${rev} path=${path}"
 [[ "$path" == "infra/k3s/overlays/dev" ]] || { echo "FAIL: unexpected Application path ${path}" >&2; exit 1; }
 [[ "$proj" == "prodavan" ]] || { echo "FAIL: Application project must be prodavan not ${proj:-empty}" >&2; exit 1; }
 
-imgs="$(kubectl -n argocd get application prodavan-dev -o jsonpath='{.spec.source.kustomize.images}')"
+imgs="$(kubectl -n argocd get application prodavan-dev -o jsonpath='{.spec.source.kustomize.images}' 2>/dev/null || true)"
 echo "kustomize.images=${imgs}"
-printf '%s' "$imgs" | grep -q 'prodavan-api:local' \
-  || { echo "FAIL: Application must force ghcr.io/ne-tort/prodavan-api:local (I18)" >&2; exit 1; }
-printf '%s' "$imgs" | grep -q 'prodavan-web:local' \
-  || { echo "FAIL: Application must force ghcr.io/ne-tort/prodavan-web:local (I18)" >&2; exit 1; }
+if [[ -n "$imgs" && "$imgs" != "[]" ]]; then
+  printf '%s' "$imgs" | grep -qE ':[0-9a-f]{7,40}([[:space:]]|$)' \
+    && { echo "FAIL: Application kustomize.images must not SHA-pin (I18)" >&2; exit 1; }
+  printf '%s' "$imgs" | grep -q ':local' \
+    && { echo "FAIL: Application kustomize.images must not force :local (use overlay :latest)" >&2; exit 1; }
+fi
+api_img="$(kubectl -n prodavan get deploy prodavan-api -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
+echo "deploy/prodavan-api image=${api_img}"
+[[ "$api_img" == *":latest" ]] \
+  || { echo "FAIL: API image must be :latest (got ${api_img})" >&2; exit 1; }
+web_img="$(kubectl -n prodavan get deploy prodavan-web -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || true)"
+echo "deploy/prodavan-web image=${web_img}"
+[[ "$web_img" == *":latest" ]] \
+  || { echo "FAIL: web image must be :latest (got ${web_img})" >&2; exit 1; }
 
 ns="$(kubectl -n argocd get appproject prodavan -o jsonpath='{.spec.destinations[0].namespace}')"
 repo="$(kubectl -n argocd get appproject prodavan -o jsonpath='{.spec.sourceRepos[0]}')"

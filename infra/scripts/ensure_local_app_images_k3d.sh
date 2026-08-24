@@ -7,8 +7,8 @@ ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 export PATH="${HOME}/.local/bin:/usr/bin:/bin:${PATH}"
 CLUSTER="${K3D_CLUSTER:-prodavan-dev}"
 API_BASE="${API_BASE:-http://prodavan.local:8088/api/v1}"
-API_IMAGE="${API_IMAGE:-ghcr.io/ne-tort/prodavan-api:local}"
-WEB_IMAGE="${WEB_IMAGE:-ghcr.io/ne-tort/prodavan-web:local}"
+API_IMAGE="${API_IMAGE:-ghcr.io/ne-tort/prodavan-api:latest}"
+WEB_IMAGE="${WEB_IMAGE:-ghcr.io/ne-tort/prodavan-web:latest}"
 
 have_image() {
   docker image inspect "$1" >/dev/null 2>&1

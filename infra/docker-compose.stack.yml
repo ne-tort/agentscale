@@ -13,7 +13,7 @@
 
 services:
   postgres:
-    image: postgres:16
+    image: postgres:16.15
     restart: unless-stopped
     environment:
       POSTGRES_USER: prodavan
@@ -30,7 +30,7 @@ services:
       retries: 8
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.11-alpine
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
     ports:
@@ -44,7 +44,7 @@ services:
       retries: 8
 
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2024-10-02T17-50-41Z
     restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
@@ -57,7 +57,7 @@ services:
       - prodavan_stack_minio:/data
 
   minio-init:
-    image: minio/mc:latest
+    image: minio/mc:RELEASE.2024-10-08T09-37-26Z
     restart: "no"
     depends_on:
       - minio

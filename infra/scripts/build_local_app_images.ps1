@@ -1,4 +1,5 @@
-# Build API + web images on Docker Desktop (Windows) for k3d :local tags.
+# Build API + web images on Docker Desktop (Windows) as overlay :latest (k3d IfNotPresent).
+# Also tags :local as a compat alias for older import tarballs.
 # Run from prodavan/ root in PowerShell. WSL import uses bridge_docker_desktop_image.sh.
 param(
   [string]$ApiBase = "http://prodavan.local:8088/api/v1"
@@ -10,15 +11,19 @@ if (-not (Test-Path "$Root/apps/api/Dockerfile")) {
   $Root = (Get-Location).Path
 }
 
-Write-Host "==> build API -> ghcr.io/ne-tort/prodavan-api:local"
+Write-Host "==> build API -> ghcr.io/ne-tort/prodavan-api:latest"
 docker build -f "$Root/apps/api/Dockerfile" `
+  -t ghcr.io/ne-tort/prodavan-api:latest `
+  -t prodavan-api:latest `
   -t ghcr.io/ne-tort/prodavan-api:local `
   -t prodavan-api:local `
   "$Root"
 
-Write-Host "==> build web -> ghcr.io/ne-tort/prodavan-web:local (API_BASE=$ApiBase)"
+Write-Host "==> build web -> ghcr.io/ne-tort/prodavan-web:latest (API_BASE=$ApiBase)"
 docker build -f "$Root/apps/flutter/Dockerfile" --target runtime `
   --build-arg "API_BASE=$ApiBase" `
+  -t ghcr.io/ne-tort/prodavan-web:latest `
+  -t prodavan-web:latest `
   -t ghcr.io/ne-tort/prodavan-web:local `
   -t prodavan-web:local `
   "$Root"

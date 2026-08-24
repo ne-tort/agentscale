@@ -28,17 +28,17 @@
 | I5 | Redis/MinIO/Kafka/Celery in k3s | **done** (subset) | Exec Redpanda binary with `--unsafe-bypass-fsync=false` (rpk start --check=false was still bypassing fsync). Admin :9644 + PDB. Init Job cluster knobs + `min.insync.replicas=1`. Celery `inspect ping`. |
 | I6 | Базовые экраны projects/runs/variants | done | Flutter screens для отладки |
 | I7 | docker-compose.stack.yml (api+web+pg+P0) | done | smoke без кластера |
-| I8 | Project sandbox Pod/Job isolator | **in_progress** | object-ws create path; SA on API + token (`verify_sandbox_sa.sh`); Job PVC probe. Admin `/sandbox-k8s` after `:local` rebuild. **Holes:** no spawn on create; no per-project Pod; no MinIO→/workspace; RWO single-node |
+| I8 | Project sandbox Pod/Job isolator | **in_progress** | object-ws create path; SA on API + token (`verify_sandbox_sa.sh`); Job PVC probe. Admin `/sandbox-k8s` after `:latest` rebuild. **Holes:** no spawn on create; no per-project Pod; no MinIO→/workspace; RWO single-node |
 | I9 | Redpanda HA (≥3 / anti-affinity) | deferred | local uses overprovisioned single node |
 | I10 | Keycloak in-cluster | open | AUTH_MODE=test + `seed_dev_identity.sh` (company+AI key+cabinet+e2e chat) |
 | I11 | Alembic history rewrite vs old PVC | **done** (ops) | `reset_dev_postgres.sh` for legacy `20260808*`/`2026082101` → stub chain |
-| I12 | GHCR API/web image lag | **done** (ops path) | **dev overlay MUST be `:local`** + k3d import. SHA-pin without GHCR publish → ImagePullBackOff (I18). |
+| I12 | GHCR API/web image lag | **done** (ops path) | Overlay first-party **`:latest`** + k3d import (`IfNotPresent`). SHA-pin without GHCR digest → ImagePullBackOff (I18). |
 | I13 | Terraform apply = full stack | **done** (subset) | `bootstrap_gitops=true` → verify_touchable_ui; Windows: `build_local_app_images.ps1` first |
 | I14 | Recover after reboot | **done** | `recover_local_stack.sh` (Argo refresh) + `test_k3d_recover.sh TEST_WORKLOADS=1` + `test_broker_pod_recover.sh` (minio/redis/kafka/pg object+row retain) + `acceptance_local.sh` (`BROKER_RECOVER_TEST=1`) |
 | I15 | Argo Job churn / selfHeal fight | **done** (subset) | AppProject `prodavan` (not `default`); RespectIgnoreDifferences; no ApplyOutOfSyncOnly; local `prune: false`. `verify_gitops.sh` |
 | I16 | Secrets in git (dev) | open | SealedSecrets/SOPS deferred; rotate before shared cluster. **Hole:** `prodavan-minio` / API S3 keys must stay in sync if rotated |
 | I17 | API image rebuild without network | **done** (ops) | Dockerfile без apt/curl; `bridge_docker_desktop_image.sh` + verify alembic/celery |
-| I18 | SHA-pin `overlays/dev` without GHCR | **done** (policy) | Overlay `newTag: local`. Application `spec.source.kustomize.images` forces `:local` (CI SHA bump was ImagePullBackOff). CI `bump-k3s-dev` disabled (`if: false`). |
+| I18 | SHA-pin `overlays/dev` without GHCR | **done** (policy) | First-party **`:latest`** (CI also pushes SHA as extra tag). CI `bump-k3s-dev` disabled. Infra frozen: postgres `16.15`, redis `7.4.11-alpine`, minio/mc RELEASE, redpanda `v24.2.4`. `verify_image_pins.sh` |
 | I19 | Argo repo-server → GitHub TLS | **done** (ops subset) | `reposerver.git.request.timeout=90s` + git retries; wait/recover accept Healthy+ComparisonError if core pods Ready; local Application `prune: false` |
 | I20 | Celery readiness vs broker | **done** | `inspect ping` readiness; liveness is PID 1 only (avoid restart storm when Redis blips); `verify_celery.sh` added |
 | I21 | Celery worker+beat in one pod | **done** | k3s + `docker-compose.stack.yml` split worker/beat |
@@ -77,4 +77,4 @@ Broker/API pod failure: `bash infra/scripts/test_broker_pod_recover.sh` (minio o
 
 Terraform (local): `bash infra/scripts/terraform_apply_local.sh` или `bootstrap_gitops=true` → verify_touchable_ui; Windows: `build_local_app_images.ps1` first.
 
-Обновлено: 2026-08-24 (I27–I29 persist+GitOps; I18 overlay `:local` + Argo kustomize.images; CI bump-k3s-dev off)
+Обновлено: 2026-08-24 (I18 first-party `:latest`; infra postgres 16.15 / redis 7.4.11-alpine; Postgres PDB)

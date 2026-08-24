@@ -6,10 +6,12 @@ resources:
   - postgres.yaml
 patches:
   - path: patch-dev.yaml
+# First-party: movable :latest (CI push + local k3d import). Never SHA-pin here (I18).
+# Third-party brokers are version-pinned in base/platform + postgres.yaml — not :latest.
 images:
   - name: ghcr.io/ne-tort/prodavan-api
     newName: ghcr.io/ne-tort/prodavan-api
-    newTag: local
+    newTag: latest
   - name: ghcr.io/ne-tort/prodavan-web
     newName: ghcr.io/ne-tort/prodavan-web
-    newTag: local
+    newTag: latest

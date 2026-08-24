@@ -34,8 +34,8 @@ if [[ "${TEST_WORKLOADS:-0}" == "1" ]]; then
   echo "TEST 4: workloads + touchable UI"
   export SEED_UI=1
   try_bridge="${SCRIPT_DIR}/bridge_docker_desktop_image.sh"
-  bash "$try_bridge" ghcr.io/ne-tort/prodavan-api:local || true
-  bash "$try_bridge" ghcr.io/ne-tort/prodavan-web:local || true
+  bash "$try_bridge" ghcr.io/ne-tort/prodavan-api:latest || true
+  bash "$try_bridge" ghcr.io/ne-tort/prodavan-web:latest || true
   bash "${SCRIPT_DIR}/recover_local_stack.sh"
   echo "PASS: workloads after recover"
 fi

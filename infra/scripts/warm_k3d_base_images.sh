@@ -19,7 +19,7 @@ IMAGES=(
   "rancher/mirrored-library-traefik:2.10.7"
   "rancher/mirrored-library-busybox:1.36.1"
   "rancher/klipper-lb:v0.4.7"
-  "postgres:16"
+  "postgres:16.15"
 )
 
 pull_one() {

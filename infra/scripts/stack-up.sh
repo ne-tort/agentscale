@@ -35,7 +35,11 @@ bash infra/scripts/docker-build-cached.sh ensure-builder || true
 
 echo "======== BUILD API ========"
 bash infra/scripts/docker-build-cached.sh api
-docker tag prodavan-api:local prodavan-api:stack
+if docker image inspect prodavan-api:latest >/dev/null 2>&1; then
+  docker tag prodavan-api:latest prodavan-api:stack
+else
+  docker tag prodavan-api:local prodavan-api:stack
+fi
 
 echo "======== BUILD WEB (runtime) ========"
 START=$(date +%s)
@@ -47,6 +51,7 @@ docker buildx build \
   --build-arg API_BASE=http://localhost:8000 \
   --build-arg FLUTTER_VERSION=3.47.1 \
   --tag prodavan-web:stack \
+  --tag prodavan-web:latest \
   --tag prodavan-web:local \
   --cache-from "type=local,src=${ROOT}/.docker-cache/web" \
   --cache-to "type=local,dest=${ROOT}/.docker-cache/web,mode=max" \

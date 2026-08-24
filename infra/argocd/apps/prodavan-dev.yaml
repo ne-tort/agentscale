@@ -11,11 +11,7 @@ spec:
     repoURL: https://github.com/ne-tort/prodavan.git
     targetRevision: main
     path: infra/k3s/overlays/dev
-    # Local k3d: force :local even if CI/main kustomization SHA-pins (I12/I18).
-    kustomize:
-      images:
-        - ghcr.io/ne-tort/prodavan-api:local
-        - ghcr.io/ne-tort/prodavan-web:local
+    # Overlay already sets first-party :latest. Do not SHA-override here (I18).
   destination:
     server: https://kubernetes.default.svc
     namespace: prodavan

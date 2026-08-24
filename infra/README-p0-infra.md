@@ -35,7 +35,7 @@ Brokers live under `infra/k3s/base/platform/` (StatefulSets + PVC). API ConfigMa
 - **Not** creating per-project Kubernetes containers yet (`CLUSTER-GAPS` I8).
 - I8: SA `prodavan-sandbox` on **API** (token for future Jobs). Create path stays `object-ws`.
 - `verify_sandbox_job.sh` + `verify_sandbox_sa.sh` (included in `verify_touchable_ui.sh`).
-- Admin `GET /admin/projects/sandbox-k8s` + flag-gated `POST .../sandbox-k8s/pvc-probe` (in git; cluster image until next `:local` rebuild).
+- Admin `GET /admin/projects/sandbox-k8s` + flag-gated `POST .../sandbox-k8s/pvc-probe` (in git; cluster image until next `:latest` rebuild).
 - **Holes:** no per-project Pod; no spawn on create; live MinIO→/workspace; RWO single-node.
 - Create project → `container_ref=object-ws:{key}` (`domain/projects/types.py`) → sync materialize via `ProjectMaterializeService` → `WorkspaceLayoutWriter` writes to MinIO (SoT) + local mirror on **API PVC** when `OBJECT_STORE_MIRROR_LOCAL=true`.
 - Celery worker mounts the **same** PVC on single-node k3d so rematerialize jobs see the mirror.
@@ -66,7 +66,7 @@ bash infra/scripts/import_local_app_images_k3d.sh       # rebuild web+api + impo
 WSL `docker build` may fail on `apt-get` (debian mirror timeout). Build on **Docker Desktop** (Windows), then import:
 
 ```powershell
-docker build -f apps/api/Dockerfile -t ghcr.io/ne-tort/prodavan-api:local .
+docker build -f apps/api/Dockerfile -t ghcr.io/ne-tort/prodavan-api:latest .
 ```
 
 WSL picks it up via `bridge_docker_desktop_image.sh` inside `import_local_app_images_k3d.sh`.
@@ -99,8 +99,8 @@ bash infra/scripts/terraform_apply_local.sh   # Windows build + terraform apply 
 - Broker PVC retain: `verify_minio_pvc_retain.sh` / `verify_redis_pvc_retain.sh` / `verify_kafka_pvc_retain.sh` / `verify_postgres_pvc_retain.sh` (wired into `test_broker_pod_recover.sh`).
 - Celery runs as two Deployments: `prodavan-celery-worker` and `prodavan-celery-beat` (local-compatible split).
 - `verify_celery.sh` validates worker `inspect ping` and that beat pod really runs `celery ... beat`.
-- Argo local Application: **prune=false**; AppProject kind whitelist + `orphanedResources.warn`; **kustomize.images force `:local`** (I18 — CI must not SHA-pin the live cluster). Recover does not require Synced if GitHub TLS ComparisonError and workloads are Ready (I19).
+- Argo local Application: **prune=false**; AppProject kind whitelist + `orphanedResources.warn`; overlay first-party **`:latest`**. Recover does not require Synced if GitHub TLS ComparisonError and workloads are Ready (I19).
 - Local emergency apply uses `apply_overlay_safe.sh` to delete fixed-name init Jobs before `kubectl apply -k` (avoids immutable Job template errors).
-- **Dev images:** `overlays/dev` tag is `:local` (k3d import). SHA-pin breaks GitOps if GHCR has no digest (I18).
+- **Dev images:** first-party `:latest` (k3d import + IfNotPresent). Infra: postgres `16.15`, redis `7.4.11-alpine`, MinIO/mc RELEASE, Redpanda `v24.2.4`. SHA-pin overlay breaks GitOps if GHCR has no digest (I18). `verify_image_pins.sh`.
 - AUTH_MODE=test in cluster ConfigMap (Keycloak-in-cluster — hole).
 - Secrets still in git for local (I16); MinIO root + API S3 keys must stay aligned if rotated.

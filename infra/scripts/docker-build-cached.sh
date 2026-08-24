@@ -33,6 +33,8 @@ build_api() {
   docker buildx build \
     --builder "${BUILDER_NAME}" \
     --file "${ROOT}/apps/api/Dockerfile" \
+    --tag prodavan-api:latest \
+    --tag ghcr.io/ne-tort/prodavan-api:latest \
     --tag prodavan-api:local \
     --tag ghcr.io/ne-tort/prodavan-api:local \
     --cache-from "type=local,src=${CACHE_ROOT}/api" \
@@ -49,6 +51,8 @@ build_web() {
     --target runtime \
     --build-arg "API_BASE=${API_BASE:-http://prodavan.local:8088/api/v1}" \
     --build-arg "BUILD_ID=${BUILD_ID:-local}" \
+    --tag prodavan-web:latest \
+    --tag ghcr.io/ne-tort/prodavan-web:latest \
     --tag prodavan-web:local \
     --tag ghcr.io/ne-tort/prodavan-web:local \
     --cache-from "type=local,src=${CACHE_ROOT}/web" \

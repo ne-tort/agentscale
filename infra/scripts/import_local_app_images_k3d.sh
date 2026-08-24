@@ -7,8 +7,8 @@ ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 export PATH="${HOME}/.local/bin:/usr/bin:/bin:${PATH}"
 CLUSTER="${K3D_CLUSTER:-prodavan-dev}"
 API_BASE="${API_BASE:-http://prodavan.local:8088/api/v1}"
-API_IMAGE="${API_IMAGE:-ghcr.io/ne-tort/prodavan-api:local}"
-WEB_IMAGE="${WEB_IMAGE:-ghcr.io/ne-tort/prodavan-web:local}"
+API_IMAGE="${API_IMAGE:-ghcr.io/ne-tort/prodavan-api:latest}"
+WEB_IMAGE="${WEB_IMAGE:-ghcr.io/ne-tort/prodavan-web:latest}"
 
 if [[ "${BUILD:-1}" == "1" ]]; then
   echo "==> build api"
@@ -18,7 +18,7 @@ if [[ "${BUILD:-1}" == "1" ]]; then
   fi
   if [[ "$build_ok" != "1" ]]; then
     docker build -f "${ROOT}/apps/api/Dockerfile" \
-      -t prodavan-api:local -t "${API_IMAGE}" "${ROOT}" \
+      -t prodavan-api:latest -t prodavan-api:local -t "${API_IMAGE}" "${ROOT}" \
       || bash "${SCRIPT_DIR}/bridge_docker_desktop_image.sh" "${API_IMAGE}" || true
   fi
 
@@ -27,20 +27,25 @@ if [[ "${BUILD:-1}" == "1" ]]; then
     API_BASE="$API_BASE" bash "${SCRIPT_DIR}/docker-build-cached.sh" web || \
       docker build -f "${ROOT}/apps/flutter/Dockerfile" --target runtime \
         --build-arg "API_BASE=${API_BASE}" \
-        -t prodavan-web:local -t "${WEB_IMAGE}" "${ROOT}"
+        -t prodavan-web:latest -t prodavan-web:local -t "${WEB_IMAGE}" "${ROOT}"
   else
     docker build -f "${ROOT}/apps/flutter/Dockerfile" --target runtime \
       --build-arg "API_BASE=${API_BASE}" \
-      -t prodavan-web:local -t "${WEB_IMAGE}" "${ROOT}"
+      -t prodavan-web:latest -t prodavan-web:local -t "${WEB_IMAGE}" "${ROOT}"
   fi
 fi
 
-for img in prodavan-web:local prodavan-api:local; do
-  if docker image inspect "$img" >/dev/null 2>&1; then
-    case "$img" in
-      prodavan-web:local) docker tag prodavan-web:local "${WEB_IMAGE}" ;;
-      prodavan-api:local) docker tag prodavan-api:local "${API_IMAGE}" ;;
-    esac
+# Promote legacy :local Desktop tags to overlay :latest.
+for src in ghcr.io/ne-tort/prodavan-api:local prodavan-api:local; do
+  if docker image inspect "$src" >/dev/null 2>&1; then
+    docker tag "$src" "${API_IMAGE}"
+    docker tag "$src" prodavan-api:latest || true
+  fi
+done
+for src in ghcr.io/ne-tort/prodavan-web:local prodavan-web:local; do
+  if docker image inspect "$src" >/dev/null 2>&1; then
+    docker tag "$src" "${WEB_IMAGE}"
+    docker tag "$src" prodavan-web:latest || true
   fi
 done
 
@@ -61,7 +66,7 @@ DESKTOP_TAR="${DESKTOP_IMAGE_TAR:-/mnt/c/Temp/prodavan-docker-bridge.tar}"
 if [[ "${VERIFY_ALEMBIC:-1}" == "1" ]]; then
   if ! API_IMAGE="$API_IMAGE" bash "${SCRIPT_DIR}/verify_api_image_alembic.sh"; then
     if [[ -f "$DESKTOP_TAR" ]]; then
-      echo "==> stale :local — reload ${DESKTOP_TAR}"
+      echo "==> stale app image — reload ${DESKTOP_TAR}"
       docker rmi "${API_IMAGE}" "${WEB_IMAGE}" 2>/dev/null || true
       docker load -i "$DESKTOP_TAR"
       IMAGES=("${WEB_IMAGE}" "${API_IMAGE}")
