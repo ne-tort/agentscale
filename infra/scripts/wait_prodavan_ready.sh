@@ -5,11 +5,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 NS_APP="${PRODAVAN_NS:-prodavan}"
-ARGO_ATTEMPTS="${ARGO_ATTEMPTS:-60}"
+ARGO_ATTEMPTS="${ARGO_ATTEMPTS:-24}"
 ARGO_SLEEP_SEC="${ARGO_SLEEP_SEC:-10}"
 
 # shellcheck source=lib/common.sh
 source "${SCRIPT_DIR}/lib/common.sh"
+# shellcheck source=lib/argo.sh
+source "${SCRIPT_DIR}/lib/argo.sh"
 ensure_kubeconfig_env
 export KUBECONFIG="${KUBECONFIG:-${ROOT}/infra/.kube/prodavan-k3d.yaml}"
 
@@ -38,14 +40,16 @@ wait_argo() {
   fi
   for i in $(seq 1 "$ARGO_ATTEMPTS"); do
     uncordon_all_nodes 2>/dev/null || true
-    health="$(kubectl -n argocd get application prodavan-dev -o jsonpath='{.status.health.status}' 2>/dev/null || echo Unknown)"
-    sync="$(kubectl -n argocd get application prodavan-dev -o jsonpath='{.status.sync.status}' 2>/dev/null || echo Unknown)"
+    health="$(argo_app_health)"
+    sync="$(argo_app_sync)"
     echo "  [${i}/${ARGO_ATTEMPTS}] sync=${sync} health=${health}"
-    if [[ "$health" == "Healthy" && "$sync" == "Synced" ]]; then
+    if argo_app_acceptable; then
+      if argo_app_i19_fallback; then
+        echo "WARN: Argo ComparisonError (git TLS) — workloads Ready, not waiting for Synced (I19)"
+      fi
       return 0
     fi
-    # Hard refresh mid-wait so new main commits / Jobs get picked up.
-    if (( i == 3 || i == 15 || i == 30 )); then
+    if (( i == 3 || i == 8 || i == 16 )); then
       refresh_argo
     fi
     sleep "$ARGO_SLEEP_SEC"
@@ -57,7 +61,7 @@ echo "==> Wait Argo / optional fallback"
 if kubectl -n argocd get application prodavan-dev >/dev/null 2>&1; then
   refresh_argo
   if wait_argo; then
-    echo "Argo Application Healthy+Synced"
+    echo "Argo Application acceptable (Healthy+Synced or I19 git TLS + workloads Ready)"
   else
     apply_fallback
   fi

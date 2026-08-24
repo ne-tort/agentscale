@@ -16,7 +16,8 @@ spec:
     namespace: prodavan
   syncPolicy:
     automated:
-      prune: true
+      # Local k3d: selfHeal drift, but do not prune when git compare fails (I19 TLS timeout).
+      prune: false
       selfHeal: true
     syncOptions:
       - CreateNamespace=true

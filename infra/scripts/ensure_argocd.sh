@@ -34,6 +34,9 @@ fi
 
 wait_nodes_schedulable 60
 
+echo "==> Argo git HTTP timeout / retries (I19)"
+bash "${SCRIPT_DIR}/patch_argocd_git_timeout.sh"
+
 # Upstream uses imagePullPolicy: Always — force local preload path + recreate pods.
 bash "${SCRIPT_DIR}/patch_argocd_pull_policy.sh" argocd
 

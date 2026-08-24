@@ -1,5 +1,6 @@
 spec:
   syncPolicy:
     automated:
-      prune: true
+      # prune=false on local k3d: ComparisonError must never look like "delete everything".
+      prune: false
       selfHeal: true
