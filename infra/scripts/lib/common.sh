@@ -7,6 +7,9 @@ die() {
   exit 1
 }
 
+# GHA/self-hosted: install_cli_tools writes here; later steps must see it.
+export PATH="${HOME}/.local/bin:/usr/local/bin:${PATH}"
+
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || die "'$1' not found on PATH"
 }

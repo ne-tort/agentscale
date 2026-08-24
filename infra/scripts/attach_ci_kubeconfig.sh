@@ -66,6 +66,9 @@ if cluster_listed; then
     if [[ -n "${GITHUB_ENV:-}" ]]; then
       echo "KUBECONFIG=${OUT}" >> "$GITHUB_ENV"
     fi
+    if [[ -n "${GITHUB_PATH:-}" ]]; then
+      echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
+    fi
     echo "OK kubeconfig via k3d in this Docker engine -> $OUT"
     kubectl get nodes
     exit 0
@@ -108,6 +111,9 @@ for src in "${candidates[@]}"; do
     export KUBECONFIG="$OUT"
     if [[ -n "${GITHUB_ENV:-}" ]]; then
       echo "KUBECONFIG=${OUT}" >> "$GITHUB_ENV"
+    fi
+    if [[ -n "${GITHUB_PATH:-}" ]]; then
+      echo "${HOME}/.local/bin" >> "$GITHUB_PATH"
     fi
     echo "OK kubeconfig rewritten (${REWRITE_HOST}:6443) from ${src} -> ${OUT}"
     kubectl get nodes
