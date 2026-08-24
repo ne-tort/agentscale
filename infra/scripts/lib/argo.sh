@@ -18,7 +18,7 @@ argo_has_comparison_error() {
 # Core workloads Ready enough to serve UI (does not require Argo Synced).
 prodavan_core_ready() {
   local ns="${PRODAVAN_NS:-prodavan}" d r p
-  for d in prodavan-api prodavan-web prodavan-postgres prodavan-celery-worker; do
+  for d in prodavan-api prodavan-web prodavan-postgres prodavan-celery-worker prodavan-celery-beat; do
     r="$(kubectl -n "$ns" get deploy "$d" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || echo 0)"
     [[ "${r:-0}" -ge 1 ]] || return 1
   done

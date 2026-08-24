@@ -24,7 +24,10 @@ grep -q 'POST chat -> 200' /tmp/prodavan_verify_ui.log \
 echo "==> project sandbox (object-ws materialize)"
 bash "${SCRIPT_DIR}/verify_project_sandbox.sh"
 
-echo "==> sandbox Job PVC mount (I8 slice 1)"
+echo "==> sandbox Job PVC mount (I8)"
 bash "${SCRIPT_DIR}/verify_sandbox_job.sh"
+
+echo "==> API sandbox ServiceAccount token"
+bash "${SCRIPT_DIR}/verify_sandbox_sa.sh"
 
 echo "verify_touchable_ui OK — http://${SMOKE_HOST:-prodavan.local}:${HTTP_PORT:-8088}/"

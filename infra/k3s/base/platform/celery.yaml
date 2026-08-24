@@ -137,9 +137,6 @@ spec:
           env:
             - name: RUN_MIGRATIONS
               value: "0"
-          volumeMounts:
-            - name: storage
-              mountPath: /data/storage
           livenessProbe:
             exec:
               command:
@@ -157,7 +154,3 @@ spec:
             limits:
               cpu: 300m
               memory: 512Mi
-      volumes:
-        - name: storage
-          persistentVolumeClaim:
-            claimName: prodavan-api-storage

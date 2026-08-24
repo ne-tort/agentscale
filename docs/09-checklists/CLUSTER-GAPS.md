@@ -25,10 +25,10 @@
 | I2 | CORS для Ingress origin | done | CORS_ORIGINS env |
 | I3 | Flutter refresh token | done | SessionStore + AuthApi.refresh |
 | I4 | OpenAPI stub ≪ runtime | open | не блокер k3s; sync later |
-| I5 | Redis/MinIO/Kafka/Celery in k3s | **done** (subset) | Kafka startupProbe :9644; PDB maxUnavailable=0 on brokers; init Job durability via **admin.hosts:9644**. `prodavan.ops.health` roundtrip. Celery `inspect ping`. |
+| I5 | Redis/MinIO/Kafka/Celery in k3s | **done** (subset) | Exec Redpanda binary with `--unsafe-bypass-fsync=false` (rpk start --check=false was still bypassing fsync). Admin :9644 + PDB. Init Job cluster knobs. Celery `inspect ping`. |
 | I6 | Базовые экраны projects/runs/variants | done | Flutter screens для отладки |
 | I7 | docker-compose.stack.yml (api+web+pg+P0) | done | smoke без кластера |
-| I8 | Project sandbox Pod/Job isolator | **in_progress** | object-ws create path; SA on API; kubectl Job PVC probe; in-cluster Job client + admin `/sandbox-k8s` (flag off; live after next `:local` rebuild). **Holes:** no spawn on create; no per-project Pod; no MinIO→/workspace; RWO single-node; empty_seed true (I9) |
+| I8 | Project sandbox Pod/Job isolator | **in_progress** | object-ws create path; SA on API + token (`verify_sandbox_sa.sh`); Job PVC probe. Admin `/sandbox-k8s` after `:local` rebuild. **Holes:** no spawn on create; no per-project Pod; no MinIO→/workspace; RWO single-node |
 | I9 | Redpanda HA (≥3 / anti-affinity) | deferred | local uses overprovisioned single node |
 | I10 | Keycloak in-cluster | open | AUTH_MODE=test + `seed_dev_identity.sh` (company+AI key+cabinet+e2e chat) |
 | I11 | Alembic history rewrite vs old PVC | **done** (ops) | `reset_dev_postgres.sh` for legacy `20260808*`/`2026082101` → stub chain |
@@ -42,7 +42,9 @@
 | I19 | Argo repo-server → GitHub TLS | **done** (ops subset) | `reposerver.git.request.timeout=90s` + git retries; wait/recover accept Healthy+ComparisonError if core pods Ready; local Application `prune: false` |
 | I20 | Celery readiness vs broker | **done** | `inspect ping` readiness; liveness is PID 1 only (avoid restart storm when Redis blips); `verify_celery.sh` added |
 | I21 | Celery worker+beat in one pod | **done** | k3s + `docker-compose.stack.yml` split worker/beat |
-| I23 | RollingUpdate + shared RWO PVC (API/Celery) | **done** | Recreate strategy on api/celery-worker/celery-beat — RollingUpdate hung waiting for second pod + PVC |
+| I22 | `kubectl apply -k` immutable hook Jobs | **done** (ops) | `apply_overlay_safe.sh` deletes fixed-name init Jobs before apply (kafka/minio) |
+| I23 | RollingUpdate + shared RWO PVC (API/Celery) | **done** | Recreate on api/celery-worker; beat **does not** mount PVC |
+| I24 | Redpanda fsync bypass via rpk start | **done** | `rpk start --check=false` injected `--unsafe-bypass-fsync=true`; now exec binary + ConfigMap `developer_mode: false` |
 
 ## Nice / later
 
@@ -70,4 +72,4 @@ Broker/API pod failure: `bash infra/scripts/test_broker_pod_recover.sh` (redis/m
 
 Terraform (local): `bash infra/scripts/terraform_apply_local.sh` или `bootstrap_gitops=true` → verify_touchable_ui; Windows: `build_local_app_images.ps1` first.
 
-Обновлено: 2026-08-24 (I8 API SA + Job client; Kafka PDB/startupProbe; Argo RespectIgnoreDifferences)
+Обновлено: 2026-08-24 (I24 Redpanda fsync; beat without PVC; Argo Application re-apply on refresh)

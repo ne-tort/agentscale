@@ -9,11 +9,11 @@ NS="${PRODAVAN_NS:-prodavan}"
 POD="${KAFKA_POD:-prodavan-kafka-0}"
 
 rpk() {
-  kubectl -n "$NS" exec "$POD" -- rpk "$@" -X brokers=127.0.0.1:9092
+  kubectl -n "$NS" exec "$POD" -- rpk "$@" -X brokers=127.0.0.1:9092 -X admin.hosts=127.0.0.1:9644
 }
 
 rpk_in() {
-  kubectl -n "$NS" exec -i "$POD" -- rpk "$@" -X brokers=127.0.0.1:9092
+  kubectl -n "$NS" exec -i "$POD" -- rpk "$@" -X brokers=127.0.0.1:9092 -X admin.hosts=127.0.0.1:9644
 }
 
 kubectl -n "$NS" wait --for=condition=Ready "pod/${POD}" --timeout=120s >/dev/null
@@ -65,5 +65,23 @@ if [[ "$ok" != "1" ]]; then
   exit 1
 fi
 echo "ok produce/consume ${PROBE}"
+
+echo "==> fsync durability (rpk start --check=false must not sneak --unsafe-bypass-fsync=true)"
+cmd="$(kubectl -n "$NS" exec "$POD" -- tr '\0' ' ' < /proc/1/cmdline)"
+echo "cmdline=${cmd}"
+if printf '%s' "$cmd" | grep -q 'unsafe-bypass-fsync=true'; then
+  echo "FAIL: Redpanda PID 1 has --unsafe-bypass-fsync=true (data loss on crash)" >&2
+  exit 1
+fi
+if ! printf '%s' "$cmd" | grep -q 'unsafe-bypass-fsync=false'; then
+  echo "FAIL: Redpanda PID 1 missing --unsafe-bypass-fsync=false" >&2
+  exit 1
+fi
+devmode="$(kubectl -n "$NS" exec "$POD" -- grep -E 'developer_mode:' /etc/redpanda/redpanda.yaml | head -1 | awk '{print $2}' || true)"
+echo "developer_mode=${devmode}"
+if [[ "$(printf '%s' "$devmode" | tr -d '"' | tr '[:upper:]' '[:lower:]')" != "false" ]]; then
+  echo "FAIL: developer_mode must be false in node yaml (got ${devmode})" >&2
+  exit 1
+fi
 
 echo "verify_kafka OK (single-node Redpanda; HA is I9)"

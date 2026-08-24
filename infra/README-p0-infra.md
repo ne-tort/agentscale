@@ -16,7 +16,8 @@ docker compose -f infra/docker-compose.stack.yml up --build -d
 ```
 
 Stack wires API/Celery to Redis (AOF), MinIO (`prodavan` bucket via `minio-init`), Redpanda
-(PVC/volume, **no** `dev-container` / fictional `--mode empty`), and runs `celery-worker` plus `celery-beat`.
+(PVC/volume, **exec binary** `--unsafe-bypass-fsync=false` — not `rpk start --check=false`),
+and runs `celery-worker` plus `celery-beat`.
 Host Kafka: `localhost:19092`. Worker entrypoint: `python -m celery …` (image ENTRYPOINT passes `$@`).
 
 ## k3s / k3d (canonical)
@@ -33,14 +34,14 @@ Brokers live under `infra/k3s/base/platform/` (StatefulSets + PVC). API ConfigMa
 
 - **Not** creating per-project Kubernetes containers yet (`CLUSTER-GAPS` I8).
 - I8: SA `prodavan-sandbox` on **API** (token for future Jobs). Create path stays `object-ws`.
-- `verify_sandbox_job.sh` applies `infra/k3s/base/prodavan-sandbox/probe-job.yaml` (Job mounts API PVC).
+- `verify_sandbox_job.sh` + `verify_sandbox_sa.sh` (included in `verify_touchable_ui.sh`).
 - Admin `GET /admin/projects/sandbox-k8s` + flag-gated `POST .../sandbox-k8s/pvc-probe` (in git; cluster image until next `:local` rebuild).
 - **Holes:** no per-project Pod; no spawn on create; live MinIO→/workspace; RWO single-node.
 - Create project → `container_ref=object-ws:{key}` (`domain/projects/types.py`) → sync materialize via `ProjectMaterializeService` → `WorkspaceLayoutWriter` writes to MinIO (SoT) + local mirror on **API PVC** when `OBJECT_STORE_MIRROR_LOCAL=true`.
 - Celery worker mounts the **same** PVC on single-node k3d so rematerialize jobs see the mirror.
 - MCP packages: zip hydrate; `MCP_SANDBOX_SPAWN=false` in cluster (fixture agent chat does not need a live MCP process).
 - Agent chat in seed/e2e uses **FixtureCursorAdapter** (`cursor` + `cursor_sdk`) — not real Cursor SDK.
-- Verify: `bash infra/scripts/verify_project_sandbox.sh` + `verify_sandbox_job.sh` (included in `verify_touchable_ui.sh`).
+- Verify: `bash infra/scripts/verify_project_sandbox.sh` + `verify_sandbox_job.sh` + `verify_sandbox_sa.sh` (included in `verify_touchable_ui.sh`).
 - Next: k8s Job/Pod isolator + live MinIO volume mount (documented hole).
 
 ## Touchable local UI

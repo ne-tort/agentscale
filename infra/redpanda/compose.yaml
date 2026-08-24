@@ -1,0 +1,41 @@
+# Compose Redpanda node config (stack + docker-compose.dev).
+# Kafka 9092 in-network, 19092 on host. No rpk start (fsync bypass).
+redpanda:
+  data_directory: /var/lib/redpanda/data
+  node_id: 0
+  empty_seed_starts_cluster: true
+  seed_servers: []
+  developer_mode: false
+  rpc_server:
+    address: 0.0.0.0
+    port: 33145
+  advertised_rpc_api:
+    address: redpanda
+    port: 33145
+  kafka_api:
+    - address: 0.0.0.0
+      port: 9092
+      name: internal
+    - address: 0.0.0.0
+      port: 19092
+      name: external
+  advertised_kafka_api:
+    - address: redpanda
+      port: 9092
+      name: internal
+    - address: localhost
+      port: 19092
+      name: external
+  admin:
+    - address: 0.0.0.0
+      port: 9644
+rpk:
+  overprovisioned: true
+  kafka_api:
+    brokers:
+      - 127.0.0.1:9092
+  admin_api:
+    addresses:
+      - 127.0.0.1:9644
+pandaproxy: {}
+schema_registry: {}

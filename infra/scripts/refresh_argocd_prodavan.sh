@@ -16,6 +16,9 @@ SLEEP_SEC="${ARGO_SLEEP_SEC:-10}"
 
 need_cmd kubectl
 
+echo "==> apply Application CR (syncOptions / ignoreDifferences from git)"
+kubectl apply -f "${ROOT}/infra/argocd/apps/prodavan-dev.yaml"
+
 if [[ "${RESTORE_SELF_HEAL:-1}" == "1" ]]; then
   kubectl -n argocd patch application prodavan-dev --type merge --patch-file "${SCRIPT_DIR}/_patch_argo_selfheal_on.yaml" \
     || kubectl -n argocd patch application prodavan-dev --type merge -p '{"spec":{"syncPolicy":{"automated":{"selfHeal":true,"prune":false}}}}'

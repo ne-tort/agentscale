@@ -2,12 +2,13 @@
 #
 # Local/single-node pattern (k3d):
 # - StatefulSet + PVC so topic data survives pod/node reboot
-# - Do NOT use --mode dev-container (bundles --unsafe-bypass-fsync → data loss on crash)
+# - Do NOT use `rpk redpanda start --check=false` / `--mode dev-container`: both end up
+#   passing --unsafe-bypass-fsync=true (data loss on crash). Exec the binary instead.
 # - Do NOT use fictional --mode empty (rpk only documents: help / dev-container)
-# - Explicit overprovisioned + check=false for shared k3d CPU (not full production tuners)
-# - Single-node keeps default empty_seed_starts_cluster=true so the STS can form a cluster;
+# - overprovisioned + no rpk syschecks (k3d); developer_mode:false in ConfigMap
+# - Single-node empty_seed_starts_cluster=true so the STS can form a cluster;
 #   HA (I9) must set it false + identical seed_servers
-# - write_caching_default=false via init Job (Admin API :9644), not --mode dev-container
+# - write_caching_default=false via init Job (Admin API :9644)
 # - API KafkaManager also ensure_topics on startup; init Job is belt-and-suspenders
 #
 # Prod HA needs ≥3 brokers + anti-affinity + no overprovisioned — hole (Helm/operator).
@@ -65,35 +66,32 @@ spec:
       containers:
         - name: redpanda
           image: docker.redpanda.com/redpandadata/redpanda:v24.2.4
-          args:
-            - redpanda
-            - start
-            - --kafka-addr
-            - internal://0.0.0.0:9092
-            - --advertise-kafka-addr
-            - internal://prodavan-kafka-0.prodavan-kafka.prodavan.svc.cluster.local:9092
-            - --rpc-addr
-            - 0.0.0.0:33145
-            - --advertise-rpc-addr
-            - prodavan-kafka-0.prodavan-kafka.prodavan.svc.cluster.local:33145
-            # No --mode: avoid unsafe_bypass_fsync from dev-container while keeping local flags:
-            - --smp
-            - "1"
-            - --memory
-            - 1G
-            - --overprovisioned
-            - --reserve-memory
-            - 0M
-            - --node-id
-            - "0"
-            - --check=false
-            - --default-log-level=warn
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              cp /config/redpanda.yaml /etc/redpanda/redpanda.yaml
+              export LD_LIBRARY_PATH="/opt/redpanda/lib"
+              export PATH="/opt/redpanda/bin:${PATH}"
+              exec /opt/redpanda/libexec/redpanda \
+                --redpanda-cfg /etc/redpanda/redpanda.yaml \
+                --memory=1G \
+                --lock-memory=false \
+                --unsafe-bypass-fsync=false \
+                --reserve-memory=0M \
+                --smp=1 \
+                --overprovisioned \
+                --default-log-level=warn
           ports:
             - name: kafka
               containerPort: 9092
             - name: admin
               containerPort: 9644
           volumeMounts:
+            - name: config
+              mountPath: /config
+              readOnly: true
             - name: data
               mountPath: /var/lib/redpanda/data
           lifecycle:
@@ -131,6 +129,10 @@ spec:
             limits:
               cpu: "1"
               memory: 2Gi
+      volumes:
+        - name: config
+          configMap:
+            name: prodavan-kafka-config
   volumeClaimTemplates:
     - metadata:
         name: data

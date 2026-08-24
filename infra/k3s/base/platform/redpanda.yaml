@@ -1,0 +1,39 @@
+# Node config for Redpanda. Cluster properties (write_caching_default, auto_create_topics)
+# are set by the init Job via Admin API — do not pin them here.
+#
+# rpk redpanda start --check=false writes developer_mode:true and passes
+# --unsafe-bypass-fsync=true to the binary (same durability hole as --mode dev-container).
+# We exec the binary ourselves with --unsafe-bypass-fsync=false.
+redpanda:
+  data_directory: /var/lib/redpanda/data
+  node_id: 0
+  empty_seed_starts_cluster: true
+  seed_servers: []
+  developer_mode: false
+  rpc_server:
+    address: 0.0.0.0
+    port: 33145
+  advertised_rpc_api:
+    address: prodavan-kafka-0.prodavan-kafka.prodavan.svc.cluster.local
+    port: 33145
+  kafka_api:
+    - address: 0.0.0.0
+      port: 9092
+      name: internal
+  advertised_kafka_api:
+    - address: prodavan-kafka-0.prodavan-kafka.prodavan.svc.cluster.local
+      port: 9092
+      name: internal
+  admin:
+    - address: 0.0.0.0
+      port: 9644
+rpk:
+  overprovisioned: true
+  kafka_api:
+    brokers:
+      - 127.0.0.1:9092
+  admin_api:
+    addresses:
+      - 127.0.0.1:9644
+pandaproxy: {}
+schema_registry: {}

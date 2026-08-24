@@ -6,3 +6,9 @@ resources:
   - kafka.yaml
   - celery.yaml
   - pdb.yaml
+generatorOptions:
+  disableNameSuffixHash: true
+configMapGenerator:
+  - name: prodavan-kafka-config
+    files:
+      - redpanda.yaml

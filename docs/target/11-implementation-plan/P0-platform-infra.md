@@ -49,7 +49,7 @@ Postgres и Keycloak/Vault роли не меняются.
 
 - Cabinet hard-delete + orphan schema/blob GC; soft-deleted projects keep rows → blobs not orphan.
 - Dual-write Kafka publish **после** PG commit; ghost envelopes при rollback сняты.
-- **k3s GitOps** (`infra/k3s/base/platform`): Redis AOF + MinIO + Redpanda StatefulSet (PVC, no `dev-container`/`--mode empty`) + Celery wired; Redpanda HA (≥3) / TLS / Helm / Keycloak-in-cluster — hole.
+- **k3s GitOps** (`infra/k3s/base/platform`): Redis AOF + MinIO + Redpanda STS (exec binary `--unsafe-bypass-fsync=false`; rpk start --check=false is not enough) + Celery; HA/TLS/Helm/Keycloak — hole.
 - **Alembic:** legacy cluster PVC on `20260808*`/`2026082101` incompatible with stub_bootstrap chain — use `infra/scripts/reset_dev_postgres.sh` (dev wipe).
 - C-CACHE / C-JOBS call sites as prior; C-MATERIALIZE object-ws + backfill as prior.
 
