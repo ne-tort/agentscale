@@ -40,6 +40,7 @@
 
 | Дата | Контракт | Изменение | Major? |
 |------|----------|-----------|--------|
+| 2026-08-24 | P0 deploy / L02 UI | shared `ApiBase`; CI+local web build use ingress API_BASE; import_local_app_images_k3d | no |
 | 2026-08-24 | P0 deploy / L03/L05 | seed: AI key+cabinet+project chat e2e; Celery shares API PVC; Flutter API_BASE ingress | no |
 | 2026-08-24 | P0 deploy / GitOps | TF `bootstrap_gitops`; recover imports platform images + Argo; Job Sync hooks; seed_dev_identity | no |
 | 2026-08-24 | P0 deploy / C-* | `infra/k3s/base/platform` Redis+MinIO+Redpanda StatefulSet+Celery; API ConfigMap P0 env | no |

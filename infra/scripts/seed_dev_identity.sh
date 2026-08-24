@@ -66,10 +66,22 @@ api() {
 ADMIN_TOKEN="$(mint 'seed-platform-admin' "$ADMIN_EMAIL" 1)"
 EMP_TOKEN="$(mint 'seed-company-admin' "$ADMIN_EMAIL" 0)"
 
-echo "==> create company"
-CODE="$(api "$ADMIN_TOKEN" POST /companies "{\"name\":\"${COMPANY_NAME}\",\"admin_email\":\"${ADMIN_EMAIL}\",\"admin_display_name\":\"Dev Admin\"}")"
-echo "POST /companies -> ${CODE}"
-cat /tmp/prodavan_seed_http.json; echo
+echo "==> create company (skip if employee already has membership)"
+CODE="$(api "$EMP_TOKEN" GET /me)"
+EXISTING_CO="$(python3 - <<'PY'
+import json
+d=json.load(open("/tmp/prodavan_seed_http.json"))
+ms=(d.get("employee") or {}).get("memberships") or []
+print(ms[0]["company_id"] if ms else "")
+PY
+)"
+if [[ -n "$EXISTING_CO" ]]; then
+  echo "GET /me already has company=${EXISTING_CO} — skip POST /companies"
+else
+  CODE="$(api "$ADMIN_TOKEN" POST /companies "{\"name\":\"${COMPANY_NAME}\",\"admin_email\":\"${ADMIN_EMAIL}\",\"admin_display_name\":\"Dev Admin\"}")"
+  echo "POST /companies -> ${CODE}"
+  cat /tmp/prodavan_seed_http.json; echo
+fi
 
 echo "==> /me"
 CODE="$(api "$EMP_TOKEN" GET /me)"
@@ -86,27 +98,41 @@ PY
 echo "company_id=${COMPANY_ID}"
 
 echo "==> AI key (cursor_sdk → FixtureCursorAdapter)"
-CODE="$(api "$ADMIN_TOKEN" POST /admin/ai-keys "{\"name\":\"Dev Cursor Fixture\",\"provider\":\"cursor\",\"api_kind\":\"cursor_sdk\",\"secret\":\"dev-fixture-cursor-secret\",\"company_ids\":[\"${COMPANY_ID}\"]}")"
-echo "POST /admin/ai-keys -> ${CODE}"
-cat /tmp/prodavan_seed_http.json; echo
-
-echo "==> cabinet"
-CODE="$(api "$EMP_TOKEN" POST /cabinets "{\"name\":\"${CABINET_NAME}\",\"company_id\":\"${COMPANY_ID}\"}")"
-echo "POST /cabinets -> ${CODE}"
-cat /tmp/prodavan_seed_http.json; echo
-CABINET_ID="$(python3 - <<'PY'
+CODE="$(api "$ADMIN_TOKEN" GET /admin/ai-keys)"
+HAS_KEY="$(python3 - <<'PY'
 import json
 d=json.load(open("/tmp/prodavan_seed_http.json"))
-print(d.get("id") or "")
+items=d if isinstance(d, list) else d.get("items") or []
+print("1" if any(k.get("provider")=="cursor" for k in items) else "")
 PY
 )"
-if [[ -z "$CABINET_ID" ]]; then
-  api "$EMP_TOKEN" GET /cabinets >/dev/null
-  CABINET_ID="$(python3 - <<'PY'
+if [[ -n "$HAS_KEY" ]]; then
+  echo "GET /admin/ai-keys — cursor key already present, skip create"
+else
+  CODE="$(api "$ADMIN_TOKEN" POST /admin/ai-keys "{\"name\":\"Dev Cursor Fixture\",\"provider\":\"cursor\",\"api_kind\":\"cursor_sdk\",\"secret\":\"dev-fixture-cursor-secret\",\"company_ids\":[\"${COMPANY_ID}\"]}")"
+  echo "POST /admin/ai-keys -> ${CODE}"
+  cat /tmp/prodavan_seed_http.json; echo
+fi
+
+echo "==> cabinet"
+CODE="$(api "$EMP_TOKEN" GET /cabinets)"
+CABINET_ID="$(python3 - <<'PY'
 import json
 d=json.load(open("/tmp/prodavan_seed_http.json"))
 items=d if isinstance(d, list) else d.get("items") or []
 print(items[0]["id"] if items else "")
+PY
+)"
+if [[ -n "$CABINET_ID" ]]; then
+  echo "GET /cabinets — using existing ${CABINET_ID}"
+else
+  CODE="$(api "$EMP_TOKEN" POST /cabinets "{\"name\":\"${CABINET_NAME}\",\"company_id\":\"${COMPANY_ID}\"}")"
+  echo "POST /cabinets -> ${CODE}"
+  cat /tmp/prodavan_seed_http.json; echo
+  CABINET_ID="$(python3 - <<'PY'
+import json
+d=json.load(open("/tmp/prodavan_seed_http.json"))
+print(d.get("id") or "")
 PY
 )"
 fi
@@ -140,10 +166,16 @@ echo "API base URL:  http://${HOST}:${HTTP_PORT}/api/v1"
 echo "company_id:    ${COMPANY_ID}"
 echo "cabinet_id:    ${CABINET_ID}"
 echo
+echo "Home buttons:"
+echo "  Platform Admin (dev)  → paste platform.admin JWT"
+echo "  Company admin (dev)   → paste employee JWT (company.admin membership)"
+echo "  Employee (dev paste)  → paste employee JWT → cabinets/projects/chat"
+echo
 echo "--- platform.admin JWT ---"
 echo "$ADMIN_TOKEN"
 echo
-echo "--- company employee JWT (projects/chat) ---"
+echo "--- company employee JWT (projects/chat + company admin) ---"
 echo "$EMP_TOKEN"
 echo
 echo "Agent: FixtureCursorAdapter (not real Cursor SDK). MCP sandbox spawn off in cluster."
+echo "Rebuild web image for default API base: bash infra/scripts/import_local_app_images_k3d.sh"

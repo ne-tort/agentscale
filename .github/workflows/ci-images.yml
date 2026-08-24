@@ -110,7 +110,7 @@ jobs:
           target: runtime
           push: ${{ steps.meta.outputs.push }}
           build-args: |
-            API_BASE=https://prodavan.local
+            API_BASE=http://prodavan.local:8088/api/v1
             BUILD_ID=${{ github.sha }}
             BUILD_NAME=1.0.0
             BUILD_NUMBER=${{ github.run_number }}

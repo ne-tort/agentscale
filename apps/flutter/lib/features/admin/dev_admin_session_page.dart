@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/config/api_base.dart';
 import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
@@ -16,7 +17,7 @@ class DevAdminSessionPage extends StatefulWidget {
 }
 
 class _DevAdminSessionPageState extends State<DevAdminSessionPage> {
-  final _baseCtrl = TextEditingController(text: adminContext.baseUrl);
+  final _baseCtrl = TextEditingController(text: ApiBase.value);
   final _tokenCtrl = TextEditingController();
   String? _error;
 

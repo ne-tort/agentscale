@@ -46,8 +46,10 @@ build_web() {
     --builder "${BUILDER_NAME}" \
     --file "${ROOT}/apps/flutter/Dockerfile" \
     --target runtime \
-    --build-arg "API_BASE=${API_BASE:-http://localhost:8000}" \
+    --build-arg "API_BASE=${API_BASE:-http://prodavan.local:8088/api/v1}" \
+    --build-arg "BUILD_ID=${BUILD_ID:-local}" \
     --tag prodavan-web:local \
+    --tag ghcr.io/ne-tort/prodavan-web:latest \
     --cache-from "type=local,src=${CACHE_ROOT}/web" \
     --cache-to "type=local,dest=${CACHE_ROOT}/web,mode=max" \
     --load \

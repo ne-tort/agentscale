@@ -45,7 +45,8 @@ Postgres и Keycloak/Vault роли не меняются.
 - Kafka consumer **ускоряет** Celery (`kick`/`dispatch`); PG outbox остаётся claim SoT; SPI fan-out не Kafka-only.
 - Package sandbox: hydrate-from-zip есть; **live MinIO mount / per-project k8s Pod** — hole (`MCP_SANDBOX_SPAWN` local-only; off in cluster ConfigMap).
 - **Project create path (as-built):** sync materialize → `container_ref=object-ws:{key}` + MinIO + API PVC mirror; UI chat via FixtureCursorAdapter when `cursor_sdk` key seeded — **works without** k8s isolator.
-- Agent: FixtureCursor / Fake adapters; real Cursor SDK sidecar — hole.
+- Identity: re-seed no longer duplicates Employee by email; bind prefers ACTIVE then unbound INVITED (MultipleResultsFound hole closed).
+
 - Cabinet hard-delete + orphan schema/blob GC; soft-deleted projects keep rows → blobs not orphan.
 - Dual-write Kafka publish **после** PG commit; ghost envelopes при rollback сняты.
 - **k3s GitOps** (`infra/k3s/base/platform`): Redis AOF + MinIO + Redpanda StatefulSet (PVC, no `dev-container`/`--mode empty`) + Celery wired; Redpanda HA (≥3) / TLS / Helm / Keycloak-in-cluster — hole.

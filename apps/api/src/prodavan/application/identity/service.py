@@ -37,9 +37,25 @@ class EntitlementService:
             select(EmployeeRow)
             .where(EmployeeRow.email == principal.email.lower())
             .options(selectinload(EmployeeRow.memberships))
+            .order_by(EmployeeRow.created_at.desc())
         )
-        emp = q.scalar_one_or_none()
-        if emp is not None and emp.status == EmployeeStatus.INVITED:
+        rows = list(q.scalars().unique().all())
+        if not rows:
+            return None
+        # Repeated company seeds can create multiple rows per email — prefer active, then unbound invite.
+        emp = next((r for r in rows if r.status == EmployeeStatus.ACTIVE), None)
+        if emp is None:
+            emp = next(
+                (
+                    r
+                    for r in rows
+                    if r.status == EmployeeStatus.INVITED and r.keycloak_sub is None
+                ),
+                rows[0],
+            )
+        if emp.status == EmployeeStatus.INVITED and (
+            emp.keycloak_sub is None or emp.keycloak_sub == principal.sub
+        ):
             emp.keycloak_sub = principal.sub
             emp.status = EmployeeStatus.ACTIVE
             await self._session.commit()
@@ -141,16 +157,22 @@ class IdentityCommandService:
         if not admin_email or "@" not in admin_email:
             raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="email required")
         # No password accepted — invite via KC only
-        await self._invites.invite_user(email=admin_email.lower(), display_name=admin_display_name)
+        email = admin_email.lower()
+        await self._invites.invite_user(email=email, display_name=admin_display_name)
         company = CompanyRow(name=name.strip())
-        employee = EmployeeRow(
-            email=admin_email.lower(),
-            display_name=admin_display_name,
-            status=EmployeeStatus.INVITED,
+        existing = await self._session.execute(
+            select(EmployeeRow).where(EmployeeRow.email == email).order_by(EmployeeRow.created_at.asc())
         )
+        employee = existing.scalars().first()
+        if employee is None:
+            employee = EmployeeRow(
+                email=email,
+                display_name=admin_display_name,
+                status=EmployeeStatus.INVITED,
+            )
+            self._session.add(employee)
+            await self._session.flush()
         self._session.add(company)
-        await self._session.flush()
-        self._session.add(employee)
         await self._session.flush()
         self._session.add(
             MembershipRow(
@@ -173,13 +195,19 @@ class IdentityCommandService:
         role: str = MembershipRole.MEMBER,
     ) -> EmployeeRow:
         await self._invites.invite_user(email=email.lower(), display_name=display_name)
-        employee = EmployeeRow(
-            email=email.lower(),
-            display_name=display_name,
-            status=EmployeeStatus.INVITED,
+        email_l = email.lower()
+        existing = await self._session.execute(
+            select(EmployeeRow).where(EmployeeRow.email == email_l).order_by(EmployeeRow.created_at.asc())
         )
-        self._session.add(employee)
-        await self._session.flush()
+        employee = existing.scalars().first()
+        if employee is None:
+            employee = EmployeeRow(
+                email=email_l,
+                display_name=display_name,
+                status=EmployeeStatus.INVITED,
+            )
+            self._session.add(employee)
+            await self._session.flush()
         self._session.add(
             MembershipRow(company_id=company_id, employee_id=employee.id, role=role)
         )

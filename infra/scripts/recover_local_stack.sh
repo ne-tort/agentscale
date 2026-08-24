@@ -15,6 +15,9 @@ bash "${SCRIPT_DIR}/ensure_k3d_cluster.sh"
 echo "==> 2/6 platform broker images (public registries)"
 bash "${SCRIPT_DIR}/import_platform_images_k3d.sh" || echo "WARN: platform image import failed"
 
+echo "==> 2b/6 local API/web images if present (no rebuild)"
+BUILD=0 bash "${SCRIPT_DIR}/import_local_app_images_k3d.sh" || echo "WARN: no local app images"
+
 if [[ -n "${GHCR_TOKEN:-${GITHUB_TOKEN:-}}" ]]; then
   echo "==> 3/6 GHCR pull secret + overlay images"
   bash "${SCRIPT_DIR}/create_ghcr_pull_secret.sh"

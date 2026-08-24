@@ -164,3 +164,5 @@ spec:
               # Local durability knobs (safe on single-node; override later for HA).
               rpk cluster config set log_retention_ms 604800000 -X brokers=prodavan-kafka:9092 || true
               rpk cluster config set log_segment_ms 86400000 -X brokers=prodavan-kafka:9092 || true
+              # Prefer fsync durability over low-latency write cache on single node.
+              rpk cluster config set write_caching_default false -X brokers=prodavan-kafka:9092 || true

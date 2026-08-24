@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/auth/auth_config.dart';
 import 'package:prodavan/core/auth/oidc_auth_service.dart';
 import 'package:prodavan/core/auth/session_store.dart';
+import 'package:prodavan/core/config/api_base.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
@@ -22,7 +23,7 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
-  final _baseCtrl = TextEditingController(text: WorkContext.defaultBaseUrl);
+  final _baseCtrl = TextEditingController(text: ApiBase.value);
   final _tokenCtrl = TextEditingController();
   bool _loadingConfig = true;
   bool _connecting = false;

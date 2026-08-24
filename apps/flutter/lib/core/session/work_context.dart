@@ -1,16 +1,14 @@
 import 'package:flutter/foundation.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
+import 'package:prodavan/core/config/api_base.dart';
 
 /// Session holder — Bearer + work headers (L01/L05).
 class WorkContext extends ChangeNotifier {
-  /// Overridden at build time for k3s web: `--dart-define=API_BASE=http://prodavan.local:8088/api/v1`.
-  static const String defaultBaseUrl = String.fromEnvironment(
-    'API_BASE',
-    defaultValue: 'http://127.0.0.1:8000/api/v1',
-  );
+  /// Overridden at build time for k3s web via `--dart-define=API_BASE=...`.
+  static const String defaultBaseUrl = ApiBase.value;
 
-  String baseUrl = defaultBaseUrl;
+  String baseUrl = ApiBase.value;
   String bearerToken = '';
   String? cabinetId;
   String? projectId;

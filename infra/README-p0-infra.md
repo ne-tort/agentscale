@@ -42,9 +42,11 @@ Brokers live under `infra/k3s/base/platform/` (StatefulSets + PVC). API ConfigMa
 
 ```bash
 bash infra/scripts/seed_dev_identity.sh
+# Optional: rebuild web with correct API_BASE and import into k3d
+bash infra/scripts/import_local_app_images_k3d.sh
 # Open http://prodavan.local:8088/
 # API base URL: http://prodavan.local:8088/api/v1
-# Paste employee JWT → cabinet → create project → chat
+# Home → Platform Admin / Company admin / Employee — paste JWT from seed
 ```
 
 ## Notes / holes

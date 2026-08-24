@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/config/api_base.dart';
 import 'package:prodavan/core/session/company_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
@@ -17,7 +18,7 @@ class DevCompanySessionPage extends StatefulWidget {
 }
 
 class _DevCompanySessionPageState extends State<DevCompanySessionPage> {
-  final _baseCtrl = TextEditingController(text: companyContext.baseUrl);
+  final _baseCtrl = TextEditingController(text: ApiBase.value);
   final _tokenCtrl = TextEditingController();
   String? _error;
 
