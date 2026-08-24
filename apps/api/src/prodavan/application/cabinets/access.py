@@ -28,6 +28,7 @@ class CabinetAccessService:
         principal: Principal,
         employee: EmployeeRow | None,
         write: bool = False,
+        allow_archived_write: bool = False,
     ) -> CabinetInstanceRow:
         inst = await self.get_instance(cabinet_id)
         if principal.is_platform_admin:
@@ -41,7 +42,7 @@ class CabinetAccessService:
                 status=403,
                 detail="peer cabinet access denied",
             )
-        if inst.status == CabinetStatus.ARCHIVED and write:
+        if inst.status == CabinetStatus.ARCHIVED and write and not allow_archived_write:
             raise AppError(
                 code="CABINET_ARCHIVED",
                 title="Cabinet archived",

@@ -6,7 +6,7 @@
 |--------|-----|------|----------|
 | PG `project_triggers` outbox-lite + claim/lease | L07 | **partial:** dual-write Kafka envelopes; PG still claim/drain SoT | C-EVENT-BUS / C-TRIGGERS |
 | Platform events fan-out in-process | L07/L06 | **partial:** dual-write Kafka; SPI fan-out still in-process | C-EVENT-BUS |
-| `data/storage/projects/...`, `local-ws:` / `object-ws:` | L07 | **partial:** new refs `object-ws:`; dual-read `local-ws:`; materialize via ObjectStorageManager; sandbox extract + optional local mirror cwd remain | C-OBJECT-STORE / C-MATERIALIZE / C-ATTACH |
+| `data/storage/projects/...`, `local-ws:` / `object-ws:` | L07 | **partial:** new refs `object-ws:`; Alembic+admin backfill for `local-ws:`; materialize via ObjectStorageManager; sandbox extract + optional local mirror cwd remain | C-OBJECT-STORE / C-MATERIALIZE / C-ATTACH |
 | `file://` secrets на диске | L03 | остаётся routing; product **blobs** не через secrets_dir | C-KEY-RESOLVE (без изменения) + C-OBJECT-STORE для файлов |
 | `TRIGGER_WORKER_ENABLED` asyncio в lifespan | L07/L08 | **partial:** Celery tasks + WorkerManager; in-process fallback when Celery off | C-JOBS |
 | Idle-pause / admin drain HTTP-only | L07/L09 | Celery beat/enqueue + HTTP drain remain | C-JOBS |

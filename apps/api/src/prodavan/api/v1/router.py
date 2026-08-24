@@ -6,6 +6,7 @@ from prodavan.api.v1 import (
     admin_companies,
     admin_metrics,
     admin_platform_events,
+    admin_projects,
     admin_starter_bundles,
     admin_triggers,
     agent,
@@ -30,6 +31,7 @@ router.include_router(admin_starter_bundles.router)
 router.include_router(admin_companies.company_router)
 router.include_router(admin_triggers.router)
 router.include_router(admin_platform_events.router)
+router.include_router(admin_projects.router)
 router.include_router(ai_keys.router)
 router.include_router(cabinets.router)
 router.include_router(projects.cabinet_projects_router)

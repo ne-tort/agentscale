@@ -23,7 +23,7 @@ Project = workspace + `object-ws:{key}` container ref (legacy `local-ws:` still 
 | ORM projects / project_triggers / project_attachments + migration | k8s pod scheduler |
 | CRUD: create/list/get/PATCH (name, agent_provider); pause/resume/delete | |
 | Materialize: AGENTS from cabinet workspace-docs + packages/sandbox | bubblewrap/k8s isolator |
-| `container_ref=object-ws:{workspace_key}` (parse accepts `local-ws:`) | |
+| `container_ref=object-ws:{workspace_key}` (parse accepts `local-ws:`; Alembic+admin backfill) | |
 | Triggers: enqueue + list + dispatch + signed webhook/telegram ingress + admin drain + worker | External broker (Kafka/SQS) |
 | Outbox-lite: `attempts` / `lease_until` / `available_at` / `last_error` + SKIP LOCKED claim | |
 | Platform events bus + cabinet SPI deliver (audit) | MCP stdio handler protocol; bubblewrap |

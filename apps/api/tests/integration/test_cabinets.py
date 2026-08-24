@@ -158,6 +158,22 @@ def test_create_cabinet_base_seed_and_peer_isolation(client: TestClient) -> None
     )
     assert write_blocked.status_code == 409
 
+    purged = client.delete(
+        f"/api/v1/cabinets/{cabinet_id}",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert purged.status_code == 200, purged.text
+    body = purged.json()
+    assert body["deleted"] is True
+    assert body["schema_dropped"] is True
+    assert "packages_wipe" in body
+
+    gone = client.get(
+        f"/api/v1/cabinets/{cabinet_id}",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert gone.status_code == 404
+
 
 @requires_postgres
 def test_mcp_tools_dispatch_and_ban_sql(client: TestClient) -> None:

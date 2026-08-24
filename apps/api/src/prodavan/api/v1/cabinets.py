@@ -247,6 +247,19 @@ async def archive_cabinet(
     )
 
 
+@router.delete("/{cabinet_id}")
+async def hard_delete_cabinet(
+    cabinet_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    """Hard-delete an archived cabinet: DROP SCHEMA CASCADE + wipe blobs + delete row."""
+    return await CabinetInstanceService(session).hard_delete(
+        cabinet_id=cabinet_id, principal=principal, employee=employee
+    )
+
+
 @router.get("/{cabinet_id}/bundle")
 async def export_cabinet_bundle(
     cabinet_id: str,

@@ -22,7 +22,7 @@ CabinetInstance: schema-per-instance, meta+UI, cabinet.*, MCP packages, bundles.
 
 | Сделано | Gaps / соседний слой |
 |---------|----------------------|
-| Instance CRUD + schema-per-instance + Base tabs | UI interpreters (L05) |
+| Instance CRUD + schema-per-instance + Base tabs; archive + hard-delete | UI interpreters (L05) |
 | Meta tables create + tabs list | columns/views mutate API (create/update/delete subset) |
 | Rows query/upsert/delete (physical + json_document) | — |
 | cabinet.* MCP dispatcher | audit events (MCP + meta HTTP) |
@@ -52,18 +52,19 @@ CabinetInstance: schema-per-instance, meta+UI, cabinet.*, MCP packages, bundles.
 | C-CABINET-MCP | dispatcher | **live** (subset) |
 | C-BUNDLE | export/import v1 | **live** |
 | C-MCP-PKG | deploy/list/disable/export | **live** (registry; no sandbox run) |
-| C-MATERIALIZE | consumed from L07 | **live** (L07 local-ws) |
+| C-MATERIALIZE | consumed from L07 | **live** (L07 object-ws + dual-read) |
 
 ## Gaps vs канон / DoD
 
 | Требование | Статус | Заметка |
 |------------|--------|---------|
-| Package deploy + strict manifest | done | object-store read/write; replace deletes old zip; archive wipes prefix |
+| Package deploy + strict manifest | done | object-store read/write; replace deletes old zip; archive wipes prefix; hard-delete drops schema |
 | Sandbox start on materialize | live (subset) | L07 prepare + opt-in local spawn; k8s hole |
 | Company/Admin quotas | done | L04 CompanyQuotaService on create/import/packages |
 | columns/views CRUD | done | PATCH column type + metadata |
 | UI meta interpreters | live (subset) | tables settings + custom tabs + view edit |
 | Non-system tabs from bundle | done | import_bundle_views_and_tabs |
+| Hard-delete archived instance | **done** (subset) | `DELETE /cabinets/{id}` DROP SCHEMA + wipe; async durable GC — hole |
 
 ## Проверка
 

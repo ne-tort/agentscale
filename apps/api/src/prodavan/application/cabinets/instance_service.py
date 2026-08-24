@@ -153,3 +153,83 @@ class CabinetInstanceService:
         out = _public(inst)
         out["packages_wipe"] = wipe
         return out
+
+    async def hard_delete(
+        self,
+        *,
+        cabinet_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        """Drop PG schema + wipe blobs + delete instance row (archived only)."""
+        from prodavan.application.cabinets.package_wipe import wipe_cabinet_packages
+        from prodavan.application.projects.project_wipe import wipe_project_tree
+        from prodavan.core.jobs.enqueue import (
+            enqueue_wipe_cabinet_packages,
+            enqueue_wipe_project_tree,
+        )
+        from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+        inst = await self._access.require_access(
+            cabinet_id=cabinet_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+            allow_archived_write=True,
+        )
+        if inst.status != CabinetStatus.ARCHIVED:
+            raise AppError(
+                code="CABINET_NOT_ARCHIVED",
+                title="Cabinet not archived",
+                status=409,
+                detail="archive the cabinet before hard-delete",
+            )
+
+        projects_q = await self._session.execute(
+            select(ProjectRow.id, ProjectRow.workspace_key).where(ProjectRow.cabinet_id == cabinet_id)
+        )
+        project_rows = list(projects_q.all())
+        project_wipes: list[dict] = []
+        for _pid, workspace_key in project_rows:
+            wipe = wipe_project_tree(workspace_key)
+            if not wipe.get("ok"):
+                retry = enqueue_wipe_project_tree(workspace_key)
+                wipe["retry_enqueued"] = bool(retry.get("enqueued"))
+                wipe["retry"] = retry
+            project_wipes.append(wipe)
+
+        packages_wipe = wipe_cabinet_packages(cabinet_id)
+        if not packages_wipe.get("ok"):
+            retry = enqueue_wipe_cabinet_packages(cabinet_id)
+            packages_wipe["retry_enqueued"] = bool(retry.get("enqueued"))
+            packages_wipe["retry"] = retry
+
+        schema_name = inst.schema_name
+        schema_dropped = False
+        try:
+            await self._provisioner.drop_schema(self._session, schema_name=schema_name)
+            schema_dropped = True
+        except Exception:
+            logger.exception(
+                "cabinet hard_delete: drop_schema failed cabinet_id=%s schema=%s",
+                cabinet_id,
+                schema_name,
+            )
+            raise AppError(
+                code="SCHEMA_DROP_FAILED",
+                title="Schema drop failed",
+                status=500,
+                detail=f"failed to drop schema {schema_name}",
+            ) from None
+
+        await self._session.delete(inst)
+        await self._session.commit()
+        return {
+            "deleted": True,
+            "id": cabinet_id,
+            "schema_name": schema_name,
+            "schema_dropped": schema_dropped,
+            "packages_wipe": packages_wipe,
+            "project_wipes": project_wipes,
+            "projects_purged": len(project_rows),
+        }
