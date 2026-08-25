@@ -20,10 +20,12 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -e .
 
 # Single COPY layer: ORM + Alembic revisions must not desync (buildx layer cache).
-COPY apps/api/src apps/api/alembic /tmp/api-pack/
-RUN cp -a /tmp/api-pack/src ./src \
-  && cp -a /tmp/api-pack/alembic ./alembic \
-  && rm -rf /tmp/api-pack
+# CI Images runs ./scripts/migrate.sh on the built image before push.
+COPY apps/api /tmp/api-full/
+RUN rm -rf ./src ./alembic \
+  && mv /tmp/api-full/src ./src \
+  && mv /tmp/api-full/alembic ./alembic \
+  && rm -rf /tmp/api-full
 COPY apps/api/alembic.ini ./
 COPY apps/api/scripts/migrate.sh ./scripts/migrate.sh
 RUN chmod +x ./scripts/migrate.sh

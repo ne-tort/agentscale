@@ -1,4 +1,4 @@
-"""Alembic migration environment — stub."""
+"""Alembic migration environment."""
 
 import asyncio
 from logging.config import fileConfig
@@ -21,11 +21,35 @@ config.set_main_option("sqlalchemy.url", settings.database_url)
 target_metadata = _Base.metadata
 
 
+def include_object(object, name, type_, reflected, compare_to):
+    """Bootstrap table + revision-managed indexes stay out of ORM drift checks."""
+    if type_ == "table" and name == "stub_meta":
+        return False
+    if type_ in ("index", "unique_constraint"):
+        return False
+    return True
+
+
+def _configure_context(connection=None, url=None, **kwargs) -> None:
+    opts = {
+        "target_metadata": target_metadata,
+        "include_object": include_object,
+        # Indexes/uniques often live in explicit revisions, not declarative Index().
+        "compare_indexes": False,
+        "compare_unique_constraints": False,
+    }
+    if connection is not None:
+        opts["connection"] = connection
+    if url is not None:
+        opts["url"] = url
+    opts.update(kwargs)
+    context.configure(**opts)
+
+
 def run_migrations_offline() -> None:
     url = config.get_main_option("sqlalchemy.url")
-    context.configure(
+    _configure_context(
         url=url,
-        target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -34,7 +58,7 @@ def run_migrations_offline() -> None:
 
 
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    _configure_context(connection=connection)
     with context.begin_transaction():
         context.run_migrations()
 

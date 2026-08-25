@@ -166,7 +166,8 @@
   },
   "adminDraining": "Draining…",
   "adminEditBindings": "Edit bindings",
-  "adminEndsAt": "Ends at (YYYY-MM-DD)",
+  "adminEndsAt": "Ends at",
+  "adminDateFormatHint": "YYYY-MM-DD",
   "adminEndsAtIfNotLifetime": "Ends at (YYYY-MM-DD, if not lifetime)",
   "adminEnterIntegerMin": "Enter integer ≥ {min}",
   "@adminEnterIntegerMin": {

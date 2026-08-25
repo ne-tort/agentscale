@@ -125,6 +125,37 @@ jobs:
           cache-from: type=local,src=/tmp/.buildx-cache-api
           cache-to: type=local,dest=/tmp/.buildx-cache-api-new,mode=max
 
+      - name: Migration smoke (image ORM ↔ alembic)
+        run: |
+          set -euo pipefail
+          IMAGE="${{ steps.meta.outputs.api }}:${{ steps.meta.outputs.tag }}"
+          PG_HOST="${PRODAVAN_CI_HOST:-127.0.0.1}"
+          NAME="prodavan-migrate-smoke-${{ github.run_id }}-${{ github.job }}"
+          docker rm -f "$NAME" 2>/dev/null || true
+          docker run -d --name "$NAME" \
+            -e POSTGRES_USER=prodavan \
+            -e POSTGRES_PASSWORD=prodavan \
+            -e POSTGRES_DB=prodavan \
+            -p 0:5432 \
+            postgres:16.15
+          PORT="$(docker port "$NAME" 5432/tcp | head -1 | awk -F: '{print $NF}')"
+          echo "Postgres $NAME on ${PG_HOST}:${PORT}"
+          for i in $(seq 1 30); do
+            if docker exec "$NAME" pg_isready -U prodavan -d prodavan; then
+              break
+            fi
+            if [ "$i" -eq 30 ]; then
+              echo "Postgres did not become ready" >&2
+              exit 1
+            fi
+            sleep 2
+          done
+          DATABASE_URL="postgresql+asyncpg://prodavan:prodavan@${PG_HOST}:${PORT}/prodavan"
+          docker run --rm \
+            -e DATABASE_URL="$DATABASE_URL" \
+            "$IMAGE" ./scripts/migrate.sh
+          docker rm -f "$NAME"
+
       - name: Rotate cache
         run: |
           python3 - <<'PY'

@@ -35,6 +35,7 @@ class _CompanyShellState extends State<CompanyShell> {
       selectedIndex: _index,
       onDestinationSelected: (i) => setState(() => _index = i),
       onOpenSettings: () => openAppSettings(context),
+      onLogoTap: () => setState(() => _index = 0),
       destinations: [
         AppNavDestination(icon: Icons.dashboard_outlined, label: l10n.navOverview),
         AppNavDestination(icon: Icons.group_outlined, label: l10n.navEmployees),

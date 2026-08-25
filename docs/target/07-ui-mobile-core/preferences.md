@@ -11,6 +11,8 @@
 | `AppChoicePreference<T>` | Выбор из списка через `AppSelectorPage` (radio / checkbox) |
 | `AppValuePreference<T>` | Inline edit текста/числа с валидацией и `onSave` |
 | `AppSwitchPreference` | Boolean toggle с немедленным `onChanged` |
+| `AppNavPreference` | Hub-строка с chevron → подстраница |
+| `AppSubscriptionPreference` | Дата окончания + switch (выкл. = бессрочная) |
 
 Barrel: `package:prodavan/core/preferences/preferences.dart`.
 

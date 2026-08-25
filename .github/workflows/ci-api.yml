@@ -91,6 +91,11 @@ jobs:
           export DATABASE_URL="${PG_ADMIN_URL}"
           alembic upgrade head
 
+      - name: Alembic model drift check
+        run: |
+          export DATABASE_URL="${PG_ADMIN_URL}"
+          alembic check
+
       - name: Migration downgrade smoke
         run: |
           export DATABASE_URL="${PG_ADMIN_URL}"

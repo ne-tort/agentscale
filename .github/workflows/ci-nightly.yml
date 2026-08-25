@@ -71,6 +71,11 @@ jobs:
           DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@${{ env.DB_HOST }}:55433/prodavan
         run: alembic upgrade head
 
+      - name: Alembic model drift check
+        env:
+          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@${{ env.DB_HOST }}:55433/prodavan
+        run: alembic check
+
       - name: Grant app role on migrated tables
         env:
           DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@${{ env.DB_HOST }}:55433/prodavan

@@ -136,6 +136,8 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
     WidgetsBinding.instance.addPostFrameCallback((_) => _focusNode.requestFocus());
   }
 
+  void _guardBlur() => _ignoreNextBlur = true;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -162,9 +164,14 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
               ? [FilteringTextInputFormatter.digitsOnly]
               : null,
           textInputAction: TextInputAction.done,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            fontFamily: widget.digitsOnly ? 'monospace' : null,
+          ),
           decoration: InputDecoration(
             isDense: true,
+            isCollapsed: true,
             border: InputBorder.none,
+            contentPadding: EdgeInsets.zero,
             hintText: widget.hintText,
           ),
           onSubmitted: (_) => _save(),
@@ -172,6 +179,7 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
         trailing: AppPreferenceInlineActions(
           onSave: _save,
           onCancel: _cancel,
+          onGuardBlur: _guardBlur,
           onToggleObscure: widget.obscureText
               ? () => setState(() => _obscured = !_obscured)
               : null,
@@ -185,7 +193,7 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
       icon: widget.icon,
       enabled: widget.enabled,
       subtitle: Text(subtitleText, style: theme.textTheme.bodyMedium),
-      trailing: const Icon(Icons.chevron_right),
+      trailing: const Icon(Icons.chevron_right_rounded, size: 22),
       onTap: _beginEdit,
     );
   }

@@ -166,7 +166,8 @@
   },
   "adminDraining": "Сброс…",
   "adminEditBindings": "Изменить привязки",
-  "adminEndsAt": "Окончание (ГГГГ-ММ-ДД)",
+  "adminEndsAt": "Окончание",
+  "adminDateFormatHint": "ГГГГ-ММ-ДД",
   "adminEndsAtIfNotLifetime": "Окончание (ГГГГ-ММ-ДД, если не бессрочная)",
   "adminEnterIntegerMin": "Введите целое ≥ {min}",
   "@adminEnterIntegerMin": {

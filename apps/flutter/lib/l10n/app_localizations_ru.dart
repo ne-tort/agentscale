@@ -181,7 +181,10 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminEditBindings => 'Изменить привязки';
 
   @override
-  String get adminEndsAt => 'Окончание (ГГГГ-ММ-ДД)';
+  String get adminEndsAt => 'Окончание';
+
+  @override
+  String get adminDateFormatHint => 'ГГГГ-ММ-ДД';
 
   @override
   String get adminEndsAtIfNotLifetime =>

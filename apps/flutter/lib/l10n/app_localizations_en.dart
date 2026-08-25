@@ -182,7 +182,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminEditBindings => 'Edit bindings';
 
   @override
-  String get adminEndsAt => 'Ends at (YYYY-MM-DD)';
+  String get adminEndsAt => 'Ends at';
+
+  @override
+  String get adminDateFormatHint => 'YYYY-MM-DD';
 
   @override
   String get adminEndsAtIfNotLifetime =>

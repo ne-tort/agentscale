@@ -41,6 +41,7 @@ class _AdminShellState extends State<AdminShell> {
       selectedIndex: _index,
       onDestinationSelected: (i) => setState(() => _index = i),
       onOpenSettings: () => openAppSettings(context),
+      onLogoTap: () => setState(() => _index = 0),
       destinations: destinations,
       body: IndexedStack(index: _index, children: pages),
     );

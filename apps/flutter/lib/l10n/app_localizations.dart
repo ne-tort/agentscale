@@ -371,8 +371,14 @@ abstract class AppLocalizations {
   /// No description provided for @adminEndsAt.
   ///
   /// In en, this message translates to:
-  /// **'Ends at (YYYY-MM-DD)'**
+  /// **'Ends at'**
   String get adminEndsAt;
+
+  /// No description provided for @adminDateFormatHint.
+  ///
+  /// In en, this message translates to:
+  /// **'YYYY-MM-DD'**
+  String get adminDateFormatHint;
 
   /// No description provided for @adminEndsAtIfNotLifetime.
   ///

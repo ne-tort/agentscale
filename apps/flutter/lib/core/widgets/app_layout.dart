@@ -34,6 +34,7 @@ class AppLayout extends StatelessWidget {
     this.actions,
     this.constrainBody = true,
     this.onOpenSettings,
+    this.onLogoTap,
   });
 
   final Widget body;
@@ -44,6 +45,7 @@ class AppLayout extends StatelessWidget {
   final List<Widget>? actions;
   final bool constrainBody;
   final VoidCallback? onOpenSettings;
+  final VoidCallback? onLogoTap;
 
   bool get _hasAppBar => title != null || (actions != null && actions!.isNotEmpty);
 
@@ -65,7 +67,7 @@ class AppLayout extends StatelessWidget {
 
   Widget _logo(BuildContext context, {required bool extended}) {
     final colors = context.appColors;
-    final icon = Icon(Icons.auto_awesome, color: colors.primary, size: 24);
+    final icon = Icon(Icons.auto_awesome_rounded, color: colors.primary, size: 28);
     final label = Text(
       'Prodavan',
       style: TextStyle(
@@ -76,27 +78,41 @@ class AppLayout extends StatelessWidget {
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
     );
-    if (extended) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.lg, AppSpacing.md, AppSpacing.md),
-        child: Row(
-          children: [
-            icon,
-            const SizedBox(width: AppSpacing.sm),
-            Flexible(child: label),
-          ],
+    final content = extended
+        ? Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              icon,
+              const SizedBox(width: AppSpacing.sm),
+              Flexible(child: label),
+            ],
+          )
+        : Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              icon,
+              const SizedBox(height: AppSpacing.xs),
+              label,
+            ],
+          );
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onLogoTap,
+        borderRadius: BorderRadius.circular(12),
+        child: MouseRegion(
+          cursor: onLogoTap != null ? SystemMouseCursors.click : MouseCursor.defer,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(
+              AppSpacing.md,
+              AppSpacing.lg,
+              AppSpacing.md,
+              extended ? AppSpacing.md : AppSpacing.sm,
+            ),
+            child: content,
+          ),
         ),
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          icon,
-          const SizedBox(height: AppSpacing.xs),
-          label,
-        ],
       ),
     );
   }

@@ -71,7 +71,7 @@ class AppChoicePreference<T> extends StatelessWidget {
       icon: icon,
       enabled: enabled,
       subtitle: Text(labelFor(value)),
-      trailing: const Icon(Icons.chevron_right),
+      trailing: const Icon(Icons.chevron_right_rounded, size: 22),
       onTap: () => _pick(context),
     );
   }

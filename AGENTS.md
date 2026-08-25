@@ -28,6 +28,30 @@
 - **Запрещены** `.sh` под `infra/`, docker-compose как кластер, k3d в git, recover/deploy shell.
 - Кластер: **k3s** + Argo (`infra/argocd` → `infra/k3s/overlays/dev`).
 
+## База данных и миграции (Alembic)
+
+Канон: [`docs/07-infrastructure/alembic.md`](docs/07-infrastructure/alembic.md).
+
+**Источник истины схемы** — SQLAlchemy-модели (`apps/api/src/.../persistence/models/`).  
+Ревизии Alembic генерируются из моделей (`alembic revision --autogenerate`) и коммитятся в PR.  
+Ручное редактирование migration-файлов — только для переноса/бэкапа данных.
+
+### Жёсткие запреты (кластер и БД)
+
+- **Не** обходить деплой: `kubectl apply`, port-forward как «фикс», ручной rollout, правки в running pod.
+- **Не** выполнять миграции на shared env вручную (`kubectl exec … alembic`, `psql ALTER`, `alembic stamp`).
+- **Не** запускать `alembic revision --autogenerate` при деплое — только `upgrade head` по закоммиченным файлам.
+- **Не** править уже применённые ревизии — только новые файлы в `alembic/versions/`.
+
+Если схема на dev отстаёт от кода — **чинить механизм поставки** (Dockerfile, `migrate.sh`, CI, merge → Images → Argo) и **передеплоить**. Не «лечить» базу императивом.
+
+### Поток
+
+```text
+ORM-модель → autogenerate в PR → CI (upgrade + alembic check) → merge
+  → CI Images → Argo → initContainer ./scripts/migrate.sh → API
+```
+
 ## Суть продукта
 
 Admin → Company → Employee → **динамический Cabinet** → **Project**.  

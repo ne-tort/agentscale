@@ -1,13 +1,26 @@
-# Prodavan API — STUB
+# Prodavan API
 
-Это **болванка** платформы. Доменную логику не восстанавливать из git history —
-реализовывать по канону [`docs/target/`](../../docs/target/).
+FastAPI backend платформы Prodavan. Канон домена — [`docs/target/`](../../docs/target/).
 
-Что оставлено для k3s / CI:
+## Локально
 
-- `GET /health`, `/health/live`, `/health/ready` (ready = Postgres `SELECT 1`)
-- `GET /api/v1/stub` — маркер stub
-- Alembic: единственная ревизия `stub_bootstrap` (таблица `stub_meta`)
-- Entrypoint: `alembic upgrade head` → uvicorn
+```bash
+cd apps/api
+pip install -e ".[dev]"
+export DATABASE_URL=postgresql+asyncpg://prodavan:prodavan@127.0.0.1:5432/prodavan
+alembic upgrade head
+uvicorn prodavan.main:app --reload
+```
 
-Миграции: [docs/07-infrastructure/alembic.md](../../docs/07-infrastructure/alembic.md).
+## Миграции
+
+- **Источник истины:** SQLAlchemy models → `alembic revision --autogenerate` в PR.
+- **Деплой:** k8s initContainer `./scripts/migrate.sh` (`upgrade head` + `alembic check`).
+- **Autogenerate при деплое запрещён.**
+
+Подробно: [docs/07-infrastructure/alembic.md](../../docs/07-infrastructure/alembic.md).
+
+## Docker / k3s
+
+- Образ: `apps/api/Dockerfile` (build context = корень `prodavan/`).
+- Main process: `uvicorn` only; миграции — initContainer, не entrypoint.

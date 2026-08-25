@@ -98,6 +98,12 @@ class AppTheme {
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: AppRadii.borderMd),
       ),
+      listTileTheme: ListTileThemeData(
+        iconColor: tokens.muted,
+        contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+        minLeadingWidth: 32,
+        horizontalTitleGap: AppSpacing.md,
+      ),
     );
   }
 

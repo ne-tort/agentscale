@@ -33,6 +33,8 @@
 
 Не `git push origin main`.
 
+**Миграции Alembic** — только через initContainer при деплое API; см. [alembic.md](alembic.md). Ручной `alembic upgrade` / `kubectl exec` на shared env запрещён.
+
 ---
 
 ## 2. Bootstrap кластера (канон)

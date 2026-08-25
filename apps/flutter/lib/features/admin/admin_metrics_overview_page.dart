@@ -7,7 +7,7 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/core/widgets/stat_tile.dart';
-import 'package:prodavan/features/admin/company_detail_page.dart';
+import 'package:prodavan/features/admin/company/admin_company_detail_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 enum _AlertKind { noKeys, keyExpiring, highUsage, subscriptionExpiring, subscriptionExpired }

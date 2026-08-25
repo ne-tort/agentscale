@@ -1,62 +1,78 @@
-# Alembic (core DB migrations)
+# Alembic (platform Postgres)
 
-Канон ops для **platform** Postgres. Доменная схема продукта — из [`docs/target/`](../target/); текущий код API — [STUB](../../STUB.md).
+Канон миграций **core** БД Prodavan. Cabinet pack SQL — только через SPI `POST /migrate` ([ADR-001](../02-architecture/ADR-001-platform-core-vs-cabinet-spi.md)).
 
-## Где лежит
+## Источник истины
 
-| Путь | Роль |
+| Слой | Роль |
 |------|------|
-| `apps/api/alembic.ini` | Конфиг Alembic (`script_location=alembic`, `prepend_sys_path=src`) |
-| `apps/api/alembic/env.py` | Async URL из `settings.database_url`, `target_metadata = Base.metadata` |
-| `apps/api/alembic/versions/` | Цепочка ревизий (сейчас только `stub_bootstrap`) |
-| `apps/api/docker-entrypoint.sh` | При `RUN_MIGRATIONS=1` (default): `alembic upgrade head` |
+| **SQLAlchemy models** (`apps/api/src/.../persistence/models/`) | Декларативная схема — единственный источник истины |
+| **`alembic/versions/*.py`** | Версионированные DDL/data steps, генерируются из моделей |
+| **`alembic_version`** в Postgres | Факт применённой ревизии |
 
-## Команды (из `apps/api`)
+Модели регистрируются через `from prodavan.infrastructure.persistence.models import Base` в `alembic/env.py` (`target_metadata = Base.metadata`).
+
+## Поток разработки (локально / PR)
 
 ```bash
-# URL: postgresql+asyncpg://… (см. Settings.database_url / CI DATABASE_URL)
+cd apps/api
+export DATABASE_URL=postgresql+asyncpg://prodavan:prodavan@127.0.0.1:5432/prodavan
+
+# 1. Изменить ORM-модель
+# 2. Сгенерировать ревизию из diff модель ↔ текущий head
+alembic revision --autogenerate -m "short_snake_name"
+
+# 3. Ревью файла в alembic/versions/ — autogenerate не идеален
+#    Ручное редактирование — только data migration, backfill, особые индексы
+
 alembic upgrade head
-alembic current
-alembic history
-alembic downgrade -1
+alembic check          # модели ≡ БД после head
+alembic downgrade -1   # опционально — smoke отката
+alembic upgrade head
 ```
 
-Новая ревизия (после появления ORM-моделей по target):
+**Autogenerate в деплое — антипаттерн:** не детерминирован, без ревью в PR, гонки в k8s, риск DROP. В деплое только `upgrade head` по закоммиченным файлам.
 
-```bash
-alembic revision -m "short_snake_name"
-# или autogenerate, когда модели снова появятся в Base.metadata:
-# alembic revision --autogenerate -m "…"
+## Деплой (единственный путь на shared env)
+
+```text
+PR merge → CI Images (API образ) → Argo sync
+  → prodavan-api initContainer: ./scripts/migrate.sh
+       1. alembic upgrade head
+       2. alembic check
+  → uvicorn (main container)
 ```
-
-Правила:
-
-1. **Одна линейная цепочка** `down_revision` — без веток без явной необходимости.
-2. Миграции **идемпотентны** по смыслу upgrade на чистой БД; не править уже применённые ревизии на shared env — только новые файлы.
-3. **Pack / cabinet SQL** не в core Alembic — через cabinet SPI `POST /migrate` (см. [ADR-001](../02-architecture/ADR-001-platform-core-vs-cabinet-spi.md)).
-4. Role `prodavan_app`: в CI создаётся отдельным шагом до `upgrade`; в k3s — init job / Terraform (см. env-matrix).
-
-## CI / runtime
 
 | Место | Поведение |
 |-------|-----------|
-| `.github/workflows/ci-api.yml` | Postgres → create role → `alembic upgrade head` → pytest |
-| API container entrypoint | `alembic upgrade head` затем uvicorn |
-| k3s readiness | `/health/ready` = DB reachable (**не** проверка содержимого схемы) |
+| `infra/k3s/base/prodavan-api/deployment.yaml` | initContainer `migrate` → `./scripts/migrate.sh` |
+| `apps/api/Dockerfile` | `src` + `alembic` в **одном COPY** (buildx cache не должен рассинхронить ORM и revisions) |
+| `.github/workflows/ci-api.yml` | Postgres → `upgrade head` → **`alembic check`** → downgrade/upgrade smoke → pytest |
+| `.github/workflows/ci-images.yml` | После сборки образа — migration smoke (`migrate.sh` на ephemeral Postgres) |
 
-## Cutover со stub (важно)
+Readiness `/health/ready` проверяет доступность Postgres, **не** содержимое схемы. Схема — ответственность initContainer.
 
-Цепочка legacy-ревизий (`2026080801` …) **удалена**. На уже развёрнутом Postgres с старым `alembic_version`:
+## Правила ревизий
 
-1. Остановить API.
-2. Сбросить том / схему: `DROP SCHEMA public CASCADE; CREATE SCHEMA public;` (или пересоздать PVC).
-3. Выдать права роли `prodavan_app`.
-4. Запустить API → `upgrade head` применит `stub_bootstrap` (`stub_meta`).
+1. **Одна линейная цепочка** `down_revision` — без веток без явной необходимости.
+2. **Не править** уже применённые ревизии на dev/staging/prod — только новый файл.
+3. **Data migration** (UPDATE/backfill) — явный `op.execute` / batch; autogenerate не заменяет ревью.
+4. Role `prodavan_app`: CI выдаёт GRANT после migrate; в k3s — bootstrap/Terraform.
 
-Не пытаться `alembic stamp` старыми id — их больше нет в репозитории.
+## Если миграция «не доехала»
 
-## Что дальше (продукт)
+Симптом: 500 на API (missing column), initContainer в CrashLoop, `alembic check` падает в CI.
 
-1. Модели SQLAlchemy по `docs/target/` (companies, employees, AI keys, …).
-2. Новые файлы в `alembic/versions/` с `down_revision = "stub_bootstrap"` (или после squash).
-3. Не тащить S4B/pipeline таблицы из git history без требований target.
+**Делать:** исправить цепочку поставки (Dockerfile, migrate.sh, CI smoke, образ `:latest` после merge) и **передеплоить** через GitOps.
+
+**Не делать:** `kubectl exec alembic upgrade`, ручной `ALTER`, `alembic stamp` на shared env, обход Argo.
+
+## Cutover со stub (legacy)
+
+Цепочка `2026080801` … удалена. Старый `alembic_version` на томе без пересоздания схемы не поддерживается — см. исторический блок в git / L00 docs.
+
+## Ссылки
+
+- [runbook.md](runbook.md) — GitOps, без ручного кластера  
+- [AGENTS.md](../../AGENTS.md) — запреты для агента  
+- `apps/api/alembic.ini`, `apps/api/alembic/env.py`

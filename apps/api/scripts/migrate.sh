@@ -1,15 +1,12 @@
 #!/bin/sh
-# Kubernetes initContainer: apply Alembic head and fail if DB is not at head.
+# Kubernetes initContainer: apply Alembic head, then verify ORM ↔ DB parity.
+# Deploy applies committed revisions only — never autogenerate here.
 set -eu
 
+echo "alembic: upgrade head"
 alembic upgrade head
 
-current="$(alembic current 2>/dev/null | awk 'NF && $1 !~ /^(INFO|Context|Will)/ { print $1; exit }')"
-head="$(alembic heads 2>/dev/null | awk 'NF && $1 !~ /^(INFO|Rev)/ { print $1; exit }')"
+echo "alembic: check (models must match database at head)"
+alembic check
 
-if [ -z "$current" ] || [ -z "$head" ] || [ "$current" != "$head" ]; then
-  echo "alembic: migration incomplete (current=${current:-?} head=${head:-?})" >&2
-  exit 1
-fi
-
-echo "alembic: database at head ${head}"
+echo "alembic: ok — database at head and consistent with SQLAlchemy models"
