@@ -32,8 +32,8 @@
 | I9 | Redpanda HA | deferred | local single node |
 | I10 | Keycloak in-cluster | open | AUTH_MODE=test; seed — out of GitOps CLI |
 | I11 | Alembic history rewrite vs old PVC | **done** (ops) | wipe PVC manually if legacy revisions |
-| I12 | GHCR API/web image lag | **done** | `:latest` + IfNotPresent; kubelet + SealedSecret |
-| I13 | Terraform apply = full stack | **done** (removed local) | local TF удалён; cloud skeletons only |
+| I12 | GHCR API/web image lag | **done** | `:latest` + Always; Verify Dev `rollout` after Images |
+| I13 | Terraform apply = full stack | **done** | local TF SSH → k3s + Argo (`environments/local`) |
 | I14 | Recover after reboot | **done** | k3s systemd + Argo selfHeal; **no** recover shell |
 | I15 | Argo Job churn / selfHeal | **done** | AppProject + RespectIgnoreDifferences; prune enabled |
 | I16 | Secrets in git (dev) | **in_progress** | Sealed Secrets controller + seal workflow; plaintext forbidden |

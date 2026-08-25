@@ -21,7 +21,7 @@ UI: `http://localhost:8088/`.
 
 Docker нужен **только** для сборки образов в CI Images (и опционально для самого runner-процесса). Кластер, Argo и validate от Docker **не зависят**.
 
-Образы: `ghcr.io/ne-tort/prodavan-{api,web}:latest`, `imagePullPolicy: IfNotPresent`, secret `ghcr-pull` (SealedSecret).
+Образы: `ghcr.io/ne-tort/prodavan-{api,web}:latest`, `imagePullPolicy: Always`, secret `ghcr-pull` (bootstrap TF и/или SealedSecret — `overlays/dev/SECRETS.md`).
 
 ---
 
@@ -59,7 +59,12 @@ export KUBECONFIG=~/.kube/prodavan-dev.yaml
 cd ../../ops && poetry install && poetry run prodavan-ops smoke
 ```
 
-Day-2 деплой: **только** merge в `main` + Argo selfHeal. Не `kubectl apply -k infra/k3s/...` руками.
+После bootstrap / reboot Windows (Admin): `infra/github-runner/Sync-KubeForDocker.ps1`
+(или `Start-Runners.ps1` — вызывает Sync сам). Без этого Verify Dev из Docker runners
+не достучится до API (`host.docker.internal:6443` + portproxy).
+
+Day-2 деплой: **только** merge в `main` → CI Images → Verify Dev (`rollout` + `wait` + `smoke`).
+Не `kubectl apply -k infra/k3s/...` руками.
 Ручной `kubectl apply -k infra/argocd/...` — только recovery, не штатный путь.
 
 ---
@@ -98,5 +103,5 @@ SandboxChanged, Traefik `:8088` пропадает. Terraform ставит `Time
 |----------|------|
 | CI Gate | `prodavan-ops validate` + api/flutter/schemas |
 | CI Images | buildx → GHCR (единственное легитимное использование Docker в поставке) |
-| Verify Dev | `wait` + `smoke` (не деплоит, не создаёт secrets) |
-| Auto-merge | squash после Gate |
+| Verify Dev | после Images: `rollout` (:latest) + `wait` + `smoke`; secrets не создаёт |
+| Auto-merge | squash после Gate (`AUTO_MERGE_TOKEN` PAT с `contents`+`actions`) |

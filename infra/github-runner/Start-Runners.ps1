@@ -22,9 +22,12 @@ Get-Content $envFile | ForEach-Object {
     if ($_ -match '^\s*RUNNER_REPLICAS\s*=\s*(\d+)') { $replicas = [int]$Matches[1] }
 }
 
-# Ensure Windows kube dir exists (empty mount is ok)
+# Ensure Windows kube dir exists + rewrite for Docker Desktop → WSL k3s
 $kube = Join-Path $env:USERPROFILE '.kube'
 if (-not (Test-Path $kube)) { New-Item -ItemType Directory -Path $kube | Out-Null }
+$sync = Join-Path $here 'Sync-KubeForDocker.ps1'
+Write-Host "Sync kubeconfig + portproxy (WSL IP drift after reboot)..."
+& $sync
 
 Write-Host "docker compose build + up -d --scale runner=$replicas"
 docker compose build

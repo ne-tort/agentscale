@@ -11,14 +11,17 @@ jobs:
     defaults:
       run:
         working-directory: apps/api
-    env:
-      DATABASE_URL: postgresql+asyncpg://prodavan_app:prodavan@127.0.0.1:55433/prodavan
-      PG_ADMIN_URL: postgresql+asyncpg://prodavan:prodavan@127.0.0.1:55433/prodavan
     steps:
       - uses: actions/checkout@v4
 
+      - name: Resolve DB host (Docker Desktop gateway)
+        run: |
+          set -euo pipefail
+          echo "DB_HOST=${PRODAVAN_CI_HOST:-127.0.0.1}" >> "${GITHUB_ENV}"
+
       - name: Start Postgres
         run: |
+          set -euo pipefail
           docker rm -f prodavan-nightly-pg 2>/dev/null || true
           docker run -d --name prodavan-nightly-pg \
             -e POSTGRES_USER=prodavan \
@@ -44,13 +47,15 @@ jobs:
 
       - name: Ensure app role
         env:
-          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@127.0.0.1:55433/prodavan
+          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@${{ env.DB_HOST }}:55433/prodavan
         run: |
-          python - <<'PY'
+          python - <<PY
           import asyncio
           import asyncpg
+          import os
+          host = os.environ["DB_HOST"]
           async def main():
-              conn = await asyncpg.connect("postgresql://prodavan:prodavan@127.0.0.1:55433/prodavan")
+              conn = await asyncpg.connect(f"postgresql://prodavan:prodavan@{host}:55433/prodavan")
               try:
                   await conn.execute("CREATE ROLE prodavan_app LOGIN PASSWORD 'prodavan'")
               except Exception:
@@ -63,18 +68,20 @@ jobs:
 
       - name: Run migrations
         env:
-          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@127.0.0.1:55433/prodavan
+          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@${{ env.DB_HOST }}:55433/prodavan
         run: alembic upgrade head
 
       - name: Grant app role on migrated tables
         env:
-          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@127.0.0.1:55433/prodavan
+          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@${{ env.DB_HOST }}:55433/prodavan
         run: |
-          python - <<'PY'
+          python - <<PY
           import asyncio
           import asyncpg
+          import os
+          host = os.environ["DB_HOST"]
           async def main():
-              conn = await asyncpg.connect("postgresql://prodavan:prodavan@127.0.0.1:55433/prodavan")
+              conn = await asyncpg.connect(f"postgresql://prodavan:prodavan@{host}:55433/prodavan")
               await conn.execute("GRANT ALL ON ALL TABLES IN SCHEMA public TO prodavan_app")
               await conn.execute("GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO prodavan_app")
               await conn.close()
@@ -82,6 +89,9 @@ jobs:
           PY
 
       - name: Pytest integration
+        env:
+          DATABASE_URL: postgresql+asyncpg://prodavan_app:prodavan@${{ env.DB_HOST }}:55433/prodavan
+          PG_ADMIN_URL: postgresql+asyncpg://prodavan:prodavan@${{ env.DB_HOST }}:55433/prodavan
         run: pytest tests/integration/ -q
 
       - name: Stop Postgres

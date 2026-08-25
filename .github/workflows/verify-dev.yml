@@ -1,7 +1,7 @@
 name: Verify Dev
 
-# Not a deploy orchestrator: Argo CD syncs from git; kubelet pulls GHCR.
-# This workflow only waits for Application health and smokes HTTP.
+# After CI Images: rollout first-party Deployments (:latest + Always), wait Argo, smoke HTTP.
+# Does not mint secrets; ghcr-pull must already exist (TF bootstrap / SealedSecret).
 
 on:
   workflow_run:
@@ -70,7 +70,10 @@ jobs:
         working-directory: infra/ops
         run: poetry install --no-interaction
 
-      # ghcr-pull must already exist (SealedSecret). CI does not mint secrets.
+      - name: Rollout first-party (after CI Images)
+        if: github.event_name == 'workflow_run' || github.event_name == 'workflow_dispatch'
+        working-directory: infra/ops
+        run: poetry run prodavan-ops rollout --timeout 900
 
       - name: Wait Argo Application
         working-directory: infra/ops

@@ -177,4 +177,11 @@ def validate_all() -> None:
     verify_image_pins(manifest)
     print("ok")
 
+    print("==> first-party Always pull + ghcr-pull")
+    if "imagePullPolicy: Always" not in manifest:
+        raise RuntimeError("dev overlay must set imagePullPolicy: Always for :latest")
+    if "name: ghcr-pull" not in manifest:
+        raise RuntimeError("dev overlay must reference imagePullSecrets ghcr-pull")
+    print("ok")
+
     print("prodavan-ops validate OK")

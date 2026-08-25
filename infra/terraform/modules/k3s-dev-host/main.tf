@@ -63,10 +63,11 @@ resource "null_resource" "k3s_server" {
   depends_on = [null_resource.sshd]
 
   triggers = {
-    rev         = "v4-dropin-file"
-    k3s_version = var.k3s_version
-    http_port   = tostring(var.http_port)
-    cluster     = var.cluster_name
+    # k3s_version intentionally NOT in triggers: already-running path skips
+    # reinstall; changing the var alone must not churn SSH provisioners.
+    rev       = "v5-tls-san-docker"
+    http_port = tostring(var.http_port)
+    cluster   = var.cluster_name
     traefik_tpl = filesha256("${path.module}/templates/traefik-port.yaml.tpl")
     # SSH coords in triggers so provisioners may only use self.*
     ssh_host     = var.ssh_host
@@ -123,7 +124,7 @@ resource "null_resource" "k3s_server" {
       # Broken/unauthenticated Tailscale netmon flaps routes around CNI veths on WSL.
       "if systemctl is-active --quiet tailscaled 2>/dev/null && ! tailscale status >/dev/null 2>&1; then sudo -n systemctl stop tailscaled 2>/dev/null || true; fi",
       "if ! command -v k3s >/dev/null 2>&1; then",
-      "  curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=\"${var.k3s_version}\" sh -s - server --write-kubeconfig-mode 644 --tls-san=127.0.0.1 --tls-san=prodavan.local",
+      "  curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=\"${var.k3s_version}\" sh -s - server --write-kubeconfig-mode 644 --tls-san=127.0.0.1 --tls-san=prodavan.local --tls-san=host.docker.internal",
       "elif ! sudo -n systemctl is-active --quiet k3s; then",
       "  sudo -n systemctl start k3s",
       "else",
@@ -179,8 +180,9 @@ resource "null_resource" "gitops_bootstrap" {
 
   triggers = {
     repo       = var.remote_repo_path
-    gitops_rev = "v6-plain-sh"
-    has_token  = var.ghcr_token != "" ? "yes" : "no"
+    gitops_rev = "v12-templatefile"
+    token_fp   = var.ghcr_token != "" ? substr(sha256(var.ghcr_token), 0, 12) : "none"
+    script_sha = filesha256("${path.module}/templates/gitops-bootstrap.sh.tpl")
   }
 
   connection {
@@ -192,43 +194,26 @@ resource "null_resource" "gitops_bootstrap" {
     timeout     = "10m"
   }
 
+  provisioner "file" {
+    content     = var.ghcr_token != "" ? var.ghcr_token : ""
+    destination = "/tmp/prodavan-ghcr.token"
+  }
+
+  provisioner "file" {
+    content = templatefile("${path.module}/templates/gitops-bootstrap.sh.tpl", {
+      kubeconfig_path  = local.kubeconfig_path
+      remote_repo_path = var.remote_repo_path
+      ghcr_username    = var.ghcr_username
+    })
+    destination = "/tmp/prodavan-gitops.sh"
+  }
+
   provisioner "remote-exec" {
-    # Plain sh lines (remote-exec wraps in a script). Absolute k3s path.
-    # Cold Argo sync can take several minutes.
-    inline = concat(
-      [
-        "set -eu",
-        "export KUBECONFIG=${local.kubeconfig_path}",
-        "export PATH=/usr/local/bin:/usr/bin:/bin",
-        "test -d ${var.remote_repo_path}/infra/argocd/install",
-        "sudo -n /usr/local/bin/k3s kubectl apply -k ${var.remote_repo_path}/infra/argocd/install",
-        "sudo -n /usr/local/bin/k3s kubectl -n argocd wait --for=condition=Available deployment/argocd-server --timeout=300s",
-        "sudo -n /usr/local/bin/k3s kubectl -n argocd wait --for=condition=Available deployment/argocd-repo-server --timeout=300s",
-      ],
-      var.ghcr_token != "" ? [
-        "sudo -n /usr/local/bin/k3s kubectl -n argocd delete secret repo-prodavan --ignore-not-found",
-        "sudo -n /usr/local/bin/k3s kubectl -n argocd create secret generic repo-prodavan --from-literal=type=git --from-literal=url=https://github.com/ne-tort/prodavan.git --from-literal=username=git --from-literal=password=${var.ghcr_token}",
-        "sudo -n /usr/local/bin/k3s kubectl -n argocd label secret repo-prodavan argocd.argoproj.io/secret-type=repository --overwrite",
-      ] : [
-        "echo WARN: no TF_VAR_ghcr_token — Argo cannot sync private repo",
-      ],
-      [
-        "sudo -n /usr/local/bin/k3s kubectl apply -k ${var.remote_repo_path}/infra/argocd/sealed-secrets",
-        "sudo -n /usr/local/bin/k3s kubectl -n kube-system wait --for=condition=Available deployment/sealed-secrets-controller --timeout=180s",
-      ],
-      var.ghcr_token != "" ? [
-        "sudo -n /usr/local/bin/k3s kubectl create namespace prodavan --dry-run=client -o yaml | sudo -n /usr/local/bin/k3s kubectl apply -f -",
-        "sudo -n /usr/local/bin/k3s kubectl -n prodavan delete secret ghcr-pull --ignore-not-found",
-        "sudo -n /usr/local/bin/k3s kubectl -n prodavan create secret docker-registry ghcr-pull --docker-server=ghcr.io --docker-username=${var.ghcr_username} --docker-password=${var.ghcr_token}",
-      ] : [],
-      [
-        "sudo -n /usr/local/bin/k3s kubectl apply -f ${var.remote_repo_path}/infra/argocd/root-app.yaml",
-        "i=0; while [ $$i -lt 72 ]; do i=$$((i+1)); sync=$$(sudo -n /usr/local/bin/k3s kubectl -n argocd get application prodavan-dev -o jsonpath='{.status.sync.status}' 2>/dev/null || echo Pending); health=$$(sudo -n /usr/local/bin/k3s kubectl -n argocd get application prodavan-dev -o jsonpath='{.status.health.status}' 2>/dev/null || echo Unknown); echo prodavan-dev sync=$$sync health=$$health; if [ \"$$sync\" = Synced ] && [ \"$$health\" = Healthy ]; then exit 0; fi; sleep 10; done",
-        "sudo -n /usr/local/bin/k3s kubectl -n argocd get applications",
-        "sudo -n /usr/local/bin/k3s kubectl -n prodavan get pods",
-        "exit 1",
-      ]
-    )
+    inline = [
+      "tr -d '\\r' < /tmp/prodavan-gitops.sh > /tmp/prodavan-gitops.lf && mv /tmp/prodavan-gitops.lf /tmp/prodavan-gitops.sh",
+      "chmod 700 /tmp/prodavan-gitops.sh",
+      "bash /tmp/prodavan-gitops.sh",
+    ]
   }
 }
 

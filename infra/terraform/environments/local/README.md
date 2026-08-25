@@ -23,4 +23,7 @@ Run Terraform **from WSL** (`~/.local/bin/terraform`), not Windows PATH — SSH 
 Destroy: `terraform destroy` runs `k3s-uninstall.sh` over SSH (requires portproxy
 `127.0.0.1:2222` → WSL eth0, see `infra/github-runner/Sync-KubeForDocker.ps1`).
 
-Day-2 deploy: git merge → Argo sync (not terraform).
+Day-2 deploy: git merge → CI Images → Verify Dev rollout → Argo/smoke (not terraform).
+
+New installs add `--tls-san=host.docker.internal` for Docker runners. Existing clusters:
+`Sync-KubeForDocker.ps1` sets `insecure-skip-tls-verify: true` for local-dev.

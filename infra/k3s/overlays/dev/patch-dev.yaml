@@ -17,7 +17,8 @@ spec:
         - name: ghcr-pull
       containers:
         - name: api
-          imagePullPolicy: IfNotPresent
+          # Dev uses :latest — Always so Verify/rollout actually pull new digests.
+          imagePullPolicy: Always
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -32,7 +33,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: web
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -47,7 +48,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: worker
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -62,7 +63,7 @@ spec:
         - name: ghcr-pull
       containers:
         - name: beat
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
 ---
 apiVersion: v1
 kind: ConfigMap
