@@ -19,9 +19,14 @@ RUN mkdir -p src/prodavan \
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -e .
 
-COPY apps/api/src ./src
-COPY apps/api/alembic ./alembic
+# Single COPY layer: ORM + Alembic revisions must not desync (buildx layer cache).
+COPY apps/api/src apps/api/alembic /tmp/api-pack/
+RUN cp -a /tmp/api-pack/src ./src \
+  && cp -a /tmp/api-pack/alembic ./alembic \
+  && rm -rf /tmp/api-pack
 COPY apps/api/alembic.ini ./
+COPY apps/api/scripts/migrate.sh ./scripts/migrate.sh
+RUN chmod +x ./scripts/migrate.sh
 COPY packages/cabinet-packs /packages/cabinet-packs
 COPY packages/schemas /packages/schemas
 

@@ -39,7 +39,7 @@ spec:
         - name: migrate
           image: ghcr.io/ne-tort/prodavan-api:latest
           imagePullPolicy: IfNotPresent
-          command: ["alembic", "upgrade", "head"]
+          command: ["./scripts/migrate.sh"]
           envFrom:
             - configMapRef:
                 name: prodavan-config
