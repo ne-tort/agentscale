@@ -66,3 +66,9 @@ variable "ghcr_username" {
   type    = string
   default = ""
 }
+
+variable "windows_kubeconfig_path" {
+  type        = string
+  default     = ""
+  description = "Docker-ready kubeconfig on the Windows side (WSL /mnt/c/...). Empty = derive from remote_repo_path."
+}

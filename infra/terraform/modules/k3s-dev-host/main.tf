@@ -11,6 +11,16 @@ terraform {
 locals {
   kubeconfig_path = var.kubeconfig_path != "" ? var.kubeconfig_path : "/home/${var.ssh_user}/.kube/prodavan-dev.yaml"
   kctl            = "sudo -n /usr/local/bin/k3s kubectl"
+  # /mnt/c/Users/<user>/git/.../prodavan → /mnt/c/Users/<user>/.kube/prodavan-dev.yaml
+  _repo_parts = split("/", var.remote_repo_path)
+  # ["", "mnt", "c", "Users", "<user>", ...]
+  windows_kubeconfig_path = (
+    var.windows_kubeconfig_path != "" ? var.windows_kubeconfig_path : (
+      length(local._repo_parts) >= 5 && local._repo_parts[1] == "mnt" && local._repo_parts[3] == "Users"
+      ? "/mnt/c/Users/${local._repo_parts[4]}/.kube/prodavan-dev.yaml"
+      : ""
+    )
+  )
 }
 
 resource "null_resource" "sshd" {
@@ -65,7 +75,7 @@ resource "null_resource" "k3s_server" {
   triggers = {
     # k3s_version intentionally NOT in triggers: already-running path skips
     # reinstall; changing the var alone must not churn SSH provisioners.
-    rev       = "v5-tls-san-docker"
+    rev       = "v6-win-kube-export"
     http_port = tostring(var.http_port)
     cluster   = var.cluster_name
     traefik_tpl = filesha256("${path.module}/templates/traefik-port.yaml.tpl")
@@ -138,6 +148,46 @@ resource "null_resource" "k3s_server" {
       "sudo -n cp /etc/rancher/k3s/k3s.yaml ${local.kubeconfig_path}",
       "sudo -n chown ${var.ssh_user}:${var.ssh_user} ${local.kubeconfig_path}",
       "chmod 600 ${local.kubeconfig_path}'",
+    ]
+  }
+}
+
+# Always refresh Windows Docker-ready kubeconfig after k3s is up (no manual Sync).
+resource "null_resource" "windows_kubeconfig" {
+  count = local.windows_kubeconfig_path != "" ? 1 : 0
+
+  depends_on = [null_resource.k3s_server]
+
+  triggers = {
+    rev        = "v1"
+    k3s_id     = null_resource.k3s_server.id
+    win_path   = local.windows_kubeconfig_path
+    script_sha = filesha256("${path.module}/templates/export-windows-kubeconfig.sh.tpl")
+    ssh_host   = var.ssh_host
+    ssh_port   = tostring(var.ssh_port)
+    ssh_user   = var.ssh_user
+    ssh_key_path = var.ssh_private_key_path
+  }
+
+  connection {
+    type        = "ssh"
+    host        = self.triggers.ssh_host
+    port        = tonumber(self.triggers.ssh_port)
+    user        = self.triggers.ssh_user
+    private_key = file(self.triggers.ssh_key_path)
+    timeout     = "5m"
+  }
+
+  provisioner "file" {
+    content     = file("${path.module}/templates/export-windows-kubeconfig.sh.tpl")
+    destination = "/tmp/prodavan-export-win-kube.sh"
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "tr -d '\\r' < /tmp/prodavan-export-win-kube.sh > /tmp/prodavan-export-win-kube.lf && mv /tmp/prodavan-export-win-kube.lf /tmp/prodavan-export-win-kube.sh",
+      "chmod 700 /tmp/prodavan-export-win-kube.sh",
+      "KUBECONFIG_SRC=${local.kubeconfig_path} WINDOWS_KUBECONFIG=${local.windows_kubeconfig_path} API_PORT=${var.api_port} bash /tmp/prodavan-export-win-kube.sh",
     ]
   }
 }

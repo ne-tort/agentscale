@@ -21,9 +21,11 @@ Requirements on WSL host (`www`):
 Run Terraform **from WSL** (`~/.local/bin/terraform`), not Windows PATH — SSH target is `127.0.0.1:2222` inside the same distro.
 
 Destroy: `terraform destroy` runs `k3s-uninstall.sh` over SSH (requires portproxy
-`127.0.0.1:2222` → WSL eth0, see `infra/github-runner/Sync-KubeForDocker.ps1`).
+`127.0.0.1:2222` → WSL eth0). Terraform also writes Docker-ready kubeconfig to
+`%USERPROFILE%\.kube\prodavan-dev.yaml` and best-effort refreshes portproxy — no
+manual Sync after recreate.
 
 Day-2 deploy: git merge → CI Images → Verify Dev rollout → Argo/smoke (not terraform).
 
 New installs add `--tls-san=host.docker.internal` for Docker runners. Existing clusters:
-`Sync-KubeForDocker.ps1` sets `insecure-skip-tls-verify: true` for local-dev.
+export sets `insecure-skip-tls-verify: true` for local-dev.

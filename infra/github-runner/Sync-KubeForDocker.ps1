@@ -1,5 +1,6 @@
-﻿#Requires -RunAsAdministrator
-# Sync WSL k3s kubeconfig + portproxy so Docker Desktop runners can Verify Dev / smoke.
+﻿# Sync WSL k3s kubeconfig + portproxy for Docker Desktop runners.
+# Kubeconfig refresh does NOT need Admin.
+# Portproxy needs Admin (best-effort; Terraform also tries via powershell.exe).
 
 $ErrorActionPreference = 'Stop'
 $portApi = 6443
@@ -31,7 +32,6 @@ foreach ($line in Get-Content $dest) {
         $sawSkip = $true
         continue
     }
-    # k3s format: "- cluster:" on one line
     if ($line -match '^\s*-\s*cluster:\s*$' -and -not $sawSkip) {
         $out.Add($line)
         $out.Add('    insecure-skip-tls-verify: true')
@@ -43,11 +43,17 @@ foreach ($line in Get-Content $dest) {
 $out | Set-Content -Path $dest -Encoding utf8
 Write-Host "Wrote $dest (server host.docker.internal:$portApi, skip-tls-verify)"
 
-foreach ($p in @($portApi, $portHttp, $portSsh)) {
-    netsh interface portproxy delete v4tov4 listenaddress=127.0.0.1 listenport=$p 2>$null | Out-Null
-    netsh interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport=$p connectaddress=$wslIp connectport=$p | Out-Null
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+    [Security.Principal.WindowsBuiltInRole]::Administrator)
+if ($isAdmin) {
+    foreach ($p in @($portApi, $portHttp, $portSsh)) {
+        netsh interface portproxy delete v4tov4 listenaddress=127.0.0.1 listenport=$p 2>$null | Out-Null
+        netsh interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport=$p connectaddress=$wslIp connectport=$p | Out-Null
+    }
+    netsh interface portproxy show v4tov4
+    Write-Host "OK portproxy -> $wslIp"
+} else {
+    Write-Host "WARN: not Admin — skipped portproxy (Terraform apply also attempts it; elevate Start-Runners once if :6443 unreachable)"
 }
-netsh interface portproxy show v4tov4
 
 Write-Host "OK. Docker runners: KUBECONFIG + PRODAVAN_CI_HOST=host.docker.internal"
-Write-Host "Terraform SSH: ssh -i ~/.ssh/prodavan_tf -p 2222 www@127.0.0.1"

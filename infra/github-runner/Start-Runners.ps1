@@ -1,6 +1,6 @@
-#Requires -RunAsAdministrator
 # Start Prodavan Actions runner pack in Docker Desktop (default: 4 replicas).
 # Peak CI Gate parallelism = 4 (infra, api, flutter, schemas).
+# Kubeconfig sync does not require Admin; portproxy is best-effort.
 
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -22,11 +22,10 @@ Get-Content $envFile | ForEach-Object {
     if ($_ -match '^\s*RUNNER_REPLICAS\s*=\s*(\d+)') { $replicas = [int]$Matches[1] }
 }
 
-# Ensure Windows kube dir exists + rewrite for Docker Desktop → WSL k3s
 $kube = Join-Path $env:USERPROFILE '.kube'
 if (-not (Test-Path $kube)) { New-Item -ItemType Directory -Path $kube | Out-Null }
 $sync = Join-Path $here 'Sync-KubeForDocker.ps1'
-Write-Host "Sync kubeconfig + portproxy (WSL IP drift after reboot)..."
+Write-Host "Sync kubeconfig for Docker runners (auto; no manual step after TF recreate)..."
 & $sync
 
 Write-Host "docker compose build + up -d --scale runner=$replicas"

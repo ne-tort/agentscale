@@ -158,6 +158,22 @@ def test_gitops_bootstrap_template_escapes_bash_arrays() -> None:
     assert '"${KCTL[@]}"' not in text.replace('"$${KCTL[@]}"', "")
 
 
+def test_export_windows_kubeconfig_script_targets_docker_gateway() -> None:
+    tpl = (
+        Path(__file__).resolve().parents[2]
+        / "terraform"
+        / "modules"
+        / "k3s-dev-host"
+        / "templates"
+        / "export-windows-kubeconfig.sh.tpl"
+    )
+    text = tpl.read_text(encoding="utf-8")
+    assert "host.docker.internal" in text
+    assert "insecure-skip-tls-verify" in text
+    assert "WINDOWS_KUBECONFIG" in text
+
+
 def test_first_party_latest_constants() -> None:
     assert "ghcr.io/ne-tort/prodavan-api:latest" in FIRST_PARTY_LATEST
     assert "ghcr.io/ne-tort/prodavan-web:latest" in FIRST_PARTY_LATEST
+

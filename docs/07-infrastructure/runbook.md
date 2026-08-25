@@ -59,10 +59,10 @@ export KUBECONFIG=~/.kube/prodavan-dev.yaml
 cd ../../ops && poetry install && poetry run prodavan-ops smoke
 ```
 
-После bootstrap / reboot Windows (Admin): `infra/github-runner/Sync-KubeForDocker.ps1`
-(или `Start-Runners.ps1` — вызывает Sync сам). Без portproxy Verify не достучится до API.
-`prodavan-ops` при `PRODAVAN_CI_HOST=host.docker.internal` сам переписывает kubeconfig
-на writable temp (mount `~/.kube` у runner’ов read-only).
+После bootstrap Terraform сам пишет Docker-ready kubeconfig в
+`%USERPROFILE%\.kube\prodavan-dev.yaml` (`host.docker.internal` + skip-tls) и
+best-effort обновляет portproxy. `Start-Runners.ps1` делает то же при старте runner’ов.
+Ручной Sync после recreate не нужен.
 
 Day-2 деплой: **только** merge в `main` → CI Images → Verify Dev (`rollout` + `wait` + `smoke`).
 Не `kubectl apply -k infra/k3s/...` руками.

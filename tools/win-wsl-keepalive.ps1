@@ -25,3 +25,11 @@ if (-not $alive) {
 }
 Write-Host "Keepalive started PID $($alive.ProcessId -join ',')"
 wsl -l -v
+
+# Refresh Docker-ready kubeconfig (no Admin). Same path Terraform writes on apply.
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+$repoSync = Join-Path $repoRoot 'infra\github-runner\Sync-KubeForDocker.ps1'
+if (Test-Path $repoSync) {
+  Write-Host "Refreshing Windows kubeconfig for Docker runners..."
+  try { & $repoSync } catch { Write-Warning $_.Exception.Message }
+}
