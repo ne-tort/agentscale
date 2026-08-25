@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:prodavan/app.dart';
 import 'package:prodavan/core/theme/app_theme.dart';
@@ -12,11 +13,14 @@ Widget themed(Widget home) {
 }
 
 void main() {
-  testWidgets('stub home renders', (tester) async {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets('app entry shows sign in', (tester) async {
+    SharedPreferences.setMockInitialValues({});
     await tester.pumpWidget(const ProdavanApp());
-    expect(find.text('Prodavan'), findsOneWidget);
-    expect(find.text('Prodavan dev shells'), findsOneWidget);
-    expect(find.text('UI Gallery'), findsOneWidget);
+    await tester.pump(); // SessionGate starts restore
+    await tester.pump(); // load() completes → LoginPage
+    expect(find.text('Sign in'), findsOneWidget);
   });
 
   testWidgets('entity collection list opens row', (tester) async {

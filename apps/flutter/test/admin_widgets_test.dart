@@ -63,12 +63,23 @@ void main() {
   });
 
   testWidgets('admin shell navigation destinations', (tester) async {
+    // Wide surface → left NavigationRail.
     await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const AdminShell()));
-    await tester.pump(); // avoid waiting on overview network load
-    expect(find.byType(NavigationBar), findsOneWidget);
-    expect(find.byType(NavigationDestination), findsNWidgets(4));
+    await tester.pump();
+    expect(find.byType(NavigationRail), findsOneWidget);
+    expect(find.text('Overview'), findsWidgets);
     expect(find.text('Companies'), findsWidgets);
     expect(find.text('AI Keys'), findsWidgets);
     expect(find.text('Bundles'), findsWidgets);
+
+    // Phone-width surface → bottom NavigationBar.
+    tester.view.physicalSize = const Size(390, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(MaterialApp(theme: AppTheme.light, home: const AdminShell()));
+    await tester.pump();
+    expect(find.byType(NavigationBar), findsOneWidget);
+    expect(find.byType(NavigationDestination), findsNWidgets(4));
   });
 }
