@@ -6,20 +6,22 @@
 
 | Компонент (канон) | Роль |
 |-------------------|------|
-| `AppBreakpoints` | Единые пороги ширины (значения px — гибко; наличие — строго) |
-| `AppLayout` | Слоты: `body`, optional `nav` (bottom / rail), optional `aside` |
+| `AppBreakpoints` | Пороги: `narrowMax` 600, `mediumMax` 1024, `contentMaxWidth` 840 |
+| `AppLayout` | Adaptive nav chrome: bottom bar / right rail; body column |
+| `AppScaffold` | AppBar + body с max-width (кроме `expandBody: true`) |
 | EntityCollection layout | `list` ниже breakpoint, `table` выше |
 
 Features потребляют **слоты и режимы**, не сырой `MediaQuery` для своей сетки колонок.
 
-## Поведение
+## Поведение chrome (`AppLayout`)
 
-| Ширина | Chrome | Коллекции |
-|--------|--------|-----------|
-| narrow (phone) | `NavigationBar` bottom | list (`AppListItem`) |
-| wide | тот же shell; nav может стать rail **только** через AppLayout | table |
+| Ширина | Nav | Контент |
+|--------|-----|---------|
+| narrow (`< 600`) | `NavigationBar` снизу | колонка ≤ `contentMaxWidth`, по центру |
+| medium (`600–1024`) | **правый** `NavigationRail`, icon над label (`labelType: all`) | то же; rail **вне** max-width |
+| expanded (`≥ 1024`) | **правый** extended rail (icon + label в одну линию) | то же |
 
-Web на desktop ≠ отдельный «desktop design»; это тот же mobile-first chrome + table density.
+Web на desktop ≠ отдельный «desktop design»; тот же chrome + table density на wide.
 
 ## Запрещено в features
 
@@ -28,11 +30,11 @@ Web на desktop ≠ отдельный «desktop design»; это тот же m
 if (MediaQuery.sizeOf(context).width > 800) { /* своя вёрстка таблицы */ }
 ```
 
-Допустимо: читать `AppBreakpoints.of(context)` / `AppLayout.isWide`.
+Допустимо: `AppBreakpoints.isNarrow/isMedium/isExpanded(context)`.
 
 ## Гибко
 
-- Конкретные px (`compact` / `medium` / `expanded`) можно менять в одном месте.
+- Конкретные px меняются только в `AppBreakpoints`.
 - Число колонок table — per EntityCollection config.
 
 ## Связь

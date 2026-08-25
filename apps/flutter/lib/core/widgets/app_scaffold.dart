@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/responsive/app_breakpoints.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 
 class AppScaffold extends StatelessWidget {
@@ -13,6 +14,7 @@ class AppScaffold extends StatelessWidget {
     this.bottomNavigationBar,
     this.bottom,
     this.centerBody = false,
+    this.expandBody = false,
   });
 
   final Widget? title;
@@ -24,6 +26,9 @@ class AppScaffold extends StatelessWidget {
   final PreferredSizeWidget? bottom;
   final bool centerBody;
 
+  /// When true, body is full-bleed (no content max-width). Prefer false.
+  final bool expandBody;
+
   @override
   Widget build(BuildContext context) {
     Widget? content = body;
@@ -32,6 +37,15 @@ class AppScaffold extends StatelessWidget {
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(AppSpacing.lg),
           child: content,
+        ),
+      );
+    }
+    if (!expandBody && content != null) {
+      content = Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: AppBreakpoints.contentMaxWidth),
+          child: SizedBox(width: double.infinity, child: content),
         ),
       );
     }

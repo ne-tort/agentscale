@@ -5,6 +5,9 @@ abstract final class AppBreakpoints {
   static const double narrowMax = 600;
   static const double mediumMax = 1024;
 
+  /// Max width of the main content column (chrome / rail sit outside this).
+  static const double contentMaxWidth = 840;
+
   static bool isNarrow(BuildContext context) =>
       MediaQuery.sizeOf(context).width < narrowMax;
 

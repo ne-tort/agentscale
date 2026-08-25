@@ -74,6 +74,7 @@ class AppTheme {
         foregroundColor: tokens.onSurface,
         elevation: 0,
         scrolledUnderElevation: 1,
+        actionsPadding: const EdgeInsets.only(right: AppSpacing.lg),
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
