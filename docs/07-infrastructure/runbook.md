@@ -69,6 +69,13 @@ Day-2 деплой: **только** merge в `main` + Argo selfHeal. Не `kube
 3. PVC на local-path остаются на диске узла (поды Recreate / STS пересоздаются).
 4. Нет `recover_*.sh`. ImagePullBackOff → SealedSecret `ghcr-pull`, не image import.
 
+**WSL / Kali:** не запускать **Docker Engine** внутри дистрибутива с k3s
+(`systemctl disable --now docker`) — иначе постоянные рестарты kube-proxy / NodeNotReady.
+GHA runners — **Docker Desktop** на Windows (`infra/github-runner`), не docker в Kali.
+После `wsl --shutdown` / сна: поднять Kali, при необходимости
+`sudo systemctl restart k3s`, с Windows — `tools/win-wsl-portforward.ps1`
+или `infra/github-runner/Sync-KubeForDocker.ps1` (Admin).
+
 ---
 
 ## 4. CI

@@ -88,8 +88,10 @@ resource "null_resource" "k3s_server" {
     inline = [
       "bash -lc 'set -euo pipefail",
       "export PATH=\"$HOME/.local/bin:/usr/sbin:/usr/bin:$PATH\"",
-      "sudo -n mkdir -p /var/lib/rancher/k3s/server/manifests",
+      "sudo -n mkdir -p /var/lib/rancher/k3s/server/manifests /etc/rancher/k3s",
       "sudo -n cp /tmp/prodavan-traefik-port.yaml /var/lib/rancher/k3s/server/manifests/prodavan-traefik-port.yaml",
+      # Docker Engine inside WSL fights k3s CNI; runners use Docker Desktop on Windows.
+      "if systemctl list-unit-files docker.service >/dev/null 2>&1; then sudo -n systemctl stop docker.socket docker 2>/dev/null || true; sudo -n systemctl disable docker.socket docker 2>/dev/null || true; fi",
       "if ! command -v k3s >/dev/null 2>&1; then",
       "  curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=\"${var.k3s_version}\" sh -s - server --write-kubeconfig-mode 644 --tls-san=127.0.0.1 --tls-san=prodavan.local",
       "else",

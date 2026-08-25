@@ -290,29 +290,49 @@ class KafkaManager(LifespanResource):
                 raise RuntimeError(msg)
             logger.warning("%s — buffer-only mode", msg)
             return
-        try:
-            from aiokafka import AIOKafkaProducer
+        # After node/WSL reboot CoreDNS + kafka STS often lag; retry before fail-fast.
+        attempts = 30 if self._required else 3
+        delay_sec = 2.0
+        last_exc: BaseException | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                from aiokafka import AIOKafkaProducer
 
-            self._producer = AIOKafkaProducer(
-                bootstrap_servers=self._bootstrap,
-                client_id=self._client_id,
-                acks="all",
-                enable_idempotence=True,
-            )
-            await self._producer.start()
-            await self._ensure_topics()
-            logger.info(
-                "kafka: producer started servers=%s topics=%s,%s",
-                self._bootstrap,
-                self._topic_platform,
-                self._topic_triggers,
-            )
-        except Exception:
-            logger.exception("kafka: producer startup failed")
+                self._producer = AIOKafkaProducer(
+                    bootstrap_servers=self._bootstrap,
+                    client_id=self._client_id,
+                    acks="all",
+                    enable_idempotence=True,
+                )
+                await self._producer.start()
+                await self._ensure_topics()
+                logger.info(
+                    "kafka: producer started servers=%s topics=%s,%s (attempt %s/%s)",
+                    self._bootstrap,
+                    self._topic_platform,
+                    self._topic_triggers,
+                    attempt,
+                    attempts,
+                )
+                last_exc = None
+                break
+            except Exception as exc:
+                last_exc = exc
+                self._producer = None
+                logger.warning(
+                    "kafka: producer startup attempt %s/%s failed: %s",
+                    attempt,
+                    attempts,
+                    exc,
+                )
+                if attempt < attempts:
+                    await asyncio.sleep(delay_sec)
+        if last_exc is not None:
+            logger.error("kafka: producer startup failed after %s attempts", attempts, exc_info=last_exc)
             self._producer = None
             if self._required:
                 set_kafka_manager(None)
-                raise
+                raise last_exc
             logger.warning("kafka: falling back to buffer-only")
             return
 
