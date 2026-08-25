@@ -15,10 +15,12 @@ locals {
   _repo_parts = split("/", var.remote_repo_path)
   # ["", "mnt", "c", "Users", "<user>", ...]
   windows_kubeconfig_path = (
-    var.windows_kubeconfig_path != "" ? var.windows_kubeconfig_path : (
-      length(local._repo_parts) >= 5 && local._repo_parts[1] == "mnt" && local._repo_parts[3] == "Users"
-      ? "/mnt/c/Users/${local._repo_parts[4]}/.kube/prodavan-dev.yaml"
-      : ""
+    !var.export_docker_kubeconfig ? "" : (
+      var.windows_kubeconfig_path != "" ? var.windows_kubeconfig_path : (
+        length(local._repo_parts) >= 5 && local._repo_parts[1] == "mnt" && local._repo_parts[3] == "Users"
+        ? "/mnt/c/Users/${local._repo_parts[4]}/.kube/prodavan-dev.yaml"
+        : ""
+      )
     )
   )
 }
@@ -134,7 +136,7 @@ resource "null_resource" "k3s_server" {
       # Broken/unauthenticated Tailscale netmon flaps routes around CNI veths on WSL.
       "if systemctl is-active --quiet tailscaled 2>/dev/null && ! tailscale status >/dev/null 2>&1; then sudo -n systemctl stop tailscaled 2>/dev/null || true; fi",
       "if ! command -v k3s >/dev/null 2>&1; then",
-      "  curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=\"${var.k3s_version}\" sh -s - server --write-kubeconfig-mode 644 --tls-san=127.0.0.1 --tls-san=prodavan.local --tls-san=host.docker.internal",
+      "  curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=\"${var.k3s_version}\" sh -s - server --write-kubeconfig-mode 644 --tls-san=127.0.0.1 --tls-san=host.docker.internal",
       "elif ! sudo -n systemctl is-active --quiet k3s; then",
       "  sudo -n systemctl start k3s",
       "else",
@@ -152,7 +154,8 @@ resource "null_resource" "k3s_server" {
   }
 }
 
-# Always refresh Windows Docker-ready kubeconfig after k3s is up (no manual Sync).
+# Optional CI helper (export_docker_kubeconfig=true): kubeconfig for Docker Desktop runners.
+# Not required for UI — Traefik listens 0.0.0.0:${http_port}, open http://127.0.0.1:${http_port}/.
 resource "null_resource" "windows_kubeconfig" {
   count = local.windows_kubeconfig_path != "" ? 1 : 0
 
@@ -276,7 +279,7 @@ output "api_endpoint" {
 }
 
 output "http_url" {
-  value = "http://prodavan.local:${var.http_port}/"
+  value = "http://127.0.0.1:${var.http_port}/"
 }
 
 output "cluster_name" {

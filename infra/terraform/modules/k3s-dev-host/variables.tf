@@ -70,5 +70,11 @@ variable "ghcr_username" {
 variable "windows_kubeconfig_path" {
   type        = string
   default     = ""
-  description = "Docker-ready kubeconfig on the Windows side (WSL /mnt/c/...). Empty = derive from remote_repo_path."
+  description = "Optional path under /mnt/c/... for Docker Desktop CI runners. Empty = derive from remote_repo_path when export_docker_kubeconfig=true."
+}
+
+variable "export_docker_kubeconfig" {
+  type        = bool
+  default     = false
+  description = "CI-only: write Docker-ready kubeconfig to Windows home. Not part of SSH+Terraform bootstrap / UI access."
 }

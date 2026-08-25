@@ -22,10 +22,11 @@
 
 **Ранбук:** [`docs/07-infrastructure/runbook.md`](docs/07-infrastructure/runbook.md).
 
-- Поставка: PR → **CI Gate** → Auto-merge → **CI Images** → Argo CD sync → **Verify Dev** (`wait`/`smoke`).
+- Поставка: PR → **CI Gate** → Auto-merge → **CI Images** → Argo CD sync → **Verify Dev**.
+- Bootstrap кластера: **SSH + Terraform** (`infra/terraform/environments/local`) → UI **http://127.0.0.1:8088/**.
 - Императив только **`infra/ops`**: `validate` / `wait` / `rollout` / `smoke`.
 - **Запрещены** `.sh` под `infra/`, docker-compose как кластер, k3d в git, recover/deploy shell.
-- Кластер: **k3s** + Argo (`infra/argocd` → `infra/k3s/overlays/dev`). После reboot — k3s systemd + Argo selfHeal.
+- Кластер: **k3s** + Argo (`infra/argocd` → `infra/k3s/overlays/dev`).
 
 ## Суть продукта
 
