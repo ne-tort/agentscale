@@ -75,8 +75,11 @@ GHA runners — **Docker Desktop** на Windows (`infra/github-runner`), не do
 Не оставлять **незалогиненный Tailscale** в том же WSL — netmon дергает CNI veth/routes.
 **Не дергать `wsl --shutdown` / `wsl --terminate` во время тестов:** WSL шлёт `systemctl poweroff`,
 k3s не успевает за 10s → `InitTerminateInstanceInternal` / force reboot → eth0 rename storm,
-SandboxChanged, Traefik `:8088` пропадает. Для проверки персистентности — только
-`sudo systemctl restart k3s` внутри Kali.
+SandboxChanged, Traefik `:8088` пропадает. Terraform ставит `TimeoutStopSec=8` на k3s
+(`k3s.service.d/prodavan-wsl-stop.conf`), чтобы graceful stop укладывался в окно WSL.
+Для проверки персистентности — только `sudo systemctl restart k3s` внутри Kali.
+Параллельные агенты с частыми `wsl.exe` вызовами усиливают terminate-шторм — не гонять
+несколько infra-сценариев одновременно на одном Kali.
 После осознанного `wsl --shutdown` / сна: поднять Kali, при необходимости
 `sudo systemctl restart k3s`, с Windows — `tools/win-wsl-portforward.ps1`
 или `infra/github-runner/Sync-KubeForDocker.ps1` (Admin).

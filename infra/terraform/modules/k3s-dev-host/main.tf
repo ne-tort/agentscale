@@ -62,7 +62,7 @@ resource "null_resource" "k3s_server" {
   depends_on = [null_resource.sshd]
 
   triggers = {
-    rev         = "v2-no-blind-restart"
+    rev         = "v3-wsl-timeout-stop"
     k3s_version = var.k3s_version
     http_port   = tostring(var.http_port)
     cluster     = var.cluster_name
@@ -114,6 +114,11 @@ resource "null_resource" "k3s_server" {
       "else",
       "  echo k3s-already-running-skip-restart",
       "fi",
+      # WSL terminates distros with systemctl poweroff and only waits ~10s; slow k3s
+      # stop → InitTerminateInstanceInternal force reboot → eth0/Sandbox churn.
+      "sudo -n mkdir -p /etc/systemd/system/k3s.service.d",
+      "printf '%s\\n' '[Service]' 'TimeoutStopSec=8' 'TimeoutSec=8' | sudo -n tee /etc/systemd/system/k3s.service.d/prodavan-wsl-stop.conf >/dev/null",
+      "sudo -n systemctl daemon-reload",
       "sudo -n systemctl enable k3s",
       "for i in $(seq 1 60); do sudo -n k3s kubectl get --raw=/readyz >/dev/null 2>&1 && break; sleep 2; done",
       "sudo -n k3s kubectl wait --for=condition=Ready node --all --timeout=180s",

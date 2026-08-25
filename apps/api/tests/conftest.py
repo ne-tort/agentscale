@@ -91,7 +91,11 @@ def _wipe_public_tables() -> None:
     """Truncate app tables in a worker thread so Windows Proactor stays intact."""
 
     async def _wipe() -> None:
-        engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
+        engine = create_async_engine(
+            DATABASE_URL,
+            pool_pre_ping=True,
+            connect_args={"timeout": 10},
+        )
         async with engine.begin() as conn:
             await conn.execute(text("SET lock_timeout = '5s'"))
             await conn.execute(text("SET statement_timeout = '30s'"))
@@ -111,11 +115,28 @@ def _wipe_public_tables() -> None:
 
 
 @pytest.fixture(autouse=True)
-def clean_engine_cache():
-    """Dispose pooled connections and wipe public tables before each test."""
+def clean_engine_cache(request: pytest.FixtureRequest):
+    """Dispose pooled connections; wipe DB only when the test may use it."""
     _dispose_app_engine()
-    if _postgres_available():
-        _wipe_public_tables()
+    path = str(getattr(request, "fspath", "")).replace("\\", "/")
+    uses_client = "async_client" in request.fixturenames
+    # Pure unit tests without AsyncClient do not touch Postgres — skip TRUNCATE
+    # (CI shared PG under Docker Desktop load otherwise flakes with TimeoutError).
+    needs_wipe = _postgres_available() and (
+        uses_client or "/tests/integration/" in path or "/tests/unit/" not in path
+    )
+    if needs_wipe:
+        last_err: TimeoutError | None = None
+        for _ in (1, 2):
+            try:
+                _wipe_public_tables()
+                last_err = None
+                break
+            except TimeoutError as exc:
+                last_err = exc
+                _dispose_app_engine()
+        if last_err is not None:
+            raise last_err
     yield
     _dispose_app_engine()
 
