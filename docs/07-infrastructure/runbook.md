@@ -60,8 +60,9 @@ cd ../../ops && poetry install && poetry run prodavan-ops smoke
 ```
 
 После bootstrap / reboot Windows (Admin): `infra/github-runner/Sync-KubeForDocker.ps1`
-(или `Start-Runners.ps1` — вызывает Sync сам). Без этого Verify Dev из Docker runners
-не достучится до API (`host.docker.internal:6443` + portproxy).
+(или `Start-Runners.ps1` — вызывает Sync сам). Без portproxy Verify не достучится до API.
+`prodavan-ops` при `PRODAVAN_CI_HOST=host.docker.internal` сам переписывает kubeconfig
+на writable temp (mount `~/.kube` у runner’ов read-only).
 
 Day-2 деплой: **только** merge в `main` → CI Images → Verify Dev (`rollout` + `wait` + `smoke`).
 Не `kubectl apply -k infra/k3s/...` руками.

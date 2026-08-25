@@ -14,6 +14,7 @@ on:
 permissions:
   contents: read
   packages: write
+  actions: write
 
 env:
   REGISTRY: ghcr.io
@@ -250,3 +251,30 @@ jobs:
           if new.exists():
               new.rename(old)
           PY
+
+  # GITHUB_TOKEN merge/push does not always chain workflow_run; dispatch explicitly.
+  trigger-verify:
+    name: trigger-verify
+    needs: [build-api, build-web]
+    if: >
+      always() &&
+      needs.build-api.result == 'success' &&
+      needs.build-web.result == 'success' &&
+      github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: Dispatch Verify Dev
+        env:
+          GH_TOKEN: ${{ secrets.AUTO_MERGE_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          export PATH="${HOME}/.local/bin:/usr/local/bin:${PATH}"
+          if ! command -v gh >/dev/null 2>&1; then
+            mkdir -p "${HOME}/.local/bin"
+            ver="2.67.0"
+            curl -fsSL "https://github.com/cli/cli/releases/download/v${ver}/gh_${ver}_linux_amd64.tar.gz" \
+              | tar -xz -C /tmp
+            mv "/tmp/gh_${ver}_linux_amd64/bin/gh" "${HOME}/.local/bin/gh"
+          fi
+          gh workflow run verify-dev.yml --repo "${{ github.repository }}" --ref main
+          echo "Dispatched Verify Dev"

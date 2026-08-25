@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import re
+import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,25 +20,74 @@ FIRST_PARTY_DEPLOYMENTS = (
 )
 
 
-def load_kube() -> None:
-    kube = os.environ.get("KUBECONFIG") or str(default_kubeconfig())
-    path = Path(kube)
-    if path.is_file():
-        config.load_kube_config(config_file=str(path))
+def prepare_docker_kubeconfig(
+    src: Path,
+    dest: Path,
+    *,
+    server_host: str = "host.docker.internal",
+    api_port: int = 6443,
+) -> None:
+    """Rewrite server for Docker Desktop runners; strip BOM; skip TLS verify (local-dev)."""
+    text = src.read_text(encoding="utf-8-sig")
+    text = re.sub(
+        r"server:\s*https://\S+",
+        f"server: https://{server_host}:{api_port}",
+        text,
+        count=1,
+    )
+    if re.search(r"insecure-skip-tls-verify:\s*", text):
+        text = re.sub(
+            r"insecure-skip-tls-verify:\s*\S+",
+            "insecure-skip-tls-verify: true",
+            text,
+            count=1,
+        )
     else:
-        config.load_kube_config()
+        # k3s kubeconfig: "clusters:\n- cluster:\n    server: ..."
+        text = re.sub(
+            r"(?m)^(\s*-\s*cluster:\s*\n)",
+            r"\1    insecure-skip-tls-verify: true\n",
+            text,
+            count=1,
+        )
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(text, encoding="utf-8")
+
+
+def resolve_kubeconfig_path() -> Path:
+    """Use KUBECONFIG; if Docker runners need host.docker.internal, rewrite to a temp file."""
+    kube = Path(os.environ.get("KUBECONFIG") or str(default_kubeconfig()))
+    expect = os.environ.get("PRODAVAN_CI_HOST", "").strip()
+    if expect != "host.docker.internal":
+        return kube
+    if not kube.is_file():
+        raise RuntimeError(f"KUBECONFIG not found: {kube}")
+    text = kube.read_text(encoding="utf-8-sig")
+    if "host.docker.internal" in text:
+        return kube
+    base = Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir())
+    dest = base / "prodavan-kube-docker.yaml"
+    prepare_docker_kubeconfig(kube, dest, server_host=expect)
+    os.environ["KUBECONFIG"] = str(dest)
+    print(f"rewrote kubeconfig for Docker gateway -> {dest}")
+    return dest
+
+
+def load_kube() -> None:
+    path = resolve_kubeconfig_path()
+    config.load_kube_config(config_file=str(path))
 
 
 def assert_kubeconfig_docker_ready() -> None:
-    """Fail fast when runners expect host.docker.internal but kubeconfig still points at 127.0.0.1."""
+    """Fail fast / auto-rewrite when runners expect host.docker.internal."""
     expect_host = os.environ.get("PRODAVAN_CI_HOST", "").strip()
     if expect_host != "host.docker.internal":
         return
-    kube = os.environ.get("KUBECONFIG") or str(default_kubeconfig())
-    text = Path(kube).read_text(encoding="utf-8")
+    path = resolve_kubeconfig_path()
+    text = path.read_text(encoding="utf-8-sig")
     if "host.docker.internal" not in text:
         raise RuntimeError(
-            f"KUBECONFIG={kube} must use server https://host.docker.internal:6443 "
+            f"KUBECONFIG={path} must use server https://host.docker.internal:6443 "
             "(run infra/github-runner/Sync-KubeForDocker.ps1 as Admin on Windows)"
         )
 

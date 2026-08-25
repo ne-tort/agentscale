@@ -76,6 +76,8 @@ jobs:
           echo "==> which poetry: $(command -v poetry)"
           echo "==> poetry install (venvs at ${POETRY_VIRTUALENVS_PATH})"
           poetry install --no-interaction
+          echo "==> prodavan-ops unit tests"
+          poetry run pytest -q
           echo "==> prodavan-ops validate"
           poetry run prodavan-ops validate
           echo "==> infra OK"
