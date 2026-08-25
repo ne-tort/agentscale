@@ -55,18 +55,17 @@ def prepare_docker_kubeconfig(
 
 
 def resolve_kubeconfig_path() -> Path:
-    """Use KUBECONFIG; if Docker runners need host.docker.internal, rewrite to a temp file."""
+    """Use KUBECONFIG; for Docker runners always rewrite to writable temp with skip-tls."""
     kube = Path(os.environ.get("KUBECONFIG") or str(default_kubeconfig()))
     expect = os.environ.get("PRODAVAN_CI_HOST", "").strip()
     if expect != "host.docker.internal":
         return kube
     if not kube.is_file():
         raise RuntimeError(f"KUBECONFIG not found: {kube}")
-    text = kube.read_text(encoding="utf-8-sig")
-    if "host.docker.internal" in text:
-        return kube
     base = Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir())
     dest = base / "prodavan-kube-docker.yaml"
+    # Always rewrite: mount may already say host.docker.internal but lack skip-tls
+    # after a Sync that only changed the server URL.
     prepare_docker_kubeconfig(kube, dest, server_host=expect)
     os.environ["KUBECONFIG"] = str(dest)
     print(f"rewrote kubeconfig for Docker gateway -> {dest}")

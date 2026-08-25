@@ -63,7 +63,11 @@ def test_resolve_kubeconfig_rewrites_when_ci_host(
 
     src = tmp_path / "prodavan-dev.yaml"
     src.write_text(
-        "apiVersion: v1\nclusters:\n- cluster:\n    server: https://127.0.0.1:6443\n",
+        "apiVersion: v1\n"
+        "clusters:\n"
+        "- cluster:\n"
+        "    server: https://host.docker.internal:6443\n"
+        "  name: default\n",
         encoding="utf-8",
     )
     monkeypatch.setenv("PRODAVAN_CI_HOST", "host.docker.internal")
@@ -71,7 +75,9 @@ def test_resolve_kubeconfig_rewrites_when_ci_host(
     monkeypatch.setenv("RUNNER_TEMP", str(tmp_path / "rt"))
     path = resolve_kubeconfig_path()
     assert path != src
-    assert "host.docker.internal" in path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8")
+    assert "host.docker.internal" in text
+    assert "insecure-skip-tls-verify: true" in text
     assert os.environ["KUBECONFIG"] == str(path)
 
 

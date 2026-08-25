@@ -31,7 +31,8 @@ foreach ($line in Get-Content $dest) {
         $sawSkip = $true
         continue
     }
-    if ($line -match '^\s*cluster:\s*$' -and -not $sawSkip) {
+    # k3s format: "- cluster:" on one line
+    if ($line -match '^\s*-\s*cluster:\s*$' -and -not $sawSkip) {
         $out.Add($line)
         $out.Add('    insecure-skip-tls-verify: true')
         $sawSkip = $true
