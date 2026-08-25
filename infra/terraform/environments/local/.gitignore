@@ -1,0 +1,4 @@
+.tf-ghcr.env
+*.auto.tfvars
+.terraform/
+

@@ -16,6 +16,7 @@ Requirements on WSL host (`www`):
 
 Outputs: `kubeconfig_path` → `~/.kube/prodavan-dev.yaml`, HTTP `:8088`.
 
-Destroy: `terraform destroy` runs `k3s-uninstall.sh`.
+Destroy: `terraform destroy` runs `k3s-uninstall.sh` over SSH (requires portproxy
+`127.0.0.1:2222` → WSL eth0, see `infra/github-runner/Sync-KubeForDocker.ps1`).
 
 Day-2 deploy: git merge → Argo sync (not terraform).

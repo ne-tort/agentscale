@@ -10,12 +10,12 @@ terraform {
 
 locals {
   kubeconfig_path = var.kubeconfig_path != "" ? var.kubeconfig_path : "/home/${var.ssh_user}/.kube/prodavan-dev.yaml"
-  kctl            = "sudo -n k3s kubectl"
+  kctl            = "sudo -n /usr/local/bin/k3s kubectl"
 }
 
 resource "null_resource" "sshd" {
   triggers = {
-    rev              = "v4"
+    rev              = "v5-listen-all"
     ssh_port         = tostring(var.ssh_port)
     ssh_user         = var.ssh_user
     sshd_config_hash = filesha256("${path.module}/../../../.ssh/sshd_config.tpl")
@@ -52,7 +52,7 @@ resource "null_resource" "sshd" {
       "sudo -n mv /tmp/prodavan-sshd.service /etc/systemd/system/prodavan-sshd.service",
       "sudo -n systemctl daemon-reload",
       "sudo -n systemctl enable prodavan-sshd.service",
-      "if systemctl is-active --quiet prodavan-sshd.service; then sudo -n systemctl reload prodavan-sshd.service || true; elif ! ss -tln | grep -q \":${var.ssh_port} \"; then sudo -n systemctl reset-failed prodavan-sshd.service || true; sudo -n systemctl start prodavan-sshd.service; fi",
+      "if systemctl is-active --quiet prodavan-sshd.service; then sudo -n systemctl restart prodavan-sshd.service || true; elif ! ss -tln | grep -q \":${var.ssh_port} \"; then sudo -n systemctl reset-failed prodavan-sshd.service || true; sudo -n systemctl start prodavan-sshd.service; fi",
       "ss -tln | grep -q \":${var.ssh_port} \"'",
     ]
   }
@@ -62,19 +62,16 @@ resource "null_resource" "k3s_server" {
   depends_on = [null_resource.sshd]
 
   triggers = {
-    k3s_version    = var.k3s_version
-    http_port      = tostring(var.http_port)
-    cluster        = var.cluster_name
-    traefik_tpl    = filesha256("${path.module}/templates/traefik-port.yaml.tpl")
-  }
-
-  connection {
-    type        = "ssh"
-    host        = var.ssh_host
-    port        = var.ssh_port
-    user        = var.ssh_user
-    private_key = file(var.ssh_private_key_path)
-    timeout     = "10m"
+    rev          = "v2-no-blind-restart"
+    k3s_version  = var.k3s_version
+    http_port    = tostring(var.http_port)
+    cluster      = var.cluster_name
+    traefik_tpl  = filesha256("${path.module}/templates/traefik-port.yaml.tpl")
+    # SSH coords in triggers so destroy-time provisioner may only use self.*
+    ssh_host     = var.ssh_host
+    ssh_port     = tostring(var.ssh_port)
+    ssh_user     = var.ssh_user
+    ssh_key_path = var.ssh_private_key_path
   }
 
   provisioner "file" {
@@ -82,20 +79,40 @@ resource "null_resource" "k3s_server" {
       http_port = var.http_port
     })
     destination = "/tmp/prodavan-traefik-port.yaml"
+    connection {
+      type        = "ssh"
+      host        = self.triggers.ssh_host
+      port        = tonumber(self.triggers.ssh_port)
+      user        = self.triggers.ssh_user
+      private_key = file(self.triggers.ssh_key_path)
+      timeout     = "10m"
+    }
   }
 
   provisioner "remote-exec" {
+    connection {
+      type        = "ssh"
+      host        = self.triggers.ssh_host
+      port        = tonumber(self.triggers.ssh_port)
+      user        = self.triggers.ssh_user
+      private_key = file(self.triggers.ssh_key_path)
+      timeout     = "10m"
+    }
     inline = [
       "bash -lc 'set -euo pipefail",
       "export PATH=\"$HOME/.local/bin:/usr/sbin:/usr/bin:$PATH\"",
       "sudo -n mkdir -p /var/lib/rancher/k3s/server/manifests /etc/rancher/k3s",
       "sudo -n cp /tmp/prodavan-traefik-port.yaml /var/lib/rancher/k3s/server/manifests/prodavan-traefik-port.yaml",
       # Docker Engine inside WSL fights k3s CNI; runners use Docker Desktop on Windows.
-      "if systemctl list-unit-files docker.service >/dev/null 2>&1; then sudo -n systemctl stop docker.socket docker 2>/dev/null || true; sudo -n systemctl disable docker.socket docker 2>/dev/null || true; fi",
+      "if systemctl list-unit-files docker.service >/dev/null 2>&1; then sudo -n systemctl stop docker.socket docker 2>/dev/null || true; sudo -n systemctl disable --now docker.socket docker 2>/dev/null || true; sudo -n systemctl mask docker.socket docker 2>/dev/null || true; fi",
+      # Broken/unauthenticated Tailscale netmon flaps routes around CNI veths on WSL.
+      "if systemctl is-active --quiet tailscaled 2>/dev/null && ! tailscale status >/dev/null 2>&1; then sudo -n systemctl stop tailscaled 2>/dev/null || true; fi",
       "if ! command -v k3s >/dev/null 2>&1; then",
       "  curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=\"${var.k3s_version}\" sh -s - server --write-kubeconfig-mode 644 --tls-san=127.0.0.1 --tls-san=prodavan.local",
+      "elif ! sudo -n systemctl is-active --quiet k3s; then",
+      "  sudo -n systemctl start k3s",
       "else",
-      "  sudo -n systemctl restart k3s",
+      "  echo k3s already running - skip restart; manifests under server/manifests apply automatically",
       "fi",
       "sudo -n systemctl enable k3s",
       "for i in $(seq 1 60); do sudo -n k3s kubectl get --raw=/readyz >/dev/null 2>&1 && break; sleep 2; done",
@@ -104,6 +121,23 @@ resource "null_resource" "k3s_server" {
       "sudo -n cp /etc/rancher/k3s/k3s.yaml ${local.kubeconfig_path}",
       "sudo -n chown ${var.ssh_user}:${var.ssh_user} ${local.kubeconfig_path}",
       "chmod 600 ${local.kubeconfig_path}'",
+    ]
+  }
+
+  provisioner "remote-exec" {
+    when       = destroy
+    on_failure = continue
+    connection {
+      type = "ssh"
+      # Old state may lack ssh_* triggers — fall back to local-dev defaults.
+      host        = try(self.triggers.ssh_host, "127.0.0.1")
+      port        = tonumber(try(self.triggers.ssh_port, "2222"))
+      user        = try(self.triggers.ssh_user, "www")
+      private_key = file(try(self.triggers.ssh_key_path, "${path.module}/../../../.ssh/prodavan_tf"))
+      timeout     = "10m"
+    }
+    inline = [
+      "bash -lc 'set -euo pipefail; if command -v k3s-uninstall.sh >/dev/null 2>&1; then sudo -n k3s-uninstall.sh; elif [ -x /usr/local/bin/k3s-uninstall.sh ]; then sudo -n /usr/local/bin/k3s-uninstall.sh; else echo WARN: k3s-uninstall.sh missing; fi'",
     ]
   }
 }
@@ -115,7 +149,7 @@ resource "null_resource" "gitops_bootstrap" {
 
   triggers = {
     repo       = var.remote_repo_path
-    gitops_rev = "v4"
+    gitops_rev = "v6-plain-sh"
     has_token  = var.ghcr_token != "" ? "yes" : "no"
   }
 
@@ -129,44 +163,40 @@ resource "null_resource" "gitops_bootstrap" {
   }
 
   provisioner "remote-exec" {
+    # Plain sh lines (remote-exec wraps in a script). Absolute k3s path.
+    # Cold Argo sync can take several minutes.
     inline = concat(
       [
-        "bash -lc 'set -euo pipefail",
+        "set -eu",
         "export KUBECONFIG=${local.kubeconfig_path}",
-        "K=${local.kctl}",
+        "export PATH=/usr/local/bin:/usr/bin:/bin",
         "test -d ${var.remote_repo_path}/infra/argocd/install",
-        "$K apply -k ${var.remote_repo_path}/infra/argocd/install",
-        "$K -n argocd wait --for=condition=Available deployment/argocd-server --timeout=300s",
-        "$K -n argocd wait --for=condition=Available deployment/argocd-repo-server --timeout=300s",
+        "sudo -n /usr/local/bin/k3s kubectl apply -k ${var.remote_repo_path}/infra/argocd/install",
+        "sudo -n /usr/local/bin/k3s kubectl -n argocd wait --for=condition=Available deployment/argocd-server --timeout=300s",
+        "sudo -n /usr/local/bin/k3s kubectl -n argocd wait --for=condition=Available deployment/argocd-repo-server --timeout=300s",
       ],
       var.ghcr_token != "" ? [
-        "$K -n argocd delete secret repo-prodavan --ignore-not-found",
-        "$K -n argocd create secret generic repo-prodavan --from-literal=type=git --from-literal=url=https://github.com/ne-tort/prodavan.git --from-literal=username=git --from-literal=password=${var.ghcr_token}",
-        "$K -n argocd label secret repo-prodavan argocd.argoproj.io/secret-type=repository --overwrite",
+        "sudo -n /usr/local/bin/k3s kubectl -n argocd delete secret repo-prodavan --ignore-not-found",
+        "sudo -n /usr/local/bin/k3s kubectl -n argocd create secret generic repo-prodavan --from-literal=type=git --from-literal=url=https://github.com/ne-tort/prodavan.git --from-literal=username=git --from-literal=password=${var.ghcr_token}",
+        "sudo -n /usr/local/bin/k3s kubectl -n argocd label secret repo-prodavan argocd.argoproj.io/secret-type=repository --overwrite",
       ] : [
         "echo WARN: no TF_VAR_ghcr_token — Argo cannot sync private repo",
       ],
       [
-        "$K apply -k ${var.remote_repo_path}/infra/argocd/sealed-secrets",
-        "$K -n kube-system wait --for=condition=Available deployment/sealed-secrets-controller --timeout=180s",
+        "sudo -n /usr/local/bin/k3s kubectl apply -k ${var.remote_repo_path}/infra/argocd/sealed-secrets",
+        "sudo -n /usr/local/bin/k3s kubectl -n kube-system wait --for=condition=Available deployment/sealed-secrets-controller --timeout=180s",
       ],
       var.ghcr_token != "" ? [
-        "$K create namespace prodavan --dry-run=client -o yaml | $K apply -f -",
-        "$K -n prodavan delete secret ghcr-pull --ignore-not-found",
-        "$K -n prodavan create secret docker-registry ghcr-pull --docker-server=ghcr.io --docker-username=${var.ghcr_username} --docker-password=${var.ghcr_token}",
+        "sudo -n /usr/local/bin/k3s kubectl create namespace prodavan --dry-run=client -o yaml | sudo -n /usr/local/bin/k3s kubectl apply -f -",
+        "sudo -n /usr/local/bin/k3s kubectl -n prodavan delete secret ghcr-pull --ignore-not-found",
+        "sudo -n /usr/local/bin/k3s kubectl -n prodavan create secret docker-registry ghcr-pull --docker-server=ghcr.io --docker-username=${var.ghcr_username} --docker-password=${var.ghcr_token}",
       ] : [],
       [
-        "$K apply -f ${var.remote_repo_path}/infra/argocd/root-app.yaml",
-        "for i in $(seq 1 36); do",
-        "  sync=$($K -n argocd get application prodavan-dev -o jsonpath={.status.sync.status} 2>/dev/null || echo Pending)",
-        "  health=$($K -n argocd get application prodavan-dev -o jsonpath={.status.health.status} 2>/dev/null || echo Unknown)",
-        "  echo prodavan-dev sync=$sync health=$health",
-        "  test \"$sync\" = Synced -a \"$health\" = Healthy && exit 0",
-        "  sleep 5",
-        "done",
-        "$K -n argocd get applications",
-        "$K -n prodavan get pods",
-        "exit 1'",
+        "sudo -n /usr/local/bin/k3s kubectl apply -f ${var.remote_repo_path}/infra/argocd/root-app.yaml",
+        "i=0; while [ $$i -lt 72 ]; do i=$$((i+1)); sync=$$(sudo -n /usr/local/bin/k3s kubectl -n argocd get application prodavan-dev -o jsonpath='{.status.sync.status}' 2>/dev/null || echo Pending); health=$$(sudo -n /usr/local/bin/k3s kubectl -n argocd get application prodavan-dev -o jsonpath='{.status.health.status}' 2>/dev/null || echo Unknown); echo prodavan-dev sync=$$sync health=$$health; if [ \"$$sync\" = Synced ] && [ \"$$health\" = Healthy ]; then exit 0; fi; sleep 10; done",
+        "sudo -n /usr/local/bin/k3s kubectl -n argocd get applications",
+        "sudo -n /usr/local/bin/k3s kubectl -n prodavan get pods",
+        "exit 1",
       ]
     )
   }

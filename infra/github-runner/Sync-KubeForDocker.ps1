@@ -2,11 +2,12 @@
 # Sync WSL k3s kubeconfig + portproxy so Docker Desktop runners can Verify Dev / smoke.
 # - copies ~/.kube/prodavan-dev.yaml from WSL user www to Windows
 # - rewrites server to https://host.docker.internal:6443
-# - portproxy 6443 and 8088 -> current WSL IP
+# - portproxy 6443, 8088, 2222 -> current WSL IP
 
 $ErrorActionPreference = 'Stop'
 $portApi = 6443
 $portHttp = 8088
+$portSsh = 2222
 
 $raw = (wsl.exe -u www -e ip -4 -o addr show eth0 2>$null) | Out-String
 if ($raw -notmatch 'inet (\d+\.\d+\.\d+\.\d+)') {
@@ -27,10 +28,11 @@ wsl.exe -u www -e bash -lc "cat /home/www/.kube/prodavan-dev.yaml" | Set-Content
     | Set-Content -Path $dest -Encoding utf8 -NoNewline
 Write-Host "Wrote $dest (server host.docker.internal:$portApi)"
 
-foreach ($p in @($portApi, $portHttp)) {
+foreach ($p in @($portApi, $portHttp, $portSsh)) {
     netsh interface portproxy delete v4tov4 listenaddress=127.0.0.1 listenport=$p 2>$null | Out-Null
     netsh interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport=$p connectaddress=$wslIp connectport=$p | Out-Null
 }
 netsh interface portproxy show v4tov4
 
 Write-Host "OK. Docker runners use KUBECONFIG=/home/runner/.kube/prodavan-dev.yaml and PRODAVAN_CI_HOST=host.docker.internal"
+Write-Host "Terraform SSH: ssh -i infra/.ssh/prodavan_tf -p 2222 www@127.0.0.1"

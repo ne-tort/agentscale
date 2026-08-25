@@ -70,11 +70,18 @@ Day-2 деплой: **только** merge в `main` + Argo selfHeal. Не `kube
 4. Нет `recover_*.sh`. ImagePullBackOff → SealedSecret `ghcr-pull`, не image import.
 
 **WSL / Kali:** не запускать **Docker Engine** внутри дистрибутива с k3s
-(`systemctl disable --now docker`) — иначе постоянные рестарты kube-proxy / NodeNotReady.
+(`systemctl disable --now docker` / `mask`) — иначе постоянные рестарты kube-proxy / NodeNotReady.
 GHA runners — **Docker Desktop** на Windows (`infra/github-runner`), не docker в Kali.
-После `wsl --shutdown` / сна: поднять Kali, при необходимости
+Не оставлять **незалогиненный Tailscale** в том же WSL — netmon дергает CNI veth/routes.
+**Не дергать `wsl --shutdown` / `wsl --terminate` во время тестов:** WSL шлёт `systemctl poweroff`,
+k3s не успевает за 10s → `InitTerminateInstanceInternal` / force reboot → eth0 rename storm,
+SandboxChanged, Traefik `:8088` пропадает. Для проверки персистентности — только
+`sudo systemctl restart k3s` внутри Kali.
+После осознанного `wsl --shutdown` / сна: поднять Kali, при необходимости
 `sudo systemctl restart k3s`, с Windows — `tools/win-wsl-portforward.ps1`
 или `infra/github-runner/Sync-KubeForDocker.ps1` (Admin).
+Terraform `k3s_server`: **не** делает blind `systemctl restart k3s`, если сервис уже active
+(HelmChartConfig/manifests подхватываются сами).
 
 ---
 

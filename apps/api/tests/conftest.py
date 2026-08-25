@@ -63,12 +63,38 @@ def sql_backdate_project(project_id: str, updated_at: datetime) -> None:
         pool.submit(_runner).result(timeout=30)
 
 
+def _run_async(coro_factory, *, timeout: float) -> None:
+    """Run async work on a fresh event loop in a worker thread (Windows Proactor safe)."""
+
+    def _runner() -> None:
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(coro_factory())
+        finally:
+            loop.close()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pool.submit(_runner).result(timeout=timeout)
+
+
+def _dispose_app_engine() -> None:
+    """Release pooled DB connections so TRUNCATE cannot wait on locks forever."""
+    import prodavan.infrastructure.persistence.database as db
+
+    async def _dispose() -> None:
+        await db.dispose_engine()
+
+    _run_async(_dispose, timeout=30)
+
+
 def _wipe_public_tables() -> None:
     """Truncate app tables in a worker thread so Windows Proactor stays intact."""
 
     async def _wipe() -> None:
         engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
         async with engine.begin() as conn:
+            await conn.execute(text("SET lock_timeout = '5s'"))
+            await conn.execute(text("SET statement_timeout = '30s'"))
             result = await conn.execute(
                 text(
                     "SELECT tablename FROM pg_tables "
@@ -81,29 +107,17 @@ def _wipe_public_tables() -> None:
                 await conn.execute(text(f"TRUNCATE {quoted} CASCADE"))
         await engine.dispose()
 
-    def _runner() -> None:
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(_wipe())
-        finally:
-            loop.close()
-
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        pool.submit(_runner).result(timeout=60)
+    _run_async(_wipe, timeout=45)
 
 
 @pytest.fixture(autouse=True)
 def clean_engine_cache():
-    """Reset engine cache and wipe public tables before each test (shared Postgres)."""
-    import prodavan.infrastructure.persistence.database as db
-
-    db._engine = None
-    db._session_factory = None
+    """Dispose pooled connections and wipe public tables before each test."""
+    _dispose_app_engine()
     if _postgres_available():
         _wipe_public_tables()
     yield
-    db._engine = None
-    db._session_factory = None
+    _dispose_app_engine()
 
 
 @pytest_asyncio.fixture
