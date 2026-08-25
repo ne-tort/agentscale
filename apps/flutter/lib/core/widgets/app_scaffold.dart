@@ -26,37 +26,48 @@ class AppScaffold extends StatelessWidget {
   final PreferredSizeWidget? bottom;
   final bool centerBody;
 
-  /// When true, body is full-bleed (no content max-width). Prefer false.
+  /// When true, body+app bar are full-bleed (no content max-width). Prefer false.
   final bool expandBody;
+
+  bool get _hasAppBar =>
+      title != null || (actions != null && actions!.isNotEmpty) || bottom != null;
 
   @override
   Widget build(BuildContext context) {
-    Widget? content = body;
-    if (centerBody && content != null) {
-      content = Center(
+    Widget? pageBody = body;
+    if (centerBody && pageBody != null) {
+      pageBody = Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(AppSpacing.lg),
-          child: content,
+          child: pageBody,
         ),
       );
     }
-    if (!expandBody && content != null) {
-      content = Align(
+
+    final inner = Scaffold(
+      primary: false,
+      appBar: _hasAppBar ? AppBar(title: title, actions: actions, bottom: bottom) : null,
+      body: pageBody,
+      floatingActionButton: floatingActionButton,
+    );
+
+    final Widget chrome;
+    if (expandBody) {
+      chrome = inner;
+    } else {
+      chrome = Align(
         alignment: Alignment.topCenter,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: AppBreakpoints.contentMaxWidth),
-          child: SizedBox(width: double.infinity, child: content),
+          child: SizedBox(width: double.infinity, height: double.infinity, child: inner),
         ),
       );
     }
+
     return Scaffold(
-      appBar: title == null && (actions == null || actions!.isEmpty)
-          ? null
-          : AppBar(title: title, actions: actions, bottom: bottom),
-      body: content,
-      floatingActionButton: floatingActionButton,
       drawer: drawer,
       bottomNavigationBar: bottomNavigationBar,
+      body: chrome,
     );
   }
 }

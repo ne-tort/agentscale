@@ -7,8 +7,8 @@
 | Компонент (канон) | Роль |
 |-------------------|------|
 | `AppBreakpoints` | Пороги: `narrowMax` 600, `mediumMax` 1024, `contentMaxWidth` 840 |
-| `AppLayout` | Adaptive nav chrome: bottom bar / right rail; body column |
-| `AppScaffold` | AppBar + body с max-width (кроме `expandBody: true`) |
+| `AppLayout` | Adaptive nav chrome: bottom bar / **left** rail; body column |
+| `AppScaffold` | AppBar **и** body в одной колонке ≤ `contentMaxWidth` (кроме `expandBody: true`) |
 | EntityCollection layout | `list` ниже breakpoint, `table` выше |
 
 Features потребляют **слоты и режимы**, не сырой `MediaQuery` для своей сетки колонок.
@@ -17,9 +17,9 @@ Features потребляют **слоты и режимы**, не сырой `M
 
 | Ширина | Nav | Контент |
 |--------|-----|---------|
-| narrow (`< 600`) | `NavigationBar` снизу | колонка ≤ `contentMaxWidth`, по центру |
-| medium (`600–1024`) | **правый** `NavigationRail`, icon над label (`labelType: all`) | то же; rail **вне** max-width |
-| expanded (`≥ 1024`) | **правый** extended rail (icon + label в одну линию) | то же |
+| narrow (`< 600`) | `NavigationBar` снизу | колонка ≤ `contentMaxWidth` (AppBar+body), по центру |
+| medium (`600–1024`) | **левый** `NavigationRail`, icon над label (`labelType: all`) | то же; rail **вне** max-width |
+| expanded (`≥ 1024`) | **левый** extended rail (icon + label в одну линию) | то же |
 
 Web на desktop ≠ отдельный «desktop design»; тот же chrome + table density на wide.
 

@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/responsive/app_breakpoints.dart';
 
-/// One adaptive nav destination (bottom bar or right rail).
+/// One adaptive nav destination (bottom bar or left rail).
 class AppNavDestination {
   const AppNavDestination({
     required this.icon,
@@ -18,11 +18,12 @@ class AppNavDestination {
 /// Product chrome: adaptive nav + content column (max-width outside the rail).
 ///
 /// - narrow: bottom [NavigationBar]
-/// - medium: right [NavigationRail] with icon above label
-/// - expanded: right extended [NavigationRail] (icon + label inline)
+/// - medium: **left** [NavigationRail] with icon above label
+/// - expanded: **left** extended [NavigationRail] (icon + label inline)
 ///
+/// AppBar from [title]/[actions] sits inside the content max-width column.
 /// Set [constrainBody] false when nested pages already use [AppScaffold]
-/// (so their AppBar can span the content column next to the rail).
+/// (their AppBar+body are constrained together there).
 class AppLayout extends StatelessWidget {
   const AppLayout({
     super.key,
@@ -43,13 +44,20 @@ class AppLayout extends StatelessWidget {
   final List<Widget>? actions;
   final bool constrainBody;
 
-  Widget _wrapContent(Widget child) {
-    if (!constrainBody) return child;
+  bool get _hasAppBar => title != null || (actions != null && actions!.isNotEmpty);
+
+  Widget _contentColumn() {
+    final page = Scaffold(
+      primary: false,
+      appBar: _hasAppBar ? AppBar(title: title, actions: actions) : null,
+      body: body,
+    );
+    if (!constrainBody) return page;
     return Align(
       alignment: Alignment.topCenter,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: AppBreakpoints.contentMaxWidth),
-        child: SizedBox(width: double.infinity, child: child),
+        child: SizedBox(width: double.infinity, height: double.infinity, child: page),
       ),
     );
   }
@@ -58,16 +66,10 @@ class AppLayout extends StatelessWidget {
   Widget build(BuildContext context) {
     final narrow = AppBreakpoints.isNarrow(context);
     final expanded = AppBreakpoints.isExpanded(context);
-    final content = _wrapContent(body);
-
-    PreferredSizeWidget? appBar;
-    if (title != null || (actions != null && actions!.isNotEmpty)) {
-      appBar = AppBar(title: title, actions: actions);
-    }
+    final content = _contentColumn();
 
     if (narrow) {
       return Scaffold(
-        appBar: appBar,
         body: content,
         bottomNavigationBar: NavigationBar(
           selectedIndex: selectedIndex,
@@ -100,12 +102,11 @@ class AppLayout extends StatelessWidget {
     );
 
     return Scaffold(
-      appBar: appBar,
       body: Row(
         children: [
-          Expanded(child: content),
-          const VerticalDivider(width: 1, thickness: 1),
           rail,
+          const VerticalDivider(width: 1, thickness: 1),
+          Expanded(child: content),
         ],
       ),
     );
