@@ -5,8 +5,8 @@ import 'package:prodavan/core/config/api_base.dart';
 
 /// Session holder — Bearer + work headers (L01/L05).
 class WorkContext extends ChangeNotifier {
-  /// Overridden at build time for k3s web via `--dart-define=API_BASE=...`.
-  static const String defaultBaseUrl = ApiBase.value;
+  /// Resolved at runtime (same-origin on web when API_BASE unset).
+  static String get defaultBaseUrl => ApiBase.value;
 
   String baseUrl = ApiBase.value;
   String bearerToken = '';
