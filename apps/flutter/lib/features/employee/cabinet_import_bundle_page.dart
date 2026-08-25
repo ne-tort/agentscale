@@ -6,10 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
-import 'package:prodavan/core/widgets/app_form.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_section_header.dart';
-import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/dynamic_cabinet_shell.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -208,9 +206,11 @@ class _CabinetImportBundlePageState extends State<CabinetImportBundlePage> {
             const SizedBox(height: AppSpacing.lg),
             AppSectionHeader(title: l10n.cabinetFromFile),
           ],
-          AppForm(
-            formKey: _formKey,
-            children: [
+          Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
               OutlinedButton.icon(
                 onPressed: _importing ? null : _pickBundle,
                 icon: Icon(Icons.folder_open),
@@ -218,20 +218,22 @@ class _CabinetImportBundlePageState extends State<CabinetImportBundlePage> {
               ),
               const SizedBox(height: AppSpacing.md),
               AppSectionHeader(title: l10n.cabinetNewCabinet),
-              AppTextField(
+              TextFormField(
                 controller: _nameCtrl,
-                label: l10n.cabinetCabinetName,
+                decoration: InputDecoration(labelText: l10n.cabinetCabinetName),
                 enabled: !_importing,
                 validator: (v) {
                   if (v == null || v.trim().isEmpty) return l10n.commonNameRequired;
                   return null;
                 },
               ),
+              const SizedBox(height: AppSpacing.md),
               AppButton(
                 label: _importing ? l10n.cabinetImporting : l10n.cabinetImportBundleTooltip,
                 onPressed: _importing ? null : _import,
               ),
-            ],
+              ],
+            ),
           ),
         ],
       ),

@@ -43,10 +43,24 @@ class AdminApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> patchCompany({
+    required String companyId,
+    String? description,
+  }) async {
+    final res = await http.patch(
+      _uri('/admin/companies/$companyId'),
+      headers: _headers,
+      body: jsonEncode({'description': description}),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> createCompany({
     required String name,
     required String adminEmail,
     String? adminDisplayName,
+    String? description,
   }) async {
     final res = await http.post(
       _uri('/companies'),
@@ -56,6 +70,7 @@ class AdminApi {
         'admin_email': adminEmail,
         if (adminDisplayName != null && adminDisplayName.isNotEmpty)
           'admin_display_name': adminDisplayName,
+        if (description != null && description.isNotEmpty) 'description': description,
       }),
     );
     _throwIfError(res);

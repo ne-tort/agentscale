@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
-import 'package:prodavan/core/widgets/empty_state.dart';
+import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/project_create_page.dart';
 import 'package:prodavan/features/employee/project_workspace_page.dart';
@@ -110,9 +110,10 @@ class _ProjectListPageState extends State<ProjectListPage> {
           child: AppEntityCollection(
             loading: _loading,
             rows: rows,
-            columns: [AppEntityColumn(id: 'name', label: l10n.projectProject)],
+            primaryColumnLabel: l10n.projectProject,
+            columns: const [],
             onOpen: _openProject,
-            empty: EmptyState(
+            empty: EmptyPlaceholder(
               title: l10n.projectNoProjects,
               subtitle: l10n.projectCreateProjectHint,
               action: TextButton(onPressed: _createProject, child: Text(l10n.projectCreateProject)),

@@ -17,6 +17,8 @@ Mobile-first Material 3. Единые виджеты в `apps/flutter/lib/core/�
 | [app-selector-page.md](app-selector-page.md) | Страница выбора |
 | [app-checkbox.md](app-checkbox.md) | Чекбоксы |
 | [app-radio.md](app-radio.md) | Radio (несколько визуальных видов) |
+| [app-section-header.md](app-section-header.md) | Заголовки крупных секций |
+| [preferences.md](preferences.md) | Preference kit (seamless save) |
 
 Составные виджеты **обязаны** использовать одинаковые spacing tokens и атомы (`AppListItem`, кнопки) внутри.  
 HelpSystem (справки) — вне этого модуля; в экранах нет instructional copy.

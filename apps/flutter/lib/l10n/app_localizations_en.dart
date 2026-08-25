@@ -10,13 +10,13 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
-  String get adminActiveEmployees => 'Active employees';
+  String get adminActiveEmployees => 'Employees online';
 
   @override
   String get adminAdminEmail => 'Admin email';
 
   @override
-  String get adminAgentMessages => 'Agent messages';
+  String get adminAgentMessages => 'AI requests';
 
   @override
   String get adminAgentPolicySaved => 'Agent policy saved';
@@ -25,7 +25,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminAgentRuntimePolicy => 'Agent runtime policy';
 
   @override
-  String get adminAiKeysBound => 'AI keys bound';
+  String get adminAiKeysBound => 'API keys';
 
   @override
   String adminAlertHighUsageTitle(String companyName) {
@@ -322,7 +322,12 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get adminPlatformTotals => 'Platform totals';
+  String get adminPlatformTotals => 'Metrics';
+
+  @override
+  String adminCompanyCabinetsRunning(String running, String quota) {
+    return '$running / $quota';
+  }
 
   @override
   String get adminPreferredProviderOptional => 'Preferred provider (optional)';
@@ -852,6 +857,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get commonCompany => 'Company';
 
   @override
+  String get commonDescription => 'Description';
+
+  @override
+  String get commonEntity => 'Name';
+
+  @override
   String get commonContinueAction => 'Continue';
 
   @override
@@ -960,7 +971,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get commonStatus => 'Status';
 
   @override
-  String get commonStorageBytes => 'Storage (bytes)';
+  String get commonStorageBytes => 'Storage';
 
   @override
   String get commonTable => 'Table';

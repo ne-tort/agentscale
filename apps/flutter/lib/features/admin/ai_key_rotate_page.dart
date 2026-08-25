@@ -3,8 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
-import 'package:prodavan/core/widgets/app_form.dart';
-import 'package:prodavan/core/widgets/app_password_field.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -27,6 +25,7 @@ class AdminAiKeyRotatePage extends StatefulWidget {
 class _AdminAiKeyRotatePageState extends State<AdminAiKeyRotatePage> {
   final _formKey = GlobalKey<FormState>();
   final _secretCtrl = TextEditingController();
+  bool _obscureSecret = true;
   bool _saving = false;
   String? _error;
 
@@ -71,22 +70,36 @@ class _AdminAiKeyRotatePageState extends State<AdminAiKeyRotatePage> {
             if (_error != null) InlineErrorBanner(message: _error!),
             Text(l10n.adminRotateSecretHint),
             const SizedBox(height: AppSpacing.md),
-            AppForm(
-              formKey: _formKey,
-              children: [
-                AppPasswordField(
-                  controller: _secretCtrl,
-                  label: l10n.adminNewSecret,
-                  validator: (v) {
-                    if (v == null || v.isEmpty) return l10n.adminSecretRequired;
-                    return null;
-                  },
-                ),
-                AppButton(
-                  label: _saving ? l10n.adminRotating : l10n.adminRotateSecret,
-                  onPressed: _saving ? null : _rotate,
-                ),
-              ],
+            Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextFormField(
+                    controller: _secretCtrl,
+                    obscureText: _obscureSecret,
+                    autofillHints: const [AutofillHints.password],
+                    decoration: InputDecoration(
+                      labelText: l10n.adminNewSecret,
+                      suffixIcon: IconButton(
+                        icon: Icon(
+                          _obscureSecret ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                        ),
+                        onPressed: () => setState(() => _obscureSecret = !_obscureSecret),
+                      ),
+                    ),
+                    validator: (v) {
+                      if (v == null || v.isEmpty) return l10n.adminSecretRequired;
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  AppButton(
+                    label: _saving ? l10n.adminRotating : l10n.adminRotateSecret,
+                    onPressed: _saving ? null : _rotate,
+                  ),
+                ],
+              ),
             ),
           ],
         ),

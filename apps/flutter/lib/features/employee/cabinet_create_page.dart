@@ -3,9 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
-import 'package:prodavan/core/widgets/app_form.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/dynamic_cabinet_shell.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -22,7 +20,6 @@ class _CabinetCreatePageState extends State<CabinetCreatePage> {
   @override
   void initState() {
     super.initState();
-    // Default filled after first frame when locale is available.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (_nameCtrl.text.isEmpty) {
@@ -86,23 +83,27 @@ class _CabinetCreatePageState extends State<CabinetCreatePage> {
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
           if (_error != null) InlineErrorBanner(message: _error!),
-          AppForm(
-            formKey: _formKey,
-            children: [
-              AppTextField(
-                controller: _nameCtrl,
-                label: l10n.cabinetCabinetName,
-                enabled: !_saving,
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) return l10n.commonNameRequired;
-                  return null;
-                },
-              ),
-              AppButton(
-                label: _saving ? l10n.commonCreating : l10n.cabinetCreateCabinet,
-                onPressed: _saving ? null : _create,
-              ),
-            ],
+          Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextFormField(
+                  controller: _nameCtrl,
+                  decoration: InputDecoration(labelText: l10n.cabinetCabinetName),
+                  enabled: !_saving,
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return l10n.commonNameRequired;
+                    return null;
+                  },
+                ),
+                const SizedBox(height: AppSpacing.md),
+                AppButton(
+                  label: _saving ? l10n.commonCreating : l10n.cabinetCreateCabinet,
+                  onPressed: _saving ? null : _create,
+                ),
+              ],
+            ),
           ),
         ],
       ),

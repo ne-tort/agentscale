@@ -10,13 +10,13 @@ class AppLocalizationsRu extends AppLocalizations {
   AppLocalizationsRu([String locale = 'ru']) : super(locale);
 
   @override
-  String get adminActiveEmployees => 'Активные сотрудники';
+  String get adminActiveEmployees => 'Сотрудники онлайн';
 
   @override
   String get adminAdminEmail => 'Email администратора';
 
   @override
-  String get adminAgentMessages => 'Сообщения агента';
+  String get adminAgentMessages => 'AI-Запросы';
 
   @override
   String get adminAgentPolicySaved => 'Политика агента сохранена';
@@ -25,7 +25,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminAgentRuntimePolicy => 'Политика runtime агента';
 
   @override
-  String get adminAiKeysBound => 'Привязанные AI-ключи';
+  String get adminAiKeysBound => 'API-ключи';
 
   @override
   String adminAlertHighUsageTitle(String companyName) {
@@ -323,7 +323,12 @@ class AppLocalizationsRu extends AppLocalizations {
   }
 
   @override
-  String get adminPlatformTotals => 'Итого по платформе';
+  String get adminPlatformTotals => 'Метрики';
+
+  @override
+  String adminCompanyCabinetsRunning(String running, String quota) {
+    return '$running / $quota';
+  }
 
   @override
   String get adminPreferredProviderOptional =>
@@ -858,6 +863,12 @@ class AppLocalizationsRu extends AppLocalizations {
   String get commonCompany => 'Компания';
 
   @override
+  String get commonDescription => 'Описание';
+
+  @override
+  String get commonEntity => 'Название';
+
+  @override
   String get commonContinueAction => 'Продолжить';
 
   @override
@@ -966,7 +977,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get commonStatus => 'Статус';
 
   @override
-  String get commonStorageBytes => 'Хранилище (байт)';
+  String get commonStorageBytes => 'Хранилище';
 
   @override
   String get commonTable => 'Таблица';

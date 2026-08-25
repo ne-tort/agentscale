@@ -28,7 +28,7 @@
 AppEntityCollection
   ├── toolbar?     # AppIconButton: add, search, filter; без простыней текста
   ├── body         # list | table
-  ├── empty        # EmptyState: факт + короткое noun-label действия
+  ├── empty        # EmptyPlaceholder: факт + короткое noun-label действия
   └── loading      # skeleton rows (не обязательный full-screen spinner)
 ```
 
@@ -41,6 +41,29 @@ Feature **не** копирует ListView/DataTable стили.
 - Secondary cells / subtitle = **данные** (status, dates, counts) — не пояснения.
 - Leading/trailing — из core (icon, chevron, status tone).
 - Tap → detail/form **page**, не modal.
+
+## Table mode — ширина и скролл
+
+Режим `table` в `AppEntityCollection` вычисляет минимальную ширину таблицы:
+
+```text
+minTableWidth = horizontalMargin × 2
+              + primaryMinWidth (140)
+              + Σ column.width (если задан)
+              + columnSpacing × N колонок
+```
+
+Константы: `_horizontalMargin = 12`, `_columnSpacing = 12`, `_primaryMinWidth = 140`.
+
+| Правило | Поведение |
+|---------|-----------|
+| `minTableWidth ≤ parentWidth` | Таблица растягивается на доступную ширину (clamp до `AppBreakpoints.contentMaxWidth`) |
+| `minTableWidth > parentWidth` | Горизонтальный `SingleChildScrollView` — таблица не сжимается ниже min |
+| Primary column | Заголовок из `primaryColumnLabel` (fallback: `commonEntity`); ячейка = `row.title` |
+| Fixed columns | `AppEntityColumn.width` задаёт фиксированную ширину ячейки; участвует в `minTableWidth` |
+| Flex columns | `flex` зарезервирован; в текущей реализации DataTable использует auto-width для колонок без `width` |
+
+Feature передаёт `primaryColumnLabel` когда первая колонка — не generic «Сущность» (например `commonCompany`, `commonEmail`, `adminKey`).
 
 ## Toolbar
 

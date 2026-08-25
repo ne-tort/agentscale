@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
-import 'package:prodavan/core/widgets/app_form.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/widgets/project_status_chip.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -181,6 +180,8 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
     return value;
   }
 
+  String _keyFor(String? value) => value ?? '__default__';
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -201,59 +202,56 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
                         ? Text(l10n.projectPausedDisabledHint)
                         : Text(_projectStatus!),
                   ),
-                AppForm(
-                  formKey: _formKey,
-                  children: [
-                    AppTextField(
-                      controller: _nameCtrl,
-                      label: l10n.projectProjectName,
-                      enabled: !_saving,
-                      validator: (v) {
-                        if (v == null || v.trim().isEmpty) return l10n.commonNameRequired;
-                        return null;
-                      },
-                    ),
-                    DropdownButtonFormField<String?>(
-                      value: _agentProvider,
-                      decoration: InputDecoration(
-                        labelText: l10n.projectPreferredAgentProvider,
-                        border: OutlineInputBorder(),
+                Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      TextFormField(
+                        controller: _nameCtrl,
+                        decoration: InputDecoration(labelText: l10n.projectProjectName),
+                        enabled: !_saving,
+                        validator: (v) {
+                          if (v == null || v.trim().isEmpty) return l10n.commonNameRequired;
+                          return null;
+                        },
                       ),
-                      items: [
-                        for (final p in _providers)
-                          DropdownMenuItem<String?>(
-                            value: p,
-                            child: Text(_labelFor(p)),
-                          ),
-                      ],
-                      onChanged: _saving
-                          ? null
-                          : (v) => setState(() => _agentProvider = v),
-                    ),
-                    AppButton(
-                      label: _saving ? l10n.commonSaving : l10n.commonSave,
-                      onPressed: _saving || _rematerializing || _pausing ? null : _save,
-                    ),
-                    if (_projectStatus == 'paused')
+                      const SizedBox(height: AppSpacing.md),
+                      AppChoicePreference<String?>(
+                        title: l10n.projectPreferredAgentProvider,
+                        icon: Icons.smart_toy_outlined,
+                        value: _agentProvider,
+                        choices: _providers,
+                        keyFor: _keyFor,
+                        labelFor: _labelFor,
+                        enabled: !_saving && !_rematerializing && !_pausing,
+                        onSave: (v) async => setState(() => _agentProvider = v),
+                      ),
                       AppButton(
-                        label: _pausing ? l10n.projectResuming : l10n.projectResumeProject,
-                        onPressed: _saving || _rematerializing || _pausing ? null : _resume,
-                      )
-                    else
+                        label: _saving ? l10n.commonSaving : l10n.commonSave,
+                        onPressed: _saving || _rematerializing || _pausing ? null : _save,
+                      ),
+                      if (_projectStatus == 'paused')
+                        AppButton(
+                          label: _pausing ? l10n.projectResuming : l10n.projectResumeProject,
+                          onPressed: _saving || _rematerializing || _pausing ? null : _resume,
+                        )
+                      else
+                        AppButton(
+                          label: _pausing ? l10n.projectPausing : l10n.projectPauseProject,
+                          onPressed: _saving || _rematerializing || _pausing ? null : _pause,
+                        ),
                       AppButton(
-                        label: _pausing ? l10n.projectPausing : l10n.projectPauseProject,
-                        onPressed: _saving || _rematerializing || _pausing ? null : _pause,
+                        label: _rematerializing ? l10n.projectRematerializing : l10n.projectRematerializeWorkspace,
+                        onPressed: _saving || _rematerializing || _pausing ? null : _rematerialize,
                       ),
-                    AppButton(
-                      label: _rematerializing ? l10n.projectRematerializing : l10n.projectRematerializeWorkspace,
-                      onPressed: _saving || _rematerializing || _pausing ? null : _rematerialize,
-                    ),
-                    if (_rematerializeInfo != null)
-                      Text(
-                        _rematerializeInfo!,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
-                  ],
+                      if (_rematerializeInfo != null)
+                        Text(
+                          _rematerializeInfo!,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
+                    ],
+                  ),
                 ),
               ],
             ),

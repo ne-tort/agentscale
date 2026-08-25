@@ -3,9 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
-import 'package:prodavan/core/widgets/app_form.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -78,20 +76,24 @@ class _CabinetMetaViewEditPageState extends State<CabinetMetaViewEditPage> {
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
           if (_error != null) InlineErrorBanner(message: _error!),
-          AppForm(
-            formKey: _formKey,
-            children: [
-              AppTextField(
-                controller: _titleField,
-                label: l10n.cabinetTitleFieldColumnName,
-                enabled: !_saving,
-                validator: (v) => (v ?? '').trim().isEmpty ? l10n.commonRequired : null,
-              ),
-              AppButton(
-                label: _saving ? l10n.commonSaving : l10n.cabinetSaveView,
-                onPressed: _saving ? null : _save,
-              ),
-            ],
+          Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextFormField(
+                  controller: _titleField,
+                  decoration: InputDecoration(labelText: l10n.cabinetTitleFieldColumnName),
+                  enabled: !_saving,
+                  validator: (v) => (v ?? '').trim().isEmpty ? l10n.commonRequired : null,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                AppButton(
+                  label: _saving ? l10n.commonSaving : l10n.cabinetSaveView,
+                  onPressed: _saving ? null : _save,
+                ),
+              ],
+            ),
           ),
         ],
       ),

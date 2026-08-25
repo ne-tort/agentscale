@@ -4,21 +4,27 @@ import 'package:prodavan/core/responsive/app_breakpoints.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_icon_button.dart';
 import 'package:prodavan/core/widgets/app_list_item.dart';
-import 'package:prodavan/core/widgets/empty_state.dart';
+import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 enum AppEntityCollectionMode { list, table }
+
+enum AppEntityColumnAlign { start, end }
 
 class AppEntityColumn {
   const AppEntityColumn({
     required this.id,
     required this.label,
     this.flex = 1,
+    this.width,
+    this.align = AppEntityColumnAlign.start,
   });
 
   final String id;
   final String label;
   final int flex;
+  final double? width;
+  final AppEntityColumnAlign align;
 }
 
 class AppEntityRow {
@@ -51,6 +57,7 @@ class AppEntityCollection extends StatefulWidget {
     this.loading = false,
     this.allowModeToggle = true,
     this.initialMode,
+    this.primaryColumnLabel,
   });
 
   final List<AppEntityRow> rows;
@@ -61,6 +68,11 @@ class AppEntityCollection extends StatefulWidget {
   final bool loading;
   final bool allowModeToggle;
   final AppEntityCollectionMode? initialMode;
+  final String? primaryColumnLabel;
+
+  static const double _columnSpacing = 12;
+  static const double _horizontalMargin = 12;
+  static const double _primaryMinWidth = 140;
 
   @override
   State<AppEntityCollection> createState() => _AppEntityCollectionState();
@@ -128,7 +140,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
     }
     if (widget.rows.isEmpty) {
       return widget.empty ??
-          EmptyState(title: l10n.commonEmpty);
+          EmptyPlaceholder(title: l10n.commonEmpty);
     }
     if (mode == AppEntityCollectionMode.list) {
       return ListView.separated(
@@ -147,16 +159,33 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
         },
       );
     }
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          minWidth: MediaQuery.sizeOf(context).width,
-        ),
-        child: DataTable(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final maxTableWidth = AppBreakpoints.contentMaxWidth;
+        final parentWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : maxTableWidth;
+        final tableWidth = parentWidth.clamp(0.0, maxTableWidth).toDouble();
+        final primaryLabel =
+            widget.primaryColumnLabel ?? l10n.commonEntity;
+        final fixedWidth = widget.columns.fold<double>(
+          0,
+          (sum, c) => sum + (c.width ?? 0),
+        );
+        final minTableWidth = AppEntityCollection._horizontalMargin * 2 +
+            AppEntityCollection._primaryMinWidth +
+            fixedWidth +
+            widget.columns.length * AppEntityCollection._columnSpacing;
+        final needsScroll = minTableWidth > tableWidth;
+
+        final table = DataTable(
           showCheckboxColumn: false,
+          columnSpacing: AppEntityCollection._columnSpacing,
+          horizontalMargin: AppEntityCollection._horizontalMargin,
+          dataRowMinHeight: 40,
+          headingRowHeight: 44,
           columns: [
-            DataColumn(label: Text(l10n.commonTitle)),
+            DataColumn(label: Text(primaryLabel)),
             ...widget.columns.map((c) => DataColumn(label: Text(c.label))),
           ],
           rows: [
@@ -164,15 +193,52 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
               DataRow(
                 onSelectChanged: (_) => widget.onOpen(row),
                 cells: [
-                  DataCell(Text(row.title)),
-                  ...widget.columns.map(
-                    (c) => DataCell(Text(row.cells[c.id] ?? '')),
+                  DataCell(
+                    Text(row.title, overflow: TextOverflow.ellipsis),
                   ),
+                  ...widget.columns.map((c) => _dataCell(row.cells[c.id] ?? '', c)),
                 ],
               ),
           ],
-        ),
-      ),
+        );
+
+        final child = ConstrainedBox(
+          constraints: BoxConstraints(
+            minWidth: needsScroll ? minTableWidth : tableWidth,
+            maxWidth: needsScroll ? minTableWidth : tableWidth,
+          ),
+          child: table,
+        );
+
+        if (!needsScroll) return child;
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: child,
+        );
+      },
     );
+  }
+
+  DataCell _dataCell(String text, AppEntityColumn column) {
+    final alignment = column.align == AppEntityColumnAlign.end
+        ? Alignment.centerRight
+        : Alignment.centerLeft;
+    final child = Text(
+      text,
+      overflow: TextOverflow.ellipsis,
+      maxLines: 1,
+      textAlign: column.align == AppEntityColumnAlign.end
+          ? TextAlign.right
+          : TextAlign.left,
+    );
+    if (column.width != null) {
+      return DataCell(
+        SizedBox(
+          width: column.width,
+          child: Align(alignment: alignment, child: child),
+        ),
+      );
+    }
+    return DataCell(Align(alignment: alignment, child: child));
   }
 }

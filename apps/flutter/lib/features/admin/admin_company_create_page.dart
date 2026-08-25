@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
-import 'package:prodavan/core/widgets/app_form.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_section_header.dart';
-import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -23,6 +22,7 @@ class _AdminCompanyCreatePageState extends State<AdminCompanyCreatePage> {
   final _nameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _displayNameCtrl = TextEditingController();
+  final _descriptionCtrl = TextEditingController();
   final _maxCabinetsCtrl = TextEditingController(text: '10');
   final _maxPackagesCtrl = TextEditingController(text: '20');
   final _maxBundleMbCtrl = TextEditingController(text: '50');
@@ -41,6 +41,7 @@ class _AdminCompanyCreatePageState extends State<AdminCompanyCreatePage> {
     _nameCtrl.dispose();
     _emailCtrl.dispose();
     _displayNameCtrl.dispose();
+    _descriptionCtrl.dispose();
     _maxCabinetsCtrl.dispose();
     _maxPackagesCtrl.dispose();
     _maxBundleMbCtrl.dispose();
@@ -85,6 +86,7 @@ class _AdminCompanyCreatePageState extends State<AdminCompanyCreatePage> {
         name: _nameCtrl.text.trim(),
         adminEmail: _emailCtrl.text.trim(),
         adminDisplayName: displayName.isEmpty ? null : displayName,
+        description: _descriptionCtrl.text.trim().isEmpty ? null : _descriptionCtrl.text.trim(),
       );
       final company = body['company'] as Map<String, dynamic>? ?? body;
       final companyId = company['id'] as String;
@@ -135,69 +137,86 @@ class _AdminCompanyCreatePageState extends State<AdminCompanyCreatePage> {
           if (_error != null) InlineErrorBanner(message: _error!),
           Text(l10n.adminInviteCompanyAdminViaKeycloak),
           const SizedBox(height: AppSpacing.md),
-          AppForm(
-            formKey: _formKey,
-            children: [
-              AppSectionHeader(title: l10n.commonCompany),
-              AppTextField(
-                controller: _nameCtrl,
-                label: l10n.adminCompanyName,
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) return l10n.commonNameRequired;
-                  return null;
-                },
-              ),
-              AppSectionHeader(title: l10n.adminCompanyAdminInvite),
-              AppTextField(
-                controller: _emailCtrl,
-                label: l10n.adminAdminEmail,
-                keyboardType: TextInputType.emailAddress,
-                validator: (v) {
-                  final email = v?.trim() ?? '';
-                  if (email.isEmpty || !email.contains('@')) return l10n.companyValidEmailRequired;
-                  return null;
-                },
-              ),
-              AppTextField(
-                controller: _displayNameCtrl,
-                label: l10n.commonDisplayNameOptional,
-              ),
-              AppSectionHeader(title: l10n.adminCabinetQuotas),
-              AppTextField(
-                controller: _maxCabinetsCtrl,
-                label: l10n.adminMaxCabinets,
-                keyboardType: TextInputType.number,
-                validator: (v) => _parsePositive(v ?? '') == null ? l10n.commonPositiveInteger : null,
-              ),
-              AppTextField(
-                controller: _maxPackagesCtrl,
-                label: l10n.adminMaxPackagesPerCabinet,
-                keyboardType: TextInputType.number,
-                validator: (v) => _parsePositive(v ?? '') == null ? l10n.commonPositiveInteger : null,
-              ),
-              AppTextField(
-                controller: _maxBundleMbCtrl,
-                label: l10n.adminMaxBundleImportMb,
-                keyboardType: TextInputType.number,
-                validator: (v) => _parsePositive(v ?? '') == null ? l10n.commonPositiveInteger : null,
-              ),
-              AppSectionHeader(title: l10n.adminProdavanSubscriptionOptional),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(l10n.adminLifetimeSubscription),
-                value: _subscriptionLifetime,
-                onChanged: _saving ? null : (v) => setState(() => _subscriptionLifetime = v),
-              ),
-              AppTextField(
-                controller: _subscriptionEndsCtrl,
-                label: l10n.adminEndsAtIfNotLifetime,
-                enabled: !_saving && !_subscriptionLifetime,
-              ),
-              AppButton(
-                label: _saving ? l10n.commonCreating : l10n.adminCreateCompany,
-                onPressed: _saving ? null : _create,
-              ),
-            ],
+          Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                AppSectionHeader(title: l10n.commonCompany),
+                TextFormField(
+                  controller: _nameCtrl,
+                  decoration: InputDecoration(labelText: l10n.adminCompanyName),
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return l10n.commonNameRequired;
+                    return null;
+                  },
+                ),
+                const SizedBox(height: AppSpacing.md),
+                TextFormField(
+                  controller: _descriptionCtrl,
+                  decoration: InputDecoration(labelText: l10n.commonDescription),
+                  maxLines: 2,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                AppSectionHeader(title: l10n.adminCompanyAdminInvite),
+                TextFormField(
+                  controller: _emailCtrl,
+                  decoration: InputDecoration(labelText: l10n.adminAdminEmail),
+                  keyboardType: TextInputType.emailAddress,
+                  validator: (v) {
+                    final email = v?.trim() ?? '';
+                    if (email.isEmpty || !email.contains('@')) return l10n.companyValidEmailRequired;
+                    return null;
+                  },
+                ),
+                const SizedBox(height: AppSpacing.md),
+                TextFormField(
+                  controller: _displayNameCtrl,
+                  decoration: InputDecoration(labelText: l10n.commonDisplayNameOptional),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                AppSectionHeader(title: l10n.adminCabinetQuotas),
+                TextFormField(
+                  controller: _maxCabinetsCtrl,
+                  decoration: InputDecoration(labelText: l10n.adminMaxCabinets),
+                  keyboardType: TextInputType.number,
+                  validator: (v) => _parsePositive(v ?? '') == null ? l10n.commonPositiveInteger : null,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                TextFormField(
+                  controller: _maxPackagesCtrl,
+                  decoration: InputDecoration(labelText: l10n.adminMaxPackagesPerCabinet),
+                  keyboardType: TextInputType.number,
+                  validator: (v) => _parsePositive(v ?? '') == null ? l10n.commonPositiveInteger : null,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                TextFormField(
+                  controller: _maxBundleMbCtrl,
+                  decoration: InputDecoration(labelText: l10n.adminMaxBundleImportMb),
+                  keyboardType: TextInputType.number,
+                  validator: (v) => _parsePositive(v ?? '') == null ? l10n.commonPositiveInteger : null,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                AppSectionHeader(title: l10n.adminProdavanSubscriptionOptional),
+                AppSwitchPreference(
+                  title: l10n.adminLifetimeSubscription,
+                  icon: Icons.all_inclusive_rounded,
+                  value: _subscriptionLifetime,
+                  enabled: !_saving,
+                  onChanged: (v) async => setState(() => _subscriptionLifetime = v),
+                ),
+                TextFormField(
+                  controller: _subscriptionEndsCtrl,
+                  decoration: InputDecoration(labelText: l10n.adminEndsAtIfNotLifetime),
+                  enabled: !_saving && !_subscriptionLifetime,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                AppButton(
+                  label: _saving ? l10n.commonCreating : l10n.adminCreateCompany,
+                  onPressed: _saving ? null : _create,
+                ),
+              ],
+            ),
           ),
         ],
       ),

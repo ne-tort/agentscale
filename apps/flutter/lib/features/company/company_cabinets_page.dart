@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/session/company_context.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
-import 'package:prodavan/core/widgets/empty_state.dart';
+import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -72,17 +72,17 @@ class _CompanyCabinetsPageState extends State<CompanyCabinetsPage> {
           child: AppEntityCollection(
             loading: _loading,
             rows: rows,
+            primaryColumnLabel: l10n.companyCabinet,
             columns: [
-              AppEntityColumn(id: 'name', label: l10n.companyCabinet),
               AppEntityColumn(id: 'owner', label: l10n.companyOwner),
-              AppEntityColumn(id: 'status', label: l10n.commonStatus),
+              AppEntityColumn(id: 'status', label: l10n.commonStatus, width: 96),
             ],
             onOpen: (row) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(content: Text(l10n.companyReadOnlyOrgView(row.title))),
               );
             },
-            empty: EmptyState(
+            empty: EmptyPlaceholder(
               title: l10n.companyNoCabinets,
               subtitle: l10n.companyCabinetsEmptyHint,
             ),

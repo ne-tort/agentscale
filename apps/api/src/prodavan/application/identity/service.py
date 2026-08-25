@@ -153,13 +153,17 @@ class IdentityCommandService:
         name: str,
         admin_email: str,
         admin_display_name: str | None,
+        description: str | None = None,
     ) -> tuple[CompanyRow, EmployeeRow]:
         if not admin_email or "@" not in admin_email:
             raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="email required")
         # No password accepted — invite via KC only
         email = admin_email.lower()
         await self._invites.invite_user(email=email, display_name=admin_display_name)
-        company = CompanyRow(name=name.strip())
+        company = CompanyRow(
+            name=name.strip(),
+            description=description.strip() if description and description.strip() else None,
+        )
         existing = await self._session.execute(
             select(EmployeeRow).where(EmployeeRow.email == email).order_by(EmployeeRow.created_at.asc())
         )

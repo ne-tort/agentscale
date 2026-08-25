@@ -3,9 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/session/company_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
-import 'package:prodavan/core/widgets/app_form.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -69,28 +67,33 @@ class _CompanyInviteEmployeePageState extends State<CompanyInviteEmployeePage> {
             if (_error != null) InlineErrorBanner(message: _error!),
             Text(l10n.companyInviteViaKeycloakPasswordNotAccepted),
             const SizedBox(height: AppSpacing.md),
-            AppForm(
-              formKey: _formKey,
-              children: [
-                AppTextField(
-                  controller: _emailCtrl,
-                  label: l10n.commonEmail,
-                  keyboardType: TextInputType.emailAddress,
-                  validator: (v) {
-                    final email = v?.trim() ?? '';
-                    if (email.isEmpty || !email.contains('@')) return l10n.companyValidEmailRequired;
-                    return null;
-                  },
-                ),
-                AppTextField(
-                  controller: _nameCtrl,
-                  label: l10n.commonDisplayNameOptional,
-                ),
-                AppButton(
-                  label: _saving ? l10n.companyInviting : l10n.commonInvite,
-                  onPressed: _saving ? null : _invite,
-                ),
-              ],
+            Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextFormField(
+                    controller: _emailCtrl,
+                    decoration: InputDecoration(labelText: l10n.commonEmail),
+                    keyboardType: TextInputType.emailAddress,
+                    validator: (v) {
+                      final email = v?.trim() ?? '';
+                      if (email.isEmpty || !email.contains('@')) return l10n.companyValidEmailRequired;
+                      return null;
+                    },
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  TextFormField(
+                    controller: _nameCtrl,
+                    decoration: InputDecoration(labelText: l10n.commonDisplayNameOptional),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  AppButton(
+                    label: _saving ? l10n.companyInviting : l10n.commonInvite,
+                    onPressed: _saving ? null : _invite,
+                  ),
+                ],
+              ),
             ),
           ],
         ),

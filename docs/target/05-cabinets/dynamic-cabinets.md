@@ -173,7 +173,7 @@ CabinetShell
   tabs ← meta.tabs (EntityCollection of tabs + fixed base tabs)
   for tab in dynamic:
     load view meta + query rows
-    render AppEntityCollection / AppForm from ui_json
+    render AppEntityCollection / preference fields from ui_json
 ```
 
 Правила:

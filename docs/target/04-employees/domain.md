@@ -9,7 +9,7 @@ Employee = человек (Keycloak `sub`) в Company.
 
 1. OIDC login → access_token (Keycloak).
 2. API: `sub` → Employee; загрузить **owned / accessible CabinetInstances** из DB.
-3. `cabinets.length == 0` → EmptyState + «Создать» / «Импорт».
+3. `cabinets.length == 0` → EmptyPlaceholder + «Создать» / «Импорт».
 4. `cabinets.length == 1` → auto-enter; client `X-Cabinet-Id`.
 5. `cabinets.length > 1` → **CabinetSelectorPage**.
 6. Внутри: dynamic shell (meta tabs) + projects → workspace.

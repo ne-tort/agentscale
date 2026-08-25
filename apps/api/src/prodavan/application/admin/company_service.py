@@ -78,22 +78,61 @@ class AdminCompanyService:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Company not found")
         return row
 
+    async def _count_running_cabinets(self, company_id: str) -> int:
+        """Distinct ACTIVE cabinets with at least one ACTIVE (non-paused) project."""
+        q = await self._session.execute(
+            select(func.count(func.distinct(ProjectRow.cabinet_id)))
+            .select_from(ProjectRow)
+            .join(CabinetInstanceRow, CabinetInstanceRow.id == ProjectRow.cabinet_id)
+            .where(
+                ProjectRow.company_id == company_id,
+                ProjectRow.status == ProjectStatus.ACTIVE,
+                CabinetInstanceRow.status == CabinetStatus.ACTIVE,
+            )
+        )
+        return int(q.scalar_one() or 0)
+
+    async def _count_employees(self, company_id: str) -> int:
+        q = await self._session.execute(
+            select(func.count(func.distinct(MembershipRow.employee_id))).where(
+                MembershipRow.company_id == company_id
+            )
+        )
+        return int(q.scalar_one() or 0)
+
     async def list_companies(self) -> list[dict]:
         q = await self._session.execute(select(CompanyRow).order_by(CompanyRow.created_at.desc()))
         out: list[dict] = []
         for company in q.scalars().all():
             quota = await self._quotas.get_quota(company.id)
             active_cabinets = await self._quotas.count_active_cabinets(company.id)
+            running_cabinets = await self._count_running_cabinets(company.id)
+            employees_total = await self._count_employees(company.id)
             out.append(
                 {
                     "id": company.id,
                     "name": company.name,
+                    "description": company.description,
                     "created_at": company.created_at.isoformat() if company.created_at else None,
                     "cabinet_quota": _quota_public(quota),
                     "active_cabinets": active_cabinets,
+                    "running_cabinets": running_cabinets,
+                    "cabinets_quota": quota.max_cabinets,
+                    "employees_total": employees_total,
                 }
             )
         return out
+
+    async def set_description(self, company_id: str, description: str | None) -> dict:
+        company = await self._require_company(company_id)
+        company.description = description.strip() if description and description.strip() else None
+        await self._session.commit()
+        await self._session.refresh(company)
+        return {
+            "id": company.id,
+            "name": company.name,
+            "description": company.description,
+        }
 
     async def get_company(self, company_id: str) -> dict:
         company = await self._require_company(company_id)
@@ -104,6 +143,7 @@ class AdminCompanyService:
         return {
             "id": company.id,
             "name": company.name,
+            "description": company.description,
             "created_at": company.created_at.isoformat() if company.created_at else None,
             "cabinet_quota": _quota_public(quota),
             "agent_policy": _policy_public(
@@ -294,6 +334,7 @@ class AdminCompanyService:
         )
         quota = await self._quotas.get_quota(company_id)
         active_cabinets = int(cab_q.scalar_one() or 0)
+        running_cabinets = await self._count_running_cabinets(company_id)
         employees_total = int(emp_q.scalar_one() or 0)
         employees_active = int(emp_active_q.scalar_one() or 0)
         projects_total = int(proj_q.scalar_one() or 0)
@@ -316,6 +357,7 @@ class AdminCompanyService:
             "employees": employees_total,
             "active_cabinets": active_cabinets,
             "cabinets_active": active_cabinets,
+            "running_cabinets": running_cabinets,
             "cabinets_quota": quota.max_cabinets,
             "cabinets_quota_used_pct": round(100 * active_cabinets / quota.max_cabinets, 1)
             if quota.max_cabinets

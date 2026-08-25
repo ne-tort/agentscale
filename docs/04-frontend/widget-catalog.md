@@ -14,7 +14,7 @@
 | `SplitPane` | `split_pane.dart` | Master-detail (desktop): resizable divider, min width 280 px |
 | `ResponsiveBuilder` | `responsive_builder.dart` | Breakpoints → `mobile` / `tablet` / `desktop` builder |
 | `ScrollableScreen` | `scrollable_screen.dart` | SafeArea + scroll + consistent padding (`AppSpacing.lg/xl`) |
-| `EmptyState` | `empty_state.dart` | Icon + title + subtitle + optional CTA button |
+| `EmptyPlaceholder` | `empty_placeholder.dart` | Icon + title + optional subtitle/CTA; viewport centering |
 | `LoadingOverlay` | `loading_overlay.dart` | Modal barrier + spinner; blocking flag |
 
 ---
@@ -47,9 +47,11 @@
 
 ## Forms & input
 
+> **Removed (2026-08):** `AppTextField`, `AppPasswordField`, `AppForm` — заменены на preference kit. Канон: [`docs/target/07-ui-mobile-core/preferences.md`](../target/07-ui-mobile-core/preferences.md).
+
 | Widget | Файл | Описание |
 |--------|------|----------|
-| `AppTextField` | `app_text_field.dart` | Styled TextFormField + error display |
+| ~~`AppTextField`~~ | — | **removed** → `AppValuePreference` |
 | `AppDropdown` | `app_dropdown.dart` | Searchable dropdown |
 | `AppSwitchRow` | `app_switch_row.dart` | Label + Switch в settings list |
 | `ConfirmDialog` | `confirm_dialog.dart` | Destructive action confirm |

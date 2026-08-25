@@ -11,6 +11,7 @@
 5. Виджеты — только `lib/core/`; feature собирает экраны ([composition.md](composition.md)).
 6. Лаконичность: нет instructional copy; title только в слоте контейнера ([principles.md](principles.md) §4).
 7. Кнопки — [buttons.md](buttons.md) (icon / icon-toggle / короткое существительное).
+8. Секции — [app-section-header.md](app-section-header.md): header только для крупных блоков; не дублировать title preference/selector строк.
 
 ## Запрещено
 
@@ -19,7 +20,8 @@
 | `showDialog` / `AlertDialog` | Модалка |
 | `showModalBottomSheet` | Модалка |
 | `PopupMenuButton` для выбора сущностей | Не page-selector |
-| `DropdownButton` для сущностей/enum с >2 значимыми опциями | Замена: `AppSelectorPage` |
+| `DropdownButton` для сущностей/enum с >2 значимыми опциями | Замена: `AppSelectorPage` / `AppChoicePreference` |
+| `AppTextField` / `AppForm` / batch «Сохранить» на settings | Замена: [preferences.md](preferences.md) (seamless save) |
 | Локальные ListTile / DataTable «на один экран» | Дублирование EntityCollection / `AppListItem` |
 | Свободные заголовки/подсказки «как пользоваться» | Нарушение laconic |
 | Feature-local кнопки в обход core | Нарушение reuse |

@@ -42,6 +42,7 @@ class CreateCompanyBody(BaseModel):
     model_config = {"extra": "forbid"}
 
     name: str = Field(min_length=1, max_length=200)
+    description: str | None = Field(default=None, max_length=2000)
     admin_email: str = Field(min_length=3, max_length=320)
     admin_display_name: str | None = None
 
@@ -105,11 +106,12 @@ async def create_company(
 ) -> dict:
     company, admin = await IdentityCommandService(session, get_invite_client()).create_company_with_admin(
         name=body.name,
+        description=body.description,
         admin_email=body.admin_email,
         admin_display_name=body.admin_display_name,
     )
     return {
-        "company": {"id": company.id, "name": company.name},
+        "company": {"id": company.id, "name": company.name, "description": company.description},
         "admin_employee": {"id": admin.id, "email": admin.email, "status": admin.status},
     }
 

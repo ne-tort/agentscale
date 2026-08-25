@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_checkbox.dart';
@@ -10,7 +11,7 @@ import 'package:prodavan/core/widgets/app_radio.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_selector_page.dart';
 import 'package:prodavan/core/widgets/danger_confirm_page.dart';
-import 'package:prodavan/core/widgets/empty_state.dart';
+import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Demo of core primitives without backend (L02).
@@ -112,15 +113,43 @@ class CoreGalleryPage extends StatelessWidget {
             },
           ),
           const SizedBox(height: AppSpacing.lg),
+          Text(l10n.settings, style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: AppSpacing.sm),
+          AppSwitchPreference(
+            title: l10n.settingsThemeLight,
+            icon: Icons.light_mode_outlined,
+            value: true,
+            onChanged: (_) async {},
+          ),
+          AppChoicePreference<String>(
+            title: l10n.settingsLanguage,
+            icon: Icons.translate,
+            value: 'ru',
+            choices: const ['ru', 'en'],
+            keyFor: (v) => v,
+            labelFor: (v) => v == 'ru' ? l10n.settingsLanguageRu : l10n.settingsLanguageEn,
+            onSave: (_) async {},
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Text('EmptyPlaceholder', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: AppSpacing.sm),
+          EmptyPlaceholder(title: l10n.commonEmpty),
+          const SizedBox(height: AppSpacing.lg),
           Text(l10n.galleryEntityCollection, style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: AppSpacing.sm),
           SizedBox(
             height: 280,
             child: AppEntityCollection(
               rows: rows,
+              primaryColumnLabel: l10n.commonName,
               columns: [
-                AppEntityColumn(id: 'status', label: l10n.commonStatus),
-                AppEntityColumn(id: 'count', label: l10n.galleryCount),
+                AppEntityColumn(id: 'status', label: l10n.commonStatus, width: 96),
+                AppEntityColumn(
+                  id: 'count',
+                  label: l10n.galleryCount,
+                  width: 64,
+                  align: AppEntityColumnAlign.end,
+                ),
               ],
               onOpen: (_) {},
               toolbar: [
@@ -132,8 +161,6 @@ class CoreGalleryPage extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: AppSpacing.lg),
-          EmptyState(title: l10n.commonEmpty, subtitle: null),
         ],
       ),
     );

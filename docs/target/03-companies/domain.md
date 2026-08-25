@@ -13,7 +13,7 @@ UI: роль `company.admin`.
 
 | Сущность | Описание |
 |----------|----------|
-| `Company` | Org (создаёт Platform Admin) |
+| `Company` | Org: `name` (required), `description` (optional), subscription |
 | `Employee` | Person + `keycloak_sub` + membership |
 | `EmployeeStatus` | `invited` \| `active` \| `disabled` |
 | `CabinetInstance` | Принадлежит employee + `company_id` (org ownership) |
@@ -29,6 +29,7 @@ UI: роль `company.admin`.
 | `employee.invite` | Email → Keycloak; **без password** |
 | `employee.disable` / `enable` | Disabled → 403 cabinet/project API |
 | `metrics.employees` / `metrics.cabinets` | Aggregates; list cabinet names/owners read-only |
+| `metrics.running_cabinets` | DISTINCT ACTIVE кабинеты с ≥1 ACTIVE проектом (см. [metrics](../01-platform-admin/metrics.md)) |
 | `policy.narrow` | Company может только **сужать** Admin policy |
 
 ## Поток кабинетов

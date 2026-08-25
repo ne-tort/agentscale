@@ -21,7 +21,7 @@ Control plane платформы. Нет chat проектов, нет доме�
 
 ## Chrome
 
-- Titles только в слотах контейнера; laconic EmptyState.
+- Titles только в слотах контейнера; laconic EmptyPlaceholder.
 - EntityCollection; icon toolbar ([buttons](../07-ui-mobile-core/buttons.md)).
 
 ## Потоки

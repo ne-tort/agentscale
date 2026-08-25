@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/empty_state.dart';
+import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -65,7 +65,7 @@ class _AdminStarterBundlesPageState extends State<AdminStarterBundlesPage> {
             child: _loading
                 ? Center(child: CircularProgressIndicator())
                 : _items.isEmpty
-                    ? EmptyState(
+                    ? EmptyPlaceholder(
                         title: l10n.adminNoStarterBundles,
                         subtitle: l10n.adminStarterBundlesHint,
                       )

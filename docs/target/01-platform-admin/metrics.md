@@ -9,6 +9,7 @@
 | `employees_total` / `employees_active` | Сотрудники всего / не отключённые |
 | `subscription_ends_at` / `subscription_lifetime` | Срок подписки на Prodavan |
 | `cabinets_active` | Число CabinetInstance в компании |
+| `running_cabinets` | ACTIVE кабинеты с ≥1 ACTIVE (не paused) проектом |
 | `cabinets_quota` | Лимит create/import (если задан) |
 | `projects_total` | Проекты по всем кабинетам компании |
 | `agent_tokens_used` | Суммарные токены (если провайдер отдаёт) |

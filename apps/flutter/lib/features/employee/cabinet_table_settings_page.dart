@@ -5,9 +5,7 @@ import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
-import 'package:prodavan/core/widgets/app_form.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/danger_confirm_page.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -157,20 +155,24 @@ class _CabinetTableSettingsPageState extends State<CabinetTableSettingsPage> {
           if (_archived) const SizedBox(height: AppSpacing.sm),
           if (_error != null) InlineErrorBanner(message: _error!),
           if (!_archived)
-            AppForm(
-              formKey: _formKey,
-              children: [
-                AppTextField(
-                  controller: _label,
-                  label: l10n.commonLabel,
-                  enabled: !busy,
-                  validator: (v) => (v ?? '').trim().isEmpty ? l10n.commonRequired : null,
-                ),
-                AppButton(
-                  label: _saving ? l10n.commonSaving : l10n.cabinetSaveLabel,
-                  onPressed: busy ? null : _saveLabel,
-                ),
-              ],
+            Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextFormField(
+                    controller: _label,
+                    decoration: InputDecoration(labelText: l10n.commonLabel),
+                    enabled: !busy,
+                    validator: (v) => (v ?? '').trim().isEmpty ? l10n.commonRequired : null,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  AppButton(
+                    label: _saving ? l10n.commonSaving : l10n.cabinetSaveLabel,
+                    onPressed: busy ? null : _saveLabel,
+                  ),
+                ],
+              ),
             ),
           if (!_archived) Divider(height: 32),
           if (!_archived)

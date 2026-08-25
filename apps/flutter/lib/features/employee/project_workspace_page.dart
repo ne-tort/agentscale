@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/project_settings_page.dart';
 import 'package:prodavan/features/employee/tool_approve_page.dart';
@@ -678,8 +679,9 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
             child: _loading
                 ? Center(child: CircularProgressIndicator())
                 : _messages.isEmpty
-                    ? Center(
-                        child: Text(l10n.projectEmptyChatHint),
+                    ? EmptyPlaceholder(
+                        title: l10n.projectEmptyChatHint,
+                        icon: Icons.chat_bubble_outline,
                       )
                     : ListView.builder(
                         controller: _scroll,

@@ -5,8 +5,7 @@ import 'package:prodavan/core/widgets/app_checkbox.dart';
 import 'package:prodavan/core/widgets/app_list_item.dart';
 import 'package:prodavan/core/widgets/app_radio.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_text_field.dart';
-import 'package:prodavan/core/widgets/empty_state.dart';
+import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -15,6 +14,7 @@ class AppSelectorItem {
     required this.id,
     required this.title,
     this.subtitle,
+    this.icon,
     this.leading,
     this.trailing,
     this.tone = AppListTone.neutral,
@@ -24,10 +24,14 @@ class AppSelectorItem {
   final String id;
   final String title;
   final String? subtitle;
+  final IconData? icon;
   final Widget? leading;
   final Widget? trailing;
   final AppListTone tone;
   final bool enabled;
+
+  Widget? get effectiveLeading =>
+      leading ?? (icon != null ? Icon(icon) : null);
 }
 
 /// Full-screen entity picker — replaces Dropdown / PopupMenu / modal pickers.
@@ -133,15 +137,18 @@ class _AppSelectorPageState extends State<AppSelectorPage> {
                 AppSpacing.md,
                 AppSpacing.sm,
               ),
-              child: AppTextField(
-                label: l10n.commonSearch,
+              child: TextField(
+                decoration: InputDecoration(
+                  labelText: l10n.commonSearch,
+                  isDense: true,
+                ),
                 onChanged: (v) => setState(() => _query = v),
               ),
             ),
           Expanded(
             child: items.isEmpty
                 ? (widget.empty ??
-                    EmptyState(title: l10n.commonNothingFound))
+                    EmptyPlaceholder(title: l10n.commonNothingFound))
                 : ListView.separated(
                     padding: const EdgeInsets.all(AppSpacing.md),
                     itemCount: items.length,
@@ -173,7 +180,7 @@ class _AppSelectorPageState extends State<AppSelectorPage> {
                         subtitle: item.subtitle != null
                             ? Text(item.subtitle!)
                             : null,
-                        leading: item.leading,
+                        leading: item.effectiveLeading,
                         trailing: item.trailing ??
                             (selected && !widget.showCheckboxes && !widget.showRadios
                                 ? const Icon(Icons.check)

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/empty_state.dart';
+import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/admin/ai_key_create_page.dart';
 import 'package:prodavan/features/admin/ai_key_detail_page.dart';
@@ -91,14 +91,19 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
           child: AppEntityCollection(
             loading: _loading,
             rows: rows,
+            primaryColumnLabel: l10n.adminKey,
             columns: [
-              AppEntityColumn(id: 'name', label: l10n.adminKey),
               AppEntityColumn(id: 'provider', label: l10n.commonProvider),
               AppEntityColumn(id: 'status', label: l10n.commonStatus),
-              AppEntityColumn(id: 'bindings', label: l10n.navCompanies),
+              AppEntityColumn(
+                id: 'bindings',
+                label: l10n.navCompanies,
+                width: 72,
+                align: AppEntityColumnAlign.end,
+              ),
             ],
             onOpen: _openKey,
-            empty: EmptyState(
+            empty: EmptyPlaceholder(
               title: l10n.adminNoAiKeys,
               subtitle: l10n.adminCreateRuntimeKeyHint,
               action: TextButton(onPressed: _createKey, child: Text(l10n.adminCreateKey)),

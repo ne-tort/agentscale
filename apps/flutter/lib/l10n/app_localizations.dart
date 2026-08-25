@@ -101,7 +101,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminActiveEmployees.
   ///
   /// In en, this message translates to:
-  /// **'Active employees'**
+  /// **'Employees online'**
   String get adminActiveEmployees;
 
   /// No description provided for @adminAdminEmail.
@@ -113,7 +113,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminAgentMessages.
   ///
   /// In en, this message translates to:
-  /// **'Agent messages'**
+  /// **'AI requests'**
   String get adminAgentMessages;
 
   /// No description provided for @adminAgentPolicySaved.
@@ -131,7 +131,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminAiKeysBound.
   ///
   /// In en, this message translates to:
-  /// **'AI keys bound'**
+  /// **'API keys'**
   String get adminAiKeysBound;
 
   /// No description provided for @adminAlertHighUsageTitle.
@@ -605,8 +605,14 @@ abstract class AppLocalizations {
   /// No description provided for @adminPlatformTotals.
   ///
   /// In en, this message translates to:
-  /// **'Platform totals'**
+  /// **'Metrics'**
   String get adminPlatformTotals;
+
+  /// No description provided for @adminCompanyCabinetsRunning.
+  ///
+  /// In en, this message translates to:
+  /// **'{running} / {quota}'**
+  String adminCompanyCabinetsRunning(String running, String quota);
 
   /// No description provided for @adminPreferredProviderOptional.
   ///
@@ -1550,6 +1556,18 @@ abstract class AppLocalizations {
   /// **'Company'**
   String get commonCompany;
 
+  /// No description provided for @commonDescription.
+  ///
+  /// In en, this message translates to:
+  /// **'Description'**
+  String get commonDescription;
+
+  /// No description provided for @commonEntity.
+  ///
+  /// In en, this message translates to:
+  /// **'Name'**
+  String get commonEntity;
+
   /// No description provided for @commonContinueAction.
   ///
   /// In en, this message translates to:
@@ -1769,7 +1787,7 @@ abstract class AppLocalizations {
   /// No description provided for @commonStorageBytes.
   ///
   /// In en, this message translates to:
-  /// **'Storage (bytes)'**
+  /// **'Storage'**
   String get commonStorageBytes;
 
   /// No description provided for @commonTable.

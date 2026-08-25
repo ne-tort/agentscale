@@ -30,7 +30,7 @@
 ## Запреты (дополнение)
 
 - `ListTile` / свой DataTable в features — EntityCollection + `AppListItem`
-- Instructional / help copy в chrome и EmptyState (Help — отдельный будущий модуль)
+- Instructional / help copy в chrome и EmptyPlaceholder (Help — отдельный будущий модуль)
 - Заглушки «Скоро» без CTA / без ссылки на канон-экран — дефект относительно UX contract
 - Password fields в Admin/Company create flows
 

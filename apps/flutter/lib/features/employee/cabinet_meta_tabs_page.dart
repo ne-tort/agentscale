@@ -6,7 +6,7 @@ import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/danger_confirm_page.dart';
-import 'package:prodavan/core/widgets/empty_state.dart';
+import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/cabinet_meta_tab_create_page.dart';
 import 'package:prodavan/features/employee/cabinet_meta_view_edit_page.dart';
@@ -154,7 +154,10 @@ class _CabinetMetaTabsPageState extends State<CabinetMetaTabsPage> {
                     ),
                   ),
                   if (_tabs.isEmpty)
-                    EmptyState(title: l10n.cabinetNoCustomTabsYet)
+                    EmptyPlaceholder(
+                      title: l10n.cabinetNoCustomTabsYet,
+                      fillViewport: false,
+                    )
                   else
                     ..._tabs.map(
                       (tab) => Card(

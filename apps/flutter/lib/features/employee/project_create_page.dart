@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
-import 'package:prodavan/core/widgets/app_form.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/project_workspace_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -24,7 +23,6 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
   @override
   void initState() {
     super.initState();
-    // Default filled after first frame when locale is available.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (_nameCtrl.text.isEmpty) {
@@ -87,6 +85,8 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
     return value;
   }
 
+  String _keyFor(String? value) => value ?? '__default__';
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -96,38 +96,37 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
           if (_error != null) InlineErrorBanner(message: _error!),
-          AppForm(
-            formKey: _formKey,
-            children: [
-              AppTextField(
-                controller: _nameCtrl,
-                label: l10n.projectProjectName,
-                enabled: !_saving,
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) return l10n.commonNameRequired;
-                  return null;
-                },
-              ),
-              DropdownButtonFormField<String?>(
-                value: _agentProvider,
-                decoration: InputDecoration(
-                  labelText: l10n.projectPreferredAgentProvider,
-                  border: OutlineInputBorder(),
+          Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextFormField(
+                  controller: _nameCtrl,
+                  decoration: InputDecoration(labelText: l10n.projectProjectName),
+                  enabled: !_saving,
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return l10n.commonNameRequired;
+                    return null;
+                  },
                 ),
-                items: [
-                  for (final p in _providers)
-                    DropdownMenuItem<String?>(
-                      value: p,
-                      child: Text(_labelFor(p)),
-                    ),
-                ],
-                onChanged: _saving ? null : (v) => setState(() => _agentProvider = v),
-              ),
-              AppButton(
-                label: _saving ? l10n.commonCreating : l10n.projectCreateAndOpenChat,
-                onPressed: _saving ? null : _create,
-              ),
-            ],
+                const SizedBox(height: AppSpacing.md),
+                AppChoicePreference<String?>(
+                  title: l10n.projectPreferredAgentProvider,
+                  icon: Icons.smart_toy_outlined,
+                  value: _agentProvider,
+                  choices: _providers,
+                  keyFor: _keyFor,
+                  labelFor: _labelFor,
+                  enabled: !_saving,
+                  onSave: (v) async => setState(() => _agentProvider = v),
+                ),
+                AppButton(
+                  label: _saving ? l10n.commonCreating : l10n.projectCreateAndOpenChat,
+                  onPressed: _saving ? null : _create,
+                ),
+              ],
+            ),
           ),
         ],
       ),

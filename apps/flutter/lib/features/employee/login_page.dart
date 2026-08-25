@@ -8,9 +8,7 @@ import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
-import 'package:prodavan/core/widgets/app_form.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/features/admin/admin_shell.dart';
 import 'package:prodavan/features/employee/contour_selector_page.dart';
 import 'package:prodavan/features/employee/cabinet_list_page.dart';
@@ -207,9 +205,11 @@ class _LoginPageState extends State<LoginPage> {
           ? const Center(child: CircularProgressIndicator())
           : Padding(
               padding: EdgeInsets.all(AppSpacing.lg),
-              child: AppForm(
-                formKey: _formKey,
-                children: [
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
                   Text(
                     isOidc ? l10n.authOidcModeHint : l10n.authDevTestModeHint,
                     style: Theme.of(context).textTheme.bodyMedium,
@@ -243,18 +243,18 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                   if (_showAdvanced) ...[
                     const SizedBox(height: AppSpacing.sm),
-                    AppTextField(
+                    TextFormField(
                       controller: _baseCtrl,
-                      label: l10n.commonApiBaseUrl,
+                      decoration: InputDecoration(labelText: l10n.commonApiBaseUrl),
                       enabled: !_connecting,
                     ),
                     const SizedBox(height: AppSpacing.sm),
                     TextButton(onPressed: _connecting ? null : _loadConfig, child: Text(l10n.authReloadAuthConfig)),
                     if (isOidc) ...[
                       const SizedBox(height: AppSpacing.md),
-                      AppTextField(
+                      TextFormField(
                         controller: _tokenCtrl,
-                        label: l10n.authBearerAccessToken,
+                        decoration: InputDecoration(labelText: l10n.authBearerAccessToken),
                         enabled: !_connecting,
                         validator: (v) => (v ?? '').trim().isEmpty ? l10n.commonRequired : null,
                       ),
@@ -267,9 +267,9 @@ class _LoginPageState extends State<LoginPage> {
                     ],
                     if (!isOidc) ...[
                       const SizedBox(height: AppSpacing.md),
-                      AppTextField(
+                      TextFormField(
                         controller: _tokenCtrl,
-                        label: l10n.authBearerAccessTokenPaste,
+                        decoration: InputDecoration(labelText: l10n.authBearerAccessTokenPaste),
                         enabled: !_connecting,
                         validator: (v) => (v ?? '').trim().isEmpty ? l10n.commonRequired : null,
                       ),
@@ -281,7 +281,8 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ],
                   ],
-                ],
+                  ],
+                ),
               ),
             ),
     );

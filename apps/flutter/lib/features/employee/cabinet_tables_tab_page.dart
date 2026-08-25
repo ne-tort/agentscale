@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/danger_confirm_page.dart';
-import 'package:prodavan/core/widgets/empty_state.dart';
+import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/cabinet_column_add_page.dart';
 import 'package:prodavan/features/employee/cabinet_column_edit_page.dart';
@@ -248,7 +248,7 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
         children: [
           if (_error != null) InlineErrorBanner(message: _error!),
           Expanded(
-            child: EmptyState(title: l10n.cabinetNoMetaTablesYet),
+            child: EmptyPlaceholder(title: l10n.cabinetNoMetaTablesYet),
           ),
           Padding(
             padding: EdgeInsets.all(12),
@@ -345,20 +345,19 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
           ),
         Expanded(
           child: _selectedSlug == null
-              ? Center(child: Text(l10n.cabinetSelectTableToPreview))
+              ? EmptyPlaceholder(
+                  title: l10n.cabinetSelectTableToPreview,
+                  icon: Icons.table_chart_outlined,
+                )
               : _rows.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(l10n.cabinetNoRows),
-                          const SizedBox(height: 8),
-                          TextButton.icon(
-                            onPressed: () => _editRow(),
-                            icon: Icon(Icons.add),
-                            label: Text(l10n.cabinetAddRow),
-                          ),
-                        ],
+                  ? EmptyPlaceholder(
+                      title: l10n.cabinetNoRows,
+                      icon: Icons.table_rows_outlined,
+                      onTitleTap: () => _editRow(),
+                      action: TextButton.icon(
+                        onPressed: () => _editRow(),
+                        icon: const Icon(Icons.add),
+                        label: Text(l10n.cabinetAddRow),
                       ),
                     )
                   : ListView.separated(

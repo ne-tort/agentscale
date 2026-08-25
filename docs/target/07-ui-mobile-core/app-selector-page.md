@@ -15,7 +15,7 @@
 | `showRadios` | bool | Radio для single |
 | `itemBuilder` | optional | Кастом, по умолчанию `AppListItem` |
 | `warningBanner` | String? | Плашка над списком |
-| `empty` | Widget? | EmptyState |
+| `empty` | Widget? | EmptyPlaceholder |
 | `onConfirm` | `ValueChanged<Set<String>>` | Кнопка «Готово» в AppBar (multi) |
 | `popOnSelect` | bool | Single: выбрать и pop сразу |
 

@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
-import 'package:prodavan/core/widgets/app_form.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/danger_confirm_page.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
@@ -137,34 +137,33 @@ class _CabinetColumnEditPageState extends State<CabinetColumnEditPage> {
           ],
           if (!_isProtected) ...[
             const SizedBox(height: AppSpacing.md),
-            AppForm(
-              formKey: GlobalKey<FormState>(),
-              children: [
-                DropdownButtonFormField<String>(
-                  value: _type,
-                  decoration: InputDecoration(labelText: l10n.cabinetType),
-                  items: _columnTypes
-                      .map((t) => DropdownMenuItem(value: t, child: Text(t)))
-                      .toList(),
-                  onChanged: busy ? null : (v) => setState(() => _type = v ?? _type),
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(l10n.commonRequired),
-                  value: _required,
-                  onChanged: busy ? null : (v) => setState(() => _required = v),
-                ),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: Text(l10n.cabinetUnique),
-                  value: _unique,
-                  onChanged: busy ? null : (v) => setState(() => _unique = v),
-                ),
-                AppButton(
-                  label: _saving ? l10n.commonSaving : l10n.commonSave,
-                  onPressed: busy ? null : _save,
-                ),
-              ],
+            AppChoicePreference<String>(
+              title: l10n.cabinetType,
+              icon: Icons.category_outlined,
+              value: _type,
+              choices: _columnTypes,
+              keyFor: (v) => v,
+              labelFor: (v) => v,
+              enabled: !busy,
+              onSave: (v) async => setState(() => _type = v),
+            ),
+            AppSwitchPreference(
+              title: l10n.commonRequired,
+              icon: Icons.star_outline,
+              value: _required,
+              enabled: !busy,
+              onChanged: (v) async => setState(() => _required = v),
+            ),
+            AppSwitchPreference(
+              title: l10n.cabinetUnique,
+              icon: Icons.fingerprint_outlined,
+              value: _unique,
+              enabled: !busy,
+              onChanged: (v) async => setState(() => _unique = v),
+            ),
+            AppButton(
+              label: _saving ? l10n.commonSaving : l10n.commonSave,
+              onPressed: busy ? null : _save,
             ),
             Divider(height: 32),
             AppButton(

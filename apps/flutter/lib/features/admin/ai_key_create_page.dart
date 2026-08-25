@@ -1,14 +1,12 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
-import 'package:prodavan/core/widgets/app_form.dart';
-import 'package:prodavan/core/widgets/app_password_field.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_section_header.dart';
 import 'package:prodavan/core/widgets/app_selector_page.dart';
-import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -28,6 +26,7 @@ class _AdminAiKeyCreatePageState extends State<AdminAiKeyCreatePage> {
   String _apiKind = 'cursor_sdk';
   List<String> _companyIds = const [];
   List<Map<String, dynamic>> _companies = const [];
+  bool _obscureSecret = true;
   bool _saving = false;
   String? _error;
 
@@ -120,59 +119,68 @@ class _AdminAiKeyCreatePageState extends State<AdminAiKeyCreatePage> {
         children: [
           if (_error != null) InlineErrorBanner(message: _error!),
           AppSectionHeader(title: l10n.adminKeyMetadata, subtitle: l10n.adminSecretStoredServerSide),
-          AppForm(
-            formKey: _formKey,
-            children: [
-              AppTextField(
-                controller: _nameCtrl,
-                label: l10n.commonName,
-                validator: (v) => (v == null || v.trim().isEmpty) ? l10n.commonRequired : null,
-              ),
-              InputDecorator(
-                decoration: InputDecoration(labelText: l10n.commonProvider),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: _provider,
-                    isExpanded: true,
-                    items: [
-                      for (final p in _providers) DropdownMenuItem(value: p, child: Text(p)),
-                    ],
-                    onChanged: _saving ? null : (v) => setState(() => _provider = v ?? 'cursor'),
+          Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextFormField(
+                  controller: _nameCtrl,
+                  decoration: InputDecoration(labelText: l10n.commonName),
+                  validator: (v) => (v == null || v.trim().isEmpty) ? l10n.commonRequired : null,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                AppChoicePreference<String>(
+                  title: l10n.commonProvider,
+                  icon: Icons.cloud_outlined,
+                  value: _provider,
+                  choices: _providers,
+                  keyFor: (v) => v,
+                  labelFor: (v) => v,
+                  enabled: !_saving,
+                  onSave: (v) async => setState(() => _provider = v),
+                ),
+                AppChoicePreference<String>(
+                  title: l10n.adminApiKind,
+                  icon: Icons.api_outlined,
+                  value: _apiKinds.contains(_apiKind) ? _apiKind : 'cursor_sdk',
+                  choices: _apiKinds,
+                  keyFor: (v) => v,
+                  labelFor: (v) => v,
+                  enabled: !_saving,
+                  onSave: (v) async => setState(() => _apiKind = v),
+                ),
+                TextFormField(
+                  controller: _secretCtrl,
+                  obscureText: _obscureSecret,
+                  autofillHints: const [AutofillHints.password],
+                  decoration: InputDecoration(
+                    labelText: l10n.commonSecret,
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscureSecret ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                      ),
+                      onPressed: () => setState(() => _obscureSecret = !_obscureSecret),
+                    ),
                   ),
+                  validator: (v) => (v == null || v.isEmpty) ? l10n.commonRequired : null,
                 ),
-              ),
-              InputDecorator(
-                decoration: InputDecoration(labelText: l10n.adminApiKind),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: _apiKinds.contains(_apiKind) ? _apiKind : 'cursor_sdk',
-                    isExpanded: true,
-                    items: [
-                      for (final k in _apiKinds) DropdownMenuItem(value: k, child: Text(k)),
-                    ],
-                    onChanged: _saving ? null : (v) => setState(() => _apiKind = v ?? 'cursor_sdk'),
+                const SizedBox(height: AppSpacing.md),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(l10n.adminCompanyBindings),
+                  subtitle: Text(
+                    _companyIds.isEmpty ? l10n.commonNone : '${_companyIds.length} selected',
                   ),
+                  trailing: TextButton(onPressed: _saving ? null : _pickCompanies, child: Text(l10n.commonSelect)),
                 ),
-              ),
-              AppPasswordField(
-                controller: _secretCtrl,
-                label: l10n.commonSecret,
-                validator: (v) => (v == null || v.isEmpty) ? l10n.commonRequired : null,
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text(l10n.adminCompanyBindings),
-                subtitle: Text(
-                  _companyIds.isEmpty ? l10n.commonNone : '${_companyIds.length} selected',
+                AppButton(
+                  label: _saving ? l10n.commonCreating : l10n.adminCreateKey,
+                  expanded: false,
+                  onPressed: _saving ? null : _save,
                 ),
-                trailing: TextButton(onPressed: _saving ? null : _pickCompanies, child: Text(l10n.commonSelect)),
-              ),
-              AppButton(
-                label: _saving ? l10n.commonCreating : l10n.adminCreateKey,
-                expanded: false,
-                onPressed: _saving ? null : _save,
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),

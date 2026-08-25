@@ -1,11 +1,11 @@
 {
   "@@locale": "en",
-  "adminActiveEmployees": "Active employees",
+  "adminActiveEmployees": "Employees online",
   "adminAdminEmail": "Admin email",
-  "adminAgentMessages": "Agent messages",
+  "adminAgentMessages": "AI requests",
   "adminAgentPolicySaved": "Agent policy saved",
   "adminAgentRuntimePolicy": "Agent runtime policy",
-  "adminAiKeysBound": "AI keys bound",
+  "adminAiKeysBound": "API keys",
   "adminAlertHighUsageTitle": "{companyName}: high agent token usage",
   "@adminAlertHighUsageTitle": {
     "placeholders": {
@@ -280,7 +280,14 @@
       }
     }
   },
-  "adminPlatformTotals": "Platform totals",
+  "adminPlatformTotals": "Metrics",
+  "adminCompanyCabinetsRunning": "{running} / {quota}",
+  "@adminCompanyCabinetsRunning": {
+    "placeholders": {
+      "running": { "type": "String" },
+      "quota": { "type": "String" }
+    }
+  },
   "adminPreferredProviderOptional": "Preferred provider (optional)",
   "adminProdavanSubscription": "Prodavan subscription",
   "adminProdavanSubscriptionOptional": "Prodavan subscription (optional)",
@@ -583,6 +590,8 @@
   "commonCabinets": "Cabinets",
   "commonCancel": "Cancel",
   "commonCompany": "Company",
+  "commonDescription": "Description",
+  "commonEntity": "Name",
   "commonContinueAction": "Continue",
   "commonCreate": "Create",
   "commonCreating": "Creating…",
@@ -619,7 +628,7 @@
   "commonSelect": "Select",
   "commonSelectCompany": "Select company",
   "commonStatus": "Status",
-  "commonStorageBytes": "Storage (bytes)",
+  "commonStorageBytes": "Storage",
   "commonTable": "Table",
   "commonTitle": "Title",
   "commonUnknown": "unknown",

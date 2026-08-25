@@ -17,4 +17,4 @@ Login (OIDC)
 - Смена кабинета/проекта — только pages (`AppSelectorPage`).
 - Нет `PopupMenuButton` для сущностей.
 - Создание проекта — `ProjectCreatePage`.
-- EmptyState + CTA; context `Company › Cabinet › Project`.
+- EmptyPlaceholder + CTA; context `Company › Cabinet › Project`.

@@ -27,6 +27,12 @@ class CabinetQuotaBody(BaseModel):
     max_bundle_import_mb: int = Field(ge=1, le=10_000)
 
 
+class CompanyPatchBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    description: str | None = Field(default=None, max_length=2000)
+
+
 class SubscriptionBody(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -59,6 +65,16 @@ async def list_companies(_: PlatformAdminDep, session: SessionDep) -> dict:
 @router.get("/{company_id}")
 async def get_company(company_id: str, _: PlatformAdminDep, session: SessionDep) -> dict:
     return await AdminCompanyService(session).get_company(company_id)
+
+
+@router.patch("/{company_id}")
+async def patch_company(
+    company_id: str,
+    body: CompanyPatchBody,
+    _: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    return await AdminCompanyService(session).set_description(company_id, body.description)
 
 
 @router.put("/{company_id}/cabinet-quotas")

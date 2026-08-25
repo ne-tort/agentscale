@@ -300,3 +300,56 @@ def test_company_employees_and_summary(client: TestClient) -> None:
         headers={"Authorization": f"Bearer {stranger}"},
     )
     assert denied.status_code == 403
+
+
+@requires_postgres
+def test_admin_company_description_and_running_cabinets(client: TestClient) -> None:
+    admin = _token(sub="desc-admin", email="desc@example.com", platform_admin=True)
+    created = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "DescCo", "admin_email": "boss@descco.test"},
+    )
+    assert created.status_code == 201, created.text
+    company_id = created.json()["company"]["id"]
+
+    patched = client.patch(
+        f"/api/v1/admin/companies/{company_id}",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"description": "Platform customer"},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["description"] == "Platform customer"
+
+    listed = client.get(
+        "/api/v1/admin/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert listed.status_code == 200, listed.text
+    match = next(i for i in listed.json()["items"] if i["id"] == company_id)
+    assert match["description"] == "Platform customer"
+    assert match["running_cabinets"] == 0
+
+    boss_tok = _token(sub="boss-desc", email="boss@descco.test")
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers={"Authorization": f"Bearer {boss_tok}"},
+        json={"name": "RunCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    project = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers={"Authorization": f"Bearer {boss_tok}"},
+        json={"name": "Active project"},
+    )
+    assert project.status_code == 201, project.text
+
+    listed_after = client.get(
+        "/api/v1/admin/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert listed_after.status_code == 200
+    match_after = next(i for i in listed_after.json()["items"] if i["id"] == company_id)
+    assert match_after["running_cabinets"] == 1

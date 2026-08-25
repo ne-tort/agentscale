@@ -8,8 +8,8 @@
 
 ```text
 atoms          AppIconButton, AppCheckbox, AppRadio, tokens
-molecules      AppListItem, AppTextField, AppButton
-organisms      AppEntityCollection, AppSelectorPage, AppScaffold, DangerConfirmPage
+molecules      AppListItem, AppButton, AppPreferenceTile
+organisms      AppEntityCollection, AppSelectorPage, AppScaffold, EmptyPlaceholder, preferences/*, DangerConfirmPage
 screens        feature pages (только сборка organisms/molecules)
 ```
 

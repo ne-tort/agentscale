@@ -9,7 +9,7 @@ meta.tables + meta.columns + meta.views + meta.tabs
         ↓
 CabinetShell (Flutter)
         ↓
-AppEntityCollection / dynamic AppForm / empty states
+AppEntityCollection / dynamic preference fields / empty states
 ```
 
 Нет доменных экранов «ПоставщикиScreen» в коде продукта — есть renderer + meta.
@@ -65,10 +65,10 @@ Base system tabs: Projects, Chat, Context (prompts/skills/rules/MCP/seeds), **Ta
 | kind | Renderer |
 |------|----------|
 | `collection` | `AppEntityCollection` (list/table per breakpoints) |
-| `form` | Dynamic fields → `AppTextField` / selectors |
+| `form` | Dynamic fields → `AppValuePreference` / `AppChoicePreference` |
 | `board` | later |
 
-Невалидный `ui_json` → EmptyState «Метаданные» + факт ошибки (без простыни), строка в audit.
+Невалидный `ui_json` → EmptyPlaceholder «Метаданные» + факт ошибки (без простыни), строка в audit.
 
 ## Refresh после агента
 

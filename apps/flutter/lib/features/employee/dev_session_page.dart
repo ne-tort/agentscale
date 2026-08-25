@@ -4,7 +4,6 @@ import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/features/employee/cabinet_list_page.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -60,9 +59,15 @@ class _DevSessionPageState extends State<DevSessionPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            AppTextField(controller: _baseCtrl, label: l10n.commonApiBaseUrl),
+            TextField(
+              controller: _baseCtrl,
+              decoration: InputDecoration(labelText: l10n.commonApiBaseUrl),
+            ),
             const SizedBox(height: AppSpacing.md),
-            AppTextField(controller: _tokenCtrl, label: l10n.devBearerTokenTestJwt),
+            TextField(
+              controller: _tokenCtrl,
+              decoration: InputDecoration(labelText: l10n.devBearerTokenTestJwt),
+            ),
             if (_error != null) ...[
               const SizedBox(height: AppSpacing.sm),
               Text(_error!, style: TextStyle(color: context.appColors.danger)),

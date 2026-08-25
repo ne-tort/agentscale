@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/session/company_context.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/danger_confirm_page.dart';
-import 'package:prodavan/core/widgets/empty_state.dart';
+import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/company/company_invite_employee_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -120,13 +120,14 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
           child: AppEntityCollection(
             loading: _loading,
             rows: rows,
+            primaryColumnLabel: l10n.commonEmail,
             columns: [
               AppEntityColumn(id: 'email', label: l10n.commonEmail),
               AppEntityColumn(id: 'role', label: l10n.companyRole),
               AppEntityColumn(id: 'status', label: l10n.commonStatus),
             ],
             onOpen: (_) {},
-            empty: EmptyState(
+            empty: EmptyPlaceholder(
               title: l10n.companyNoEmployees,
               subtitle: l10n.companyInviteViaKeycloakNoPassword,
               action: TextButton(onPressed: _invite, child: Text(l10n.commonInvite)),

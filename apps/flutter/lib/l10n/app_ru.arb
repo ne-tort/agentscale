@@ -1,11 +1,11 @@
 {
   "@@locale": "ru",
-  "adminActiveEmployees": "Активные сотрудники",
+  "adminActiveEmployees": "Сотрудники онлайн",
   "adminAdminEmail": "Email администратора",
-  "adminAgentMessages": "Сообщения агента",
+  "adminAgentMessages": "AI-Запросы",
   "adminAgentPolicySaved": "Политика агента сохранена",
   "adminAgentRuntimePolicy": "Политика runtime агента",
-  "adminAiKeysBound": "Привязанные AI-ключи",
+  "adminAiKeysBound": "API-ключи",
   "adminAlertHighUsageTitle": "{companyName}: высокий расход токенов агента",
   "@adminAlertHighUsageTitle": {
     "placeholders": {
@@ -280,7 +280,14 @@
       }
     }
   },
-  "adminPlatformTotals": "Итого по платформе",
+  "adminPlatformTotals": "Метрики",
+  "adminCompanyCabinetsRunning": "{running} / {quota}",
+  "@adminCompanyCabinetsRunning": {
+    "placeholders": {
+      "running": { "type": "String" },
+      "quota": { "type": "String" }
+    }
+  },
   "adminPreferredProviderOptional": "Предпочтительный провайдер (необязательно)",
   "adminProdavanSubscription": "Подписка Prodavan",
   "adminProdavanSubscriptionOptional": "Подписка Prodavan (необязательно)",
@@ -583,6 +590,8 @@
   "commonCabinets": "Кабинеты",
   "commonCancel": "Отмена",
   "commonCompany": "Компания",
+  "commonDescription": "Описание",
+  "commonEntity": "Название",
   "commonContinueAction": "Продолжить",
   "commonCreate": "Создать",
   "commonCreating": "Создание…",
@@ -619,7 +628,7 @@
   "commonSelect": "Выбрать",
   "commonSelectCompany": "Выберите компанию",
   "commonStatus": "Статус",
-  "commonStorageBytes": "Хранилище (байт)",
+  "commonStorageBytes": "Хранилище",
   "commonTable": "Таблица",
   "commonTitle": "Заголовок",
   "commonUnknown": "неизвестно",

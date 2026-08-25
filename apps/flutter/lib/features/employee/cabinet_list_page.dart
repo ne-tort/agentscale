@@ -4,7 +4,7 @@ import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/empty_state.dart';
+import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/cabinet_create_page.dart';
 import 'package:prodavan/features/employee/cabinet_import_bundle_page.dart';
@@ -98,9 +98,9 @@ class _CabinetListPageState extends State<CabinetListPage> {
             child: AppEntityCollection(
               loading: _loading,
               rows: rows,
+              primaryColumnLabel: l10n.commonName,
               columns: [
-                AppEntityColumn(id: 'name', label: l10n.commonName),
-                AppEntityColumn(id: 'status', label: l10n.commonStatus),
+                AppEntityColumn(id: 'status', label: l10n.commonStatus, width: 96),
               ],
               onOpen: (row) {
                 workContext.enterCabinet(row.id);
@@ -110,7 +110,7 @@ class _CabinetListPageState extends State<CabinetListPage> {
                   ),
                 );
               },
-              empty: EmptyState(
+              empty: EmptyPlaceholder(
                 title: l10n.companyNoCabinets,
                 subtitle: l10n.cabinetCreateBaseCabinetHint,
                 action: AppButton(label: l10n.commonCreate, expanded: false, onPressed: _createCabinet),

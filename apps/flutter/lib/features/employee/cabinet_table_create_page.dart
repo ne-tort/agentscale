@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
-import 'package:prodavan/core/widgets/app_form.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -30,6 +29,7 @@ class _ColumnDraft {
 
 class _CabinetTableCreatePageState extends State<CabinetTableCreatePage> {
   static const _columnTypes = ['text', 'number', 'bool', 'datetime', 'json', 'enum', 'ref', 'file_ref'];
+  static const _storageKinds = ['physical', 'json_document'];
 
   final _formKey = GlobalKey<FormState>();
   final _slug = TextEditingController();
@@ -58,6 +58,14 @@ class _CabinetTableCreatePageState extends State<CabinetTableCreatePage> {
     final removed = _columns.removeAt(index);
     removed.name.dispose();
     setState(() {});
+  }
+
+  String _storageLabel(String kind) {
+    final l10n = AppLocalizations.of(context);
+    return switch (kind) {
+      'json_document' => l10n.cabinetStorageJsonDocument,
+      _ => l10n.cabinetStoragePhysical,
+    };
   }
 
   Future<void> _save() async {
@@ -113,98 +121,95 @@ class _CabinetTableCreatePageState extends State<CabinetTableCreatePage> {
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
           if (_error != null) InlineErrorBanner(message: _error!),
-          AppForm(
-            formKey: _formKey,
-            children: [
-              AppTextField(
-                controller: _slug,
-                label: l10n.cabinetSlug,
-                enabled: !_saving,
-                validator: (v) {
-                  final s = (v ?? '').trim();
-                  if (s.isEmpty) return l10n.commonRequired;
-                  if (!RegExp(r'^[a-z][a-z0-9_]*$').hasMatch(s)) {
-                    return l10n.cabinetLowercaseSlugRule;
-                  }
-                  return null;
-                },
-              ),
-              AppTextField(
-                controller: _label,
-                label: l10n.commonLabel,
-                enabled: !_saving,
-                validator: (v) => (v ?? '').trim().isEmpty ? l10n.commonRequired : null,
-              ),
-              DropdownButtonFormField<String>(
-                value: _storageKind,
-                decoration: InputDecoration(labelText: l10n.cabinetStorage),
-                items: [
-                  DropdownMenuItem(value: 'physical', child: Text(l10n.cabinetStoragePhysical)),
-                  DropdownMenuItem(value: 'json_document', child: Text(l10n.cabinetStorageJsonDocument)),
-                ],
-                onChanged: _saving ? null : (v) => setState(() => _storageKind = v ?? 'physical'),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              Text(l10n.cabinetColumns, style: Theme.of(context).textTheme.titleSmall),
-              const SizedBox(height: AppSpacing.sm),
-              for (var i = 0; i < _columns.length; i++) ...[
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      flex: 2,
-                      child: AppTextField(
-                        controller: _columns[i].name,
-                        label: l10n.cabinetColumnName,
-                        enabled: !_saving,
-                        validator: (v) => (v ?? '').trim().isEmpty ? l10n.commonRequired : null,
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.sm),
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        value: _columns[i].type,
-                        decoration: InputDecoration(labelText: l10n.cabinetType),
-                        items: [
-                          for (final t in _columnTypes)
-                            DropdownMenuItem(value: t, child: Text(t)),
-                        ],
+          Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextFormField(
+                  controller: _slug,
+                  decoration: InputDecoration(labelText: l10n.cabinetSlug),
+                  enabled: !_saving,
+                  validator: (v) {
+                    final s = (v ?? '').trim();
+                    if (s.isEmpty) return l10n.commonRequired;
+                    if (!RegExp(r'^[a-z][a-z0-9_]*$').hasMatch(s)) {
+                      return l10n.cabinetLowercaseSlugRule;
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: AppSpacing.md),
+                TextFormField(
+                  controller: _label,
+                  decoration: InputDecoration(labelText: l10n.commonLabel),
+                  enabled: !_saving,
+                  validator: (v) => (v ?? '').trim().isEmpty ? l10n.commonRequired : null,
+                ),
+                const SizedBox(height: AppSpacing.md),
+                AppChoicePreference<String>(
+                  title: l10n.cabinetStorage,
+                  icon: Icons.storage_outlined,
+                  value: _storageKind,
+                  choices: _storageKinds,
+                  keyFor: (v) => v,
+                  labelFor: _storageLabel,
+                  enabled: !_saving,
+                  onSave: (v) async => setState(() => _storageKind = v),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                Text(l10n.cabinetColumns, style: Theme.of(context).textTheme.titleSmall),
+                const SizedBox(height: AppSpacing.sm),
+                for (var i = 0; i < _columns.length; i++) ...[
+                  TextFormField(
+                    controller: _columns[i].name,
+                    decoration: InputDecoration(labelText: l10n.cabinetColumnName),
+                    enabled: !_saving,
+                    validator: (v) => (v ?? '').trim().isEmpty ? l10n.commonRequired : null,
+                  ),
+                  AppChoicePreference<String>(
+                    title: l10n.cabinetType,
+                    icon: Icons.category_outlined,
+                    value: _columns[i].type,
+                    choices: _columnTypes,
+                    keyFor: (v) => v,
+                    labelFor: (v) => v,
+                    enabled: !_saving,
+                    onSave: (v) async => setState(() => _columns[i].type = v),
+                  ),
+                  Row(
+                    children: [
+                      Checkbox(
+                        value: _columns[i].required,
                         onChanged: _saving
                             ? null
-                            : (v) {
-                                if (v == null) return;
-                                setState(() => _columns[i].type = v);
-                              },
+                            : (v) => setState(() => _columns[i].required = v ?? false),
                       ),
-                    ),
-                    Checkbox(
-                      value: _columns[i].required,
-                      onChanged: _saving
-                          ? null
-                          : (v) => setState(() => _columns[i].required = v ?? false),
-                    ),
-                    if (_columns.length > 1)
-                      IconButton(
-                        icon: const Icon(Icons.remove_circle_outline),
-                        onPressed: _saving ? null : () => _removeColumn(i),
-                      ),
-                  ],
+                      Text(l10n.commonRequired),
+                      const Spacer(),
+                      if (_columns.length > 1)
+                        IconButton(
+                          icon: const Icon(Icons.remove_circle_outline),
+                          onPressed: _saving ? null : () => _removeColumn(i),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                ],
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: _saving ? null : _addColumn,
+                    icon: Icon(Icons.add),
+                    label: Text(l10n.cabinetAddColumn),
+                  ),
                 ),
-                const SizedBox(height: AppSpacing.sm),
+                AppButton(
+                  label: _saving ? l10n.commonCreating : l10n.cabinetCreateTable,
+                  onPressed: _saving ? null : _save,
+                ),
               ],
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: _saving ? null : _addColumn,
-                  icon: Icon(Icons.add),
-                  label: Text(l10n.cabinetAddColumn),
-                ),
-              ),
-              AppButton(
-                label: _saving ? l10n.commonCreating : l10n.cabinetCreateTable,
-                onPressed: _saving ? null : _save,
-              ),
-            ],
+            ),
           ),
         ],
       ),
