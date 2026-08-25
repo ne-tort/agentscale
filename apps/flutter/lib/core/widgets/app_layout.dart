@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/responsive/app_breakpoints.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
+import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// One adaptive nav destination (bottom bar or left rail).
 class AppNavDestination {
@@ -17,13 +20,9 @@ class AppNavDestination {
 
 /// Product chrome: adaptive nav + content column (max-width outside the rail).
 ///
-/// - narrow: bottom [NavigationBar]
-/// - medium: **left** [NavigationRail] with icon above label
-/// - expanded: **left** extended [NavigationRail] (icon + label inline)
-///
-/// AppBar from [title]/[actions] sits inside the content max-width column.
-/// Set [constrainBody] false when nested pages already use [AppScaffold]
-/// (their AppBar+body are constrained together there).
+/// - narrow: bottom [NavigationBar] (+ Settings as last item)
+/// - medium: **left** [NavigationRail] icon over label + logo leading + Settings trailing
+/// - expanded: **left** extended rail
 class AppLayout extends StatelessWidget {
   const AppLayout({
     super.key,
@@ -34,6 +33,7 @@ class AppLayout extends StatelessWidget {
     this.title,
     this.actions,
     this.constrainBody = true,
+    this.onOpenSettings,
   });
 
   final Widget body;
@@ -43,6 +43,7 @@ class AppLayout extends StatelessWidget {
   final Widget? title;
   final List<Widget>? actions;
   final bool constrainBody;
+  final VoidCallback? onOpenSettings;
 
   bool get _hasAppBar => title != null || (actions != null && actions!.isNotEmpty);
 
@@ -62,18 +63,99 @@ class AppLayout extends StatelessWidget {
     );
   }
 
+  Widget _logo(BuildContext context, {required bool extended}) {
+    final colors = context.appColors;
+    final icon = Icon(Icons.auto_awesome, color: colors.primary, size: 24);
+    final label = Text(
+      'Prodavan',
+      style: TextStyle(
+        color: colors.onSurface,
+        fontSize: extended ? 14 : 12,
+        fontWeight: FontWeight.w600,
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+    if (extended) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.lg, AppSpacing.md, AppSpacing.md),
+        child: Row(
+          children: [
+            icon,
+            const SizedBox(width: AppSpacing.sm),
+            Flexible(child: label),
+          ],
+        ),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          icon,
+          const SizedBox(height: AppSpacing.xs),
+          label,
+        ],
+      ),
+    );
+  }
+
+  Widget _settingsControl(BuildContext context, {required bool extended}) {
+    final l10n = AppLocalizations.of(context);
+    final colors = context.appColors;
+    final child = extended
+        ? Row(
+            children: [
+              Icon(Icons.settings_outlined, color: colors.muted),
+              const SizedBox(width: AppSpacing.sm),
+              Text(l10n.settings, style: TextStyle(color: colors.onSurface, fontSize: 14)),
+            ],
+          )
+        : Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.settings_outlined, color: colors.muted, size: 24),
+              const SizedBox(height: AppSpacing.xs),
+              Text(l10n.settings, style: TextStyle(color: colors.muted, fontSize: 12)),
+            ],
+          );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      child: InkWell(
+        onTap: onOpenSettings,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: extended ? AppSpacing.md : AppSpacing.sm,
+            vertical: AppSpacing.sm,
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final narrow = AppBreakpoints.isNarrow(context);
     final expanded = AppBreakpoints.isExpanded(context);
     final content = _contentColumn();
+    final l10n = AppLocalizations.of(context);
 
     if (narrow) {
+      final settingsIndex = destinations.length;
       return Scaffold(
         body: content,
         bottomNavigationBar: NavigationBar(
-          selectedIndex: selectedIndex,
-          onDestinationSelected: onDestinationSelected,
+          selectedIndex: selectedIndex.clamp(0, destinations.length - 1),
+          onDestinationSelected: (i) {
+            if (i == settingsIndex) {
+              onOpenSettings?.call();
+              return;
+            }
+            onDestinationSelected(i);
+          },
           destinations: [
             for (final d in destinations)
               NavigationDestination(
@@ -81,6 +163,10 @@ class AppLayout extends StatelessWidget {
                 selectedIcon: Icon(d.selectedIcon ?? d.icon),
                 label: d.label,
               ),
+            NavigationDestination(
+              icon: const Icon(Icons.settings_outlined),
+              label: l10n.settings,
+            ),
           ],
         ),
       );
@@ -91,6 +177,13 @@ class AppLayout extends StatelessWidget {
       onDestinationSelected: onDestinationSelected,
       extended: expanded,
       labelType: expanded ? NavigationRailLabelType.none : NavigationRailLabelType.all,
+      leading: _logo(context, extended: expanded),
+      trailing: Expanded(
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: _settingsControl(context, extended: expanded),
+        ),
+      ),
       destinations: [
         for (final d in destinations)
           NavigationRailDestination(

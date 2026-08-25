@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/theme/app_color_tokens.dart';
+
 enum AppCheckboxVariant { material, filledSquare, tonal }
 
 class AppCheckbox extends StatelessWidget {
@@ -22,6 +24,7 @@ class AppCheckbox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.appColors;
     final checkbox = Checkbox(
       value: value,
       tristate: tristate,
@@ -29,7 +32,7 @@ class AppCheckbox extends StatelessWidget {
       fillColor: variant == AppCheckboxVariant.tonal
           ? WidgetStateProperty.resolveWith((states) {
               if (states.contains(WidgetState.selected)) {
-                return Theme.of(context).colorScheme.secondaryContainer;
+                return colors.primaryContainer;
               }
               return null;
             })

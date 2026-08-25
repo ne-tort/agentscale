@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/theme/app_color_tokens.dart';
+
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
@@ -8,6 +10,7 @@ import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/cabinet_meta_tab_create_page.dart';
 import 'package:prodavan/features/employee/cabinet_meta_view_edit_page.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Manage non-system cabinet tabs (L06 meta views/tabs).
 class CabinetMetaTabsPage extends StatefulWidget {
@@ -68,13 +71,14 @@ class _CabinetMetaTabsPageState extends State<CabinetMetaTabsPage> {
     if (viewSlug == null || viewSlug.isEmpty) return;
 
     try {
+      final l10n = AppLocalizations.of(context);
       final views = await workContext.api.listMetaViews(widget.cabinetId);
       final view = views.cast<Map<String, dynamic>?>().firstWhere(
             (v) => v?['slug'] == viewSlug,
             orElse: () => null,
           );
       if (view == null) {
-        setState(() => _error = 'View not found');
+        setState(() => _error = l10n.cabinetViewNotFound);
         return;
       }
       final ui = view['ui_json'];
@@ -98,15 +102,16 @@ class _CabinetMetaTabsPageState extends State<CabinetMetaTabsPage> {
   }
 
   Future<void> _deleteTab(Map<String, dynamic> tab) async {
+    final l10n = AppLocalizations.of(context);
     final tabId = tab['id'] as String?;
     final viewSlug = tab['view_slug'] as String?;
     if (tabId == null) return;
 
     final ok = await DangerConfirmPage.push(
       context,
-      title: 'Delete tab?',
-      message: 'Remove tab "${tab['title']}" and its view.',
-      confirmLabel: 'Delete',
+      title: l10n.cabinetDeleteTab,
+      message: l10n.cabinetRemoveTabAndView('${tab['title']}'),
+      confirmLabel: l10n.commonDelete,
     );
     if (ok != true) return;
 
@@ -129,8 +134,9 @@ class _CabinetMetaTabsPageState extends State<CabinetMetaTabsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      title: const Text('Custom tabs'),
+      title: Text(l10n.cabinetCustomTabs),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
@@ -143,12 +149,12 @@ class _CabinetMetaTabsPageState extends State<CabinetMetaTabsPage> {
                     alignment: Alignment.centerRight,
                     child: TextButton.icon(
                       onPressed: _createTab,
-                      icon: const Icon(Icons.add),
-                      label: const Text('New tab'),
+                      icon: Icon(Icons.add),
+                      label: Text(l10n.cabinetNewTab),
                     ),
                   ),
                   if (_tabs.isEmpty)
-                    const EmptyState(title: 'No custom tabs yet.')
+                    EmptyState(title: l10n.cabinetNoCustomTabsYet)
                   else
                     ..._tabs.map(
                       (tab) => Card(
@@ -167,9 +173,9 @@ class _CabinetMetaTabsPageState extends State<CabinetMetaTabsPage> {
                     ),
                   const SizedBox(height: AppSpacing.md),
                   Text(
-                    'Custom tabs appear in the cabinet shell after creation. System tabs cannot be removed here.',
+                    l10n.cabinetCustomTabsHint,
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          color: context.appColors.muted,
                         ),
                   ),
                 ],

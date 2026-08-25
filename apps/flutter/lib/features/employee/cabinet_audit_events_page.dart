@@ -5,6 +5,7 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Recent cabinet audit trail (L06).
 class CabinetAuditEventsPage extends StatefulWidget {
@@ -50,18 +51,19 @@ class _CabinetAuditEventsPageState extends State<CabinetAuditEventsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      title: const Text('Audit log'),
+      title: Text(l10n.cabinetAuditLog),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
               onRefresh: _load,
               child: ListView(
-                padding: const EdgeInsets.all(AppSpacing.lg),
+                padding: EdgeInsets.all(AppSpacing.lg),
                 children: [
                   if (_error != null) InlineErrorBanner(message: _error!),
                   if (_events.isEmpty)
-                    const EmptyState(title: 'No audit events yet.')
+                    EmptyState(title: l10n.cabinetNoAuditEventsYet)
                   else
                     ..._events.map(
                       (e) => Card(

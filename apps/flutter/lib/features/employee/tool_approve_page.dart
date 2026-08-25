@@ -7,6 +7,7 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Full-page HITL tool approval (L05/L08 — no modals).
 class ToolApprovePage extends StatefulWidget {
@@ -58,9 +59,10 @@ class _ToolApprovePageState extends State<ToolApprovePage> {
 
   @override
   Widget build(BuildContext context) {
-    final inputPreview = const JsonEncoder.withIndent('  ').convert(widget.toolInput);
+    final l10n = AppLocalizations.of(context);
+    final inputPreview = JsonEncoder.withIndent('  ').convert(widget.toolInput);
     return AppScaffold(
-      title: const Text('Approve tool'),
+      title: Text(l10n.projectApproveTool),
       body: Padding(
         padding: const EdgeInsets.all(AppSpacing.lg),
         child: Column(
@@ -73,7 +75,7 @@ class _ToolApprovePageState extends State<ToolApprovePage> {
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              'This tool requires human approval before the agent can continue.',
+              l10n.projectToolApprovalHint,
               style: Theme.of(context).textTheme.bodyMedium,
             ),
             const SizedBox(height: AppSpacing.md),
@@ -86,13 +88,13 @@ class _ToolApprovePageState extends State<ToolApprovePage> {
               ),
             ),
             AppButton(
-              label: 'Deny',
+              label: l10n.projectDeny,
               variant: AppButtonVariant.outlined,
               onPressed: _busy ? null : () => _decide('deny'),
             ),
             const SizedBox(height: AppSpacing.sm),
             AppButton(
-              label: _busy ? 'Working…' : 'Approve and continue',
+              label: _busy ? l10n.projectWorking : l10n.projectApproveAndContinue,
               onPressed: _busy ? null : () => _decide('approve'),
             ),
           ],

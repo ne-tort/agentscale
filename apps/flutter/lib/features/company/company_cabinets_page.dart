@@ -4,6 +4,7 @@ import 'package:prodavan/core/session/company_context.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Org cabinets list — metadata only, read-mostly (L04).
 class CompanyCabinetsPage extends StatefulWidget {
@@ -49,6 +50,7 @@ class _CompanyCabinetsPageState extends State<CompanyCabinetsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final rows = _cabinets
         .map(
           (c) => AppEntityRow(
@@ -70,19 +72,19 @@ class _CompanyCabinetsPageState extends State<CompanyCabinetsPage> {
           child: AppEntityCollection(
             loading: _loading,
             rows: rows,
-            columns: const [
-              AppEntityColumn(id: 'name', label: 'Cabinet'),
-              AppEntityColumn(id: 'owner', label: 'Owner'),
-              AppEntityColumn(id: 'status', label: 'Status'),
+            columns: [
+              AppEntityColumn(id: 'name', label: l10n.companyCabinet),
+              AppEntityColumn(id: 'owner', label: l10n.companyOwner),
+              AppEntityColumn(id: 'status', label: l10n.commonStatus),
             ],
             onOpen: (row) {
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('${row.title} — read-only org view')),
+                SnackBar(content: Text(l10n.companyReadOnlyOrgView(row.title))),
               );
             },
-            empty: const EmptyState(
-              title: 'No cabinets',
-              subtitle: 'Employees create cabinets in Employee contour',
+            empty: EmptyState(
+              title: l10n.companyNoCabinets,
+              subtitle: l10n.companyCabinetsEmptyHint,
             ),
           ),
         ),

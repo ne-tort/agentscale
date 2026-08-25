@@ -7,6 +7,7 @@ import 'package:prodavan/core/widgets/app_form.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Create custom view + tab bound to a meta table (L06).
 class CabinetMetaTabCreatePage extends StatefulWidget {
@@ -63,8 +64,9 @@ class _CabinetMetaTabCreatePageState extends State<CabinetMetaTabCreatePage> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
+    final l10n = AppLocalizations.of(context);
     if (_tableSlug == null || _tableSlug!.isEmpty) {
-      setState(() => _error = 'Select a table');
+      setState(() => _error = l10n.cabinetSelectATable);
       return;
     }
 
@@ -106,47 +108,48 @@ class _CabinetMetaTabCreatePageState extends State<CabinetMetaTabCreatePage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loadingTables) {
-      return const AppScaffold(
-        title: Text('New custom tab'),
+    final l10n = AppLocalizations.of(context);
+if (_loadingTables) {
+      return AppScaffold(
+        title: Text(l10n.cabinetNewCustomTab),
         body: Center(child: CircularProgressIndicator()),
       );
     }
 
     return AppScaffold(
-      title: const Text('New custom tab'),
+      title: Text(l10n.cabinetNewCustomTab),
       body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.lg),
+        padding: EdgeInsets.all(AppSpacing.lg),
         children: [
           if (_error != null) InlineErrorBanner(message: _error!),
           if (_tables.isEmpty)
-            const Text('Create a meta table first (Tables tab → New table).')
+            Text(l10n.cabinetCreateMetaTableFirst)
           else
             AppForm(
               formKey: _formKey,
               children: [
                 AppTextField(
                   controller: _tabTitle,
-                  label: 'Tab title',
+                  label: l10n.cabinetTabTitle,
                   enabled: !_saving,
-                  validator: (v) => (v ?? '').trim().isEmpty ? 'Required' : null,
+                  validator: (v) => (v ?? '').trim().isEmpty ? l10n.commonRequired : null,
                 ),
                 AppTextField(
                   controller: _viewSlug,
-                  label: 'View slug',
+                  label: l10n.cabinetViewSlug,
                   enabled: !_saving,
                   validator: (v) {
                     final s = (v ?? '').trim();
-                    if (s.isEmpty) return 'Required';
+                    if (s.isEmpty) return l10n.commonRequired;
                     if (!RegExp(r'^[a-z][a-z0-9_]*$').hasMatch(s)) {
-                      return 'Lowercase letters, digits, underscore';
+                      return l10n.cabinetLowercaseSlugRule;
                     }
                     return null;
                   },
                 ),
                 DropdownButtonFormField<String>(
                   value: _tableSlug,
-                  decoration: const InputDecoration(labelText: 'Table'),
+                  decoration: InputDecoration(labelText: l10n.commonTable),
                   items: [
                     for (final t in _tables)
                       DropdownMenuItem(
@@ -158,12 +161,12 @@ class _CabinetMetaTabCreatePageState extends State<CabinetMetaTabCreatePage> {
                 ),
                 AppTextField(
                   controller: _order,
-                  label: 'Tab order',
+                  label: l10n.cabinetTabOrder,
                   enabled: !_saving,
                   keyboardType: TextInputType.number,
                 ),
                 AppButton(
-                  label: _saving ? 'Creating…' : 'Create tab',
+                  label: _saving ? l10n.commonCreating : l10n.cabinetCreateTab,
                   onPressed: _saving ? null : _save,
                 ),
               ],

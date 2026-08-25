@@ -10,6 +10,7 @@ import 'package:prodavan/features/admin/admin_shell.dart';
 import 'package:prodavan/features/employee/contour_selector_page.dart';
 import 'package:prodavan/features/employee/cabinet_list_page.dart';
 import 'package:prodavan/features/employee/login_page.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// App entry with session restore (L01/L05).
 class SessionGatePage extends StatefulWidget {
@@ -106,10 +107,11 @@ class _SessionGatePageState extends State<SessionGatePage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     if (_checking) {
-      return const AppScaffold(
-        title: Text('Prodavan'),
-        body: Center(child: CircularProgressIndicator()),
+      return AppScaffold(
+        title: Text(l10n.navProdavan),
+        body: const Center(child: CircularProgressIndicator()),
       );
     }
     return const LoginPage();

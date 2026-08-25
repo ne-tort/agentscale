@@ -7,6 +7,7 @@ import 'package:prodavan/core/widgets/app_form.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Full-page meta row create/edit (L05 — no modals).
 class CabinetRowEditPage extends StatefulWidget {
@@ -68,6 +69,7 @@ class _CabinetRowEditPageState extends State<CabinetRowEditPage> {
   }
 
   Future<void> _save() async {
+    final l10n = AppLocalizations.of(context);
     if (!_formKey.currentState!.validate()) return;
     final values = <String, dynamic>{};
     for (final entry in _controllers.entries) {
@@ -75,7 +77,7 @@ class _CabinetRowEditPageState extends State<CabinetRowEditPage> {
       if (text.isNotEmpty) values[entry.key] = text;
     }
     if (values.isEmpty) {
-      setState(() => _error = 'Enter at least one field value');
+      setState(() => _error = l10n.cabinetEnterAtLeastOneField);
       return;
     }
 
@@ -103,9 +105,10 @@ class _CabinetRowEditPageState extends State<CabinetRowEditPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isEdit = widget.existing != null;
+    final l10n = AppLocalizations.of(context);
+final isEdit = widget.existing != null;
     return AppScaffold(
-      title: Text(isEdit ? 'Edit row' : 'Add row'),
+      title: Text(isEdit ? l10n.cabinetEditRow : l10n.cabinetAddRow),
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
@@ -125,7 +128,7 @@ class _CabinetRowEditPageState extends State<CabinetRowEditPage> {
                   enabled: !_saving,
                 ),
               AppButton(
-                label: _saving ? 'Saving…' : 'Save row',
+                label: _saving ? l10n.commonSaving : l10n.cabinetSaveRow,
                 onPressed: _saving ? null : _save,
               ),
             ],

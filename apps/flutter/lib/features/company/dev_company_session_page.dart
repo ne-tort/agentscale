@@ -8,6 +8,8 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_selector_page.dart';
 import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/features/company/company_shell.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Dev-only Company admin bearer entry (L04).
 class DevCompanySessionPage extends StatefulWidget {
@@ -36,18 +38,19 @@ class _DevCompanySessionPageState extends State<DevCompanySessionPage> {
       bearerToken: _tokenCtrl.text.trim(),
     );
     try {
+      final l10n = AppLocalizations.of(context);
       final me = await companyContext.api.me();
       final contours = me['contours'];
       if (contours is! List || !contours.contains('company')) {
         companyContext.clear();
-        setState(() => _error = 'Token must have company contour (company.admin membership)');
+        setState(() => _error = l10n.devTokenMustHaveCompanyContour);
         return;
       }
       final employee = me['employee'] as Map<String, dynamic>?;
       final memberships = employee?['memberships'];
       if (memberships is! List) {
         companyContext.clear();
-        setState(() => _error = 'No employee memberships');
+        setState(() => _error = l10n.devNoEmployeeMemberships);
         return;
       }
       final adminMemberships = memberships
@@ -56,7 +59,7 @@ class _DevCompanySessionPageState extends State<DevCompanySessionPage> {
           .toList();
       if (adminMemberships.isEmpty) {
         companyContext.clear();
-        setState(() => _error = 'company.admin membership required');
+        setState(() => _error = l10n.devCompanyAdminMembershipRequired);
         return;
       }
       if (!mounted) return;
@@ -69,7 +72,7 @@ class _DevCompanySessionPageState extends State<DevCompanySessionPage> {
       final picked = await Navigator.of(context).push<Set<String>>(
         MaterialPageRoute(
           builder: (_) => AppSelectorPage(
-            title: 'Select company',
+            title: l10n.commonSelectCompany,
             items: [
               for (final m in adminMemberships)
                 AppSelectorItem(
@@ -105,25 +108,26 @@ class _DevCompanySessionPageState extends State<DevCompanySessionPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      title: const Text('Company session'),
+      title: Text(l10n.devCompanySession),
       body: Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
+        padding: EdgeInsets.all(AppSpacing.lg),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            AppTextField(controller: _baseCtrl, label: 'API base URL'),
+            AppTextField(controller: _baseCtrl, label: l10n.commonApiBaseUrl),
             const SizedBox(height: AppSpacing.md),
             AppTextField(
               controller: _tokenCtrl,
-              label: 'Bearer token (company.admin JWT)',
+              label: l10n.devBearerTokenCompanyAdmin,
             ),
             if (_error != null) ...[
               const SizedBox(height: AppSpacing.sm),
-              Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              Text(_error!, style: TextStyle(color: context.appColors.danger)),
             ],
             const SizedBox(height: AppSpacing.lg),
-            AppButton(label: 'Continue', onPressed: _connect),
+            AppButton(label: l10n.commonContinueAction, onPressed: _connect),
           ],
         ),
       ),

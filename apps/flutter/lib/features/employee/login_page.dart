@@ -14,6 +14,9 @@ import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/features/admin/admin_shell.dart';
 import 'package:prodavan/features/employee/contour_selector_page.dart';
 import 'package:prodavan/features/employee/cabinet_list_page.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
+import 'package:prodavan/features/settings/open_app_settings.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Unified login — OIDC PKCE or AUTH_MODE=test one-click personas.
 class LoginPage extends StatefulWidget {
@@ -63,7 +66,7 @@ class _LoginPageState extends State<LoginPage> {
       setState(() {
         _authConfig = {'auth_mode': 'test', 'oidc': null};
         _loadingConfig = false;
-        _error = 'Auth config unavailable — using test mode. $e';
+        _error = AppLocalizations.of(context).authConfigUnavailableTestMode('$e');
       });
     }
   }
@@ -145,6 +148,7 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _signInTestPersona(String persona) async {
+    final l10n = AppLocalizations.of(context);
     setState(() {
       _connecting = true;
       _error = null;
@@ -153,7 +157,7 @@ class _LoginPageState extends State<LoginPage> {
       final body = await AuthConfigClient(baseUrl: _baseCtrl.text.trim()).testLogin(persona: persona);
       final token = body['access_token'] as String?;
       if (token == null || token.isEmpty) {
-        throw Exception('No access_token in test login response');
+        throw Exception(l10n.authNoAccessTokenInTestLogin);
       }
       await _finishSession(baseUrl: _baseCtrl.text.trim(), token: token);
     } catch (e) {
@@ -187,41 +191,47 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final mode = _authConfig?['auth_mode'] as String? ?? 'test';
     final isOidc = mode == 'oidc';
     return AppScaffold(
-      title: const Text('Sign in'),
+      title: Text(l10n.authSignIn),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.settings_outlined),
+          tooltip: l10n.settings,
+          onPressed: () => openAppSettings(context),
+        ),
+      ],
       body: _loadingConfig
           ? const Center(child: CircularProgressIndicator())
           : Padding(
-              padding: const EdgeInsets.all(AppSpacing.lg),
+              padding: EdgeInsets.all(AppSpacing.lg),
               child: AppForm(
                 formKey: _formKey,
                 children: [
                   Text(
-                    isOidc
-                        ? 'OIDC — PKCE via Keycloak (mobile AppAuth, desktop browser loopback)'
-                        : 'Dev test mode — one-click persona (no Keycloak)',
+                    isOidc ? l10n.authOidcModeHint : l10n.authDevTestModeHint,
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   const SizedBox(height: AppSpacing.md),
                   if (_error != null) ...[
-                    Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                    Text(_error!, style: TextStyle(color: context.appColors.danger)),
                     const SizedBox(height: AppSpacing.sm),
                   ],
                   if (isOidc)
                     AppButton(
-                      label: _connecting ? 'Opening login…' : 'Sign in with Keycloak',
+                      label: _connecting ? l10n.authOpeningLogin : l10n.authSignInWithKeycloak,
                       onPressed: _connecting ? null : _signInOidc,
                     ),
                   if (!isOidc) ...[
                     AppButton(
-                      label: _connecting ? 'Signing in…' : 'Continue as Demo Employee',
+                      label: _connecting ? l10n.authSigningIn : l10n.authContinueAsDemoEmployee,
                       onPressed: _connecting ? null : () => _signInTestPersona('demo_employee'),
                     ),
                     const SizedBox(height: AppSpacing.sm),
                     AppButton(
-                      label: _connecting ? 'Signing in…' : 'Continue as Platform Admin',
+                      label: _connecting ? l10n.authSigningIn : l10n.authContinueAsPlatformAdmin,
                       variant: AppButtonVariant.outlined,
                       onPressed: _connecting ? null : () => _signInTestPersona('platform_admin'),
                     ),
@@ -229,28 +239,28 @@ class _LoginPageState extends State<LoginPage> {
                   const SizedBox(height: AppSpacing.md),
                   TextButton(
                     onPressed: _connecting ? null : () => setState(() => _showAdvanced = !_showAdvanced),
-                    child: Text(_showAdvanced ? 'Hide advanced' : 'Advanced'),
+                    child: Text(_showAdvanced ? l10n.authHideAdvanced : l10n.authAdvanced),
                   ),
                   if (_showAdvanced) ...[
                     const SizedBox(height: AppSpacing.sm),
                     AppTextField(
                       controller: _baseCtrl,
-                      label: 'API base URL',
+                      label: l10n.commonApiBaseUrl,
                       enabled: !_connecting,
                     ),
                     const SizedBox(height: AppSpacing.sm),
-                    TextButton(onPressed: _connecting ? null : _loadConfig, child: const Text('Reload auth config')),
+                    TextButton(onPressed: _connecting ? null : _loadConfig, child: Text(l10n.authReloadAuthConfig)),
                     if (isOidc) ...[
                       const SizedBox(height: AppSpacing.md),
                       AppTextField(
                         controller: _tokenCtrl,
-                        label: 'Bearer access token',
+                        label: l10n.authBearerAccessToken,
                         enabled: !_connecting,
-                        validator: (v) => (v ?? '').trim().isEmpty ? 'Required' : null,
+                        validator: (v) => (v ?? '').trim().isEmpty ? l10n.commonRequired : null,
                       ),
                       const SizedBox(height: AppSpacing.sm),
                       AppButton(
-                        label: _connecting ? 'Connecting…' : 'Continue with token',
+                        label: _connecting ? l10n.authConnecting : l10n.authContinueWithToken,
                         expanded: false,
                         onPressed: _connecting ? null : _connectTest,
                       ),
@@ -259,13 +269,13 @@ class _LoginPageState extends State<LoginPage> {
                       const SizedBox(height: AppSpacing.md),
                       AppTextField(
                         controller: _tokenCtrl,
-                        label: 'Bearer access token (paste)',
+                        label: l10n.authBearerAccessTokenPaste,
                         enabled: !_connecting,
-                        validator: (v) => (v ?? '').trim().isEmpty ? 'Required' : null,
+                        validator: (v) => (v ?? '').trim().isEmpty ? l10n.commonRequired : null,
                       ),
                       const SizedBox(height: AppSpacing.sm),
                       AppButton(
-                        label: _connecting ? 'Connecting…' : 'Continue with token',
+                        label: _connecting ? l10n.authConnecting : l10n.authContinueWithToken,
                         expanded: false,
                         onPressed: _connecting ? null : _connectTest,
                       ),

@@ -5,6 +5,7 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_icon_button.dart';
 import 'package:prodavan/core/widgets/app_list_item.dart';
 import 'package:prodavan/core/widgets/empty_state.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 enum AppEntityCollectionMode { list, table }
 
@@ -78,6 +79,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final mode = _effectiveMode(context);
 
     return Column(
@@ -96,7 +98,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                 if (widget.allowModeToggle) ...[
                   AppIconToggle(
                     icon: Icons.view_list_outlined,
-                    tooltip: 'List',
+                    tooltip: l10n.commonList,
                     selected: mode == AppEntityCollectionMode.list,
                     onPressed: () => setState(
                       () => _override = AppEntityCollectionMode.list,
@@ -104,7 +106,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                   ),
                   AppIconToggle(
                     icon: Icons.table_rows_outlined,
-                    tooltip: 'Table',
+                    tooltip: l10n.commonTable,
                     selected: mode == AppEntityCollectionMode.table,
                     onPressed: () => setState(
                       () => _override = AppEntityCollectionMode.table,
@@ -120,12 +122,13 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
   }
 
   Widget _body(BuildContext context, AppEntityCollectionMode mode) {
+    final l10n = AppLocalizations.of(context);
     if (widget.loading) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
     }
     if (widget.rows.isEmpty) {
       return widget.empty ??
-          const EmptyState(title: 'Пусто');
+          EmptyState(title: l10n.commonEmpty);
     }
     if (mode == AppEntityCollectionMode.list) {
       return ListView.separated(
@@ -153,7 +156,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
         child: DataTable(
           showCheckboxColumn: false,
           columns: [
-            const DataColumn(label: Text('Title')),
+            DataColumn(label: Text(l10n.commonTitle)),
             ...widget.columns.map((c) => DataColumn(label: Text(c.label))),
           ],
           rows: [

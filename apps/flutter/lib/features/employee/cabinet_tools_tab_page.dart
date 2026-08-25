@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Platform cabinet.* MCP tools list (L05/L06 interpreter).
 class CabinetToolsTabPage extends StatefulWidget {
@@ -48,7 +49,8 @@ class _CabinetToolsTabPageState extends State<CabinetToolsTabPage> {
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
+    final l10n = AppLocalizations.of(context);
+if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
     return Column(
@@ -57,11 +59,11 @@ class _CabinetToolsTabPageState extends State<CabinetToolsTabPage> {
         if (_error != null) InlineErrorBanner(message: _error!),
         Align(
           alignment: Alignment.centerRight,
-          child: IconButton(onPressed: _reload, icon: const Icon(Icons.refresh), tooltip: 'Reload'),
+          child: IconButton(onPressed: _reload, icon: Icon(Icons.refresh), tooltip: l10n.commonReload),
         ),
         Expanded(
           child: _tools.isEmpty
-              ? const EmptyState(title: 'No MCP tools exposed for this cabinet.')
+              ? EmptyState(title: l10n.cabinetNoMcpTools)
               : ListView.separated(
                   padding: const EdgeInsets.all(12),
                   itemCount: _tools.length,

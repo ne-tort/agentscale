@@ -1,0 +1,804 @@
+{
+  "@@locale": "ru",
+  "adminActiveEmployees": "Активные сотрудники",
+  "adminAdminEmail": "Email администратора",
+  "adminAgentMessages": "Сообщения агента",
+  "adminAgentPolicySaved": "Политика агента сохранена",
+  "adminAgentRuntimePolicy": "Политика runtime агента",
+  "adminAiKeysBound": "Привязанные AI-ключи",
+  "adminAlertHighUsageTitle": "{companyName}: высокий расход токенов агента",
+  "@adminAlertHighUsageTitle": {
+    "placeholders": {
+      "companyName": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlertKeyRenewalTitle": "{companyName}: скоро продление AI-ключа",
+  "@adminAlertKeyRenewalTitle": {
+    "placeholders": {
+      "companyName": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlertKeysRenewingSoon": "Скоро продление: {count} ключ(ей)",
+  "@adminAlertKeysRenewingSoon": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlertKeysRenewingSoonNext": "Скоро продление: {count} · ближайшее {next}",
+  "@adminAlertKeysRenewingSoonNext": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      },
+      "next": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlertNoKeysSubtitle": "Сессии агента завершатся с NO_AI_KEY",
+  "adminAlertNoKeysTitle": "{companyName}: нет привязанных AI-ключей",
+  "@adminAlertNoKeysTitle": {
+    "placeholders": {
+      "companyName": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlertSubExpiredTitle": "{companyName}: подписка истекла",
+  "@adminAlertSubExpiredTitle": {
+    "placeholders": {
+      "companyName": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlertSubExpiringTitle": "{companyName}: подписка скоро истекает",
+  "@adminAlertSubExpiringTitle": {
+    "placeholders": {
+      "companyName": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlertSubscriptionEnded": "Подписка закончилась",
+  "adminAlertSubscriptionEndedAt": "Подписка закончилась · {ends}",
+  "@adminAlertSubscriptionEndedAt": {
+    "placeholders": {
+      "ends": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlertSubscriptionEndsSoon": "Подписка скоро закончится",
+  "adminAlertSubscriptionEndsSoonAt": "Подписка скоро закончится · {ends}",
+  "@adminAlertSubscriptionEndsSoonAt": {
+    "placeholders": {
+      "ends": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlertTokensAboveThreshold": "Токены агента {tokens} выше порога платформы",
+  "@adminAlertTokensAboveThreshold": {
+    "placeholders": {
+      "tokens": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlerts": "Предупреждения",
+  "adminApiKind": "Тип API",
+  "adminApiKindValue": "Тип API: {api_kind}",
+  "@adminApiKindValue": {
+    "placeholders": {
+      "api_kind": {
+        "type": "String"
+      }
+    }
+  },
+  "adminBindCompanies": "Привязать компании",
+  "adminBindingsSelected": "Выбрано: {count}",
+  "@adminBindingsSelected": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "adminBundle": "Бандл",
+  "adminCabinetQuotas": "Квоты кабинетов",
+  "adminCabinetQuotasMustBePositive": "Квоты кабинетов — целые числа больше нуля",
+  "adminCabinetsProjectsSubtitle": "{cabinets} кабинетов · {projects} проектов",
+  "@adminCabinetsProjectsSubtitle": {
+    "placeholders": {
+      "cabinets": {
+        "type": "String"
+      },
+      "projects": {
+        "type": "String"
+      }
+    }
+  },
+  "adminCabinetsQuotaCell": "{active} / {max} кабинетов",
+  "@adminCabinetsQuotaCell": {
+    "placeholders": {
+      "active": {
+        "type": "String"
+      },
+      "max": {
+        "type": "String"
+      }
+    }
+  },
+  "adminCompanyAdminInvite": "Приглашение admin компании",
+  "adminCompanyBindings": "Привязки компаний",
+  "adminCompanyName": "Название компании",
+  "adminCreateAiKey": "Создать AI-ключ",
+  "adminCreateCompany": "Создать компанию",
+  "adminCreateCompanyAndInviteAdmin": "Создайте компанию и пригласите company.admin",
+  "adminCreateCompanyToSeeMetrics": "Создайте компанию, чтобы видеть метрики",
+  "adminCreateKey": "Создать ключ",
+  "adminCreateRuntimeKeyHint": "Создайте runtime-ключ и привяжите компании",
+  "adminDisableAiKey": "Отключить AI-ключ",
+  "adminDisableKey": "Отключить ключ",
+  "adminDisableKeyConfirm": "Отключить {keyName}? Сессии агента завершатся с NO_AI_KEY.",
+  "@adminDisableKeyConfirm": {
+    "placeholders": {
+      "keyName": {
+        "type": "String"
+      }
+    }
+  },
+  "adminDrainProjectTriggers": "Сбросить триггеры проектов",
+  "adminDrainedTriggers": "Сброшено триггеров: {count}",
+  "@adminDrainedTriggers": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "adminDraining": "Сброс…",
+  "adminEditBindings": "Изменить привязки",
+  "adminEndsAt": "Окончание (ГГГГ-ММ-ДД)",
+  "adminEndsAtIfNotLifetime": "Окончание (ГГГГ-ММ-ДД, если не бессрочная)",
+  "adminEnterIntegerMin": "Введите целое ≥ {min}",
+  "@adminEnterIntegerMin": {
+    "placeholders": {
+      "min": {
+        "type": "String"
+      }
+    }
+  },
+  "adminIdlePauseAfterHours": "Пауза после простоя, часы (пусто/0 = выкл.)",
+  "adminIdlePausedProjectsInCompany": "На паузу по простою: {count} проект(ов) в компании",
+  "@adminIdlePausedProjectsInCompany": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "adminInviteCompanyAdminViaKeycloak": "Приглашение company.admin через Keycloak — пароль не принимается.",
+  "adminKey": "Ключ",
+  "adminKeyInfo": "О ключе",
+  "adminKeyListSubtitle": "{provider} · {api_kind} · {status}",
+  "@adminKeyListSubtitle": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      },
+      "api_kind": {
+        "type": "String"
+      },
+      "status": {
+        "type": "String"
+      }
+    }
+  },
+  "adminKeyMetadata": "Метаданные ключа",
+  "adminLifecycle": "Жизненный цикл",
+  "adminLifetimeSubscription": "Бессрочная подписка",
+  "adminMaxAgentTokensMonth": "Макс. токенов агента / месяц (необязательно)",
+  "adminMaxBundleImportMb": "Макс. размер импорта бандла (МБ)",
+  "adminMaxCabinets": "Макс. кабинетов",
+  "adminMaxChatAttachmentMb": "Макс. размер вложения в чат (МБ)",
+  "adminMaxPackagesPerCabinet": "Макс. пакетов на кабинет",
+  "adminMaxTokensPerRun": "Макс. токенов за запуск (необязательно)",
+  "adminMaxUsdCostMonth": "Макс. стоимость USD / месяц (необязательно)",
+  "adminMetadataOnly": "только метаданные",
+  "adminMetrics": "Метрики",
+  "adminMetricsAiKeysRenewSoon": "Скоро продление AI-ключей: {count}",
+  "@adminMetricsAiKeysRenewSoon": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "adminMetricsAiKeysRenewSoonNext": "Скоро продление AI-ключей: {count} · ближайшее {next}",
+  "@adminMetricsAiKeysRenewSoonNext": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      },
+      "next": {
+        "type": "String"
+      }
+    }
+  },
+  "adminMetricsHighTokenUsage": "Высокий расход токенов агента ({tokens})",
+  "@adminMetricsHighTokenUsage": {
+    "placeholders": {
+      "tokens": {
+        "type": "String"
+      }
+    }
+  },
+  "adminMetricsNoAiKeysBound": "Нет AI-ключей — агент вернёт NO_AI_KEY",
+  "adminMetricsSubscriptionExpired": "Подписка истекла",
+  "adminMetricsSubscriptionExpiring": "Подписка истекает · {ends}",
+  "@adminMetricsSubscriptionExpiring": {
+    "placeholders": {
+      "ends": {
+        "type": "String"
+      }
+    }
+  },
+  "adminModelAllowlist": "Allowlist моделей (через запятую, пусто = любые)",
+  "adminNewSecret": "Новый секрет",
+  "adminNextRenewalValue": "Следующее продление: {next_renewal_at}",
+  "@adminNextRenewalValue": {
+    "placeholders": {
+      "next_renewal_at": {
+        "type": "String"
+      }
+    }
+  },
+  "adminNoAiKeys": "Нет AI-ключей",
+  "adminNoCompanies": "Нет компаний",
+  "adminNoCompaniesBound": "Компании не привязаны",
+  "adminNoCompaniesYet": "Компаний пока нет",
+  "adminNoPlatformEventsYet": "Событий платформы пока нет",
+  "adminNoStarterBundles": "Нет стартовых бандлов",
+  "adminPlatformEvents": "События платформы",
+  "adminPlatformFallback": "Fallback платформы",
+  "adminPlatformIdleSweep": "Пауза по простою: {count} проект(ов) ({companies} компаний с политикой)",
+  "@adminPlatformIdleSweep": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      },
+      "companies": {
+        "type": "String"
+      }
+    }
+  },
+  "adminPlatformTotals": "Итого по платформе",
+  "adminPreferredProviderOptional": "Предпочтительный провайдер (необязательно)",
+  "adminProdavanSubscription": "Подписка Prodavan",
+  "adminProdavanSubscriptionOptional": "Подписка Prodavan (необязательно)",
+  "adminProviderValue": "Провайдер: {provider}",
+  "@adminProviderValue": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
+  "adminQuotasSaved": "Квоты сохранены",
+  "adminRenewPlusOneMonth": "Продлить +1 месяц",
+  "adminRenewing": "Продление…",
+  "adminRotateKeyTitle": "Смена секрета: {keyName}",
+  "@adminRotateKeyTitle": {
+    "placeholders": {
+      "keyName": {
+        "type": "String"
+      }
+    }
+  },
+  "adminRotateSecret": "Сменить секрет",
+  "adminRotateSecretHint": "Новый секрет заменит сохранённый. Старый будет удалён из file store.",
+  "adminRotating": "Смена…",
+  "adminSaveAgentPolicy": "Сохранить политику агента",
+  "adminSaveQuotas": "Сохранить квоты",
+  "adminSaveSubscription": "Сохранить подписку",
+  "adminSecretRefValue": "Secret ref: {secret_ref_prefix}",
+  "@adminSecretRefValue": {
+    "placeholders": {
+      "secret_ref_prefix": {
+        "type": "String"
+      }
+    }
+  },
+  "adminSecretRequired": "Укажите секрет",
+  "adminSecretStoredServerSide": "Секрет хранится только на сервере",
+  "adminSetEndDateOrLifetime": "Укажите дату окончания или бессрочную подписку",
+  "adminShipped": "поставлен",
+  "adminStarterBundles": "Стартовые бандлы",
+  "adminStarterBundlesHint": "Записи каталога появляются при поставке в data/starter_bundles/",
+  "adminStatusValue": "Статус: {status}",
+  "@adminStatusValue": {
+    "placeholders": {
+      "status": {
+        "type": "String"
+      }
+    }
+  },
+  "adminSubscriptionSaved": "Подписка сохранена",
+  "adminSweepIdlePause": "Пауза по простою",
+  "adminSweepIdlePauseAll": "Пауза по простою (все компании)",
+  "adminSweeping": "Выполнение…",
+  "adminTelegramHmacConfigured": "Telegram HMAC: задан (оставьте пустым, чтобы не менять)",
+  "adminTelegramHmacNotSet": "Telegram HMAC: не задан",
+  "adminTelegramHmacSecret": "Секрет Telegram HMAC (запись, необязательно)",
+  "adminTokens": "Токены",
+  "adminToolPreset": "Пресет инструментов",
+  "adminWebhookHmacConfigured": "Webhook HMAC: задан (оставьте пустым, чтобы не менять)",
+  "adminWebhookHmacNotSet": "Webhook HMAC: не задан",
+  "adminWebhookHmacSecret": "Секрет Webhook HMAC (запись, необязательно)",
+  "authAdvanced": "Дополнительно",
+  "authBearerAccessToken": "Bearer access token",
+  "authBearerAccessTokenPaste": "Bearer access token (вставить)",
+  "authConfigUnavailableTestMode": "Конфиг auth недоступен — тестовый режим. {e}",
+  "@authConfigUnavailableTestMode": {
+    "placeholders": {
+      "e": {
+        "type": "String"
+      }
+    }
+  },
+  "authConnecting": "Подключение…",
+  "authContinueAsDemoEmployee": "Войти как Demo Employee",
+  "authContinueAsPlatformAdmin": "Войти как Platform Admin",
+  "authContinueWithToken": "Продолжить с токеном",
+  "authDevTestModeHint": "Тестовый режим — вход в один клик (без Keycloak)",
+  "authHideAdvanced": "Скрыть дополнительно",
+  "authNoAccessTokenInTestLogin": "В ответе test login нет access_token",
+  "authOidcModeHint": "OIDC — PKCE через Keycloak (AppAuth / loopback на десктопе)",
+  "authOpeningLogin": "Открываем вход…",
+  "authReloadAuthConfig": "Обновить конфиг auth",
+  "authSignIn": "Вход",
+  "authSignInWithKeycloak": "Войти через Keycloak",
+  "authSigningIn": "Входим…",
+  "cabinetAddAtLeastOneColumn": "Добавьте хотя бы одну колонку",
+  "cabinetAddColumn": "Добавить колонку",
+  "cabinetAddRow": "Добавить строку",
+  "cabinetAgentsInstructions": "Инструкции для агентов",
+  "cabinetAgentsMd": "AGENTS.md",
+  "cabinetAgentsMdHint": "Пишется в workspace проекта при materialize (AGENTS.md + CLAUDE.md). Пересоздайте проекты, чтобы применить.",
+  "cabinetArchiveTable": "В архив",
+  "cabinetArchiveTableConfirm": "Отправить таблицу в архив?",
+  "cabinetArchiveTableMessage": "Архивировать «{tableSlug}». Строки останутся в БД, таблица скрывается из списков. Сначала уберите представления с этой таблицей.",
+  "@cabinetArchiveTableMessage": {
+    "placeholders": {
+      "tableSlug": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetArchivedBanner": "В архиве — можно удалить навсегда или вернуться назад.",
+  "cabinetArchiving": "Архивация…",
+  "cabinetAuditLog": "Журнал аудита",
+  "cabinetAuditRecent": "Аудит (недавние)",
+  "cabinetCabinetName": "Название кабинета",
+  "cabinetChooseZipFile": "Выбрать .zip",
+  "cabinetColumnName": "Имя колонки",
+  "cabinetColumnSettings": "Настройки колонки",
+  "cabinetColumnTypeChip": "{name} · {type}",
+  "@cabinetColumnTypeChip": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "type": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetColumns": "Колонки",
+  "cabinetContextHint": "Вкладка «Проекты» открывает workspace агента. Таблицы и Tools — runtime-данные кабинета.",
+  "cabinetContextStatusLine": "Статус: {status} · Компания {companyId}",
+  "@cabinetContextStatusLine": {
+    "placeholders": {
+      "status": {
+        "type": "String"
+      },
+      "companyId": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetCouldNotReadZipBytes": "Не удалось прочитать zip",
+  "cabinetCreateBaseCabinetHint": "Создайте базовый кабинет, чтобы начать",
+  "cabinetCreateCabinet": "Создать кабинет",
+  "cabinetCreateMetaTableFirst": "Сначала создайте мета-таблицу (Таблицы → Новая таблица).",
+  "cabinetCreateTab": "Создать вкладку",
+  "cabinetCreateTable": "Создать таблицу",
+  "cabinetCustomTabs": "Пользовательские вкладки",
+  "cabinetCustomTabsHint": "После создания вкладки появятся в оболочке кабинета. Системные вкладки здесь не удаляются.",
+  "cabinetDeleteColumn": "Удалить колонку",
+  "cabinetDeleteColumnConfirm": "Удалить колонку?",
+  "cabinetDeletePermanently": "Удалить навсегда",
+  "cabinetDeleteRow": "Удалить строку?",
+  "cabinetDeleteRowPermanently": "Удалить строку {rowId} навсегда.",
+  "@cabinetDeleteRowPermanently": {
+    "placeholders": {
+      "rowId": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetDeleteTab": "Удалить вкладку?",
+  "cabinetDeleteTablePermanently": "Удалить таблицу навсегда?",
+  "cabinetDropAllDataConfirm": "Удалить все данные «{tableSlug}». Это необратимо.",
+  "@cabinetDropAllDataConfirm": {
+    "placeholders": {
+      "tableSlug": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetEditAgentsMd": "Редактировать AGENTS.md",
+  "cabinetEditRow": "Редактировать строку",
+  "cabinetEmptyBundleExport": "Пустой экспорт бандла",
+  "cabinetEnterAtLeastOneField": "Заполните хотя бы одно поле",
+  "cabinetExportCabinetBundle": "Экспорт бандла кабинета",
+  "cabinetExportReady": "Экспорт готов ({bytes} байт)",
+  "@cabinetExportReady": {
+    "placeholders": {
+      "bytes": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetExporting": "Экспорт…",
+  "cabinetFromFile": "Из файла",
+  "cabinetImportBundleIntro": "Импорт zip cabinet.bundle из другого кабинета. Создаётся новый кабинет со своей схемой.",
+  "cabinetImportBundleTooltip": "Импорт бандла",
+  "cabinetImportCabinetBundle": "Импорт бандла кабинета",
+  "cabinetImportedCabinetDefault": "Импортированный кабинет",
+  "cabinetImporting": "Импорт…",
+  "cabinetLettersDigitsUnderscore": "Буквы, цифры и подчёркивание",
+  "cabinetLowercaseSlugRule": "Строчные латинские буквы, цифры, подчёркивание",
+  "cabinetManageCustomTabs": "Пользовательские вкладки",
+  "cabinetMcpTools": "MCP-инструменты",
+  "cabinetMetaTables": "Мета-таблицы",
+  "cabinetMyCabinetDefault": "Мой кабинет",
+  "cabinetNewCabinet": "Новый кабинет",
+  "cabinetNewCustomTab": "Новая пользовательская вкладка",
+  "cabinetNewTab": "Новая вкладка",
+  "cabinetNewTable": "Новая таблица",
+  "cabinetNoAuditEventsYet": "Событий аудита пока нет.",
+  "cabinetNoCompanyIdFromMe": "Нет company_id в memberships /me",
+  "cabinetNoCustomTabsYet": "Пользовательских вкладок пока нет.",
+  "cabinetNoInterpreterForView": "Нет интерпретатора для представления «{slug}».",
+  "@cabinetNoInterpreterForView": {
+    "placeholders": {
+      "slug": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetNoMcpTools": "Для этого кабинета нет MCP-инструментов.",
+  "cabinetNoMetaTablesYet": "В этом кабинете ещё нет мета-таблиц.",
+  "cabinetNoRows": "Нет строк",
+  "cabinetNotShipped": "не поставлен",
+  "cabinetOfficialStarterBundles": "Официальные стартовые бандлы",
+  "cabinetRemoveColumnData": "Удалить колонку «{columnName}» и её данные.",
+  "@cabinetRemoveColumnData": {
+    "placeholders": {
+      "columnName": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetRemoveTabAndView": "Удалить вкладку «{title}» и её представление.",
+  "@cabinetRemoveTabAndView": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetReservedName": "Зарезервированное имя",
+  "cabinetRowFallback": "Строка {index}",
+  "@cabinetRowFallback": {
+    "placeholders": {
+      "index": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetSaveLabel": "Сохранить подпись",
+  "cabinetSaveRow": "Сохранить строку",
+  "cabinetSaveView": "Сохранить представление",
+  "cabinetSavedTo": "Сохранено: {path}",
+  "@cabinetSavedTo": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetSelectATable": "Выберите таблицу",
+  "cabinetSelectCabinetBundleZip": "Выберите zip cabinet.bundle",
+  "cabinetSelectTableToPreview": "Выберите таблицу для просмотра строк",
+  "cabinetSlug": "Slug",
+  "cabinetStatusCompanyLine": "Статус: {status} · Компания {companyId}",
+  "@cabinetStatusCompanyLine": {
+    "placeholders": {
+      "status": {
+        "type": "String"
+      },
+      "companyId": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetStorage": "Хранение",
+  "cabinetStorageJsonDocument": "json_document",
+  "cabinetStoragePhysical": "physical",
+  "cabinetSystemColumnReadOnly": "Системная колонка — только чтение.",
+  "cabinetTabFallback": "Вкладка",
+  "cabinetTabOrder": "Порядок вкладки",
+  "cabinetTabSubtitle": "view: {viewSlug} · table: {tableSlug}",
+  "@cabinetTabSubtitle": {
+    "placeholders": {
+      "viewSlug": {
+        "type": "String"
+      },
+      "tableSlug": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetTabTitle": "Заголовок вкладки",
+  "cabinetTableSettings": "Настройки таблицы",
+  "cabinetTitleFieldColumnName": "Поле заголовка (имя колонки)",
+  "cabinetType": "Тип",
+  "cabinetUnique": "Уникальная",
+  "cabinetUnknownTabNoViewSlug": "Неизвестная вкладка — нет view_slug в meta.",
+  "cabinetViewNotFound": "Представление не найдено",
+  "cabinetViewSlug": "Slug представления",
+  "cabinetViewTitle": "Представление {viewSlug}",
+  "@cabinetViewTitle": {
+    "placeholders": {
+      "viewSlug": {
+        "type": "String"
+      }
+    }
+  },
+  "commonAdd": "Добавить",
+  "commonAdding": "Добавление…",
+  "commonAgentTokens": "Токены агента",
+  "commonApiBaseUrl": "Базовый URL API",
+  "commonArchive": "В архив",
+  "commonCabinets": "Кабинеты",
+  "commonCancel": "Отмена",
+  "commonCompany": "Компания",
+  "commonContinueAction": "Продолжить",
+  "commonCreate": "Создать",
+  "commonCreating": "Создание…",
+  "commonDelete": "Удалить",
+  "commonDeleting": "Удаление…",
+  "commonDisable": "Отключить",
+  "commonDisplayNameOptional": "Отображаемое имя (необязательно)",
+  "commonDone": "Готово",
+  "commonEmDash": "—",
+  "commonEmail": "Email",
+  "commonEmployees": "Сотрудники",
+  "commonEmpty": "Пусто",
+  "commonFilter": "Фильтр",
+  "commonImport": "Импорт",
+  "commonInvite": "Пригласить",
+  "commonLabel": "Подпись",
+  "commonLastActivity": "Последняя активность",
+  "commonList": "Список",
+  "commonName": "Название",
+  "commonNameRequired": "Укажите название",
+  "commonNone": "Нет",
+  "commonNothingFound": "Ничего не найдено",
+  "commonOverview": "Обзор",
+  "commonPositiveInteger": "Целое число больше нуля",
+  "commonProjects": "Проекты",
+  "commonProvider": "Провайдер",
+  "commonReload": "Обновить",
+  "commonRequired": "Обязательно",
+  "commonResume": "Возобновить",
+  "commonSave": "Сохранить",
+  "commonSaving": "Сохранение…",
+  "commonSearch": "Поиск",
+  "commonSecret": "Секрет",
+  "commonSelect": "Выбрать",
+  "commonSelectCompany": "Выберите компанию",
+  "commonStatus": "Статус",
+  "commonStorageBytes": "Хранилище (байт)",
+  "commonTable": "Таблица",
+  "commonTitle": "Заголовок",
+  "commonUnknown": "неизвестно",
+  "companyActive": "Активен",
+  "companyCabinet": "Кабинет",
+  "companyCabinetsEmptyHint": "Кабинеты создают сотрудники в контуре Employee",
+  "companyDisableEmployee": "Отключить сотрудника",
+  "companyDisableEmployeeConfirm": "Отключить {email}? Доступ будет закрыт.",
+  "@companyDisableEmployeeConfirm": {
+    "placeholders": {
+      "email": {
+        "type": "String"
+      }
+    }
+  },
+  "companyInviteEmployee": "Пригласить сотрудника",
+  "companyInviteViaKeycloakNoPassword": "Приглашение через Keycloak — без поля пароля",
+  "companyInviteViaKeycloakPasswordNotAccepted": "Приглашение через Keycloak — пароль здесь не принимается.",
+  "companyInviting": "Приглашение…",
+  "companyNoCabinets": "Нет кабинетов",
+  "companyNoEmployees": "Нет сотрудников",
+  "companyOrgMetrics": "Метрики организации",
+  "companyOwner": "Владелец",
+  "companyReadOnlyOrgView": "{title} — просмотр организации (только чтение)",
+  "@companyReadOnlyOrgView": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "companyRole": "Роль",
+  "companyValidEmailRequired": "Нужен корректный email",
+  "devAdminSession": "Сессия admin",
+  "devBearerTokenCompanyAdmin": "Bearer token (JWT company.admin)",
+  "devBearerTokenPlatformAdmin": "Bearer token (JWT platform_admin)",
+  "devBearerTokenTestJwt": "Bearer token (JWT AUTH_MODE=test)",
+  "devCompanyAdminMembershipRequired": "Нужен membership company.admin",
+  "devCompanySession": "Сессия компании",
+  "devDevSession": "Dev-сессия",
+  "devNoEmployeeMemberships": "Нет memberships сотрудника",
+  "devTokenMustHaveCompanyContour": "В токене нужен контур company (membership company.admin)",
+  "devTokenMustHavePlatformAdmin": "В токене нужен контур platform_admin",
+  "galleryAlpha": "Alpha",
+  "galleryBeta": "Beta",
+  "galleryButtons": "Кнопки",
+  "galleryCheck": "Чекбокс",
+  "galleryCoreGallery": "Галерея core",
+  "galleryCount": "Счётчик",
+  "galleryDanger": "Опасное",
+  "galleryDemo": "demo",
+  "galleryDemoConfirm": "Демо-подтверждение",
+  "galleryEntityCollection": "EntityCollection",
+  "galleryListItem": "Элемент списка",
+  "galleryOne": "Один",
+  "galleryPick": "Выбор",
+  "galleryRadio": "Радио",
+  "gallerySampleRow": "Пример строки",
+  "gallerySelection": "Выбор",
+  "gallerySelector": "Селектор",
+  "gallerySubtitle": "подзаголовок",
+  "galleryTwo": "Два",
+  "navAiKeys": "AI-ключи",
+  "navBundles": "Бандлы",
+  "navCabinets": "Кабинеты",
+  "navCompanies": "Компании",
+  "navEmployees": "Сотрудники",
+  "navOverview": "Обзор",
+  "navProdavan": "Prodavan",
+  "projectAgentError": "Ошибка агента",
+  "projectApproveAndContinue": "Разрешить и продолжить",
+  "projectApproveTool": "Разрешение инструмента",
+  "projectApproveToolPrompt": "Разрешить {name}?",
+  "@projectApproveToolPrompt": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "projectAttachFile": "Прикрепить файл",
+  "projectAttachmentFallback": "вложение",
+  "projectCancelledMarker": "(отменено)",
+  "projectCancelledWithText": "{text}\n(отменено)",
+  "@projectCancelledWithText": {
+    "placeholders": {
+      "text": {
+        "type": "String"
+      }
+    }
+  },
+  "projectCompanyDefault": "По умолчанию для компании",
+  "projectCouldNotReadFileBytes": "Не удалось прочитать файл",
+  "projectCreateAndOpenChat": "Создать и открыть чат",
+  "projectCreateProject": "Создать проект",
+  "projectCreateProjectHint": "Создайте проект, чтобы открыть чат",
+  "projectDeny": "Отклонить",
+  "projectEmptyChatHint": "Отправьте сообщение, чтобы начать сессию агента",
+  "projectFileFallback": "файл",
+  "projectInbox": "Входящие ({count})",
+  "@projectInbox": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "projectMessageHint": "Сообщение…",
+  "projectNewProject": "Новый проект",
+  "projectNoAttachmentData": "Нет данных вложения",
+  "projectNoPreviewForType": "Нет превью для {contentType} ({bytes} байт)",
+  "@projectNoPreviewForType": {
+    "placeholders": {
+      "contentType": {
+        "type": "String"
+      },
+      "bytes": {
+        "type": "String"
+      }
+    }
+  },
+  "projectNoProjects": "Нет проектов",
+  "projectPauseProject": "Поставить на паузу",
+  "projectPausedBanner": "Проект на паузе — чат, загрузки и запуски агента отключены",
+  "projectPausedDisabledHint": "Чат, загрузки и запуски агента недоступны на паузе",
+  "projectPausedListSubtitle": "На паузе — чат, загрузки и запуски агента отключены",
+  "projectPausing": "Пауза…",
+  "projectPdfPreviewUnavailable": "Встроенный просмотр PDF пока недоступен.\n{bytes} байт · {contentType}",
+  "@projectPdfPreviewUnavailable": {
+    "placeholders": {
+      "bytes": {
+        "type": "String"
+      },
+      "contentType": {
+        "type": "String"
+      }
+    }
+  },
+  "projectPreferredAgentProvider": "Предпочтительный провайдер агента",
+  "projectPreviewTruncated": "Превью обрезано до первых 200k символов",
+  "projectProject": "Проект",
+  "projectProjectName": "Название проекта",
+  "projectProjectPaused": "Проект на паузе",
+  "projectProjectResumed": "Проект возобновлён",
+  "projectProjectSettings": "Настройки проекта",
+  "projectProjectStatus": "Статус проекта",
+  "projectRegenerate": "Сгенерировать снова",
+  "projectReloadTranscript": "Обновить переписку",
+  "projectRematerializeWorkspace": "Пересоздать workspace",
+  "projectRematerializedPackages": "Пересозданы пакеты: {packages}",
+  "@projectRematerializedPackages": {
+    "placeholders": {
+      "packages": {
+        "type": "String"
+      }
+    }
+  },
+  "projectRematerializing": "Пересоздание…",
+  "projectResumeProject": "Возобновить проект",
+  "projectResuming": "Возобновление…",
+  "projectSizeBytes": "{size} B",
+  "@projectSizeBytes": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "projectSubscriptionExpiredBanner": "Подписка компании истекла — чат и загрузки недоступны",
+  "projectToolApprovalHint": "Инструменту нужно ваше подтверждение, прежде чем агент продолжит.",
+  "projectUploadMissingId": "В загрузке нет id/storage_ref",
+  "projectWorking": "Работаем…",
+  "projectWorkspaceRematerializedNoPackages": "Workspace пересоздан (без MCP-пакетов)",
+  "settings": "Настройки",
+  "settingsLanguage": "Язык",
+  "settingsLanguageEn": "English",
+  "settingsLanguageRu": "Русский",
+  "settingsTheme": "Тема",
+  "settingsThemeDark": "Тёмная",
+  "settingsThemeLight": "Светлая",
+  "settingsThemeUltraDark": "Ультратёмная"
+}

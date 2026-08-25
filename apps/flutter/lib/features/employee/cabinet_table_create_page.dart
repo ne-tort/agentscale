@@ -7,6 +7,7 @@ import 'package:prodavan/core/widgets/app_form.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Create meta table with initial columns (L06 mutate API).
 class CabinetTableCreatePage extends StatefulWidget {
@@ -61,6 +62,7 @@ class _CabinetTableCreatePageState extends State<CabinetTableCreatePage> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
+    final l10n = AppLocalizations.of(context);
 
     final slug = _slug.text.trim();
     final label = _label.text.trim();
@@ -75,7 +77,7 @@ class _CabinetTableCreatePageState extends State<CabinetTableCreatePage> {
       });
     }
     if (columns.isEmpty) {
-      setState(() => _error = 'Add at least one column');
+      setState(() => _error = l10n.cabinetAddAtLeastOneColumn);
       return;
     }
 
@@ -104,8 +106,9 @@ class _CabinetTableCreatePageState extends State<CabinetTableCreatePage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      title: const Text('New table'),
+      title: Text(l10n.cabinetNewTable),
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
@@ -115,34 +118,34 @@ class _CabinetTableCreatePageState extends State<CabinetTableCreatePage> {
             children: [
               AppTextField(
                 controller: _slug,
-                label: 'Slug',
+                label: l10n.cabinetSlug,
                 enabled: !_saving,
                 validator: (v) {
                   final s = (v ?? '').trim();
-                  if (s.isEmpty) return 'Required';
+                  if (s.isEmpty) return l10n.commonRequired;
                   if (!RegExp(r'^[a-z][a-z0-9_]*$').hasMatch(s)) {
-                    return 'Lowercase letters, digits, underscore';
+                    return l10n.cabinetLowercaseSlugRule;
                   }
                   return null;
                 },
               ),
               AppTextField(
                 controller: _label,
-                label: 'Label',
+                label: l10n.commonLabel,
                 enabled: !_saving,
-                validator: (v) => (v ?? '').trim().isEmpty ? 'Required' : null,
+                validator: (v) => (v ?? '').trim().isEmpty ? l10n.commonRequired : null,
               ),
               DropdownButtonFormField<String>(
                 value: _storageKind,
-                decoration: const InputDecoration(labelText: 'Storage'),
-                items: const [
-                  DropdownMenuItem(value: 'physical', child: Text('physical')),
-                  DropdownMenuItem(value: 'json_document', child: Text('json_document')),
+                decoration: InputDecoration(labelText: l10n.cabinetStorage),
+                items: [
+                  DropdownMenuItem(value: 'physical', child: Text(l10n.cabinetStoragePhysical)),
+                  DropdownMenuItem(value: 'json_document', child: Text(l10n.cabinetStorageJsonDocument)),
                 ],
                 onChanged: _saving ? null : (v) => setState(() => _storageKind = v ?? 'physical'),
               ),
               const SizedBox(height: AppSpacing.md),
-              Text('Columns', style: Theme.of(context).textTheme.titleSmall),
+              Text(l10n.cabinetColumns, style: Theme.of(context).textTheme.titleSmall),
               const SizedBox(height: AppSpacing.sm),
               for (var i = 0; i < _columns.length; i++) ...[
                 Row(
@@ -152,16 +155,16 @@ class _CabinetTableCreatePageState extends State<CabinetTableCreatePage> {
                       flex: 2,
                       child: AppTextField(
                         controller: _columns[i].name,
-                        label: 'Column name',
+                        label: l10n.cabinetColumnName,
                         enabled: !_saving,
-                        validator: (v) => (v ?? '').trim().isEmpty ? 'Required' : null,
+                        validator: (v) => (v ?? '').trim().isEmpty ? l10n.commonRequired : null,
                       ),
                     ),
                     const SizedBox(width: AppSpacing.sm),
                     Expanded(
                       child: DropdownButtonFormField<String>(
                         value: _columns[i].type,
-                        decoration: const InputDecoration(labelText: 'Type'),
+                        decoration: InputDecoration(labelText: l10n.cabinetType),
                         items: [
                           for (final t in _columnTypes)
                             DropdownMenuItem(value: t, child: Text(t)),
@@ -193,12 +196,12 @@ class _CabinetTableCreatePageState extends State<CabinetTableCreatePage> {
                 alignment: Alignment.centerLeft,
                 child: TextButton.icon(
                   onPressed: _saving ? null : _addColumn,
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add column'),
+                  icon: Icon(Icons.add),
+                  label: Text(l10n.cabinetAddColumn),
                 ),
               ),
               AppButton(
-                label: _saving ? 'Creating…' : 'Create table',
+                label: _saving ? l10n.commonCreating : l10n.cabinetCreateTable,
                 onPressed: _saving ? null : _save,
               ),
             ],

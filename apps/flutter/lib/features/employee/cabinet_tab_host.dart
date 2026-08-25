@@ -5,6 +5,7 @@ import 'package:prodavan/features/employee/cabinet_placeholder_tab_page.dart';
 import 'package:prodavan/features/employee/cabinet_tables_tab_page.dart';
 import 'package:prodavan/features/employee/cabinet_tools_tab_page.dart';
 import 'package:prodavan/features/employee/project_list_page.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Routes cabinet meta tabs to L05/L06 interpreters by view_slug.
 class CabinetTabHost extends StatelessWidget {
@@ -21,7 +22,8 @@ class CabinetTabHost extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final slug = tab['view_slug'] as String? ?? '';
+    final l10n = AppLocalizations.of(context);
+final slug = tab['view_slug'] as String? ?? '';
     final title = tab['title'] as String? ?? 'Tab';
 
     switch (slug) {
@@ -52,8 +54,8 @@ class CabinetTabHost extends StatelessWidget {
         return CabinetPlaceholderTabPage(
           title: title,
           hint: slug.isEmpty
-              ? 'Unknown tab — no view_slug from meta.'
-              : 'No interpreter registered for view "$slug".',
+              ? l10n.cabinetUnknownTabNoViewSlug
+              : l10n.cabinetNoInterpreterForView(slug),
         );
     }
   }

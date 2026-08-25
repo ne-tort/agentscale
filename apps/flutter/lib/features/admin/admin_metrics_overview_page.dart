@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/session/admin_context.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
@@ -9,6 +10,7 @@ import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/core/widgets/stat_tile.dart';
 import 'package:prodavan/features/admin/company_detail_page.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 enum _AlertKind { noKeys, keyExpiring, highUsage, subscriptionExpiring, subscriptionExpired }
 
@@ -71,6 +73,7 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
   }
 
   List<_OverviewAlert> _buildAlerts(List<Map<String, dynamic>> companies) {
+    final l10n = AppLocalizations.of(context);
     final alerts = <_OverviewAlert>[];
     for (final c in companies) {
       final id = _companyId(c);
@@ -84,7 +87,7 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
             kind: _AlertKind.noKeys,
             companyId: id,
             companyName: name,
-            subtitle: 'Agent sessions will fail with NO_AI_KEY',
+            subtitle: l10n.adminAlertNoKeysSubtitle,
           ),
         );
       }
@@ -95,7 +98,9 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
             kind: _AlertKind.keyExpiring,
             companyId: id,
             companyName: name,
-            subtitle: '$expiring key(s) renewing soon${next != null ? ' · next $next' : ''}',
+            subtitle: next != null
+                ? l10n.adminAlertKeysRenewingSoonNext('$expiring', '$next')
+                : l10n.adminAlertKeysRenewingSoon('$expiring'),
           ),
         );
       }
@@ -105,7 +110,7 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
             kind: _AlertKind.highUsage,
             companyId: id,
             companyName: name,
-            subtitle: 'Agent tokens ${_asInt(c['agent_tokens_used'])} above platform threshold',
+            subtitle: l10n.adminAlertTokensAboveThreshold('${_asInt(c['agent_tokens_used'])}'),
           ),
         );
       }
@@ -116,7 +121,9 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
             kind: _AlertKind.subscriptionExpired,
             companyId: id,
             companyName: name,
-            subtitle: 'Subscription ended${ends != null ? ' · $ends' : ''}',
+            subtitle: ends != null
+                ? l10n.adminAlertSubscriptionEndedAt('$ends')
+                : l10n.adminAlertSubscriptionEnded,
           ),
         );
       } else if (c['subscription_lifetime'] != true && c['subscription_expiring_soon'] == true) {
@@ -126,7 +133,9 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
             kind: _AlertKind.subscriptionExpiring,
             companyId: id,
             companyName: name,
-            subtitle: 'Subscription ends soon${ends != null ? ' · $ends' : ''}',
+            subtitle: ends != null
+                ? l10n.adminAlertSubscriptionEndsSoonAt('$ends')
+                : l10n.adminAlertSubscriptionEndsSoon,
           ),
         );
       }
@@ -164,7 +173,7 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
 
   String _cell(Map<String, dynamic> item, String key) {
     final v = item[key];
-    if (v == null) return '—';
+    if (v == null) return AppLocalizations.of(context).commonEmDash;
     return '$v';
   }
 
@@ -178,6 +187,7 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final rows = _items.map((item) {
       final companyId = _companyId(item);
       final name = item['name'] as String? ?? companyId;
@@ -185,7 +195,7 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
       return AppEntityRow(
         id: companyId,
         title: name,
-        subtitle: '$cabinets cabinets · ${_cell(item, 'projects_total')} projects',
+        subtitle: l10n.adminCabinetsProjectsSubtitle(cabinets, _cell(item, 'projects_total')),
         cells: {
           'employees': _cell(item, 'employees_total'),
           'cabinets': cabinets,
@@ -195,8 +205,9 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
       );
     }).toList();
 
+    final colors = context.appColors;
     return AppScaffold(
-      title: const Text('Overview'),
+      title: Text(l10n.commonOverview),
       actions: [
         IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
       ],
@@ -206,8 +217,8 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
           if (_error != null) InlineErrorBanner(message: _error!),
           if (!_loading && _alerts.isNotEmpty) ...[
             Padding(
-              padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.md, AppSpacing.md, 0),
-              child: const AppSectionHeader(title: 'Alerts'),
+              padding: EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.md, AppSpacing.md, 0),
+              child: AppSectionHeader(title: l10n.adminAlerts),
             ),
             ..._alerts.map(
               (a) => ListTile(
@@ -220,20 +231,20 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
                     _AlertKind.subscriptionExpired => Icons.event_busy_outlined,
                   },
                   color: switch (a.kind) {
-                    _AlertKind.noKeys => Colors.orange,
-                    _AlertKind.keyExpiring => Colors.deepOrange,
-                    _AlertKind.highUsage => Colors.redAccent,
-                    _AlertKind.subscriptionExpiring => Colors.deepOrange,
-                    _AlertKind.subscriptionExpired => Colors.red,
+                    _AlertKind.noKeys => colors.warning,
+                    _AlertKind.keyExpiring => colors.warning,
+                    _AlertKind.highUsage => colors.danger,
+                    _AlertKind.subscriptionExpiring => colors.warning,
+                    _AlertKind.subscriptionExpired => colors.danger,
                   },
                 ),
                 title: Text(
                   switch (a.kind) {
-                    _AlertKind.noKeys => '${a.companyName}: no AI keys bound',
-                    _AlertKind.keyExpiring => '${a.companyName}: AI key renewal soon',
-                    _AlertKind.highUsage => '${a.companyName}: high agent token usage',
-                    _AlertKind.subscriptionExpiring => '${a.companyName}: subscription expiring',
-                    _AlertKind.subscriptionExpired => '${a.companyName}: subscription expired',
+                    _AlertKind.noKeys => l10n.adminAlertNoKeysTitle(a.companyName),
+                    _AlertKind.keyExpiring => l10n.adminAlertKeyRenewalTitle(a.companyName),
+                    _AlertKind.highUsage => l10n.adminAlertHighUsageTitle(a.companyName),
+                    _AlertKind.subscriptionExpiring => l10n.adminAlertSubExpiringTitle(a.companyName),
+                    _AlertKind.subscriptionExpired => l10n.adminAlertSubExpiredTitle(a.companyName),
                   },
                 ),
                 subtitle: Text(a.subtitle),
@@ -244,8 +255,8 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
           ],
           if (!_loading && _items.isNotEmpty) ...[
             Padding(
-              padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.md, AppSpacing.md, 0),
-              child: const AppSectionHeader(title: 'Platform totals'),
+              padding: EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.md, AppSpacing.md, 0),
+              child: AppSectionHeader(title: l10n.adminPlatformTotals),
             ),
             Padding(
               padding: const EdgeInsets.all(AppSpacing.md),
@@ -255,19 +266,19 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
                 children: [
                   SizedBox(
                     width: 150,
-                    child: StatTile(label: 'Companies', value: '${_items.length}'),
+                    child: StatTile(label: l10n.navCompanies, value: '${_items.length}'),
                   ),
                   SizedBox(
                     width: 150,
-                    child: StatTile(label: 'Employees', value: '${_sum('employees_total')}'),
+                    child: StatTile(label: l10n.commonEmployees, value: '${_sum('employees_total')}'),
                   ),
                   SizedBox(
                     width: 150,
-                    child: StatTile(label: 'Projects', value: '${_sum('projects_total')}'),
+                    child: StatTile(label: l10n.commonProjects, value: '${_sum('projects_total')}'),
                   ),
                   SizedBox(
                     width: 150,
-                    child: StatTile(label: 'Agent tokens', value: '${_sum('agent_tokens_used')}'),
+                    child: StatTile(label: l10n.commonAgentTokens, value: '${_sum('agent_tokens_used')}'),
                   ),
                 ],
               ),
@@ -277,17 +288,17 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
             child: AppEntityCollection(
               loading: _loading,
               rows: rows,
-              columns: const [
-                AppEntityColumn(id: 'name', label: 'Company'),
-                AppEntityColumn(id: 'employees', label: 'Employees'),
-                AppEntityColumn(id: 'cabinets', label: 'Cabinets'),
-                AppEntityColumn(id: 'projects', label: 'Projects'),
-                AppEntityColumn(id: 'tokens', label: 'Tokens'),
+              columns: [
+                AppEntityColumn(id: 'name', label: l10n.commonCompany),
+                AppEntityColumn(id: 'employees', label: l10n.commonEmployees),
+                AppEntityColumn(id: 'cabinets', label: l10n.commonCabinets),
+                AppEntityColumn(id: 'projects', label: l10n.commonProjects),
+                AppEntityColumn(id: 'tokens', label: l10n.adminTokens),
               ],
               onOpen: _openCompany,
               empty: EmptyState(
-                title: 'No companies yet',
-                subtitle: 'Create a company to see platform metrics',
+                title: l10n.adminNoCompaniesYet,
+                subtitle: l10n.adminCreateCompanyToSeeMetrics,
               ),
             ),
           ),

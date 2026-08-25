@@ -10,6 +10,7 @@ import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/core/widgets/stat_tile.dart';
 import 'package:prodavan/features/admin/widgets/admin_metrics_alerts.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Platform Admin company detail — metrics, quotas, agent policy (L04).
 class AdminCompanyDetailPage extends StatefulWidget {
@@ -148,8 +149,9 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
       );
       await _load();
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
       setState(() => _savingQuotas = false);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Quotas saved')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.adminQuotasSaved)));
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -161,7 +163,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
 
   Future<void> _saveSubscription() async {
     if (!_subscriptionLifetime && _subscriptionEndsCtrl.text.trim().isEmpty) {
-      setState(() => _error = 'Set end date or enable lifetime subscription');
+      setState(() => _error = AppLocalizations.of(context).adminSetEndDateOrLifetime);
       return;
     }
     setState(() {
@@ -182,8 +184,9 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
       );
       await _load();
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
       setState(() => _savingSubscription = false);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Subscription saved')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.adminSubscriptionSaved)));
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -202,10 +205,11 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
       final result = await adminContext.api.drainTriggers();
       await _load();
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
       setState(() => _drainingTriggers = false);
       final count = result['count'] ?? 0;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Drained $count trigger(s)')),
+        SnackBar(content: Text(l10n.adminDrainedTriggers('$count'))),
       );
     } catch (e) {
       if (!mounted) return;
@@ -225,10 +229,11 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
       final result = await adminContext.api.sweepIdlePause(companyId: widget.companyId);
       await _load();
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
       setState(() => _drainingTriggers = false);
       final count = result['count'] ?? 0;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Idle-paused $count project(s) in this company')),
+        SnackBar(content: Text(l10n.adminIdlePausedProjectsInCompany('$count'))),
       );
     } catch (e) {
       if (!mounted) return;
@@ -248,11 +253,12 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
       final result = await adminContext.api.sweepIdlePause();
       await _load();
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
       setState(() => _drainingTriggers = false);
       final count = result['count'] ?? 0;
       final companies = (result['companies'] is List) ? (result['companies'] as List).length : 0;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Platform idle sweep: $count project(s) ($companies companies with policy)')),
+        SnackBar(content: Text(l10n.adminPlatformIdleSweep('$count', '$companies'))),
       );
     } catch (e) {
       if (!mounted) return;
@@ -293,8 +299,9 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
       );
       await _load();
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
       setState(() => _savingPolicy = false);
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Agent policy saved')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(l10n.adminAgentPolicySaved)));
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -312,6 +319,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
       title: Text(widget.companyName),
       actions: [
@@ -327,63 +335,63 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                   const SizedBox(height: AppSpacing.md),
                 ],
                 AdminMetricsAlerts(metrics: _metrics),
-                const AppSectionHeader(title: 'Metrics'),
+                AppSectionHeader(title: l10n.adminMetrics),
                 Wrap(
                   spacing: AppSpacing.sm,
                   runSpacing: AppSpacing.sm,
                   children: [
                     SizedBox(
                       width: 160,
-                      child: StatTile(label: 'Employees', value: _metric('employees_total')),
+                      child: StatTile(label: l10n.commonEmployees, value: _metric('employees_total')),
                     ),
                     SizedBox(
                       width: 160,
                       child: StatTile(
-                        label: 'Active employees',
+                        label: l10n.adminActiveEmployees,
                         value: _metric('employees_active'),
                       ),
                     ),
                     SizedBox(
                       width: 160,
                       child: StatTile(
-                        label: 'Cabinets',
+                        label: l10n.commonCabinets,
                         value: '${_metric('active_cabinets')} / ${_metric('cabinets_quota')}',
                       ),
                     ),
                     SizedBox(
                       width: 160,
-                      child: StatTile(label: 'Projects', value: _metric('projects_total')),
+                      child: StatTile(label: l10n.commonProjects, value: _metric('projects_total')),
                     ),
                     SizedBox(
                       width: 160,
-                      child: StatTile(label: 'Agent tokens', value: _metric('agent_tokens_used')),
+                      child: StatTile(label: l10n.commonAgentTokens, value: _metric('agent_tokens_used')),
                     ),
                     SizedBox(
                       width: 160,
-                      child: StatTile(label: 'Agent messages', value: _metric('agent_messages')),
+                      child: StatTile(label: l10n.adminAgentMessages, value: _metric('agent_messages')),
                     ),
                     SizedBox(
                       width: 160,
-                      child: StatTile(label: 'AI keys bound', value: _metric('ai_keys_bound')),
+                      child: StatTile(label: l10n.adminAiKeysBound, value: _metric('ai_keys_bound')),
                     ),
                     SizedBox(
                       width: 160,
-                      child: StatTile(label: 'Storage (bytes)', value: _metric('storage_bytes')),
+                      child: StatTile(label: l10n.commonStorageBytes, value: _metric('storage_bytes')),
                     ),
                     if (_metrics?['last_activity_at'] != null)
                       SizedBox(
                         width: 200,
                         child: StatTile(
-                          label: 'Last activity',
-                          value: _metric('last_activity_at', fallback: '—'),
+                          label: l10n.commonLastActivity,
+                          value: _metric('last_activity_at', fallback: l10n.commonEmDash),
                         ),
                       ),
                   ],
                 ),
                 const SizedBox(height: AppSpacing.lg),
-                const AppSectionHeader(title: 'Prodavan subscription'),
+                AppSectionHeader(title: l10n.adminProdavanSubscription),
                 SwitchListTile(
-                  title: const Text('Lifetime subscription'),
+                  title: Text(l10n.adminLifetimeSubscription),
                   value: _subscriptionLifetime,
                   onChanged: _savingSubscription
                       ? null
@@ -391,30 +399,30 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                 ),
                 AppTextField(
                   controller: _subscriptionEndsCtrl,
-                  label: 'Ends at (YYYY-MM-DD)',
+                  label: l10n.adminEndsAt,
                   enabled: !_savingSubscription && !_subscriptionLifetime,
                 ),
                 AppButton(
-                  label: _savingSubscription ? 'Saving…' : 'Save subscription',
+                  label: _savingSubscription ? l10n.commonSaving : l10n.adminSaveSubscription,
                   expanded: false,
                   onPressed: _savingSubscription ? null : _saveSubscription,
                 ),
                 const SizedBox(height: AppSpacing.lg),
-                const AppSectionHeader(title: 'Platform events'),
+                AppSectionHeader(title: l10n.adminPlatformEvents),
                 AppButton(
-                  label: _drainingTriggers ? 'Draining…' : 'Drain project triggers',
+                  label: _drainingTriggers ? l10n.adminDraining : l10n.adminDrainProjectTriggers,
                   expanded: false,
                   onPressed: _drainingTriggers ? null : _drainTriggers,
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 AppButton(
-                  label: _drainingTriggers ? 'Sweeping…' : 'Sweep idle pause',
+                  label: _drainingTriggers ? l10n.adminSweeping : l10n.adminSweepIdlePause,
                   expanded: false,
                   onPressed: _drainingTriggers ? null : _sweepIdlePause,
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 AppButton(
-                  label: _drainingTriggers ? 'Sweeping…' : 'Sweep idle pause (all companies)',
+                  label: _drainingTriggers ? l10n.adminSweeping : l10n.adminSweepIdlePauseAll,
                   expanded: false,
                   variant: AppButtonVariant.outlined,
                   onPressed: _drainingTriggers ? null : _sweepIdlePauseAll,
@@ -422,7 +430,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                 const SizedBox(height: AppSpacing.sm),
                 if (_platformEvents.isEmpty)
                   Text(
-                    'No platform events yet',
+                    l10n.adminNoPlatformEventsYet,
                     style: Theme.of(context).textTheme.bodySmall,
                   )
                 else
@@ -441,39 +449,39 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                       ),
                     ),
                 const SizedBox(height: AppSpacing.lg),
-                const AppSectionHeader(title: 'Cabinet quotas'),
+                AppSectionHeader(title: l10n.adminCabinetQuotas),
                 AppForm(
                   formKey: _quotaFormKey,
                   children: [
                     AppTextField(
                       controller: _maxCabinetsCtrl,
-                      label: 'Max cabinets',
+                      label: l10n.adminMaxCabinets,
                       keyboardType: TextInputType.number,
                       validator: (v) => _positiveInt(v, min: 1),
                     ),
                     AppTextField(
                       controller: _maxPackagesCtrl,
-                      label: 'Max packages per cabinet',
+                      label: l10n.adminMaxPackagesPerCabinet,
                       keyboardType: TextInputType.number,
                       validator: (v) => _positiveInt(v, min: 0),
                     ),
                     AppTextField(
                       controller: _maxBundleMbCtrl,
-                      label: 'Max bundle import (MB)',
+                      label: l10n.adminMaxBundleImportMb,
                       keyboardType: TextInputType.number,
                       validator: (v) => _positiveInt(v, min: 1),
                     ),
                     AppButton(
-                      label: _savingQuotas ? 'Saving…' : 'Save quotas',
+                      label: _savingQuotas ? l10n.commonSaving : l10n.adminSaveQuotas,
                       expanded: false,
                       onPressed: _savingQuotas ? null : _saveQuotas,
                     ),
                   ],
                 ),
                 const SizedBox(height: AppSpacing.lg),
-                const AppSectionHeader(title: 'Agent runtime policy'),
+                AppSectionHeader(title: l10n.adminAgentRuntimePolicy),
                 InputDecorator(
-                  decoration: const InputDecoration(labelText: 'Tool preset'),
+                  decoration: InputDecoration(labelText: l10n.adminToolPreset),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<String>(
                       value: _toolPresets.contains(_toolPreset) ? _toolPreset : 'workspace_dev',
@@ -491,79 +499,79 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                 const SizedBox(height: AppSpacing.md),
                 AppTextField(
                   controller: _preferredProviderCtrl,
-                  label: 'Preferred provider (optional)',
+                  label: l10n.adminPreferredProviderOptional,
                   enabled: !_savingPolicy,
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 AppTextField(
                   controller: _modelAllowlistCtrl,
-                  label: 'Model allowlist (comma-separated, empty = any)',
+                  label: l10n.adminModelAllowlist,
                   enabled: !_savingPolicy,
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Platform fallback'),
+                  title: Text(l10n.adminPlatformFallback),
                   value: _platformFallback,
                   onChanged: _savingPolicy ? null : (v) => setState(() => _platformFallback = v),
                 ),
                 AppTextField(
                   controller: _maxTokensMonthCtrl,
-                  label: 'Max agent tokens / month (optional)',
+                  label: l10n.adminMaxAgentTokensMonth,
                   keyboardType: TextInputType.number,
                   enabled: !_savingPolicy,
                 ),
                 AppTextField(
                   controller: _maxTokensPerRunCtrl,
-                  label: 'Max tokens per run (optional)',
+                  label: l10n.adminMaxTokensPerRun,
                   keyboardType: TextInputType.number,
                   enabled: !_savingPolicy,
                 ),
                 AppTextField(
                   controller: _maxCostUsdMonthCtrl,
-                  label: 'Max USD cost / month (optional)',
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  label: l10n.adminMaxUsdCostMonth,
+                  keyboardType: TextInputType.numberWithOptions(decimal: true),
                   enabled: !_savingPolicy,
                 ),
                 AppTextField(
                   controller: _maxAttachmentMbCtrl,
-                  label: 'Max chat attachment size (MB)',
+                  label: l10n.adminMaxChatAttachmentMb,
                   keyboardType: TextInputType.number,
                   enabled: !_savingPolicy,
                   validator: (v) => _positiveInt(v, min: 1),
                 ),
                 AppTextField(
                   controller: _idlePauseHoursCtrl,
-                  label: 'Idle pause after hours (empty/0 = off)',
+                  label: l10n.adminIdlePauseAfterHours,
                   keyboardType: TextInputType.number,
                   enabled: !_savingPolicy,
                 ),
                 Text(
                   _webhookHmacConfigured
-                      ? 'Webhook HMAC: configured (leave blank to keep)'
-                      : 'Webhook HMAC: not set',
+                      ? l10n.adminWebhookHmacConfigured
+                      : l10n.adminWebhookHmacNotSet,
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 AppTextField(
                   controller: _webhookSecretCtrl,
-                  label: 'Webhook HMAC secret (optional write)',
+                  label: l10n.adminWebhookHmacSecret,
                   enabled: !_savingPolicy,
                   obscureText: true,
                 ),
                 Text(
                   _telegramHmacConfigured
-                      ? 'Telegram HMAC: configured (leave blank to keep)'
-                      : 'Telegram HMAC: not set',
+                      ? l10n.adminTelegramHmacConfigured
+                      : l10n.adminTelegramHmacNotSet,
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 AppTextField(
                   controller: _telegramSecretCtrl,
-                  label: 'Telegram HMAC secret (optional write)',
+                  label: l10n.adminTelegramHmacSecret,
                   enabled: !_savingPolicy,
                   obscureText: true,
                 ),
                 AppButton(
-                  label: _savingPolicy ? 'Saving…' : 'Save agent policy',
+                  label: _savingPolicy ? l10n.commonSaving : l10n.adminSaveAgentPolicy,
                   expanded: false,
                   onPressed: _savingPolicy ? null : _savePolicy,
                 ),
@@ -573,8 +581,9 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
   }
 
   String? _positiveInt(String? value, {required int min}) {
+    final l10n = AppLocalizations.of(context);
     final n = int.tryParse(value?.trim() ?? '');
-    if (n == null || n < min) return 'Enter integer ≥ $min';
+    if (n == null || n < min) return l10n.adminEnterIntegerMin('$min');
     return null;
   }
 

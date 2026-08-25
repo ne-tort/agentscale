@@ -7,6 +7,7 @@ import 'package:prodavan/core/widgets/app_form.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Full-page employee invite — no password field (L04 ux-contract).
 class CompanyInviteEmployeePage extends StatefulWidget {
@@ -57,35 +58,36 @@ class _CompanyInviteEmployeePageState extends State<CompanyInviteEmployeePage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      title: const Text('Invite employee'),
+      title: Text(l10n.companyInviteEmployee),
       body: Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
+        padding: EdgeInsets.all(AppSpacing.lg),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (_error != null) InlineErrorBanner(message: _error!),
-            const Text('Invite via Keycloak — password is not accepted here.'),
+            Text(l10n.companyInviteViaKeycloakPasswordNotAccepted),
             const SizedBox(height: AppSpacing.md),
             AppForm(
               formKey: _formKey,
               children: [
                 AppTextField(
                   controller: _emailCtrl,
-                  label: 'Email',
+                  label: l10n.commonEmail,
                   keyboardType: TextInputType.emailAddress,
                   validator: (v) {
                     final email = v?.trim() ?? '';
-                    if (email.isEmpty || !email.contains('@')) return 'Valid email required';
+                    if (email.isEmpty || !email.contains('@')) return l10n.companyValidEmailRequired;
                     return null;
                   },
                 ),
                 AppTextField(
                   controller: _nameCtrl,
-                  label: 'Display name (optional)',
+                  label: l10n.commonDisplayNameOptional,
                 ),
                 AppButton(
-                  label: _saving ? 'Inviting…' : 'Invite',
+                  label: _saving ? l10n.companyInviting : l10n.commonInvite,
                   onPressed: _saving ? null : _invite,
                 ),
               ],

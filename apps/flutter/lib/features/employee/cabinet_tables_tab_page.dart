@@ -11,6 +11,7 @@ import 'package:prodavan/features/employee/cabinet_column_edit_page.dart';
 import 'package:prodavan/features/employee/cabinet_row_edit_page.dart';
 import 'package:prodavan/features/employee/cabinet_table_settings_page.dart';
 import 'package:prodavan/features/employee/cabinet_table_create_page.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Meta tables browser with row upsert/delete (L05/L06 interpreter).
 class CabinetTablesTabPage extends StatefulWidget {
@@ -209,15 +210,16 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
   }
 
   Future<void> _deleteRow(Map<String, dynamic> row) async {
+    final l10n = AppLocalizations.of(context);
     final slug = _selectedSlug;
     final rowId = row['id'] as String?;
     if (slug == null || rowId == null) return;
 
     final ok = await DangerConfirmPage.push(
       context,
-      title: 'Delete row?',
-      message: 'Delete row $rowId permanently.',
-      confirmLabel: 'Delete',
+      title: l10n.cabinetDeleteRow,
+      message: l10n.cabinetDeleteRowPermanently('$rowId'),
+      confirmLabel: l10n.commonDelete,
     );
     if (ok != true) return;
 
@@ -236,6 +238,7 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -244,15 +247,15 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (_error != null) InlineErrorBanner(message: _error!),
-          const Expanded(
-            child: EmptyState(title: 'No meta tables in this cabinet yet.'),
+          Expanded(
+            child: EmptyState(title: l10n.cabinetNoMetaTablesYet),
           ),
           Padding(
-            padding: const EdgeInsets.all(12),
+            padding: EdgeInsets.all(12),
             child: TextButton.icon(
               onPressed: _createTable,
-              icon: const Icon(Icons.add),
-              label: const Text('New table'),
+              icon: Icon(Icons.add),
+              label: Text(l10n.cabinetNewTable),
             ),
           ),
         ],
@@ -269,8 +272,8 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
             alignment: Alignment.centerRight,
             child: TextButton.icon(
               onPressed: _createTable,
-              icon: const Icon(Icons.table_rows),
-              label: const Text('New table'),
+              icon: Icon(Icons.table_rows),
+              label: Text(l10n.cabinetNewTable),
             ),
           ),
         ),
@@ -303,20 +306,20 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
               children: [
                 TextButton.icon(
                   onPressed: _tableSettings,
-                  icon: const Icon(Icons.settings_outlined),
-                  label: const Text('Settings'),
+                  icon: Icon(Icons.settings_outlined),
+                  label: Text(l10n.settings),
                 ),
                 const SizedBox(width: 8),
                 TextButton.icon(
                   onPressed: _addColumn,
-                  icon: const Icon(Icons.view_column_outlined),
-                  label: const Text('Add column'),
+                  icon: Icon(Icons.view_column_outlined),
+                  label: Text(l10n.cabinetAddColumn),
                 ),
                 const SizedBox(width: 8),
                 TextButton.icon(
                   onPressed: () => _editRow(),
-                  icon: const Icon(Icons.add),
-                  label: const Text('Add row'),
+                  icon: Icon(Icons.add),
+                  label: Text(l10n.cabinetAddRow),
                 ),
               ],
             ),
@@ -334,7 +337,7 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
                 final name = col['name'] as String? ?? '';
                 final type = col['type'] as String? ?? '';
                 return ActionChip(
-                  label: Text('$name · $type'),
+                  label: Text(l10n.cabinetColumnTypeChip(name, type)),
                   onPressed: () => _editColumn(col),
                 );
               },
@@ -342,18 +345,18 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
           ),
         Expanded(
           child: _selectedSlug == null
-              ? const Center(child: Text('Select a table to preview rows'))
+              ? Center(child: Text(l10n.cabinetSelectTableToPreview))
               : _rows.isEmpty
                   ? Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Text('No rows'),
+                          Text(l10n.cabinetNoRows),
                           const SizedBox(height: 8),
                           TextButton.icon(
                             onPressed: () => _editRow(),
-                            icon: const Icon(Icons.add),
-                            label: const Text('Add row'),
+                            icon: Icon(Icons.add),
+                            label: Text(l10n.cabinetAddRow),
                           ),
                         ],
                       ),
@@ -367,7 +370,7 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
                         final id = row['id'] as String? ?? '';
                         final preview = JsonEncoder.withIndent('  ').convert(row);
                         return ListTile(
-                          title: Text(id.isEmpty ? 'Row ${index + 1}' : id),
+                          title: Text(id.isEmpty ? l10n.cabinetRowFallback('${index + 1}') : id),
                           subtitle: Text(
                             preview,
                             maxLines: 4,

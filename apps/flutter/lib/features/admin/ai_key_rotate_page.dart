@@ -7,6 +7,7 @@ import 'package:prodavan/core/widgets/app_form.dart';
 import 'package:prodavan/core/widgets/app_password_field.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Full-page secret rotation — no modal (L04 ux-contract).
 class AdminAiKeyRotatePage extends StatefulWidget {
@@ -59,29 +60,30 @@ class _AdminAiKeyRotatePageState extends State<AdminAiKeyRotatePage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      title: Text('Rotate ${widget.keyName}'),
+      title: Text(l10n.adminRotateKeyTitle(widget.keyName)),
       body: Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
+        padding: EdgeInsets.all(AppSpacing.lg),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             if (_error != null) InlineErrorBanner(message: _error!),
-            const Text('New secret replaces the stored value. Old secret is deleted from the file store.'),
+            Text(l10n.adminRotateSecretHint),
             const SizedBox(height: AppSpacing.md),
             AppForm(
               formKey: _formKey,
               children: [
                 AppPasswordField(
                   controller: _secretCtrl,
-                  label: 'New secret',
+                  label: l10n.adminNewSecret,
                   validator: (v) {
-                    if (v == null || v.isEmpty) return 'Secret required';
+                    if (v == null || v.isEmpty) return l10n.adminSecretRequired;
                     return null;
                   },
                 ),
                 AppButton(
-                  label: _saving ? 'Rotating…' : 'Rotate secret',
+                  label: _saving ? l10n.adminRotating : l10n.adminRotateSecret,
                   onPressed: _saving ? null : _rotate,
                 ),
               ],

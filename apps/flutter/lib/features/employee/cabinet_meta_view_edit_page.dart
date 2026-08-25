@@ -7,6 +7,7 @@ import 'package:prodavan/core/widgets/app_form.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Edit collection view ui_json subset (L06 PATCH views).
 class CabinetMetaViewEditPage extends StatefulWidget {
@@ -70,8 +71,9 @@ class _CabinetMetaViewEditPageState extends State<CabinetMetaViewEditPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      title: Text('View ${widget.viewSlug}'),
+      title: Text(l10n.cabinetViewTitle(widget.viewSlug)),
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
@@ -81,12 +83,12 @@ class _CabinetMetaViewEditPageState extends State<CabinetMetaViewEditPage> {
             children: [
               AppTextField(
                 controller: _titleField,
-                label: 'Title field (column name)',
+                label: l10n.cabinetTitleFieldColumnName,
                 enabled: !_saving,
-                validator: (v) => (v ?? '').trim().isEmpty ? 'Required' : null,
+                validator: (v) => (v ?? '').trim().isEmpty ? l10n.commonRequired : null,
               ),
               AppButton(
-                label: _saving ? 'Saving…' : 'Save view',
+                label: _saving ? l10n.commonSaving : l10n.cabinetSaveView,
                 onPressed: _saving ? null : _save,
               ),
             ],

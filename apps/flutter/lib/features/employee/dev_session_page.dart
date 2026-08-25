@@ -6,6 +6,8 @@ import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/features/employee/cabinet_list_page.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Dev-only bearer token entry until AppAuth (L01 cutover).
 class DevSessionPage extends StatefulWidget {
@@ -50,22 +52,23 @@ class _DevSessionPageState extends State<DevSessionPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      title: const Text('Dev session'),
+      title: Text(l10n.devDevSession),
       body: Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
+        padding: EdgeInsets.all(AppSpacing.lg),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            AppTextField(controller: _baseCtrl, label: 'API base URL'),
+            AppTextField(controller: _baseCtrl, label: l10n.commonApiBaseUrl),
             const SizedBox(height: AppSpacing.md),
-            AppTextField(controller: _tokenCtrl, label: 'Bearer token (AUTH_MODE=test JWT)'),
+            AppTextField(controller: _tokenCtrl, label: l10n.devBearerTokenTestJwt),
             if (_error != null) ...[
               const SizedBox(height: AppSpacing.sm),
-              Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              Text(_error!, style: TextStyle(color: context.appColors.danger)),
             ],
             const SizedBox(height: AppSpacing.lg),
-            AppButton(label: 'Continue', onPressed: _connect),
+            AppButton(label: l10n.commonContinueAction, onPressed: _connect),
           ],
         ),
       ),

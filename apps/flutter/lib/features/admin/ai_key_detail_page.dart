@@ -9,6 +9,7 @@ import 'package:prodavan/core/widgets/app_selector_page.dart';
 import 'package:prodavan/core/widgets/danger_confirm_page.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/admin/ai_key_rotate_page.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// AI key detail — status, company bindings (L03/L04).
 class AdminAiKeyDetailPage extends StatefulWidget {
@@ -75,10 +76,11 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
   }
 
   Future<void> _bindCompanies() async {
+    final l10n = AppLocalizations.of(context);
     final picked = await Navigator.of(context).push<Set<String>>(
       MaterialPageRoute(
         builder: (_) => AppSelectorPage(
-          title: 'Bind companies',
+          title: l10n.adminBindCompanies,
           multiSelect: true,
           selectedIds: _boundIds.toSet(),
           showCheckboxes: true,
@@ -147,12 +149,13 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
   }
 
   Future<void> _disableKey() async {
+    final l10n = AppLocalizations.of(context);
     if (_key?['status'] == 'disabled') return;
     final ok = await DangerConfirmPage.push(
       context,
-      title: 'Disable AI key',
-      message: 'Disable ${widget.keyName}? Agent sessions will fail with NO_AI_KEY.',
-      confirmLabel: 'Disable',
+      title: l10n.adminDisableAiKey,
+      message: l10n.adminDisableKeyConfirm(widget.keyName),
+      confirmLabel: l10n.commonDisable,
     );
     if (!ok) return;
     setState(() {
@@ -175,55 +178,56 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
       title: Text(widget.keyName),
       actions: [
         IconButton(onPressed: _loading || _saving ? null : _load, icon: const Icon(Icons.refresh)),
       ],
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? Center(child: CircularProgressIndicator())
           : ListView(
-              padding: const EdgeInsets.all(AppSpacing.md),
+              padding: EdgeInsets.all(AppSpacing.md),
               children: [
                 if (_error != null) InlineErrorBanner(message: _error!),
-                const AppSectionHeader(title: 'Key info'),
+                AppSectionHeader(title: l10n.adminKeyInfo),
                 if (_key != null) ...[
-                  Text('Provider: ${_key!['provider']}'),
-                  Text('API kind: ${_key!['api_kind']}'),
-                  Text('Status: ${_key!['status']}'),
+                  Text(l10n.adminProviderValue('${_key!['provider']}')),
+                  Text(l10n.adminApiKindValue('${_key!['api_kind']}')),
+                  Text(l10n.adminStatusValue('${_key!['status']}')),
                   if (_key!['next_renewal_at'] != null)
-                    Text('Next renewal: ${_key!['next_renewal_at']}'),
-                  Text('Secret ref: ${_key!['secret_ref_prefix']}'),
+                    Text(l10n.adminNextRenewalValue('${_key!['next_renewal_at']}')),
+                  Text(l10n.adminSecretRefValue('${_key!['secret_ref_prefix']}')),
                 ],
                 const SizedBox(height: AppSpacing.lg),
-                const AppSectionHeader(title: 'Lifecycle'),
+                AppSectionHeader(title: l10n.adminLifecycle),
                 AppButton(
-                  label: _saving ? 'Renewing…' : 'Renew +1 month',
+                  label: _saving ? l10n.adminRenewing : l10n.adminRenewPlusOneMonth,
                   expanded: false,
                   onPressed: _saving ? null : _renewKey,
                 ),
                 const SizedBox(height: AppSpacing.sm),
                 AppButton(
-                  label: 'Rotate secret',
+                  label: l10n.adminRotateSecret,
                   expanded: false,
                   variant: AppButtonVariant.outlined,
                   onPressed: _saving ? null : _rotateSecret,
                 ),
                 const SizedBox(height: AppSpacing.lg),
-                const AppSectionHeader(title: 'Company bindings'),
+                AppSectionHeader(title: l10n.adminCompanyBindings),
                 if (_boundIds.isEmpty)
-                  const Text('No companies bound')
+                  Text(l10n.adminNoCompaniesBound)
                 else
                   ..._boundIds.map((id) => ListTile(title: Text(_companyLabel(id)), subtitle: Text(id))),
                 AppButton(
-                  label: _saving ? 'Saving…' : 'Edit bindings',
+                  label: _saving ? l10n.commonSaving : l10n.adminEditBindings,
                   expanded: false,
                   onPressed: _saving ? null : _bindCompanies,
                 ),
                 const SizedBox(height: AppSpacing.lg),
                 if (_key?['status'] != 'disabled')
                   AppButton(
-                    label: 'Disable key',
+                    label: l10n.adminDisableKey,
                     expanded: false,
                     variant: AppButtonVariant.outlined,
                     onPressed: _saving ? null : _disableKey,

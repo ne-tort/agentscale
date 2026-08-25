@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/theme/app_color_tokens.dart';
+
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
@@ -7,6 +9,7 @@ import 'package:prodavan/core/widgets/app_form.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/danger_confirm_page.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Edit column metadata / type (L06 PATCH columns).
 class CabinetColumnEditPage extends StatefulWidget {
@@ -76,11 +79,12 @@ class _CabinetColumnEditPageState extends State<CabinetColumnEditPage> {
   }
 
   Future<void> _delete() async {
+    final l10n = AppLocalizations.of(context);
     final ok = await DangerConfirmPage.push(
       context,
-      title: 'Delete column?',
-      message: 'Remove column "$_columnName" and its data.',
-      confirmLabel: 'Delete',
+      title: l10n.cabinetDeleteColumnConfirm,
+      message: l10n.cabinetRemoveColumnData(_columnName),
+      confirmLabel: l10n.commonDelete,
     );
     if (ok != true) return;
 
@@ -107,9 +111,10 @@ class _CabinetColumnEditPageState extends State<CabinetColumnEditPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final busy = _saving || _deleting;
     return AppScaffold(
-      title: const Text('Column settings'),
+      title: Text(l10n.cabinetColumnSettings),
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
@@ -118,11 +123,11 @@ class _CabinetColumnEditPageState extends State<CabinetColumnEditPage> {
           Text(_columnName, style: Theme.of(context).textTheme.titleSmall),
           if (_isProtected)
             Padding(
-              padding: const EdgeInsets.only(top: AppSpacing.sm),
+              padding: EdgeInsets.only(top: AppSpacing.sm),
               child: Text(
-                'System column — read only.',
+                l10n.cabinetSystemColumnReadOnly,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      color: context.appColors.muted,
                     ),
               ),
             ),
@@ -137,7 +142,7 @@ class _CabinetColumnEditPageState extends State<CabinetColumnEditPage> {
               children: [
                 DropdownButtonFormField<String>(
                   value: _type,
-                  decoration: const InputDecoration(labelText: 'Type'),
+                  decoration: InputDecoration(labelText: l10n.cabinetType),
                   items: _columnTypes
                       .map((t) => DropdownMenuItem(value: t, child: Text(t)))
                       .toList(),
@@ -145,25 +150,25 @@ class _CabinetColumnEditPageState extends State<CabinetColumnEditPage> {
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Required'),
+                  title: Text(l10n.commonRequired),
                   value: _required,
                   onChanged: busy ? null : (v) => setState(() => _required = v),
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Unique'),
+                  title: Text(l10n.cabinetUnique),
                   value: _unique,
                   onChanged: busy ? null : (v) => setState(() => _unique = v),
                 ),
                 AppButton(
-                  label: _saving ? 'Saving…' : 'Save',
+                  label: _saving ? l10n.commonSaving : l10n.commonSave,
                   onPressed: busy ? null : _save,
                 ),
               ],
             ),
-            const Divider(height: 32),
+            Divider(height: 32),
             AppButton(
-              label: _deleting ? 'Deleting…' : 'Delete column',
+              label: _deleting ? l10n.commonDeleting : l10n.cabinetDeleteColumn,
               onPressed: busy ? null : _delete,
             ),
           ],

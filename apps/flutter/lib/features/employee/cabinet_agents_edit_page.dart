@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/theme/app_color_tokens.dart';
+
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Edit cabinet AGENTS.md source (materialize writes AGENTS.md + CLAUDE.md).
 class CabinetAgentsEditPage extends StatefulWidget {
@@ -83,17 +86,18 @@ class _CabinetAgentsEditPageState extends State<CabinetAgentsEditPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      title: const Text('AGENTS.md'),
+      title: Text(l10n.cabinetAgentsMd),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               padding: const EdgeInsets.all(AppSpacing.lg),
               children: [
                 Text(
-                  'Written into project workspace on materialize (AGENTS.md + CLAUDE.md). Re-materialize projects to apply.',
+                  l10n.cabinetAgentsMdHint,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        color: context.appColors.muted,
                       ),
                 ),
                 const SizedBox(height: AppSpacing.md),
@@ -102,15 +106,15 @@ class _CabinetAgentsEditPageState extends State<CabinetAgentsEditPage> {
                   controller: _ctrl,
                   maxLines: 18,
                   enabled: !_saving,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     border: OutlineInputBorder(),
                     alignLabelWithHint: true,
-                    labelText: 'Agents instructions',
+                    labelText: l10n.cabinetAgentsInstructions,
                   ),
                 ),
                 const SizedBox(height: AppSpacing.md),
                 AppButton(
-                  label: _saving ? 'Saving…' : 'Save',
+                  label: _saving ? l10n.commonSaving : l10n.commonSave,
                   onPressed: _saving ? null : _save,
                 ),
               ],

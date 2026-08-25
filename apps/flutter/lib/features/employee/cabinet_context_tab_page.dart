@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/theme/app_color_tokens.dart';
+
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
@@ -10,6 +12,7 @@ import 'package:prodavan/core/widgets/stat_tile.dart';
 import 'package:prodavan/features/employee/cabinet_agents_edit_page.dart';
 import 'package:prodavan/features/employee/cabinet_audit_events_page.dart';
 import 'package:prodavan/features/employee/cabinet_meta_tabs_page.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Cabinet context summary — projects, meta tables, MCP tools (L05/L06).
 class CabinetContextTabPage extends StatefulWidget {
@@ -75,6 +78,7 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
   bool _exporting = false;
 
   Future<void> _exportBundle() async {
+    final l10n = AppLocalizations.of(context);
     setState(() {
       _exporting = true;
       _error = null;
@@ -84,7 +88,7 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
       if (!mounted) return;
       final b64 = exported['zip_base64'] as String? ?? '';
       if (b64.isEmpty) {
-        setState(() => _error = 'Empty bundle export');
+        setState(() => _error = l10n.cabinetEmptyBundleExport);
         return;
       }
       final bytes = base64Decode(b64);
@@ -96,7 +100,7 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(saved == null ? 'Export ready (${bytes.length} bytes)' : 'Saved to $saved'),
+          content: Text(saved == null ? l10n.cabinetExportReady('${bytes.length}') : l10n.cabinetSavedTo(saved)),
         ),
       );
     } catch (e) {
@@ -109,6 +113,7 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -123,9 +128,9 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
           if (cab != null) ...[
             const SizedBox(height: 8),
             Text(
-              'Status: ${cab['status'] ?? '—'} · Company ${cab['company_id'] ?? '—'}',
+              l10n.cabinetStatusCompanyLine('${cab['status'] ?? l10n.commonEmDash}', '${cab['company_id'] ?? l10n.commonEmDash}'),
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    color: context.appColors.muted,
                   ),
             ),
           ],
@@ -134,9 +139,9 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
             spacing: 12,
             runSpacing: 12,
             children: [
-              SizedBox(width: 140, child: StatTile(label: 'Projects', value: '$_projects')),
-              SizedBox(width: 140, child: StatTile(label: 'Meta tables', value: '$_tables')),
-              SizedBox(width: 140, child: StatTile(label: 'MCP tools', value: '$_tools')),
+              SizedBox(width: 140, child: StatTile(label: l10n.commonProjects, value: '$_projects')),
+              SizedBox(width: 140, child: StatTile(label: l10n.cabinetMetaTables, value: '$_tables')),
+              SizedBox(width: 140, child: StatTile(label: l10n.cabinetMcpTools, value: '$_tools')),
               SizedBox(
                 width: 140,
                 child: InkWell(
@@ -147,20 +152,20 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
                       ),
                     );
                   },
-                  child: StatTile(label: 'Audit (recent)', value: '$_auditEvents'),
+                  child: StatTile(label: l10n.cabinetAuditRecent, value: '$_auditEvents'),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 16),
           AppButton(
-            label: _exporting ? 'Exporting…' : 'Export cabinet bundle',
+            label: _exporting ? l10n.cabinetExporting : l10n.cabinetExportCabinetBundle,
             expanded: false,
             onPressed: _exporting ? null : _exportBundle,
           ),
           const SizedBox(height: 8),
           AppButton(
-            label: 'Edit AGENTS.md',
+            label: l10n.cabinetEditAgentsMd,
             expanded: false,
             onPressed: () {
               Navigator.of(context).push(
@@ -172,7 +177,7 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
           ),
           const SizedBox(height: 8),
           AppButton(
-            label: 'Manage custom tabs',
+            label: l10n.cabinetManageCustomTabs,
             expanded: false,
             onPressed: () {
               Navigator.of(context).push(
@@ -184,9 +189,9 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
           ),
           const SizedBox(height: 16),
           Text(
-            'Use the Projects tab to open an agent workspace. Tables and Tools tabs expose cabinet runtime data.',
+            l10n.cabinetContextHint,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  color: context.appColors.muted,
                 ),
           ),
         ],

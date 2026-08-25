@@ -9,6 +9,8 @@ import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/cabinet_create_page.dart';
 import 'package:prodavan/features/employee/cabinet_import_bundle_page.dart';
 import 'package:prodavan/features/employee/dynamic_cabinet_shell.dart';
+import 'package:prodavan/features/settings/open_app_settings.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Employee cabinet home — owned cabinets only (L05).
 class CabinetListPage extends StatefulWidget {
@@ -65,6 +67,7 @@ class _CabinetListPageState extends State<CabinetListPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final rows = _cabinets
         .map(
           (c) => AppEntityRow(
@@ -76,11 +79,16 @@ class _CabinetListPageState extends State<CabinetListPage> {
         .toList();
 
     return AppScaffold(
-      title: const Text('Cabinets'),
+      title: Text(l10n.commonCabinets),
       actions: [
-        IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
-        IconButton(onPressed: _openImportBundle, icon: const Icon(Icons.upload_file), tooltip: 'Import bundle'),
-        IconButton(onPressed: _createCabinet, icon: const Icon(Icons.add)),
+        IconButton(onPressed: _reload, icon: Icon(Icons.refresh)),
+        IconButton(onPressed: _openImportBundle, icon: Icon(Icons.upload_file), tooltip: l10n.cabinetImportBundleTooltip),
+        IconButton(onPressed: _createCabinet, icon: Icon(Icons.add)),
+        IconButton(
+          tooltip: l10n.settings,
+          icon: const Icon(Icons.settings_outlined),
+          onPressed: () => openAppSettings(context),
+        ),
       ],
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -90,9 +98,9 @@ class _CabinetListPageState extends State<CabinetListPage> {
             child: AppEntityCollection(
               loading: _loading,
               rows: rows,
-              columns: const [
-                AppEntityColumn(id: 'name', label: 'Name'),
-                AppEntityColumn(id: 'status', label: 'Status'),
+              columns: [
+                AppEntityColumn(id: 'name', label: l10n.commonName),
+                AppEntityColumn(id: 'status', label: l10n.commonStatus),
               ],
               onOpen: (row) {
                 workContext.enterCabinet(row.id);
@@ -103,9 +111,9 @@ class _CabinetListPageState extends State<CabinetListPage> {
                 );
               },
               empty: EmptyState(
-                title: 'No cabinets',
-                subtitle: 'Create a Base cabinet to start',
-                action: AppButton(label: 'Create', expanded: false, onPressed: _createCabinet),
+                title: l10n.companyNoCabinets,
+                subtitle: l10n.cabinetCreateBaseCabinetHint,
+                action: AppButton(label: l10n.commonCreate, expanded: false, onPressed: _createCabinet),
               ),
             ),
           ),

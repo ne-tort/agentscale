@@ -8,6 +8,7 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_section_header.dart';
 import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Full-page company create + optional cabinet quotas (L04 ux-contract — no modals).
 class AdminCompanyCreatePage extends StatefulWidget {
@@ -65,11 +66,12 @@ class _AdminCompanyCreatePageState extends State<AdminCompanyCreatePage> {
 
   Future<void> _create() async {
     if (!_formKey.currentState!.validate()) return;
+    final l10n = AppLocalizations.of(context);
     final maxCabinets = _parsePositive(_maxCabinetsCtrl.text);
     final maxPackages = _parsePositive(_maxPackagesCtrl.text);
     final maxBundleMb = _parsePositive(_maxBundleMbCtrl.text);
     if (maxCabinets == null || maxPackages == null || maxBundleMb == null) {
-      setState(() => _error = 'Cabinet quotas must be positive integers');
+      setState(() => _error = l10n.adminCabinetQuotasMustBePositive);
       return;
     }
 
@@ -124,74 +126,75 @@ class _AdminCompanyCreatePageState extends State<AdminCompanyCreatePage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      title: const Text('Create company'),
+      title: Text(l10n.adminCreateCompany),
       body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.lg),
+        padding: EdgeInsets.all(AppSpacing.lg),
         children: [
           if (_error != null) InlineErrorBanner(message: _error!),
-          const Text('Invite company.admin via Keycloak — password is not accepted.'),
+          Text(l10n.adminInviteCompanyAdminViaKeycloak),
           const SizedBox(height: AppSpacing.md),
           AppForm(
             formKey: _formKey,
             children: [
-              const AppSectionHeader(title: 'Company'),
+              AppSectionHeader(title: l10n.commonCompany),
               AppTextField(
                 controller: _nameCtrl,
-                label: 'Company name',
+                label: l10n.adminCompanyName,
                 validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Name required';
+                  if (v == null || v.trim().isEmpty) return l10n.commonNameRequired;
                   return null;
                 },
               ),
-              const AppSectionHeader(title: 'Company admin invite'),
+              AppSectionHeader(title: l10n.adminCompanyAdminInvite),
               AppTextField(
                 controller: _emailCtrl,
-                label: 'Admin email',
+                label: l10n.adminAdminEmail,
                 keyboardType: TextInputType.emailAddress,
                 validator: (v) {
                   final email = v?.trim() ?? '';
-                  if (email.isEmpty || !email.contains('@')) return 'Valid email required';
+                  if (email.isEmpty || !email.contains('@')) return l10n.companyValidEmailRequired;
                   return null;
                 },
               ),
               AppTextField(
                 controller: _displayNameCtrl,
-                label: 'Display name (optional)',
+                label: l10n.commonDisplayNameOptional,
               ),
-              const AppSectionHeader(title: 'Cabinet quotas'),
+              AppSectionHeader(title: l10n.adminCabinetQuotas),
               AppTextField(
                 controller: _maxCabinetsCtrl,
-                label: 'Max cabinets',
+                label: l10n.adminMaxCabinets,
                 keyboardType: TextInputType.number,
-                validator: (v) => _parsePositive(v ?? '') == null ? 'Positive integer' : null,
+                validator: (v) => _parsePositive(v ?? '') == null ? l10n.commonPositiveInteger : null,
               ),
               AppTextField(
                 controller: _maxPackagesCtrl,
-                label: 'Max packages per cabinet',
+                label: l10n.adminMaxPackagesPerCabinet,
                 keyboardType: TextInputType.number,
-                validator: (v) => _parsePositive(v ?? '') == null ? 'Positive integer' : null,
+                validator: (v) => _parsePositive(v ?? '') == null ? l10n.commonPositiveInteger : null,
               ),
               AppTextField(
                 controller: _maxBundleMbCtrl,
-                label: 'Max bundle import (MB)',
+                label: l10n.adminMaxBundleImportMb,
                 keyboardType: TextInputType.number,
-                validator: (v) => _parsePositive(v ?? '') == null ? 'Positive integer' : null,
+                validator: (v) => _parsePositive(v ?? '') == null ? l10n.commonPositiveInteger : null,
               ),
-              const AppSectionHeader(title: 'Prodavan subscription (optional)'),
+              AppSectionHeader(title: l10n.adminProdavanSubscriptionOptional),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                title: const Text('Lifetime subscription'),
+                title: Text(l10n.adminLifetimeSubscription),
                 value: _subscriptionLifetime,
                 onChanged: _saving ? null : (v) => setState(() => _subscriptionLifetime = v),
               ),
               AppTextField(
                 controller: _subscriptionEndsCtrl,
-                label: 'Ends at (YYYY-MM-DD, if not lifetime)',
+                label: l10n.adminEndsAtIfNotLifetime,
                 enabled: !_saving && !_subscriptionLifetime,
               ),
               AppButton(
-                label: _saving ? 'Creating…' : 'Create company',
+                label: _saving ? l10n.commonCreating : l10n.adminCreateCompany,
                 onPressed: _saving ? null : _create,
               ),
             ],

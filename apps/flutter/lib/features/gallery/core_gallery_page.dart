@@ -11,6 +11,7 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_selector_page.dart';
 import 'package:prodavan/core/widgets/danger_confirm_page.dart';
 import 'package:prodavan/core/widgets/empty_state.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Demo of core primitives without backend (L02).
 class CoreGalleryPage extends StatelessWidget {
@@ -18,45 +19,46 @@ class CoreGalleryPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final rows = [
-      const AppEntityRow(
+      AppEntityRow(
         id: '1',
-        title: 'Alpha',
-        subtitle: 'demo',
+        title: l10n.galleryAlpha,
+        subtitle: l10n.galleryDemo,
         cells: {'status': 'active', 'count': '3'},
       ),
-      const AppEntityRow(
+      AppEntityRow(
         id: '2',
-        title: 'Beta',
-        subtitle: 'demo',
+        title: l10n.galleryBeta,
+        subtitle: l10n.galleryDemo,
         cells: {'status': 'paused', 'count': '0'},
       ),
     ];
 
     return AppScaffold(
-      title: const Text('Core gallery'),
+      title: Text(l10n.galleryCoreGallery),
       body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.md),
+        padding: EdgeInsets.all(AppSpacing.md),
         children: [
-          Text('Buttons', style: Theme.of(context).textTheme.titleMedium),
+          Text(l10n.galleryButtons, style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: AppSpacing.sm),
           Row(
             children: [
               AppIconButton(
                 icon: Icons.add,
-                tooltip: 'Add',
+                tooltip: l10n.commonAdd,
                 onPressed: () {},
               ),
               AppIconToggle(
                 icon: Icons.filter_list,
-                tooltip: 'Filter',
+                tooltip: l10n.commonFilter,
                 selected: true,
                 onPressed: () {},
               ),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: AppButton(
-                  label: 'Создать',
+                  label: l10n.commonCreate,
                   expanded: false,
                   onPressed: () {},
                 ),
@@ -64,33 +66,33 @@ class CoreGalleryPage extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.lg),
-          Text('List item', style: Theme.of(context).textTheme.titleMedium),
+          Text(l10n.galleryListItem, style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: AppSpacing.sm),
           AppListItem(
-            title: const Text('Sample row'),
-            subtitle: const Text('subtitle'),
-            trailing: const Icon(Icons.chevron_right),
+            title: Text(l10n.gallerySampleRow),
+            subtitle: Text(l10n.gallerySubtitle),
+            trailing: Icon(Icons.chevron_right),
             onTap: () {},
           ),
           const SizedBox(height: AppSpacing.lg),
-          Text('Selection', style: Theme.of(context).textTheme.titleMedium),
+          Text(l10n.gallerySelection, style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: AppSpacing.sm),
-          const AppCheckbox(value: true, onChanged: null, label: 'Check'),
-          const AppRadio<int>(value: 1, groupValue: 1, onChanged: null, label: 'Radio'),
+          AppCheckbox(value: true, onChanged: null, label: l10n.galleryCheck),
+          AppRadio<int>(value: 1, groupValue: 1, onChanged: null, label: l10n.galleryRadio),
           const SizedBox(height: AppSpacing.lg),
           AppButton(
-            label: 'Selector',
+            label: l10n.gallerySelector,
             onPressed: () async {
               await Navigator.of(context).push<Set<String>>(
                 MaterialPageRoute(
                   builder: (_) => AppSelectorPage(
-                    title: 'Pick',
+                    title: l10n.galleryPick,
                     multiSelect: true,
                     showCheckboxes: true,
                     searchEnabled: true,
-                    items: const [
-                      AppSelectorItem(id: 'a', title: 'One'),
-                      AppSelectorItem(id: 'b', title: 'Two'),
+                    items: [
+                      AppSelectorItem(id: 'a', title: l10n.galleryOne),
+                      AppSelectorItem(id: 'b', title: l10n.galleryTwo),
                     ],
                   ),
                 ),
@@ -99,39 +101,39 @@ class CoreGalleryPage extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.sm),
           AppButton(
-            label: 'Danger',
+            label: l10n.galleryDanger,
             variant: AppButtonVariant.outlined,
             onPressed: () {
               DangerConfirmPage.push(
                 context,
-                title: 'Удалить',
-                message: 'Demo confirm',
+                title: l10n.commonDelete,
+                message: l10n.galleryDemoConfirm,
               );
             },
           ),
           const SizedBox(height: AppSpacing.lg),
-          Text('EntityCollection', style: Theme.of(context).textTheme.titleMedium),
+          Text(l10n.galleryEntityCollection, style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: AppSpacing.sm),
           SizedBox(
             height: 280,
             child: AppEntityCollection(
               rows: rows,
-              columns: const [
-                AppEntityColumn(id: 'status', label: 'Status'),
-                AppEntityColumn(id: 'count', label: 'Count'),
+              columns: [
+                AppEntityColumn(id: 'status', label: l10n.commonStatus),
+                AppEntityColumn(id: 'count', label: l10n.galleryCount),
               ],
               onOpen: (_) {},
               toolbar: [
                 AppIconButton(
                   icon: Icons.add,
-                  tooltip: 'Add',
+                  tooltip: l10n.commonAdd,
                   onPressed: () {},
                 ),
               ],
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
-          const EmptyState(title: 'Пусто', subtitle: null),
+          EmptyState(title: l10n.commonEmpty, subtitle: null),
         ],
       ),
     );

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/theme/app_color_tokens.dart';
+
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
@@ -8,6 +10,7 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/danger_confirm_page.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Rename or archive a meta table (L06).
 class CabinetTableSettingsPage extends StatefulWidget {
@@ -71,12 +74,12 @@ class _CabinetTableSettingsPageState extends State<CabinetTableSettingsPage> {
   }
 
   Future<void> _archive() async {
+    final l10n = AppLocalizations.of(context);
     final ok = await DangerConfirmPage.push(
       context,
-      title: 'Archive table?',
-      message:
-          'Archive "${widget.tableSlug}". Rows stay in DB but table hides from lists. Remove views referencing this table first.',
-      confirmLabel: 'Archive',
+      title: l10n.cabinetArchiveTableConfirm,
+      message: l10n.cabinetArchiveTableMessage(widget.tableSlug),
+      confirmLabel: l10n.commonArchive,
     );
     if (ok != true) return;
 
@@ -104,11 +107,12 @@ class _CabinetTableSettingsPageState extends State<CabinetTableSettingsPage> {
   }
 
   Future<void> _deletePermanently() async {
+    final l10n = AppLocalizations.of(context);
     final ok = await DangerConfirmPage.push(
       context,
-      title: 'Delete table permanently?',
-      message: 'Drop all data for "${widget.tableSlug}". This cannot be undone.',
-      confirmLabel: 'Delete',
+      title: l10n.cabinetDeleteTablePermanently,
+      message: l10n.cabinetDropAllDataConfirm(widget.tableSlug),
+      confirmLabel: l10n.commonDelete,
     );
     if (ok != true) return;
 
@@ -134,9 +138,10 @@ class _CabinetTableSettingsPageState extends State<CabinetTableSettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final busy = _saving || _archiving || _deleting;
     return AppScaffold(
-      title: const Text('Table settings'),
+      title: Text(l10n.cabinetTableSettings),
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
@@ -144,9 +149,9 @@ class _CabinetTableSettingsPageState extends State<CabinetTableSettingsPage> {
           const SizedBox(height: AppSpacing.sm),
           if (_archived)
             Text(
-              'Archived — you can delete permanently or go back.',
+              l10n.cabinetArchivedBanner,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    color: context.appColors.muted,
                   ),
             ),
           if (_archived) const SizedBox(height: AppSpacing.sm),
@@ -157,25 +162,25 @@ class _CabinetTableSettingsPageState extends State<CabinetTableSettingsPage> {
               children: [
                 AppTextField(
                   controller: _label,
-                  label: 'Label',
+                  label: l10n.commonLabel,
                   enabled: !busy,
-                  validator: (v) => (v ?? '').trim().isEmpty ? 'Required' : null,
+                  validator: (v) => (v ?? '').trim().isEmpty ? l10n.commonRequired : null,
                 ),
                 AppButton(
-                  label: _saving ? 'Saving…' : 'Save label',
+                  label: _saving ? l10n.commonSaving : l10n.cabinetSaveLabel,
                   onPressed: busy ? null : _saveLabel,
                 ),
               ],
             ),
-          if (!_archived) const Divider(height: 32),
+          if (!_archived) Divider(height: 32),
           if (!_archived)
             AppButton(
-              label: _archiving ? 'Archiving…' : 'Archive table',
+              label: _archiving ? l10n.cabinetArchiving : l10n.cabinetArchiveTable,
               onPressed: busy ? null : _archive,
             ),
           if (_archived)
             AppButton(
-              label: _deleting ? 'Deleting…' : 'Delete permanently',
+              label: _deleting ? l10n.commonDeleting : l10n.cabinetDeletePermanently,
               onPressed: busy ? null : _deletePermanently,
             ),
         ],

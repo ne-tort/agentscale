@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/theme/app_color_tokens.dart';
+
 /// Toolbar / chrome icon action — default button kind (see docs/target/07 buttons).
 class AppIconButton extends StatelessWidget {
   const AppIconButton({
@@ -17,17 +19,15 @@ class AppIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    final colors = context.appColors;
     return IconButton(
       onPressed: onPressed,
       tooltip: tooltip,
       icon: Icon(icon),
       style: IconButton.styleFrom(
         minimumSize: const Size(48, 48),
-        foregroundColor: selected ? colorScheme.primary : null,
-        backgroundColor: selected
-            ? colorScheme.primary.withValues(alpha: 0.12)
-            : null,
+        foregroundColor: selected ? colors.primary : null,
+        backgroundColor: selected ? colors.primary.withValues(alpha: 0.12) : null,
       ),
     );
   }

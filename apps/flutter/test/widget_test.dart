@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -7,20 +8,32 @@ import 'package:prodavan/core/theme/app_theme.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_selector_page.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
-Widget themed(Widget home) {
-  return MaterialApp(theme: AppTheme.light, home: home);
+Widget themed(Widget home, {Locale locale = const Locale('en')}) {
+  return MaterialApp(
+    theme: AppTheme.light,
+    locale: locale,
+    supportedLocales: AppLocalizations.supportedLocales,
+    localizationsDelegates: const [
+      AppLocalizations.delegate,
+      GlobalMaterialLocalizations.delegate,
+      GlobalWidgetsLocalizations.delegate,
+      GlobalCupertinoLocalizations.delegate,
+    ],
+    home: home,
+  );
 }
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('app entry shows sign in', (tester) async {
+  testWidgets('app entry shows sign in (default ru)', (tester) async {
     SharedPreferences.setMockInitialValues({});
     await tester.pumpWidget(const ProdavanApp());
-    await tester.pump(); // SessionGate starts restore
-    await tester.pump(); // load() completes → LoginPage
-    expect(find.text('Sign in'), findsOneWidget);
+    // Wait for appSettings.load() + session restore → LoginPage.
+    await tester.pumpAndSettle();
+    expect(find.text('Вход'), findsOneWidget);
   });
 
   testWidgets('entity collection list opens row', (tester) async {

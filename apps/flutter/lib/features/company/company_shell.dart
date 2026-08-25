@@ -5,6 +5,8 @@ import 'package:prodavan/core/widgets/app_layout.dart';
 import 'package:prodavan/features/company/company_cabinets_page.dart';
 import 'package:prodavan/features/company/company_employees_page.dart';
 import 'package:prodavan/features/company/company_overview_page.dart';
+import 'package:prodavan/features/settings/open_app_settings.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Company admin shell — adaptive nav per ux-contract (L04).
 class CompanyShell extends StatefulWidget {
@@ -17,14 +19,9 @@ class CompanyShell extends StatefulWidget {
 class _CompanyShellState extends State<CompanyShell> {
   int _index = 0;
 
-  static const _destinations = [
-    AppNavDestination(icon: Icons.dashboard_outlined, label: 'Overview'),
-    AppNavDestination(icon: Icons.group_outlined, label: 'Employees'),
-    AppNavDestination(icon: Icons.view_module_outlined, label: 'Cabinets'),
-  ];
-
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final companyId = companyContext.companyId!;
     final title = companyContext.companyName ?? companyId;
     final pages = [
@@ -37,7 +34,12 @@ class _CompanyShellState extends State<CompanyShell> {
       title: Text(title),
       selectedIndex: _index,
       onDestinationSelected: (i) => setState(() => _index = i),
-      destinations: _destinations,
+      onOpenSettings: () => openAppSettings(context),
+      destinations: [
+        AppNavDestination(icon: Icons.dashboard_outlined, label: l10n.navOverview),
+        AppNavDestination(icon: Icons.group_outlined, label: l10n.navEmployees),
+        AppNavDestination(icon: Icons.view_module_outlined, label: l10n.navCabinets),
+      ],
       body: pages[_index],
     );
   }

@@ -1,0 +1,1339 @@
+// ignore: unused_import
+import 'package:intl/intl.dart' as intl;
+
+import 'app_localizations.dart';
+
+// ignore_for_file: type=lint
+
+/// The translations for Russian (`ru`).
+class AppLocalizationsRu extends AppLocalizations {
+  AppLocalizationsRu([String locale = 'ru']) : super(locale);
+
+  @override
+  String get adminActiveEmployees => 'Активные сотрудники';
+
+  @override
+  String get adminAdminEmail => 'Email администратора';
+
+  @override
+  String get adminAgentMessages => 'Сообщения агента';
+
+  @override
+  String get adminAgentPolicySaved => 'Политика агента сохранена';
+
+  @override
+  String get adminAgentRuntimePolicy => 'Политика runtime агента';
+
+  @override
+  String get adminAiKeysBound => 'Привязанные AI-ключи';
+
+  @override
+  String adminAlertHighUsageTitle(String companyName) {
+    return '$companyName: высокий расход токенов агента';
+  }
+
+  @override
+  String adminAlertKeyRenewalTitle(String companyName) {
+    return '$companyName: скоро продление AI-ключа';
+  }
+
+  @override
+  String adminAlertKeysRenewingSoon(String count) {
+    return 'Скоро продление: $count ключ(ей)';
+  }
+
+  @override
+  String adminAlertKeysRenewingSoonNext(String count, String next) {
+    return 'Скоро продление: $count · ближайшее $next';
+  }
+
+  @override
+  String get adminAlertNoKeysSubtitle => 'Сессии агента завершатся с NO_AI_KEY';
+
+  @override
+  String adminAlertNoKeysTitle(String companyName) {
+    return '$companyName: нет привязанных AI-ключей';
+  }
+
+  @override
+  String adminAlertSubExpiredTitle(String companyName) {
+    return '$companyName: подписка истекла';
+  }
+
+  @override
+  String adminAlertSubExpiringTitle(String companyName) {
+    return '$companyName: подписка скоро истекает';
+  }
+
+  @override
+  String get adminAlertSubscriptionEnded => 'Подписка закончилась';
+
+  @override
+  String adminAlertSubscriptionEndedAt(String ends) {
+    return 'Подписка закончилась · $ends';
+  }
+
+  @override
+  String get adminAlertSubscriptionEndsSoon => 'Подписка скоро закончится';
+
+  @override
+  String adminAlertSubscriptionEndsSoonAt(String ends) {
+    return 'Подписка скоро закончится · $ends';
+  }
+
+  @override
+  String adminAlertTokensAboveThreshold(String tokens) {
+    return 'Токены агента $tokens выше порога платформы';
+  }
+
+  @override
+  String get adminAlerts => 'Предупреждения';
+
+  @override
+  String get adminApiKind => 'Тип API';
+
+  @override
+  String adminApiKindValue(String api_kind) {
+    return 'Тип API: $api_kind';
+  }
+
+  @override
+  String get adminBindCompanies => 'Привязать компании';
+
+  @override
+  String adminBindingsSelected(String count) {
+    return 'Выбрано: $count';
+  }
+
+  @override
+  String get adminBundle => 'Бандл';
+
+  @override
+  String get adminCabinetQuotas => 'Квоты кабинетов';
+
+  @override
+  String get adminCabinetQuotasMustBePositive =>
+      'Квоты кабинетов — целые числа больше нуля';
+
+  @override
+  String adminCabinetsProjectsSubtitle(String cabinets, String projects) {
+    return '$cabinets кабинетов · $projects проектов';
+  }
+
+  @override
+  String adminCabinetsQuotaCell(String active, String max) {
+    return '$active / $max кабинетов';
+  }
+
+  @override
+  String get adminCompanyAdminInvite => 'Приглашение admin компании';
+
+  @override
+  String get adminCompanyBindings => 'Привязки компаний';
+
+  @override
+  String get adminCompanyName => 'Название компании';
+
+  @override
+  String get adminCreateAiKey => 'Создать AI-ключ';
+
+  @override
+  String get adminCreateCompany => 'Создать компанию';
+
+  @override
+  String get adminCreateCompanyAndInviteAdmin =>
+      'Создайте компанию и пригласите company.admin';
+
+  @override
+  String get adminCreateCompanyToSeeMetrics =>
+      'Создайте компанию, чтобы видеть метрики';
+
+  @override
+  String get adminCreateKey => 'Создать ключ';
+
+  @override
+  String get adminCreateRuntimeKeyHint =>
+      'Создайте runtime-ключ и привяжите компании';
+
+  @override
+  String get adminDisableAiKey => 'Отключить AI-ключ';
+
+  @override
+  String get adminDisableKey => 'Отключить ключ';
+
+  @override
+  String adminDisableKeyConfirm(String keyName) {
+    return 'Отключить $keyName? Сессии агента завершатся с NO_AI_KEY.';
+  }
+
+  @override
+  String get adminDrainProjectTriggers => 'Сбросить триггеры проектов';
+
+  @override
+  String adminDrainedTriggers(String count) {
+    return 'Сброшено триггеров: $count';
+  }
+
+  @override
+  String get adminDraining => 'Сброс…';
+
+  @override
+  String get adminEditBindings => 'Изменить привязки';
+
+  @override
+  String get adminEndsAt => 'Окончание (ГГГГ-ММ-ДД)';
+
+  @override
+  String get adminEndsAtIfNotLifetime =>
+      'Окончание (ГГГГ-ММ-ДД, если не бессрочная)';
+
+  @override
+  String adminEnterIntegerMin(String min) {
+    return 'Введите целое ≥ $min';
+  }
+
+  @override
+  String get adminIdlePauseAfterHours =>
+      'Пауза после простоя, часы (пусто/0 = выкл.)';
+
+  @override
+  String adminIdlePausedProjectsInCompany(String count) {
+    return 'На паузу по простою: $count проект(ов) в компании';
+  }
+
+  @override
+  String get adminInviteCompanyAdminViaKeycloak =>
+      'Приглашение company.admin через Keycloak — пароль не принимается.';
+
+  @override
+  String get adminKey => 'Ключ';
+
+  @override
+  String get adminKeyInfo => 'О ключе';
+
+  @override
+  String adminKeyListSubtitle(String provider, String api_kind, String status) {
+    return '$provider · $api_kind · $status';
+  }
+
+  @override
+  String get adminKeyMetadata => 'Метаданные ключа';
+
+  @override
+  String get adminLifecycle => 'Жизненный цикл';
+
+  @override
+  String get adminLifetimeSubscription => 'Бессрочная подписка';
+
+  @override
+  String get adminMaxAgentTokensMonth =>
+      'Макс. токенов агента / месяц (необязательно)';
+
+  @override
+  String get adminMaxBundleImportMb => 'Макс. размер импорта бандла (МБ)';
+
+  @override
+  String get adminMaxCabinets => 'Макс. кабинетов';
+
+  @override
+  String get adminMaxChatAttachmentMb => 'Макс. размер вложения в чат (МБ)';
+
+  @override
+  String get adminMaxPackagesPerCabinet => 'Макс. пакетов на кабинет';
+
+  @override
+  String get adminMaxTokensPerRun => 'Макс. токенов за запуск (необязательно)';
+
+  @override
+  String get adminMaxUsdCostMonth =>
+      'Макс. стоимость USD / месяц (необязательно)';
+
+  @override
+  String get adminMetadataOnly => 'только метаданные';
+
+  @override
+  String get adminMetrics => 'Метрики';
+
+  @override
+  String adminMetricsAiKeysRenewSoon(String count) {
+    return 'Скоро продление AI-ключей: $count';
+  }
+
+  @override
+  String adminMetricsAiKeysRenewSoonNext(String count, String next) {
+    return 'Скоро продление AI-ключей: $count · ближайшее $next';
+  }
+
+  @override
+  String adminMetricsHighTokenUsage(String tokens) {
+    return 'Высокий расход токенов агента ($tokens)';
+  }
+
+  @override
+  String get adminMetricsNoAiKeysBound =>
+      'Нет AI-ключей — агент вернёт NO_AI_KEY';
+
+  @override
+  String get adminMetricsSubscriptionExpired => 'Подписка истекла';
+
+  @override
+  String adminMetricsSubscriptionExpiring(String ends) {
+    return 'Подписка истекает · $ends';
+  }
+
+  @override
+  String get adminModelAllowlist =>
+      'Allowlist моделей (через запятую, пусто = любые)';
+
+  @override
+  String get adminNewSecret => 'Новый секрет';
+
+  @override
+  String adminNextRenewalValue(String next_renewal_at) {
+    return 'Следующее продление: $next_renewal_at';
+  }
+
+  @override
+  String get adminNoAiKeys => 'Нет AI-ключей';
+
+  @override
+  String get adminNoCompanies => 'Нет компаний';
+
+  @override
+  String get adminNoCompaniesBound => 'Компании не привязаны';
+
+  @override
+  String get adminNoCompaniesYet => 'Компаний пока нет';
+
+  @override
+  String get adminNoPlatformEventsYet => 'Событий платформы пока нет';
+
+  @override
+  String get adminNoStarterBundles => 'Нет стартовых бандлов';
+
+  @override
+  String get adminPlatformEvents => 'События платформы';
+
+  @override
+  String get adminPlatformFallback => 'Fallback платформы';
+
+  @override
+  String adminPlatformIdleSweep(String count, String companies) {
+    return 'Пауза по простою: $count проект(ов) ($companies компаний с политикой)';
+  }
+
+  @override
+  String get adminPlatformTotals => 'Итого по платформе';
+
+  @override
+  String get adminPreferredProviderOptional =>
+      'Предпочтительный провайдер (необязательно)';
+
+  @override
+  String get adminProdavanSubscription => 'Подписка Prodavan';
+
+  @override
+  String get adminProdavanSubscriptionOptional =>
+      'Подписка Prodavan (необязательно)';
+
+  @override
+  String adminProviderValue(String provider) {
+    return 'Провайдер: $provider';
+  }
+
+  @override
+  String get adminQuotasSaved => 'Квоты сохранены';
+
+  @override
+  String get adminRenewPlusOneMonth => 'Продлить +1 месяц';
+
+  @override
+  String get adminRenewing => 'Продление…';
+
+  @override
+  String adminRotateKeyTitle(String keyName) {
+    return 'Смена секрета: $keyName';
+  }
+
+  @override
+  String get adminRotateSecret => 'Сменить секрет';
+
+  @override
+  String get adminRotateSecretHint =>
+      'Новый секрет заменит сохранённый. Старый будет удалён из file store.';
+
+  @override
+  String get adminRotating => 'Смена…';
+
+  @override
+  String get adminSaveAgentPolicy => 'Сохранить политику агента';
+
+  @override
+  String get adminSaveQuotas => 'Сохранить квоты';
+
+  @override
+  String get adminSaveSubscription => 'Сохранить подписку';
+
+  @override
+  String adminSecretRefValue(String secret_ref_prefix) {
+    return 'Secret ref: $secret_ref_prefix';
+  }
+
+  @override
+  String get adminSecretRequired => 'Укажите секрет';
+
+  @override
+  String get adminSecretStoredServerSide => 'Секрет хранится только на сервере';
+
+  @override
+  String get adminSetEndDateOrLifetime =>
+      'Укажите дату окончания или бессрочную подписку';
+
+  @override
+  String get adminShipped => 'поставлен';
+
+  @override
+  String get adminStarterBundles => 'Стартовые бандлы';
+
+  @override
+  String get adminStarterBundlesHint =>
+      'Записи каталога появляются при поставке в data/starter_bundles/';
+
+  @override
+  String adminStatusValue(String status) {
+    return 'Статус: $status';
+  }
+
+  @override
+  String get adminSubscriptionSaved => 'Подписка сохранена';
+
+  @override
+  String get adminSweepIdlePause => 'Пауза по простою';
+
+  @override
+  String get adminSweepIdlePauseAll => 'Пауза по простою (все компании)';
+
+  @override
+  String get adminSweeping => 'Выполнение…';
+
+  @override
+  String get adminTelegramHmacConfigured =>
+      'Telegram HMAC: задан (оставьте пустым, чтобы не менять)';
+
+  @override
+  String get adminTelegramHmacNotSet => 'Telegram HMAC: не задан';
+
+  @override
+  String get adminTelegramHmacSecret =>
+      'Секрет Telegram HMAC (запись, необязательно)';
+
+  @override
+  String get adminTokens => 'Токены';
+
+  @override
+  String get adminToolPreset => 'Пресет инструментов';
+
+  @override
+  String get adminWebhookHmacConfigured =>
+      'Webhook HMAC: задан (оставьте пустым, чтобы не менять)';
+
+  @override
+  String get adminWebhookHmacNotSet => 'Webhook HMAC: не задан';
+
+  @override
+  String get adminWebhookHmacSecret =>
+      'Секрет Webhook HMAC (запись, необязательно)';
+
+  @override
+  String get authAdvanced => 'Дополнительно';
+
+  @override
+  String get authBearerAccessToken => 'Bearer access token';
+
+  @override
+  String get authBearerAccessTokenPaste => 'Bearer access token (вставить)';
+
+  @override
+  String authConfigUnavailableTestMode(String e) {
+    return 'Конфиг auth недоступен — тестовый режим. $e';
+  }
+
+  @override
+  String get authConnecting => 'Подключение…';
+
+  @override
+  String get authContinueAsDemoEmployee => 'Войти как Demo Employee';
+
+  @override
+  String get authContinueAsPlatformAdmin => 'Войти как Platform Admin';
+
+  @override
+  String get authContinueWithToken => 'Продолжить с токеном';
+
+  @override
+  String get authDevTestModeHint =>
+      'Тестовый режим — вход в один клик (без Keycloak)';
+
+  @override
+  String get authHideAdvanced => 'Скрыть дополнительно';
+
+  @override
+  String get authNoAccessTokenInTestLogin =>
+      'В ответе test login нет access_token';
+
+  @override
+  String get authOidcModeHint =>
+      'OIDC — PKCE через Keycloak (AppAuth / loopback на десктопе)';
+
+  @override
+  String get authOpeningLogin => 'Открываем вход…';
+
+  @override
+  String get authReloadAuthConfig => 'Обновить конфиг auth';
+
+  @override
+  String get authSignIn => 'Вход';
+
+  @override
+  String get authSignInWithKeycloak => 'Войти через Keycloak';
+
+  @override
+  String get authSigningIn => 'Входим…';
+
+  @override
+  String get cabinetAddAtLeastOneColumn => 'Добавьте хотя бы одну колонку';
+
+  @override
+  String get cabinetAddColumn => 'Добавить колонку';
+
+  @override
+  String get cabinetAddRow => 'Добавить строку';
+
+  @override
+  String get cabinetAgentsInstructions => 'Инструкции для агентов';
+
+  @override
+  String get cabinetAgentsMd => 'AGENTS.md';
+
+  @override
+  String get cabinetAgentsMdHint =>
+      'Пишется в workspace проекта при materialize (AGENTS.md + CLAUDE.md). Пересоздайте проекты, чтобы применить.';
+
+  @override
+  String get cabinetArchiveTable => 'В архив';
+
+  @override
+  String get cabinetArchiveTableConfirm => 'Отправить таблицу в архив?';
+
+  @override
+  String cabinetArchiveTableMessage(String tableSlug) {
+    return 'Архивировать «$tableSlug». Строки останутся в БД, таблица скрывается из списков. Сначала уберите представления с этой таблицей.';
+  }
+
+  @override
+  String get cabinetArchivedBanner =>
+      'В архиве — можно удалить навсегда или вернуться назад.';
+
+  @override
+  String get cabinetArchiving => 'Архивация…';
+
+  @override
+  String get cabinetAuditLog => 'Журнал аудита';
+
+  @override
+  String get cabinetAuditRecent => 'Аудит (недавние)';
+
+  @override
+  String get cabinetCabinetName => 'Название кабинета';
+
+  @override
+  String get cabinetChooseZipFile => 'Выбрать .zip';
+
+  @override
+  String get cabinetColumnName => 'Имя колонки';
+
+  @override
+  String get cabinetColumnSettings => 'Настройки колонки';
+
+  @override
+  String cabinetColumnTypeChip(String name, String type) {
+    return '$name · $type';
+  }
+
+  @override
+  String get cabinetColumns => 'Колонки';
+
+  @override
+  String get cabinetContextHint =>
+      'Вкладка «Проекты» открывает workspace агента. Таблицы и Tools — runtime-данные кабинета.';
+
+  @override
+  String cabinetContextStatusLine(String status, String companyId) {
+    return 'Статус: $status · Компания $companyId';
+  }
+
+  @override
+  String get cabinetCouldNotReadZipBytes => 'Не удалось прочитать zip';
+
+  @override
+  String get cabinetCreateBaseCabinetHint =>
+      'Создайте базовый кабинет, чтобы начать';
+
+  @override
+  String get cabinetCreateCabinet => 'Создать кабинет';
+
+  @override
+  String get cabinetCreateMetaTableFirst =>
+      'Сначала создайте мета-таблицу (Таблицы → Новая таблица).';
+
+  @override
+  String get cabinetCreateTab => 'Создать вкладку';
+
+  @override
+  String get cabinetCreateTable => 'Создать таблицу';
+
+  @override
+  String get cabinetCustomTabs => 'Пользовательские вкладки';
+
+  @override
+  String get cabinetCustomTabsHint =>
+      'После создания вкладки появятся в оболочке кабинета. Системные вкладки здесь не удаляются.';
+
+  @override
+  String get cabinetDeleteColumn => 'Удалить колонку';
+
+  @override
+  String get cabinetDeleteColumnConfirm => 'Удалить колонку?';
+
+  @override
+  String get cabinetDeletePermanently => 'Удалить навсегда';
+
+  @override
+  String get cabinetDeleteRow => 'Удалить строку?';
+
+  @override
+  String cabinetDeleteRowPermanently(String rowId) {
+    return 'Удалить строку $rowId навсегда.';
+  }
+
+  @override
+  String get cabinetDeleteTab => 'Удалить вкладку?';
+
+  @override
+  String get cabinetDeleteTablePermanently => 'Удалить таблицу навсегда?';
+
+  @override
+  String cabinetDropAllDataConfirm(String tableSlug) {
+    return 'Удалить все данные «$tableSlug». Это необратимо.';
+  }
+
+  @override
+  String get cabinetEditAgentsMd => 'Редактировать AGENTS.md';
+
+  @override
+  String get cabinetEditRow => 'Редактировать строку';
+
+  @override
+  String get cabinetEmptyBundleExport => 'Пустой экспорт бандла';
+
+  @override
+  String get cabinetEnterAtLeastOneField => 'Заполните хотя бы одно поле';
+
+  @override
+  String get cabinetExportCabinetBundle => 'Экспорт бандла кабинета';
+
+  @override
+  String cabinetExportReady(String bytes) {
+    return 'Экспорт готов ($bytes байт)';
+  }
+
+  @override
+  String get cabinetExporting => 'Экспорт…';
+
+  @override
+  String get cabinetFromFile => 'Из файла';
+
+  @override
+  String get cabinetImportBundleIntro =>
+      'Импорт zip cabinet.bundle из другого кабинета. Создаётся новый кабинет со своей схемой.';
+
+  @override
+  String get cabinetImportBundleTooltip => 'Импорт бандла';
+
+  @override
+  String get cabinetImportCabinetBundle => 'Импорт бандла кабинета';
+
+  @override
+  String get cabinetImportedCabinetDefault => 'Импортированный кабинет';
+
+  @override
+  String get cabinetImporting => 'Импорт…';
+
+  @override
+  String get cabinetLettersDigitsUnderscore => 'Буквы, цифры и подчёркивание';
+
+  @override
+  String get cabinetLowercaseSlugRule =>
+      'Строчные латинские буквы, цифры, подчёркивание';
+
+  @override
+  String get cabinetManageCustomTabs => 'Пользовательские вкладки';
+
+  @override
+  String get cabinetMcpTools => 'MCP-инструменты';
+
+  @override
+  String get cabinetMetaTables => 'Мета-таблицы';
+
+  @override
+  String get cabinetMyCabinetDefault => 'Мой кабинет';
+
+  @override
+  String get cabinetNewCabinet => 'Новый кабинет';
+
+  @override
+  String get cabinetNewCustomTab => 'Новая пользовательская вкладка';
+
+  @override
+  String get cabinetNewTab => 'Новая вкладка';
+
+  @override
+  String get cabinetNewTable => 'Новая таблица';
+
+  @override
+  String get cabinetNoAuditEventsYet => 'Событий аудита пока нет.';
+
+  @override
+  String get cabinetNoCompanyIdFromMe => 'Нет company_id в memberships /me';
+
+  @override
+  String get cabinetNoCustomTabsYet => 'Пользовательских вкладок пока нет.';
+
+  @override
+  String cabinetNoInterpreterForView(String slug) {
+    return 'Нет интерпретатора для представления «$slug».';
+  }
+
+  @override
+  String get cabinetNoMcpTools => 'Для этого кабинета нет MCP-инструментов.';
+
+  @override
+  String get cabinetNoMetaTablesYet => 'В этом кабинете ещё нет мета-таблиц.';
+
+  @override
+  String get cabinetNoRows => 'Нет строк';
+
+  @override
+  String get cabinetNotShipped => 'не поставлен';
+
+  @override
+  String get cabinetOfficialStarterBundles => 'Официальные стартовые бандлы';
+
+  @override
+  String cabinetRemoveColumnData(String columnName) {
+    return 'Удалить колонку «$columnName» и её данные.';
+  }
+
+  @override
+  String cabinetRemoveTabAndView(String title) {
+    return 'Удалить вкладку «$title» и её представление.';
+  }
+
+  @override
+  String get cabinetReservedName => 'Зарезервированное имя';
+
+  @override
+  String cabinetRowFallback(String index) {
+    return 'Строка $index';
+  }
+
+  @override
+  String get cabinetSaveLabel => 'Сохранить подпись';
+
+  @override
+  String get cabinetSaveRow => 'Сохранить строку';
+
+  @override
+  String get cabinetSaveView => 'Сохранить представление';
+
+  @override
+  String cabinetSavedTo(String path) {
+    return 'Сохранено: $path';
+  }
+
+  @override
+  String get cabinetSelectATable => 'Выберите таблицу';
+
+  @override
+  String get cabinetSelectCabinetBundleZip => 'Выберите zip cabinet.bundle';
+
+  @override
+  String get cabinetSelectTableToPreview =>
+      'Выберите таблицу для просмотра строк';
+
+  @override
+  String get cabinetSlug => 'Slug';
+
+  @override
+  String cabinetStatusCompanyLine(String status, String companyId) {
+    return 'Статус: $status · Компания $companyId';
+  }
+
+  @override
+  String get cabinetStorage => 'Хранение';
+
+  @override
+  String get cabinetStorageJsonDocument => 'json_document';
+
+  @override
+  String get cabinetStoragePhysical => 'physical';
+
+  @override
+  String get cabinetSystemColumnReadOnly =>
+      'Системная колонка — только чтение.';
+
+  @override
+  String get cabinetTabFallback => 'Вкладка';
+
+  @override
+  String get cabinetTabOrder => 'Порядок вкладки';
+
+  @override
+  String cabinetTabSubtitle(String viewSlug, String tableSlug) {
+    return 'view: $viewSlug · table: $tableSlug';
+  }
+
+  @override
+  String get cabinetTabTitle => 'Заголовок вкладки';
+
+  @override
+  String get cabinetTableSettings => 'Настройки таблицы';
+
+  @override
+  String get cabinetTitleFieldColumnName => 'Поле заголовка (имя колонки)';
+
+  @override
+  String get cabinetType => 'Тип';
+
+  @override
+  String get cabinetUnique => 'Уникальная';
+
+  @override
+  String get cabinetUnknownTabNoViewSlug =>
+      'Неизвестная вкладка — нет view_slug в meta.';
+
+  @override
+  String get cabinetViewNotFound => 'Представление не найдено';
+
+  @override
+  String get cabinetViewSlug => 'Slug представления';
+
+  @override
+  String cabinetViewTitle(String viewSlug) {
+    return 'Представление $viewSlug';
+  }
+
+  @override
+  String get commonAdd => 'Добавить';
+
+  @override
+  String get commonAdding => 'Добавление…';
+
+  @override
+  String get commonAgentTokens => 'Токены агента';
+
+  @override
+  String get commonApiBaseUrl => 'Базовый URL API';
+
+  @override
+  String get commonArchive => 'В архив';
+
+  @override
+  String get commonCabinets => 'Кабинеты';
+
+  @override
+  String get commonCancel => 'Отмена';
+
+  @override
+  String get commonCompany => 'Компания';
+
+  @override
+  String get commonContinueAction => 'Продолжить';
+
+  @override
+  String get commonCreate => 'Создать';
+
+  @override
+  String get commonCreating => 'Создание…';
+
+  @override
+  String get commonDelete => 'Удалить';
+
+  @override
+  String get commonDeleting => 'Удаление…';
+
+  @override
+  String get commonDisable => 'Отключить';
+
+  @override
+  String get commonDisplayNameOptional => 'Отображаемое имя (необязательно)';
+
+  @override
+  String get commonDone => 'Готово';
+
+  @override
+  String get commonEmDash => '—';
+
+  @override
+  String get commonEmail => 'Email';
+
+  @override
+  String get commonEmployees => 'Сотрудники';
+
+  @override
+  String get commonEmpty => 'Пусто';
+
+  @override
+  String get commonFilter => 'Фильтр';
+
+  @override
+  String get commonImport => 'Импорт';
+
+  @override
+  String get commonInvite => 'Пригласить';
+
+  @override
+  String get commonLabel => 'Подпись';
+
+  @override
+  String get commonLastActivity => 'Последняя активность';
+
+  @override
+  String get commonList => 'Список';
+
+  @override
+  String get commonName => 'Название';
+
+  @override
+  String get commonNameRequired => 'Укажите название';
+
+  @override
+  String get commonNone => 'Нет';
+
+  @override
+  String get commonNothingFound => 'Ничего не найдено';
+
+  @override
+  String get commonOverview => 'Обзор';
+
+  @override
+  String get commonPositiveInteger => 'Целое число больше нуля';
+
+  @override
+  String get commonProjects => 'Проекты';
+
+  @override
+  String get commonProvider => 'Провайдер';
+
+  @override
+  String get commonReload => 'Обновить';
+
+  @override
+  String get commonRequired => 'Обязательно';
+
+  @override
+  String get commonResume => 'Возобновить';
+
+  @override
+  String get commonSave => 'Сохранить';
+
+  @override
+  String get commonSaving => 'Сохранение…';
+
+  @override
+  String get commonSearch => 'Поиск';
+
+  @override
+  String get commonSecret => 'Секрет';
+
+  @override
+  String get commonSelect => 'Выбрать';
+
+  @override
+  String get commonSelectCompany => 'Выберите компанию';
+
+  @override
+  String get commonStatus => 'Статус';
+
+  @override
+  String get commonStorageBytes => 'Хранилище (байт)';
+
+  @override
+  String get commonTable => 'Таблица';
+
+  @override
+  String get commonTitle => 'Заголовок';
+
+  @override
+  String get commonUnknown => 'неизвестно';
+
+  @override
+  String get companyActive => 'Активен';
+
+  @override
+  String get companyCabinet => 'Кабинет';
+
+  @override
+  String get companyCabinetsEmptyHint =>
+      'Кабинеты создают сотрудники в контуре Employee';
+
+  @override
+  String get companyDisableEmployee => 'Отключить сотрудника';
+
+  @override
+  String companyDisableEmployeeConfirm(String email) {
+    return 'Отключить $email? Доступ будет закрыт.';
+  }
+
+  @override
+  String get companyInviteEmployee => 'Пригласить сотрудника';
+
+  @override
+  String get companyInviteViaKeycloakNoPassword =>
+      'Приглашение через Keycloak — без поля пароля';
+
+  @override
+  String get companyInviteViaKeycloakPasswordNotAccepted =>
+      'Приглашение через Keycloak — пароль здесь не принимается.';
+
+  @override
+  String get companyInviting => 'Приглашение…';
+
+  @override
+  String get companyNoCabinets => 'Нет кабинетов';
+
+  @override
+  String get companyNoEmployees => 'Нет сотрудников';
+
+  @override
+  String get companyOrgMetrics => 'Метрики организации';
+
+  @override
+  String get companyOwner => 'Владелец';
+
+  @override
+  String companyReadOnlyOrgView(String title) {
+    return '$title — просмотр организации (только чтение)';
+  }
+
+  @override
+  String get companyRole => 'Роль';
+
+  @override
+  String get companyValidEmailRequired => 'Нужен корректный email';
+
+  @override
+  String get devAdminSession => 'Сессия admin';
+
+  @override
+  String get devBearerTokenCompanyAdmin => 'Bearer token (JWT company.admin)';
+
+  @override
+  String get devBearerTokenPlatformAdmin => 'Bearer token (JWT platform_admin)';
+
+  @override
+  String get devBearerTokenTestJwt => 'Bearer token (JWT AUTH_MODE=test)';
+
+  @override
+  String get devCompanyAdminMembershipRequired =>
+      'Нужен membership company.admin';
+
+  @override
+  String get devCompanySession => 'Сессия компании';
+
+  @override
+  String get devDevSession => 'Dev-сессия';
+
+  @override
+  String get devNoEmployeeMemberships => 'Нет memberships сотрудника';
+
+  @override
+  String get devTokenMustHaveCompanyContour =>
+      'В токене нужен контур company (membership company.admin)';
+
+  @override
+  String get devTokenMustHavePlatformAdmin =>
+      'В токене нужен контур platform_admin';
+
+  @override
+  String get galleryAlpha => 'Alpha';
+
+  @override
+  String get galleryBeta => 'Beta';
+
+  @override
+  String get galleryButtons => 'Кнопки';
+
+  @override
+  String get galleryCheck => 'Чекбокс';
+
+  @override
+  String get galleryCoreGallery => 'Галерея core';
+
+  @override
+  String get galleryCount => 'Счётчик';
+
+  @override
+  String get galleryDanger => 'Опасное';
+
+  @override
+  String get galleryDemo => 'demo';
+
+  @override
+  String get galleryDemoConfirm => 'Демо-подтверждение';
+
+  @override
+  String get galleryEntityCollection => 'EntityCollection';
+
+  @override
+  String get galleryListItem => 'Элемент списка';
+
+  @override
+  String get galleryOne => 'Один';
+
+  @override
+  String get galleryPick => 'Выбор';
+
+  @override
+  String get galleryRadio => 'Радио';
+
+  @override
+  String get gallerySampleRow => 'Пример строки';
+
+  @override
+  String get gallerySelection => 'Выбор';
+
+  @override
+  String get gallerySelector => 'Селектор';
+
+  @override
+  String get gallerySubtitle => 'подзаголовок';
+
+  @override
+  String get galleryTwo => 'Два';
+
+  @override
+  String get navAiKeys => 'AI-ключи';
+
+  @override
+  String get navBundles => 'Бандлы';
+
+  @override
+  String get navCabinets => 'Кабинеты';
+
+  @override
+  String get navCompanies => 'Компании';
+
+  @override
+  String get navEmployees => 'Сотрудники';
+
+  @override
+  String get navOverview => 'Обзор';
+
+  @override
+  String get navProdavan => 'Prodavan';
+
+  @override
+  String get projectAgentError => 'Ошибка агента';
+
+  @override
+  String get projectApproveAndContinue => 'Разрешить и продолжить';
+
+  @override
+  String get projectApproveTool => 'Разрешение инструмента';
+
+  @override
+  String projectApproveToolPrompt(String name) {
+    return 'Разрешить $name?';
+  }
+
+  @override
+  String get projectAttachFile => 'Прикрепить файл';
+
+  @override
+  String get projectAttachmentFallback => 'вложение';
+
+  @override
+  String get projectCancelledMarker => '(отменено)';
+
+  @override
+  String projectCancelledWithText(String text) {
+    return '$text\n(отменено)';
+  }
+
+  @override
+  String get projectCompanyDefault => 'По умолчанию для компании';
+
+  @override
+  String get projectCouldNotReadFileBytes => 'Не удалось прочитать файл';
+
+  @override
+  String get projectCreateAndOpenChat => 'Создать и открыть чат';
+
+  @override
+  String get projectCreateProject => 'Создать проект';
+
+  @override
+  String get projectCreateProjectHint => 'Создайте проект, чтобы открыть чат';
+
+  @override
+  String get projectDeny => 'Отклонить';
+
+  @override
+  String get projectEmptyChatHint =>
+      'Отправьте сообщение, чтобы начать сессию агента';
+
+  @override
+  String get projectFileFallback => 'файл';
+
+  @override
+  String projectInbox(String count) {
+    return 'Входящие ($count)';
+  }
+
+  @override
+  String get projectMessageHint => 'Сообщение…';
+
+  @override
+  String get projectNewProject => 'Новый проект';
+
+  @override
+  String get projectNoAttachmentData => 'Нет данных вложения';
+
+  @override
+  String projectNoPreviewForType(String contentType, String bytes) {
+    return 'Нет превью для $contentType ($bytes байт)';
+  }
+
+  @override
+  String get projectNoProjects => 'Нет проектов';
+
+  @override
+  String get projectPauseProject => 'Поставить на паузу';
+
+  @override
+  String get projectPausedBanner =>
+      'Проект на паузе — чат, загрузки и запуски агента отключены';
+
+  @override
+  String get projectPausedDisabledHint =>
+      'Чат, загрузки и запуски агента недоступны на паузе';
+
+  @override
+  String get projectPausedListSubtitle =>
+      'На паузе — чат, загрузки и запуски агента отключены';
+
+  @override
+  String get projectPausing => 'Пауза…';
+
+  @override
+  String projectPdfPreviewUnavailable(String bytes, String contentType) {
+    return 'Встроенный просмотр PDF пока недоступен.\n$bytes байт · $contentType';
+  }
+
+  @override
+  String get projectPreferredAgentProvider =>
+      'Предпочтительный провайдер агента';
+
+  @override
+  String get projectPreviewTruncated =>
+      'Превью обрезано до первых 200k символов';
+
+  @override
+  String get projectProject => 'Проект';
+
+  @override
+  String get projectProjectName => 'Название проекта';
+
+  @override
+  String get projectProjectPaused => 'Проект на паузе';
+
+  @override
+  String get projectProjectResumed => 'Проект возобновлён';
+
+  @override
+  String get projectProjectSettings => 'Настройки проекта';
+
+  @override
+  String get projectProjectStatus => 'Статус проекта';
+
+  @override
+  String get projectRegenerate => 'Сгенерировать снова';
+
+  @override
+  String get projectReloadTranscript => 'Обновить переписку';
+
+  @override
+  String get projectRematerializeWorkspace => 'Пересоздать workspace';
+
+  @override
+  String projectRematerializedPackages(String packages) {
+    return 'Пересозданы пакеты: $packages';
+  }
+
+  @override
+  String get projectRematerializing => 'Пересоздание…';
+
+  @override
+  String get projectResumeProject => 'Возобновить проект';
+
+  @override
+  String get projectResuming => 'Возобновление…';
+
+  @override
+  String projectSizeBytes(String size) {
+    return '$size B';
+  }
+
+  @override
+  String get projectSubscriptionExpiredBanner =>
+      'Подписка компании истекла — чат и загрузки недоступны';
+
+  @override
+  String get projectToolApprovalHint =>
+      'Инструменту нужно ваше подтверждение, прежде чем агент продолжит.';
+
+  @override
+  String get projectUploadMissingId => 'В загрузке нет id/storage_ref';
+
+  @override
+  String get projectWorking => 'Работаем…';
+
+  @override
+  String get projectWorkspaceRematerializedNoPackages =>
+      'Workspace пересоздан (без MCP-пакетов)';
+
+  @override
+  String get settings => 'Настройки';
+
+  @override
+  String get settingsLanguage => 'Язык';
+
+  @override
+  String get settingsLanguageEn => 'English';
+
+  @override
+  String get settingsLanguageRu => 'Русский';
+
+  @override
+  String get settingsTheme => 'Тема';
+
+  @override
+  String get settingsThemeDark => 'Тёмная';
+
+  @override
+  String get settingsThemeLight => 'Светлая';
+
+  @override
+  String get settingsThemeUltraDark => 'Ультратёмная';
+}

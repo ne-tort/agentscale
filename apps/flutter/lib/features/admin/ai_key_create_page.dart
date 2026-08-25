@@ -10,6 +10,7 @@ import 'package:prodavan/core/widgets/app_section_header.dart';
 import 'package:prodavan/core/widgets/app_selector_page.dart';
 import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Create AI provider key + optional company bind (L03/L04).
 class AdminAiKeyCreatePage extends StatefulWidget {
@@ -61,10 +62,11 @@ class _AdminAiKeyCreatePageState extends State<AdminAiKeyCreatePage> {
   }
 
   Future<void> _pickCompanies() async {
+    final l10n = AppLocalizations.of(context);
     final picked = await Navigator.of(context).push<Set<String>>(
       MaterialPageRoute(
         builder: (_) => AppSelectorPage(
-          title: 'Bind companies',
+          title: l10n.adminBindCompanies,
           multiSelect: true,
           selectedIds: _companyIds.toSet(),
           showCheckboxes: true,
@@ -110,23 +112,24 @@ class _AdminAiKeyCreatePageState extends State<AdminAiKeyCreatePage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      title: const Text('Create AI key'),
+      title: Text(l10n.adminCreateAiKey),
       body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.md),
+        padding: EdgeInsets.all(AppSpacing.md),
         children: [
           if (_error != null) InlineErrorBanner(message: _error!),
-          const AppSectionHeader(title: 'Key metadata', subtitle: 'Secret is stored server-side only'),
+          AppSectionHeader(title: l10n.adminKeyMetadata, subtitle: l10n.adminSecretStoredServerSide),
           AppForm(
             formKey: _formKey,
             children: [
               AppTextField(
                 controller: _nameCtrl,
-                label: 'Name',
-                validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                label: l10n.commonName,
+                validator: (v) => (v == null || v.trim().isEmpty) ? l10n.commonRequired : null,
               ),
               InputDecorator(
-                decoration: const InputDecoration(labelText: 'Provider'),
+                decoration: InputDecoration(labelText: l10n.commonProvider),
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<String>(
                     value: _provider,
@@ -139,7 +142,7 @@ class _AdminAiKeyCreatePageState extends State<AdminAiKeyCreatePage> {
                 ),
               ),
               InputDecorator(
-                decoration: const InputDecoration(labelText: 'API kind'),
+                decoration: InputDecoration(labelText: l10n.adminApiKind),
                 child: DropdownButtonHideUnderline(
                   child: DropdownButton<String>(
                     value: _apiKinds.contains(_apiKind) ? _apiKind : 'cursor_sdk',
@@ -153,19 +156,19 @@ class _AdminAiKeyCreatePageState extends State<AdminAiKeyCreatePage> {
               ),
               AppPasswordField(
                 controller: _secretCtrl,
-                label: 'Secret',
-                validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+                label: l10n.commonSecret,
+                validator: (v) => (v == null || v.isEmpty) ? l10n.commonRequired : null,
               ),
               ListTile(
                 contentPadding: EdgeInsets.zero,
-                title: const Text('Company bindings'),
+                title: Text(l10n.adminCompanyBindings),
                 subtitle: Text(
-                  _companyIds.isEmpty ? 'None' : '${_companyIds.length} selected',
+                  _companyIds.isEmpty ? l10n.commonNone : '${_companyIds.length} selected',
                 ),
-                trailing: TextButton(onPressed: _saving ? null : _pickCompanies, child: const Text('Select')),
+                trailing: TextButton(onPressed: _saving ? null : _pickCompanies, child: Text(l10n.commonSelect)),
               ),
               AppButton(
-                label: _saving ? 'Creating…' : 'Create key',
+                label: _saving ? l10n.commonCreating : l10n.adminCreateKey,
                 expanded: false,
                 onPressed: _saving ? null : _save,
               ),

@@ -8,8 +8,11 @@ class AppColorTokens extends ThemeExtension<AppColorTokens> {
   const AppColorTokens({
     required this.primary,
     required this.onPrimary,
+    required this.primaryContainer,
+    required this.onPrimaryContainer,
     required this.surface,
     required this.onSurface,
+    required this.surfaceContainer,
     required this.muted,
     required this.border,
     required this.danger,
@@ -32,8 +35,11 @@ class AppColorTokens extends ThemeExtension<AppColorTokens> {
 
   final Color primary;
   final Color onPrimary;
+  final Color primaryContainer;
+  final Color onPrimaryContainer;
   final Color surface;
   final Color onSurface;
+  final Color surfaceContainer;
   final Color muted;
   final Color border;
   final Color danger;
@@ -53,30 +59,33 @@ class AppColorTokens extends ThemeExtension<AppColorTokens> {
   final Color snackInfoBg;
   final Color snackInfoFg;
 
-  factory AppColorTokens.fromScheme(ColorScheme scheme) {
+  factory AppColorTokens.fromPalette(AppTonePalette p, ColorScheme scheme) {
     return AppColorTokens(
       primary: scheme.primary,
       onPrimary: scheme.onPrimary,
-      surface: scheme.surface,
-      onSurface: scheme.onSurface,
-      muted: scheme.onSurfaceVariant,
-      border: scheme.outlineVariant,
-      danger: scheme.error,
-      onDanger: scheme.onError,
-      dangerContainer: scheme.errorContainer,
-      onDangerContainer: scheme.onErrorContainer,
-      success: AppPalette.success,
-      onSuccess: scheme.onPrimary,
-      warning: AppPalette.warning,
-      onWarning: scheme.onPrimary,
-      info: AppPalette.info,
-      onInfo: scheme.onPrimary,
-      snackErrorBg: scheme.errorContainer,
-      snackErrorFg: scheme.onErrorContainer,
-      snackSuccessBg: AppPalette.success.withValues(alpha: 0.15),
-      snackSuccessFg: AppPalette.success,
-      snackInfoBg: AppPalette.info.withValues(alpha: 0.12),
-      snackInfoFg: AppPalette.info,
+      primaryContainer: scheme.primaryContainer,
+      onPrimaryContainer: scheme.onPrimaryContainer,
+      surface: p.surface,
+      onSurface: p.onSurface,
+      surfaceContainer: p.surfaceContainer,
+      muted: p.muted,
+      border: p.border,
+      danger: p.danger,
+      onDanger: p.onAccent,
+      dangerContainer: p.danger.withValues(alpha: 0.18),
+      onDangerContainer: p.danger,
+      success: p.success,
+      onSuccess: p.onAccent,
+      warning: p.warning,
+      onWarning: p.onAccent,
+      info: p.info,
+      onInfo: p.onAccent,
+      snackErrorBg: p.danger.withValues(alpha: 0.18),
+      snackErrorFg: p.danger,
+      snackSuccessBg: p.success.withValues(alpha: 0.15),
+      snackSuccessFg: p.success,
+      snackInfoBg: p.info.withValues(alpha: 0.12),
+      snackInfoFg: p.info,
     );
   }
 
@@ -84,8 +93,11 @@ class AppColorTokens extends ThemeExtension<AppColorTokens> {
   AppColorTokens copyWith({
     Color? primary,
     Color? onPrimary,
+    Color? primaryContainer,
+    Color? onPrimaryContainer,
     Color? surface,
     Color? onSurface,
+    Color? surfaceContainer,
     Color? muted,
     Color? border,
     Color? danger,
@@ -108,8 +120,11 @@ class AppColorTokens extends ThemeExtension<AppColorTokens> {
     return AppColorTokens(
       primary: primary ?? this.primary,
       onPrimary: onPrimary ?? this.onPrimary,
+      primaryContainer: primaryContainer ?? this.primaryContainer,
+      onPrimaryContainer: onPrimaryContainer ?? this.onPrimaryContainer,
       surface: surface ?? this.surface,
       onSurface: onSurface ?? this.onSurface,
+      surfaceContainer: surfaceContainer ?? this.surfaceContainer,
       muted: muted ?? this.muted,
       border: border ?? this.border,
       danger: danger ?? this.danger,
@@ -137,8 +152,11 @@ class AppColorTokens extends ThemeExtension<AppColorTokens> {
     return AppColorTokens(
       primary: Color.lerp(primary, other.primary, t)!,
       onPrimary: Color.lerp(onPrimary, other.onPrimary, t)!,
+      primaryContainer: Color.lerp(primaryContainer, other.primaryContainer, t)!,
+      onPrimaryContainer: Color.lerp(onPrimaryContainer, other.onPrimaryContainer, t)!,
       surface: Color.lerp(surface, other.surface, t)!,
       onSurface: Color.lerp(onSurface, other.onSurface, t)!,
+      surfaceContainer: Color.lerp(surfaceContainer, other.surfaceContainer, t)!,
       muted: Color.lerp(muted, other.muted, t)!,
       border: Color.lerp(border, other.border, t)!,
       danger: Color.lerp(danger, other.danger, t)!,
@@ -162,7 +180,10 @@ class AppColorTokens extends ThemeExtension<AppColorTokens> {
 }
 
 extension AppColorTokensX on BuildContext {
-  AppColorTokens get appColors =>
-      Theme.of(this).extension<AppColorTokens>() ??
-      AppColorTokens.fromScheme(Theme.of(this).colorScheme);
+  AppColorTokens get appColors {
+    final ext = Theme.of(this).extension<AppColorTokens>();
+    if (ext != null) return ext;
+    final p = AppPalette.light;
+    return AppColorTokens.fromPalette(p, ColorScheme.fromSeed(seedColor: p.seed));
+  }
 }

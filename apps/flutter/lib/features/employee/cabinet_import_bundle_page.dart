@@ -12,6 +12,7 @@ import 'package:prodavan/core/widgets/app_section_header.dart';
 import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/dynamic_cabinet_shell.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Import cabinet.bundle zip into a new schema (L05/L06 C-BUNDLE).
 class CabinetImportBundlePage extends StatefulWidget {
@@ -64,16 +65,17 @@ class _CabinetImportBundlePageState extends State<CabinetImportBundlePage> {
   }
 
   Future<void> _pickBundle() async {
+    final l10n = AppLocalizations.of(context);
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: const ['zip'],
+      allowedExtensions: ['zip'],
       withData: true,
     );
     if (result == null || result.files.isEmpty) return;
     final file = result.files.first;
     final bytes = file.bytes;
     if (bytes == null) {
-      setState(() => _error = 'Could not read zip bytes');
+      setState(() => _error = l10n.cabinetCouldNotReadZipBytes);
       return;
     }
     setState(() {
@@ -82,15 +84,16 @@ class _CabinetImportBundlePageState extends State<CabinetImportBundlePage> {
       _error = null;
       if (_nameCtrl.text.trim().isEmpty) {
         final base = file.name.replaceAll(RegExp(r'\.zip$', caseSensitive: false), '');
-        _nameCtrl.text = base.isEmpty ? 'Imported cabinet' : base;
+        _nameCtrl.text = base.isEmpty ? l10n.cabinetImportedCabinetDefault : base;
       }
     });
   }
 
   Future<void> _importFromStarter(String bundleId, String defaultName) async {
+    final l10n = AppLocalizations.of(context);
     final companyId = workContext.companyId;
     if (companyId == null) {
-      setState(() => _error = 'No company_id from /me memberships');
+      setState(() => _error = l10n.cabinetNoCompanyIdFromMe);
       return;
     }
     setState(() {
@@ -131,14 +134,15 @@ class _CabinetImportBundlePageState extends State<CabinetImportBundlePage> {
 
   Future<void> _import() async {
     if (!_formKey.currentState!.validate()) return;
+    final l10n = AppLocalizations.of(context);
     final companyId = workContext.companyId;
     if (companyId == null) {
-      setState(() => _error = 'No company_id from /me memberships');
+      setState(() => _error = l10n.cabinetNoCompanyIdFromMe);
       return;
     }
     final bytes = _zipBytes;
     if (bytes == null || bytes.isEmpty) {
-      setState(() => _error = 'Select a cabinet.bundle zip file');
+      setState(() => _error = l10n.cabinetSelectCabinetBundleZip);
       return;
     }
 
@@ -173,21 +177,19 @@ class _CabinetImportBundlePageState extends State<CabinetImportBundlePage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      title: const Text('Import cabinet bundle'),
+      title: Text(l10n.cabinetImportCabinetBundle),
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
           if (_error != null) InlineErrorBanner(message: _error!),
-          const Text(
-            'Import a cabinet.bundle zip exported from another cabinet. '
-            'Creates a new cabinet instance with a fresh schema.',
-          ),
+          Text(l10n.cabinetImportBundleIntro),
           const SizedBox(height: AppSpacing.md),
           if (_loadingCatalog)
-            const Center(child: Padding(padding: EdgeInsets.all(AppSpacing.md), child: CircularProgressIndicator()))
+            Center(child: Padding(padding: EdgeInsets.all(AppSpacing.md), child: CircularProgressIndicator()))
           else if (_starterBundles.isNotEmpty) ...[
-            const AppSectionHeader(title: 'Official starter bundles'),
+            AppSectionHeader(title: l10n.cabinetOfficialStarterBundles),
             ..._starterBundles.map((item) {
               final id = item['id'] as String? ?? '';
               final available = item['bundle_available'] == true;
@@ -197,36 +199,36 @@ class _CabinetImportBundlePageState extends State<CabinetImportBundlePage> {
                 subtitle: Text(item['description'] as String? ?? ''),
                 trailing: available
                     ? AppButton(
-                        label: _importing ? '…' : 'Import',
+                        label: _importing ? '…' : l10n.commonImport,
                         onPressed: _importing ? null : () => _importFromStarter(id, item['name'] as String? ?? id),
                       )
-                    : const Text('not shipped'),
+                    : Text(l10n.cabinetNotShipped),
               );
             }),
             const SizedBox(height: AppSpacing.lg),
-            const AppSectionHeader(title: 'From file'),
+            AppSectionHeader(title: l10n.cabinetFromFile),
           ],
           AppForm(
             formKey: _formKey,
             children: [
               OutlinedButton.icon(
                 onPressed: _importing ? null : _pickBundle,
-                icon: const Icon(Icons.folder_open),
-                label: Text(_pickedFilename ?? 'Choose .zip file'),
+                icon: Icon(Icons.folder_open),
+                label: Text(_pickedFilename ?? l10n.cabinetChooseZipFile),
               ),
               const SizedBox(height: AppSpacing.md),
-              const AppSectionHeader(title: 'New cabinet'),
+              AppSectionHeader(title: l10n.cabinetNewCabinet),
               AppTextField(
                 controller: _nameCtrl,
-                label: 'Cabinet name',
+                label: l10n.cabinetCabinetName,
                 enabled: !_importing,
                 validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Name required';
+                  if (v == null || v.trim().isEmpty) return l10n.commonNameRequired;
                   return null;
                 },
               ),
               AppButton(
-                label: _importing ? 'Importing…' : 'Import bundle',
+                label: _importing ? l10n.cabinetImporting : l10n.cabinetImportBundleTooltip,
                 onPressed: _importing ? null : _import,
               ),
             ],

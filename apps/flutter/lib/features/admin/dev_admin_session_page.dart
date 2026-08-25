@@ -7,6 +7,8 @@ import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/features/admin/admin_shell.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Dev-only Platform Admin bearer entry (L04).
 class DevAdminSessionPage extends StatefulWidget {
@@ -35,12 +37,13 @@ class _DevAdminSessionPageState extends State<DevAdminSessionPage> {
       bearerToken: _tokenCtrl.text.trim(),
     );
     try {
+      final l10n = AppLocalizations.of(context);
       final me = await adminContext.api.me();
       final contours = me['contours'];
       final isAdmin = contours is List && contours.contains('platform_admin');
       if (!isAdmin) {
         adminContext.clear();
-        setState(() => _error = 'Token must have platform_admin contour');
+        setState(() => _error = l10n.devTokenMustHavePlatformAdmin);
         return;
       }
       if (!mounted) return;
@@ -55,25 +58,26 @@ class _DevAdminSessionPageState extends State<DevAdminSessionPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      title: const Text('Admin session'),
+      title: Text(l10n.devAdminSession),
       body: Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
+        padding: EdgeInsets.all(AppSpacing.lg),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            AppTextField(controller: _baseCtrl, label: 'API base URL'),
+            AppTextField(controller: _baseCtrl, label: l10n.commonApiBaseUrl),
             const SizedBox(height: AppSpacing.md),
             AppTextField(
               controller: _tokenCtrl,
-              label: 'Bearer token (platform_admin JWT)',
+              label: l10n.devBearerTokenPlatformAdmin,
             ),
             if (_error != null) ...[
               const SizedBox(height: AppSpacing.sm),
-              Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              Text(_error!, style: TextStyle(color: context.appColors.danger)),
             ],
             const SizedBox(height: AppSpacing.lg),
-            AppButton(label: 'Continue', onPressed: _connect),
+            AppButton(label: l10n.commonContinueAction, onPressed: _connect),
           ],
         ),
       ),

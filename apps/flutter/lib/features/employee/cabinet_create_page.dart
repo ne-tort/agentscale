@@ -8,6 +8,7 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/dynamic_cabinet_shell.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Full-page cabinet create (L05 ux — no modals).
 class CabinetCreatePage extends StatefulWidget {
@@ -18,8 +19,20 @@ class CabinetCreatePage extends StatefulWidget {
 }
 
 class _CabinetCreatePageState extends State<CabinetCreatePage> {
+  @override
+  void initState() {
+    super.initState();
+    // Default filled after first frame when locale is available.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_nameCtrl.text.isEmpty) {
+        _nameCtrl.text = AppLocalizations.of(context).cabinetMyCabinetDefault;
+      }
+    });
+  }
+
   final _formKey = GlobalKey<FormState>();
-  final _nameCtrl = TextEditingController(text: 'My cabinet');
+  final _nameCtrl = TextEditingController();
   bool _saving = false;
   String? _error;
 
@@ -31,9 +44,10 @@ class _CabinetCreatePageState extends State<CabinetCreatePage> {
 
   Future<void> _create() async {
     if (!_formKey.currentState!.validate()) return;
+    final l10n = AppLocalizations.of(context);
     final companyId = workContext.companyId;
     if (companyId == null) {
-      setState(() => _error = 'No company_id from /me memberships');
+      setState(() => _error = l10n.cabinetNoCompanyIdFromMe);
       return;
     }
     setState(() {
@@ -65,8 +79,9 @@ class _CabinetCreatePageState extends State<CabinetCreatePage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      title: const Text('Create cabinet'),
+      title: Text(l10n.cabinetCreateCabinet),
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
@@ -76,15 +91,15 @@ class _CabinetCreatePageState extends State<CabinetCreatePage> {
             children: [
               AppTextField(
                 controller: _nameCtrl,
-                label: 'Cabinet name',
+                label: l10n.cabinetCabinetName,
                 enabled: !_saving,
                 validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Name required';
+                  if (v == null || v.trim().isEmpty) return l10n.commonNameRequired;
                   return null;
                 },
               ),
               AppButton(
-                label: _saving ? 'Creating…' : 'Create cabinet',
+                label: _saving ? l10n.commonCreating : l10n.cabinetCreateCabinet,
                 onPressed: _saving ? null : _create,
               ),
             ],

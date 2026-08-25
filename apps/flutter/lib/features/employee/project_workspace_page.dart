@@ -10,6 +10,8 @@ import 'package:prodavan/features/employee/tool_approve_page.dart';
 import 'package:prodavan/features/employee/widgets/attachment_image_viewer.dart';
 import 'package:prodavan/features/employee/widgets/attachment_preview_chip.dart';
 import 'package:prodavan/features/employee/widgets/project_status_banner.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Chat-first project workspace (L05/L09) — SSE streaming assistant deltas.
 class ProjectWorkspacePage extends StatefulWidget {
@@ -118,6 +120,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   }
 
   Future<void> _pickAttachment() async {
+    final l10n = AppLocalizations.of(context);
     if (_uploadingAttachment || _sending || _loading || _chatBlocked) return;
     final result = await FilePicker.platform.pickFiles(withData: true);
     if (result == null || result.files.isEmpty) return;
@@ -125,7 +128,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     final bytes = file.bytes;
     if (bytes == null) {
       if (!mounted) return;
-      setState(() => _error = 'Could not read file bytes');
+      setState(() => _error = l10n.projectCouldNotReadFileBytes);
       return;
     }
     final filename = file.name.trim().isEmpty ? 'attachment.bin' : file.name.trim();
@@ -143,7 +146,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       final ref = uploaded['storage_ref'] as String?;
       final id = uploaded['id'] as String?;
       if (ref == null || ref.isEmpty || id == null || id.isEmpty) {
-        setState(() => _error = 'Upload missing id/storage_ref');
+        setState(() => _error = l10n.projectUploadMissingId);
         return;
       }
       setState(() {
@@ -351,6 +354,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   }
 
   Future<void> _send() async {
+    final l10n = AppLocalizations.of(context);
     final text = _composer.text.trim();
     if (_sending || _chatBlocked) return;
     if (text.isEmpty && _pendingAttachments.isEmpty) return;
@@ -430,7 +434,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
               assistantIndex,
               _ChatLine(
                 role: 'approval',
-                text: 'Approve $name?',
+                text: l10n.projectApproveToolPrompt(name),
                 approvalId: approvalId,
                 toolName: name,
                 toolInput: input is Map<String, dynamic> ? input : null,
@@ -461,7 +465,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
             }
           }
         } else if (type == '_error') {
-          final detail = payload['detail'] as String? ?? payload['code'] as String? ?? 'Agent error';
+          final detail = payload['detail'] as String? ?? payload['code'] as String? ?? l10n.projectAgentError;
           setState(() {
             _error = detail;
             if (assistantText.isEmpty && _messages.length > assistantIndex) {
@@ -478,7 +482,9 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         setState(() {
           _messages[assistantIndex] = _ChatLine(
             role: 'assistant',
-            text: assistantText.isEmpty ? '(cancelled)' : '$assistantText\n(cancelled)',
+            text: assistantText.isEmpty
+                ? l10n.projectCancelledMarker
+                : l10n.projectCancelledWithText(assistantText),
           );
           _sending = false;
           _cancelRequested = false;
@@ -492,7 +498,9 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         setState(() {
           _messages[assistantIndex] = _ChatLine(
             role: 'assistant',
-            text: assistantText.isEmpty ? '(cancelled)' : '$assistantText\n(cancelled)',
+            text: assistantText.isEmpty
+                ? l10n.projectCancelledMarker
+                : l10n.projectCancelledWithText(assistantText),
           );
           _sending = false;
           _cancelRequested = false;
@@ -591,6 +599,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
       title: Text(_projectName),
       actions: [
@@ -612,13 +621,13 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                     setState(() => _projectName = updated);
                   }
                 },
-          icon: const Icon(Icons.settings_outlined),
-          tooltip: 'Project settings',
+          icon: Icon(Icons.settings_outlined),
+          tooltip: l10n.projectProjectSettings,
         ),
         IconButton(
           onPressed: _loading || _sending ? null : _loadTranscript,
-          icon: const Icon(Icons.refresh),
-          tooltip: 'Reload transcript',
+          icon: Icon(Icons.refresh),
+          tooltip: l10n.projectReloadTranscript,
         ),
       ],
       body: Column(
@@ -635,7 +644,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
           if (_inboxAttachments.isNotEmpty)
             ExpansionTile(
               initiallyExpanded: false,
-              title: Text('Inbox (${_inboxAttachments.length})'),
+              title: Text(l10n.projectInbox('${_inboxAttachments.length}')),
               leading: const Icon(Icons.folder_open_outlined, size: 20),
               children: [
                 for (final item in _inboxAttachments)
@@ -656,8 +665,8 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                         ? () => _openAttachmentPreview(item)
                         : null,
                     trailing: IconButton(
-                      icon: const Icon(Icons.delete_outline, size: 20),
-                      tooltip: 'Delete',
+                      icon: Icon(Icons.delete_outline, size: 20),
+                      tooltip: l10n.commonDelete,
                       onPressed: _sending || _inboxMutationsBlocked
                           ? null
                           : () => _deleteInboxAttachment(item),
@@ -667,10 +676,10 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
             ),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? Center(child: CircularProgressIndicator())
                 : _messages.isEmpty
-                    ? const Center(
-                        child: Text('Send a message to start the agent session'),
+                    ? Center(
+                        child: Text(l10n.projectEmptyChatHint),
                       )
                     : ListView.builder(
                         controller: _scroll,
@@ -709,12 +718,12 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                               ),
                               decoration: BoxDecoration(
                                 color: isApproval
-                                    ? Theme.of(context).colorScheme.errorContainer
+                                    ? context.appColors.dangerContainer
                                     : isTool
-                                        ? Theme.of(context).colorScheme.surfaceContainerLow
+                                        ? context.appColors.surfaceContainer
                                         : isUser
-                                            ? Theme.of(context).colorScheme.primaryContainer
-                                            : Theme.of(context).colorScheme.surfaceContainerHighest,
+                                            ? context.appColors.primaryContainer
+                                            : context.appColors.surfaceContainer,
                                 borderRadius: BorderRadius.circular(isTool || isApproval ? 8 : 12),
                               ),
                               child: Column(
@@ -728,7 +737,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                                         Icon(
                                           isApproval ? Icons.gavel_outlined : Icons.build_outlined,
                                           size: 14,
-                                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                          color: context.appColors.muted,
                                         ),
                                         const SizedBox(width: 4),
                                       ],
@@ -741,7 +750,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                                                   : msg.text,
                                           style: isTool || isApproval
                                               ? Theme.of(context).textTheme.labelSmall?.copyWith(
-                                                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                                                    color: context.appColors.muted,
                                                   )
                                               : null,
                                         ),
@@ -765,8 +774,8 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                                         IconButton(
                                           visualDensity: VisualDensity.compact,
                                           padding: EdgeInsets.zero,
-                                          constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-                                          tooltip: 'Regenerate',
+                                          constraints: BoxConstraints(minWidth: 28, minHeight: 28),
+                                          tooltip: l10n.projectRegenerate,
                                           icon: const Icon(Icons.refresh, size: 16),
                                           onPressed: _regenerateLast,
                                         ),
@@ -822,13 +831,13 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                             ? null
                             : _pickAttachment,
                         icon: _uploadingAttachment
-                            ? const SizedBox(
+                            ? SizedBox(
                                 width: 20,
                                 height: 20,
                                 child: CircularProgressIndicator(strokeWidth: 2),
                               )
-                            : const Icon(Icons.attach_file),
-                        tooltip: 'Attach file',
+                            : Icon(Icons.attach_file),
+                        tooltip: l10n.projectAttachFile,
                       ),
                       Expanded(
                         child: TextField(
@@ -838,8 +847,8 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                           enabled: !_loading && !_chatBlocked,
                           textInputAction: TextInputAction.send,
                           onSubmitted: (_) => _send(),
-                          decoration: const InputDecoration(
-                            hintText: 'Message…',
+                          decoration: InputDecoration(
+                            hintText: l10n.projectMessageHint,
                             border: OutlineInputBorder(),
                             isDense: true,
                           ),
@@ -849,8 +858,8 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                       if (_sending)
                         IconButton(
                           onPressed: _cancelStream,
-                          icon: const Icon(Icons.stop_circle_outlined),
-                          tooltip: 'Cancel',
+                          icon: Icon(Icons.stop_circle_outlined),
+                          tooltip: l10n.commonCancel,
                         ),
                       IconButton.filled(
                         onPressed: _sending || _loading || _chatBlocked ? null : _send,

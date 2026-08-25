@@ -5,6 +5,7 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Read-only official starter bundle catalog (L04).
 class AdminStarterBundlesPage extends StatefulWidget {
@@ -50,8 +51,9 @@ class _AdminStarterBundlesPageState extends State<AdminStarterBundlesPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      title: const Text('Starter bundles'),
+      title: Text(l10n.adminStarterBundles),
       actions: [
         IconButton(onPressed: _loading ? null : _reload, icon: const Icon(Icons.refresh)),
       ],
@@ -61,11 +63,11 @@ class _AdminStarterBundlesPageState extends State<AdminStarterBundlesPage> {
           if (_error != null) InlineErrorBanner(message: _error!),
           Expanded(
             child: _loading
-                ? const Center(child: CircularProgressIndicator())
+                ? Center(child: CircularProgressIndicator())
                 : _items.isEmpty
-                    ? const EmptyState(
-                        title: 'No starter bundles',
-                        subtitle: 'Catalog entries appear when shipped under data/starter_bundles/',
+                    ? EmptyState(
+                        title: l10n.adminNoStarterBundles,
+                        subtitle: l10n.adminStarterBundlesHint,
                       )
                     : ListView.separated(
                         padding: const EdgeInsets.all(AppSpacing.md),
@@ -80,7 +82,7 @@ class _AdminStarterBundlesPageState extends State<AdminStarterBundlesPage> {
                             ),
                             title: Text(item['name'] as String? ?? item['id'] as String? ?? 'Bundle'),
                             subtitle: Text(item['description'] as String? ?? ''),
-                            trailing: Text(available ? 'shipped' : 'metadata only'),
+                            trailing: Text(available ? l10n.adminShipped : l10n.adminMetadataOnly),
                           );
                         },
                       ),

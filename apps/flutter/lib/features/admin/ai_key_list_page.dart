@@ -7,6 +7,7 @@ import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/admin/ai_key_create_page.dart';
 import 'package:prodavan/features/admin/ai_key_detail_page.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Platform Admin AI keys list (L03/L04).
 class AdminAiKeyListPage extends StatefulWidget {
@@ -67,13 +68,14 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final rows = _keys.map((k) {
       final bindings = k['company_ids'];
       final bindCount = bindings is List ? bindings.length : 0;
       return AppEntityRow(
         id: k['id'] as String,
         title: k['name'] as String? ?? k['id'] as String,
-        subtitle: '${k['provider']} · ${k['api_kind']} · ${k['status']}',
+        subtitle: l10n.adminKeyListSubtitle('${k['provider']}', '${k['api_kind']}', '${k['status']}'),
         cells: {
           'provider': k['provider'] as String? ?? '—',
           'status': k['status'] as String? ?? '—',
@@ -89,17 +91,17 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
           child: AppEntityCollection(
             loading: _loading,
             rows: rows,
-            columns: const [
-              AppEntityColumn(id: 'name', label: 'Key'),
-              AppEntityColumn(id: 'provider', label: 'Provider'),
-              AppEntityColumn(id: 'status', label: 'Status'),
-              AppEntityColumn(id: 'bindings', label: 'Companies'),
+            columns: [
+              AppEntityColumn(id: 'name', label: l10n.adminKey),
+              AppEntityColumn(id: 'provider', label: l10n.commonProvider),
+              AppEntityColumn(id: 'status', label: l10n.commonStatus),
+              AppEntityColumn(id: 'bindings', label: l10n.navCompanies),
             ],
             onOpen: _openKey,
             empty: EmptyState(
-              title: 'No AI keys',
-              subtitle: 'Create a runtime key and bind companies',
-              action: TextButton(onPressed: _createKey, child: const Text('Create key')),
+              title: l10n.adminNoAiKeys,
+              subtitle: l10n.adminCreateRuntimeKeyHint,
+              action: TextButton(onPressed: _createKey, child: Text(l10n.adminCreateKey)),
             ),
           ),
         ),
@@ -108,7 +110,7 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
 
     if (widget.embedded) {
       return AppScaffold(
-        title: const Text('AI Keys'),
+        title: Text(l10n.navAiKeys),
         actions: [
           IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
           IconButton(onPressed: _createKey, icon: const Icon(Icons.add)),
@@ -118,7 +120,7 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
     }
 
     return AppScaffold(
-      title: const Text('AI Keys'),
+      title: Text(l10n.navAiKeys),
       actions: [
         IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
         IconButton(onPressed: _createKey, icon: const Icon(Icons.add)),

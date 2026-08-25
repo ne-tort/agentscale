@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_card.dart';
 
@@ -18,6 +19,7 @@ class StatTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final colors = context.appColors;
     return AppCard(
       padding: const EdgeInsets.all(AppSpacing.md),
       child: Column(
@@ -26,14 +28,14 @@ class StatTile extends StatelessWidget {
           Row(
             children: [
               if (icon != null) ...[
-                Icon(icon, size: 18, color: theme.colorScheme.primary),
+                Icon(icon, size: 18, color: colors.primary),
                 const SizedBox(width: AppSpacing.sm),
               ],
               Expanded(
                 child: Text(
                   label,
                   style: theme.textTheme.labelMedium?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
+                    color: colors.muted,
                   ),
                 ),
               ),

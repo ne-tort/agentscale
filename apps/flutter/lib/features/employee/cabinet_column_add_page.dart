@@ -7,6 +7,7 @@ import 'package:prodavan/core/widgets/app_form.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Add column to existing meta table (L06 mutate API).
 class CabinetColumnAddPage extends StatefulWidget {
@@ -69,8 +70,9 @@ class _CabinetColumnAddPageState extends State<CabinetColumnAddPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      title: const Text('Add column'),
+      title: Text(l10n.cabinetAddColumn),
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
@@ -85,21 +87,21 @@ class _CabinetColumnAddPageState extends State<CabinetColumnAddPage> {
             children: [
               AppTextField(
                 controller: _name,
-                label: 'Column name',
+                label: l10n.cabinetColumnName,
                 enabled: !_saving,
                 validator: (v) {
                   final s = (v ?? '').trim();
-                  if (s.isEmpty) return 'Required';
+                  if (s.isEmpty) return l10n.commonRequired;
                   if (!RegExp(r'^[a-zA-Z_][a-zA-Z0-9_]*$').hasMatch(s)) {
-                    return 'Letters, digits, underscore';
+                    return l10n.cabinetLettersDigitsUnderscore;
                   }
-                  if (s == 'id' || s == 'created_at') return 'Reserved name';
+                  if (s == 'id' || s == 'created_at') return l10n.cabinetReservedName;
                   return null;
                 },
               ),
               DropdownButtonFormField<String>(
                 value: _type,
-                decoration: const InputDecoration(labelText: 'Type'),
+                decoration: InputDecoration(labelText: l10n.cabinetType),
                 items: [
                   for (final t in _columnTypes) DropdownMenuItem(value: t, child: Text(t)),
                 ],
@@ -107,13 +109,13 @@ class _CabinetColumnAddPageState extends State<CabinetColumnAddPage> {
               ),
               CheckboxListTile(
                 contentPadding: EdgeInsets.zero,
-                title: const Text('Required'),
+                title: Text(l10n.commonRequired),
                 value: _required,
                 onChanged: _saving ? null : (v) => setState(() => _required = v ?? false),
                 controlAffinity: ListTileControlAffinity.leading,
               ),
               AppButton(
-                label: _saving ? 'Adding…' : 'Add column',
+                label: _saving ? l10n.commonAdding : l10n.cabinetAddColumn,
                 onPressed: _saving ? null : _save,
               ),
             ],

@@ -7,6 +7,7 @@ import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/admin/admin_company_create_page.dart';
 import 'package:prodavan/features/admin/company_detail_page.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Platform Admin company list (L04).
 class AdminCompanyListPage extends StatefulWidget {
@@ -79,6 +80,7 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final rows = _companies.map((c) {
       final quota = c['cabinet_quota'] as Map<String, dynamic>? ?? const {};
       final max = quota['max_cabinets'];
@@ -95,7 +97,7 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
     }).toList();
 
     return AppScaffold(
-      title: const Text('Companies'),
+      title: Text(l10n.navCompanies),
       actions: [
         IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
         IconButton(onPressed: _createCompany, icon: const Icon(Icons.add)),
@@ -107,15 +109,15 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
             child: AppEntityCollection(
               loading: _loading,
               rows: rows,
-              columns: const [
-                AppEntityColumn(id: 'name', label: 'Company'),
-                AppEntityColumn(id: 'cabinets', label: 'Cabinets'),
+              columns: [
+                AppEntityColumn(id: 'name', label: l10n.commonCompany),
+                AppEntityColumn(id: 'cabinets', label: l10n.commonCabinets),
               ],
               onOpen: _openCompany,
               empty: EmptyState(
-                title: 'No companies',
-                subtitle: 'Create a company and invite company.admin',
-                action: TextButton(onPressed: _createCompany, child: const Text('Create company')),
+                title: l10n.adminNoCompanies,
+                subtitle: l10n.adminCreateCompanyAndInviteAdmin,
+                action: TextButton(onPressed: _createCompany, child: Text(l10n.adminCreateCompany)),
               ),
             ),
           ),

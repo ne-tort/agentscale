@@ -6,6 +6,7 @@ import 'package:prodavan/core/widgets/danger_confirm_page.dart';
 import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/company/company_invite_employee_page.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Company employees — invite + disable (L04). No static cabinet grants.
 class CompanyEmployeesPage extends StatefulWidget {
@@ -59,12 +60,13 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
   }
 
   Future<void> _disable(Map<String, dynamic> emp) async {
+    final l10n = AppLocalizations.of(context);
     if (emp['status'] == 'disabled') return;
     final ok = await DangerConfirmPage.push(
       context,
-      title: 'Disable employee',
-      message: 'Disable ${emp['email']}? They will lose access.',
-      confirmLabel: 'Disable',
+      title: l10n.companyDisableEmployee,
+      message: l10n.companyDisableEmployeeConfirm('${emp['email']}'),
+      confirmLabel: l10n.commonDisable,
     );
     if (!ok) return;
     try {
@@ -78,6 +80,7 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final rows = _employees
         .map(
           (e) => AppEntityRow(
@@ -91,8 +94,8 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
             trailing: e['status'] == 'disabled'
                 ? null
                 : IconButton(
-                    icon: const Icon(Icons.block),
-                    tooltip: 'Disable',
+                    icon: Icon(Icons.block),
+                    tooltip: l10n.commonDisable,
                     onPressed: () => _disable(e),
                   ),
           ),
@@ -108,8 +111,8 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
             alignment: Alignment.centerRight,
             child: TextButton.icon(
               onPressed: _invite,
-              icon: const Icon(Icons.person_add),
-              label: const Text('Invite'),
+              icon: Icon(Icons.person_add),
+              label: Text(l10n.commonInvite),
             ),
           ),
         ),
@@ -117,16 +120,16 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
           child: AppEntityCollection(
             loading: _loading,
             rows: rows,
-            columns: const [
-              AppEntityColumn(id: 'email', label: 'Email'),
-              AppEntityColumn(id: 'role', label: 'Role'),
-              AppEntityColumn(id: 'status', label: 'Status'),
+            columns: [
+              AppEntityColumn(id: 'email', label: l10n.commonEmail),
+              AppEntityColumn(id: 'role', label: l10n.companyRole),
+              AppEntityColumn(id: 'status', label: l10n.commonStatus),
             ],
             onOpen: (_) {},
             empty: EmptyState(
-              title: 'No employees',
-              subtitle: 'Invite via Keycloak — no password field',
-              action: TextButton(onPressed: _invite, child: const Text('Invite')),
+              title: l10n.companyNoEmployees,
+              subtitle: l10n.companyInviteViaKeycloakNoPassword,
+              action: TextButton(onPressed: _invite, child: Text(l10n.commonInvite)),
             ),
           ),
         ),

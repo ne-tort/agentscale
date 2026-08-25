@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/theme/app_color_tokens.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
+
 /// Compact project lifecycle status chip (L05/L07).
 class ProjectStatusChip extends StatelessWidget {
   const ProjectStatusChip({
@@ -15,18 +18,19 @@ class ProjectStatusChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final l10n = AppLocalizations.of(context);
+final colors = context.appColors;
     final paused = isPaused(status);
-    final label = status.isEmpty ? 'unknown' : status;
+    final label = status.isEmpty ? l10n.commonUnknown : status;
     return Chip(
       visualDensity: dense ? VisualDensity.compact : VisualDensity.standard,
       avatar: Icon(
         paused ? Icons.pause_circle_filled : Icons.play_circle_outline,
         size: 16,
-        color: paused ? scheme.onSecondaryContainer : scheme.onPrimaryContainer,
+        color: paused ? colors.muted : colors.onPrimaryContainer,
       ),
       label: Text(label),
-      backgroundColor: paused ? scheme.secondaryContainer : scheme.primaryContainer,
+      backgroundColor: paused ? colors.surfaceContainer : colors.primaryContainer,
       side: BorderSide.none,
     );
   }

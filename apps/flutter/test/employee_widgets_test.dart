@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:prodavan/core/theme/app_theme.dart';
@@ -12,9 +13,36 @@ import 'package:prodavan/features/employee/widgets/project_status_banner.dart';
 import 'package:prodavan/features/employee/widgets/project_status_chip.dart';
 import 'package:prodavan/features/employee/contour_selector_page.dart';
 import 'package:prodavan/features/employee/tool_approve_page.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 Widget themed(Widget child) {
-  return MaterialApp(theme: AppTheme.light, home: Scaffold(body: child));
+  return MaterialApp(
+    theme: AppTheme.light,
+    locale: const Locale('en'),
+    supportedLocales: AppLocalizations.supportedLocales,
+    localizationsDelegates: const [
+      AppLocalizations.delegate,
+      GlobalMaterialLocalizations.delegate,
+      GlobalWidgetsLocalizations.delegate,
+      GlobalCupertinoLocalizations.delegate,
+    ],
+    home: Scaffold(body: child),
+  );
+}
+
+Widget themedFull(Widget home) {
+  return MaterialApp(
+    theme: AppTheme.light,
+    locale: const Locale('en'),
+    supportedLocales: AppLocalizations.supportedLocales,
+    localizationsDelegates: const [
+      AppLocalizations.delegate,
+      GlobalMaterialLocalizations.delegate,
+      GlobalWidgetsLocalizations.delegate,
+      GlobalCupertinoLocalizations.delegate,
+    ],
+    home: home,
+  );
 }
 
 /// Minimal valid 1x1 PNG.
@@ -63,7 +91,10 @@ void main() {
         ),
       ),
     );
-    expect(find.text('Project is paused — chat, uploads and agent runs are disabled'), findsOneWidget);
+    expect(
+      find.text('Project is paused — chat, uploads and agent runs are disabled'),
+      findsOneWidget,
+    );
     expect(find.text('Resume'), findsNothing);
   });
 
@@ -102,8 +133,14 @@ void main() {
         ),
       ),
     );
-    expect(find.text('Company subscription expired — chat and uploads are disabled'), findsOneWidget);
-    expect(find.text('Project is paused — chat, uploads and agent runs are disabled'), findsNothing);
+    expect(
+      find.text('Company subscription expired — chat and uploads are disabled'),
+      findsOneWidget,
+    );
+    expect(
+      find.text('Project is paused — chat, uploads and agent runs are disabled'),
+      findsNothing,
+    );
   });
 
   testWidgets('attachment preview chip shows image thumbnail', (tester) async {
@@ -125,9 +162,8 @@ void main() {
 
   testWidgets('tapping image chip opens full-screen viewer', (tester) async {
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.light,
-        home: Scaffold(
+      themedFull(
+        Scaffold(
           body: AttachmentPreviewChip(
             projectId: 'p1',
             attachmentId: 'a1',
@@ -149,9 +185,8 @@ void main() {
   testWidgets('tapping text chip opens selectable text preview', (tester) async {
     final bytes = Uint8List.fromList(utf8.encode('hello preview\nline 2'));
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.light,
-        home: Scaffold(
+      themedFull(
+        Scaffold(
           body: AttachmentPreviewChip(
             projectId: 'p1',
             attachmentId: 'a2',
@@ -173,9 +208,8 @@ void main() {
   testWidgets('tapping pdf chip opens stub viewer', (tester) async {
     final bytes = Uint8List.fromList(utf8.encode('%PDF-1.4 stub'));
     await tester.pumpWidget(
-      MaterialApp(
-        theme: AppTheme.light,
-        home: Scaffold(
+      themedFull(
+        Scaffold(
           body: AttachmentPreviewChip(
             projectId: 'p1',
             attachmentId: 'a3',
@@ -211,7 +245,7 @@ void main() {
 
   testWidgets('contour selector shows company name', (tester) async {
     await tester.pumpWidget(
-      themed(
+      themedFull(
         ContourSelectorPage(
           me: {
             'employee': {
@@ -229,7 +263,7 @@ void main() {
 
   testWidgets('tool approve page shows tool name and actions', (tester) async {
     await tester.pumpWidget(
-      themed(
+      themedFull(
         ToolApprovePage(
           projectId: 'p1',
           sessionId: 's1',

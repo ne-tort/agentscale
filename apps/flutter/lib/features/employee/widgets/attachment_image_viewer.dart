@@ -3,8 +3,11 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/theme/app_color_tokens.dart';
+
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/features/employee/widgets/attachment_preview_kinds.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Full-screen attachment preview: image / text / PDF stub (L05/L07).
 class AttachmentViewerPage extends StatefulWidget {
@@ -119,16 +122,17 @@ class _AttachmentViewerPageState extends State<AttachmentViewerPage> {
     }
   }
 
-  Widget _body(ColorScheme scheme) {
+  Widget _body() {
+    final l10n = AppLocalizations.of(context);
     if (_loading) return const CircularProgressIndicator();
     if (_error != null) {
       return Padding(
-        padding: const EdgeInsets.all(24),
+        padding: EdgeInsets.all(24),
         child: Text(_error!, textAlign: TextAlign.center),
       );
     }
     final bytes = _bytes;
-    if (bytes == null) return const Text('No attachment data');
+    if (bytes == null) return Text(l10n.projectNoAttachmentData);
 
     if (attachmentIsImageContentType(widget.contentType)) {
       return InteractiveViewer(
@@ -154,7 +158,7 @@ class _AttachmentViewerPageState extends State<AttachmentViewerPage> {
         children: [
           if (truncated)
             MaterialBanner(
-              content: const Text('Preview truncated to first 200k characters'),
+              content: Text(l10n.projectPreviewTruncated),
               actions: const [SizedBox.shrink()],
             ),
           Expanded(
@@ -179,13 +183,15 @@ class _AttachmentViewerPageState extends State<AttachmentViewerPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.picture_as_pdf_outlined, size: 64, color: scheme.primary),
+            Icon(Icons.picture_as_pdf_outlined, size: 64, color: context.appColors.primary),
             const SizedBox(height: 16),
             Text(widget.title, style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
             Text(
-              'PDF inline preview is not available yet.\n'
-              '${bytes.length} bytes · ${widget.contentType ?? 'application/pdf'}',
+              l10n.projectPdfPreviewUnavailable(
+                '${bytes.length}',
+                widget.contentType ?? 'application/pdf',
+              ),
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium,
             ),
@@ -197,7 +203,10 @@ class _AttachmentViewerPageState extends State<AttachmentViewerPage> {
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Text(
-        'No preview for ${widget.contentType ?? 'unknown'} (${bytes.length} bytes)',
+        l10n.projectNoPreviewForType(
+          widget.contentType ?? l10n.commonUnknown,
+          '${bytes.length}',
+        ),
         textAlign: TextAlign.center,
       ),
     );
@@ -205,15 +214,14 @@ class _AttachmentViewerPageState extends State<AttachmentViewerPage> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final fillBody =
         attachmentIsTextContentType(widget.contentType) || attachmentIsPdfContentType(widget.contentType);
     return Scaffold(
-      backgroundColor: scheme.surface,
+      backgroundColor: context.appColors.surface,
       appBar: AppBar(
         title: Text(widget.title, overflow: TextOverflow.ellipsis),
       ),
-      body: fillBody ? _body(scheme) : Center(child: _body(scheme)),
+      body: fillBody ? _body() : Center(child: _body()),
     );
   }
 }

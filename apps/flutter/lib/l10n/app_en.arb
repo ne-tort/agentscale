@@ -1,0 +1,804 @@
+{
+  "@@locale": "en",
+  "adminActiveEmployees": "Active employees",
+  "adminAdminEmail": "Admin email",
+  "adminAgentMessages": "Agent messages",
+  "adminAgentPolicySaved": "Agent policy saved",
+  "adminAgentRuntimePolicy": "Agent runtime policy",
+  "adminAiKeysBound": "AI keys bound",
+  "adminAlertHighUsageTitle": "{companyName}: high agent token usage",
+  "@adminAlertHighUsageTitle": {
+    "placeholders": {
+      "companyName": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlertKeyRenewalTitle": "{companyName}: AI key renewal soon",
+  "@adminAlertKeyRenewalTitle": {
+    "placeholders": {
+      "companyName": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlertKeysRenewingSoon": "{count} key(s) renewing soon",
+  "@adminAlertKeysRenewingSoon": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlertKeysRenewingSoonNext": "{count} key(s) renewing soon · next {next}",
+  "@adminAlertKeysRenewingSoonNext": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      },
+      "next": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlertNoKeysSubtitle": "Agent sessions will fail with NO_AI_KEY",
+  "adminAlertNoKeysTitle": "{companyName}: no AI keys bound",
+  "@adminAlertNoKeysTitle": {
+    "placeholders": {
+      "companyName": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlertSubExpiredTitle": "{companyName}: subscription expired",
+  "@adminAlertSubExpiredTitle": {
+    "placeholders": {
+      "companyName": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlertSubExpiringTitle": "{companyName}: subscription expiring",
+  "@adminAlertSubExpiringTitle": {
+    "placeholders": {
+      "companyName": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlertSubscriptionEnded": "Subscription ended",
+  "adminAlertSubscriptionEndedAt": "Subscription ended · {ends}",
+  "@adminAlertSubscriptionEndedAt": {
+    "placeholders": {
+      "ends": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlertSubscriptionEndsSoon": "Subscription ends soon",
+  "adminAlertSubscriptionEndsSoonAt": "Subscription ends soon · {ends}",
+  "@adminAlertSubscriptionEndsSoonAt": {
+    "placeholders": {
+      "ends": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlertTokensAboveThreshold": "Agent tokens {tokens} above platform threshold",
+  "@adminAlertTokensAboveThreshold": {
+    "placeholders": {
+      "tokens": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlerts": "Alerts",
+  "adminApiKind": "API kind",
+  "adminApiKindValue": "API kind: {api_kind}",
+  "@adminApiKindValue": {
+    "placeholders": {
+      "api_kind": {
+        "type": "String"
+      }
+    }
+  },
+  "adminBindCompanies": "Bind companies",
+  "adminBindingsSelected": "{count} selected",
+  "@adminBindingsSelected": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "adminBundle": "Bundle",
+  "adminCabinetQuotas": "Cabinet quotas",
+  "adminCabinetQuotasMustBePositive": "Cabinet quotas must be positive integers",
+  "adminCabinetsProjectsSubtitle": "{cabinets} cabinets · {projects} projects",
+  "@adminCabinetsProjectsSubtitle": {
+    "placeholders": {
+      "cabinets": {
+        "type": "String"
+      },
+      "projects": {
+        "type": "String"
+      }
+    }
+  },
+  "adminCabinetsQuotaCell": "{active} / {max} cabinets",
+  "@adminCabinetsQuotaCell": {
+    "placeholders": {
+      "active": {
+        "type": "String"
+      },
+      "max": {
+        "type": "String"
+      }
+    }
+  },
+  "adminCompanyAdminInvite": "Company admin invite",
+  "adminCompanyBindings": "Company bindings",
+  "adminCompanyName": "Company name",
+  "adminCreateAiKey": "Create AI key",
+  "adminCreateCompany": "Create company",
+  "adminCreateCompanyAndInviteAdmin": "Create a company and invite company.admin",
+  "adminCreateCompanyToSeeMetrics": "Create a company to see platform metrics",
+  "adminCreateKey": "Create key",
+  "adminCreateRuntimeKeyHint": "Create a runtime key and bind companies",
+  "adminDisableAiKey": "Disable AI key",
+  "adminDisableKey": "Disable key",
+  "adminDisableKeyConfirm": "Disable {keyName}? Agent sessions will fail with NO_AI_KEY.",
+  "@adminDisableKeyConfirm": {
+    "placeholders": {
+      "keyName": {
+        "type": "String"
+      }
+    }
+  },
+  "adminDrainProjectTriggers": "Drain project triggers",
+  "adminDrainedTriggers": "Drained {count} trigger(s)",
+  "@adminDrainedTriggers": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "adminDraining": "Draining…",
+  "adminEditBindings": "Edit bindings",
+  "adminEndsAt": "Ends at (YYYY-MM-DD)",
+  "adminEndsAtIfNotLifetime": "Ends at (YYYY-MM-DD, if not lifetime)",
+  "adminEnterIntegerMin": "Enter integer ≥ {min}",
+  "@adminEnterIntegerMin": {
+    "placeholders": {
+      "min": {
+        "type": "String"
+      }
+    }
+  },
+  "adminIdlePauseAfterHours": "Idle pause after hours (empty/0 = off)",
+  "adminIdlePausedProjectsInCompany": "Idle-paused {count} project(s) in this company",
+  "@adminIdlePausedProjectsInCompany": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "adminInviteCompanyAdminViaKeycloak": "Invite company.admin via Keycloak — password is not accepted.",
+  "adminKey": "Key",
+  "adminKeyInfo": "Key info",
+  "adminKeyListSubtitle": "{provider} · {api_kind} · {status}",
+  "@adminKeyListSubtitle": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      },
+      "api_kind": {
+        "type": "String"
+      },
+      "status": {
+        "type": "String"
+      }
+    }
+  },
+  "adminKeyMetadata": "Key metadata",
+  "adminLifecycle": "Lifecycle",
+  "adminLifetimeSubscription": "Lifetime subscription",
+  "adminMaxAgentTokensMonth": "Max agent tokens / month (optional)",
+  "adminMaxBundleImportMb": "Max bundle import (MB)",
+  "adminMaxCabinets": "Max cabinets",
+  "adminMaxChatAttachmentMb": "Max chat attachment size (MB)",
+  "adminMaxPackagesPerCabinet": "Max packages per cabinet",
+  "adminMaxTokensPerRun": "Max tokens per run (optional)",
+  "adminMaxUsdCostMonth": "Max USD cost / month (optional)",
+  "adminMetadataOnly": "metadata only",
+  "adminMetrics": "Metrics",
+  "adminMetricsAiKeysRenewSoon": "{count} AI key(s) renew soon",
+  "@adminMetricsAiKeysRenewSoon": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "adminMetricsAiKeysRenewSoonNext": "{count} AI key(s) renew soon · next {next}",
+  "@adminMetricsAiKeysRenewSoonNext": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      },
+      "next": {
+        "type": "String"
+      }
+    }
+  },
+  "adminMetricsHighTokenUsage": "High agent token usage ({tokens} tokens)",
+  "@adminMetricsHighTokenUsage": {
+    "placeholders": {
+      "tokens": {
+        "type": "String"
+      }
+    }
+  },
+  "adminMetricsNoAiKeysBound": "No AI keys bound — agent will return NO_AI_KEY",
+  "adminMetricsSubscriptionExpired": "Subscription expired",
+  "adminMetricsSubscriptionExpiring": "Subscription expiring · {ends}",
+  "@adminMetricsSubscriptionExpiring": {
+    "placeholders": {
+      "ends": {
+        "type": "String"
+      }
+    }
+  },
+  "adminModelAllowlist": "Model allowlist (comma-separated, empty = any)",
+  "adminNewSecret": "New secret",
+  "adminNextRenewalValue": "Next renewal: {next_renewal_at}",
+  "@adminNextRenewalValue": {
+    "placeholders": {
+      "next_renewal_at": {
+        "type": "String"
+      }
+    }
+  },
+  "adminNoAiKeys": "No AI keys",
+  "adminNoCompanies": "No companies",
+  "adminNoCompaniesBound": "No companies bound",
+  "adminNoCompaniesYet": "No companies yet",
+  "adminNoPlatformEventsYet": "No platform events yet",
+  "adminNoStarterBundles": "No starter bundles",
+  "adminPlatformEvents": "Platform events",
+  "adminPlatformFallback": "Platform fallback",
+  "adminPlatformIdleSweep": "Platform idle sweep: {count} project(s) ({companies} companies with policy)",
+  "@adminPlatformIdleSweep": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      },
+      "companies": {
+        "type": "String"
+      }
+    }
+  },
+  "adminPlatformTotals": "Platform totals",
+  "adminPreferredProviderOptional": "Preferred provider (optional)",
+  "adminProdavanSubscription": "Prodavan subscription",
+  "adminProdavanSubscriptionOptional": "Prodavan subscription (optional)",
+  "adminProviderValue": "Provider: {provider}",
+  "@adminProviderValue": {
+    "placeholders": {
+      "provider": {
+        "type": "String"
+      }
+    }
+  },
+  "adminQuotasSaved": "Quotas saved",
+  "adminRenewPlusOneMonth": "Renew +1 month",
+  "adminRenewing": "Renewing…",
+  "adminRotateKeyTitle": "Rotate {keyName}",
+  "@adminRotateKeyTitle": {
+    "placeholders": {
+      "keyName": {
+        "type": "String"
+      }
+    }
+  },
+  "adminRotateSecret": "Rotate secret",
+  "adminRotateSecretHint": "New secret replaces the stored value. Old secret is deleted from the file store.",
+  "adminRotating": "Rotating…",
+  "adminSaveAgentPolicy": "Save agent policy",
+  "adminSaveQuotas": "Save quotas",
+  "adminSaveSubscription": "Save subscription",
+  "adminSecretRefValue": "Secret ref: {secret_ref_prefix}",
+  "@adminSecretRefValue": {
+    "placeholders": {
+      "secret_ref_prefix": {
+        "type": "String"
+      }
+    }
+  },
+  "adminSecretRequired": "Secret required",
+  "adminSecretStoredServerSide": "Secret is stored server-side only",
+  "adminSetEndDateOrLifetime": "Set end date or enable lifetime subscription",
+  "adminShipped": "shipped",
+  "adminStarterBundles": "Starter bundles",
+  "adminStarterBundlesHint": "Catalog entries appear when shipped under data/starter_bundles/",
+  "adminStatusValue": "Status: {status}",
+  "@adminStatusValue": {
+    "placeholders": {
+      "status": {
+        "type": "String"
+      }
+    }
+  },
+  "adminSubscriptionSaved": "Subscription saved",
+  "adminSweepIdlePause": "Sweep idle pause",
+  "adminSweepIdlePauseAll": "Sweep idle pause (all companies)",
+  "adminSweeping": "Sweeping…",
+  "adminTelegramHmacConfigured": "Telegram HMAC: configured (leave blank to keep)",
+  "adminTelegramHmacNotSet": "Telegram HMAC: not set",
+  "adminTelegramHmacSecret": "Telegram HMAC secret (optional write)",
+  "adminTokens": "Tokens",
+  "adminToolPreset": "Tool preset",
+  "adminWebhookHmacConfigured": "Webhook HMAC: configured (leave blank to keep)",
+  "adminWebhookHmacNotSet": "Webhook HMAC: not set",
+  "adminWebhookHmacSecret": "Webhook HMAC secret (optional write)",
+  "authAdvanced": "Advanced",
+  "authBearerAccessToken": "Bearer access token",
+  "authBearerAccessTokenPaste": "Bearer access token (paste)",
+  "authConfigUnavailableTestMode": "Auth config unavailable — using test mode. {e}",
+  "@authConfigUnavailableTestMode": {
+    "placeholders": {
+      "e": {
+        "type": "String"
+      }
+    }
+  },
+  "authConnecting": "Connecting…",
+  "authContinueAsDemoEmployee": "Continue as Demo Employee",
+  "authContinueAsPlatformAdmin": "Continue as Platform Admin",
+  "authContinueWithToken": "Continue with token",
+  "authDevTestModeHint": "Dev test mode — one-click persona (no Keycloak)",
+  "authHideAdvanced": "Hide advanced",
+  "authNoAccessTokenInTestLogin": "No access_token in test login response",
+  "authOidcModeHint": "OIDC — PKCE via Keycloak (mobile AppAuth, desktop browser loopback)",
+  "authOpeningLogin": "Opening login…",
+  "authReloadAuthConfig": "Reload auth config",
+  "authSignIn": "Sign in",
+  "authSignInWithKeycloak": "Sign in with Keycloak",
+  "authSigningIn": "Signing in…",
+  "cabinetAddAtLeastOneColumn": "Add at least one column",
+  "cabinetAddColumn": "Add column",
+  "cabinetAddRow": "Add row",
+  "cabinetAgentsInstructions": "Agents instructions",
+  "cabinetAgentsMd": "AGENTS.md",
+  "cabinetAgentsMdHint": "Written into project workspace on materialize (AGENTS.md + CLAUDE.md). Re-materialize projects to apply.",
+  "cabinetArchiveTable": "Archive table",
+  "cabinetArchiveTableConfirm": "Archive table?",
+  "cabinetArchiveTableMessage": "Archive \"{tableSlug}\". Rows stay in DB but table hides from lists. Remove views referencing this table first.",
+  "@cabinetArchiveTableMessage": {
+    "placeholders": {
+      "tableSlug": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetArchivedBanner": "Archived — you can delete permanently or go back.",
+  "cabinetArchiving": "Archiving…",
+  "cabinetAuditLog": "Audit log",
+  "cabinetAuditRecent": "Audit (recent)",
+  "cabinetCabinetName": "Cabinet name",
+  "cabinetChooseZipFile": "Choose .zip file",
+  "cabinetColumnName": "Column name",
+  "cabinetColumnSettings": "Column settings",
+  "cabinetColumnTypeChip": "{name} · {type}",
+  "@cabinetColumnTypeChip": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      },
+      "type": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetColumns": "Columns",
+  "cabinetContextHint": "Use the Projects tab to open an agent workspace. Tables and Tools tabs expose cabinet runtime data.",
+  "cabinetContextStatusLine": "Status: {status} · Company {companyId}",
+  "@cabinetContextStatusLine": {
+    "placeholders": {
+      "status": {
+        "type": "String"
+      },
+      "companyId": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetCouldNotReadZipBytes": "Could not read zip bytes",
+  "cabinetCreateBaseCabinetHint": "Create a Base cabinet to start",
+  "cabinetCreateCabinet": "Create cabinet",
+  "cabinetCreateMetaTableFirst": "Create a meta table first (Tables tab → New table).",
+  "cabinetCreateTab": "Create tab",
+  "cabinetCreateTable": "Create table",
+  "cabinetCustomTabs": "Custom tabs",
+  "cabinetCustomTabsHint": "Custom tabs appear in the cabinet shell after creation. System tabs cannot be removed here.",
+  "cabinetDeleteColumn": "Delete column",
+  "cabinetDeleteColumnConfirm": "Delete column?",
+  "cabinetDeletePermanently": "Delete permanently",
+  "cabinetDeleteRow": "Delete row?",
+  "cabinetDeleteRowPermanently": "Delete row {rowId} permanently.",
+  "@cabinetDeleteRowPermanently": {
+    "placeholders": {
+      "rowId": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetDeleteTab": "Delete tab?",
+  "cabinetDeleteTablePermanently": "Delete table permanently?",
+  "cabinetDropAllDataConfirm": "Drop all data for \"{tableSlug}\". This cannot be undone.",
+  "@cabinetDropAllDataConfirm": {
+    "placeholders": {
+      "tableSlug": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetEditAgentsMd": "Edit AGENTS.md",
+  "cabinetEditRow": "Edit row",
+  "cabinetEmptyBundleExport": "Empty bundle export",
+  "cabinetEnterAtLeastOneField": "Enter at least one field value",
+  "cabinetExportCabinetBundle": "Export cabinet bundle",
+  "cabinetExportReady": "Export ready ({bytes} bytes)",
+  "@cabinetExportReady": {
+    "placeholders": {
+      "bytes": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetExporting": "Exporting…",
+  "cabinetFromFile": "From file",
+  "cabinetImportBundleIntro": "Import a cabinet.bundle zip exported from another cabinet. Creates a new cabinet instance with a fresh schema.",
+  "cabinetImportBundleTooltip": "Import bundle",
+  "cabinetImportCabinetBundle": "Import cabinet bundle",
+  "cabinetImportedCabinetDefault": "Imported cabinet",
+  "cabinetImporting": "Importing…",
+  "cabinetLettersDigitsUnderscore": "Letters, digits, underscore",
+  "cabinetLowercaseSlugRule": "Lowercase letters, digits, underscore",
+  "cabinetManageCustomTabs": "Manage custom tabs",
+  "cabinetMcpTools": "MCP tools",
+  "cabinetMetaTables": "Meta tables",
+  "cabinetMyCabinetDefault": "My cabinet",
+  "cabinetNewCabinet": "New cabinet",
+  "cabinetNewCustomTab": "New custom tab",
+  "cabinetNewTab": "New tab",
+  "cabinetNewTable": "New table",
+  "cabinetNoAuditEventsYet": "No audit events yet.",
+  "cabinetNoCompanyIdFromMe": "No company_id from /me memberships",
+  "cabinetNoCustomTabsYet": "No custom tabs yet.",
+  "cabinetNoInterpreterForView": "No interpreter registered for view \"{slug}\".",
+  "@cabinetNoInterpreterForView": {
+    "placeholders": {
+      "slug": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetNoMcpTools": "No MCP tools exposed for this cabinet.",
+  "cabinetNoMetaTablesYet": "No meta tables in this cabinet yet.",
+  "cabinetNoRows": "No rows",
+  "cabinetNotShipped": "not shipped",
+  "cabinetOfficialStarterBundles": "Official starter bundles",
+  "cabinetRemoveColumnData": "Remove column \"{columnName}\" and its data.",
+  "@cabinetRemoveColumnData": {
+    "placeholders": {
+      "columnName": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetRemoveTabAndView": "Remove tab \"{title}\" and its view.",
+  "@cabinetRemoveTabAndView": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetReservedName": "Reserved name",
+  "cabinetRowFallback": "Row {index}",
+  "@cabinetRowFallback": {
+    "placeholders": {
+      "index": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetSaveLabel": "Save label",
+  "cabinetSaveRow": "Save row",
+  "cabinetSaveView": "Save view",
+  "cabinetSavedTo": "Saved to {path}",
+  "@cabinetSavedTo": {
+    "placeholders": {
+      "path": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetSelectATable": "Select a table",
+  "cabinetSelectCabinetBundleZip": "Select a cabinet.bundle zip file",
+  "cabinetSelectTableToPreview": "Select a table to preview rows",
+  "cabinetSlug": "Slug",
+  "cabinetStatusCompanyLine": "Status: {status} · Company {companyId}",
+  "@cabinetStatusCompanyLine": {
+    "placeholders": {
+      "status": {
+        "type": "String"
+      },
+      "companyId": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetStorage": "Storage",
+  "cabinetStorageJsonDocument": "json_document",
+  "cabinetStoragePhysical": "physical",
+  "cabinetSystemColumnReadOnly": "System column — read only.",
+  "cabinetTabFallback": "Tab",
+  "cabinetTabOrder": "Tab order",
+  "cabinetTabSubtitle": "view: {viewSlug} · table: {tableSlug}",
+  "@cabinetTabSubtitle": {
+    "placeholders": {
+      "viewSlug": {
+        "type": "String"
+      },
+      "tableSlug": {
+        "type": "String"
+      }
+    }
+  },
+  "cabinetTabTitle": "Tab title",
+  "cabinetTableSettings": "Table settings",
+  "cabinetTitleFieldColumnName": "Title field (column name)",
+  "cabinetType": "Type",
+  "cabinetUnique": "Unique",
+  "cabinetUnknownTabNoViewSlug": "Unknown tab — no view_slug from meta.",
+  "cabinetViewNotFound": "View not found",
+  "cabinetViewSlug": "View slug",
+  "cabinetViewTitle": "View {viewSlug}",
+  "@cabinetViewTitle": {
+    "placeholders": {
+      "viewSlug": {
+        "type": "String"
+      }
+    }
+  },
+  "commonAdd": "Add",
+  "commonAdding": "Adding…",
+  "commonAgentTokens": "Agent tokens",
+  "commonApiBaseUrl": "API base URL",
+  "commonArchive": "Archive",
+  "commonCabinets": "Cabinets",
+  "commonCancel": "Cancel",
+  "commonCompany": "Company",
+  "commonContinueAction": "Continue",
+  "commonCreate": "Create",
+  "commonCreating": "Creating…",
+  "commonDelete": "Delete",
+  "commonDeleting": "Deleting…",
+  "commonDisable": "Disable",
+  "commonDisplayNameOptional": "Display name (optional)",
+  "commonDone": "Done",
+  "commonEmDash": "—",
+  "commonEmail": "Email",
+  "commonEmployees": "Employees",
+  "commonEmpty": "Empty",
+  "commonFilter": "Filter",
+  "commonImport": "Import",
+  "commonInvite": "Invite",
+  "commonLabel": "Label",
+  "commonLastActivity": "Last activity",
+  "commonList": "List",
+  "commonName": "Name",
+  "commonNameRequired": "Name required",
+  "commonNone": "None",
+  "commonNothingFound": "Nothing found",
+  "commonOverview": "Overview",
+  "commonPositiveInteger": "Positive integer",
+  "commonProjects": "Projects",
+  "commonProvider": "Provider",
+  "commonReload": "Reload",
+  "commonRequired": "Required",
+  "commonResume": "Resume",
+  "commonSave": "Save",
+  "commonSaving": "Saving…",
+  "commonSearch": "Search",
+  "commonSecret": "Secret",
+  "commonSelect": "Select",
+  "commonSelectCompany": "Select company",
+  "commonStatus": "Status",
+  "commonStorageBytes": "Storage (bytes)",
+  "commonTable": "Table",
+  "commonTitle": "Title",
+  "commonUnknown": "unknown",
+  "companyActive": "Active",
+  "companyCabinet": "Cabinet",
+  "companyCabinetsEmptyHint": "Employees create cabinets in Employee contour",
+  "companyDisableEmployee": "Disable employee",
+  "companyDisableEmployeeConfirm": "Disable {email}? They will lose access.",
+  "@companyDisableEmployeeConfirm": {
+    "placeholders": {
+      "email": {
+        "type": "String"
+      }
+    }
+  },
+  "companyInviteEmployee": "Invite employee",
+  "companyInviteViaKeycloakNoPassword": "Invite via Keycloak — no password field",
+  "companyInviteViaKeycloakPasswordNotAccepted": "Invite via Keycloak — password is not accepted here.",
+  "companyInviting": "Inviting…",
+  "companyNoCabinets": "No cabinets",
+  "companyNoEmployees": "No employees",
+  "companyOrgMetrics": "Org metrics",
+  "companyOwner": "Owner",
+  "companyReadOnlyOrgView": "{title} — read-only org view",
+  "@companyReadOnlyOrgView": {
+    "placeholders": {
+      "title": {
+        "type": "String"
+      }
+    }
+  },
+  "companyRole": "Role",
+  "companyValidEmailRequired": "Valid email required",
+  "devAdminSession": "Admin session",
+  "devBearerTokenCompanyAdmin": "Bearer token (company.admin JWT)",
+  "devBearerTokenPlatformAdmin": "Bearer token (platform_admin JWT)",
+  "devBearerTokenTestJwt": "Bearer token (AUTH_MODE=test JWT)",
+  "devCompanyAdminMembershipRequired": "company.admin membership required",
+  "devCompanySession": "Company session",
+  "devDevSession": "Dev session",
+  "devNoEmployeeMemberships": "No employee memberships",
+  "devTokenMustHaveCompanyContour": "Token must have company contour (company.admin membership)",
+  "devTokenMustHavePlatformAdmin": "Token must have platform_admin contour",
+  "galleryAlpha": "Alpha",
+  "galleryBeta": "Beta",
+  "galleryButtons": "Buttons",
+  "galleryCheck": "Check",
+  "galleryCoreGallery": "Core gallery",
+  "galleryCount": "Count",
+  "galleryDanger": "Danger",
+  "galleryDemo": "demo",
+  "galleryDemoConfirm": "Demo confirm",
+  "galleryEntityCollection": "EntityCollection",
+  "galleryListItem": "List item",
+  "galleryOne": "One",
+  "galleryPick": "Pick",
+  "galleryRadio": "Radio",
+  "gallerySampleRow": "Sample row",
+  "gallerySelection": "Selection",
+  "gallerySelector": "Selector",
+  "gallerySubtitle": "subtitle",
+  "galleryTwo": "Two",
+  "navAiKeys": "AI Keys",
+  "navBundles": "Bundles",
+  "navCabinets": "Cabinets",
+  "navCompanies": "Companies",
+  "navEmployees": "Employees",
+  "navOverview": "Overview",
+  "navProdavan": "Prodavan",
+  "projectAgentError": "Agent error",
+  "projectApproveAndContinue": "Approve and continue",
+  "projectApproveTool": "Approve tool",
+  "projectApproveToolPrompt": "Approve {name}?",
+  "@projectApproveToolPrompt": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "projectAttachFile": "Attach file",
+  "projectAttachmentFallback": "attachment",
+  "projectCancelledMarker": "(cancelled)",
+  "projectCancelledWithText": "{text}\n(cancelled)",
+  "@projectCancelledWithText": {
+    "placeholders": {
+      "text": {
+        "type": "String"
+      }
+    }
+  },
+  "projectCompanyDefault": "Company default",
+  "projectCouldNotReadFileBytes": "Could not read file bytes",
+  "projectCreateAndOpenChat": "Create and open chat",
+  "projectCreateProject": "Create project",
+  "projectCreateProjectHint": "Create a project to open chat workspace",
+  "projectDeny": "Deny",
+  "projectEmptyChatHint": "Send a message to start the agent session",
+  "projectFileFallback": "file",
+  "projectInbox": "Inbox ({count})",
+  "@projectInbox": {
+    "placeholders": {
+      "count": {
+        "type": "String"
+      }
+    }
+  },
+  "projectMessageHint": "Message…",
+  "projectNewProject": "New project",
+  "projectNoAttachmentData": "No attachment data",
+  "projectNoPreviewForType": "No preview for {contentType} ({bytes} bytes)",
+  "@projectNoPreviewForType": {
+    "placeholders": {
+      "contentType": {
+        "type": "String"
+      },
+      "bytes": {
+        "type": "String"
+      }
+    }
+  },
+  "projectNoProjects": "No projects",
+  "projectPauseProject": "Pause project",
+  "projectPausedBanner": "Project is paused — chat, uploads and agent runs are disabled",
+  "projectPausedDisabledHint": "Chat, uploads and agent runs are disabled while paused",
+  "projectPausedListSubtitle": "Paused — chat, uploads and agent runs disabled",
+  "projectPausing": "Pausing…",
+  "projectPdfPreviewUnavailable": "PDF inline preview is not available yet.\n{bytes} bytes · {contentType}",
+  "@projectPdfPreviewUnavailable": {
+    "placeholders": {
+      "bytes": {
+        "type": "String"
+      },
+      "contentType": {
+        "type": "String"
+      }
+    }
+  },
+  "projectPreferredAgentProvider": "Preferred agent provider",
+  "projectPreviewTruncated": "Preview truncated to first 200k characters",
+  "projectProject": "Project",
+  "projectProjectName": "Project name",
+  "projectProjectPaused": "Project paused",
+  "projectProjectResumed": "Project resumed",
+  "projectProjectSettings": "Project settings",
+  "projectProjectStatus": "Project status",
+  "projectRegenerate": "Regenerate",
+  "projectReloadTranscript": "Reload transcript",
+  "projectRematerializeWorkspace": "Rematerialize workspace",
+  "projectRematerializedPackages": "Rematerialized packages: {packages}",
+  "@projectRematerializedPackages": {
+    "placeholders": {
+      "packages": {
+        "type": "String"
+      }
+    }
+  },
+  "projectRematerializing": "Rematerializing…",
+  "projectResumeProject": "Resume project",
+  "projectResuming": "Resuming…",
+  "projectSizeBytes": "{size} B",
+  "@projectSizeBytes": {
+    "placeholders": {
+      "size": {
+        "type": "String"
+      }
+    }
+  },
+  "projectSubscriptionExpiredBanner": "Company subscription expired — chat and uploads are disabled",
+  "projectToolApprovalHint": "This tool requires human approval before the agent can continue.",
+  "projectUploadMissingId": "Upload missing id/storage_ref",
+  "projectWorking": "Working…",
+  "projectWorkspaceRematerializedNoPackages": "Workspace rematerialized (no MCP packages)",
+  "settings": "Settings",
+  "settingsLanguage": "Language",
+  "settingsLanguageEn": "English",
+  "settingsLanguageRu": "Русский",
+  "settingsTheme": "Theme",
+  "settingsThemeDark": "Dark",
+  "settingsThemeLight": "Light",
+  "settingsThemeUltraDark": "Ultra dark"
+}

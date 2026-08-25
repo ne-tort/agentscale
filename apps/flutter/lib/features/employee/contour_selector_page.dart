@@ -5,6 +5,8 @@ import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/features/employee/cabinet_list_page.dart';
+import 'package:prodavan/features/settings/open_app_settings.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Pick active company when employee has multiple memberships (L05).
 class ContourSelectorPage extends StatelessWidget {
@@ -27,11 +29,19 @@ class ContourSelectorPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final memberships = me['employee']?['memberships'];
-    final items = memberships is List ? memberships.cast<Map<String, dynamic>>() : const <Map<String, dynamic>>[];
+    final items = memberships is List ? memberships.cast<Map<String, dynamic>>() : <Map<String, dynamic>>[];
 
     return AppScaffold(
-      title: const Text('Select company'),
+      title: Text(l10n.commonSelectCompany),
+      actions: [
+        IconButton(
+          tooltip: l10n.settings,
+          icon: const Icon(Icons.settings_outlined),
+          onPressed: () => openAppSettings(context),
+        ),
+      ],
       body: ListView.separated(
         padding: const EdgeInsets.all(AppSpacing.lg),
         itemCount: items.length,

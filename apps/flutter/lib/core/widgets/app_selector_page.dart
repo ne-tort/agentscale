@@ -8,6 +8,7 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/empty_state.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 class AppSelectorItem {
   const AppSelectorItem({
@@ -103,6 +104,7 @@ class _AppSelectorPageState extends State<AppSelectorPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final items = _filtered;
     return AppScaffold(
       title: Text(widget.title),
@@ -113,7 +115,7 @@ class _AppSelectorPageState extends State<AppSelectorPage> {
               widget.onConfirm?.call(_selected);
               Navigator.of(context).pop(_selected);
             },
-            child: const Text('Готово'),
+            child: Text(l10n.commonDone),
           ),
       ],
       body: Column(
@@ -132,14 +134,14 @@ class _AppSelectorPageState extends State<AppSelectorPage> {
                 AppSpacing.sm,
               ),
               child: AppTextField(
-                label: 'Поиск',
+                label: l10n.commonSearch,
                 onChanged: (v) => setState(() => _query = v),
               ),
             ),
           Expanded(
             child: items.isEmpty
                 ? (widget.empty ??
-                    const EmptyState(title: 'Ничего не найдено'))
+                    EmptyState(title: l10n.commonNothingFound))
                 : ListView.separated(
                     padding: const EdgeInsets.all(AppSpacing.md),
                     itemCount: items.length,

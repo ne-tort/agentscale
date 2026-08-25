@@ -8,6 +8,7 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/project_workspace_page.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Full-page project create (L05 ux — no modals).
 class ProjectCreatePage extends StatefulWidget {
@@ -20,10 +21,22 @@ class ProjectCreatePage extends StatefulWidget {
 }
 
 class _ProjectCreatePageState extends State<ProjectCreatePage> {
+  @override
+  void initState() {
+    super.initState();
+    // Default filled after first frame when locale is available.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_nameCtrl.text.isEmpty) {
+        _nameCtrl.text = AppLocalizations.of(context).projectNewProject;
+      }
+    });
+  }
+
   static const _providers = <String?>[null, 'cursor', 'codex', 'claude_code'];
 
   final _formKey = GlobalKey<FormState>();
-  final _nameCtrl = TextEditingController(text: 'New project');
+  final _nameCtrl = TextEditingController();
   String? _agentProvider;
   bool _saving = false;
   String? _error;
@@ -69,14 +82,16 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
   }
 
   String _labelFor(String? value) {
-    if (value == null) return 'Company default';
+    final l10n = AppLocalizations.of(context);
+    if (value == null) return l10n.projectCompanyDefault;
     return value;
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      title: const Text('Create project'),
+      title: Text(l10n.projectCreateProject),
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
@@ -86,17 +101,17 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
             children: [
               AppTextField(
                 controller: _nameCtrl,
-                label: 'Project name',
+                label: l10n.projectProjectName,
                 enabled: !_saving,
                 validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Name required';
+                  if (v == null || v.trim().isEmpty) return l10n.commonNameRequired;
                   return null;
                 },
               ),
               DropdownButtonFormField<String?>(
                 value: _agentProvider,
-                decoration: const InputDecoration(
-                  labelText: 'Preferred agent provider',
+                decoration: InputDecoration(
+                  labelText: l10n.projectPreferredAgentProvider,
                   border: OutlineInputBorder(),
                 ),
                 items: [
@@ -109,7 +124,7 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
                 onChanged: _saving ? null : (v) => setState(() => _agentProvider = v),
               ),
               AppButton(
-                label: _saving ? 'Creating…' : 'Create and open chat',
+                label: _saving ? l10n.commonCreating : l10n.projectCreateAndOpenChat,
                 onPressed: _saving ? null : _create,
               ),
             ],

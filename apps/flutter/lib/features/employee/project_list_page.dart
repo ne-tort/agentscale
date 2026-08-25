@@ -7,6 +7,7 @@ import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/project_create_page.dart';
 import 'package:prodavan/features/employee/project_workspace_page.dart';
 import 'package:prodavan/features/employee/widgets/project_status_chip.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Projects tab — list + chat workspace (L05/L09).
 class ProjectListPage extends StatefulWidget {
@@ -74,6 +75,7 @@ class _ProjectListPageState extends State<ProjectListPage> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final rows = _projects
         .map(
           (p) {
@@ -82,7 +84,7 @@ class _ProjectListPageState extends State<ProjectListPage> {
               id: p['id'] as String,
               title: p['name'] as String? ?? p['id'] as String,
               subtitle: ProjectStatusChip.isPaused(status)
-                  ? 'Paused — chat, uploads and agent runs disabled'
+                  ? l10n.projectPausedListSubtitle
                   : status,
               trailing: ProjectStatusChip(status: status),
             );
@@ -99,8 +101,8 @@ class _ProjectListPageState extends State<ProjectListPage> {
             alignment: Alignment.centerRight,
             child: TextButton.icon(
               onPressed: _createProject,
-              icon: const Icon(Icons.add),
-              label: const Text('New project'),
+              icon: Icon(Icons.add),
+              label: Text(l10n.projectNewProject),
             ),
           ),
         ),
@@ -108,12 +110,12 @@ class _ProjectListPageState extends State<ProjectListPage> {
           child: AppEntityCollection(
             loading: _loading,
             rows: rows,
-            columns: const [AppEntityColumn(id: 'name', label: 'Project')],
+            columns: [AppEntityColumn(id: 'name', label: l10n.projectProject)],
             onOpen: _openProject,
             empty: EmptyState(
-              title: 'No projects',
-              subtitle: 'Create a project to open chat workspace',
-              action: TextButton(onPressed: _createProject, child: const Text('Create project')),
+              title: l10n.projectNoProjects,
+              subtitle: l10n.projectCreateProjectHint,
+              action: TextButton(onPressed: _createProject, child: Text(l10n.projectCreateProject)),
             ),
           ),
         ),

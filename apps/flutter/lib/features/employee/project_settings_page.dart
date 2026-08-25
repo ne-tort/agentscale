@@ -8,6 +8,7 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/widgets/project_status_chip.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Project settings — name + preferred agent provider override (L07/L03).
 class ProjectSettingsPage extends StatefulWidget {
@@ -105,14 +106,15 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
       _rematerializeInfo = null;
     });
     try {
+      final l10n = AppLocalizations.of(context);
       final result = await workContext.api.rematerializeProject(widget.projectId);
       if (!mounted) return;
       final packages = (result['package_names'] as List?)?.join(', ') ?? '';
       setState(() {
         _rematerializing = false;
         _rematerializeInfo = packages.isEmpty
-            ? 'Workspace rematerialized (no MCP packages)'
-            : 'Rematerialized packages: $packages';
+            ? l10n.projectWorkspaceRematerializedNoPackages
+            : l10n.projectRematerializedPackages(packages);
       });
     } catch (e) {
       if (!mounted) return;
@@ -131,12 +133,13 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
     try {
       final result = await workContext.api.pauseProject(widget.projectId);
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
       setState(() {
         _projectStatus = result['status'] as String? ?? 'paused';
         _pausing = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Project paused')),
+        SnackBar(content: Text(l10n.projectProjectPaused)),
       );
     } catch (e) {
       if (!mounted) return;
@@ -155,12 +158,13 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
     try {
       final result = await workContext.api.resumeProject(widget.projectId);
       if (!mounted) return;
+      final l10n = AppLocalizations.of(context);
       setState(() {
         _projectStatus = result['status'] as String? ?? 'active';
         _pausing = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Project resumed')),
+        SnackBar(content: Text(l10n.projectProjectResumed)),
       );
     } catch (e) {
       if (!mounted) return;
@@ -172,14 +176,16 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
   }
 
   String _labelFor(String? value) {
-    if (value == null) return 'Company default';
+    final l10n = AppLocalizations.of(context);
+    if (value == null) return l10n.projectCompanyDefault;
     return value;
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      title: const Text('Project settings'),
+      title: Text(l10n.projectProjectSettings),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -190,9 +196,9 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: ProjectStatusChip(status: _projectStatus!),
-                    title: const Text('Project status'),
+                    title: Text(l10n.projectProjectStatus),
                     subtitle: ProjectStatusChip.isPaused(_projectStatus)
-                        ? const Text('Chat, uploads and agent runs are disabled while paused')
+                        ? Text(l10n.projectPausedDisabledHint)
                         : Text(_projectStatus!),
                   ),
                 AppForm(
@@ -200,17 +206,17 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
                   children: [
                     AppTextField(
                       controller: _nameCtrl,
-                      label: 'Project name',
+                      label: l10n.projectProjectName,
                       enabled: !_saving,
                       validator: (v) {
-                        if (v == null || v.trim().isEmpty) return 'Name required';
+                        if (v == null || v.trim().isEmpty) return l10n.commonNameRequired;
                         return null;
                       },
                     ),
                     DropdownButtonFormField<String?>(
                       value: _agentProvider,
-                      decoration: const InputDecoration(
-                        labelText: 'Preferred agent provider',
+                      decoration: InputDecoration(
+                        labelText: l10n.projectPreferredAgentProvider,
                         border: OutlineInputBorder(),
                       ),
                       items: [
@@ -225,21 +231,21 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
                           : (v) => setState(() => _agentProvider = v),
                     ),
                     AppButton(
-                      label: _saving ? 'Saving…' : 'Save',
+                      label: _saving ? l10n.commonSaving : l10n.commonSave,
                       onPressed: _saving || _rematerializing || _pausing ? null : _save,
                     ),
                     if (_projectStatus == 'paused')
                       AppButton(
-                        label: _pausing ? 'Resuming…' : 'Resume project',
+                        label: _pausing ? l10n.projectResuming : l10n.projectResumeProject,
                         onPressed: _saving || _rematerializing || _pausing ? null : _resume,
                       )
                     else
                       AppButton(
-                        label: _pausing ? 'Pausing…' : 'Pause project',
+                        label: _pausing ? l10n.projectPausing : l10n.projectPauseProject,
                         onPressed: _saving || _rematerializing || _pausing ? null : _pause,
                       ),
                     AppButton(
-                      label: _rematerializing ? 'Rematerializing…' : 'Rematerialize workspace',
+                      label: _rematerializing ? l10n.projectRematerializing : l10n.projectRematerializeWorkspace,
                       onPressed: _saving || _rematerializing || _pausing ? null : _rematerialize,
                     ),
                     if (_rematerializeInfo != null)
