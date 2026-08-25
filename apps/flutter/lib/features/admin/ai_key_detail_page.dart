@@ -1,18 +1,14 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
-import 'package:prodavan/core/widgets/app_button.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_section_header.dart';
-import 'package:prodavan/core/widgets/app_selector_page.dart';
 import 'package:prodavan/core/widgets/danger_confirm_page.dart';
-import 'package:prodavan/core/widgets/empty_placeholder.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
-import 'package:prodavan/features/admin/ai_key_rotate_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// AI key detail — status, company bindings (L03/L04).
+/// AI key detail — seamless preference editing (L03/L04).
 class AdminAiKeyDetailPage extends StatefulWidget {
   const AdminAiKeyDetailPage({
     super.key,
@@ -28,23 +24,29 @@ class AdminAiKeyDetailPage extends StatefulWidget {
 }
 
 class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
+  static const _providers = ['cursor', 'codex', 'claude_code'];
+  static const _apiKinds = [
+    'cursor_sdk',
+    'codex_sdk',
+    'claude_agent_sdk',
+    'openai_api',
+    'anthropic_api',
+  ];
+
   bool _loading = true;
-  bool _saving = false;
-  String? _error;
   Map<String, dynamic>? _key;
   List<Map<String, dynamic>> _companies = const [];
+  String _displayName = '';
 
   @override
   void initState() {
     super.initState();
+    _displayName = widget.keyName;
     _load();
   }
 
   Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    setState(() => _loading = true);
     try {
       final key = await adminContext.api.getAiKey(widget.keyId);
       final companies = await adminContext.api.listCompanies();
@@ -52,14 +54,13 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
       setState(() {
         _key = key;
         _companies = companies;
+        _displayName = key['name'] as String? ?? widget.keyName;
         _loading = false;
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      setState(() => _loading = false);
+      AppErrors.showSnack(context, e);
     }
   }
 
@@ -69,6 +70,9 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
     return const [];
   }
 
+  Set<String> get _companyChoices =>
+      _companies.map((c) => c['id'] as String).toSet();
+
   String _companyLabel(String id) {
     for (final c in _companies) {
       if (c['id'] == id) return c['name'] as String? ?? id;
@@ -76,77 +80,20 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
     return id;
   }
 
-  Future<void> _bindCompanies() async {
-    final l10n = AppLocalizations.of(context);
-    final picked = await Navigator.of(context).push<Set<String>>(
-      MaterialPageRoute(
-        builder: (_) => AppSelectorPage(
-          title: l10n.adminBindCompanies,
-          multiSelect: true,
-          selectedIds: _boundIds.toSet(),
-          showCheckboxes: true,
-          items: [
-            for (final c in _companies)
-              AppSelectorItem(
-                id: c['id'] as String,
-                title: c['name'] as String? ?? c['id'] as String,
-              ),
-          ],
-          onConfirm: (_) {},
-        ),
-      ),
-    );
-    if (picked == null) return;
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-    try {
-      await adminContext.api.setAiKeyCompanies(
-        keyId: widget.keyId,
-        companyIds: picked.toList(),
-      );
-      await _load();
-      if (!mounted) return;
-      setState(() => _saving = false);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _saving = false;
-      });
-    }
+  String _bindingsSubtitle(AppLocalizations l10n) {
+    final count = _boundIds.length;
+    if (count == 0) return l10n.commonNotSet;
+    if (count == 1) return _companyLabel(_boundIds.first);
+    return l10n.adminBindingsCount(count);
   }
 
   Future<void> _renewKey() async {
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
     try {
       await adminContext.api.renewAiKey(keyId: widget.keyId, months: 1);
       await _load();
-      if (!mounted) return;
-      setState(() => _saving = false);
     } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _saving = false;
-      });
+      if (mounted) AppErrors.showSnack(context, e);
     }
-  }
-
-  Future<void> _rotateSecret() async {
-    final rotated = await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(
-        builder: (_) => AdminAiKeyRotatePage(
-          keyId: widget.keyId,
-          keyName: widget.keyName,
-        ),
-      ),
-    );
-    if (rotated == true) await _load();
   }
 
   Future<void> _disableKey() async {
@@ -155,92 +102,125 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
     final ok = await DangerConfirmPage.push(
       context,
       title: l10n.adminDisableAiKey,
-      message: l10n.adminDisableKeyConfirm(widget.keyName),
+      message: l10n.adminDisableKeyConfirm(_displayName),
       confirmLabel: l10n.commonDisable,
     );
     if (!ok) return;
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
     try {
       await adminContext.api.patchAiKey(keyId: widget.keyId, status: 'disabled');
       await _load();
-      if (!mounted) return;
-      setState(() => _saving = false);
     } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _saving = false;
-      });
+      if (mounted) AppErrors.showSnack(context, e);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    if (_loading) {
+      return AppScaffold(
+        title: Text(_displayName),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final provider = _key?['provider'] as String? ?? 'cursor';
+    final apiKind = _key?['api_kind'] as String? ?? 'cursor_sdk';
+    final status = _key?['status'] as String? ?? '—';
+    final hasSecret = (_key?['secret_ref_prefix'] as String? ?? '').isNotEmpty;
+
     return AppScaffold(
-      title: Text(widget.keyName),
+      title: Text(_displayName),
       actions: [
-        IconButton(onPressed: _loading || _saving ? null : _load, icon: const Icon(Icons.refresh)),
+        IconButton(onPressed: _load, icon: const Icon(Icons.refresh)),
       ],
-      body: _loading
-          ? Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: EdgeInsets.all(AppSpacing.md),
-              children: [
-                if (_error != null) InlineErrorBanner(message: _error!),
-                AppSectionHeader(title: l10n.adminKeyInfo),
-                if (_key != null) ...[
-                  Text(l10n.adminProviderValue('${_key!['provider']}')),
-                  Text(l10n.adminApiKindValue('${_key!['api_kind']}')),
-                  Text(l10n.adminStatusValue('${_key!['status']}')),
-                  if (_key!['next_renewal_at'] != null)
-                    Text(l10n.adminNextRenewalValue('${_key!['next_renewal_at']}')),
-                  Text(l10n.adminSecretRefValue('${_key!['secret_ref_prefix']}')),
-                ],
-                const SizedBox(height: AppSpacing.lg),
-                AppSectionHeader(title: l10n.adminLifecycle),
-                AppButton(
-                  label: _saving ? l10n.adminRenewing : l10n.adminRenewPlusOneMonth,
-                  expanded: false,
-                  onPressed: _saving ? null : _renewKey,
-                ),
-                const SizedBox(height: AppSpacing.sm),
-                AppButton(
-                  label: l10n.adminRotateSecret,
-                  expanded: false,
-                  variant: AppButtonVariant.outlined,
-                  onPressed: _saving ? null : _rotateSecret,
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                AppSectionHeader(title: l10n.adminCompanyBindings),
-                if (_boundIds.isEmpty)
-                  EmptyPlaceholder(
-                    title: l10n.adminNoCompaniesBound,
-                    icon: Icons.link_off_outlined,
-                    iconSize: 32,
-                    fillViewport: false,
-                    padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-                  )
-                else
-                  ..._boundIds.map((id) => ListTile(title: Text(_companyLabel(id)), subtitle: Text(id))),
-                AppButton(
-                  label: _saving ? l10n.commonSaving : l10n.adminEditBindings,
-                  expanded: false,
-                  onPressed: _saving ? null : _bindCompanies,
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                if (_key?['status'] != 'disabled')
-                  AppButton(
-                    label: l10n.adminDisableKey,
-                    expanded: false,
-                    variant: AppButtonVariant.outlined,
-                    onPressed: _saving ? null : _disableKey,
-                  ),
-              ],
+      body: ListView(
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+        children: [
+          AppValuePreference<String>(
+            title: l10n.commonName,
+            icon: Icons.label_outline_rounded,
+            value: _displayName,
+            onSave: (v) async {
+              await adminContext.api.patchAiKey(keyId: widget.keyId, name: v.trim());
+              await _load();
+            },
+          ),
+          AppChoicePreference<String>(
+            title: l10n.commonProvider,
+            icon: Icons.cloud_outlined,
+            value: _providers.contains(provider) ? provider : 'cursor',
+            choices: _providers,
+            keyFor: (v) => v,
+            labelFor: (v) => v,
+            onSave: (v) async {
+              await adminContext.api.patchAiKey(keyId: widget.keyId, provider: v);
+              await _load();
+            },
+          ),
+          AppChoicePreference<String>(
+            title: l10n.adminApiKind,
+            icon: Icons.api_outlined,
+            value: _apiKinds.contains(apiKind) ? apiKind : 'cursor_sdk',
+            choices: _apiKinds,
+            keyFor: (v) => v,
+            labelFor: (v) => v,
+            onSave: (v) async {
+              await adminContext.api.patchAiKey(keyId: widget.keyId, apiKind: v);
+              await _load();
+            },
+          ),
+          AppMultiChoicePreference<String>(
+            title: l10n.adminCompanyBindings,
+            icon: Icons.link_rounded,
+            values: _boundIds.toSet(),
+            choices: _companyChoices.toList(),
+            keyFor: (v) => v,
+            labelFor: _companyLabel,
+            presentValues: (_) => _bindingsSubtitle(l10n),
+            onSave: (ids) async {
+              await adminContext.api.setAiKeyCompanies(
+                keyId: widget.keyId,
+                companyIds: ids.toList(),
+              );
+              await _load();
+            },
+          ),
+          AppPreferenceTile(
+            title: l10n.commonStatus,
+            icon: Icons.info_outline_rounded,
+            subtitle: Text(status),
+          ),
+          AppNavPreference(
+            title: l10n.adminRenewPlusOneMonth,
+            icon: Icons.update_rounded,
+            onTap: _renewKey,
+          ),
+          if (status != 'disabled')
+            AppNavPreference(
+              title: l10n.adminDisableKey,
+              icon: Icons.block_rounded,
+              accentColor: Theme.of(context).colorScheme.error,
+              onTap: _disableKey,
             ),
+          AppValuePreference<String>(
+            title: l10n.commonSecret,
+            icon: Icons.key_outlined,
+            value: '',
+            obscureText: true,
+            presentValue: (_) => hasSecret ? '••••••••' : l10n.commonNotSet,
+            formatInputValue: (_) => '',
+            onSave: (v) async {
+              if (v.trim().isEmpty) return;
+              await adminContext.api.rotateAiKeySecret(
+                keyId: widget.keyId,
+                secret: v.trim(),
+              );
+              await _load();
+            },
+          ),
+        ],
+      ),
     );
   }
 }

@@ -42,7 +42,7 @@ apps/flutter/lib/features/admin/
   admin_shell.dart
   admin_metrics_overview_page.dart
   admin_company_create_page.dart
-  {company_list,company_detail,ai_key_list,ai_key_create,ai_key_detail,ai_key_rotate}_page.dart
+  {company_list,company_detail,ai_key_list,ai_key_detail}_page.dart
   admin_starter_bundles_page.dart
   widgets/admin_metrics_alerts.dart
 apps/flutter/test/admin_widgets_test.dart

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/preferences/app_subscription_preference.dart';
 import 'package:prodavan/core/session/admin_context.dart';
 
 /// Shared company detail state for admin hub + sub-pages.
@@ -37,6 +38,9 @@ class AdminCompanyDetailController extends ChangeNotifier {
   String subscriptionEnds = '';
 
   static const toolPresets = ['chat_readonly', 'workspace_dev', 'workspace_full'];
+  static const providerChoices = ['', 'cursor', 'codex', 'claude_code'];
+  static const idlePauseChoices = ['', '1', '2', '4', '8', '12', '24'];
+  static const attachmentMbChoices = [10, 20, 50, 100, 200];
 
   Future<void> load() async {
     loading = true;
@@ -73,7 +77,13 @@ class AdminCompanyDetailController extends ChangeNotifier {
       telegramHmacConfigured = policy['telegram_hmac_configured'] == true;
       subscriptionLifetime = m['subscription_lifetime'] == true;
       final endsAt = m['subscription_ends_at'];
-      subscriptionEnds = endsAt is String ? endsAt.split('T').first : '';
+      if (subscriptionLifetime || endsAt == null) {
+        subscriptionEnds = '';
+      } else if (endsAt is String) {
+        subscriptionEnds = formatSubscriptionDate(endsAt);
+      } else {
+        subscriptionEnds = '';
+      }
       loading = false;
       notifyListeners();
     } catch (e) {
@@ -108,28 +118,21 @@ class AdminCompanyDetailController extends ChangeNotifier {
     await load();
   }
 
-  Future<String?> saveSubscription({
-    bool? lifetime,
-    String? endsAt,
-  }) async {
-    final lt = lifetime ?? subscriptionLifetime;
-    final ends = endsAt ?? subscriptionEnds;
-    if (!lt && ends.trim().isEmpty) {
-      return 'adminSetEndDateOrLifetime';
+  Future<void> saveSubscription({String? endsAt}) async {
+    final endsRaw = (endsAt ?? subscriptionEnds).trim();
+    final lifetime = endsRaw.isEmpty;
+    final endsIso = lifetime ? null : subscriptionDateToIso(endsRaw);
+    if (!lifetime && endsIso == null) {
+      throw FormatException('invalid date');
     }
-    final endsRaw = ends.trim();
-    final endsIso = endsRaw.isEmpty
-        ? null
-        : endsRaw.contains('T') ? endsRaw : '${endsRaw}T00:00:00Z';
     await adminContext.api.setCompanySubscription(
       companyId: companyId,
-      subscriptionLifetime: lt,
-      subscriptionEndsAt: lt ? null : endsIso,
+      subscriptionLifetime: lifetime,
+      subscriptionEndsAt: endsIso,
     );
-    subscriptionLifetime = lt;
+    subscriptionLifetime = lifetime;
     subscriptionEnds = endsRaw;
     await load();
-    return null;
   }
 
   Future<void> savePolicy({

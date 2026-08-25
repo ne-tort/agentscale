@@ -32,27 +32,13 @@ class AdminCompanyGeneralPage extends StatelessWidget {
                 icon: Icons.notes_rounded,
                 value: ctrl.description,
                 maxLines: 3,
+                presentValue: (v) =>
+                    v.trim().isEmpty ? l10n.commonNotSet : v,
                 onSave: ctrl.saveDescription,
               ),
               AppSubscriptionPreference(
-                lifetime: ctrl.subscriptionLifetime,
                 endsAt: ctrl.subscriptionEnds,
-                onLifetimeChanged: (v) async {
-                  final err = await ctrl.saveSubscription(lifetime: v);
-                  if (err != null && context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(l10n.adminSetEndDateOrLifetime)),
-                    );
-                  }
-                },
-                onEndsAtSave: (v) async {
-                  final err = await ctrl.saveSubscription(endsAt: v);
-                  if (err != null && context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(l10n.adminSetEndDateOrLifetime)),
-                    );
-                  }
-                },
+                onEndsAtSave: (v) => ctrl.saveSubscription(endsAt: v),
               ),
             ],
           ),

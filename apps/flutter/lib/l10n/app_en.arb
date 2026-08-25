@@ -4,7 +4,7 @@
   "adminAdminEmail": "Admin email",
   "adminAgentMessages": "AI requests",
   "adminAgentPolicySaved": "Agent policy saved",
-  "adminAgentRuntimePolicy": "Agent runtime policy",
+  "adminAgentRuntimePolicy": "Agent policy",
   "adminAiKeysBound": "API keys",
   "adminAlertHighUsageTitle": "{companyName}: high agent token usage",
   "@adminAlertHighUsageTitle": {
@@ -144,7 +144,7 @@
   "adminCreateCompanyAndInviteAdmin": "Create a company and invite company.admin",
   "adminCreateCompanyToSeeMetrics": "Create a company to see platform metrics",
   "adminCreateKey": "Create key",
-  "adminCreateRuntimeKeyHint": "Create a runtime key and bind companies",
+  "adminCreateRuntimeKeyHint": "Add a key and configure on its page",
   "adminDisableAiKey": "Disable AI key",
   "adminDisableKey": "Disable key",
   "adminDisableKeyConfirm": "Disable {keyName}? Agent sessions will fail with NO_AI_KEY.",
@@ -167,7 +167,8 @@
   "adminDraining": "Draining…",
   "adminEditBindings": "Edit bindings",
   "adminEndsAt": "Ends at",
-  "adminDateFormatHint": "YYYY-MM-DD",
+  "adminDateFormatHint": "DD.MM.YY",
+  "adminInvalidDate": "Format: DD.MM.YY or DD.MM.YYYY",
   "adminEndsAtIfNotLifetime": "Ends at (YYYY-MM-DD, if not lifetime)",
   "adminEnterIntegerMin": "Enter integer ≥ {min}",
   "@adminEnterIntegerMin": {
@@ -177,7 +178,7 @@
       }
     }
   },
-  "adminIdlePauseAfterHours": "Idle pause after hours (empty/0 = off)",
+  "adminIdlePauseAfterHours": "Idle pause",
   "adminIdlePausedProjectsInCompany": "Idle-paused {count} project(s) in this company",
   "@adminIdlePausedProjectsInCompany": {
     "placeholders": {
@@ -206,13 +207,13 @@
   "adminKeyMetadata": "Key metadata",
   "adminLifecycle": "Lifecycle",
   "adminLifetimeSubscription": "Lifetime subscription",
-  "adminMaxAgentTokensMonth": "Max agent tokens / month (optional)",
-  "adminMaxBundleImportMb": "Max bundle import (MB)",
+  "adminMaxAgentTokensMonth": "Agent tokens / month",
+  "adminMaxBundleImportMb": "Bundle import",
   "adminMaxCabinets": "Max cabinets",
-  "adminMaxChatAttachmentMb": "Max chat attachment size (MB)",
+  "adminMaxChatAttachmentMb": "Chat attachment",
   "adminMaxPackagesPerCabinet": "Max packages per cabinet",
-  "adminMaxTokensPerRun": "Max tokens per run (optional)",
-  "adminMaxUsdCostMonth": "Max USD cost / month (optional)",
+  "adminMaxTokensPerRun": "Tokens per run",
+  "adminMaxUsdCostMonth": "USD cost / month",
   "adminMetadataOnly": "metadata only",
   "adminMetrics": "Metrics",
   "adminMetricsAiKeysRenewSoon": "{count} AI key(s) renew soon",
@@ -252,7 +253,7 @@
       }
     }
   },
-  "adminModelAllowlist": "Model allowlist (comma-separated, empty = any)",
+  "adminModelAllowlist": "Model allowlist",
   "adminNewSecret": "New secret",
   "adminNextRenewalValue": "Next renewal: {next_renewal_at}",
   "@adminNextRenewalValue": {
@@ -289,9 +290,10 @@
       "quota": { "type": "String" }
     }
   },
-  "adminPreferredProviderOptional": "Preferred provider (optional)",
+  "adminPreferredProvider": "Provider",
+  "adminPreferredProviderOptional": "Provider",
   "adminProdavanSubscription": "Prodavan subscription",
-  "adminProdavanSubscriptionOptional": "Prodavan subscription (optional)",
+  "adminProdavanSubscriptionOptional": "Prodavan subscription",
   "adminProviderValue": "Provider: {provider}",
   "@adminProviderValue": {
     "placeholders": {
@@ -345,12 +347,12 @@
   "adminSweeping": "Sweeping…",
   "adminTelegramHmacConfigured": "Telegram HMAC: configured (leave blank to keep)",
   "adminTelegramHmacNotSet": "Telegram HMAC: not set",
-  "adminTelegramHmacSecret": "Telegram HMAC secret (optional write)",
+  "adminTelegramHmacSecret": "Telegram HMAC",
   "adminTokens": "Tokens",
   "adminToolPreset": "Tool preset",
   "adminWebhookHmacConfigured": "Webhook HMAC: configured (leave blank to keep)",
   "adminWebhookHmacNotSet": "Webhook HMAC: not set",
-  "adminWebhookHmacSecret": "Webhook HMAC secret (optional write)",
+  "adminWebhookHmacSecret": "Webhook HMAC",
   "authAdvanced": "Advanced",
   "authBearerAccessToken": "Bearer access token",
   "authBearerAccessTokenPaste": "Bearer access token (paste)",
@@ -599,7 +601,19 @@
   "commonDelete": "Delete",
   "commonDeleting": "Deleting…",
   "commonDisable": "Disable",
-  "commonDisplayNameOptional": "Display name (optional)",
+  "commonDisplayNameOptional": "Display name",
+  "commonMbUnit": "MB",
+  "commonNotSet": "Not set",
+  "commonOff": "Off",
+  "commonUnlimited": "Unlimited",
+  "adminBindingsCount": "{count} companies",
+  "@adminBindingsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "commonDone": "Done",
   "commonEmDash": "—",
   "commonEmail": "Email",

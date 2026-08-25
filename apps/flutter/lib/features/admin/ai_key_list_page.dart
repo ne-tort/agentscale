@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
+import 'package:prodavan/core/widgets/app_inline_add_field.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
-import 'package:prodavan/features/admin/ai_key_create_page.dart';
 import 'package:prodavan/features/admin/ai_key_detail_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -21,7 +21,6 @@ class AdminAiKeyListPage extends StatefulWidget {
 
 class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
   bool _loading = true;
-  String? _error;
   List<Map<String, dynamic>> _keys = const [];
 
   @override
@@ -31,10 +30,7 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
   }
 
   Future<void> _reload() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+    setState(() => _loading = true);
     try {
       final items = await adminContext.api.listAiKeys();
       if (!mounted) return;
@@ -44,18 +40,25 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
+      setState(() => _loading = false);
+      AppErrors.showSnack(context, e);
     }
   }
 
-  Future<void> _createKey() async {
-    final created = await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(builder: (_) => const AdminAiKeyCreatePage()),
+  Future<void> _createKey(String name) async {
+    final created = await adminContext.api.createAiKey(name: name);
+    if (!mounted) return;
+    await _reload();
+    if (!mounted) return;
+    final keyId = created['id'] as String?;
+    final keyName = created['name'] as String? ?? name;
+    if (keyId == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => AdminAiKeyDetailPage(keyId: keyId, keyName: keyName),
+      ),
     );
-    if (created == true) await _reload();
+    if (mounted) await _reload();
   }
 
   void _openKey(AppEntityRow row) {
@@ -86,7 +89,13 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
 
     final body = Column(
       children: [
-        if (_error != null) InlineErrorBanner(message: _error!),
+        AppInlineAddField(
+          title: l10n.commonName,
+          hintText: l10n.commonName,
+          validator: (v) => v.trim().isNotEmpty,
+          invalidMessage: l10n.commonRequired,
+          onSave: _createKey,
+        ),
         Expanded(
           child: AppEntityCollection(
             loading: _loading,
@@ -106,29 +115,16 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
             empty: EmptyPlaceholder(
               title: l10n.adminNoAiKeys,
               subtitle: l10n.adminCreateRuntimeKeyHint,
-              action: TextButton(onPressed: _createKey, child: Text(l10n.adminCreateKey)),
             ),
           ),
         ),
       ],
     );
 
-    if (widget.embedded) {
-      return AppScaffold(
-        title: Text(l10n.navAiKeys),
-        actions: [
-          IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
-          IconButton(onPressed: _createKey, icon: const Icon(Icons.add)),
-        ],
-        body: body,
-      );
-    }
-
     return AppScaffold(
       title: Text(l10n.navAiKeys),
       actions: [
         IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
-        IconButton(onPressed: _createKey, icon: const Icon(Icons.add)),
       ],
       body: body,
     );

@@ -199,9 +199,9 @@ class AdminApi {
 
   Future<Map<String, dynamic>> createAiKey({
     required String name,
-    required String provider,
-    required String apiKind,
-    required String secret,
+    String provider = 'cursor',
+    String apiKind = 'cursor_sdk',
+    String? secret,
     List<String> companyIds = const [],
   }) async {
     final res = await http.post(
@@ -211,7 +211,7 @@ class AdminApi {
         'name': name,
         'provider': provider,
         'api_kind': apiKind,
-        'secret': secret,
+        if (secret != null && secret.isNotEmpty) 'secret': secret,
         'company_ids': companyIds,
       }),
     );
@@ -223,6 +223,8 @@ class AdminApi {
     required String keyId,
     String? status,
     String? name,
+    String? provider,
+    String? apiKind,
   }) async {
     final res = await http.patch(
       _uri('/admin/ai-keys/$keyId'),
@@ -230,6 +232,8 @@ class AdminApi {
       body: jsonEncode({
         if (status != null) 'status': status,
         if (name != null) 'name': name,
+        if (provider != null) 'provider': provider,
+        if (apiKind != null) 'api_kind': apiKind,
       }),
     );
     _throwIfError(res);

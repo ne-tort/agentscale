@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 
-import 'package:prodavan/core/preferences/preferences.dart';
+import 'package:prodavan/core/preferences/app_subscription_preference.dart';
 import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_section_header.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Full-page company create + optional cabinet quotas (L04 ux-contract — no modals).
@@ -29,8 +29,6 @@ class _AdminCompanyCreatePageState extends State<AdminCompanyCreatePage> {
   final _subscriptionEndsCtrl = TextEditingController();
 
   bool _saving = false;
-  bool _subscriptionLifetime = false;
-  String? _error;
 
   static const _defaultMaxCabinets = 10;
   static const _defaultMaxPackages = 20;
@@ -72,14 +70,17 @@ class _AdminCompanyCreatePageState extends State<AdminCompanyCreatePage> {
     final maxPackages = _parsePositive(_maxPackagesCtrl.text);
     final maxBundleMb = _parsePositive(_maxBundleMbCtrl.text);
     if (maxCabinets == null || maxPackages == null || maxBundleMb == null) {
-      setState(() => _error = l10n.adminCabinetQuotasMustBePositive);
+      AppErrors.showSnack(context, l10n.adminCabinetQuotasMustBePositive);
       return;
     }
 
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
+    final endsRaw = _subscriptionEndsCtrl.text.trim();
+    if (endsRaw.isNotEmpty && !AppSubscriptionPreference.isValidDate(endsRaw)) {
+      AppErrors.showSnack(context, l10n.adminInvalidDate);
+      return;
+    }
+
+    setState(() => _saving = true);
     try {
       final displayName = _displayNameCtrl.text.trim();
       final body = await adminContext.api.createCompany(
@@ -101,16 +102,12 @@ class _AdminCompanyCreatePageState extends State<AdminCompanyCreatePage> {
         );
       }
 
-      if (_subscriptionLifetime || _subscriptionEndsCtrl.text.trim().isNotEmpty) {
-        final endsRaw = _subscriptionEndsCtrl.text.trim();
-        await adminContext.api.setCompanySubscription(
-          companyId: companyId,
-          subscriptionLifetime: _subscriptionLifetime,
-          subscriptionEndsAt: _subscriptionLifetime
-              ? null
-              : (endsRaw.contains('T') ? endsRaw : '${endsRaw}T00:00:00Z'),
-        );
-      }
+      final endsIso = endsRaw.isEmpty ? null : subscriptionDateToIso(endsRaw);
+      await adminContext.api.setCompanySubscription(
+        companyId: companyId,
+        subscriptionLifetime: endsRaw.isEmpty,
+        subscriptionEndsAt: endsIso,
+      );
 
       if (!mounted) return;
       Navigator.of(context).pop(<String, String>{
@@ -119,10 +116,8 @@ class _AdminCompanyCreatePageState extends State<AdminCompanyCreatePage> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e.toString();
-        _saving = false;
-      });
+      setState(() => _saving = false);
+      AppErrors.showSnack(context, e);
     }
   }
 
@@ -134,7 +129,6 @@ class _AdminCompanyCreatePageState extends State<AdminCompanyCreatePage> {
       body: ListView(
         padding: EdgeInsets.all(AppSpacing.lg),
         children: [
-          if (_error != null) InlineErrorBanner(message: _error!),
           Text(l10n.adminInviteCompanyAdminViaKeycloak),
           const SizedBox(height: AppSpacing.md),
           Form(
@@ -197,18 +191,14 @@ class _AdminCompanyCreatePageState extends State<AdminCompanyCreatePage> {
                   validator: (v) => _parsePositive(v ?? '') == null ? l10n.commonPositiveInteger : null,
                 ),
                 const SizedBox(height: AppSpacing.md),
-                AppSectionHeader(title: l10n.adminProdavanSubscriptionOptional),
-                AppSwitchPreference(
-                  title: l10n.adminLifetimeSubscription,
-                  icon: Icons.all_inclusive_rounded,
-                  value: _subscriptionLifetime,
-                  enabled: !_saving,
-                  onChanged: (v) async => setState(() => _subscriptionLifetime = v),
-                ),
+                AppSectionHeader(title: l10n.adminProdavanSubscription),
                 TextFormField(
                   controller: _subscriptionEndsCtrl,
-                  decoration: InputDecoration(labelText: l10n.adminEndsAtIfNotLifetime),
-                  enabled: !_saving && !_subscriptionLifetime,
+                  decoration: InputDecoration(
+                    labelText: l10n.adminEndsAt,
+                    hintText: l10n.adminDateFormatHint,
+                  ),
+                  enabled: !_saving,
                 ),
                 const SizedBox(height: AppSpacing.md),
                 AppButton(

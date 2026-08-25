@@ -1,4 +1,5 @@
 export 'app_choice_preference.dart';
+export 'app_multi_choice_preference.dart';
 export 'app_nav_preference.dart';
 export 'app_preference_section.dart';
 export 'app_preference_tile.dart';

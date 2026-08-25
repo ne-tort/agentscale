@@ -192,7 +192,7 @@ class AiKeysService:
         name: str,
         provider: str,
         api_kind: str,
-        secret: str,
+        secret: str | None = None,
         next_renewal_at: datetime | None = None,
         renewal_price: str | Decimal | None = None,
         currency: str | None = None,
@@ -202,14 +202,15 @@ class AiKeysService:
     ) -> dict:
         self._validate_provider_kind(provider, api_kind)
         key_id = new_key_id()
-        secret_ref = self._secrets.put(key_id, secret)
+        has_secret = secret is not None and secret.strip() != ""
+        secret_ref = self._secrets.put(key_id, secret) if has_secret else ""
         row = AiProviderKeyRow(
             id=key_id,
             name=name.strip(),
             provider=provider,
             api_kind=api_kind,
             secret_ref=secret_ref,
-            status=KeyStatus.ACTIVE,
+            status=KeyStatus.ACTIVE if has_secret else KeyStatus.DISABLED,
             next_renewal_at=next_renewal_at,
             renewal_price=_parse_price(renewal_price),
             currency=currency,
@@ -241,6 +242,14 @@ class AiKeysService:
         old_status = row.status
         if "name" in updates and updates["name"] is not None:
             row.name = str(updates["name"]).strip()
+        if "provider" in updates and updates["provider"] is not None:
+            provider = str(updates["provider"]).strip()
+            self._validate_provider_kind(provider, row.api_kind)
+            row.provider = provider
+        if "api_kind" in updates and updates["api_kind"] is not None:
+            api_kind = str(updates["api_kind"]).strip()
+            self._validate_provider_kind(row.provider, api_kind)
+            row.api_kind = api_kind
         if "status" in updates and updates["status"] is not None:
             status = updates["status"]
             if status not in {KeyStatus.ACTIVE, KeyStatus.EXPIRED, KeyStatus.DISABLED}:
@@ -295,8 +304,10 @@ class AiKeysService:
         row = await self._get_row(key_id)
         old_ref = row.secret_ref
         row.secret_ref = self._secrets.put(key_id, secret)
-        if old_ref != row.secret_ref:
+        if old_ref and old_ref != row.secret_ref:
             self._secrets.delete(old_ref)
+        if row.status == KeyStatus.DISABLED:
+            row.status = KeyStatus.ACTIVE
         await self._session.commit()
         await self._session.refresh(row)
         await self._emit_audit(

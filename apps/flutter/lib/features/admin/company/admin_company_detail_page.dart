@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/company_metrics_wrap.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/admin/company/admin_company_agent_policy_page.dart';
 import 'package:prodavan/features/admin/company/admin_company_detail_controller.dart';
 import 'package:prodavan/features/admin/company/admin_company_events_page.dart';
@@ -37,11 +37,22 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
     _controller = AdminCompanyDetailController(
       companyId: widget.companyId,
       companyName: widget.companyName,
-    )..load();
+    );
+    _controller.addListener(_onControllerUpdate);
+    _controller.load();
+  }
+
+  void _onControllerUpdate() {
+    final err = _controller.error;
+    if (err != null && mounted) {
+      AppErrors.showSnack(context, err);
+      _controller.error = null;
+    }
   }
 
   @override
   void dispose() {
+    _controller.removeListener(_onControllerUpdate);
     _controller.dispose();
     super.dispose();
   }
@@ -68,10 +79,6 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                 : ListView(
                     padding: const EdgeInsets.all(AppSpacing.md),
                     children: [
-                      if (ctrl.error != null) ...[
-                        InlineErrorBanner(message: ctrl.error!),
-                        const SizedBox(height: AppSpacing.md),
-                      ],
                       AdminMetricsAlerts(metrics: ctrl.metrics),
                       const SizedBox(height: AppSpacing.sm),
                       CompanyMetricsWrap(metrics: ctrl.metrics, includeAgentDetail: true),

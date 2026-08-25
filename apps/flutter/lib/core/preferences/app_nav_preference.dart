@@ -10,12 +10,14 @@ class AppNavPreference extends StatelessWidget {
     required this.icon,
     required this.onTap,
     this.subtitle,
+    this.accentColor,
   });
 
   final String title;
   final IconData icon;
   final VoidCallback onTap;
   final Widget? subtitle;
+  final Color? accentColor;
 
   @override
   Widget build(BuildContext context) {
@@ -23,6 +25,7 @@ class AppNavPreference extends StatelessWidget {
       title: title,
       icon: icon,
       subtitle: subtitle,
+      accentColor: accentColor,
       trailing: const Icon(Icons.chevron_right_rounded, size: 22),
       onTap: onTap,
     );

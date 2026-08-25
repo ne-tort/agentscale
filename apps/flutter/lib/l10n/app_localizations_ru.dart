@@ -22,7 +22,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminAgentPolicySaved => 'Политика агента сохранена';
 
   @override
-  String get adminAgentRuntimePolicy => 'Политика runtime агента';
+  String get adminAgentRuntimePolicy => 'Политика агента';
 
   @override
   String get adminAiKeysBound => 'API-ключи';
@@ -153,7 +153,7 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get adminCreateRuntimeKeyHint =>
-      'Создайте runtime-ключ и привяжите компании';
+      'Добавьте ключ и настройте на странице';
 
   @override
   String get adminDisableAiKey => 'Отключить AI-ключ';
@@ -184,7 +184,10 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminEndsAt => 'Окончание';
 
   @override
-  String get adminDateFormatHint => 'ГГГГ-ММ-ДД';
+  String get adminDateFormatHint => 'ДД.ММ.ГГ';
+
+  @override
+  String get adminInvalidDate => 'Формат: ДД.ММ.ГГ или ДД.ММ.ГГГГ';
 
   @override
   String get adminEndsAtIfNotLifetime =>
@@ -196,8 +199,7 @@ class AppLocalizationsRu extends AppLocalizations {
   }
 
   @override
-  String get adminIdlePauseAfterHours =>
-      'Пауза после простоя, часы (пусто/0 = выкл.)';
+  String get adminIdlePauseAfterHours => 'Пауза после простоя';
 
   @override
   String adminIdlePausedProjectsInCompany(String count) {
@@ -229,27 +231,25 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminLifetimeSubscription => 'Бессрочная подписка';
 
   @override
-  String get adminMaxAgentTokensMonth =>
-      'Макс. токенов агента / месяц (необязательно)';
+  String get adminMaxAgentTokensMonth => 'Токены агента / месяц';
 
   @override
-  String get adminMaxBundleImportMb => 'Макс. размер импорта бандла (МБ)';
+  String get adminMaxBundleImportMb => 'Импорт бандла';
 
   @override
   String get adminMaxCabinets => 'Макс. кабинетов';
 
   @override
-  String get adminMaxChatAttachmentMb => 'Макс. размер вложения в чат (МБ)';
+  String get adminMaxChatAttachmentMb => 'Вложение в чат';
 
   @override
   String get adminMaxPackagesPerCabinet => 'Макс. пакетов на кабинет';
 
   @override
-  String get adminMaxTokensPerRun => 'Макс. токенов за запуск (необязательно)';
+  String get adminMaxTokensPerRun => 'Токены за запуск';
 
   @override
-  String get adminMaxUsdCostMonth =>
-      'Макс. стоимость USD / месяц (необязательно)';
+  String get adminMaxUsdCostMonth => 'Стоимость USD / месяц';
 
   @override
   String get adminMetadataOnly => 'только метаданные';
@@ -285,8 +285,7 @@ class AppLocalizationsRu extends AppLocalizations {
   }
 
   @override
-  String get adminModelAllowlist =>
-      'Allowlist моделей (через запятую, пусто = любые)';
+  String get adminModelAllowlist => 'Allowlist моделей';
 
   @override
   String get adminNewSecret => 'Новый секрет';
@@ -334,15 +333,16 @@ class AppLocalizationsRu extends AppLocalizations {
   }
 
   @override
-  String get adminPreferredProviderOptional =>
-      'Предпочтительный провайдер (необязательно)';
+  String get adminPreferredProvider => 'Провайдер';
+
+  @override
+  String get adminPreferredProviderOptional => 'Провайдер';
 
   @override
   String get adminProdavanSubscription => 'Подписка Prodavan';
 
   @override
-  String get adminProdavanSubscriptionOptional =>
-      'Подписка Prodavan (необязательно)';
+  String get adminProdavanSubscriptionOptional => 'Подписка Prodavan';
 
   @override
   String adminProviderValue(String provider) {
@@ -432,8 +432,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminTelegramHmacNotSet => 'Telegram HMAC: не задан';
 
   @override
-  String get adminTelegramHmacSecret =>
-      'Секрет Telegram HMAC (запись, необязательно)';
+  String get adminTelegramHmacSecret => 'Telegram HMAC';
 
   @override
   String get adminTokens => 'Токены';
@@ -449,8 +448,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminWebhookHmacNotSet => 'Webhook HMAC: не задан';
 
   @override
-  String get adminWebhookHmacSecret =>
-      'Секрет Webhook HMAC (запись, необязательно)';
+  String get adminWebhookHmacSecret => 'Webhook HMAC';
 
   @override
   String get authAdvanced => 'Дополнительно';
@@ -890,7 +888,24 @@ class AppLocalizationsRu extends AppLocalizations {
   String get commonDisable => 'Отключить';
 
   @override
-  String get commonDisplayNameOptional => 'Отображаемое имя (необязательно)';
+  String get commonDisplayNameOptional => 'Отображаемое имя';
+
+  @override
+  String get commonMbUnit => 'Мб';
+
+  @override
+  String get commonNotSet => 'Не задан';
+
+  @override
+  String get commonOff => 'Выкл.';
+
+  @override
+  String get commonUnlimited => 'Бессрочно';
+
+  @override
+  String adminBindingsCount(int count) {
+    return '$count компаний';
+  }
 
   @override
   String get commonDone => 'Готово';

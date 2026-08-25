@@ -6,9 +6,13 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/features/admin/company/admin_company_detail_controller.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Agent runtime policy fields for a company.
+/// Agent policy fields for a company.
 class AdminCompanyAgentPolicyPage extends StatelessWidget {
   const AdminCompanyAgentPolicyPage({super.key});
+
+  static const _providers = AdminCompanyDetailController.providerChoices;
+  static const _idleChoices = AdminCompanyDetailController.idlePauseChoices;
+  static const _attachmentChoices = AdminCompanyDetailController.attachmentMbChoices;
 
   @override
   Widget build(BuildContext context) {
@@ -17,6 +21,19 @@ class AdminCompanyAgentPolicyPage extends StatelessWidget {
     return ListenableBuilder(
       listenable: ctrl,
       builder: (context, _) {
+        final providerValue = _providers.contains(ctrl.preferredProvider)
+            ? ctrl.preferredProvider
+            : '';
+        final idleValue = _idleChoices.contains(ctrl.idlePauseHours)
+            ? ctrl.idlePauseHours
+            : (ctrl.idlePauseHours.trim().isEmpty ? '' : ctrl.idlePauseHours);
+        final attachmentValue = ctrl.maxAttachmentMb;
+        final attachmentChoices = {
+          ..._attachmentChoices,
+          if (!_attachmentChoices.contains(attachmentValue)) attachmentValue,
+        }.toList()
+          ..sort();
+
         return AppScaffold(
           title: Text(l10n.adminAgentRuntimePolicy),
           body: ListView(
@@ -40,20 +57,40 @@ class AdminCompanyAgentPolicyPage extends StatelessWidget {
                   await ctrl.savePolicy(toolPreset: v);
                 },
               ),
-              AppValuePreference<String>(
-                title: l10n.adminPreferredProviderOptional,
+              AppChoicePreference<String>(
+                title: l10n.adminPreferredProvider,
                 icon: Icons.cloud_outlined,
-                value: ctrl.preferredProvider,
+                value: providerValue,
+                choices: _providers,
+                keyFor: (v) => v.isEmpty ? '__none__' : v,
+                labelFor: (v) => v.isEmpty ? l10n.commonNotSet : v,
+                presentValue: (v) => v.isEmpty ? l10n.commonNotSet : v,
                 onSave: (v) async {
                   await ctrl.savePolicy(preferredProvider: v);
                 },
               ),
-              AppValuePreference<String>(
-                title: l10n.adminModelAllowlist,
-                icon: Icons.list_alt_rounded,
-                value: ctrl.modelAllowlist,
+              AppChoicePreference<String>(
+                title: l10n.adminIdlePauseAfterHours,
+                icon: Icons.pause_circle_outline_rounded,
+                value: idleValue,
+                choices: _idleChoices,
+                keyFor: (v) => v.isEmpty ? '__off__' : v,
+                labelFor: (v) => v.isEmpty ? l10n.commonOff : v,
+                presentValue: (v) => v.isEmpty ? l10n.commonOff : '$v ч',
                 onSave: (v) async {
-                  await ctrl.savePolicy(modelAllowlist: v);
+                  await ctrl.savePolicy(idlePauseHours: v);
+                },
+              ),
+              AppChoicePreference<int>(
+                title: l10n.adminMaxChatAttachmentMb,
+                icon: Icons.attachment_rounded,
+                value: attachmentValue,
+                choices: attachmentChoices,
+                keyFor: (v) => '$v',
+                labelFor: (v) => '$v ${l10n.commonMbUnit}',
+                presentValue: (v) => '$v ${l10n.commonMbUnit}',
+                onSave: (v) async {
+                  await ctrl.savePolicy(maxAttachmentMb: v);
                 },
               ),
               AppSwitchPreference(
@@ -65,10 +102,22 @@ class AdminCompanyAgentPolicyPage extends StatelessWidget {
                 },
               ),
               AppValuePreference<String>(
+                title: l10n.adminModelAllowlist,
+                icon: Icons.list_alt_rounded,
+                value: ctrl.modelAllowlist,
+                presentValue: (v) =>
+                    v.trim().isEmpty ? l10n.commonNotSet : v,
+                onSave: (v) async {
+                  await ctrl.savePolicy(modelAllowlist: v);
+                },
+              ),
+              AppValuePreference<String>(
                 title: l10n.adminMaxAgentTokensMonth,
                 icon: Icons.numbers_rounded,
                 value: ctrl.maxTokensMonth,
                 digitsOnly: true,
+                presentValue: (v) =>
+                    v.trim().isEmpty ? l10n.commonOff : v,
                 onSave: (v) async {
                   await ctrl.savePolicy(maxTokensMonth: v);
                 },
@@ -78,6 +127,8 @@ class AdminCompanyAgentPolicyPage extends StatelessWidget {
                 icon: Icons.speed_rounded,
                 value: ctrl.maxTokensPerRun,
                 digitsOnly: true,
+                presentValue: (v) =>
+                    v.trim().isEmpty ? l10n.commonOff : v,
                 onSave: (v) async {
                   await ctrl.savePolicy(maxTokensPerRun: v);
                 },
@@ -87,27 +138,10 @@ class AdminCompanyAgentPolicyPage extends StatelessWidget {
                 icon: Icons.attach_money_rounded,
                 value: ctrl.maxCostUsdMonth,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                presentValue: (v) =>
+                    v.trim().isEmpty ? l10n.commonOff : v,
                 onSave: (v) async {
                   await ctrl.savePolicy(maxCostUsdMonth: v);
-                },
-              ),
-              AppValuePreference<String>(
-                title: l10n.adminMaxChatAttachmentMb,
-                icon: Icons.attachment_rounded,
-                value: '${ctrl.maxAttachmentMb}',
-                digitsOnly: true,
-                validateInput: (v) => ctrl.validatePositiveInt(v, min: 1),
-                onSave: (v) async {
-                  await ctrl.savePolicy(maxAttachmentMb: int.parse(v.trim()));
-                },
-              ),
-              AppValuePreference<String>(
-                title: l10n.adminIdlePauseAfterHours,
-                icon: Icons.pause_circle_outline_rounded,
-                value: ctrl.idlePauseHours,
-                digitsOnly: true,
-                onSave: (v) async {
-                  await ctrl.savePolicy(idlePauseHours: v);
                 },
               ),
               AppValuePreference<String>(
@@ -116,8 +150,8 @@ class AdminCompanyAgentPolicyPage extends StatelessWidget {
                 value: '',
                 obscureText: true,
                 presentValue: (_) => ctrl.webhookHmacConfigured
-                    ? l10n.adminWebhookHmacConfigured
-                    : l10n.adminWebhookHmacNotSet,
+                    ? '••••••••'
+                    : l10n.commonNotSet,
                 formatInputValue: (_) => '',
                 onSave: (v) async {
                   if (v.trim().isEmpty) return;
@@ -130,8 +164,8 @@ class AdminCompanyAgentPolicyPage extends StatelessWidget {
                 value: '',
                 obscureText: true,
                 presentValue: (_) => ctrl.telegramHmacConfigured
-                    ? l10n.adminTelegramHmacConfigured
-                    : l10n.adminTelegramHmacNotSet,
+                    ? '••••••••'
+                    : l10n.commonNotSet,
                 formatInputValue: (_) => '',
                 onSave: (v) async {
                   if (v.trim().isEmpty) return;

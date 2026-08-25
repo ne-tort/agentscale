@@ -12,7 +12,9 @@
 | `AppValuePreference<T>` | Inline edit текста/числа с валидацией и `onSave` |
 | `AppSwitchPreference` | Boolean toggle с немедленным `onChanged` |
 | `AppNavPreference` | Hub-строка с chevron → подстраница |
-| `AppSubscriptionPreference` | Дата окончания + switch (выкл. = бессрочная) |
+| `AppSubscriptionPreference` | Дата окончания: пусто = бессрочно |
+| `AppMultiChoicePreference` | Множественный выбор через `AppSelectorPage` |
+| `AppInlineAddField` | Inline add в списках сущностей (Hiddify clients pattern) |
 
 Barrel: `package:prodavan/core/preferences/preferences.dart`.
 

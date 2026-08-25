@@ -2,27 +2,28 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:prodavan/core/preferences/app_preference_tile.dart';
+import 'package:prodavan/core/preferences/app_value_preference.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Subscription end date + lifetime switch on one row (Hiddify-style).
-///
-/// Switch off = lifetime subscription; switch on = edit end date.
+/// Subscription end date: empty = lifetime; otherwise DD.MM.YY / DD.MM.YYYY.
 class AppSubscriptionPreference extends StatefulWidget {
   const AppSubscriptionPreference({
     super.key,
-    required this.lifetime,
     required this.endsAt,
-    required this.onLifetimeChanged,
     required this.onEndsAtSave,
     this.enabled = true,
   });
 
-  final bool lifetime;
   final String endsAt;
-  final Future<void> Function(bool lifetime) onLifetimeChanged;
   final Future<void> Function(String endsAt) onEndsAtSave;
   final bool enabled;
+
+  static final _datePattern = RegExp(r'^\d{2}\.\d{2}\.\d{2,4}$');
+
+  static bool isValidDate(String raw) =>
+      raw.isEmpty || _datePattern.hasMatch(raw.trim());
 
   @override
   State<AppSubscriptionPreference> createState() => _AppSubscriptionPreferenceState();
@@ -34,8 +35,7 @@ class _AppSubscriptionPreferenceState extends State<AppSubscriptionPreference> {
   bool _expanded = false;
   bool _saving = false;
   bool _ignoreNextBlur = false;
-
-  bool get _hasEndDate => !widget.lifetime;
+  bool _invalid = false;
 
   @override
   void initState() {
@@ -77,42 +77,49 @@ class _AppSubscriptionPreferenceState extends State<AppSubscriptionPreference> {
   void _cancel() {
     setState(() {
       _expanded = false;
+      _invalid = false;
       _controller.text = widget.endsAt;
     });
     _focusNode.unfocus();
   }
 
   Future<void> _save() async {
-    if (_saving || !widget.enabled || widget.lifetime) return;
+    if (_saving || !widget.enabled) return;
     final raw = _controller.text.trim();
-    setState(() => _saving = true);
+    if (!AppSubscriptionPreference.isValidDate(raw)) {
+      setState(() => _invalid = true);
+      return;
+    }
+    setState(() {
+      _invalid = false;
+      _saving = true;
+    });
     try {
       await widget.onEndsAtSave(raw);
       if (!mounted) return;
       setState(() => _expanded = false);
       _focusNode.unfocus();
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
   void _beginEdit() {
-    if (!widget.enabled || widget.lifetime || _expanded) return;
+    if (!widget.enabled || _expanded) return;
     _controller.text = widget.endsAt;
-    setState(() => _expanded = true);
+    setState(() {
+      _expanded = true;
+      _invalid = false;
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) => _focusNode.requestFocus());
   }
 
   String _subtitleText(AppLocalizations l10n) {
-    if (widget.lifetime) return l10n.adminLifetimeSubscription;
     final raw = widget.endsAt.trim();
-    if (raw.isEmpty) return l10n.adminDateFormatHint;
+    if (raw.isEmpty) return l10n.commonUnlimited;
     return raw;
-  }
-
-  Future<void> _onSwitchChanged(bool hasEndDate) async {
-    _guardBlur();
-    await widget.onLifetimeChanged(!hasEndDate);
   }
 
   @override
@@ -121,7 +128,7 @@ class _AppSubscriptionPreferenceState extends State<AppSubscriptionPreference> {
     final theme = Theme.of(context);
     final colors = context.appColors;
 
-    if (_expanded && _hasEndDate) {
+    if (_expanded) {
       return AppPreferenceTile(
         title: l10n.adminEndsAt,
         icon: Icons.event_rounded,
@@ -132,32 +139,23 @@ class _AppSubscriptionPreferenceState extends State<AppSubscriptionPreference> {
           autofocus: true,
           keyboardType: TextInputType.datetime,
           inputFormatters: [
-            FilteringTextInputFormatter.allow(RegExp(r'[0-9\-]')),
+            FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
           ],
           textInputAction: TextInputAction.done,
           style: theme.textTheme.bodyMedium,
-          decoration: InputDecoration(
-            isDense: true,
-            isCollapsed: true,
-            border: InputBorder.none,
-            contentPadding: EdgeInsets.zero,
+          decoration: kBorderlessInputDecoration.copyWith(
             hintText: l10n.adminDateFormatHint,
+            errorText: _invalid ? l10n.adminInvalidDate : null,
           ),
           onSubmitted: (_) => _save(),
+          onChanged: (_) {
+            if (_invalid) setState(() => _invalid = false);
+          },
         ),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AppPreferenceInlineActions(
-              onSave: _save,
-              onCancel: _cancel,
-              onGuardBlur: _guardBlur,
-            ),
-            Switch.adaptive(
-              value: _hasEndDate,
-              onChanged: widget.enabled ? _onSwitchChanged : null,
-            ),
-          ],
+        trailing: AppPreferenceInlineActions(
+          onSave: _save,
+          onCancel: _cancel,
+          onGuardBlur: _guardBlur,
         ),
       );
     }
@@ -169,14 +167,38 @@ class _AppSubscriptionPreferenceState extends State<AppSubscriptionPreference> {
       subtitle: Text(
         _subtitleText(l10n),
         style: theme.textTheme.bodyMedium?.copyWith(
-          color: widget.lifetime || widget.endsAt.trim().isEmpty ? colors.muted : null,
+          color: widget.endsAt.trim().isEmpty ? colors.muted : null,
         ),
       ),
-      trailing: Switch.adaptive(
-        value: _hasEndDate,
-        onChanged: widget.enabled ? _onSwitchChanged : null,
-      ),
-      onTap: _hasEndDate ? _beginEdit : null,
+      trailing: const Icon(Icons.chevron_right_rounded, size: 22),
+      onTap: _beginEdit,
     );
   }
+}
+
+/// Parse DD.MM.YY / DD.MM.YYYY to ISO date string for API.
+String? subscriptionDateToIso(String raw) {
+  final trimmed = raw.trim();
+  if (trimmed.isEmpty) return null;
+  final parts = trimmed.split('.');
+  if (parts.length != 3) return null;
+  final day = int.tryParse(parts[0]);
+  var month = int.tryParse(parts[1]);
+  var year = int.tryParse(parts[2]);
+  if (day == null || month == null || year == null) return null;
+  if (year < 100) year += 2000;
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  final mm = month.toString().padLeft(2, '0');
+  final dd = day.toString().padLeft(2, '0');
+  return '$year-$mm-${dd}T00:00:00Z';
+}
+
+/// Format ISO/API date to DD.MM.YYYY for display.
+String formatSubscriptionDate(String isoOrDate) {
+  final raw = isoOrDate.trim();
+  if (raw.isEmpty) return '';
+  final datePart = raw.contains('T') ? raw.split('T').first : raw;
+  final parts = datePart.split('-');
+  if (parts.length != 3) return raw;
+  return '${parts[2]}.${parts[1]}.${parts[0]}';
 }

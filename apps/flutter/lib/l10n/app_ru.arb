@@ -4,7 +4,7 @@
   "adminAdminEmail": "Email администратора",
   "adminAgentMessages": "AI-Запросы",
   "adminAgentPolicySaved": "Политика агента сохранена",
-  "adminAgentRuntimePolicy": "Политика runtime агента",
+  "adminAgentRuntimePolicy": "Политика агента",
   "adminAiKeysBound": "API-ключи",
   "adminAlertHighUsageTitle": "{companyName}: высокий расход токенов агента",
   "@adminAlertHighUsageTitle": {
@@ -144,7 +144,7 @@
   "adminCreateCompanyAndInviteAdmin": "Создайте компанию и пригласите company.admin",
   "adminCreateCompanyToSeeMetrics": "Создайте компанию, чтобы видеть метрики",
   "adminCreateKey": "Создать ключ",
-  "adminCreateRuntimeKeyHint": "Создайте runtime-ключ и привяжите компании",
+  "adminCreateRuntimeKeyHint": "Добавьте ключ и настройте на странице",
   "adminDisableAiKey": "Отключить AI-ключ",
   "adminDisableKey": "Отключить ключ",
   "adminDisableKeyConfirm": "Отключить {keyName}? Сессии агента завершатся с NO_AI_KEY.",
@@ -167,7 +167,8 @@
   "adminDraining": "Сброс…",
   "adminEditBindings": "Изменить привязки",
   "adminEndsAt": "Окончание",
-  "adminDateFormatHint": "ГГГГ-ММ-ДД",
+  "adminDateFormatHint": "ДД.ММ.ГГ",
+  "adminInvalidDate": "Формат: ДД.ММ.ГГ или ДД.ММ.ГГГГ",
   "adminEndsAtIfNotLifetime": "Окончание (ГГГГ-ММ-ДД, если не бессрочная)",
   "adminEnterIntegerMin": "Введите целое ≥ {min}",
   "@adminEnterIntegerMin": {
@@ -177,7 +178,7 @@
       }
     }
   },
-  "adminIdlePauseAfterHours": "Пауза после простоя, часы (пусто/0 = выкл.)",
+  "adminIdlePauseAfterHours": "Пауза после простоя",
   "adminIdlePausedProjectsInCompany": "На паузу по простою: {count} проект(ов) в компании",
   "@adminIdlePausedProjectsInCompany": {
     "placeholders": {
@@ -206,13 +207,13 @@
   "adminKeyMetadata": "Метаданные ключа",
   "adminLifecycle": "Жизненный цикл",
   "adminLifetimeSubscription": "Бессрочная подписка",
-  "adminMaxAgentTokensMonth": "Макс. токенов агента / месяц (необязательно)",
-  "adminMaxBundleImportMb": "Макс. размер импорта бандла (МБ)",
+  "adminMaxAgentTokensMonth": "Токены агента / месяц",
+  "adminMaxBundleImportMb": "Импорт бандла",
   "adminMaxCabinets": "Макс. кабинетов",
-  "adminMaxChatAttachmentMb": "Макс. размер вложения в чат (МБ)",
+  "adminMaxChatAttachmentMb": "Вложение в чат",
   "adminMaxPackagesPerCabinet": "Макс. пакетов на кабинет",
-  "adminMaxTokensPerRun": "Макс. токенов за запуск (необязательно)",
-  "adminMaxUsdCostMonth": "Макс. стоимость USD / месяц (необязательно)",
+  "adminMaxTokensPerRun": "Токены за запуск",
+  "adminMaxUsdCostMonth": "Стоимость USD / месяц",
   "adminMetadataOnly": "только метаданные",
   "adminMetrics": "Метрики",
   "adminMetricsAiKeysRenewSoon": "Скоро продление AI-ключей: {count}",
@@ -252,7 +253,7 @@
       }
     }
   },
-  "adminModelAllowlist": "Allowlist моделей (через запятую, пусто = любые)",
+  "adminModelAllowlist": "Allowlist моделей",
   "adminNewSecret": "Новый секрет",
   "adminNextRenewalValue": "Следующее продление: {next_renewal_at}",
   "@adminNextRenewalValue": {
@@ -289,9 +290,10 @@
       "quota": { "type": "String" }
     }
   },
-  "adminPreferredProviderOptional": "Предпочтительный провайдер (необязательно)",
+  "adminPreferredProvider": "Провайдер",
+  "adminPreferredProviderOptional": "Провайдер",
   "adminProdavanSubscription": "Подписка Prodavan",
-  "adminProdavanSubscriptionOptional": "Подписка Prodavan (необязательно)",
+  "adminProdavanSubscriptionOptional": "Подписка Prodavan",
   "adminProviderValue": "Провайдер: {provider}",
   "@adminProviderValue": {
     "placeholders": {
@@ -345,12 +347,12 @@
   "adminSweeping": "Выполнение…",
   "adminTelegramHmacConfigured": "Telegram HMAC: задан (оставьте пустым, чтобы не менять)",
   "adminTelegramHmacNotSet": "Telegram HMAC: не задан",
-  "adminTelegramHmacSecret": "Секрет Telegram HMAC (запись, необязательно)",
+  "adminTelegramHmacSecret": "Telegram HMAC",
   "adminTokens": "Токены",
   "adminToolPreset": "Пресет инструментов",
   "adminWebhookHmacConfigured": "Webhook HMAC: задан (оставьте пустым, чтобы не менять)",
   "adminWebhookHmacNotSet": "Webhook HMAC: не задан",
-  "adminWebhookHmacSecret": "Секрет Webhook HMAC (запись, необязательно)",
+  "adminWebhookHmacSecret": "Webhook HMAC",
   "authAdvanced": "Дополнительно",
   "authBearerAccessToken": "Bearer access token",
   "authBearerAccessTokenPaste": "Bearer access token (вставить)",
@@ -599,7 +601,19 @@
   "commonDelete": "Удалить",
   "commonDeleting": "Удаление…",
   "commonDisable": "Отключить",
-  "commonDisplayNameOptional": "Отображаемое имя (необязательно)",
+  "commonDisplayNameOptional": "Отображаемое имя",
+  "commonMbUnit": "Мб",
+  "commonNotSet": "Не задан",
+  "commonOff": "Выкл.",
+  "commonUnlimited": "Бессрочно",
+  "adminBindingsCount": "{count} компаний",
+  "@adminBindingsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "commonDone": "Готово",
   "commonEmDash": "—",
   "commonEmail": "Email",

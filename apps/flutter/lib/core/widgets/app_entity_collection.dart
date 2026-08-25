@@ -100,31 +100,35 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
         if (widget.toolbar != null || widget.allowModeToggle)
           Padding(
             padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.sm,
+              horizontal: AppSpacing.md,
               vertical: AppSpacing.xs,
             ),
             child: Row(
               children: [
                 ...?widget.toolbar,
                 const Spacer(),
-                if (widget.allowModeToggle) ...[
-                  AppIconToggle(
-                    icon: Icons.view_list_outlined,
-                    tooltip: l10n.commonList,
-                    selected: mode == AppEntityCollectionMode.list,
-                    onPressed: () => setState(
-                      () => _override = AppEntityCollectionMode.list,
-                    ),
+                if (widget.allowModeToggle)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      AppIconToggle(
+                        icon: Icons.view_list_outlined,
+                        tooltip: l10n.commonList,
+                        selected: mode == AppEntityCollectionMode.list,
+                        onPressed: () => setState(
+                          () => _override = AppEntityCollectionMode.list,
+                        ),
+                      ),
+                      AppIconToggle(
+                        icon: Icons.table_rows_outlined,
+                        tooltip: l10n.commonTable,
+                        selected: mode == AppEntityCollectionMode.table,
+                        onPressed: () => setState(
+                          () => _override = AppEntityCollectionMode.table,
+                        ),
+                      ),
+                    ],
                   ),
-                  AppIconToggle(
-                    icon: Icons.table_rows_outlined,
-                    tooltip: l10n.commonTable,
-                    selected: mode == AppEntityCollectionMode.table,
-                    onPressed: () => setState(
-                      () => _override = AppEntityCollectionMode.table,
-                    ),
-                  ),
-                ],
               ],
             ),
           ),

@@ -125,7 +125,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminAgentRuntimePolicy.
   ///
   /// In en, this message translates to:
-  /// **'Agent runtime policy'**
+  /// **'Agent policy'**
   String get adminAgentRuntimePolicy;
 
   /// No description provided for @adminAiKeysBound.
@@ -323,7 +323,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminCreateRuntimeKeyHint.
   ///
   /// In en, this message translates to:
-  /// **'Create a runtime key and bind companies'**
+  /// **'Add a key and configure on its page'**
   String get adminCreateRuntimeKeyHint;
 
   /// No description provided for @adminDisableAiKey.
@@ -377,8 +377,14 @@ abstract class AppLocalizations {
   /// No description provided for @adminDateFormatHint.
   ///
   /// In en, this message translates to:
-  /// **'YYYY-MM-DD'**
+  /// **'DD.MM.YY'**
   String get adminDateFormatHint;
+
+  /// No description provided for @adminInvalidDate.
+  ///
+  /// In en, this message translates to:
+  /// **'Format: DD.MM.YY or DD.MM.YYYY'**
+  String get adminInvalidDate;
 
   /// No description provided for @adminEndsAtIfNotLifetime.
   ///
@@ -395,7 +401,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminIdlePauseAfterHours.
   ///
   /// In en, this message translates to:
-  /// **'Idle pause after hours (empty/0 = off)'**
+  /// **'Idle pause'**
   String get adminIdlePauseAfterHours;
 
   /// No description provided for @adminIdlePausedProjectsInCompany.
@@ -449,13 +455,13 @@ abstract class AppLocalizations {
   /// No description provided for @adminMaxAgentTokensMonth.
   ///
   /// In en, this message translates to:
-  /// **'Max agent tokens / month (optional)'**
+  /// **'Agent tokens / month'**
   String get adminMaxAgentTokensMonth;
 
   /// No description provided for @adminMaxBundleImportMb.
   ///
   /// In en, this message translates to:
-  /// **'Max bundle import (MB)'**
+  /// **'Bundle import'**
   String get adminMaxBundleImportMb;
 
   /// No description provided for @adminMaxCabinets.
@@ -467,7 +473,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminMaxChatAttachmentMb.
   ///
   /// In en, this message translates to:
-  /// **'Max chat attachment size (MB)'**
+  /// **'Chat attachment'**
   String get adminMaxChatAttachmentMb;
 
   /// No description provided for @adminMaxPackagesPerCabinet.
@@ -479,13 +485,13 @@ abstract class AppLocalizations {
   /// No description provided for @adminMaxTokensPerRun.
   ///
   /// In en, this message translates to:
-  /// **'Max tokens per run (optional)'**
+  /// **'Tokens per run'**
   String get adminMaxTokensPerRun;
 
   /// No description provided for @adminMaxUsdCostMonth.
   ///
   /// In en, this message translates to:
-  /// **'Max USD cost / month (optional)'**
+  /// **'USD cost / month'**
   String get adminMaxUsdCostMonth;
 
   /// No description provided for @adminMetadataOnly.
@@ -539,7 +545,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminModelAllowlist.
   ///
   /// In en, this message translates to:
-  /// **'Model allowlist (comma-separated, empty = any)'**
+  /// **'Model allowlist'**
   String get adminModelAllowlist;
 
   /// No description provided for @adminNewSecret.
@@ -620,10 +626,16 @@ abstract class AppLocalizations {
   /// **'{running} / {quota}'**
   String adminCompanyCabinetsRunning(String running, String quota);
 
+  /// No description provided for @adminPreferredProvider.
+  ///
+  /// In en, this message translates to:
+  /// **'Provider'**
+  String get adminPreferredProvider;
+
   /// No description provided for @adminPreferredProviderOptional.
   ///
   /// In en, this message translates to:
-  /// **'Preferred provider (optional)'**
+  /// **'Provider'**
   String get adminPreferredProviderOptional;
 
   /// No description provided for @adminProdavanSubscription.
@@ -635,7 +647,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminProdavanSubscriptionOptional.
   ///
   /// In en, this message translates to:
-  /// **'Prodavan subscription (optional)'**
+  /// **'Prodavan subscription'**
   String get adminProdavanSubscriptionOptional;
 
   /// No description provided for @adminProviderValue.
@@ -791,7 +803,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminTelegramHmacSecret.
   ///
   /// In en, this message translates to:
-  /// **'Telegram HMAC secret (optional write)'**
+  /// **'Telegram HMAC'**
   String get adminTelegramHmacSecret;
 
   /// No description provided for @adminTokens.
@@ -821,7 +833,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminWebhookHmacSecret.
   ///
   /// In en, this message translates to:
-  /// **'Webhook HMAC secret (optional write)'**
+  /// **'Webhook HMAC'**
   String get adminWebhookHmacSecret;
 
   /// No description provided for @authAdvanced.
@@ -1613,8 +1625,38 @@ abstract class AppLocalizations {
   /// No description provided for @commonDisplayNameOptional.
   ///
   /// In en, this message translates to:
-  /// **'Display name (optional)'**
+  /// **'Display name'**
   String get commonDisplayNameOptional;
+
+  /// No description provided for @commonMbUnit.
+  ///
+  /// In en, this message translates to:
+  /// **'MB'**
+  String get commonMbUnit;
+
+  /// No description provided for @commonNotSet.
+  ///
+  /// In en, this message translates to:
+  /// **'Not set'**
+  String get commonNotSet;
+
+  /// No description provided for @commonOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Off'**
+  String get commonOff;
+
+  /// No description provided for @commonUnlimited.
+  ///
+  /// In en, this message translates to:
+  /// **'Unlimited'**
+  String get commonUnlimited;
+
+  /// No description provided for @adminBindingsCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} companies'**
+  String adminBindingsCount(int count);
 
   /// No description provided for @commonDone.
   ///

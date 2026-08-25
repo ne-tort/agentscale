@@ -18,9 +18,9 @@ class CreateKeyBody(BaseModel):
     model_config = {"extra": "forbid"}
 
     name: str = Field(min_length=1, max_length=200)
-    provider: str
-    api_kind: str
-    secret: str = Field(min_length=1)
+    provider: str = "cursor"
+    api_kind: str = "cursor_sdk"
+    secret: str | None = Field(default=None, min_length=1)
     next_renewal_at: datetime | None = None
     renewal_price: str | None = None
     currency: str | None = Field(default=None, max_length=8)
@@ -33,6 +33,8 @@ class PatchKeyBody(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
     status: str | None = None
+    provider: str | None = None
+    api_kind: str | None = None
     next_renewal_at: datetime | None = None
     renewal_price: str | None = None
     currency: str | None = None

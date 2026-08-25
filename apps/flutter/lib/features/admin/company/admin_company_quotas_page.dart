@@ -49,6 +49,7 @@ class AdminCompanyQuotasPage extends StatelessWidget {
                 icon: Icons.upload_file_outlined,
                 value: '${ctrl.maxBundleMb}',
                 digitsOnly: true,
+                presentValue: (v) => '$v ${l10n.commonMbUnit}',
                 validateInput: (v) => ctrl.validatePositiveInt(v, min: 1),
                 inputToValue: (v) => v,
                 onSave: (v) async {

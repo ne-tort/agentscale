@@ -260,4 +260,33 @@ def test_platform_fallback_uses_unbound_pool_key(
                 )
             assert ei.value.code == "NO_AI_KEY"
 
-    asyncio.run(_resolve_without_fallback_fails())
+@requires_postgres
+def test_create_name_only_then_rotate_activates(
+    client: TestClient, auth_headers: dict[str, str], tmp_path: Path
+) -> None:
+    create = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=auth_headers,
+        json={"name": "Draft key"},
+    )
+    assert create.status_code == 201, create.text
+    body = create.json()
+    assert body["status"] == "disabled"
+    key_id = body["id"]
+
+    rotate = client.post(
+        f"/api/v1/admin/ai-keys/{key_id}/rotate-secret",
+        headers=auth_headers,
+        json={"secret": "draft-secret-value"},
+    )
+    assert rotate.status_code == 200, rotate.text
+    assert rotate.json()["status"] == "active"
+
+    patch = client.patch(
+        f"/api/v1/admin/ai-keys/{key_id}",
+        headers=auth_headers,
+        json={"provider": "codex", "api_kind": "codex_sdk"},
+    )
+    assert patch.status_code == 200, patch.text
+    assert patch.json()["provider"] == "codex"
+    assert patch.json()["api_kind"] == "codex_sdk"

@@ -2,6 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:prodavan/core/preferences/app_preference_tile.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
+
+/// Borderless inline [TextField] decoration (Hiddify-style).
+const kBorderlessInputDecoration = InputDecoration(
+  isDense: true,
+  isCollapsed: true,
+  filled: false,
+  border: InputBorder.none,
+  enabledBorder: InputBorder.none,
+  focusedBorder: InputBorder.none,
+  disabledBorder: InputBorder.none,
+  errorBorder: InputBorder.none,
+  focusedErrorBorder: InputBorder.none,
+  contentPadding: EdgeInsets.zero,
+);
 
 /// Text/number/password preference with inline edit and seamless save on commit.
 class AppValuePreference<T> extends StatefulWidget {
@@ -122,9 +137,11 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
         _saving = false;
       });
       _focusNode.unfocus();
-    } catch (_) {
-      if (mounted) setState(() => _saving = false);
-      rethrow;
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        AppErrors.showSnack(context, e);
+      }
     }
   }
 
@@ -167,13 +184,7 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
           style: theme.textTheme.bodyMedium?.copyWith(
             fontFamily: widget.digitsOnly ? 'monospace' : null,
           ),
-          decoration: InputDecoration(
-            isDense: true,
-            isCollapsed: true,
-            border: InputBorder.none,
-            contentPadding: EdgeInsets.zero,
-            hintText: widget.hintText,
-          ),
+          decoration: kBorderlessInputDecoration.copyWith(hintText: widget.hintText),
           onSubmitted: (_) => _save(),
         ),
         trailing: AppPreferenceInlineActions(

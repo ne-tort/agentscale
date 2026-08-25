@@ -4,12 +4,12 @@ import 'package:prodavan/core/preferences/app_preference_tile.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_selector_page.dart';
 
-/// Opens [AppSelectorPage] and saves selection seamlessly.
-class AppChoicePreference<T> extends StatelessWidget {
-  const AppChoicePreference({
+/// Multi-select via [AppSelectorPage] with seamless save.
+class AppMultiChoicePreference<T> extends StatelessWidget {
+  const AppMultiChoicePreference({
     super.key,
     required this.title,
-    required this.value,
+    required this.values,
     required this.choices,
     required this.keyFor,
     required this.labelFor,
@@ -17,25 +17,28 @@ class AppChoicePreference<T> extends StatelessWidget {
     this.icon,
     this.iconFor,
     this.enabled = true,
-    this.showRadios = true,
-    this.multiSelect = false,
     this.pickerTitle,
-    this.presentValue,
+    this.presentValues,
   });
 
   final String title;
-  final T value;
+  final Set<T> values;
   final List<T> choices;
   final String Function(T value) keyFor;
   final String Function(T value) labelFor;
-  final Future<void> Function(T value) onSave;
+  final Future<void> Function(Set<T> values) onSave;
   final IconData? icon;
   final IconData? Function(T value)? iconFor;
   final bool enabled;
-  final bool showRadios;
-  final bool multiSelect;
   final String? pickerTitle;
-  final String Function(T value)? presentValue;
+  final String Function(Set<T> values)? presentValues;
+
+  String _subtitle() {
+    if (presentValues != null) return presentValues!(values);
+    if (values.isEmpty) return '';
+    if (values.length == 1) return labelFor(values.first);
+    return '${values.length}';
+  }
 
   Future<void> _pick(BuildContext context) async {
     if (!enabled) return;
@@ -43,10 +46,9 @@ class AppChoicePreference<T> extends StatelessWidget {
       MaterialPageRoute(
         builder: (_) => AppSelectorPage(
           title: pickerTitle ?? title,
-          showRadios: showRadios && !multiSelect,
-          showCheckboxes: multiSelect,
-          multiSelect: multiSelect,
-          selectedIds: {keyFor(value)},
+          multiSelect: true,
+          showCheckboxes: true,
+          selectedIds: values.map(keyFor).toSet(),
           items: [
             for (final c in choices)
               AppSelectorItem(
@@ -55,19 +57,19 @@ class AppChoicePreference<T> extends StatelessWidget {
                 icon: iconFor?.call(c),
               ),
           ],
+          onConfirm: (_) {},
         ),
       ),
     );
-    if (picked == null || picked.isEmpty) return;
+    if (picked == null) return;
+    final next = <T>{};
     for (final c in choices) {
-      if (keyFor(c) == picked.first) {
-        try {
-          await onSave(c);
-        } catch (e) {
-          if (context.mounted) AppErrors.showSnack(context, e);
-        }
-        return;
-      }
+      if (picked.contains(keyFor(c))) next.add(c);
+    }
+    try {
+      await onSave(next);
+    } catch (e) {
+      if (context.mounted) AppErrors.showSnack(context, e);
     }
   }
 
@@ -77,7 +79,7 @@ class AppChoicePreference<T> extends StatelessWidget {
       title: title,
       icon: icon,
       enabled: enabled,
-      subtitle: Text(presentValue?.call(value) ?? labelFor(value)),
+      subtitle: Text(_subtitle()),
       trailing: const Icon(Icons.chevron_right_rounded, size: 22),
       onTap: () => _pick(context),
     );

@@ -67,7 +67,24 @@ class AppLayout extends StatelessWidget {
 
   Widget _logo(BuildContext context, {required bool extended}) {
     final colors = context.appColors;
-    final icon = Icon(Icons.auto_awesome_rounded, color: colors.primary, size: 28);
+    final badge = Container(
+      width: 28,
+      height: 28,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: colors.primary.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        'AI',
+        style: TextStyle(
+          color: colors.primary,
+          fontSize: 12,
+          fontWeight: FontWeight.w700,
+          height: 1,
+        ),
+      ),
+    );
     final label = Text(
       'Prodavan',
       style: TextStyle(
@@ -82,7 +99,7 @@ class AppLayout extends StatelessWidget {
         ? Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              icon,
+              badge,
               const SizedBox(width: AppSpacing.sm),
               Flexible(child: label),
             ],
@@ -90,7 +107,7 @@ class AppLayout extends StatelessWidget {
         : Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              icon,
+              badge,
               const SizedBox(height: AppSpacing.xs),
               label,
             ],
@@ -106,7 +123,7 @@ class AppLayout extends StatelessWidget {
           child: Padding(
             padding: EdgeInsets.fromLTRB(
               AppSpacing.md,
-              AppSpacing.lg,
+              AppSpacing.md,
               AppSpacing.md,
               extended ? AppSpacing.md : AppSpacing.sm,
             ),

@@ -22,7 +22,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminAgentPolicySaved => 'Agent policy saved';
 
   @override
-  String get adminAgentRuntimePolicy => 'Agent runtime policy';
+  String get adminAgentRuntimePolicy => 'Agent policy';
 
   @override
   String get adminAiKeysBound => 'API keys';
@@ -153,8 +153,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminCreateKey => 'Create key';
 
   @override
-  String get adminCreateRuntimeKeyHint =>
-      'Create a runtime key and bind companies';
+  String get adminCreateRuntimeKeyHint => 'Add a key and configure on its page';
 
   @override
   String get adminDisableAiKey => 'Disable AI key';
@@ -185,7 +184,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminEndsAt => 'Ends at';
 
   @override
-  String get adminDateFormatHint => 'YYYY-MM-DD';
+  String get adminDateFormatHint => 'DD.MM.YY';
+
+  @override
+  String get adminInvalidDate => 'Format: DD.MM.YY or DD.MM.YYYY';
 
   @override
   String get adminEndsAtIfNotLifetime =>
@@ -197,8 +199,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get adminIdlePauseAfterHours =>
-      'Idle pause after hours (empty/0 = off)';
+  String get adminIdlePauseAfterHours => 'Idle pause';
 
   @override
   String adminIdlePausedProjectsInCompany(String count) {
@@ -230,25 +231,25 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminLifetimeSubscription => 'Lifetime subscription';
 
   @override
-  String get adminMaxAgentTokensMonth => 'Max agent tokens / month (optional)';
+  String get adminMaxAgentTokensMonth => 'Agent tokens / month';
 
   @override
-  String get adminMaxBundleImportMb => 'Max bundle import (MB)';
+  String get adminMaxBundleImportMb => 'Bundle import';
 
   @override
   String get adminMaxCabinets => 'Max cabinets';
 
   @override
-  String get adminMaxChatAttachmentMb => 'Max chat attachment size (MB)';
+  String get adminMaxChatAttachmentMb => 'Chat attachment';
 
   @override
   String get adminMaxPackagesPerCabinet => 'Max packages per cabinet';
 
   @override
-  String get adminMaxTokensPerRun => 'Max tokens per run (optional)';
+  String get adminMaxTokensPerRun => 'Tokens per run';
 
   @override
-  String get adminMaxUsdCostMonth => 'Max USD cost / month (optional)';
+  String get adminMaxUsdCostMonth => 'USD cost / month';
 
   @override
   String get adminMetadataOnly => 'metadata only';
@@ -284,8 +285,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get adminModelAllowlist =>
-      'Model allowlist (comma-separated, empty = any)';
+  String get adminModelAllowlist => 'Model allowlist';
 
   @override
   String get adminNewSecret => 'New secret';
@@ -333,14 +333,16 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get adminPreferredProviderOptional => 'Preferred provider (optional)';
+  String get adminPreferredProvider => 'Provider';
+
+  @override
+  String get adminPreferredProviderOptional => 'Provider';
 
   @override
   String get adminProdavanSubscription => 'Prodavan subscription';
 
   @override
-  String get adminProdavanSubscriptionOptional =>
-      'Prodavan subscription (optional)';
+  String get adminProdavanSubscriptionOptional => 'Prodavan subscription';
 
   @override
   String adminProviderValue(String provider) {
@@ -430,7 +432,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminTelegramHmacNotSet => 'Telegram HMAC: not set';
 
   @override
-  String get adminTelegramHmacSecret => 'Telegram HMAC secret (optional write)';
+  String get adminTelegramHmacSecret => 'Telegram HMAC';
 
   @override
   String get adminTokens => 'Tokens';
@@ -446,7 +448,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminWebhookHmacNotSet => 'Webhook HMAC: not set';
 
   @override
-  String get adminWebhookHmacSecret => 'Webhook HMAC secret (optional write)';
+  String get adminWebhookHmacSecret => 'Webhook HMAC';
 
   @override
   String get authAdvanced => 'Advanced';
@@ -884,7 +886,24 @@ class AppLocalizationsEn extends AppLocalizations {
   String get commonDisable => 'Disable';
 
   @override
-  String get commonDisplayNameOptional => 'Display name (optional)';
+  String get commonDisplayNameOptional => 'Display name';
+
+  @override
+  String get commonMbUnit => 'MB';
+
+  @override
+  String get commonNotSet => 'Not set';
+
+  @override
+  String get commonOff => 'Off';
+
+  @override
+  String get commonUnlimited => 'Unlimited';
+
+  @override
+  String adminBindingsCount(int count) {
+    return '$count companies';
+  }
 
   @override
   String get commonDone => 'Done';
