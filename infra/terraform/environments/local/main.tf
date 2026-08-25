@@ -82,7 +82,14 @@ variable "ghcr_username" {
 
 locals {
   remote_repo_path = var.remote_repo_path != "" ? var.remote_repo_path : "/mnt/c/Users/qwerty/git/Commerce/prodavan"
-  ssh_key          = var.ssh_private_key_path != "" ? var.ssh_private_key_path : abspath("${path.module}/../../../.ssh/prodavan_tf")
+  # Keys on /mnt/c/... are mode 0777 — OpenSSH refuses them. Prefer a 0600 copy under ~/.ssh.
+  ssh_key_mntc = abspath("${path.module}/../../../.ssh/prodavan_tf")
+  ssh_key_home = "/home/${var.ssh_user}/.ssh/prodavan_tf"
+  ssh_key = (
+    var.ssh_private_key_path != "" ? var.ssh_private_key_path : (
+      fileexists(local.ssh_key_home) ? local.ssh_key_home : local.ssh_key_mntc
+    )
+  )
 }
 
 module "k3s_dev" {

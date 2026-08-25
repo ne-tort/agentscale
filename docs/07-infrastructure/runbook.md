@@ -83,7 +83,9 @@ SandboxChanged, Traefik `:8088` пропадает. Terraform ставит `Time
 После осознанного `wsl --shutdown` / сна: поднять Kali, при необходимости
 `sudo systemctl restart k3s`, с Windows — `tools/win-wsl-portforward.ps1`
 или `infra/github-runner/Sync-KubeForDocker.ps1` (Admin).
-Terraform `k3s_server`: **не** делает blind `systemctl restart k3s`, если сервис уже active
+На Win10 держи сессию живой: `tools/win-wsl-keepalive.ps1` — иначе после выхода
+последнего `wsl.exe` дистрибутив может получить `InitTerminate` / poweroff и снова
+уронить Traefik `:8088`. Terraform `k3s_server`: **не** делает blind `systemctl restart k3s`, если сервис уже active
 (HelmChartConfig/manifests подхватываются сами).
 
 ---
