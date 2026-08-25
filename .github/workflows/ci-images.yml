@@ -230,7 +230,6 @@ jobs:
           provenance: false
           sbom: false
           build-args: |
-            API_BASE=http://localhost:8088/api/v1
             BUILD_ID=${{ github.sha }}
             BUILD_NAME=1.0.0
             BUILD_NUMBER=${{ github.run_number }}

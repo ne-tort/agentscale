@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/auth/auth_config.dart';
 import 'package:prodavan/core/auth/oidc_auth_service.dart';
 import 'package:prodavan/core/auth/session_store.dart';
+import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/features/admin/admin_shell.dart';
 import 'package:prodavan/features/employee/contour_selector_page.dart';
 import 'package:prodavan/features/employee/cabinet_list_page.dart';
 import 'package:prodavan/features/employee/login_page.dart';
@@ -28,7 +30,20 @@ class _SessionGatePageState extends State<SessionGatePage> {
 
   Future<void> _navigateAfterMe(Map<String, dynamic> me, StoredSession stored) async {
     if (!mounted) return;
+    final contours = me['contours'];
     final memberships = me['employee']?['memberships'];
+    final isPlatformAdmin = contours is List && contours.contains('platform_admin');
+    final hasMemberships = memberships is List && memberships.isNotEmpty;
+    if (isPlatformAdmin && !hasMemberships) {
+      adminContext.setSession(
+        baseUrl: stored.baseUrl,
+        bearerToken: workContext.bearerToken,
+      );
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute<void>(builder: (_) => const AdminShell()),
+      );
+      return;
+    }
     if (stored.companyId == null && memberships is List && memberships.length > 1) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(builder: (_) => ContourSelectorPage(me: me)),

@@ -9,6 +9,7 @@
 | Валидация API | JWT access token → **JWKS Keycloak** (RS256/ES256), не shared HS256 secret |
 | Пароли / MFA / reset | **Только в Keycloak** |
 | Локальный `POST /auth/login` | Legacy dual-verify → **удалить** после cutover |
+| Dev bridge `POST /auth/test/login` | Только `AUTH_MODE=test` + `APP_ENV!=prod` — mint HS256 + seed Demo Employee; **не** целевой prod-путь |
 | Session / cabinets | См. [session.md](session.md) — headers + DB, **не** reissue JWT |
 
 ## Семантика слоя

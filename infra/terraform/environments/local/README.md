@@ -14,6 +14,8 @@ terraform apply -auto-approve
 
 Then open **http://127.0.0.1:8088/** (Traefik `hostNetwork` + `hostIP: 0.0.0.0`, Ingress without `host:`).
 
+Sign in uses `AUTH_MODE=test` one-click personas (**Demo Employee** / **Platform Admin**). Paste JWT is Advanced only.
+
 Requirements on the SSH host:
 
 - Passwordless sudo for k3s (`/etc/sudoers.d/prodavan-terraform`)

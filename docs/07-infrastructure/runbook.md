@@ -5,7 +5,8 @@
 **Запрещены:** `.sh` под `infra/`, docker-compose как кластер, k3d в git, recover/deploy shell.
 
 Репозиторий: [ne-tort/prodavan](https://github.com/ne-tort/prodavan).  
-**UI:** http://127.0.0.1:8088/ (Traefik слушает `0.0.0.0:8088`, Ingress без фильтра `host`).
+**UI:** http://127.0.0.1:8088/ (Traefik слушает `0.0.0.0:8088`, Ingress без фильтра `host`).  
+После bootstrap открывается **Sign in**. В кластере `AUTH_MODE=test` — кнопки **Demo Employee** / **Platform Admin** (API `POST /auth/test/login`, без paste JWT). Keycloak для локального smoke не нужен.
 
 ---
 
@@ -44,7 +45,7 @@ export TF_VAR_ghcr_token="$(gh auth token)"
 terraform init
 terraform apply -auto-approve
 # UI:
-#   http://127.0.0.1:8088/
+#   http://127.0.0.1:8088/  → Sign in → Demo Employee / Platform Admin
 ```
 
 Подробности хоста/ключа: [`infra/terraform/environments/local/README.md`](../../infra/terraform/environments/local/README.md).
