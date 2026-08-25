@@ -294,6 +294,10 @@ class AdminCompanyService:
         )
         quota = await self._quotas.get_quota(company_id)
         active_cabinets = int(cab_q.scalar_one() or 0)
+        employees_total = int(emp_q.scalar_one() or 0)
+        employees_active = int(emp_active_q.scalar_one() or 0)
+        projects_total = int(proj_q.scalar_one() or 0)
+        agent_messages = int(msg_q.scalar_one() or 0)
         key_metrics = await AiKeysService(self._session).company_key_metrics(company_id)
         last_activity = await self._last_activity_at(company_id)
         storage_bytes = await self._storage_bytes(company_id)
@@ -307,20 +311,20 @@ class AdminCompanyService:
             expiring_days=settings.admin_metrics_subscription_expiring_days,
         )
         return {
-            "employees_total": int(emp_q.scalar_one() or 0),
-            "employees_active": int(emp_active_q.scalar_one() or 0),
-            "employees": int(emp_q.scalar_one() or 0),
+            "employees_total": employees_total,
+            "employees_active": employees_active,
+            "employees": employees_total,
             "active_cabinets": active_cabinets,
             "cabinets_active": active_cabinets,
             "cabinets_quota": quota.max_cabinets,
             "cabinets_quota_used_pct": round(100 * active_cabinets / quota.max_cabinets, 1)
             if quota.max_cabinets
             else 0,
-            "projects_total": int(proj_q.scalar_one() or 0),
+            "projects_total": projects_total,
             "agent_tokens_used": tokens_used,
             "agent_input_tokens": input_tok,
             "agent_output_tokens": output_tok,
-            "agent_messages": int(msg_q.scalar_one() or 0),
+            "agent_messages": agent_messages,
             "last_activity_at": last_activity.isoformat() if last_activity else None,
             "storage_bytes": storage_bytes,
             "high_agent_usage": high_usage,
