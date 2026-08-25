@@ -112,7 +112,7 @@ resource "null_resource" "k3s_server" {
       "elif ! sudo -n systemctl is-active --quiet k3s; then",
       "  sudo -n systemctl start k3s",
       "else",
-      "  echo k3s already running - skip restart; manifests under server/manifests apply automatically",
+      "  echo k3s-already-running-skip-restart",
       "fi",
       "sudo -n systemctl enable k3s",
       "for i in $(seq 1 60); do sudo -n k3s kubectl get --raw=/readyz >/dev/null 2>&1 && break; sleep 2; done",
