@@ -15,7 +15,7 @@ locals {
 
 resource "null_resource" "sshd" {
   triggers = {
-    rev              = "v5-listen-all"
+    rev              = "v7-sshd-no-restart"
     ssh_port         = tostring(var.ssh_port)
     ssh_user         = var.ssh_user
     sshd_config_hash = filesha256("${path.module}/../../../.ssh/sshd_config.tpl")
@@ -52,7 +52,8 @@ resource "null_resource" "sshd" {
       "sudo -n mv /tmp/prodavan-sshd.service /etc/systemd/system/prodavan-sshd.service",
       "sudo -n systemctl daemon-reload",
       "sudo -n systemctl enable prodavan-sshd.service",
-      "if systemctl is-active --quiet prodavan-sshd.service; then sudo -n systemctl restart prodavan-sshd.service || true; elif ! ss -tln | grep -q \":${var.ssh_port} \"; then sudo -n systemctl reset-failed prodavan-sshd.service || true; sudo -n systemctl start prodavan-sshd.service; fi",
+      # Never restart prodavan-sshd here: terraform is connected through it.
+      "if ss -tln | grep -q \":${var.ssh_port} \"; then echo sshd-already-listening; else sudo -n systemctl reset-failed prodavan-sshd.service || true; sudo -n systemctl start prodavan-sshd.service; fi",
       "ss -tln | grep -q \":${var.ssh_port} \"'",
     ]
   }
@@ -117,9 +118,9 @@ resource "null_resource" "k3s_server" {
       # WSL terminates distros with systemctl poweroff and only waits ~10s; slow k3s
       # stop → InitTerminateInstanceInternal force reboot → eth0/Sandbox churn.
       "sudo -n mkdir -p /etc/systemd/system/k3s.service.d",
-      "printf '%s\\n' '[Service]' 'TimeoutStopSec=8' 'TimeoutSec=8' | sudo -n tee /etc/systemd/system/k3s.service.d/prodavan-wsl-stop.conf >/dev/null",
+      "sudo -n bash -c \"printf '%s\\n' '[Service]' 'TimeoutStopSec=8' > /etc/systemd/system/k3s.service.d/prodavan-wsl-stop.conf\"",
       "sudo -n systemctl daemon-reload",
-      "sudo -n systemctl enable k3s",
+      "sudo -n systemctl enable k3s || true",
       "for i in $(seq 1 60); do sudo -n k3s kubectl get --raw=/readyz >/dev/null 2>&1 && break; sleep 2; done",
       "sudo -n k3s kubectl wait --for=condition=Ready node --all --timeout=180s",
       "mkdir -p /home/${var.ssh_user}/.kube",
@@ -130,17 +131,18 @@ resource "null_resource" "k3s_server" {
   }
 }
 
-# Uninstall only on full terraform destroy / cluster rename — NOT when k3s_server
-# triggers (rev/traefik hash) change, otherwise every script tweak wipes the cluster.
+# Uninstall only on full terraform destroy / cluster rename — NOT when key path,
+# traefik hash, or other mutable SSH coords change (that previously wiped k3s).
 resource "null_resource" "k3s_uninstall" {
   depends_on = [null_resource.k3s_server]
 
   triggers = {
-    cluster      = var.cluster_name
-    ssh_host     = var.ssh_host
-    ssh_port     = tostring(var.ssh_port)
-    ssh_user     = var.ssh_user
-    ssh_key_path = var.ssh_private_key_path
+    cluster = var.cluster_name
+    # Frozen local-dev SSH coords (must live in triggers for destroy-time connection).
+    ssh_host     = "127.0.0.1"
+    ssh_port     = "2222"
+    ssh_user     = "www"
+    ssh_key_path = "/home/www/.ssh/prodavan_tf"
   }
 
   provisioner "remote-exec" {
@@ -151,7 +153,7 @@ resource "null_resource" "k3s_uninstall" {
       host        = try(self.triggers.ssh_host, "127.0.0.1")
       port        = tonumber(try(self.triggers.ssh_port, "2222"))
       user        = try(self.triggers.ssh_user, "www")
-      private_key = file(try(self.triggers.ssh_key_path, "${path.module}/../../../.ssh/prodavan_tf"))
+      private_key = file(try(self.triggers.ssh_key_path, "/home/www/.ssh/prodavan_tf"))
       timeout     = "10m"
     }
     inline = [
