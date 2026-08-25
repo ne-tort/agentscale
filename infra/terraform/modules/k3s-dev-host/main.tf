@@ -62,12 +62,12 @@ resource "null_resource" "k3s_server" {
   depends_on = [null_resource.sshd]
 
   triggers = {
-    rev          = "v2-no-blind-restart"
-    k3s_version  = var.k3s_version
-    http_port    = tostring(var.http_port)
-    cluster      = var.cluster_name
-    traefik_tpl  = filesha256("${path.module}/templates/traefik-port.yaml.tpl")
-    # SSH coords in triggers so destroy-time provisioner may only use self.*
+    rev         = "v2-no-blind-restart"
+    k3s_version = var.k3s_version
+    http_port   = tostring(var.http_port)
+    cluster     = var.cluster_name
+    traefik_tpl = filesha256("${path.module}/templates/traefik-port.yaml.tpl")
+    # SSH coords in triggers so provisioners may only use self.*
     ssh_host     = var.ssh_host
     ssh_port     = tostring(var.ssh_port)
     ssh_user     = var.ssh_user
@@ -123,13 +123,26 @@ resource "null_resource" "k3s_server" {
       "chmod 600 ${local.kubeconfig_path}'",
     ]
   }
+}
+
+# Uninstall only on full terraform destroy / cluster rename — NOT when k3s_server
+# triggers (rev/traefik hash) change, otherwise every script tweak wipes the cluster.
+resource "null_resource" "k3s_uninstall" {
+  depends_on = [null_resource.k3s_server]
+
+  triggers = {
+    cluster      = var.cluster_name
+    ssh_host     = var.ssh_host
+    ssh_port     = tostring(var.ssh_port)
+    ssh_user     = var.ssh_user
+    ssh_key_path = var.ssh_private_key_path
+  }
 
   provisioner "remote-exec" {
     when       = destroy
     on_failure = continue
     connection {
-      type = "ssh"
-      # Old state may lack ssh_* triggers — fall back to local-dev defaults.
+      type        = "ssh"
       host        = try(self.triggers.ssh_host, "127.0.0.1")
       port        = tonumber(try(self.triggers.ssh_port, "2222"))
       user        = try(self.triggers.ssh_user, "www")
@@ -145,7 +158,7 @@ resource "null_resource" "k3s_server" {
 resource "null_resource" "gitops_bootstrap" {
   count = var.bootstrap_gitops ? 1 : 0
 
-  depends_on = [null_resource.k3s_server]
+  depends_on = [null_resource.k3s_server, null_resource.k3s_uninstall]
 
   triggers = {
     repo       = var.remote_repo_path
