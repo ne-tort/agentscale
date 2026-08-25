@@ -1,0 +1,61 @@
+# Prodavan GitHub Actions runners — Docker Desktop (Windows-controlled)
+#
+# Peak parallel jobs in CI Gate: infra + api + flutter + schemas = 4
+# Persistent /cache volume: Flutter SDK, pub, Poetry, pip (project-dedicated runners).
+#
+# Usage (PowerShell):
+#   copy .env.example .env   # set ACCESS_TOKEN
+#   .\Start-Runners.ps1
+#   docker compose down      # keeps volumes
+#   docker compose down -v   # WIPES caches
+
+name: prodavan-runners
+
+x-cache-env: &cache-env
+  # Shared across all replicas via named volume prodavan-ci-cache
+  PRODAVAN_CI_CACHE: /cache
+  RUNNER_TOOL_CACHE: /cache/toolcache
+  AGENT_TOOLSDIRECTORY: /cache/toolcache
+  PUB_CACHE: /cache/pub
+  FLUTTER_SDK: /cache/flutter-sdk
+  PIP_CACHE_DIR: /cache/pip
+  POETRY_CLI: /cache/poetry-cli
+  POETRY_CACHE_DIR: /cache/poetry
+  POETRY_VIRTUALENVS_PATH: /cache/poetry-venvs
+  POETRY_VIRTUALENVS_IN_PROJECT: "false"
+  XDG_CACHE_HOME: /cache/xdg
+  # Jobs reach published ports / WSL portproxy via Docker Desktop gateway
+  PRODAVAN_CI_HOST: host.docker.internal
+  KUBECONFIG: /home/runner/.kube/prodavan-dev.yaml
+
+services:
+  runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: prodavan-github-runner:py312
+    restart: unless-stopped
+    environment:
+      <<: *cache-env
+      REPO_URL: ${REPO_URL:-https://github.com/ne-tort/prodavan}
+      ACCESS_TOKEN: ${ACCESS_TOKEN:-}
+      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
+      RUNNER_NAME_PREFIX: ${RUNNER_NAME_PREFIX:-dd-prodavan}
+      RUNNER_SCOPE: repo
+      LABELS: ${LABELS:-self-hosted,linux,docker,docker-desktop}
+      DISABLE_AUTO_UPDATE: "true"
+      EPHEMERAL: ${EPHEMERAL:-false}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${USERPROFILE}/.kube:/home/runner/.kube:ro
+      - prodavan-ci-cache:/cache
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    dns:
+      - 8.8.8.8
+      - 1.1.1.1
+
+volumes:
+  # Survives `docker compose down` (use down -v to wipe)
+  prodavan-ci-cache:
+    name: prodavan-ci-cache

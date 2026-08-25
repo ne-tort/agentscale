@@ -1,65 +1,96 @@
-# Self-hosted GitHub Actions runner (OUTSIDE k3s)
+# Self-hosted GitHub Actions runners — **Docker Desktop**
 
-## Канон: **system** unit (не `--user`)
+## Сколько раннеров
 
-На WSL `systemd --user` часто гасится вместе с короткой `wsl`-сессией → runner **offline**, джобы в queue.  
-Канон: `/etc/systemd/system/prodavan-actions-runner.service` с `User=www`.
+| Workflow | Параллельные job'ы |
+|----------|-------------------|
+| **CI Gate** | `infra` + `api` + `flutter` + `schemas` = **4** (потом `gate`) |
+| CI Images | `build-api` + `build-web` = 2 |
+| Verify Dev | 1 (`wait-smoke`) |
 
-Ожидать в GitHub: `wsl-prodavan-host` **online**, labels `self-hosted`, `linux`/`Linux`, `docker`.
+**Канон: 4 реплики** (`RUNNER_REPLICAS=4`) — закрывает пик Gate. Больше 4 на одном ПК обычно не нужно (CPU/RAM + Docker builds).
 
-### 1. Install once
+Управление: Docker Desktop UI / `docker compose` из Windows. Старый host/WSL runner (`wsl-prodavan-host`) **снят**.
 
-```bash
-export PATH="${HOME}/.local/bin:/usr/bin:/bin"
-mkdir -p ~/prodavan-actions-runner && cd ~/prodavan-actions-runner
-# extract actions-runner-linux-x64-*.tar.gz
-./config.sh --url https://github.com/ne-tort/prodavan --token <REG_TOKEN> \
-  --name wsl-prodavan-host --labels self-hosted,linux,docker,wsl-dev \
-  --work _work --unattended --replace
+## Quick start (Windows)
+
+1. Docker Desktop запущен (context `desktop-linux`).
+2. Токен:
+
+```powershell
+cd infra/github-runner
+copy .env.example .env
+# В .env:
+# ACCESS_TOKEN=<gh auth token с scope repo>
 ```
 
-Token:
-
-```bash
-gh api -X POST repos/ne-tort/prodavan/actions/runners/registration-token --jq .token
+```powershell
+gh auth token   # вставить в .env как ACCESS_TOKEN
 ```
 
-### 2. `.env` (не в git) — только из bash в WSL
+3. (Verify Dev / smoke) один раз после reboot WSL:
 
-```bash
-printf 'DISABLE_RUNNER_UPDATE=1\nDISABLE_AUTO_UPDATE=true\nKUBECONFIG=%s/.kube/prodavan-dev.yaml\n' "$HOME" > ~/prodavan-actions-runner/.env
+```powershell
+.\Sync-KubeForDocker.ps1   # Admin: kubeconfig + portproxy 6443/8088
 ```
 
-Не пиши `.env` из PowerShell — `\n` превращается в букву `n`.
+4. Старт пака:
 
-### 3. systemd system unit
-
-```bash
-sudo cp infra/github-runner/prodavan-actions-runner.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now prodavan-actions-runner.service
-sudo systemctl status prodavan-actions-runner.service
+```powershell
+.\Start-Runners.ps1        # Admin не обязателен, если docker без elevation
+# или:
+docker compose up -d --scale runner=4
 ```
 
-Юнит: [`prodavan-actions-runner.service`](prodavan-actions-runner.service).
+5. Проверка:
 
-Логи: `journalctl -u prodavan-actions-runner -f` → `Listening for Jobs`.  
-На PATH у `www`: `kubectl` / `kustomize`.  
-`KUBECONFIG` → `~/.kube/prodavan-dev.yaml`.
-
-### Conflict / offline
-
-```bash
-sudo systemctl stop prodavan-actions-runner
-sudo pkill -9 -u www -f Runner.Listener || true
-# подождать ~1–2 мин или удалить runner в GitHub UI/API и config.sh --replace
-sudo systemctl start prodavan-actions-runner
-gh api repos/ne-tort/prodavan/actions/runners
+```powershell
+docker compose ps
+gh api repos/ne-tort/prodavan/actions/runners --jq '.runners[]|{name,status,busy,labels:[.labels[].name]}'
 ```
 
-Единственный runner → `cancel-in-progress: false` в workflows. Зависший run в concurrency group блокирует новые — cancel через `gh run cancel <id>`.
+Остановить: `docker compose down` (кэш **сохраняется**)  
+Снести кэш: `docker compose down -v`  
+Логи: `docker compose logs -f`
 
-## Ops CLI
+## Persistent cache (`prodavan-ci-cache` → `/cache`)
+
+Общий named volume на все 4 реплики (раннеры только под Prodavan):
+
+| Path | Что |
+|------|-----|
+| `/cache/flutter-sdk` | Flutter stable SDK (clone once) |
+| `/cache/pub` | `PUB_CACHE` |
+| `/cache/poetry-cli` | Poetry CLI (venv bootstrap) |
+| `/cache/poetry` + `/cache/poetry-venvs` | Poetry cache + project virtualenvs |
+| `/cache/pip` | pip wheel cache (api) |
+| `/cache/toolcache` | `RUNNER_TOOL_CACHE` |
+
+В логах Gate/Flutter ищи `cache HIT` / `cache MISS`.
+
+## Сеть Docker Desktop
+
+Раннеры монтируют `docker.sock` Desktop-движка. Job'ы публикуют порты на Desktop VM; из контейнера раннера хост — **`host.docker.internal`** (env `PRODАVAN_CI_HOST` в compose).
+
+- API tests Postgres: `host.docker.internal:55432`
+- Smoke / k3s: Windows `portproxy` 8088/6443 → WSL (скрипт `Sync-KubeForDocker.ps1`)
+
+## Labels
+
+`self-hosted,linux,docker,docker-desktop` — workflows используют `[self-hosted, linux, docker]`.
+
+## Файлы
+
+| Файл | Назначение |
+|------|------------|
+| `docker-compose.yml` | сервис `runner`, scale N, volume `prodavan-ci-cache` |
+| `.env.example` | токены / replicas |
+| `Start-Runners.ps1` | `compose up --scale` |
+| `Sync-KubeForDocker.ps1` | kubeconfig + portproxy для Verify |
+
+Image: local build `prodavan-github-runner:py312` (FROM myoung34 jammy + **Python 3.12** — api/ops требуют `>=3.12`).
+
+## Ops CLI (локально в WSL, не в runner)
 
 ```bash
 cd infra/ops && poetry install
@@ -67,5 +98,3 @@ poetry run prodavan-ops validate
 poetry run prodavan-ops wait
 poetry run prodavan-ops smoke
 ```
-
-Ранбук: [`docs/07-infrastructure/runbook.md`](../../docs/07-infrastructure/runbook.md).

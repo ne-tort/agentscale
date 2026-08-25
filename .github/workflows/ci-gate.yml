@@ -10,8 +10,7 @@ on:
 
 concurrency:
   group: ci-gate-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  # Single self-hosted runner. true + rapid pushes cancel infra mid-flight (empty logs).
-  # Stuck group: gh api -X POST repos/.../actions/runs/<id>/force-cancel
+  # Docker Desktop runner pack (4×). Stuck run: gh api -X POST .../actions/runs/<id>/force-cancel
   cancel-in-progress: false
 
 jobs:
@@ -21,7 +20,11 @@ jobs:
     timeout-minutes: 15
     env:
       PYTHONUNBUFFERED: "1"
-      POETRY_VIRTUALENVS_IN_PROJECT: "true"
+      PIP_CACHE_DIR: /cache/pip
+      POETRY_CLI: /cache/poetry-cli
+      POETRY_CACHE_DIR: /cache/poetry
+      POETRY_VIRTUALENVS_PATH: /cache/poetry-venvs
+      POETRY_VIRTUALENVS_IN_PROJECT: "false"
     steps:
       - uses: actions/checkout@v4
 
@@ -43,25 +46,35 @@ jobs:
           echo "$dest" >> "${GITHUB_PATH}"
           "$dest/kustomize" version
 
-      - name: Python venv + Poetry
+      - name: Poetry (persistent /cache)
         run: |
           set -euo pipefail
-          echo "==> creating venv"
-          python3 -m venv "${{ runner.temp }}/ops-venv"
-          echo "${{ runner.temp }}/ops-venv/bin" >> "${GITHUB_PATH}"
-          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
-          echo "/usr/local/bin" >> "${GITHUB_PATH}"
-          echo "==> pip install poetry"
-          "${{ runner.temp }}/ops-venv/bin/python" -m pip install -U pip poetry
-          echo "==> poetry ready"
-          "${{ runner.temp }}/ops-venv/bin/poetry" --version
+          echo "==> python $(python3 --version)"
+          python3 -c 'import sys; assert sys.version_info >= (3, 12), sys.version'
+          # CLI lives in a dedicated venv on the shared volume (system pip breaks under 3.12).
+          POETRY_CLI="${POETRY_CLI:-/cache/poetry-cli}"
+          mkdir -p /cache/pip /cache/poetry /cache/poetry-venvs
+          echo "${POETRY_CLI}/bin" >> "${GITHUB_PATH}"
+          export PATH="${POETRY_CLI}/bin:${PATH}"
+          if [ -x "${POETRY_CLI}/bin/poetry" ]; then
+            echo "==> poetry cache HIT: ${POETRY_CLI}/bin/poetry"
+            poetry --version
+          else
+            echo "==> poetry cache MISS — bootstrap venv at ${POETRY_CLI}"
+            rm -rf "${POETRY_CLI}"
+            python3 -m venv "${POETRY_CLI}"
+            "${POETRY_CLI}/bin/pip" install -U pip poetry
+            poetry --version
+          fi
 
       - name: Validate (kustomize, pins, no legacy deploy paths)
         working-directory: infra/ops
         run: |
           set -euo pipefail
+          export PATH="${POETRY_CLI:-/cache/poetry-cli}/bin:${PATH}"
           echo "==> which kustomize: $(command -v kustomize)"
-          echo "==> poetry install"
+          echo "==> which poetry: $(command -v poetry)"
+          echo "==> poetry install (venvs at ${POETRY_VIRTUALENVS_PATH})"
           poetry install --no-interaction
           echo "==> prodavan-ops validate"
           poetry run prodavan-ops validate

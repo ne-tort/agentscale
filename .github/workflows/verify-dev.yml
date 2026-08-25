@@ -78,4 +78,9 @@ jobs:
 
       - name: Smoke HTTP
         working-directory: infra/ops
-        run: poetry run prodavan-ops smoke --addr 127.0.0.1 --port 8088
+        run: |
+          set -euo pipefail
+          # Docker Desktop runners: host.docker.internal + Windows portproxy → WSL Traefik
+          ADDR="${PRODAVAN_CI_HOST:-${SMOKE_ADDR:-127.0.0.1}}"
+          echo "smoke addr=$ADDR port=${HTTP_PORT}"
+          poetry run prodavan-ops smoke --addr "$ADDR" --port "${HTTP_PORT}"

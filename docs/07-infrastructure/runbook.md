@@ -16,7 +16,7 @@ UI: `http://localhost:8088/`.
 | Кластер | **k3s** (kubelet + API). Workloads только из git. |
 | Argo CD | `infra/argocd/install` → `root-app.yaml` → `apps/` → `infra/k3s/overlays/dev` |
 | Sealed Secrets | `infra/argocd/sealed-secrets` + `overlays/dev/SECRETS.md` |
-| GHA runner | процесс на хосте, **вне** k3s ([`infra/github-runner/README.md`](../../infra/github-runner/README.md)) |
+| GHA runners | **Docker Desktop** pack ×4 ([`infra/github-runner/README.md`](../../infra/github-runner/README.md)) |
 | Ops CLI | [`infra/ops`](../../infra/ops): `validate` / `wait` / `smoke` |
 
 Docker нужен **только** для сборки образов в CI Images (и опционально для самого runner-процесса). Кластер, Argo и validate от Docker **не зависят**.

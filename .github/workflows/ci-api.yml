@@ -17,8 +17,7 @@ jobs:
       run:
         working-directory: apps/api
     env:
-      DATABASE_URL: postgresql+asyncpg://prodavan_app:prodavan@127.0.0.1:55432/prodavan
-      PG_ADMIN_URL: postgresql+asyncpg://prodavan:prodavan@127.0.0.1:55432/prodavan
+      PIP_CACHE_DIR: /cache/pip
     steps:
       - uses: actions/checkout@v4
 
@@ -27,21 +26,38 @@ jobs:
         run: |
           set -euo pipefail
           python3 --version
+          # api requires >=3.12 (Docker runner image must ship 3.12)
+          python3 -c 'import sys; assert sys.version_info >= (3, 12), sys.version'
+          mkdir -p "${PIP_CACHE_DIR:-/cache/pip}"
           python3 -m venv "${{ runner.temp }}/venv"
           echo "${{ runner.temp }}/venv/bin" >> "${GITHUB_PATH}"
           "${{ runner.temp }}/venv/bin/python" -m pip install -U pip
 
       - name: Start Postgres
+        id: pg
         run: |
-          docker rm -f prodavan-ci-pg 2>/dev/null || true
-          docker run -d --name prodavan-ci-pg \
+          set -euo pipefail
+          # Docker Desktop runners: published ports land on Desktop VM → host.docker.internal
+          # Host/WSL runners: 127.0.0.1
+          PG_HOST="${PRODAVAN_CI_HOST:-127.0.0.1}"
+          NAME="prodavan-ci-pg-${{ github.run_id }}-${{ github.job }}"
+          docker rm -f "$NAME" 2>/dev/null || true
+          # ephemeral host port avoids collisions across parallel runners
+          docker run -d --name "$NAME" \
             -e POSTGRES_USER=prodavan \
             -e POSTGRES_PASSWORD=prodavan \
             -e POSTGRES_DB=prodavan \
-            -p 55432:5432 \
+            -p 0:5432 \
             postgres:16.15
+          PORT="$(docker port "$NAME" 5432/tcp | head -1 | awk -F: '{print $NF}')"
+          echo "PG_HOST=$PG_HOST" >> "${GITHUB_ENV}"
+          echo "PG_PORT=$PORT" >> "${GITHUB_ENV}"
+          echo "PG_CONTAINER=$NAME" >> "${GITHUB_ENV}"
+          echo "DATABASE_URL=postgresql+asyncpg://prodavan_app:prodavan@${PG_HOST}:${PORT}/prodavan" >> "${GITHUB_ENV}"
+          echo "PG_ADMIN_URL=postgresql+asyncpg://prodavan:prodavan@${PG_HOST}:${PORT}/prodavan" >> "${GITHUB_ENV}"
+          echo "Postgres $NAME on ${PG_HOST}:${PORT}"
           for i in $(seq 1 30); do
-            if docker exec prodavan-ci-pg pg_isready -U prodavan -d prodavan; then
+            if docker exec "$NAME" pg_isready -U prodavan -d prodavan; then
               exit 0
             fi
             sleep 2
@@ -53,14 +69,13 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Ensure app role
-        env:
-          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@127.0.0.1:55432/prodavan
         run: |
           python - <<'PY'
-          import asyncio
-          import asyncpg
+          import asyncio, os, asyncpg
           async def main():
-              conn = await asyncpg.connect("postgresql://prodavan:prodavan@127.0.0.1:55432/prodavan")
+              host = os.environ["PG_HOST"]
+              port = os.environ["PG_PORT"]
+              conn = await asyncpg.connect(f"postgresql://prodavan:prodavan@{host}:{port}/prodavan")
               try:
                   await conn.execute("CREATE ROLE prodavan_app LOGIN PASSWORD 'prodavan'")
               except Exception:
@@ -72,26 +87,24 @@ jobs:
           PY
 
       - name: Run migrations
-        env:
-          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@127.0.0.1:55432/prodavan
-        run: alembic upgrade head
+        run: |
+          export DATABASE_URL="${PG_ADMIN_URL}"
+          alembic upgrade head
 
       - name: Migration downgrade smoke
-        env:
-          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@127.0.0.1:55432/prodavan
         run: |
+          export DATABASE_URL="${PG_ADMIN_URL}"
           alembic downgrade base
           alembic upgrade head
 
       - name: Grant app role on migrated tables
-        env:
-          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@127.0.0.1:55432/prodavan
         run: |
           python - <<'PY'
-          import asyncio
-          import asyncpg
+          import asyncio, os, asyncpg
           async def main():
-              conn = await asyncpg.connect("postgresql://prodavan:prodavan@127.0.0.1:55432/prodavan")
+              host = os.environ["PG_HOST"]
+              port = os.environ["PG_PORT"]
+              conn = await asyncpg.connect(f"postgresql://prodavan:prodavan@{host}:{port}/prodavan")
               await conn.execute("GRANT ALL ON ALL TABLES IN SCHEMA public TO prodavan_app")
               await conn.execute("GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO prodavan_app")
               await conn.execute(
@@ -116,6 +129,6 @@ jobs:
 
       - name: Stop Postgres
         if: always()
-        run: docker rm -f prodavan-ci-pg 2>/dev/null || true
+        run: docker rm -f "${PG_CONTAINER:-}" 2>/dev/null || true
 
       # actions/setup-python@v5 removed — Kali not in python-versions manifest.

@@ -11,37 +11,51 @@ on:
 
 jobs:
   analyze:
-    # github-hosted ubuntu-latest fails instantly in this org;
-    # self-hosted runner image may lack xz for Flutter SDK tarball.
+    # github-hosted ubuntu-latest fails instantly in this org.
+    # Flutter SDK + pub live on Docker volume /cache (see infra/github-runner).
     runs-on: [self-hosted, linux, docker]
     defaults:
       run:
         working-directory: apps/flutter
+    env:
+      # Runner compose sets these; shell defaults if missing
+      PUB_CACHE: /cache/pub
+      FLUTTER_SDK: /cache/flutter-sdk
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ensure jq/xz for Flutter SDK extract
+      - name: Flutter SDK (persistent /cache)
         run: |
           set -euo pipefail
-          mkdir -p "${HOME}/.local/bin"
-          export PATH="${HOME}/.local/bin:${PATH}"
-          echo "${HOME}/.local/bin" >> "${GITHUB_PATH}"
-          if ! command -v jq >/dev/null 2>&1; then
-            curl -fsSL -o "${HOME}/.local/bin/jq" \
-              https://github.com/jqlang/jq/releases/download/jq-1.7.1/jq-linux-amd64
-            chmod +x "${HOME}/.local/bin/jq"
+          SDK="${FLUTTER_SDK:-/cache/flutter-sdk}"
+          PUB="${PUB_CACHE:-/cache/pub}"
+          mkdir -p /cache "$PUB"
+          echo "PUB_CACHE=$PUB" >> "${GITHUB_ENV}"
+          echo "$SDK/bin" >> "${GITHUB_PATH}"
+
+          # One Flutter job at a time still races across PRs — lock clone/update.
+          exec 9>/cache/flutter-sdk.lock
+          flock 9
+
+          if [ -x "$SDK/bin/flutter" ]; then
+            echo "==> Flutter cache HIT: $SDK"
+            "$SDK/bin/flutter" --version
+          else
+            echo "==> Flutter cache MISS — cloning stable into $SDK"
+            rm -rf "$SDK"
+            git clone --depth 1 --branch stable https://github.com/flutter/flutter.git "$SDK"
+            "$SDK/bin/flutter" config --no-analytics
+            "$SDK/bin/flutter" --version
+            "$SDK/bin/flutter" precache --no-android --no-ios --no-linux --no-windows --no-macos || true
           fi
-          if ! command -v xz >/dev/null 2>&1; then
-            echo "xz required but missing; install xz-utils on the runner host" >&2
-            exit 1
-          fi
+
+      - name: Ensure jq/xz
+        run: |
+          set -euo pipefail
+          command -v jq
+          command -v xz
           jq --version
           xz --version | head -1
-
-      - uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: false
 
       - run: flutter pub get
       - run: flutter analyze --no-fatal-infos

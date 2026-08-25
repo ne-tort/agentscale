@@ -58,11 +58,19 @@ def render_overlay() -> str:
 def render_argocd_install() -> str:
     """Render Argo CD install kustomize (remote upstream + patches)."""
     path = repo_root() / "infra" / "argocd" / "install"
-    if shutil.which("kubectl"):
-        return _run(["kubectl", "kustomize", str(path)])
-    if shutil.which("kustomize"):
-        return _run(["kustomize", "build", str(path)])
-    raise RuntimeError("need kubectl or kustomize on PATH for validate")
+    last_err: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            if shutil.which("kubectl"):
+                return _run(["kubectl", "kustomize", str(path)])
+            if shutil.which("kustomize"):
+                return _run(["kustomize", "build", str(path)])
+            raise RuntimeError("need kubectl or kustomize on PATH for validate")
+        except Exception as exc:  # noqa: BLE001 — retry remote fetch flakes
+            last_err = exc
+            print(f"argocd/install render attempt {attempt}/3 failed: {exc}")
+    assert last_err is not None
+    raise last_err
 
 
 def _images_from_manifest(manifest: str) -> list[str]:
@@ -121,11 +129,18 @@ def assert_no_shell_scripts() -> None:
 
 
 def assert_no_compose_or_k3d() -> None:
-    """Cluster path is k3s+Argo only — no compose-as-cluster, no k3d, no duplicate deploy trees."""
+    """Cluster path is k3s+Argo only — no compose-as-cluster, no k3d, no duplicate deploy trees.
+
+    Exception: infra/github-runner/docker-compose.yml — Actions runners on Docker Desktop
+    (not the app cluster).
+    """
     root = repo_root()
     banned: list[Path] = []
     for p in (root / "infra").rglob("docker-compose*.yml"):
-        banned.append(p.relative_to(root))
+        rel = p.relative_to(root)
+        if rel.parts[:2] == ("infra", "github-runner"):
+            continue
+        banned.append(rel)
     for rel in ("infra/k3d", "infra/k8s", "deploy/k8s", "deploy"):
         p = root / rel
         if p.exists():
