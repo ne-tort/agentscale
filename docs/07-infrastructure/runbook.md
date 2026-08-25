@@ -39,26 +39,28 @@ Docker нужен **только** для сборки образов в CI Imag
 
 ## 2. Bootstrap кластера (один раз)
 
+Канон локального bootstrap: **Terraform SSH** → k3s + Argo + root-app
+(`infra/terraform/environments/local/README.md`).
+
+```powershell
+# Windows: держи Kali живой
+.\tools\win-wsl-keepalive.ps1
+# ключ для OpenSSH из WSL (NTFS → 0777 ломает SSH)
+wsl -u www -- bash -lc "cp /mnt/c/Users/qwerty/git/Commerce/prodavan/infra/.ssh/prodavan_tf ~/.ssh/prodavan_tf && chmod 600 ~/.ssh/prodavan_tf"
+```
+
 ```bash
-# 1) k3s уже установлен и работает (systemd). kubeconfig:
-#    sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/prodavan-dev.yaml
-#    # поправить server: https://127.0.0.1:6443 при необходимости
+# Из WSL (terraform CLI на PATH)
+cd infra/terraform/environments/local
+export TF_VAR_ghcr_token="$(gh auth token)"   # или .tf-ghcr.env (gitignored)
+terraform init
+terraform apply -auto-approve
 export KUBECONFIG=~/.kube/prodavan-dev.yaml
-
-# 2) Control plane в git
-kubectl apply -k infra/argocd/install
-kubectl apply -k infra/argocd/sealed-secrets
-kubectl apply -f infra/argocd/root-app.yaml
-
-# 3) Secret pull (декларативно — см. overlays/dev/SECRETS.md)
-
-# 4) Проверка
-cd infra/ops && poetry install
-poetry run prodavan-ops wait
-poetry run prodavan-ops smoke
+cd ../../ops && poetry install && poetry run prodavan-ops smoke
 ```
 
 Day-2 деплой: **только** merge в `main` + Argo selfHeal. Не `kubectl apply -k infra/k3s/...` руками.
+Ручной `kubectl apply -k infra/argocd/...` — только recovery, не штатный путь.
 
 ---
 

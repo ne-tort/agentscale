@@ -15,10 +15,10 @@ Requirements on WSL host (`www`):
 - **SSH private key for Terraform-from-WSL:** copy off `/mnt/c` (NTFS → mode 0777 breaks OpenSSH):
   `cp .../infra/.ssh/prodavan_tf ~/.ssh/prodavan_tf && chmod 600 ~/.ssh/prodavan_tf`
   (local env prefers `~/.ssh/prodavan_tf` when present)
+- **Required on Win10:** `tools/win-wsl-keepalive.ps1` so Kali is not InitTerminate'd after the last `wsl.exe` exits
 - Repo path matches `remote_repo_path` (default `/mnt/c/Users/qwerty/git/Commerce/prodavan`)
-- Optional: `tools/win-wsl-keepalive.ps1` so Kali is not InitTerminate'd after the last `wsl.exe` exits
 
-Outputs: `kubeconfig_path` → `~/.kube/prodavan-dev.yaml`, HTTP `:8088`.
+Run Terraform **from WSL** (`~/.local/bin/terraform`), not Windows PATH — SSH target is `127.0.0.1:2222` inside the same distro.
 
 Destroy: `terraform destroy` runs `k3s-uninstall.sh` over SSH (requires portproxy
 `127.0.0.1:2222` → WSL eth0, see `infra/github-runner/Sync-KubeForDocker.ps1`).

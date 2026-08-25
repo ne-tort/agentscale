@@ -63,7 +63,7 @@ resource "null_resource" "k3s_server" {
   depends_on = [null_resource.sshd]
 
   triggers = {
-    rev         = "v3-wsl-timeout-stop"
+    rev         = "v4-dropin-file"
     k3s_version = var.k3s_version
     http_port   = tostring(var.http_port)
     cluster     = var.cluster_name
@@ -90,6 +90,19 @@ resource "null_resource" "k3s_server" {
     }
   }
 
+  provisioner "file" {
+    content     = "[Service]\nTimeoutStopSec=8\n"
+    destination = "/tmp/prodavan-wsl-stop.conf"
+    connection {
+      type        = "ssh"
+      host        = self.triggers.ssh_host
+      port        = tonumber(self.triggers.ssh_port)
+      user        = self.triggers.ssh_user
+      private_key = file(self.triggers.ssh_key_path)
+      timeout     = "10m"
+    }
+  }
+
   provisioner "remote-exec" {
     connection {
       type        = "ssh"
@@ -102,8 +115,9 @@ resource "null_resource" "k3s_server" {
     inline = [
       "bash -lc 'set -euo pipefail",
       "export PATH=\"$HOME/.local/bin:/usr/sbin:/usr/bin:$PATH\"",
-      "sudo -n mkdir -p /var/lib/rancher/k3s/server/manifests /etc/rancher/k3s",
+      "sudo -n mkdir -p /var/lib/rancher/k3s/server/manifests /etc/rancher/k3s /etc/systemd/system/k3s.service.d",
       "sudo -n cp /tmp/prodavan-traefik-port.yaml /var/lib/rancher/k3s/server/manifests/prodavan-traefik-port.yaml",
+      "sudo -n cp /tmp/prodavan-wsl-stop.conf /etc/systemd/system/k3s.service.d/prodavan-wsl-stop.conf",
       # Docker Engine inside WSL fights k3s CNI; runners use Docker Desktop on Windows.
       "if systemctl list-unit-files docker.service >/dev/null 2>&1; then sudo -n systemctl stop docker.socket docker 2>/dev/null || true; sudo -n systemctl disable --now docker.socket docker 2>/dev/null || true; sudo -n systemctl mask docker.socket docker 2>/dev/null || true; fi",
       # Broken/unauthenticated Tailscale netmon flaps routes around CNI veths on WSL.
@@ -115,10 +129,6 @@ resource "null_resource" "k3s_server" {
       "else",
       "  echo k3s-already-running-skip-restart",
       "fi",
-      # WSL terminates distros with systemctl poweroff and only waits ~10s; slow k3s
-      # stop → InitTerminateInstanceInternal force reboot → eth0/Sandbox churn.
-      "sudo -n mkdir -p /etc/systemd/system/k3s.service.d",
-      "sudo -n bash -c \"printf '%s\\n' '[Service]' 'TimeoutStopSec=8' > /etc/systemd/system/k3s.service.d/prodavan-wsl-stop.conf\"",
       "sudo -n systemctl daemon-reload",
       "sudo -n systemctl enable k3s || true",
       "for i in $(seq 1 60); do sudo -n k3s kubectl get --raw=/readyz >/dev/null 2>&1 && break; sleep 2; done",
