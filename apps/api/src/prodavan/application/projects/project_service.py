@@ -338,6 +338,8 @@ class ProjectService:
         principal: Principal,
         employee: EmployeeRow | None,
     ) -> dict:
+        from prodavan.application.ai_keys.service import AiKeysService
+
         row = await self._access.require_access(
             project_id=project_id,
             principal=principal,
@@ -352,6 +354,13 @@ class ProjectService:
                 status=422,
                 detail="project is not paused",
             )
+        company_policy = await AdminCompanyService(self._session).get_agent_policy(row.company_id)
+        # Manual resume only — require a valid runtime key; never auto-resume from key enable.
+        await AiKeysService(self._session).resolve_credentials(
+            company_id=row.company_id,
+            preferred_provider=row.agent_provider or company_policy.preferred_provider,
+            platform_fallback=company_policy.platform_fallback,
+        )
         row.status = ProjectStatus.ACTIVE
         await self._platform_events.emit(
             event_type="project.resumed",

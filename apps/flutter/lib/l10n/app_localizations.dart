@@ -377,19 +377,25 @@ abstract class AppLocalizations {
   /// No description provided for @adminDisableAiKey.
   ///
   /// In en, this message translates to:
-  /// **'Disable AI key'**
+  /// **'Pause AI key'**
   String get adminDisableAiKey;
 
   /// No description provided for @adminDisableKey.
   ///
   /// In en, this message translates to:
-  /// **'Disable key'**
+  /// **'Pause key'**
   String get adminDisableKey;
+
+  /// No description provided for @adminResumeKey.
+  ///
+  /// In en, this message translates to:
+  /// **'Resume'**
+  String get adminResumeKey;
 
   /// No description provided for @adminDisableKeyConfirm.
   ///
   /// In en, this message translates to:
-  /// **'Disable {keyName}? Agent sessions will fail with NO_AI_KEY.'**
+  /// **'Pause key? Related projects will be paused'**
   String adminDisableKeyConfirm(String keyName);
 
   /// No description provided for @adminDrainProjectTriggers.
@@ -833,7 +839,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminDisableAiKeyConfirm.
   ///
   /// In en, this message translates to:
-  /// **'Disable AI key \"{name}\"? Active sessions using this key will be cancelled, and projects may pause if it was their only runtime key.'**
+  /// **'Pause key? Related projects will be paused'**
   String adminDisableAiKeyConfirm(String name);
 
   /// No description provided for @adminNoCompaniesBound.

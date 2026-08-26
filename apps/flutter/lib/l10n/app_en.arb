@@ -160,14 +160,13 @@
   "adminCreateCompanyToSeeMetrics": "Create a company to see platform metrics",
   "adminCreateKey": "Create key",
   "adminCreateRuntimeKeyHint": "Add a key and configure on its page",
-  "adminDisableAiKey": "Disable AI key",
-  "adminDisableKey": "Disable key",
-  "adminDisableKeyConfirm": "Disable {keyName}? Agent sessions will fail with NO_AI_KEY.",
+  "adminDisableAiKey": "Pause AI key",
+  "adminDisableKey": "Pause key",
+  "adminResumeKey": "Resume",
+  "adminDisableKeyConfirm": "Pause key? Related projects will be paused",
   "@adminDisableKeyConfirm": {
     "placeholders": {
-      "keyName": {
-        "type": "String"
-      }
+      "keyName": { "type": "String" }
     }
   },
   "adminDrainProjectTriggers": "Triggers",
@@ -331,7 +330,7 @@
       "name": { "type": "String" }
     }
   },
-  "adminDisableAiKeyConfirm": "Disable AI key \"{name}\"? Active sessions using this key will be cancelled, and projects may pause if it was their only runtime key.",
+  "adminDisableAiKeyConfirm": "Pause key? Related projects will be paused",
   "@adminDisableAiKeyConfirm": {
     "placeholders": {
       "name": { "type": "String" }

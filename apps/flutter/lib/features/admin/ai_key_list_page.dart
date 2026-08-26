@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/admin_context.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
@@ -132,9 +133,16 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
     }
   }
 
+  bool _isKeySuspended(Map<String, dynamic> k) {
+    final status = k['status'] as String? ?? '';
+    if (status == 'disabled' || status == 'expired') return true;
+    final secret = k['secret_ref_prefix'] as String? ?? '';
+    return secret.trim().isEmpty;
+  }
+
   bool _keyEnabled(AppEntityRow row) {
     for (final k in _keys) {
-      if (k['id'] == row.id) return k['status'] != 'disabled';
+      if (k['id'] == row.id) return !_isKeySuspended(k);
     }
     return true;
   }
@@ -144,9 +152,9 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
       final l10n = AppLocalizations.of(context);
       final ok = await AppConfirmPage.push(
         context,
-        title: l10n.commonDisable,
+        title: l10n.adminDisableKey,
         message: l10n.adminDisableAiKeyConfirm(row.title),
-        confirmLabel: l10n.commonDisable,
+        confirmLabel: l10n.adminDisableKey,
         severity: AppStatusSeverity.warning,
       );
       if (!ok) return;
@@ -206,14 +214,17 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final warning = context.appColors.warning;
     final rows = _keys.map((k) {
       final bindings = k['company_ids'];
       final bindCount = bindings is List ? bindings.length : 0;
       final typeLabel = _typeLabel(l10n, k);
       final providerLabel = _providerCell(k);
+      final suspended = _isKeySuspended(k);
       return AppEntityRow(
         id: k['id'] as String,
         title: k['name'] as String? ?? k['id'] as String,
+        titleColor: suspended ? warning : null,
         subtitle: l10n.adminKeyListSubtitle(typeLabel, providerLabel),
         cells: {
           'type': typeLabel,

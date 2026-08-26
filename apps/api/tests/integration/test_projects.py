@@ -53,6 +53,18 @@ def _setup_cabinet(client: TestClient) -> tuple[str, str, str]:
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={
+            "name": "ProjCo Key",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-projco",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
     owner_tok = _token(sub="owner-sub", email="owner@projco.test")
     cab = client.post(
         "/api/v1/cabinets",
@@ -1678,3 +1690,36 @@ def test_mcp_package_deploy_rematerializes_project(client: TestClient) -> None:
     )
     assert manual.status_code == 200, manual.text
     assert "remat_pkg" in manual.json()["package_names"]
+
+@requires_postgres
+def test_project_resume_requires_valid_ai_key(client: TestClient) -> None:
+    admin = _token(sub="padmin-resume-key", platform_admin=True)
+    created = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "ResumeKeyCo", "admin_email": "owner@resumekey.test"},
+    )
+    assert created.status_code == 201, created.text
+    company_id = created.json()["company"]["id"]
+    owner_tok = _token(sub="owner-resume-key", email="owner@resumekey.test")
+    owner_h = {"Authorization": f"Bearer {owner_tok}"}
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "ResumeKeyCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    proj = client.post(
+        f"/api/v1/cabinets/{cab.json()['id']}/projects",
+        headers=owner_h,
+        json={"name": "ResumeKeyProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
+    blocked = client.post(f"/api/v1/projects/{project_id}/resume", headers=owner_h)
+    assert blocked.status_code == 404, blocked.text
+    assert blocked.json()["code"] == "NO_AI_KEY"
+    assert client.get(f"/api/v1/projects/{project_id}", headers=owner_h).json()["status"] == "paused"

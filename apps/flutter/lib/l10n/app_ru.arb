@@ -160,9 +160,10 @@
   "adminCreateCompanyToSeeMetrics": "Создайте компанию, чтобы видеть метрики",
   "adminCreateKey": "Создать ключ",
   "adminCreateRuntimeKeyHint": "Добавьте ключ и настройте на странице",
-  "adminDisableAiKey": "Отключить AI-ключ",
-  "adminDisableKey": "Отключить ключ",
-  "adminDisableKeyConfirm": "Отключить {keyName}? Сессии агента завершатся с NO_AI_KEY.",
+  "adminDisableAiKey": "Приостановить AI-ключ",
+  "adminDisableKey": "Приостановить ключ",
+  "adminResumeKey": "Возобновить",
+  "adminDisableKeyConfirm": "Приостановить ключ? Связанные проекты будут приостановлены",
   "@adminDisableKeyConfirm": {
     "placeholders": {
       "keyName": {
@@ -331,7 +332,7 @@
       "name": { "type": "String" }
     }
   },
-  "adminDisableAiKeyConfirm": "Отключить AI-ключ «{name}»? Активные сессии с этим ключом будут отменены, а проекты могут уйти в pause, если это был их единственный runtime-ключ.",
+  "adminDisableAiKeyConfirm": "Приостановить ключ? Связанные проекты будут приостановлены",
   "@adminDisableAiKeyConfirm": {
     "placeholders": {
       "name": { "type": "String" }

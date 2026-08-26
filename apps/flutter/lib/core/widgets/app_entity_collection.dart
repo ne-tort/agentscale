@@ -38,6 +38,7 @@ class AppEntityRow {
     this.cells = const {},
     this.leading,
     this.trailing,
+    this.titleColor,
   });
 
   final String id;
@@ -46,6 +47,8 @@ class AppEntityRow {
   final Map<String, String> cells;
   final Widget? leading;
   final Widget? trailing;
+  /// Optional primary-title color (e.g. warning for suspended AI keys).
+  final Color? titleColor;
 }
 
 /// Unified list/table surface — primary entity management chrome (canon 07).
@@ -218,7 +221,12 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
               bottom: i == widget.rows.length - 1 ? 0 : AppSpacing.sm,
             ),
             child: AppListItem(
-              title: Text(row.title),
+              title: Text(
+                row.title,
+                style: row.titleColor != null
+                    ? TextStyle(color: row.titleColor)
+                    : null,
+              ),
               subtitle: row.subtitle != null ? Text(row.subtitle!) : null,
               leading: row.leading,
               selected: editing,
@@ -328,7 +336,13 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                     DataCell(
                       Align(
                         alignment: Alignment.centerLeft,
-                        child: Text(row.title, overflow: TextOverflow.ellipsis),
+                        child: Text(
+                          row.title,
+                          overflow: TextOverflow.ellipsis,
+                          style: row.titleColor != null
+                              ? TextStyle(color: row.titleColor)
+                              : null,
+                        ),
                       ),
                     ),
                     ...[

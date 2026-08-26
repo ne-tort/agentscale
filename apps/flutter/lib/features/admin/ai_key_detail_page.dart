@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/admin_context.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
@@ -193,14 +194,14 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
     }
   }
 
-  Future<void> _disableKey() async {
+  Future<void> _pauseKey() async {
     final l10n = AppLocalizations.of(context);
-    if (_key?['status'] == 'disabled') return;
+    if (_isSuspended(_key)) return;
     final ok = await AppConfirmPage.push(
       context,
-      title: l10n.adminDisableAiKey,
+      title: l10n.adminDisableKey,
       message: l10n.adminDisableKeyConfirm(_displayName),
-      confirmLabel: l10n.commonDisable,
+      confirmLabel: l10n.adminDisableKey,
       severity: AppStatusSeverity.warning,
     );
     if (!ok) return;
@@ -210,6 +211,23 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     }
+  }
+
+  Future<void> _resumeKey() async {
+    try {
+      await adminContext.api.patchAiKey(keyId: widget.keyId, status: 'active');
+      await _load();
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    }
+  }
+
+  bool _isSuspended(Map<String, dynamic>? key) {
+    if (key == null) return true;
+    final status = key['status'] as String? ?? '';
+    if (status == 'disabled' || status == 'expired') return true;
+    final secret = key['secret_ref_prefix'] as String? ?? '';
+    return secret.trim().isEmpty;
   }
 
   @override
@@ -224,9 +242,10 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
 
     final type = _type;
     final hasSecret = (_key?['secret_ref_prefix'] as String? ?? '').isNotEmpty;
-    final status = _key?['status'] as String? ?? '';
+    final suspended = _isSuspended(_key);
     final nextRaw = _key?['next_renewal_at'] as String? ?? '';
     final nextDisplay = formatSubscriptionDate(nextRaw);
+    final warning = context.appColors.warning;
 
     return AppScaffold(
       title: Text(_displayName),
@@ -331,12 +350,19 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
               icon: Icons.update_rounded,
               onTap: _renewKey,
             ),
-          if (status != 'disabled')
+          if (suspended)
+            AppNavPreference(
+              title: l10n.adminResumeKey,
+              icon: Icons.play_circle_outline_rounded,
+              accentColor: warning,
+              onTap: _resumeKey,
+            )
+          else
             AppNavPreference(
               title: l10n.adminDisableKey,
-              icon: Icons.block_rounded,
-              accentColor: Theme.of(context).colorScheme.error,
-              onTap: _disableKey,
+              icon: Icons.pause_circle_outline_rounded,
+              accentColor: warning,
+              onTap: _pauseKey,
             ),
         ],
       ),

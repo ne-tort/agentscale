@@ -182,14 +182,17 @@ class AppLocalizationsRu extends AppLocalizations {
       'Добавьте ключ и настройте на странице';
 
   @override
-  String get adminDisableAiKey => 'Отключить AI-ключ';
+  String get adminDisableAiKey => 'Приостановить AI-ключ';
 
   @override
-  String get adminDisableKey => 'Отключить ключ';
+  String get adminDisableKey => 'Приостановить ключ';
+
+  @override
+  String get adminResumeKey => 'Возобновить';
 
   @override
   String adminDisableKeyConfirm(String keyName) {
-    return 'Отключить $keyName? Сессии агента завершатся с NO_AI_KEY.';
+    return 'Приостановить ключ? Связанные проекты будут приостановлены';
   }
 
   @override
@@ -439,7 +442,7 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String adminDisableAiKeyConfirm(String name) {
-    return 'Отключить AI-ключ «$name»? Активные сессии с этим ключом будут отменены, а проекты могут уйти в pause, если это был их единственный runtime-ключ.';
+    return 'Приостановить ключ? Связанные проекты будут приостановлены';
   }
 
   @override

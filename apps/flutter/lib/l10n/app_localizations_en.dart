@@ -182,14 +182,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminCreateRuntimeKeyHint => 'Add a key and configure on its page';
 
   @override
-  String get adminDisableAiKey => 'Disable AI key';
+  String get adminDisableAiKey => 'Pause AI key';
 
   @override
-  String get adminDisableKey => 'Disable key';
+  String get adminDisableKey => 'Pause key';
+
+  @override
+  String get adminResumeKey => 'Resume';
 
   @override
   String adminDisableKeyConfirm(String keyName) {
-    return 'Disable $keyName? Agent sessions will fail with NO_AI_KEY.';
+    return 'Pause key? Related projects will be paused';
   }
 
   @override
@@ -439,7 +442,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String adminDisableAiKeyConfirm(String name) {
-    return 'Disable AI key \"$name\"? Active sessions using this key will be cancelled, and projects may pause if it was their only runtime key.';
+    return 'Pause key? Related projects will be paused';
   }
 
   @override

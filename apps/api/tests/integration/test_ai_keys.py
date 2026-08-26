@@ -155,7 +155,7 @@ def test_crud_and_resolve_bans_cli_subscription(
 
 
 @requires_postgres
-def test_resolve_lazy_expires_past_renewal(
+def test_resolve_lazy_disables_past_renewal(
     client: TestClient, auth_headers: dict[str, str], tmp_path: Path
 ) -> None:
     company_id = asyncio.run(_create_company("Expire Co"))
@@ -192,11 +192,11 @@ def test_resolve_lazy_expires_past_renewal(
         headers=auth_headers,
     )
     assert audit_exp.status_code == 200
-    assert any(e["event_type"] == "ai_key.expired" for e in audit_exp.json())
+    assert any(e["event_type"] == "ai_key.disabled" for e in audit_exp.json())
 
     got = client.get(f"/api/v1/admin/ai-keys/{key_id}", headers=auth_headers)
     assert got.status_code == 200
-    assert got.json()["status"] == "expired"
+    assert got.json()["status"] == "disabled"
 
     renewed = client.post(
         f"/api/v1/admin/ai-keys/{key_id}/renew",
@@ -204,8 +204,16 @@ def test_resolve_lazy_expires_past_renewal(
         json={"months": 1},
     )
     assert renewed.status_code == 200, renewed.text
-    assert renewed.json()["status"] == "active"
+    assert renewed.json()["status"] == "disabled"
     assert renewed.json()["next_renewal_at"] is not None
+
+    resumed = client.patch(
+        f"/api/v1/admin/ai-keys/{key_id}",
+        headers=auth_headers,
+        json={"status": "active"},
+    )
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["status"] == "active"
 
     async def _resolve_ok() -> None:
         factory = get_session_factory()
@@ -261,7 +269,7 @@ def test_platform_fallback_uses_unbound_pool_key(
             assert ei.value.code == "NO_AI_KEY"
 
 @requires_postgres
-def test_create_name_only_then_rotate_activates(
+def test_create_name_only_then_rotate_stays_disabled(
     client: TestClient, auth_headers: dict[str, str], tmp_path: Path
 ) -> None:
     create = client.post(
@@ -280,13 +288,14 @@ def test_create_name_only_then_rotate_activates(
         json={"secret": "draft-secret-value"},
     )
     assert rotate.status_code == 200, rotate.text
-    assert rotate.json()["status"] == "active"
+    assert rotate.json()["status"] == "disabled"
 
-    patch = client.patch(
+    resumed = client.patch(
         f"/api/v1/admin/ai-keys/{key_id}",
         headers=auth_headers,
-        json={"provider": "codex", "api_kind": "codex_sdk"},
+        json={"status": "active", "provider": "codex", "api_kind": "codex_sdk"},
     )
-    assert patch.status_code == 200, patch.text
-    assert patch.json()["provider"] == "codex"
-    assert patch.json()["api_kind"] == "codex_sdk"
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["status"] == "active"
+    assert resumed.json()["provider"] == "codex"
+    assert resumed.json()["api_kind"] == "codex_sdk"

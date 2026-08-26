@@ -353,12 +353,34 @@ def test_e2e_expired_ai_key_by_date_blocks_chat(client: TestClient) -> None:
         headers=owner_h,
         json={"text": "expired key"},
     )
-    assert blocked.status_code == 404
-    assert blocked.json()["code"] == "NO_AI_KEY"
+    assert blocked.status_code in (404, 409)
+    assert blocked.json()["code"] in ("NO_AI_KEY", "PROJECT_PAUSED")
 
-    expired = client.get(f"/api/v1/admin/ai-keys/{key_id}", headers=admin_h)
-    assert expired.status_code == 200
-    assert expired.json()["status"] == "expired"
+    disabled = client.get(f"/api/v1/admin/ai-keys/{key_id}", headers=admin_h)
+    assert disabled.status_code == 200
+    assert disabled.json()["status"] == "disabled"
+
+    paused = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
+    assert paused.status_code == 200
+    assert paused.json()["status"] == "paused"
+
+    # Renew date only — still disabled; project stays paused (no auto-resume).
+    client.post(
+        f"/api/v1/admin/ai-keys/{key_id}/renew",
+        headers=admin_h,
+        json={"months": 1},
+    )
+    client.patch(
+        f"/api/v1/admin/ai-keys/{key_id}",
+        headers=admin_h,
+        json={"status": "active"},
+    )
+    still = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
+    assert still.json()["status"] == "paused"
+
+    resumed = client.post(f"/api/v1/projects/{project_id}/resume", headers=owner_h)
+    assert resumed.status_code == 200, resumed.text
+    assert resumed.json()["status"] == "active"
 
 
 @requires_postgres

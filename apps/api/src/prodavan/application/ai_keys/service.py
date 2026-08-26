@@ -74,7 +74,7 @@ class AiKeysService:
         for key_id in key_ids:
             try:
                 await self._audit.record(
-                    event_type="ai_key.expired",
+                    event_type="ai_key.disabled",
                     key_id=key_id,
                     principal=_SYSTEM_PRINCIPAL,
                     detail={"reason": "next_renewal_at_past"},
@@ -83,14 +83,21 @@ class AiKeysService:
                 pass
 
     def _apply_lazy_expiry(self, row: AiProviderKeyRow) -> tuple[bool, bool]:
-        """Returns (still_active, just_marked_expired)."""
+        """Returns (still_active, just_disabled_by_expiry).
+
+        Past next_renewal_at → status=disabled (not expired). Caller cascades.
+        """
         now = datetime.now(UTC)
         if row.next_renewal_at is not None and row.next_renewal_at <= now:
             if row.status == KeyStatus.ACTIVE:
-                row.status = KeyStatus.EXPIRED
+                row.status = KeyStatus.DISABLED
                 return False, True
             return False, False
-        return row.status == KeyStatus.ACTIVE, False
+        if row.status != KeyStatus.ACTIVE:
+            return False, False
+        if not (row.secret_ref or "").strip():
+            return False, False
+        return True, False
 
     def _pick_runtime_rows(
         self,
@@ -98,12 +105,12 @@ class AiKeysService:
         *,
         preferred_provider: str | None,
     ) -> tuple[list[AiProviderKeyRow], list[str]]:
-        expired_ids: list[str] = []
+        disabled_ids: list[str] = []
         runtime: list[AiProviderKeyRow] = []
         for row in rows:
-            active, just_expired = self._apply_lazy_expiry(row)
-            if just_expired:
-                expired_ids.append(row.id)
+            active, just_disabled = self._apply_lazy_expiry(row)
+            if just_disabled:
+                disabled_ids.append(row.id)
             if not active:
                 continue
             if is_runtime_api_kind(row.api_kind):
@@ -112,8 +119,18 @@ class AiKeysService:
             matched = [r for r in runtime if r.provider == preferred_provider]
             if matched:
                 runtime = matched
-        return runtime, expired_ids
+        return runtime, disabled_ids
 
+    async def _finalize_lazy_disabled(
+        self, key_ids: list[str], *, principal: Principal | None = None
+    ) -> None:
+        if not key_ids:
+            return
+        await self._session.commit()
+        await self._emit_lazy_expire_audits(key_ids)
+        actor = principal or _SYSTEM_PRINCIPAL
+        for key_id in key_ids:
+            await self.cascade_key_runtime_stop(key_id, principal=actor)
     async def _unbound_active_keys(self) -> list[AiProviderKeyRow]:
         bound = select(CompanyAiKeyBindingRow.key_id)
         q = await self._session.execute(
@@ -146,8 +163,15 @@ class AiKeysService:
 
     async def list_keys(self) -> list[dict]:
         q = await self._session.execute(select(AiProviderKeyRow).order_by(AiProviderKeyRow.created_at))
+        disabled_ids: list[str] = []
+        rows = list(q.scalars().all())
+        for row in rows:
+            _, just_disabled = self._apply_lazy_expiry(row)
+            if just_disabled:
+                disabled_ids.append(row.id)
+        await self._finalize_lazy_disabled(disabled_ids)
         out: list[dict] = []
-        for row in q.scalars().all():
+        for row in rows:
             out.append(self._to_public(row, company_ids=await self._company_ids(row.id)))
         return out
 
@@ -184,6 +208,10 @@ class AiKeysService:
 
     async def get_key(self, key_id: str) -> dict:
         row = await self._get_row(key_id)
+        _, just_disabled = self._apply_lazy_expiry(row)
+        if just_disabled:
+            await self._finalize_lazy_disabled([key_id])
+            row = await self._get_row(key_id)
         return self._to_public(row, company_ids=await self._company_ids(key_id))
 
     async def create_key(
@@ -291,8 +319,7 @@ class AiKeysService:
         now = datetime.now(UTC)
         base = row.next_renewal_at if row.next_renewal_at and row.next_renewal_at > now else now
         row.next_renewal_at = _add_months(base, months)
-        if row.status == KeyStatus.EXPIRED:
-            row.status = KeyStatus.ACTIVE
+        # Never auto-activate: expire/disable stays until explicit resume (PATCH status=active).
         await self._session.commit()
         await self._session.refresh(row)
         renewal_iso = row.next_renewal_at.isoformat() if row.next_renewal_at else None
@@ -312,8 +339,7 @@ class AiKeysService:
         row.secret_ref = self._secrets.put(key_id, secret)
         if old_ref and old_ref != row.secret_ref:
             self._secrets.delete(old_ref)
-        if row.status == KeyStatus.DISABLED:
-            row.status = KeyStatus.ACTIVE
+        # Never auto-activate: resume is an explicit PATCH status=active.
         await self._session.commit()
         await self._session.refresh(row)
         await self._emit_audit(
@@ -420,6 +446,7 @@ class AiKeysService:
             row
             for row in q.scalars().all()
             if is_runtime_api_kind(row.api_kind)
+            and (row.secret_ref or "").strip()
             and (not preferred or row.provider == preferred)
         ]
         return len(remaining) == 0
@@ -442,23 +469,19 @@ class AiKeysService:
             .order_by(AiProviderKeyRow.created_at.desc())
         )
         bound_rows = list(q.scalars().all())
-        runtime, expired_ids = self._pick_runtime_rows(
+        runtime, disabled_ids = self._pick_runtime_rows(
             bound_rows, preferred_provider=preferred_provider
         )
-        if expired_ids:
-            await self._session.commit()
-            await self._emit_lazy_expire_audits(expired_ids)
+        await self._finalize_lazy_disabled(disabled_ids)
 
         chosen = runtime[0] if runtime else None
 
         if chosen is None and platform_fallback:
             pool_rows = await self._unbound_active_keys()
-            pool_runtime, pool_expired = self._pick_runtime_rows(
+            pool_runtime, pool_disabled = self._pick_runtime_rows(
                 pool_rows, preferred_provider=preferred_provider
             )
-            if pool_expired:
-                await self._session.commit()
-                await self._emit_lazy_expire_audits(pool_expired)
+            await self._finalize_lazy_disabled(pool_disabled)
             chosen = pool_runtime[0] if pool_runtime else None
 
         if chosen is None:

@@ -76,17 +76,28 @@ Resolve-контракт и adapters **не меняются** — UI тольк
 | `preferred_provider` | Company (default) или Project override | `cursor` / `codex` / `claude_code` |
 | `platform_fallback` | Company flag, default false | Разрешить platform-owned key |
 
-Rotate / disable → **cancel** ACTIVE `AgentSession` with `resolved_key_id` = this key;
+Rotate / pause (`status=disabled`) → **cancel** ACTIVE `AgentSession` with `resolved_key_id` = this key;
 pause ACTIVE projects of bound companies when the key was the **last ACTIVE runtime-capable
 binding** for the company's `preferred_provider` (or any provider if preferred is unset).
-`platform_fallback` does **not** prevent that pause — company-owned binding path is gone.
-New sessions already fail with `NO_AI_KEY` when no binding remains (unless fallback).
-Audit: `ai_key.rotated` / `ai_key.disabled` / cascade detail on delete.
+`platform_fallback` does **not** prevent that pause.
+**Resume key** is an explicit PATCH `status=active` only — projects stay paused (manual resume).
+**Empty secret** is treated like paused for runtime/UI (create without secret → `disabled`).
+
+### Expiry (`next_renewal_at`)
+
+When the date is past, lazy path sets **`disabled`** (not `expired`) and runs the same cascade.
+`renew` only extends the date — **never** auto-activates.
+`rotate_secret` writes the vault secret — **never** auto-activates.
 
 ### Session snapshot
 
 On session create, `agent_sessions.resolved_key_id` stores the credential key id from resolve.
 Key module does **not** own Project; cascade uses binding membership + session snapshot.
+
+### Project resume
+
+Manual only. Requires a valid runtime key (`resolve_credentials`); otherwise `NO_AI_KEY`.
+Re-enabling a key does **not** resume projects.
 
 ## Продление
 

@@ -15,8 +15,8 @@
 |----------|--------|
 | create | Volume + materialize + `container_ref` |
 | update context | Re-materialize after prompts/MCP package changes |
-| pause | Cancel agent sessions + **pause container** (API: `pause_container`; keep volume; k8s pod stop — hole) |
-| resume | Start; resume agent if supported |
+| pause | Cancel agent sessions + **pause container** (API: `pause_container`; keep volume; k8s pod stop — hole). Triggered by project pause only (incl. key cascade → `ProjectService.pause`), never key→container directly |
+| resume | Manual; requires valid AI key (`resolve_credentials`); then start; resume agent if supported. Key re-enable does **not** auto-resume projects |
 | delete | Soft-delete + wipe workspace + cabinet event |
 
 См. также каскад ключей/компаний: [02 domain](../02-ai-provider-keys/domain.md), [01 domain](../01-platform-admin/domain.md).

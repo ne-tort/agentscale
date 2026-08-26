@@ -33,6 +33,8 @@
 | company_key_metrics(company_id) for L04 alerts | |
 | Bind/unbind companies; renew months 1..12; rotate-secret | |
 | Disable/delete cascade: cancel sessions by `resolved_key_id`; pause projects that lose last runtime binding for preferred_provider | |
+| Lazy past `next_renewal_at` → `disabled` + cascade; renew/rotate never auto-activate | |
+| Project resume gated on `resolve_credentials` (manual only) | |
 
 ## Как сделано
 
