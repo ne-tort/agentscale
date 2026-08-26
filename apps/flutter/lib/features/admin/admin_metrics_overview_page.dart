@@ -220,6 +220,7 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
                   Expanded(
                     child: AppEntityCollection(
                       mode: AppEntityCollectionMode.table,
+                      showHeader: false,
                       primaryColumnLabel: l10n.navCompanies,
                       columns: [
                         AppEntityColumn(

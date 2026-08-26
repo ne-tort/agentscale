@@ -234,7 +234,7 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
                   AppEntityColumn(
                     id: 'bindings',
                     label: l10n.navCompanies,
-                    width: 72,
+                    width: 100,
                     align: AppEntityColumnAlign.end,
                   ),
                 ],

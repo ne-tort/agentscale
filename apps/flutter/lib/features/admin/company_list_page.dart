@@ -150,13 +150,13 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
                     AppEntityColumn(
                       id: 'employees',
                       label: l10n.commonEmployees,
-                      width: 72,
+                      width: 110,
                       align: AppEntityColumnAlign.end,
                     ),
                     AppEntityColumn(
                       id: 'cabinets',
                       label: l10n.commonCabinets,
-                      width: 88,
+                      width: 100,
                       align: AppEntityColumnAlign.end,
                     ),
                   ],

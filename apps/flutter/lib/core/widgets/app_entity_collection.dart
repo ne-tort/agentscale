@@ -63,6 +63,7 @@ class AppEntityCollection extends StatefulWidget {
     this.loading = false,
     this.mode,
     this.primaryColumnLabel,
+    this.showHeader = true,
     this.onEdit,
     this.onDelete,
     this.enabledOf,
@@ -77,6 +78,9 @@ class AppEntityCollection extends StatefulWidget {
   final bool loading;
   final AppEntityCollectionMode? mode;
   final String? primaryColumnLabel;
+
+  /// When false (table mode), hides the heading row entirely.
+  final bool showHeader;
 
   final Future<void> Function(AppEntityRow row)? onEdit;
   final Future<void> Function(AppEntityRow row)? onDelete;
@@ -240,6 +244,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
           color: colors.muted,
           fontWeight: FontWeight.w600,
         );
+    final showMutateCol = _mutateEnabled && _editFocusId != null;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -253,8 +258,10 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
           0,
           (sum, c) => sum + (c.width ?? 0),
         );
-        final mutateCol =
-            _mutateEnabled ? AppInsets.trailingIconExtent * 3 + 24 : 0.0;
+        // Reserve mutate width only while a row is in long-press edit mode.
+        final mutateCol = showMutateCol
+            ? AppInsets.trailingIconExtent * 3 + 24
+            : 0.0;
         final minTableWidth = _horizontalMargin * 2 +
             _primaryMinWidth +
             fixedWidth +
@@ -278,34 +285,37 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
             columnSpacing: _columnSpacing,
             horizontalMargin: _horizontalMargin,
             dataRowMinHeight: 40,
-            headingRowHeight: 44,
+            headingRowHeight: widget.showHeader ? 44 : 0,
             headingRowColor: WidgetStatePropertyAll(colors.surface),
             decoration: const BoxDecoration(),
             border: TableBorder.all(width: 0, color: Colors.transparent),
             columns: [
               DataColumn(
-                label: Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(primaryLabel, style: headingStyle),
-                ),
+                label: widget.showHeader
+                    ? Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(primaryLabel, style: headingStyle),
+                      )
+                    : const SizedBox.shrink(),
               ),
               ...widget.columns.map(
                 (c) => DataColumn(
-                  label: SizedBox(
-                    width: c.width,
-                    child: Align(
-                      alignment: _alignment(c.align),
-                      child: Text(
-                        c.label,
-                        style: headingStyle,
-                        textAlign: _textAlign(c.align),
-                      ),
-                    ),
-                  ),
+                  label: widget.showHeader
+                      ? Align(
+                          alignment: _alignment(c.align),
+                          child: Text(
+                            c.label,
+                            style: headingStyle,
+                            textAlign: _textAlign(c.align),
+                            softWrap: false,
+                            overflow: TextOverflow.visible,
+                          ),
+                        )
+                      : const SizedBox.shrink(),
                   numeric: c.align == AppEntityColumnAlign.end,
                 ),
               ),
-              if (_mutateEnabled)
+              if (showMutateCol)
                 DataColumn(
                   label: SizedBox(
                     width: mutateCol,
@@ -335,11 +345,11 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                     ),
                     ...widget.columns
                         .map((c) => _dataCell(row.cells[c.id] ?? '', c)),
-                    if (_mutateEnabled)
+                    if (showMutateCol)
                       DataCell(
                         _editFocusId == row.id
                             ? _mutateTrailing(context, row)
-                            : const SizedBox.shrink(),
+                            : SizedBox(width: mutateCol),
                       ),
                   ],
                 ),
