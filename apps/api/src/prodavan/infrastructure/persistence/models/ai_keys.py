@@ -7,6 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 
 from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from prodavan.infrastructure.persistence.models.base import Base
@@ -42,4 +43,17 @@ class CompanyAiKeyBindingRow(Base):
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: _id("ckb"))
     company_id: Mapped[str] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     key_id: Mapped[str] = mapped_column(ForeignKey("ai_provider_keys.id", ondelete="CASCADE"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AiKeyAuditEventRow(Base):
+    """Mutation audit for AI keys (was created ad-hoc via SQL; must live in ORM for alembic check)."""
+
+    __tablename__ = "ai_key_audit_events"
+
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: _id("aae"))
+    event_type: Mapped[str] = mapped_column(Text, nullable=False)
+    key_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    actor_sub: Mapped[str | None] = mapped_column(Text, nullable=True)
+    detail: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
