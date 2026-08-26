@@ -67,7 +67,11 @@ Admin ──creates──► Company ──creates──► Employee
                       ▼                    ▼
                  CabinetInstance ◄─────────┘
                       │
-                      │ scope (N projects)
+                      │ N:M (module catalog)
+                      ▼
+                   Module
+                      │
+                      │ scope (N projects, via cabinet grant)
                       ▼
                    Project ──owner──► Employee
                       │
@@ -107,6 +111,7 @@ Hard-delete Cabinet = полный wipe связанных проектов. Sof
 | **Company** | Организация + **свой** KC-логин | platform DB + Keycloak |
 | **Employee** | Человек в компании | platform DB + Keycloak |
 | **CabinetInstance** | Оболочка рабочего пространства | реестр в DB; суть в **meta/data** |
+| **Module** | Переиспользуемый каталог meta (tables/columns/views) | platform DB; N:M cabinet + project |
 | **Project** | Единица работы агента | platform DB (`cabinet_id` + `owner_employee_id`) |
 | **ProjectContainer** | Изолированный **k8s Pod** + workspace | DB row + Pod + MinIO |
 | **AgentSession** | Сессия в Project | platform DB |
@@ -146,5 +151,5 @@ UI кабинета = **интерпретатор** meta (не hardcoded Flutte
 
 1. [Identity session](10-identity-keycloak/session.md)  
 2. [Companies](03-companies/) · [Employees](04-employees/)  
-3. [Cabinets](05-cabinets/) · [Projects](06-projects-runtime/) · [Containers](14-project-containers/)  
+3. [Cabinets](05-cabinets/) · [Modules](06-modules/) · [Projects](06-projects-runtime/) · [Containers](14-project-containers/)  
 4. [Gap / проблемы](09-gap-map.md)  

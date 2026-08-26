@@ -8,6 +8,7 @@ from prodavan.api.v1 import (
     admin_companies,
     admin_containers,
     admin_metrics,
+    admin_modules,
     admin_object_store,
     admin_platform_events,
     admin_projects,
@@ -37,6 +38,7 @@ router.include_router(admin_platform_events.router)
 router.include_router(admin_projects.router)
 router.include_router(admin_containers.router)
 router.include_router(admin_cabinets.router)
+router.include_router(admin_modules.router)
 router.include_router(admin_object_store.router)
 router.include_router(admin_catalogs.router)
 router.include_router(ai_keys.router)

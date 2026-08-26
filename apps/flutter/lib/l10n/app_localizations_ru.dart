@@ -439,13 +439,35 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminNoCompanies => 'Нет компаний';
 
   @override
-  String get adminNoContainers => 'Нет контейнеров';
+  String get adminNoContainers => 'Нет проектов';
 
   @override
   String get adminNoCabinets => 'Нет кабинетов';
 
   @override
   String get adminAddCabinet => 'Добавить кабинет';
+
+  @override
+  String get adminNoModules => 'Нет модулей';
+
+  @override
+  String get adminAddModule => 'Добавить модуль';
+
+  @override
+  String adminDeleteModuleConfirm(String name) {
+    return 'Удалить модуль «$name»? Будут удалены meta и привязки; кабинеты и проекты не затрагиваются.';
+  }
+
+  @override
+  String get adminModuleCopied => 'ID модуля скопирован';
+
+  @override
+  String adminModuleCabinetsCount(int count) {
+    return '$count кабинетов';
+  }
+
+  @override
+  String get adminSelectCabinetsForModule => 'Выберите кабинеты для модуля';
 
   @override
   String adminDeleteCabinetConfirm(String name) {
@@ -1456,10 +1478,13 @@ class AppLocalizationsRu extends AppLocalizations {
   String get navBundles => 'Бандлы';
 
   @override
-  String get navContainers => 'Контейнеры';
+  String get navContainers => 'Проекты';
 
   @override
   String get navCabinets => 'Кабинеты';
+
+  @override
+  String get navModules => 'Модули';
 
   @override
   String get navCompanies => 'Компании';

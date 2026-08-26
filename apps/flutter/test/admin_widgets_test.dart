@@ -93,8 +93,9 @@ void main() {
     expect(find.text('Overview'), findsWidgets);
     expect(find.text('Companies'), findsWidgets);
     expect(find.text('AI Keys'), findsWidgets);
-    expect(find.text('Containers'), findsWidgets);
+    expect(find.text('Projects'), findsWidgets);
     expect(find.text('Cabinets'), findsWidgets);
+    expect(find.text('Modules'), findsWidgets);
     expect(find.text('Prodavan'), findsWidgets);
     expect(find.text('Management'), findsNothing);
 
@@ -117,7 +118,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Companies'), findsOneWidget);
     expect(find.text('AI Keys'), findsOneWidget);
-    expect(find.text('Containers'), findsOneWidget);
+    expect(find.text('Projects'), findsOneWidget);
     expect(find.text('Cabinets'), findsOneWidget);
+    expect(find.text('Modules'), findsOneWidget);
   });
 }

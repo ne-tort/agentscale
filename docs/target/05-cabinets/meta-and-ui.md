@@ -4,10 +4,13 @@
 
 ## Принцип
 
+Meta slugs (`tables`, `columns`, `views`, `tabs`) хранятся в **Module** (platform DB, shared template).  
+Runtime данные — в `cab_inst_*.module_data_rows` (per cabinet).
+
 ```text
-meta.tables + meta.columns + meta.views + meta.tabs
-        ↓
-CabinetShell (Flutter)
+module_meta_documents (shared template)
+        ↓ bind
+CabinetShell (Flutter) reads template + cabinet data rows
         ↓
 AppEntityCollection / dynamic preference fields / empty states
 ```

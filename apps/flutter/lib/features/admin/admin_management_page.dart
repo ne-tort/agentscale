@@ -5,12 +5,13 @@ import 'package:prodavan/core/widgets/app_list_item.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 import 'package:prodavan/features/admin/admin_cabinet_list_page.dart';
+import 'package:prodavan/features/admin/admin_module_list_page.dart';
 import 'package:prodavan/features/admin/admin_project_containers_page.dart';
 import 'package:prodavan/features/admin/ai_key_list_page.dart';
 import 'package:prodavan/features/admin/company_list_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Narrow-only hub: Companies / AI Keys / Containers / Cabinets.
+/// Narrow-only hub: Companies / AI Keys / Projects / Cabinets / Modules.
 class AdminManagementPage extends StatelessWidget {
   const AdminManagementPage({super.key});
 
@@ -43,6 +44,11 @@ class AdminManagementPage extends StatelessWidget {
         icon: Icons.folder_outlined,
         label: l10n.navCabinets,
         page: const AdminCabinetListPage(),
+      ),
+      (
+        icon: Icons.extension_outlined,
+        label: l10n.navModules,
+        page: const AdminModuleListPage(),
       ),
     ];
 

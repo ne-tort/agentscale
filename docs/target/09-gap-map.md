@@ -17,7 +17,8 @@
 | **P-ID-01** | **Company** имеет **Keycloak-креды** | `companies.keycloak_sub` + role `company` + provisioning (**partial**); live realm cutover / Flutter OIDC — open | Org principal in API; see [session](10-identity-keycloak/session.md) |
 | **P-ID-02** | Admin / Company / Employee — три KC-сущности | Realm roles in `infra/keycloak/realm-prodavan.json`; API resolution live | Cluster Keycloak deploy still open |
 | **P-CAB-01** | Company **назначает** Employee ↔ Cabinet | **Grants + assignment API + Flutter** | Verify Dev E2E |
-| **P-CAB-02** | UI кабинета из meta | Free-form `meta_documents` JSONB API; employee UI = placeholder | Generic meta UI next |
+| **P-CAB-02** | UI кабинета из module meta | Module template + `module_data_rows` API; employee UI = placeholder | Generic meta UI next |
+| **P-MOD-01** | **Module** catalog + cabinet bind + per-cabinet data | **Admin CRUD + meta + materialize + runtime data API + Flutter** | Physical DDL; meta editor UI |
 | **P-MAT-01** | Pod hydrate из meta/MinIO | object-ws; нет Pod; file_ref слаб | Materialize/Pod debt |
 | **P-POD-01** | `ProjectContainer` = k8s Pod | `object-ws:…`; pause no-op | [14](14-project-containers/) |
 | **P-MCP-01** | Агент в Pod ↔ `cabinet.*` | **Out of MVP cabinet entity** (removed typed MCP/packages); future contract | Изоляция + контракт |
@@ -122,7 +123,7 @@ flowchart TB
 |----|-----------------|-----------|
 | Company | Локальный Admin: employees, containers, **company keys**, assign cabinets, policy narrow | Issue JWT; edit platform keys; peer schema без grant |
 | Admin + Keys | Companies (+KC), platform keys + bind, quotas, metrics, assign cabinets→company | Workspace files |
-| Cabinet Runtime | Registry + `meta_documents` JSONB; Admin CRUD | Typed meta UI / MCP packages / Pod lifecycle |
+| Cabinet Runtime | Registry + module data rows; Admin modules | Typed meta UI / MCP packages / Pod lifecycle |
 | Projects / Containers | Project, Pod port, triggers, materialize hydrate | Hardcoded domain packs |
 | Agent | Port + adapters in Pod | GLM, OpenClaw |
 | UI core | Primitives | Feature ListTile zoos |

@@ -466,6 +466,53 @@ class AdminApi {
     _throwIfError(res);
   }
 
+  Future<List<Map<String, dynamic>>> listModules() async {
+    final res = await AuthHttp.get(_uri('/admin/modules'));
+    _throwIfError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = body['items'];
+    if (items is List) {
+      return items.cast<Map<String, dynamic>>();
+    }
+    return const [];
+  }
+
+  Future<Map<String, dynamic>> createModule({required String name}) async {
+    final res = await AuthHttp.post(
+      _uri('/admin/modules'),
+      body: jsonEncode({'name': name}),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getModule(String moduleId) async {
+    final res = await AuthHttp.get(_uri('/admin/modules/$moduleId'));
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> updateModule({
+    required String moduleId,
+    String? name,
+    List<String>? cabinetIds,
+  }) async {
+    final payload = <String, dynamic>{};
+    if (name != null) payload['name'] = name;
+    if (cabinetIds != null) payload['cabinet_ids'] = cabinetIds;
+    final res = await AuthHttp.patch(
+      _uri('/admin/modules/$moduleId'),
+      body: jsonEncode(payload),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> deleteModule(String moduleId) async {
+    final res = await AuthHttp.delete(_uri('/admin/modules/$moduleId'));
+    _throwIfError(res);
+  }
+
   Future<Map<String, dynamic>> drainTriggers({
     int maxProjects = 20,
     int maxPerProject = 10,

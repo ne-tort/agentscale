@@ -325,9 +325,29 @@
   },
   "adminNoAiKeys": "No AI keys",
   "adminNoCompanies": "No companies",
-  "adminNoContainers": "No containers",
+  "adminNoContainers": "No projects",
   "adminNoCabinets": "No cabinets",
   "adminAddCabinet": "Add cabinet",
+  "adminNoModules": "No modules",
+  "adminAddModule": "Add module",
+  "adminDeleteModuleConfirm": "Delete module \"{name}\"? Meta and bindings will be removed; cabinets and projects are not affected.",
+  "@adminDeleteModuleConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "adminModuleCopied": "Module ID copied",
+  "adminModuleCabinetsCount": "{count} cabinets",
+  "@adminModuleCabinetsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "adminSelectCabinetsForModule": "Select cabinets for module",
   "adminDeleteCabinetConfirm": "Delete cabinet \"{name}\"? All projects and the cabinet schema will be removed.",
   "@adminDeleteCabinetConfirm": {
     "placeholders": {
@@ -858,8 +878,9 @@
   "galleryTwo": "Two",
   "navAiKeys": "AI Keys",
   "navBundles": "Bundles",
-  "navContainers": "Containers",
+  "navContainers": "Projects",
   "navCabinets": "Cabinets",
+  "navModules": "Modules",
   "navCompanies": "Companies",
   "navEmployees": "Employees",
   "navOverview": "Overview",

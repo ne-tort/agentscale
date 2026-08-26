@@ -23,6 +23,12 @@ from prodavan.infrastructure.persistence.models.identity import (
     IdentityLinkRow,
     MembershipRow,
 )
+from prodavan.infrastructure.persistence.models.modules import (
+    ModuleCabinetBindingRow,
+    ModuleMetaDocumentRow,
+    ModuleProjectBindingRow,
+    ModuleRow,
+)
 from prodavan.infrastructure.persistence.models.platform_events import PlatformEventRow
 from prodavan.infrastructure.persistence.models.projects import (
     ProjectAttachmentRow,
@@ -47,6 +53,10 @@ __all__ = [
     "EmployeeRow",
     "IdentityLinkRow",
     "MembershipRow",
+    "ModuleCabinetBindingRow",
+    "ModuleMetaDocumentRow",
+    "ModuleProjectBindingRow",
+    "ModuleRow",
     "PlatformEventRow",
     "ProjectAttachmentRow",
     "ProjectRow",

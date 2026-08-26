@@ -1,4 +1,4 @@
-"""Cabinet Runtime HTTP — registry + free-form meta documents."""
+"""Cabinet Runtime HTTP — registry + bound modules and per-cabinet data."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
+from prodavan.application.cabinets.cabinet_module_service import CabinetModuleService
 from prodavan.application.cabinets.instance_service import CabinetInstanceService
-from prodavan.application.cabinets.meta_document_service import CabinetMetaDocumentService
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
 router = APIRouter(prefix="/cabinets", tags=["cabinets"])
@@ -29,10 +29,10 @@ class RenameCabinetBody(BaseModel):
     name: str = Field(min_length=1, max_length=200)
 
 
-class PutMetaDocumentBody(BaseModel):
+class DataRowBody(BaseModel):
     model_config = {"extra": "forbid"}
 
-    body: Any
+    body: dict[str, Any]
 
 
 @router.post("")
@@ -120,58 +120,113 @@ async def delete_cabinet(
     )
 
 
-@router.get("/{cabinet_id}/meta/documents")
-async def list_meta_documents(
+@router.get("/{cabinet_id}/modules")
+async def list_cabinet_modules(
     cabinet_id: str,
     principal: PrincipalDep,
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
 ) -> dict:
-    items = await CabinetMetaDocumentService(session).list_documents(
+    items = await CabinetModuleService(session).list_modules(
         cabinet_id=cabinet_id, principal=principal, employee=employee
     )
     return {"items": items}
 
 
-@router.get("/{cabinet_id}/meta/documents/{slug}")
-async def get_meta_document(
+@router.get("/{cabinet_id}/modules/{module_id}/meta/documents/{slug}")
+async def get_cabinet_module_meta(
     cabinet_id: str,
+    module_id: str,
     slug: str,
     principal: PrincipalDep,
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
 ) -> dict:
-    return await CabinetMetaDocumentService(session).get_document(
-        cabinet_id=cabinet_id, slug=slug, principal=principal, employee=employee
+    return await CabinetModuleService(session).get_meta_document(
+        cabinet_id=cabinet_id,
+        module_id=module_id,
+        slug=slug,
+        principal=principal,
+        employee=employee,
     )
 
 
-@router.put("/{cabinet_id}/meta/documents/{slug}")
-async def put_meta_document(
+@router.get("/{cabinet_id}/modules/{module_id}/data/{table_slug}")
+async def list_module_data_rows(
     cabinet_id: str,
-    slug: str,
-    body: PutMetaDocumentBody,
+    module_id: str,
+    table_slug: str,
     principal: PrincipalDep,
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
 ) -> dict:
-    return await CabinetMetaDocumentService(session).put_document(
+    items = await CabinetModuleService(session).list_data_rows(
         cabinet_id=cabinet_id,
-        slug=slug,
+        module_id=module_id,
+        table_slug=table_slug,
+        principal=principal,
+        employee=employee,
+    )
+    return {"items": items}
+
+
+@router.post("/{cabinet_id}/modules/{module_id}/data/{table_slug}")
+async def create_module_data_row(
+    cabinet_id: str,
+    module_id: str,
+    table_slug: str,
+    body: DataRowBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+) -> dict:
+    return await CabinetModuleService(session).create_data_row(
+        cabinet_id=cabinet_id,
+        module_id=module_id,
+        table_slug=table_slug,
         body=body.body,
         principal=principal,
         employee=employee,
     )
 
 
-@router.delete("/{cabinet_id}/meta/documents/{slug}")
-async def delete_meta_document(
+@router.patch("/{cabinet_id}/modules/{module_id}/data/{table_slug}/{row_id}")
+async def update_module_data_row(
     cabinet_id: str,
-    slug: str,
+    module_id: str,
+    table_slug: str,
+    row_id: str,
+    body: DataRowBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+) -> dict:
+    return await CabinetModuleService(session).update_data_row(
+        cabinet_id=cabinet_id,
+        module_id=module_id,
+        table_slug=table_slug,
+        row_id=row_id,
+        body=body.body,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.delete("/{cabinet_id}/modules/{module_id}/data/{table_slug}/{row_id}")
+async def delete_module_data_row(
+    cabinet_id: str,
+    module_id: str,
+    table_slug: str,
+    row_id: str,
     principal: PrincipalDep,
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
 ) -> None:
-    await CabinetMetaDocumentService(session).delete_document(
-        cabinet_id=cabinet_id, slug=slug, principal=principal, employee=employee
+    await CabinetModuleService(session).delete_data_row(
+        cabinet_id=cabinet_id,
+        module_id=module_id,
+        table_slug=table_slug,
+        row_id=row_id,
+        principal=principal,
+        employee=employee,
     )

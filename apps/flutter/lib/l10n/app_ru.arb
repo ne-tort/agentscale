@@ -327,9 +327,29 @@
   },
   "adminNoAiKeys": "Нет AI-ключей",
   "adminNoCompanies": "Нет компаний",
-  "adminNoContainers": "Нет контейнеров",
+  "adminNoContainers": "Нет проектов",
   "adminNoCabinets": "Нет кабинетов",
   "adminAddCabinet": "Добавить кабинет",
+  "adminNoModules": "Нет модулей",
+  "adminAddModule": "Добавить модуль",
+  "adminDeleteModuleConfirm": "Удалить модуль «{name}»? Будут удалены meta и привязки; кабинеты и проекты не затрагиваются.",
+  "@adminDeleteModuleConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "adminModuleCopied": "ID модуля скопирован",
+  "adminModuleCabinetsCount": "{count} кабинетов",
+  "@adminModuleCabinetsCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "adminSelectCabinetsForModule": "Выберите кабинеты для модуля",
   "adminDeleteCabinetConfirm": "Удалить кабинет «{name}»? Будут удалены все проекты и схема кабинета.",
   "@adminDeleteCabinetConfirm": {
     "placeholders": {
@@ -860,8 +880,9 @@
   "galleryTwo": "Два",
   "navAiKeys": "AI-ключи",
   "navBundles": "Бандлы",
-  "navContainers": "Контейнеры",
+  "navContainers": "Проекты",
   "navCabinets": "Кабинеты",
+  "navModules": "Модули",
   "navCompanies": "Компании",
   "navEmployees": "Сотрудники",
   "navOverview": "Обзор",

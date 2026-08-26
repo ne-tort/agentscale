@@ -1,4 +1,4 @@
-"""Cabinet registry + meta documents (integration)."""
+"""Cabinet registry (integration)."""
 
 from __future__ import annotations
 
@@ -47,7 +47,7 @@ def test_cabinets_require_auth(client: TestClient) -> None:
 
 
 @requires_postgres
-def test_admin_cabinet_crud_and_meta_documents(client: TestClient) -> None:
+def test_admin_cabinet_crud(client: TestClient) -> None:
     admin = _token(sub="padmin-cab", platform_admin=True)
     created = client.post(
         "/api/v1/companies",
@@ -85,36 +85,6 @@ def test_admin_cabinet_crud_and_meta_documents(client: TestClient) -> None:
     )
     assert patched.status_code == 200
     assert patched.json()["name"] == "Ops Cabinet Renamed"
-
-    put = client.put(
-        f"/api/v1/cabinets/{cabinet_id}/meta/documents/ui",
-        headers={"Authorization": f"Bearer {admin}"},
-        json={"body": {"tabs": [{"title": "Home"}], "version": 1}},
-    )
-    assert put.status_code == 200, put.text
-    assert put.json()["slug"] == "ui"
-    assert put.json()["body"]["version"] == 1
-
-    bad = client.put(
-        f"/api/v1/cabinets/{cabinet_id}/meta/documents/bad",
-        headers={"Authorization": f"Bearer {admin}"},
-        json={"body": "not-json-object"},
-    )
-    assert bad.status_code == 422
-
-    got = client.get(
-        f"/api/v1/cabinets/{cabinet_id}/meta/documents/ui",
-        headers={"Authorization": f"Bearer {admin}"},
-    )
-    assert got.status_code == 200
-    assert got.json()["body"]["tabs"][0]["title"] == "Home"
-
-    docs = client.get(
-        f"/api/v1/cabinets/{cabinet_id}/meta/documents",
-        headers={"Authorization": f"Bearer {admin}"},
-    )
-    assert docs.status_code == 200
-    assert any(d["slug"] == "ui" for d in docs.json()["items"])
 
     deleted = client.delete(
         f"/api/v1/admin/cabinets/{cabinet_id}",
@@ -208,10 +178,3 @@ def test_admin_cabinet_grants_company_visibility_and_assignment(client: TestClie
     listed = client.get("/api/v1/cabinets", headers={"Authorization": f"Bearer {member_tok}"})
     assert listed.status_code == 200, listed.text
     assert any(i["id"] == cabinet_id for i in listed.json()["items"])
-
-    meta_denied = client.put(
-        f"/api/v1/cabinets/{cabinet_id}/meta/documents/ui",
-        headers={"Authorization": f"Bearer {boss_tok}"},
-        json={"body": {"version": 1}},
-    )
-    assert meta_denied.status_code == 403

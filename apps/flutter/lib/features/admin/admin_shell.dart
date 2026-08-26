@@ -6,6 +6,7 @@ import 'package:prodavan/core/widgets/app_shell_branch.dart';
 import 'package:prodavan/features/admin/admin_cabinet_list_page.dart';
 import 'package:prodavan/features/admin/admin_management_page.dart';
 import 'package:prodavan/features/admin/admin_metrics_overview_page.dart';
+import 'package:prodavan/features/admin/admin_module_list_page.dart';
 import 'package:prodavan/features/admin/admin_project_containers_page.dart';
 import 'package:prodavan/features/admin/ai_key_list_page.dart';
 import 'package:prodavan/features/admin/company_list_page.dart';
@@ -20,7 +21,7 @@ class AdminShell extends StatefulWidget {
 }
 
 class _AdminShellState extends State<AdminShell> {
-  /// Wide/medium rail: 0 Overview … 4 Cabinets.
+  /// Wide/medium rail: 0 Overview … 5 Modules.
   int _railIndex = 0;
 
   /// Narrow bottom: 0 Overview, 1 Management hub.
@@ -86,6 +87,7 @@ class _AdminShellState extends State<AdminShell> {
       AppNavDestination(icon: Icons.key_outlined, label: l10n.navAiKeys),
       AppNavDestination(icon: Icons.dns_outlined, label: l10n.navContainers),
       AppNavDestination(icon: Icons.folder_outlined, label: l10n.navCabinets),
+      AppNavDestination(icon: Icons.extension_outlined, label: l10n.navModules),
     ];
 
     final pages = const [
@@ -94,6 +96,7 @@ class _AdminShellState extends State<AdminShell> {
       AdminAiKeyListPage(embedded: true),
       AdminProjectContainersPage(embedded: true),
       AdminCabinetListPage(embedded: true),
+      AdminModuleListPage(embedded: true),
     ];
 
     return AppLayout(

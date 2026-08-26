@@ -7,7 +7,7 @@ import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/employee/project_list_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Cabinet shell — placeholder until meta_documents UI returns.
+/// Cabinet shell — placeholder until module meta UI.
 class DynamicCabinetShell extends StatefulWidget {
   const DynamicCabinetShell({
     super.key,

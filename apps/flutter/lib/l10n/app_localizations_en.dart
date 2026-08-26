@@ -439,13 +439,35 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminNoCompanies => 'No companies';
 
   @override
-  String get adminNoContainers => 'No containers';
+  String get adminNoContainers => 'No projects';
 
   @override
   String get adminNoCabinets => 'No cabinets';
 
   @override
   String get adminAddCabinet => 'Add cabinet';
+
+  @override
+  String get adminNoModules => 'No modules';
+
+  @override
+  String get adminAddModule => 'Add module';
+
+  @override
+  String adminDeleteModuleConfirm(String name) {
+    return 'Delete module \"$name\"? Meta and bindings will be removed; cabinets and projects are not affected.';
+  }
+
+  @override
+  String get adminModuleCopied => 'Module ID copied';
+
+  @override
+  String adminModuleCabinetsCount(int count) {
+    return '$count cabinets';
+  }
+
+  @override
+  String get adminSelectCabinetsForModule => 'Select cabinets for module';
 
   @override
   String adminDeleteCabinetConfirm(String name) {
@@ -1454,10 +1476,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get navBundles => 'Bundles';
 
   @override
-  String get navContainers => 'Containers';
+  String get navContainers => 'Projects';
 
   @override
   String get navCabinets => 'Cabinets';
+
+  @override
+  String get navModules => 'Modules';
 
   @override
   String get navCompanies => 'Companies';

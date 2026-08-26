@@ -839,7 +839,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminNoContainers.
   ///
   /// In en, this message translates to:
-  /// **'No containers'**
+  /// **'No projects'**
   String get adminNoContainers;
 
   /// No description provided for @adminNoCabinets.
@@ -853,6 +853,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Add cabinet'**
   String get adminAddCabinet;
+
+  /// No description provided for @adminNoModules.
+  ///
+  /// In en, this message translates to:
+  /// **'No modules'**
+  String get adminNoModules;
+
+  /// No description provided for @adminAddModule.
+  ///
+  /// In en, this message translates to:
+  /// **'Add module'**
+  String get adminAddModule;
+
+  /// No description provided for @adminDeleteModuleConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete module \"{name}\"? Meta and bindings will be removed; cabinets and projects are not affected.'**
+  String adminDeleteModuleConfirm(String name);
+
+  /// No description provided for @adminModuleCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Module ID copied'**
+  String get adminModuleCopied;
+
+  /// No description provided for @adminModuleCabinetsCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} cabinets'**
+  String adminModuleCabinetsCount(int count);
+
+  /// No description provided for @adminSelectCabinetsForModule.
+  ///
+  /// In en, this message translates to:
+  /// **'Select cabinets for module'**
+  String get adminSelectCabinetsForModule;
 
   /// No description provided for @adminDeleteCabinetConfirm.
   ///
@@ -2693,7 +2729,7 @@ abstract class AppLocalizations {
   /// No description provided for @navContainers.
   ///
   /// In en, this message translates to:
-  /// **'Containers'**
+  /// **'Projects'**
   String get navContainers;
 
   /// No description provided for @navCabinets.
@@ -2701,6 +2737,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Cabinets'**
   String get navCabinets;
+
+  /// No description provided for @navModules.
+  ///
+  /// In en, this message translates to:
+  /// **'Modules'**
+  String get navModules;
 
   /// No description provided for @navCompanies.
   ///
