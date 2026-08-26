@@ -123,6 +123,26 @@ class ModuleMetaManifest {
     return columns.where((c) => c['table_slug'] == tableSlug).toList();
   }
 
+  /// True when manifest has any non-empty slug payload (not the empty stub).
+  bool get hasContent =>
+      tables.isNotEmpty ||
+      columns.isNotEmpty ||
+      views.isNotEmpty ||
+      tabs.isNotEmpty ||
+      actions.isNotEmpty ||
+      materialize.isNotEmpty ||
+      mcpTools.isNotEmpty;
+
+  /// Whether [text] parses to a manifest with real content (not empty stub).
+  static bool isNonEmptyStubText(String text) {
+    if (text.trim().isEmpty) return false;
+    try {
+      return fromJson(jsonDecode(text)).hasContent;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static List<Map<String, dynamic>> _listOfMaps(Object? value) {
     if (value is! List) return const [];
     return value.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();

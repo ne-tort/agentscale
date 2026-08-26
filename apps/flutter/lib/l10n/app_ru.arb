@@ -350,6 +350,7 @@
     }
   },
   "adminModuleJson": "JSON",
+  "adminModuleJsonConfigured": "Настроено",
   "adminModulePreview": "Предпросмотр",
   "adminModuleJsonInvalid": "Неверный JSON",
   "adminMetaInvalid": "Метаданные",

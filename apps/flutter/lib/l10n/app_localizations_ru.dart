@@ -470,6 +470,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminModuleJson => 'JSON';
 
   @override
+  String get adminModuleJsonConfigured => 'Настроено';
+
+  @override
   String get adminModulePreview => 'Предпросмотр';
 
   @override

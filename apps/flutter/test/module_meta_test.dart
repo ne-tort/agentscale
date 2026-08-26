@@ -212,6 +212,26 @@ void main() {
       expect(restored.views, original.views);
       expect(restored.tabs, original.tabs);
     });
+
+    test('hasContent and isNonEmptyStubText', () {
+      expect(ModuleMetaManifest.empty().hasContent, isFalse);
+      expect(
+        ModuleMetaManifest.fromJson(suppliersManifestJson()).hasContent,
+        isTrue,
+      );
+      expect(
+        ModuleMetaManifest.isNonEmptyStubText(
+          ModuleMetaManifest.empty().toPrettyJson(),
+        ),
+        isFalse,
+      );
+      expect(
+        ModuleMetaManifest.isNonEmptyStubText(
+          const JsonEncoder.withIndent('  ').convert(suppliersManifestJson()),
+        ),
+        isTrue,
+      );
+    });
   });
 
   group('ModuleMetaPreviewPage', () {

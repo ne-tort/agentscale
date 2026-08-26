@@ -1,24 +1,16 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/admin_context.dart';
-import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
-import 'package:prodavan/core/widgets/app_json_editor_field.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_section_header.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
-import 'package:prodavan/features/meta/module_meta_autosave.dart';
-import 'package:prodavan/features/meta/module_meta_manifest.dart';
+import 'package:prodavan/features/admin/admin_module_json_page.dart';
 import 'package:prodavan/features/meta/module_meta_repository.dart';
-import 'package:prodavan/features/meta/module_meta_validator.dart';
-import 'package:prodavan/features/meta/preview/module_meta_preview_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Admin module detail — name, cabinets, JSON manifest, preview.
+/// Admin module detail — name and cabinet bindings.
 class AdminModuleDetailPage extends StatefulWidget {
   const AdminModuleDetailPage({
     super.key,
@@ -34,40 +26,17 @@ class AdminModuleDetailPage extends StatefulWidget {
 }
 
 class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
-  final _jsonController = TextEditingController();
-  final _jsonFieldKey = GlobalKey<AppJsonEditorFieldState>();
-
-  late final ModuleMetaAutosave _autosave;
-
   bool _loading = true;
   Object? _error;
   String _name = '';
   Set<String> _cabinetIds = {};
   List<Map<String, dynamic>> _cabinets = const [];
+  bool _jsonConfigured = false;
 
   @override
   void initState() {
     super.initState();
-    _autosave = ModuleMetaAutosave(
-      moduleId: widget.moduleId,
-      api: adminContext.api,
-    );
-    _jsonController.addListener(_onJsonChanged);
     _load();
-  }
-
-  @override
-  void dispose() {
-    _jsonController.removeListener(_onJsonChanged);
-    _autosave.dispose();
-    _jsonController.dispose();
-    super.dispose();
-  }
-
-  void _onJsonChanged() {
-    final field = _jsonFieldKey.currentState;
-    final canSave = field?.isFullyValid ?? false;
-    _autosave.onTextChanged(_jsonController.text, canSave: canSave);
   }
 
   Future<void> _load() async {
@@ -81,22 +50,15 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
       final manifest = await ModuleMetaRepository.load(adminContext.api, widget.moduleId);
       if (!mounted) return;
       final ids = mod['cabinet_ids'];
-      final text = manifest.tables.isEmpty &&
-              manifest.columns.isEmpty &&
-              manifest.views.isEmpty &&
-              manifest.tabs.isEmpty
-          ? ModuleMetaManifest.empty().toPrettyJson()
-          : manifest.toPrettyJson();
       setState(() {
         _name = mod['name'] as String? ?? widget.moduleName;
         _cabinetIds = ids is List
             ? ids.map((e) => e.toString()).toSet()
             : <String>{};
         _cabinets = cabinets;
+        _jsonConfigured = manifest.hasContent;
         _loading = false;
       });
-      _jsonController.text = text;
-      _autosave.markSaved(text);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -144,26 +106,17 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
     }
   }
 
-  String? _validateManifest(Object? parsed) {
-    return ModuleMetaValidator.validate(parsed);
-  }
-
-  void _openPreview() {
-    final field = _jsonFieldKey.currentState;
-    if (field == null || !field.isValidJson) return;
-    try {
-      final manifest = ModuleMetaManifest.fromJson(jsonDecode(_jsonController.text));
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => ModuleMetaPreviewPage(
-            manifest: manifest,
-            moduleName: _name.isEmpty ? widget.moduleName : _name,
-          ),
+  Future<void> _openJsonPage() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => AdminModuleJsonPage(
+          moduleId: widget.moduleId,
+          moduleName: _name.isEmpty ? widget.moduleName : _name,
         ),
-      );
-    } catch (e) {
-      AppErrors.showSnack(context, e);
-    }
+      ),
+    );
+    if (!mounted) return;
+    await _load();
   }
 
   String _cabinetLabel(String id) {
@@ -184,7 +137,6 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final tokens = Theme.of(context).extension<AppColorTokens>()!;
     final cabinetChoices = _cabinets
         .map((c) => c['id'] as String)
         .where((id) => id.isNotEmpty)
@@ -192,10 +144,6 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
     for (final id in _cabinetIds) {
       if (!cabinetChoices.contains(id)) cabinetChoices.insert(0, id);
     }
-
-    final jsonField = _jsonFieldKey.currentState;
-    final canPreview = jsonField?.isValidJson ?? false;
-    final domainError = jsonField?.errorText;
 
     return AppScaffold(
       title: Text(_name.isEmpty ? widget.moduleName : _name),
@@ -228,50 +176,15 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
                     pickerTitle: l10n.adminSelectCabinetsForModule,
                     onSave: _saveCabinets,
                   ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md).add(
-                    const EdgeInsets.only(top: AppSpacing.md, bottom: AppSpacing.sm),
+                AppNavPreference(
+                  title: l10n.adminModuleJson,
+                  icon: Icons.data_object_outlined,
+                  subtitle: Text(
+                    _jsonConfigured
+                        ? l10n.adminModuleJsonConfigured
+                        : l10n.commonNotSet,
                   ),
-                  child: AppSectionHeader(title: l10n.adminModuleJson),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-                  child: AppJsonEditorField(
-                    key: _jsonFieldKey,
-                    controller: _jsonController,
-                    validator: _validateManifest,
-                    onChanged: (_) => setState(() {}),
-                  ),
-                ),
-                if (domainError != null &&
-                    _jsonController.text.trim().isNotEmpty &&
-                    jsonField?.isValidJson == true) ...[
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md).add(
-                      const EdgeInsets.only(top: AppSpacing.sm),
-                    ),
-                    child: AppStatusBanner(
-                      severity: AppStatusSeverity.warning,
-                      message: domainError,
-                    ),
-                  ),
-                ],
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md).add(
-                    const EdgeInsets.only(top: AppSpacing.md, bottom: AppSpacing.lg),
-                  ),
-                  child: SizedBox(
-                    width: double.infinity,
-                    child: FilledButton(
-                      onPressed: canPreview ? _openPreview : null,
-                      style: FilledButton.styleFrom(
-                        backgroundColor: tokens.warning,
-                        foregroundColor: tokens.onWarning,
-                        disabledBackgroundColor: tokens.warning.withValues(alpha: 0.35),
-                      ),
-                      child: Text(l10n.adminModulePreview),
-                    ),
-                  ),
+                  onTap: _openJsonPage,
                 ),
               ],
             ),

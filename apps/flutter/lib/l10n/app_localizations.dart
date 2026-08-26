@@ -890,6 +890,12 @@ abstract class AppLocalizations {
   /// **'JSON'**
   String get adminModuleJson;
 
+  /// No description provided for @adminModuleJsonConfigured.
+  ///
+  /// In en, this message translates to:
+  /// **'Configured'**
+  String get adminModuleJsonConfigured;
+
   /// No description provided for @adminModulePreview.
   ///
   /// In en, this message translates to:

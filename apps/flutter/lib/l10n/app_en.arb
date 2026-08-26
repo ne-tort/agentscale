@@ -348,6 +348,7 @@
     }
   },
   "adminModuleJson": "JSON",
+  "adminModuleJsonConfigured": "Configured",
   "adminModulePreview": "Preview",
   "adminModuleJsonInvalid": "Invalid JSON",
   "adminMetaInvalid": "Metadata",
