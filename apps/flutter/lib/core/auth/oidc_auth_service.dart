@@ -13,11 +13,13 @@ class OidcAuthResult {
   const OidcAuthResult({
     required this.accessToken,
     this.refreshToken,
+    this.idToken,
     this.accessTokenExpiration,
   });
 
   final String accessToken;
   final String? refreshToken;
+  final String? idToken;
   final DateTime? accessTokenExpiration;
 }
 
@@ -89,8 +91,139 @@ class OidcAuthService {
     return OidcAuthResult(
       accessToken: access,
       refreshToken: body['refresh_token'] as String? ?? refreshToken,
+      idToken: body['id_token'] as String?,
       accessTokenExpiration: _parseExpiry(body['expires_in']),
     );
+  }
+
+  /// Best-effort Keycloak logout: revoke refresh/access, then RP-initiated end session.
+  ///
+  /// Local tokens must still be cleared by the caller even if remote calls fail.
+  Future<void> signOut({
+    required Map<String, dynamic> oidc,
+    String? refreshToken,
+    String? accessToken,
+    String? idToken,
+  }) async {
+    final refresh = refreshToken?.trim();
+    final access = accessToken?.trim();
+    final id = idToken?.trim();
+
+    if (refresh != null && refresh.isNotEmpty) {
+      await _revokeToken(oidc: oidc, token: refresh, tokenTypeHint: 'refresh_token');
+    }
+    if (access != null && access.isNotEmpty) {
+      await _revokeToken(oidc: oidc, token: access, tokenTypeHint: 'access_token');
+    }
+
+    try {
+      if (Platform.isAndroid || Platform.isIOS) {
+        await _endSessionMobile(oidc: oidc, idToken: id);
+      } else {
+        await _endSessionDesktop(oidc: oidc, idToken: id);
+      }
+    } catch (_) {
+      // Browser / AppAuth end-session is best-effort; revoke already ran.
+    }
+  }
+
+  Future<void> _revokeToken({
+    required Map<String, dynamic> oidc,
+    required String token,
+    required String tokenTypeHint,
+  }) async {
+    final clientId = oidc['client_id'] as String?;
+    final endpoint = _revocationEndpoint(oidc);
+    if (clientId == null || clientId.isEmpty || endpoint == null) return;
+    try {
+      await http.post(
+        Uri.parse(endpoint),
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: {
+          'client_id': clientId,
+          'token': token,
+          'token_type_hint': tokenTypeHint,
+        },
+      );
+    } catch (_) {
+      // Ignore network / KC errors — local clear still proceeds.
+    }
+  }
+
+  Future<void> _endSessionMobile({
+    required Map<String, dynamic> oidc,
+    String? idToken,
+  }) async {
+    final discoveryUrl = oidc['discovery_url'] as String?;
+    final redirectUri = oidc['redirect_uri'] as String?;
+    final id = idToken;
+    if (discoveryUrl == null ||
+        redirectUri == null ||
+        id == null ||
+        id.isEmpty) {
+      // AppAuth requires id_token_hint + post_logout_redirect together.
+      final logoutUri = endSessionUri(oidc: oidc, idToken: id);
+      if (logoutUri != null) {
+        await launchUrl(logoutUri, mode: LaunchMode.externalApplication);
+      }
+      return;
+    }
+    await _appAuth.endSession(
+      EndSessionRequest(
+        idTokenHint: id,
+        postLogoutRedirectUrl: redirectUri,
+        discoveryUrl: discoveryUrl,
+      ),
+    );
+  }
+
+  Future<void> _endSessionDesktop({
+    required Map<String, dynamic> oidc,
+    String? idToken,
+  }) async {
+    final logoutUri = endSessionUri(oidc: oidc, idToken: idToken);
+    if (logoutUri == null) return;
+    await launchUrl(logoutUri, mode: LaunchMode.externalApplication);
+  }
+
+  /// Builds Keycloak RP-initiated logout URL (public for tests).
+  static Uri? endSessionUri({
+    required Map<String, dynamic> oidc,
+    String? idToken,
+  }) {
+    final endpoint = _endSessionEndpoint(oidc);
+    final clientId = oidc['client_id'] as String?;
+    if (endpoint == null || clientId == null || clientId.isEmpty) return null;
+
+    final redirect = (oidc['redirect_uri_desktop'] as String?) ??
+        (oidc['redirect_uri'] as String?);
+    final query = <String, String>{
+      'client_id': clientId,
+    };
+    final id = idToken?.trim();
+    if (id != null && id.isNotEmpty) {
+      query['id_token_hint'] = id;
+      if (redirect != null && redirect.isNotEmpty) {
+        query['post_logout_redirect_uri'] = redirect;
+      }
+    }
+    return Uri.parse(endpoint).replace(queryParameters: query);
+  }
+
+  static String? _endSessionEndpoint(Map<String, dynamic> oidc) {
+    final explicit = oidc['end_session_endpoint'] as String?;
+    if (explicit != null && explicit.isNotEmpty) return explicit;
+    final issuer = oidc['issuer'] as String?;
+    if (issuer == null || issuer.isEmpty) return null;
+    return '${issuer.replaceAll(RegExp(r'/+$'), '')}/protocol/openid-connect/logout';
+  }
+
+  static String? _revocationEndpoint(Map<String, dynamic> oidc) {
+    final explicit = oidc['revocation_endpoint'] as String?;
+    if (explicit != null && explicit.isNotEmpty) return explicit;
+    final issuer = oidc['issuer'] as String?;
+    if (issuer == null || issuer.isEmpty) return null;
+    return '${issuer.replaceAll(RegExp(r'/+$'), '')}/protocol/openid-connect/revoke';
   }
 
   Future<OidcAuthResult> _signInMobile(
@@ -124,6 +257,7 @@ class OidcAuthService {
     return OidcAuthResult(
       accessToken: access,
       refreshToken: response.refreshToken,
+      idToken: response.idToken,
       accessTokenExpiration: response.accessTokenExpirationDateTime,
     );
   }
@@ -191,6 +325,7 @@ class OidcAuthService {
       return OidcAuthResult(
         accessToken: access,
         refreshToken: body['refresh_token'] as String?,
+        idToken: body['id_token'] as String?,
         accessTokenExpiration: _parseExpiry(body['expires_in']),
       );
     } finally {

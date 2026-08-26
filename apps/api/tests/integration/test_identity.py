@@ -68,6 +68,10 @@ def test_auth_config_public(client: TestClient) -> None:
     if body.get("oidc"):
         assert "redirect_uri" in body["oidc"]
         assert "discovery_url" in body["oidc"]
+        assert "end_session_endpoint" in body["oidc"]
+        assert "revocation_endpoint" in body["oidc"]
+        assert body["oidc"]["end_session_endpoint"].endswith("/protocol/openid-connect/logout")
+        assert body["oidc"]["revocation_endpoint"].endswith("/protocol/openid-connect/revoke")
 
 
 def test_invalid_token_rejected(client: TestClient) -> None:

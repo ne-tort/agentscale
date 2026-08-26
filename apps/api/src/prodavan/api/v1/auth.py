@@ -65,6 +65,8 @@ async def auth_config() -> dict:
             "discovery_url": f"{issuer}/.well-known/openid-configuration",
             "authorization_endpoint": f"{issuer}/protocol/openid-connect/auth",
             "token_endpoint": f"{issuer}/protocol/openid-connect/token",
+            "end_session_endpoint": f"{issuer}/protocol/openid-connect/logout",
+            "revocation_endpoint": f"{issuer}/protocol/openid-connect/revoke",
             "jwks_uri": settings.oidc_jwks_url or f"{issuer}/protocol/openid-connect/certs",
             "redirect_uri": settings.oidc_flutter_redirect_uri,
             "redirect_uri_desktop": settings.oidc_flutter_redirect_uri_desktop,

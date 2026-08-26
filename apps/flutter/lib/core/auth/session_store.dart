@@ -7,6 +7,7 @@ class SessionStore {
   static const _keyCompanyId = 'prodavan.api.company_id';
   static const _secureToken = 'prodavan.secure.bearer_token';
   static const _secureRefresh = 'prodavan.secure.refresh_token';
+  static const _secureIdToken = 'prodavan.secure.id_token';
   static const _legacyToken = 'prodavan.api.bearer_token';
 
   static const _secure = FlutterSecureStorage(
@@ -17,16 +18,27 @@ class SessionStore {
     required String baseUrl,
     required String bearerToken,
     String? refreshToken,
+    String? idToken,
     String? companyId,
+    bool keepRefreshIfNull = false,
+    bool keepIdTokenIfNull = false,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyBaseUrl, baseUrl);
     await _secure.write(key: _secureToken, value: bearerToken);
+
     if (refreshToken != null && refreshToken.isNotEmpty) {
       await _secure.write(key: _secureRefresh, value: refreshToken);
-    } else {
+    } else if (!keepRefreshIfNull) {
       await _secure.delete(key: _secureRefresh);
     }
+
+    if (idToken != null && idToken.isNotEmpty) {
+      await _secure.write(key: _secureIdToken, value: idToken);
+    } else if (!keepIdTokenIfNull) {
+      await _secure.delete(key: _secureIdToken);
+    }
+
     if (companyId != null) {
       await prefs.setString(_keyCompanyId, companyId);
     } else {
@@ -53,6 +65,7 @@ class SessionStore {
       baseUrl: baseUrl,
       bearerToken: token,
       refreshToken: await _secure.read(key: _secureRefresh),
+      idToken: await _secure.read(key: _secureIdToken),
       companyId: prefs.getString(_keyCompanyId),
     );
   }
@@ -64,6 +77,7 @@ class SessionStore {
     await prefs.remove(_legacyToken);
     await _secure.delete(key: _secureToken);
     await _secure.delete(key: _secureRefresh);
+    await _secure.delete(key: _secureIdToken);
   }
 }
 
@@ -72,12 +86,14 @@ class StoredSession {
     required this.baseUrl,
     required this.bearerToken,
     this.refreshToken,
+    this.idToken,
     this.companyId,
   });
 
   final String baseUrl;
   final String bearerToken;
   final String? refreshToken;
+  final String? idToken;
   final String? companyId;
 }
 

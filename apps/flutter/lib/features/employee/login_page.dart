@@ -104,6 +104,7 @@ class _LoginPageState extends State<LoginPage> {
     required String baseUrl,
     required String token,
     String? refreshToken,
+    String? idToken,
   }) async {
     workContext.setSession(baseUrl: baseUrl, bearerToken: token);
     final me = await workContext.api.me();
@@ -116,6 +117,7 @@ class _LoginPageState extends State<LoginPage> {
       baseUrl: baseUrl,
       bearerToken: token,
       refreshToken: refreshToken,
+      idToken: idToken,
       companyId: companyId,
     );
     if (companyId != null) workContext.companyId = companyId;
@@ -136,6 +138,7 @@ class _LoginPageState extends State<LoginPage> {
         baseUrl: _baseCtrl.text.trim(),
         token: result.accessToken,
         refreshToken: result.refreshToken,
+        idToken: result.idToken,
       );
     } catch (e) {
       if (!mounted) return;

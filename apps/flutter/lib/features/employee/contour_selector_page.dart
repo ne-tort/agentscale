@@ -17,10 +17,15 @@ class ContourSelectorPage extends StatelessWidget {
 
   Future<void> _select(BuildContext context, String companyId) async {
     workContext.companyId = companyId;
+    final existing = await sessionStore.load();
     await sessionStore.save(
       baseUrl: workContext.baseUrl,
       bearerToken: workContext.bearerToken,
+      refreshToken: existing?.refreshToken,
+      idToken: existing?.idToken,
       companyId: companyId,
+      keepRefreshIfNull: true,
+      keepIdTokenIfNull: true,
     );
     if (!context.mounted) return;
     Navigator.of(context).pushReplacement(

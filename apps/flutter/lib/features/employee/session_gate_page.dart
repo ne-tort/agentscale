@@ -70,7 +70,9 @@ class _SessionGatePageState extends State<SessionGatePage> {
         baseUrl: stored.baseUrl,
         bearerToken: result.accessToken,
         refreshToken: result.refreshToken ?? refresh,
+        idToken: result.idToken ?? stored.idToken,
         companyId: stored.companyId,
+        keepIdTokenIfNull: true,
       );
       return true;
     } catch (_) {
