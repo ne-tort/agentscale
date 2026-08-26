@@ -11,6 +11,13 @@
 | `space.xl` | 24 | Секции |
 | `space.xxl` | 32 | Пустые состояния |
 
+Named insets (код `AppInsets`, поверх шкалы):
+
+| Token | значение | Применение |
+|-------|----------|------------|
+| `trailingActionRight` | `AppSpacing.md` (16) | Правый отступ trailing icons: ListTile / preference / overview alerts / inline add |
+| `appBarActionsRight` | `AppSpacing.lg` (24) | AppBar `actionsPadding` |
+
 ## Правила для составных виджетов
 
 - `AppListItem` horizontal padding = `space.lg`, vertical = `space.md`.

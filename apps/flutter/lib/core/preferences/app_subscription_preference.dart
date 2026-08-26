@@ -5,6 +5,7 @@ import 'package:prodavan/core/preferences/app_preference_tile.dart';
 import 'package:prodavan/core/preferences/app_value_preference.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
+import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Date preference (DD.MM.YY / DD.MM.YYYY). Empty = [emptyLabel] (default unlimited).
@@ -177,7 +178,7 @@ class _AppSubscriptionPreferenceState extends State<AppSubscriptionPreference> {
           color: widget.endsAt.trim().isEmpty ? colors.muted : null,
         ),
       ),
-      trailing: const Icon(Icons.chevron_right_rounded, size: 22),
+      trailing: const AppTrailingChevron(),
       onTap: _beginEdit,
     );
   }

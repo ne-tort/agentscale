@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/preferences/app_preference_tile.dart';
 import 'package:prodavan/core/widgets/app_catalog_select_page.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
+import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 
 /// Opens [AppCatalogSelectPage] and saves selection seamlessly.
 class AppChoicePreference<T> extends StatelessWidget {
@@ -74,7 +75,7 @@ class AppChoicePreference<T> extends StatelessWidget {
       icon: icon,
       enabled: enabled,
       subtitle: Text(presentValue?.call(value) ?? labelFor(value)),
-      trailing: const Icon(Icons.chevron_right_rounded, size: 22),
+      trailing: const AppTrailingChevron(),
       onTap: () => _pick(context),
     );
   }

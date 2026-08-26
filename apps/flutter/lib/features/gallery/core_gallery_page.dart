@@ -11,6 +11,7 @@ import 'package:prodavan/core/widgets/app_list_item.dart';
 import 'package:prodavan/core/widgets/app_radio.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_catalog_select_page.dart';
+import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 import 'package:prodavan/core/widgets/danger_confirm_page.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -98,7 +99,7 @@ class _CoreGalleryPageState extends State<CoreGalleryPage> {
           AppListItem(
             title: Text(l10n.gallerySampleRow),
             subtitle: Text(l10n.gallerySubtitle),
-            trailing: Icon(Icons.chevron_right),
+            trailing: const AppTrailingChevron(),
             onTap: () {},
           ),
           const SizedBox(height: AppSpacing.lg),

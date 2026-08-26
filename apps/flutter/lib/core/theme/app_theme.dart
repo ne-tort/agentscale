@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/theme/app_color_tokens.dart';
+import 'package:prodavan/core/theme/app_insets.dart';
 import 'package:prodavan/core/theme/app_palette.dart';
 import 'package:prodavan/core/theme/app_radii.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
@@ -80,7 +81,7 @@ class AppTheme {
         foregroundColor: tokens.onSurface,
         elevation: 0,
         scrolledUnderElevation: 1,
-        actionsPadding: const EdgeInsets.only(right: AppSpacing.lg),
+        actionsPadding: AppInsets.appBarActionsRightOnly,
       ),
       navigationRailTheme: NavigationRailThemeData(
         backgroundColor: tokens.surface,
@@ -100,7 +101,10 @@ class AppTheme {
       ),
       listTileTheme: ListTileThemeData(
         iconColor: tokens.muted,
-        contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+        contentPadding: const EdgeInsets.only(
+          left: AppSpacing.md,
+          right: AppInsets.trailingActionRight,
+        ),
         minLeadingWidth: 32,
         horizontalTitleGap: AppSpacing.md,
       ),

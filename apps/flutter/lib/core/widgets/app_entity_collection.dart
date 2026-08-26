@@ -4,6 +4,7 @@ import 'package:prodavan/core/responsive/app_breakpoints.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_list_item.dart';
+import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -129,7 +130,7 @@ class AppEntityCollection extends StatelessWidget {
               title: Text(row.title),
               subtitle: row.subtitle != null ? Text(row.subtitle!) : null,
               leading: row.leading,
-              trailing: row.trailing ?? const Icon(Icons.chevron_right),
+              trailing: row.trailing ?? const AppTrailingChevron(),
               onTap: () => onOpen(row),
             ),
           );

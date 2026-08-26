@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/theme/app_insets.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 /// Base row chrome for preference controls (settings / admin forms).
 class AppPreferenceTile extends StatelessWidget {
@@ -34,7 +35,10 @@ class AppPreferenceTile extends StatelessWidget {
     return ListTile(
       enabled: enabled,
       onTap: onTap,
-      contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+      contentPadding: const EdgeInsets.only(
+        left: AppSpacing.md,
+        right: AppInsets.trailingActionRight,
+      ),
       minLeadingWidth: 32,
       horizontalTitleGap: AppSpacing.md,
       leading: leading ??

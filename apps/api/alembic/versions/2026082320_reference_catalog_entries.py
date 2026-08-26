@@ -2,6 +2,7 @@
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 revision = "2026082320"
 down_revision = "2026082319"
@@ -18,7 +19,12 @@ def upgrade() -> None:
         sa.Column("title", sa.String(length=200), nullable=False),
         sa.Column("subtitle", sa.String(length=500), nullable=True),
         sa.Column("icon_name", sa.String(length=64), nullable=True),
-        sa.Column("payload", sa.JSON(), nullable=False),
+        sa.Column(
+            "payload",
+            postgresql.JSONB(),
+            nullable=False,
+            server_default=sa.text("'{}'::jsonb"),
+        ),
         sa.Column("seeded", sa.Boolean(), nullable=False, server_default=sa.false()),
         sa.Column("sort_order", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("archived_at", sa.DateTime(timezone=True), nullable=True),

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/preferences/app_preference_tile.dart';
 import 'package:prodavan/core/widgets/app_catalog_select_page.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
+import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 
 /// Multi-select via [AppCatalogSelectPage] (switch trailing) with seamless save.
 class AppMultiChoicePreference<T> extends StatelessWidget {
@@ -79,7 +80,7 @@ class AppMultiChoicePreference<T> extends StatelessWidget {
       icon: icon,
       enabled: enabled,
       subtitle: Text(_subtitle()),
-      trailing: const Icon(Icons.chevron_right_rounded, size: 22),
+      trailing: const AppTrailingChevron(),
       onTap: () => _pick(context),
     );
   }

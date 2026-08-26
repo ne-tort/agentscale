@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/app_preference_tile.dart';
+import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 
 /// Hub row — navigates to a sub-page (Hiddify SettingsSection pattern).
 class AppNavPreference extends StatelessWidget {
@@ -26,7 +27,7 @@ class AppNavPreference extends StatelessWidget {
       icon: icon,
       subtitle: subtitle,
       accentColor: accentColor,
-      trailing: const Icon(Icons.chevron_right_rounded, size: 22),
+      trailing: const AppTrailingChevron(),
       onTap: onTap,
     );
   }

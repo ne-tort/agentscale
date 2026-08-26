@@ -5,6 +5,7 @@ import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/stat_tile.dart';
 import 'package:prodavan/features/admin/company/admin_company_detail_page.dart';
@@ -194,7 +195,7 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
                         },
                       ),
                       subtitle: Text(a.subtitle),
-                      trailing: const Icon(Icons.chevron_right),
+                      trailing: const AppTrailingChevron(),
                       onTap: () => _openCompany(a.companyId, a.companyName),
                     ),
                   const SizedBox(height: AppSpacing.lg),

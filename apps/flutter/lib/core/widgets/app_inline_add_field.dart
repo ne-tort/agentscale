@@ -150,17 +150,13 @@ class _AppInlineAddFieldState extends State<AppInlineAddField> {
     return AppPreferenceTile(
       title: widget.title,
       enabled: !_saving,
-      trailing: SizedBox(
-        width: 48,
-        child: Align(
-          alignment: Alignment.centerRight,
-          child: IconButton(
-            tooltip: l10n.commonAdd,
-            icon: const Icon(Icons.add_rounded, size: 22),
-            visualDensity: VisualDensity.compact,
-            onPressed: _saving ? null : _beginEdit,
-          ),
-        ),
+      trailing: IconButton(
+        tooltip: l10n.commonAdd,
+        icon: const Icon(Icons.add_rounded, size: 22),
+        padding: EdgeInsets.zero,
+        visualDensity: VisualDensity.compact,
+        constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+        onPressed: _saving ? null : _beginEdit,
       ),
       onTap: _saving ? null : _beginEdit,
     );

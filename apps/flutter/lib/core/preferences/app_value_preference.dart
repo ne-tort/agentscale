@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'package:prodavan/core/preferences/app_preference_tile.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
+import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 
 /// Borderless inline [TextField] decoration (Hiddify-style).
 const kBorderlessInputDecoration = InputDecoration(
@@ -204,7 +205,7 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
       icon: widget.icon,
       enabled: widget.enabled,
       subtitle: Text(subtitleText, style: theme.textTheme.bodyMedium),
-      trailing: const Icon(Icons.chevron_right_rounded, size: 22),
+      trailing: const AppTrailingChevron(),
       onTap: _beginEdit,
     );
   }

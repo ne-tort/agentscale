@@ -13,6 +13,7 @@ export 'app_section_header.dart';
 export 'app_selector_page.dart';
 export 'app_snack_bar.dart';
 export 'app_switch.dart';
+export 'app_trailing_chevron.dart';
 export 'company_metrics_wrap.dart';
 export 'danger_confirm_page.dart';
 export 'empty_placeholder.dart';
