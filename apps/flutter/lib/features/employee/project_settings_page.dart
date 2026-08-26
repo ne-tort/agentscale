@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/work_context.dart';
@@ -36,7 +37,7 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
   bool _rematerializing = false;
   bool _pausing = false;
   String? _projectStatus;
-  String? _error;
+  Object? _error;
   String? _rematerializeInfo;
 
   @override
@@ -69,7 +70,7 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _loading = false;
       });
     }
@@ -93,7 +94,7 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _saving = false;
       });
     }
@@ -119,7 +120,7 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _rematerializing = false;
       });
     }
@@ -142,7 +143,7 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _pausing = false;
       });
     }
@@ -165,7 +166,7 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _pausing = false;
       });
     }
@@ -189,7 +190,7 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
           : ListView(
               padding: const EdgeInsets.all(AppSpacing.lg),
               children: [
-                if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+                if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
                 if (_projectStatus != null)
                   ListTile(
                     contentPadding: EdgeInsets.zero,

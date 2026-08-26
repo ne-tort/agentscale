@@ -153,6 +153,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminPolicy => 'Политика';
 
   @override
+  String get adminAgentLimits => 'Ограничения агента';
+
+  @override
   String get adminQuotas => 'Квоты';
 
   @override
@@ -1253,8 +1256,50 @@ class AppLocalizationsRu extends AppLocalizations {
   String get companyPassword => 'Пароль';
 
   @override
-  String get companyPasswordHint =>
-      'Минимум 8 символов — пароль входа в Keycloak';
+  String get companyPasswordHint => 'Минимум 8 символов';
+
+  @override
+  String get companyPasswordChanged => 'Пароль успешно изменен';
+
+  @override
+  String get errorConflict =>
+      'Конфликт данных. Обновите страницу и попробуйте снова.';
+
+  @override
+  String get errorForbidden => 'Недостаточно прав для этого действия.';
+
+  @override
+  String get errorGateway => 'Сервер временно недоступен. Попробуйте ещё раз.';
+
+  @override
+  String errorHttpStatus(int status) {
+    return 'Ошибка запроса (HTTP $status)';
+  }
+
+  @override
+  String get errorIdentityProvider =>
+      'Не удалось обновить учётные данные. Попробуйте ещё раз.';
+
+  @override
+  String get errorNetwork => 'Нет связи с сервером. Проверьте подключение.';
+
+  @override
+  String get errorNotFound => 'Запрошенный объект не найден.';
+
+  @override
+  String get errorRateLimited => 'Слишком много запросов. Подождите немного.';
+
+  @override
+  String get errorServer => 'Внутренняя ошибка сервера. Попробуйте позже.';
+
+  @override
+  String get errorUnauthorized => 'Сессия истекла. Войдите снова.';
+
+  @override
+  String get errorUnexpected => 'Что-то пошло не так.';
+
+  @override
+  String get errorValidation => 'Проверьте введённые данные.';
 
   @override
   String companyCredentialsCreated(String companyId, String password) {

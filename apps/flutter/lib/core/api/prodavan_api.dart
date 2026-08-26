@@ -990,5 +990,17 @@ class ProdavanApiException implements Exception {
   final String body;
 
   @override
-  String toString() => 'ProdavanApiException($statusCode): $body';
+  String toString() {
+    final trimmed = body.trim();
+    final lower = trimmed.toLowerCase();
+    if (trimmed.isEmpty ||
+        lower.contains('<html') ||
+        lower.contains('<!doctype') ||
+        lower.contains('nginx/')) {
+      return 'ProdavanApiException($statusCode)';
+    }
+    final short =
+        trimmed.length > 160 ? '${trimmed.substring(0, 160)}…' : trimmed;
+    return 'ProdavanApiException($statusCode): $short';
+  }
 }

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 
@@ -34,7 +35,7 @@ class CabinetContextTabPage extends StatefulWidget {
 class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
   late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
-  String? _error;
+  Object? _error;
   Map<String, dynamic>? _cabinet;
   int _projects = 0;
   int _tables = 0;
@@ -100,7 +101,7 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
       if (!mounted) return;
       if (silent) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _loading = false;
       });
     }
@@ -137,7 +138,7 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
       );
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      setState(() => _error = e);
     } finally {
       if (mounted) setState(() => _exporting = false);
     }
@@ -155,7 +156,7 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
           Text(widget.cabinetName, style: Theme.of(context).textTheme.titleLarge),
           if (cab != null) ...[
             const SizedBox(height: 8),

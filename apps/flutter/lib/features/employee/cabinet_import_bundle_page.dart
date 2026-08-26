@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
@@ -27,7 +28,7 @@ class _CabinetImportBundlePageState extends State<CabinetImportBundlePage> {
   String? _pickedFilename;
   bool _importing = false;
   bool _loadingCatalog = true;
-  String? _error;
+  Object? _error;
   List<Map<String, dynamic>> _starterBundles = const [];
 
   @override
@@ -124,7 +125,7 @@ class _CabinetImportBundlePageState extends State<CabinetImportBundlePage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _importing = false;
       });
     }
@@ -167,7 +168,7 @@ class _CabinetImportBundlePageState extends State<CabinetImportBundlePage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _importing = false;
       });
     }
@@ -181,7 +182,7 @@ class _CabinetImportBundlePageState extends State<CabinetImportBundlePage> {
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
-          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
           Text(l10n.cabinetImportBundleIntro),
           const SizedBox(height: AppSpacing.md),
           if (_loadingCatalog)

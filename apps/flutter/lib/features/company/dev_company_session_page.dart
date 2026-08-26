@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/config/api_base.dart';
 import 'package:prodavan/core/session/company_context.dart';
@@ -21,7 +22,7 @@ class DevCompanySessionPage extends StatefulWidget {
 class _DevCompanySessionPageState extends State<DevCompanySessionPage> {
   final _baseCtrl = TextEditingController(text: ApiBase.value);
   final _tokenCtrl = TextEditingController();
-  String? _error;
+  Object? _error;
 
   @override
   void dispose() {
@@ -94,7 +95,7 @@ class _DevCompanySessionPageState extends State<DevCompanySessionPage> {
       _openShell();
     } catch (e) {
       companyContext.clear();
-      setState(() => _error = e.toString());
+      setState(() => _error = e);
     }
   }
 
@@ -125,7 +126,7 @@ class _DevCompanySessionPageState extends State<DevCompanySessionPage> {
             ),
             if (_error != null) ...[
               const SizedBox(height: AppSpacing.sm),
-              Text(_error!, style: TextStyle(color: context.appColors.danger)),
+              Text(AppErrors.localize(context, _error!), style: TextStyle(color: context.appColors.danger)),
             ],
             const SizedBox(height: AppSpacing.lg),
             AppButton(label: l10n.commonContinueAction, onPressed: _connect),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
@@ -28,7 +29,7 @@ class _DynamicCabinetShellState extends State<DynamicCabinetShell>
   final _projectsViewMode = AppCollectionViewModeStore(_projectsViewPageKey);
   TabController? _tabs;
   List<Map<String, dynamic>> _metaTabs = const [];
-  String? _error;
+  Object? _error;
   int _metaEpoch = 0;
   int _tabIndex = 0;
 
@@ -64,7 +65,7 @@ class _DynamicCabinetShellState extends State<DynamicCabinetShell>
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      setState(() => _error = e);
     }
   }
 
@@ -118,7 +119,7 @@ class _DynamicCabinetShellState extends State<DynamicCabinetShell>
             ),
       body: Column(
         children: [
-          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
           Expanded(
             child: tabs.isEmpty || _tabs == null
                 ? const Center(child: CircularProgressIndicator())

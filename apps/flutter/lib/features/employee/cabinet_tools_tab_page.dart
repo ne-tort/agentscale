@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
@@ -19,7 +20,7 @@ class CabinetToolsTabPage extends StatefulWidget {
 class _CabinetToolsTabPageState extends State<CabinetToolsTabPage> {
   late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
-  String? _error;
+  Object? _error;
   List<Map<String, dynamic>> _tools = const [];
 
   @override
@@ -58,7 +59,7 @@ class _CabinetToolsTabPageState extends State<CabinetToolsTabPage> {
       if (!mounted) return;
       if (silent) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _loading = false;
       });
     }
@@ -73,7 +74,7 @@ class _CabinetToolsTabPageState extends State<CabinetToolsTabPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+        if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
         Expanded(
           child: _tools.isEmpty
               ? EmptyPlaceholder(title: l10n.cabinetNoMcpTools)

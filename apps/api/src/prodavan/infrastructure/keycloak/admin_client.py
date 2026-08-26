@@ -345,35 +345,52 @@ class HttpKeycloakAdminClient:
                 status=422,
                 detail="company username and password (min 8) required",
             )
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            token = await self._admin_token(client)
-            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-            users_url = self._users_url()
-            user_id = await self._lookup_user_id(
-                client,
-                headers=headers,
-                users_url=users_url,
-                params={"username": uname, "exact": "true"},
-            )
-            if not user_id:
-                raise AppError(
-                    code="NOT_FOUND",
-                    title="Not Found",
-                    status=404,
-                    detail=f"Keycloak user {uname} not found",
+        try:
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                token = await self._admin_token(client)
+                headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+                users_url = self._users_url()
+                user_id = await self._lookup_user_id(
+                    client,
+                    headers=headers,
+                    users_url=users_url,
+                    params={"username": uname, "exact": "true"},
                 )
-            reset = await client.put(
-                f"{users_url}/{user_id}/reset-password",
-                json={"type": "password", "value": password, "temporary": False},
-                headers=headers,
-            )
-            if reset.status_code >= 400:
-                raise AppError(
-                    code="KEYCLOAK_ADMIN",
-                    title="Keycloak password reset failed",
-                    status=502,
-                    detail=f"reset-password returned {reset.status_code}",
+                if not user_id:
+                    raise AppError(
+                        code="NOT_FOUND",
+                        title="Not Found",
+                        status=404,
+                        detail=f"Keycloak user {uname} not found",
+                    )
+                reset = await client.put(
+                    f"{users_url}/{user_id}/reset-password",
+                    json={"type": "password", "value": password, "temporary": False},
+                    headers=headers,
                 )
+                if reset.status_code >= 400:
+                    raise AppError(
+                        code="KEYCLOAK_ADMIN",
+                        title="Keycloak password reset failed",
+                        status=502,
+                        detail=f"reset-password returned {reset.status_code}",
+                    )
+        except AppError:
+            raise
+        except httpx.TimeoutException as exc:
+            raise AppError(
+                code="KEYCLOAK_ADMIN",
+                title="Keycloak timeout",
+                status=502,
+                detail="Keycloak password reset timed out",
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise AppError(
+                code="KEYCLOAK_ADMIN",
+                title="Keycloak unavailable",
+                status=502,
+                detail=f"Keycloak request failed: {exc.__class__.__name__}",
+            ) from exc
 
     async def _disable_id(
         self,

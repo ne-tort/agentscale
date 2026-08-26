@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 
@@ -26,7 +27,7 @@ class _CabinetAgentsEditPageState extends State<CabinetAgentsEditPage> {
   final _ctrl = TextEditingController();
   bool _loading = true;
   bool _saving = false;
-  String? _error;
+  Object? _error;
 
   @override
   void initState() {
@@ -56,7 +57,7 @@ class _CabinetAgentsEditPageState extends State<CabinetAgentsEditPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _loading = false;
       });
     }
@@ -78,7 +79,7 @@ class _CabinetAgentsEditPageState extends State<CabinetAgentsEditPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _saving = false;
       });
     }
@@ -101,7 +102,7 @@ class _CabinetAgentsEditPageState extends State<CabinetAgentsEditPage> {
                       ),
                 ),
                 const SizedBox(height: AppSpacing.md),
-                if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+                if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
                 TextField(
                   controller: _ctrl,
                   maxLines: 18,

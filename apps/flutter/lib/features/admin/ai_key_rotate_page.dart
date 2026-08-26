@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
@@ -27,7 +28,7 @@ class _AdminAiKeyRotatePageState extends State<AdminAiKeyRotatePage> {
   final _secretCtrl = TextEditingController();
   bool _obscureSecret = true;
   bool _saving = false;
-  String? _error;
+  Object? _error;
 
   @override
   void dispose() {
@@ -51,7 +52,7 @@ class _AdminAiKeyRotatePageState extends State<AdminAiKeyRotatePage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _saving = false;
       });
     }
@@ -67,7 +68,7 @@ class _AdminAiKeyRotatePageState extends State<AdminAiKeyRotatePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+            if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
             Text(l10n.adminRotateSecretHint),
             const SizedBox(height: AppSpacing.md),
             Form(

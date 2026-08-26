@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
@@ -32,7 +33,7 @@ class ToolApprovePage extends StatefulWidget {
 
 class _ToolApprovePageState extends State<ToolApprovePage> {
   bool _busy = false;
-  String? _error;
+  Object? _error;
 
   Future<void> _decide(String decision) async {
     setState(() {
@@ -51,7 +52,7 @@ class _ToolApprovePageState extends State<ToolApprovePage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _busy = false;
       });
     }
@@ -68,7 +69,7 @@ class _ToolApprovePageState extends State<ToolApprovePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+            if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
             Text(
               widget.toolName,
               style: Theme.of(context).textTheme.titleLarge,

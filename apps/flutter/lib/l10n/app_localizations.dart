@@ -326,6 +326,12 @@ abstract class AppLocalizations {
   /// **'Policy'**
   String get adminPolicy;
 
+  /// No description provided for @adminAgentLimits.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent limits'**
+  String get adminAgentLimits;
+
   /// No description provided for @adminQuotas.
   ///
   /// In en, this message translates to:
@@ -2315,8 +2321,86 @@ abstract class AppLocalizations {
   /// No description provided for @companyPasswordHint.
   ///
   /// In en, this message translates to:
-  /// **'Min 8 characters — Keycloak login password'**
+  /// **'Minimum 8 characters'**
   String get companyPasswordHint;
+
+  /// No description provided for @companyPasswordChanged.
+  ///
+  /// In en, this message translates to:
+  /// **'Password changed successfully'**
+  String get companyPasswordChanged;
+
+  /// No description provided for @errorConflict.
+  ///
+  /// In en, this message translates to:
+  /// **'Data conflict. Refresh and try again.'**
+  String get errorConflict;
+
+  /// No description provided for @errorForbidden.
+  ///
+  /// In en, this message translates to:
+  /// **'You do not have permission for this action.'**
+  String get errorForbidden;
+
+  /// No description provided for @errorGateway.
+  ///
+  /// In en, this message translates to:
+  /// **'Server temporarily unavailable. Please try again.'**
+  String get errorGateway;
+
+  /// No description provided for @errorHttpStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Request failed (HTTP {status})'**
+  String errorHttpStatus(int status);
+
+  /// No description provided for @errorIdentityProvider.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not update credentials. Please try again.'**
+  String get errorIdentityProvider;
+
+  /// No description provided for @errorNetwork.
+  ///
+  /// In en, this message translates to:
+  /// **'No connection to the server. Check your network.'**
+  String get errorNetwork;
+
+  /// No description provided for @errorNotFound.
+  ///
+  /// In en, this message translates to:
+  /// **'The requested item was not found.'**
+  String get errorNotFound;
+
+  /// No description provided for @errorRateLimited.
+  ///
+  /// In en, this message translates to:
+  /// **'Too many requests. Please wait a moment.'**
+  String get errorRateLimited;
+
+  /// No description provided for @errorServer.
+  ///
+  /// In en, this message translates to:
+  /// **'Internal server error. Please try again later.'**
+  String get errorServer;
+
+  /// No description provided for @errorUnauthorized.
+  ///
+  /// In en, this message translates to:
+  /// **'Session expired. Please sign in again.'**
+  String get errorUnauthorized;
+
+  /// No description provided for @errorUnexpected.
+  ///
+  /// In en, this message translates to:
+  /// **'Something went wrong.'**
+  String get errorUnexpected;
+
+  /// No description provided for @errorValidation.
+  ///
+  /// In en, this message translates to:
+  /// **'Please check the entered data.'**
+  String get errorValidation;
 
   /// No description provided for @companyCredentialsCreated.
   ///

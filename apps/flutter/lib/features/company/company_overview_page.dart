@@ -4,7 +4,9 @@ import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/company_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/company_metrics_wrap.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -22,7 +24,7 @@ class CompanyOverviewPage extends StatefulWidget {
 class _CompanyOverviewPageState extends State<CompanyOverviewPage> {
   late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
-  String? _error;
+  Object? _error;
   Map<String, dynamic>? _metrics;
   bool _passwordSet = false;
 
@@ -70,7 +72,7 @@ class _CompanyOverviewPageState extends State<CompanyOverviewPage> {
       if (!mounted) return;
       if (silent) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _loading = false;
       });
     }
@@ -85,6 +87,10 @@ class _CompanyOverviewPageState extends State<CompanyOverviewPage> {
     );
     if (!mounted) return;
     setState(() => _passwordSet = true);
+    AppSnackBar.success(
+      context,
+      AppLocalizations.of(context).companyPasswordChanged,
+    );
   }
 
   @override
@@ -101,7 +107,7 @@ class _CompanyOverviewPageState extends State<CompanyOverviewPage> {
                     padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
                     child: AppStatusBanner(
                       severity: AppStatusSeverity.error,
-                      message: _error!,
+                      message: AppErrors.localize(context, _error!),
                     ),
                   ),
                 Padding(
@@ -123,6 +129,7 @@ class _CompanyOverviewPageState extends State<CompanyOverviewPage> {
                   value: '',
                   obscureText: true,
                   hintText: l10n.companyPasswordHint,
+                  invalidMessage: l10n.companyPasswordHint,
                   presentValue: (_) =>
                       _passwordSet ? '••••••••' : l10n.commonNotSet,
                   formatInputValue: (_) => '',

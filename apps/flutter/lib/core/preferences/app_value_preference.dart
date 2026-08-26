@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'package:prodavan/core/preferences/app_preference_tile.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 
 /// Borderless inline [TextField] decoration (Hiddify-style).
@@ -31,6 +32,7 @@ class AppValuePreference<T> extends StatefulWidget {
     this.obscureText = false,
     this.digitsOnly = false,
     this.hintText,
+    this.invalidMessage,
     this.presentValue,
     this.formatInputValue,
     this.validateInput,
@@ -47,6 +49,8 @@ class AppValuePreference<T> extends StatefulWidget {
   final bool obscureText;
   final bool digitsOnly;
   final String? hintText;
+  /// Shown in a snackbar when [validateInput] rejects the value on save.
+  final String? invalidMessage;
   final String Function(T value)? presentValue;
   final String Function(T value)? formatInputValue;
   final bool Function(String raw)? validateInput;
@@ -124,7 +128,13 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
   Future<void> _save() async {
     if (_saving || !widget.enabled) return;
     final raw = _controller.text.trim();
-    if (widget.validateInput != null && !widget.validateInput!(raw)) return;
+    if (widget.validateInput != null && !widget.validateInput!(raw)) {
+      final msg = widget.invalidMessage;
+      if (msg != null && msg.isNotEmpty && mounted) {
+        AppSnackBar.error(context, msg, copyOnTap: false);
+      }
+      return;
+    }
     final parsed = widget.inputToValue != null
         ? widget.inputToValue!(raw)
         : raw as T?;

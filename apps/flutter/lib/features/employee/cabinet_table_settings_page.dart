@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 
@@ -34,7 +35,7 @@ class _CabinetTableSettingsPageState extends State<CabinetTableSettingsPage> {
   bool _archiving = false;
   bool _deleting = false;
   bool _archived = false;
-  String? _error;
+  Object? _error;
 
   @override
   void initState() {
@@ -65,7 +66,7 @@ class _CabinetTableSettingsPageState extends State<CabinetTableSettingsPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _saving = false;
       });
     }
@@ -99,7 +100,7 @@ class _CabinetTableSettingsPageState extends State<CabinetTableSettingsPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _archiving = false;
       });
     }
@@ -130,7 +131,7 @@ class _CabinetTableSettingsPageState extends State<CabinetTableSettingsPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _deleting = false;
       });
     }
@@ -155,7 +156,7 @@ class _CabinetTableSettingsPageState extends State<CabinetTableSettingsPage> {
                   ),
             ),
           if (_archived) const SizedBox(height: AppSpacing.sm),
-          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
           if (!_archived)
             Form(
               key: _formKey,

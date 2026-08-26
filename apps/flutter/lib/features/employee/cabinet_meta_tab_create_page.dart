@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/work_context.dart';
@@ -28,7 +29,7 @@ class _CabinetMetaTabCreatePageState extends State<CabinetMetaTabCreatePage> {
   String? _tableSlug;
   bool _loadingTables = true;
   bool _saving = false;
-  String? _error;
+  Object? _error;
 
   @override
   void initState() {
@@ -56,7 +57,7 @@ class _CabinetMetaTabCreatePageState extends State<CabinetMetaTabCreatePage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _loadingTables = false;
       });
     }
@@ -112,7 +113,7 @@ class _CabinetMetaTabCreatePageState extends State<CabinetMetaTabCreatePage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _saving = false;
       });
     }
@@ -133,7 +134,7 @@ class _CabinetMetaTabCreatePageState extends State<CabinetMetaTabCreatePage> {
       body: ListView(
         padding: EdgeInsets.all(AppSpacing.lg),
         children: [
-          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
           if (_tables.isEmpty)
             EmptyPlaceholder(
               title: l10n.cabinetCreateMetaTableFirst,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/work_context.dart';
@@ -37,7 +38,7 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
   final _nameCtrl = TextEditingController();
   String? _agentProvider;
   bool _saving = false;
-  String? _error;
+  Object? _error;
 
   @override
   void dispose() {
@@ -73,7 +74,7 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _saving = false;
       });
     }
@@ -95,7 +96,7 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
-          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
           Form(
             key: _formKey,
             child: Column(

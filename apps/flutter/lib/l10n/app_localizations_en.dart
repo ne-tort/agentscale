@@ -154,6 +154,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminPolicy => 'Policy';
 
   @override
+  String get adminAgentLimits => 'Agent limits';
+
+  @override
   String get adminQuotas => 'Quotas';
 
   @override
@@ -1251,8 +1254,50 @@ class AppLocalizationsEn extends AppLocalizations {
   String get companyPassword => 'Password';
 
   @override
-  String get companyPasswordHint =>
-      'Min 8 characters — Keycloak login password';
+  String get companyPasswordHint => 'Minimum 8 characters';
+
+  @override
+  String get companyPasswordChanged => 'Password changed successfully';
+
+  @override
+  String get errorConflict => 'Data conflict. Refresh and try again.';
+
+  @override
+  String get errorForbidden => 'You do not have permission for this action.';
+
+  @override
+  String get errorGateway =>
+      'Server temporarily unavailable. Please try again.';
+
+  @override
+  String errorHttpStatus(int status) {
+    return 'Request failed (HTTP $status)';
+  }
+
+  @override
+  String get errorIdentityProvider =>
+      'Could not update credentials. Please try again.';
+
+  @override
+  String get errorNetwork => 'No connection to the server. Check your network.';
+
+  @override
+  String get errorNotFound => 'The requested item was not found.';
+
+  @override
+  String get errorRateLimited => 'Too many requests. Please wait a moment.';
+
+  @override
+  String get errorServer => 'Internal server error. Please try again later.';
+
+  @override
+  String get errorUnauthorized => 'Session expired. Please sign in again.';
+
+  @override
+  String get errorUnexpected => 'Something went wrong.';
+
+  @override
+  String get errorValidation => 'Please check the entered data.';
 
   @override
   String companyCredentialsCreated(String companyId, String password) {

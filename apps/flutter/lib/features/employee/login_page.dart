@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/auth/auth_config.dart';
 import 'package:prodavan/core/auth/oidc_auth_service.dart';
@@ -31,7 +32,7 @@ class _LoginPageState extends State<LoginPage> {
   bool _loadingConfig = true;
   bool _connecting = false;
   bool _showAdvanced = false;
-  String? _error;
+  Object? _error;
   Map<String, dynamic>? _authConfig;
 
   @override
@@ -139,7 +140,7 @@ class _LoginPageState extends State<LoginPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _connecting = false;
       });
     }
@@ -161,7 +162,7 @@ class _LoginPageState extends State<LoginPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _connecting = false;
       });
     }
@@ -181,7 +182,7 @@ class _LoginPageState extends State<LoginPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _connecting = false;
       });
     }
@@ -216,7 +217,7 @@ class _LoginPageState extends State<LoginPage> {
                   ),
                   const SizedBox(height: AppSpacing.md),
                   if (_error != null) ...[
-                    Text(_error!, style: TextStyle(color: context.appColors.danger)),
+                    Text(AppErrors.localize(context, _error!), style: TextStyle(color: context.appColors.danger)),
                     const SizedBox(height: AppSpacing.sm),
                   ],
                   if (isOidc)

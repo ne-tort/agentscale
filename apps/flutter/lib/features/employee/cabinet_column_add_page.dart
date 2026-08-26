@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/work_context.dart';
@@ -33,7 +34,7 @@ class _CabinetColumnAddPageState extends State<CabinetColumnAddPage> {
   String _type = 'text';
   bool _required = false;
   bool _saving = false;
-  String? _error;
+  Object? _error;
 
   @override
   void dispose() {
@@ -61,7 +62,7 @@ class _CabinetColumnAddPageState extends State<CabinetColumnAddPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _saving = false;
       });
     }
@@ -80,7 +81,7 @@ class _CabinetColumnAddPageState extends State<CabinetColumnAddPage> {
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: AppSpacing.sm),
-          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
           Form(
             key: _formKey,
             child: Column(

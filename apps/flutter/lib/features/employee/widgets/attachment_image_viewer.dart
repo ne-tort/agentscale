@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 
@@ -80,7 +81,7 @@ class _AttachmentViewerPageState extends State<AttachmentViewerPage> {
 
   Uint8List? _bytes;
   bool _loading = true;
-  String? _error;
+  Object? _error;
 
   @override
   void initState() {
@@ -108,7 +109,7 @@ class _AttachmentViewerPageState extends State<AttachmentViewerPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _loading = false;
       });
     }
@@ -128,7 +129,7 @@ class _AttachmentViewerPageState extends State<AttachmentViewerPage> {
     if (_error != null) {
       return Padding(
         padding: EdgeInsets.all(24),
-        child: Text(_error!, textAlign: TextAlign.center),
+        child: Text(AppErrors.localize(context, _error!), textAlign: TextAlign.center),
       );
     }
     final bytes = _bytes;

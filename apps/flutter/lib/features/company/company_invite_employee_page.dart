@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/session/company_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
@@ -22,7 +23,7 @@ class _CompanyInviteEmployeePageState extends State<CompanyInviteEmployeePage> {
   final _emailCtrl = TextEditingController();
   final _nameCtrl = TextEditingController();
   bool _saving = false;
-  String? _error;
+  Object? _error;
 
   @override
   void dispose() {
@@ -48,7 +49,7 @@ class _CompanyInviteEmployeePageState extends State<CompanyInviteEmployeePage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _saving = false;
       });
     }
@@ -64,7 +65,7 @@ class _CompanyInviteEmployeePageState extends State<CompanyInviteEmployeePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+            if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
             Text(l10n.companyInviteViaKeycloakPasswordNotAccepted),
             const SizedBox(height: AppSpacing.md),
             Form(

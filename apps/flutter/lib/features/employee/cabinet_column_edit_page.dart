@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
@@ -39,7 +40,7 @@ class _CabinetColumnEditPageState extends State<CabinetColumnEditPage> {
   late bool _unique;
   bool _saving = false;
   bool _deleting = false;
-  String? _error;
+  Object? _error;
 
   String get _columnName => widget.column['name'] as String? ?? '';
 
@@ -72,7 +73,7 @@ class _CabinetColumnEditPageState extends State<CabinetColumnEditPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _saving = false;
       });
     }
@@ -104,7 +105,7 @@ class _CabinetColumnEditPageState extends State<CabinetColumnEditPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _deleting = false;
       });
     }
@@ -134,7 +135,7 @@ class _CabinetColumnEditPageState extends State<CabinetColumnEditPage> {
             ),
           if (_error != null) ...[
             const SizedBox(height: AppSpacing.sm),
-            AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+            AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
           ],
           if (!_isProtected) ...[
             const SizedBox(height: AppSpacing.md),

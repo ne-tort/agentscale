@@ -145,6 +145,7 @@
   "adminEvents": "События",
   "adminInviteAdmin": "Админ",
   "adminPolicy": "Политика",
+  "adminAgentLimits": "Ограничения агента",
   "adminQuotas": "Квоты",
   "adminQuotasSummary": "{cabinets} · {packages} · {bundleMb}",
   "@adminQuotasSummary": {
@@ -765,7 +766,25 @@
   "companyOrgMetrics": "Метрики организации",
   "companyLoginId": "ID компании",
   "companyPassword": "Пароль",
-  "companyPasswordHint": "Минимум 8 символов — пароль входа в Keycloak",
+  "companyPasswordHint": "Минимум 8 символов",
+  "companyPasswordChanged": "Пароль успешно изменен",
+  "errorConflict": "Конфликт данных. Обновите страницу и попробуйте снова.",
+  "errorForbidden": "Недостаточно прав для этого действия.",
+  "errorGateway": "Сервер временно недоступен. Попробуйте ещё раз.",
+  "errorHttpStatus": "Ошибка запроса (HTTP {status})",
+  "@errorHttpStatus": {
+    "placeholders": {
+      "status": { "type": "int" }
+    }
+  },
+  "errorIdentityProvider": "Не удалось обновить учётные данные. Попробуйте ещё раз.",
+  "errorNetwork": "Нет связи с сервером. Проверьте подключение.",
+  "errorNotFound": "Запрошенный объект не найден.",
+  "errorRateLimited": "Слишком много запросов. Подождите немного.",
+  "errorServer": "Внутренняя ошибка сервера. Попробуйте позже.",
+  "errorUnauthorized": "Сессия истекла. Войдите снова.",
+  "errorUnexpected": "Что-то пошло не так.",
+  "errorValidation": "Проверьте введённые данные.",
   "companyCredentialsCreated": "Логин: {companyId} · пароль: {password}",
   "@companyCredentialsCreated": {
     "placeholders": {

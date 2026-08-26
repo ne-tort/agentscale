@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
@@ -80,7 +81,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   bool _companySuspended = false;
   bool _projectPaused = false;
   bool _resuming = false;
-  String? _error;
+  Object? _error;
   ProjectChatStreamHandle? _activeStream;
 
   bool get _chatBlocked => _companySuspended || _projectPaused;
@@ -115,7 +116,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       await _loadTranscript();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      setState(() => _error = e);
     } finally {
       if (mounted) setState(() => _resuming = false);
     }
@@ -181,7 +182,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       await _loadInbox();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      setState(() => _error = e);
     } finally {
       if (mounted) setState(() => _uploadingAttachment = false);
     }
@@ -197,7 +198,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       await _loadInbox();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      setState(() => _error = e);
     }
   }
 
@@ -215,7 +216,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       );
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      setState(() => _error = e);
       await _loadInbox();
     }
   }
@@ -231,7 +232,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      setState(() => _error = e);
     }
   }
 
@@ -377,7 +378,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       if (!mounted) return;
       if (silent) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _loading = false;
       });
     }
@@ -552,7 +553,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         return;
       }
       setState(() {
-        _error = e.toString();
+        _error = e;
         if (assistantText.isEmpty && _messages.length > assistantIndex) {
           _messages.removeAt(assistantIndex);
         }
@@ -573,7 +574,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       await workContext.api.cancelAgentSession(projectId: widget.projectId, sessionId: sid);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      setState(() => _error = e);
     }
   }
 
@@ -678,7 +679,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                 ? _resumeFromBanner
                 : null,
           ),
-          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
           if (_inboxAttachments.isNotEmpty)
             ExpansionTile(
               initiallyExpanded: false,

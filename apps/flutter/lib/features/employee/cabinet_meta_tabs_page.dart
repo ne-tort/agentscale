@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 
@@ -26,7 +27,7 @@ class CabinetMetaTabsPage extends StatefulWidget {
 class _CabinetMetaTabsPageState extends State<CabinetMetaTabsPage> {
   late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
-  String? _error;
+  Object? _error;
   List<Map<String, dynamic>> _tabs = const [];
 
   @override
@@ -66,7 +67,7 @@ class _CabinetMetaTabsPageState extends State<CabinetMetaTabsPage> {
       if (!mounted) return;
       if (silent) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _loading = false;
       });
     }
@@ -115,7 +116,7 @@ class _CabinetMetaTabsPageState extends State<CabinetMetaTabsPage> {
       if (saved == true) await _load();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      setState(() => _error = e);
     }
   }
 
@@ -147,7 +148,7 @@ class _CabinetMetaTabsPageState extends State<CabinetMetaTabsPage> {
       await _load();
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      setState(() => _error = e);
     }
   }
 
@@ -163,7 +164,7 @@ class _CabinetMetaTabsPageState extends State<CabinetMetaTabsPage> {
               child: ListView(
                 padding: const EdgeInsets.all(AppSpacing.lg),
                 children: [
-                  if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+                  if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
                   Align(
                     alignment: Alignment.centerRight,
                     child: TextButton.icon(

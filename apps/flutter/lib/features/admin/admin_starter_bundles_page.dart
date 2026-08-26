@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/admin_context.dart';
@@ -21,7 +22,7 @@ class AdminStarterBundlesPage extends StatefulWidget {
 class _AdminStarterBundlesPageState extends State<AdminStarterBundlesPage> {
   late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
-  String? _error;
+  Object? _error;
   List<Map<String, dynamic>> _items = const [];
 
   @override
@@ -60,7 +61,7 @@ class _AdminStarterBundlesPageState extends State<AdminStarterBundlesPage> {
       if (!mounted) return;
       if (silent) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _loading = false;
       });
     }
@@ -73,7 +74,7 @@ class _AdminStarterBundlesPageState extends State<AdminStarterBundlesPage> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
           Expanded(
             child: _loading
                 ? Center(child: CircularProgressIndicator())

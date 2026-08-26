@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
@@ -30,7 +31,7 @@ class ProjectListPage extends StatefulWidget {
 class _ProjectListPageState extends State<ProjectListPage> {
   late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
-  String? _error;
+  Object? _error;
   List<Map<String, dynamic>> _projects = const [];
 
   @override
@@ -69,7 +70,7 @@ class _ProjectListPageState extends State<ProjectListPage> {
       if (!mounted) return;
       if (silent) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _loading = false;
       });
     }
@@ -121,7 +122,7 @@ class _ProjectListPageState extends State<ProjectListPage> {
       builder: (context, _) {
         return Column(
           children: [
-            if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+            if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
               child: Align(

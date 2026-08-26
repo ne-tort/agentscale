@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
@@ -31,7 +32,7 @@ class _CabinetCreatePageState extends State<CabinetCreatePage> {
   final _formKey = GlobalKey<FormState>();
   final _nameCtrl = TextEditingController();
   bool _saving = false;
-  String? _error;
+  Object? _error;
 
   @override
   void dispose() {
@@ -68,7 +69,7 @@ class _CabinetCreatePageState extends State<CabinetCreatePage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _saving = false;
       });
     }
@@ -82,7 +83,7 @@ class _CabinetCreatePageState extends State<CabinetCreatePage> {
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
-          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
           Form(
             key: _formKey,
             child: Column(

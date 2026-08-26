@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
@@ -19,7 +20,7 @@ class DevSessionPage extends StatefulWidget {
 class _DevSessionPageState extends State<DevSessionPage> {
   final _baseCtrl = TextEditingController(text: workContext.baseUrl);
   final _tokenCtrl = TextEditingController();
-  String? _error;
+  Object? _error;
 
   @override
   void dispose() {
@@ -45,7 +46,7 @@ class _DevSessionPageState extends State<DevSessionPage> {
         MaterialPageRoute<void>(builder: (_) => const CabinetListPage()),
       );
     } catch (e) {
-      setState(() => _error = e.toString());
+      setState(() => _error = e);
     }
   }
 
@@ -70,7 +71,7 @@ class _DevSessionPageState extends State<DevSessionPage> {
             ),
             if (_error != null) ...[
               const SizedBox(height: AppSpacing.sm),
-              Text(_error!, style: TextStyle(color: context.appColors.danger)),
+              Text(AppErrors.localize(context, _error!), style: TextStyle(color: context.appColors.danger)),
             ],
             const SizedBox(height: AppSpacing.lg),
             AppButton(label: l10n.commonContinueAction, onPressed: _connect),

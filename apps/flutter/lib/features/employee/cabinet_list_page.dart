@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
@@ -28,7 +29,7 @@ class _CabinetListPageState extends State<CabinetListPage> {
   final _viewMode = AppCollectionViewModeStore(_viewPageKey);
   late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
-  String? _error;
+  Object? _error;
   List<Map<String, dynamic>> _cabinets = const [];
 
   @override
@@ -69,7 +70,7 @@ class _CabinetListPageState extends State<CabinetListPage> {
       if (!mounted) return;
       if (silent) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _loading = false;
       });
     }
@@ -123,7 +124,7 @@ class _CabinetListPageState extends State<CabinetListPage> {
           body: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+              if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
               Expanded(
                 child: AppEntityCollection(
                   loading: _loading,

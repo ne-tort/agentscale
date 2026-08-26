@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
@@ -32,7 +33,7 @@ class _CabinetRowEditPageState extends State<CabinetRowEditPage> {
   final _formKey = GlobalKey<FormState>();
   late final Map<String, TextEditingController> _controllers;
   bool _saving = false;
-  String? _error;
+  Object? _error;
 
   @override
   void initState() {
@@ -95,7 +96,7 @@ class _CabinetRowEditPageState extends State<CabinetRowEditPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _saving = false;
       });
     }
@@ -115,7 +116,7 @@ class _CabinetRowEditPageState extends State<CabinetRowEditPage> {
             style: Theme.of(context).textTheme.titleMedium,
           ),
           const SizedBox(height: AppSpacing.sm),
-          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
           Form(
             key: _formKey,
             child: Column(

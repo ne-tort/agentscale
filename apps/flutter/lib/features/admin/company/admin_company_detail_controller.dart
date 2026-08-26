@@ -16,7 +16,7 @@ class AdminCompanyDetailController extends ChangeNotifier {
 
   bool loading = true;
   bool busy = false;
-  String? error;
+  Object? error;
   Map<String, dynamic>? metrics;
   List<Map<String, dynamic>> platformEvents = const [];
 
@@ -151,7 +151,7 @@ class AdminCompanyDetailController extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       if (silent) rethrow;
-      error = e.toString();
+      error = e;
       loading = false;
       notifyListeners();
     }
@@ -309,7 +309,7 @@ class AdminCompanyDetailController extends ChangeNotifier {
       await load();
       return result;
     } catch (e) {
-      error = e.toString();
+      error = e;
       rethrow;
     } finally {
       busy = false;
@@ -326,7 +326,7 @@ class AdminCompanyDetailController extends ChangeNotifier {
       await load();
       return result;
     } catch (e) {
-      error = e.toString();
+      error = e;
       rethrow;
     } finally {
       busy = false;

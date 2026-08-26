@@ -5,6 +5,7 @@ import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/company_metrics_wrap.dart';
 import 'package:prodavan/features/admin/company/admin_company_agent_policy_page.dart';
 import 'package:prodavan/features/admin/company/admin_company_detail_controller.dart';
@@ -120,6 +121,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                         value: '',
                         obscureText: true,
                         hintText: l10n.companyPasswordHint,
+                        invalidMessage: l10n.companyPasswordHint,
                         presentValue: (_) =>
                             ctrl.passwordSet ? '••••••••' : l10n.commonNotSet,
                         formatInputValue: (_) => '',
@@ -128,6 +130,8 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                           final trimmed = v.trim();
                           if (trimmed.length < 8) return;
                           await ctrl.savePassword(trimmed);
+                          if (!context.mounted) return;
+                          AppSnackBar.success(context, l10n.companyPasswordChanged);
                         },
                       ),
                       const SizedBox(height: AppSpacing.md),
@@ -158,13 +162,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                       AppNavPreference(
                         title: l10n.adminPolicy,
                         icon: Icons.smart_toy_outlined,
-                        subtitle: Text(
-                          switch (ctrl.toolPreset) {
-                            'chat_readonly' => l10n.adminToolPresetChatReadonly,
-                            'workspace_full' => l10n.adminToolPresetWorkspaceFull,
-                            _ => l10n.adminToolPresetWorkspaceDev,
-                          },
-                        ),
+                        subtitle: Text(l10n.adminAgentLimits),
                         onTap: () => pushCompanySubPage(
                           context,
                           const AdminCompanyAgentPolicyPage(),

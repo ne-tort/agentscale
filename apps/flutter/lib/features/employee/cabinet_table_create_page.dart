@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/work_context.dart';
@@ -37,7 +38,7 @@ class _CabinetTableCreatePageState extends State<CabinetTableCreatePage> {
   final _columns = [_ColumnDraft(initialName: 'name', type: 'text', required: true)];
   String _storageKind = 'physical';
   bool _saving = false;
-  String? _error;
+  Object? _error;
 
   @override
   void dispose() {
@@ -106,7 +107,7 @@ class _CabinetTableCreatePageState extends State<CabinetTableCreatePage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _saving = false;
       });
     }
@@ -120,7 +121,7 @@ class _CabinetTableCreatePageState extends State<CabinetTableCreatePage> {
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
-          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
           Form(
             key: _formKey,
             child: Column(

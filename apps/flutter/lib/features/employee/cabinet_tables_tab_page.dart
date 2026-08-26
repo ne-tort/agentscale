@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
@@ -32,7 +33,7 @@ class CabinetTablesTabPage extends StatefulWidget {
 class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
   late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
-  String? _error;
+  Object? _error;
   List<Map<String, dynamic>> _tables = const [];
   String? _selectedSlug;
   List<Map<String, dynamic>> _rows = const [];
@@ -111,7 +112,7 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = e.toString();
+        _error = e;
         _loading = false;
       });
     }
@@ -141,7 +142,7 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      setState(() => _error = e);
     }
   }
 
@@ -282,7 +283,7 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
       await _loadRows(slug);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _error = e.toString());
+      setState(() => _error = e);
     }
   }
 
@@ -296,7 +297,7 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
           Expanded(
             child: EmptyPlaceholder(title: l10n.cabinetNoMetaTablesYet),
           ),
@@ -315,7 +316,7 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
+        if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
           child: Align(

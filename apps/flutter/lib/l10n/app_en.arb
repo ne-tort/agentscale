@@ -145,6 +145,7 @@
   "adminEvents": "Events",
   "adminInviteAdmin": "Admin",
   "adminPolicy": "Policy",
+  "adminAgentLimits": "Agent limits",
   "adminQuotas": "Quotas",
   "adminQuotasSummary": "{cabinets} · {packages} · {bundleMb}",
   "@adminQuotasSummary": {
@@ -763,7 +764,25 @@
   "companyOrgMetrics": "Org metrics",
   "companyLoginId": "Company ID",
   "companyPassword": "Password",
-  "companyPasswordHint": "Min 8 characters — Keycloak login password",
+  "companyPasswordHint": "Minimum 8 characters",
+  "companyPasswordChanged": "Password changed successfully",
+  "errorConflict": "Data conflict. Refresh and try again.",
+  "errorForbidden": "You do not have permission for this action.",
+  "errorGateway": "Server temporarily unavailable. Please try again.",
+  "errorHttpStatus": "Request failed (HTTP {status})",
+  "@errorHttpStatus": {
+    "placeholders": {
+      "status": { "type": "int" }
+    }
+  },
+  "errorIdentityProvider": "Could not update credentials. Please try again.",
+  "errorNetwork": "No connection to the server. Check your network.",
+  "errorNotFound": "The requested item was not found.",
+  "errorRateLimited": "Too many requests. Please wait a moment.",
+  "errorServer": "Internal server error. Please try again later.",
+  "errorUnauthorized": "Session expired. Please sign in again.",
+  "errorUnexpected": "Something went wrong.",
+  "errorValidation": "Please check the entered data.",
   "companyCredentialsCreated": "Login: {companyId} · password: {password}",
   "@companyCredentialsCreated": {
     "placeholders": {
