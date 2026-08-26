@@ -554,14 +554,6 @@ def test_delete_attachment_and_signed_webhook(client: TestClient) -> None:
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
 
-    # SPI delivery should have written cabinet audit for project.created
-    audit = client.get(
-        f"/api/v1/cabinets/{cabinet_id}/audit-events",
-        headers={"Authorization": f"Bearer {owner_tok}"},
-    )
-    assert audit.status_code == 200, audit.text
-    assert any(e.get("event_type") == "platform_event.delivered" for e in audit.json())
-
     att = client.post(
         f"/api/v1/projects/{project_id}/attachments",
         headers={"Authorization": f"Bearer {owner_tok}"},
@@ -705,14 +697,6 @@ def test_company_suspended_emit_and_chat_gate(client: TestClient) -> None:
     sess_row = next(s for s in listed.json()["items"] if s["id"] == session_id)
     assert sess_row["status"] == "cancelled"
 
-    audit = client.get(
-        f"/api/v1/cabinets/{cabinet_id}/audit-events",
-        headers={"Authorization": f"Bearer {owner_tok}"},
-    )
-    assert audit.status_code == 200, audit.text
-    audit_types = [e.get("event_type") for e in audit.json()]
-    assert "platform_event.delivered" in audit_types
-
     chat = client.post(
         f"/api/v1/projects/{project_id}/chat",
         headers={"Authorization": f"Bearer {owner_tok}"},
@@ -720,63 +704,6 @@ def test_company_suspended_emit_and_chat_gate(client: TestClient) -> None:
     )
     assert chat.status_code == 403, chat.text
     assert chat.json()["code"] == "COMPANY_SUSPENDED"
-
-
-@requires_postgres
-def test_company_suspended_invokes_package_platform_handler(client: TestClient) -> None:
-    from prodavan.infrastructure.cabinets.package_codec import build_minimal_package_zip
-
-    admin = _token(sub="padmin-pkg", platform_admin=True)
-    created_co = client.post(
-        "/api/v1/companies",
-        headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "PkgCo", "password": "test-company-pass", "admin_email": "owner@pkgco.test"},
-    )
-    assert created_co.status_code == 201, created_co.text
-    company_id = created_co.json()["company"]["id"]
-    owner_tok = _token(sub="owner-pkg", email="owner@pkgco.test")
-
-    cab = client.post(
-        "/api/v1/cabinets",
-        headers={"Authorization": f"Bearer {owner_tok}"},
-        json={"name": "PkgCab", "company_id": company_id},
-    )
-    assert cab.status_code == 201, cab.text
-    cabinet_id = cab.json()["id"]
-
-    pkg_b64 = base64.b64encode(
-        build_minimal_package_zip(
-            name="suspend_hook",
-            platform_events=["company.suspended"],
-        )
-    ).decode("ascii")
-    deployed = client.post(
-        f"/api/v1/cabinets/{cabinet_id}/mcp-packages",
-        headers={"Authorization": f"Bearer {owner_tok}"},
-        json={"zip_base64": pkg_b64},
-    )
-    assert deployed.status_code == 201, deployed.text
-
-    past = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    sub = client.put(
-        f"/api/v1/admin/companies/{company_id}/subscription",
-        headers={"Authorization": f"Bearer {admin}"},
-        json={"subscription_lifetime": False, "subscription_ends_at": past},
-    )
-    assert sub.status_code == 200, sub.text
-
-    audit = client.get(
-        f"/api/v1/cabinets/{cabinet_id}/audit-events",
-        headers={"Authorization": f"Bearer {owner_tok}"},
-    )
-    assert audit.status_code == 200, audit.text
-    events = audit.json()
-    assert any(e.get("event_type") == "platform_event.delivered" for e in events)
-    handler = next(e for e in events if e.get("event_type") == "platform_event.package_handler")
-    detail = handler.get("detail") or {}
-    assert detail.get("platform_event_type") == "company.suspended"
-    assert detail.get("package_name") == "suspend_hook"
-    assert detail.get("action") == "stub"
 
 
 @requires_postgres
@@ -836,7 +763,6 @@ def test_subscription_reactivate_emits_event(client: TestClient) -> None:
         json={"name": "ReactCab", "company_id": company_id},
     )
     assert cab.status_code == 201, cab.text
-    cabinet_id = cab.json()["id"]
 
     past = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     suspend = client.put(
@@ -861,13 +787,6 @@ def test_subscription_reactivate_emits_event(client: TestClient) -> None:
     )
     assert events.status_code == 200, events.text
     assert len(events.json()["items"]) >= 1
-
-    audit = client.get(
-        f"/api/v1/cabinets/{cabinet_id}/audit-events",
-        headers={"Authorization": f"Bearer {owner_tok}"},
-    )
-    assert audit.status_code == 200, audit.text
-    assert any(e.get("event_type") == "platform_event.delivered" for e in audit.json())
 
 
 @requires_postgres
@@ -1144,68 +1063,6 @@ def test_create_project_blocked_when_company_suspended(client: TestClient) -> No
     )
     assert blocked.status_code == 403, blocked.text
     assert blocked.json()["code"] == "COMPANY_SUSPENDED"
-
-
-@requires_postgres
-def test_package_platform_handler_invoked_when_enabled(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from prodavan.config.settings import settings
-    from prodavan.infrastructure.cabinets.package_codec import build_minimal_package_zip
-
-    monkeypatch.setattr(settings, "mcp_platform_event_invoke", True)
-
-    admin = _token(sub="padmin-inv", platform_admin=True)
-    created_co = client.post(
-        "/api/v1/companies",
-        headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "InvCo", "password": "test-company-pass", "admin_email": "owner@invco.test"},
-    )
-    assert created_co.status_code == 201, created_co.text
-    company_id = created_co.json()["company"]["id"]
-    owner_tok = _token(sub="owner-inv", email="owner@invco.test")
-
-    cab = client.post(
-        "/api/v1/cabinets",
-        headers={"Authorization": f"Bearer {owner_tok}"},
-        json={"name": "InvCab", "company_id": company_id},
-    )
-    assert cab.status_code == 201, cab.text
-    cabinet_id = cab.json()["id"]
-
-    pkg_b64 = base64.b64encode(
-        build_minimal_package_zip(
-            name="invoke_hook",
-            platform_events=["company.suspended"],
-            with_platform_event_handler=True,
-        )
-    ).decode("ascii")
-    deployed = client.post(
-        f"/api/v1/cabinets/{cabinet_id}/mcp-packages",
-        headers={"Authorization": f"Bearer {owner_tok}"},
-        json={"zip_base64": pkg_b64},
-    )
-    assert deployed.status_code == 201, deployed.text
-
-    past = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    sub = client.put(
-        f"/api/v1/admin/companies/{company_id}/subscription",
-        headers={"Authorization": f"Bearer {admin}"},
-        json={"subscription_lifetime": False, "subscription_ends_at": past},
-    )
-    assert sub.status_code == 200, sub.text
-
-    audit = client.get(
-        f"/api/v1/cabinets/{cabinet_id}/audit-events",
-        headers={"Authorization": f"Bearer {owner_tok}"},
-    )
-    assert audit.status_code == 200, audit.text
-    handler = next(
-        e for e in audit.json() if e.get("event_type") == "platform_event.package_handler"
-    )
-    detail = handler.get("detail") or {}
-    assert detail.get("action") == "invoked"
-    assert detail.get("exit_code") == 0
 
 
 @requires_postgres
@@ -1628,68 +1485,6 @@ def test_idle_pause_sweep_pauses_stale_project(client: TestClient) -> None:
     assert events.status_code == 200, events.text
     assert any(e.get("payload", {}).get("reason") == "idle_pause" for e in events.json()["items"])
 
-
-@requires_postgres
-def test_mcp_package_deploy_rematerializes_project(client: TestClient) -> None:
-    from prodavan.infrastructure.cabinets.package_codec import build_minimal_package_zip
-
-    admin = _token(sub="padmin-remat", platform_admin=True)
-    created_co = client.post(
-        "/api/v1/companies",
-        headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "RematCo", "password": "test-company-pass", "admin_email": "owner@rematco.test"},
-    )
-    assert created_co.status_code == 201, created_co.text
-    company_id = created_co.json()["company"]["id"]
-    owner_tok = _token(sub="owner-remat", email="owner@rematco.test")
-
-    key = client.post(
-        "/api/v1/admin/ai-keys",
-        headers={"Authorization": f"Bearer {admin}"},
-        json={
-            "name": "Remat Key",
-            "provider": "cursor",
-            "api_kind": "cursor_sdk",
-            "secret": "sk-remat",
-            "company_ids": [company_id],
-        },
-    )
-    assert key.status_code == 201, key.text
-
-    cab = client.post(
-        "/api/v1/cabinets",
-        headers={"Authorization": f"Bearer {owner_tok}"},
-        json={"name": "RematCab", "company_id": company_id},
-    )
-    assert cab.status_code == 201, cab.text
-    cabinet_id = cab.json()["id"]
-
-    proj = client.post(
-        f"/api/v1/cabinets/{cabinet_id}/projects",
-        headers={"Authorization": f"Bearer {owner_tok}"},
-        json={"name": "RematProj"},
-    )
-    assert proj.status_code == 201, proj.text
-    project_id = proj.json()["id"]
-
-    pkg_b64 = base64.b64encode(build_minimal_package_zip(name="remat_pkg")).decode()
-    deployed = client.post(
-        f"/api/v1/cabinets/{cabinet_id}/mcp-packages",
-        headers={"Authorization": f"Bearer {owner_tok}"},
-        json={"zip_base64": pkg_b64},
-    )
-    assert deployed.status_code == 201, deployed.text
-    remat = deployed.json()["rematerialized"]
-    assert remat["count"] == 1
-    assert remat["projects"][0]["project_id"] == project_id
-    assert "remat_pkg" in remat["projects"][0]["package_names"]
-
-    manual = client.post(
-        f"/api/v1/projects/{project_id}/rematerialize",
-        headers={"Authorization": f"Bearer {owner_tok}"},
-    )
-    assert manual.status_code == 200, manual.text
-    assert "remat_pkg" in manual.json()["package_names"]
 
 @requires_postgres
 def test_project_resume_requires_valid_ai_key(client: TestClient) -> None:

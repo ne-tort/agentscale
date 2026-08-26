@@ -442,15 +442,25 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminNoContainers => 'No containers';
 
   @override
-  String get adminContainersHint =>
-      'Containers appear when projects are created';
+  String get adminNoCabinets => 'No cabinets';
 
   @override
-  String get adminCabinetsComingSoonTitle => 'Coming soon';
+  String get adminAddCabinet => 'Add cabinet';
 
   @override
-  String get adminCabinetsComingSoonHint =>
-      'Cabinets admin will land here. Starter bundles stay in employee import.';
+  String adminDeleteCabinetConfirm(String name) {
+    return 'Delete cabinet \"$name\"? All projects and the cabinet schema will be removed.';
+  }
+
+  @override
+  String get adminCabinetCopied => 'Cabinet ID copied';
+
+  @override
+  String get adminSelectCompanyForCabinet => 'Select company';
+
+  @override
+  String get cabinetOpenedPlaceholder =>
+      'Cabinet is open. Meta UI will return in a later iteration.';
 
   @override
   String get adminContainerColProject => 'Project';
@@ -1077,6 +1087,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get commonDelete => 'Delete';
+
+  @override
+  String get commonCopy => 'Copy';
 
   @override
   String get commonEdit => 'Edit';

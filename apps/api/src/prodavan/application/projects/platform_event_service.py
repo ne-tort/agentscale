@@ -63,24 +63,7 @@ class PlatformEventService:
         self._session.add(row)
         await self._session.flush()
         deliveries: list[dict] = []
-        target_cabinets = await self._cabinet_ids_for_delivery(
-            company_id=company_id,
-            cabinet_id=cabinet_id,
-        )
-        if target_cabinets:
-            from prodavan.application.cabinets.platform_event_spi import CabinetPlatformEventSpi
-
-            spi = CabinetPlatformEventSpi(self._session)
-            actor = principal.sub if principal else None
-            for cid in target_cabinets:
-                delivered = await spi.deliver(
-                    cabinet_id=cid,
-                    event_id=row.id,
-                    event_type=event_type,
-                    actor_sub=actor,
-                    payload=payload or {},
-                )
-                deliveries.append(delivered)
+        # Package SPI removed with MCP packages; platform events stay in DB only.
         out = {
             "id": row.id,
             "event_type": row.event_type,

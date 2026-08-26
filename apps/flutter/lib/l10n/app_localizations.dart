@@ -842,23 +842,41 @@ abstract class AppLocalizations {
   /// **'No containers'**
   String get adminNoContainers;
 
-  /// No description provided for @adminContainersHint.
+  /// No description provided for @adminNoCabinets.
   ///
   /// In en, this message translates to:
-  /// **'Containers appear when projects are created'**
-  String get adminContainersHint;
+  /// **'No cabinets'**
+  String get adminNoCabinets;
 
-  /// No description provided for @adminCabinetsComingSoonTitle.
+  /// No description provided for @adminAddCabinet.
   ///
   /// In en, this message translates to:
-  /// **'Coming soon'**
-  String get adminCabinetsComingSoonTitle;
+  /// **'Add cabinet'**
+  String get adminAddCabinet;
 
-  /// No description provided for @adminCabinetsComingSoonHint.
+  /// No description provided for @adminDeleteCabinetConfirm.
   ///
   /// In en, this message translates to:
-  /// **'Cabinets admin will land here. Starter bundles stay in employee import.'**
-  String get adminCabinetsComingSoonHint;
+  /// **'Delete cabinet \"{name}\"? All projects and the cabinet schema will be removed.'**
+  String adminDeleteCabinetConfirm(String name);
+
+  /// No description provided for @adminCabinetCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Cabinet ID copied'**
+  String get adminCabinetCopied;
+
+  /// No description provided for @adminSelectCompanyForCabinet.
+  ///
+  /// In en, this message translates to:
+  /// **'Select company'**
+  String get adminSelectCompanyForCabinet;
+
+  /// No description provided for @cabinetOpenedPlaceholder.
+  ///
+  /// In en, this message translates to:
+  /// **'Cabinet is open. Meta UI will return in a later iteration.'**
+  String get cabinetOpenedPlaceholder;
 
   /// No description provided for @adminContainerColProject.
   ///
@@ -1981,6 +1999,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Delete'**
   String get commonDelete;
+
+  /// No description provided for @commonCopy.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy'**
+  String get commonCopy;
 
   /// No description provided for @commonEdit.
   ///

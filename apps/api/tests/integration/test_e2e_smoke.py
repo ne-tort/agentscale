@@ -151,38 +151,6 @@ def test_e2e_smoke_admin_to_agent_ping(client: TestClient) -> None:
     assert any(e.get("type") == "text_delta" for e in stream_events)
     assert any(e.get("type") == "_turn_complete" for e in stream_events)
 
-    tabs = client.get(f"/api/v1/cabinets/{cabinet_id}/meta/tabs", headers=owner_h)
-    assert tabs.status_code == 200, tabs.text
-    slugs = {t.get("view_slug") for t in tabs.json()}
-    assert "projects" in slugs
-    assert all(t.get("view_slug") for t in tabs.json())
-
-    tables = client.get(f"/api/v1/cabinets/{cabinet_id}/meta/tables", headers=owner_h)
-    assert tables.status_code == 200, tables.text
-    table_list = tables.json()
-    if table_list:
-        first_slug = table_list[0]["slug"]
-        detail = client.get(
-            f"/api/v1/cabinets/{cabinet_id}/meta/tables/{first_slug}",
-            headers=owner_h,
-        )
-        assert detail.status_code == 200, detail.text
-        body = detail.json()
-        assert body["slug"] == first_slug
-        assert isinstance(body.get("columns"), list)
-
-    exported = client.get(f"/api/v1/cabinets/{cabinet_id}/bundle", headers=owner_h)
-    assert exported.status_code == 200, exported.text
-    zip_b64 = exported.json()["zip_base64"]
-    imported = client.post(
-        "/api/v1/cabinets/import",
-        headers=owner_h,
-        json={"company_id": company_id, "zip_base64": zip_b64, "name": "E2E Imported"},
-    )
-    assert imported.status_code == 201, imported.text
-    assert imported.json()["cabinet"]["id"] != cabinet_id
-    assert imported.json().get("tabs_imported", 0) >= 0
-
 
 @requires_postgres
 def test_e2e_disabled_employee_cannot_chat(client: TestClient) -> None:
@@ -519,74 +487,6 @@ def test_e2e_usd_cost_cap_blocks_followup(client: TestClient) -> None:
 
 
 @requires_postgres
-def test_e2e_starter_bundle_import(client: TestClient) -> None:
-    """Download official starter zip → import → line_items table + custom tab."""
-    admin_h = {"Authorization": f"Bearer {_token(sub='e2e-starter-admin', platform_admin=True)}"}
-
-    co = client.post(
-        "/api/v1/companies",
-        headers=admin_h,
-        json={"name": "Starter Co", "password": "test-company-pass", "admin_email": "starter@e2e.test"},
-    )
-    assert co.status_code == 201, co.text
-    company_id = co.json()["company"]["id"]
-
-    catalog = client.get("/api/v1/admin/starter-bundles", headers=admin_h)
-    assert catalog.status_code == 200, catalog.text
-    match = next(i for i in catalog.json()["items"] if i["id"] == "equipment-procurement")
-    assert match["bundle_available"] is True
-
-    bundle = client.get(
-        "/api/v1/admin/starter-bundles/equipment-procurement/bundle",
-        headers=admin_h,
-    )
-    assert bundle.status_code == 200, bundle.text
-    zip_b64 = bundle.json()["zip_base64"]
-
-    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-starter-boss', email='starter@e2e.test')}"}
-    imported = client.post(
-        "/api/v1/cabinets/import",
-        headers=owner_h,
-        json={
-            "company_id": company_id,
-            "zip_base64": zip_b64,
-            "name": "Procurement from starter",
-        },
-    )
-    assert imported.status_code == 201, imported.text
-    body = imported.json()
-    assert body["imported_tables"] >= 1
-    assert body["tabs_imported"] >= 1
-    cabinet_id = body["cabinet"]["id"]
-
-    tables = client.get(f"/api/v1/cabinets/{cabinet_id}/meta/tables", headers=owner_h)
-    assert tables.status_code == 200, tables.text
-    assert any(t["slug"] == "line_items" for t in tables.json())
-
-    detail = client.get(
-        f"/api/v1/cabinets/{cabinet_id}/meta/tables/line_items",
-        headers=owner_h,
-    )
-    assert detail.status_code == 200, detail.text
-    col_names = {c["name"] for c in detail.json()["columns"]}
-    assert "title" in col_names
-    assert "part_number" in col_names
-
-    tabs = client.get(f"/api/v1/cabinets/{cabinet_id}/meta/tabs", headers=owner_h)
-    assert tabs.status_code == 200, tabs.text
-    custom = [t for t in tabs.json() if t.get("title") == "Line items" and not t.get("system")]
-    assert custom
-    assert custom[0].get("table_slug") == "line_items" or custom[0].get("view_slug") == "line_items"
-
-    rows = client.get(
-        f"/api/v1/cabinets/{cabinet_id}/data/line_items/rows",
-        headers=owner_h,
-    )
-    assert rows.status_code == 200, rows.text
-    assert len(rows.json()["rows"]) >= 1
-
-
-@requires_postgres
 def test_e2e_tool_approval_hitl(client: TestClient) -> None:
     """dangerous: message → pending approval → approve continues turn."""
     admin_h = {"Authorization": f"Bearer {_token(sub='e2e-hitl-admin', platform_admin=True)}"}
@@ -836,52 +736,6 @@ def test_e2e_project_pause_blocks_chat(client: TestClient) -> None:
         json={"text": "after resume"},
     )
     assert ok.status_code == 200, ok.text
-
-
-@requires_postgres
-def test_e2e_mcp_deploy_rematerializes_project(client: TestClient) -> None:
-    """L06→L07→L09: MCP package deploy rematerializes active cabinet projects."""
-    import base64
-
-    from prodavan.infrastructure.cabinets.package_codec import build_minimal_package_zip
-
-    admin_h = {"Authorization": f"Bearer {_token(sub='e2e-remat-admin', platform_admin=True)}"}
-    co = client.post(
-        "/api/v1/companies",
-        headers=admin_h,
-        json={"name": "E2ERematCo", "password": "test-company-pass", "admin_email": "owner@e2eremat.test"},
-    )
-    assert co.status_code == 201, co.text
-    company_id = co.json()["company"]["id"]
-
-    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-remat-owner', email='owner@e2eremat.test')}"}
-    cab = client.post(
-        "/api/v1/cabinets",
-        headers=owner_h,
-        json={"name": "E2ERematCab", "company_id": company_id},
-    )
-    assert cab.status_code == 201, cab.text
-    cabinet_id = cab.json()["id"]
-
-    proj = client.post(
-        f"/api/v1/cabinets/{cabinet_id}/projects",
-        headers=owner_h,
-        json={"name": "E2ERematProj"},
-    )
-    assert proj.status_code == 201, proj.text
-    project_id = proj.json()["id"]
-
-    pkg_b64 = base64.b64encode(build_minimal_package_zip(name="e2e_remat_pkg")).decode()
-    deployed = client.post(
-        f"/api/v1/cabinets/{cabinet_id}/mcp-packages",
-        headers=owner_h,
-        json={"zip_base64": pkg_b64},
-    )
-    assert deployed.status_code == 201, deployed.text
-    remat = deployed.json()["rematerialized"]
-    assert remat["count"] == 1
-    assert remat["projects"][0]["project_id"] == project_id
-    assert "e2e_remat_pkg" in remat["projects"][0]["package_names"]
 
 
 @requires_postgres

@@ -11,7 +11,6 @@ from prodavan.api.v1 import (
     admin_object_store,
     admin_platform_events,
     admin_projects,
-    admin_starter_bundles,
     admin_triggers,
     agent,
     ai_keys,
@@ -32,8 +31,6 @@ router.include_router(identity.router)
 router.include_router(company_ai_keys.router)
 router.include_router(admin_companies.router)
 router.include_router(admin_metrics.router)
-router.include_router(admin_starter_bundles.admin_router)
-router.include_router(admin_starter_bundles.router)
 router.include_router(admin_companies.company_router)
 router.include_router(admin_triggers.router)
 router.include_router(admin_platform_events.router)

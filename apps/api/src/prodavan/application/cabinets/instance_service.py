@@ -1,4 +1,4 @@
-"""CabinetInstance lifecycle (L06)."""
+"""CabinetInstance lifecycle — registry + cascade delete."""
 
 from __future__ import annotations
 
@@ -15,13 +15,13 @@ from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.infrastructure.cabinets.schema_provisioner import SchemaProvisioner
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
-from prodavan.infrastructure.persistence.models.identity import EmployeeRow
+from prodavan.infrastructure.persistence.models.identity import CompanyRow, EmployeeRow
 
 logger = logging.getLogger(__name__)
 
 
-def _public(row: CabinetInstanceRow) -> dict:
-    return {
+def _public(row: CabinetInstanceRow, *, company_name: str | None = None) -> dict:
+    out = {
         "id": row.id,
         "name": row.name,
         "schema_name": row.schema_name,
@@ -32,6 +32,9 @@ def _public(row: CabinetInstanceRow) -> dict:
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
+    if company_name is not None:
+        out["company_name"] = company_name
+    return out
 
 
 class CabinetInstanceService:
@@ -44,6 +47,31 @@ class CabinetInstanceService:
         self._session = session
         self._access = CabinetAccessService(session)
         self._provisioner = provisioner or SchemaProvisioner()
+
+    async def create_for_admin(self, *, name: str, company_id: str) -> dict:
+        """Platform Admin creates a cabinet bound to a company (no employee owner)."""
+        if not name.strip():
+            raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="name required")
+        company = await self._session.get(CompanyRow, company_id)
+        if company is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="company not found")
+        await CompanyQuotaService(self._session).assert_can_create_cabinet(company_id)
+
+        row = CabinetInstanceRow(
+            name=name.strip(),
+            schema_name="pending",
+            owner_employee_id=None,
+            company_id=company_id,
+            base_template="base",
+            status=CabinetStatus.ACTIVE,
+        )
+        self._session.add(row)
+        await self._session.flush()
+        row.schema_name = schema_name_for_instance(row.id)
+        await self._provisioner.provision(self._session, instance_id=row.id)
+        await self._session.commit()
+        await self._session.refresh(row)
+        return _public(row, company_name=company.name)
 
     async def create_from_base(
         self,
@@ -74,6 +102,14 @@ class CabinetInstanceService:
         await self._session.refresh(row)
         return _public(row)
 
+    async def list_all_admin(self) -> list[dict]:
+        q = await self._session.execute(
+            select(CabinetInstanceRow, CompanyRow.name)
+            .outerjoin(CompanyRow, CompanyRow.id == CabinetInstanceRow.company_id)
+            .order_by(CabinetInstanceRow.created_at.desc())
+        )
+        return [_public(row, company_name=cname) for row, cname in q.all()]
+
     async def list_for_actor(
         self,
         *,
@@ -81,10 +117,7 @@ class CabinetInstanceService:
         employee: EmployeeRow | None,
     ) -> list[dict]:
         if principal.is_platform_admin:
-            q = await self._session.execute(
-                select(CabinetInstanceRow).order_by(CabinetInstanceRow.created_at.desc())
-            )
-            return [_public(r) for r in q.scalars().all()]
+            return await self.list_all_admin()
         if employee is None:
             raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
         q = await self._session.execute(
@@ -104,7 +137,35 @@ class CabinetInstanceService:
         inst = await self._access.require_access(
             cabinet_id=cabinet_id, principal=principal, employee=employee, write=False
         )
-        return _public(inst)
+        company = await self._session.get(CompanyRow, inst.company_id)
+        return _public(inst, company_name=company.name if company else None)
+
+    async def get_admin(self, *, cabinet_id: str) -> dict:
+        inst = await self._access.get_instance(cabinet_id)
+        company = await self._session.get(CompanyRow, inst.company_id)
+        return _public(inst, company_name=company.name if company else None)
+
+    async def update_admin(
+        self,
+        *,
+        cabinet_id: str,
+        name: str | None = None,
+        company_id: str | None = None,
+    ) -> dict:
+        inst = await self._access.get_instance(cabinet_id)
+        if name is not None:
+            if not name.strip():
+                raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="name required")
+            inst.name = name.strip()
+        if company_id is not None:
+            company = await self._session.get(CompanyRow, company_id)
+            if company is None:
+                raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="company not found")
+            inst.company_id = company_id
+        await self._session.commit()
+        await self._session.refresh(inst)
+        company = await self._session.get(CompanyRow, inst.company_id)
+        return _public(inst, company_name=company.name if company else None)
 
     async def rename(
         self,
@@ -137,53 +198,15 @@ class CabinetInstanceService:
         inst.status = CabinetStatus.ARCHIVED
         await self._session.commit()
         await self._session.refresh(inst)
-        # Wipe MCP package blobs (C-OBJECT-STORE); schema rows stay until hard-delete.
-        wipe: dict = {"ok": False, "deleted": 0, "remaining": 0}
-        try:
-            from prodavan.application.cabinets.package_wipe import wipe_cabinet_packages
-            from prodavan.core.jobs.enqueue import enqueue_wipe_cabinet_packages
+        return _public(inst)
 
-            wipe = wipe_cabinet_packages(cabinet_id)
-            if not wipe.get("ok"):
-                retry = enqueue_wipe_cabinet_packages(cabinet_id)
-                wipe["retry_enqueued"] = bool(retry.get("enqueued"))
-                wipe["retry"] = retry
-        except Exception:
-            logger.exception("cabinet archive: packages wipe failed cabinet_id=%s", cabinet_id)
-        out = _public(inst)
-        out["packages_wipe"] = wipe
-        return out
-
-    async def hard_delete(
-        self,
-        *,
-        cabinet_id: str,
-        principal: Principal,
-        employee: EmployeeRow | None,
-    ) -> dict:
-        """Drop PG schema + wipe blobs + delete instance row (archived only)."""
-        from prodavan.application.cabinets.package_wipe import wipe_cabinet_packages
+    async def delete_with_cascade(self, *, cabinet_id: str) -> dict:
+        """Wipe projects + drop schema + delete row (Admin; no archive required)."""
         from prodavan.application.projects.project_wipe import wipe_project_tree
-        from prodavan.core.jobs.enqueue import (
-            enqueue_wipe_cabinet_packages,
-            enqueue_wipe_project_tree,
-        )
+        from prodavan.core.jobs.enqueue import enqueue_wipe_project_tree
         from prodavan.infrastructure.persistence.models.projects import ProjectRow
 
-        inst = await self._access.require_access(
-            cabinet_id=cabinet_id,
-            principal=principal,
-            employee=employee,
-            write=True,
-            allow_archived_write=True,
-        )
-        if inst.status != CabinetStatus.ARCHIVED:
-            raise AppError(
-                code="CABINET_NOT_ARCHIVED",
-                title="Cabinet not archived",
-                status=409,
-                detail="archive the cabinet before hard-delete",
-            )
+        inst = await self._access.get_instance(cabinet_id)
 
         projects_q = await self._session.execute(
             select(ProjectRow.id, ProjectRow.workspace_key).where(ProjectRow.cabinet_id == cabinet_id)
@@ -198,20 +221,12 @@ class CabinetInstanceService:
                 wipe["retry"] = retry
             project_wipes.append(wipe)
 
-        packages_wipe = wipe_cabinet_packages(cabinet_id)
-        if not packages_wipe.get("ok"):
-            retry = enqueue_wipe_cabinet_packages(cabinet_id)
-            packages_wipe["retry_enqueued"] = bool(retry.get("enqueued"))
-            packages_wipe["retry"] = retry
-
         schema_name = inst.schema_name
-        schema_dropped = False
         try:
             await self._provisioner.drop_schema(self._session, schema_name=schema_name)
-            schema_dropped = True
         except Exception:
             logger.exception(
-                "cabinet hard_delete: drop_schema failed cabinet_id=%s schema=%s",
+                "cabinet delete: drop_schema failed cabinet_id=%s schema=%s",
                 cabinet_id,
                 schema_name,
             )
@@ -228,8 +243,31 @@ class CabinetInstanceService:
             "deleted": True,
             "id": cabinet_id,
             "schema_name": schema_name,
-            "schema_dropped": schema_dropped,
-            "packages_wipe": packages_wipe,
+            "schema_dropped": True,
             "project_wipes": project_wipes,
             "projects_purged": len(project_rows),
         }
+
+    async def hard_delete(
+        self,
+        *,
+        cabinet_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        """Employee/admin hard-delete: archive required unless platform admin."""
+        inst = await self._access.require_access(
+            cabinet_id=cabinet_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+            allow_archived_write=True,
+        )
+        if not principal.is_platform_admin and inst.status != CabinetStatus.ARCHIVED:
+            raise AppError(
+                code="CABINET_NOT_ARCHIVED",
+                title="Cabinet not archived",
+                status=409,
+                detail="archive the cabinet before hard-delete",
+            )
+        return await self.delete_with_cascade(cabinet_id=cabinet_id)

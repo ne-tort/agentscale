@@ -442,15 +442,25 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminNoContainers => 'Нет контейнеров';
 
   @override
-  String get adminContainersHint =>
-      'Контейнеры появляются при создании проектов';
+  String get adminNoCabinets => 'Нет кабинетов';
 
   @override
-  String get adminCabinetsComingSoonTitle => 'Скоро';
+  String get adminAddCabinet => 'Добавить кабинет';
 
   @override
-  String get adminCabinetsComingSoonHint =>
-      'Админка кабинетов будет здесь. Стартовые бандлы остаются в employee import.';
+  String adminDeleteCabinetConfirm(String name) {
+    return 'Удалить кабинет «$name»? Будут удалены все проекты и схема кабинета.';
+  }
+
+  @override
+  String get adminCabinetCopied => 'ID кабинета скопирован';
+
+  @override
+  String get adminSelectCompanyForCabinet => 'Выберите компанию';
+
+  @override
+  String get cabinetOpenedPlaceholder =>
+      'Кабинет открыт. Meta UI вернётся в следующей итерации.';
 
   @override
   String get adminContainerColProject => 'Проект';
@@ -1079,6 +1089,9 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get commonDelete => 'Удалить';
+
+  @override
+  String get commonCopy => 'Копировать';
 
   @override
   String get commonEdit => 'Изменить';

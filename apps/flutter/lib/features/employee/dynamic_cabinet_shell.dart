@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/session/work_context.dart';
+import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_status_banner.dart';
-import 'package:prodavan/features/employee/cabinet_tab_host.dart';
+import 'package:prodavan/core/widgets/empty_placeholder.dart';
+import 'package:prodavan/features/employee/project_list_page.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Dynamic cabinet shell — tabs from L06 meta (L05).
+/// Cabinet shell — placeholder until meta_documents UI returns.
 class DynamicCabinetShell extends StatefulWidget {
   const DynamicCabinetShell({
     super.key,
@@ -21,88 +22,34 @@ class DynamicCabinetShell extends StatefulWidget {
   State<DynamicCabinetShell> createState() => _DynamicCabinetShellState();
 }
 
-class _DynamicCabinetShellState extends State<DynamicCabinetShell>
-    with SingleTickerProviderStateMixin {
-  TabController? _tabs;
-  List<Map<String, dynamic>> _metaTabs = const [];
-  Object? _error;
-  int _metaEpoch = 0;
-
+class _DynamicCabinetShellState extends State<DynamicCabinetShell> {
   @override
   void initState() {
     super.initState();
     workContext.enterCabinet(widget.cabinetId);
-    workContext.addListener(_onWorkContext);
-    _metaEpoch = workContext.cabinetMetaEpoch;
-    _loadTabs();
   }
 
-  void _onWorkContext() {
-    if (workContext.cabinetMetaEpoch != _metaEpoch) {
-      _metaEpoch = workContext.cabinetMetaEpoch;
-      _loadTabs();
-    }
-  }
-
-  Future<void> _loadTabs() async {
-    try {
-      final tabs = await workContext.api.listMetaTabs(widget.cabinetId);
-      if (!mounted) return;
-      setState(() {
-        _metaTabs = tabs;
-        _tabs?.dispose();
-        _tabs = TabController(length: tabs.isEmpty ? 1 : tabs.length, vsync: this);
-        _error = null;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _error = e);
-    }
-  }
-
-  @override
-  void dispose() {
-    workContext.removeListener(_onWorkContext);
-    _tabs?.dispose();
-    super.dispose();
-  }
-
-  Widget _tabBody(Map<String, dynamic> tab) {
-    return CabinetTabHost(
-      cabinetId: widget.cabinetId,
-      cabinetName: widget.cabinetName,
-      tab: tab,
+  void _openProjects() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => ProjectListPage(cabinetId: widget.cabinetId),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final tabs = _metaTabs;
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
       title: Text(widget.cabinetName),
-      bottom: tabs.isEmpty || _tabs == null
-          ? null
-          : TabBar(
-              controller: _tabs,
-              isScrollable: true,
-              tabs: [for (final t in tabs) Tab(text: t['title'] as String? ?? 'Tab')],
-            ),
-      body: Column(
-        children: [
-          if (_error != null)
-            AppStatusBanner(
-              severity: AppStatusSeverity.error,
-              message: AppErrors.localize(context, _error!),
-            ),
-          Expanded(
-            child: tabs.isEmpty || _tabs == null
-                ? const Center(child: CircularProgressIndicator())
-                : TabBarView(
-                    controller: _tabs,
-                    children: [for (final t in tabs) _tabBody(t)],
-                  ),
-          ),
-        ],
+      body: EmptyPlaceholder(
+        title: widget.cabinetName,
+        subtitle: l10n.cabinetOpenedPlaceholder,
+        action: AppButton(
+          label: l10n.commonProjects,
+          expanded: false,
+          onPressed: _openProjects,
+        ),
       ),
     );
   }

@@ -106,10 +106,9 @@ def register_tasks(app) -> None:
 
     @app.task(name=job_names.WIPE_CABINET_PACKAGES, bind=False)
     def wipe_cabinet_packages(cabinet_id: str) -> dict[str, Any]:
-        from prodavan.application.cabinets.package_wipe import wipe_cabinet_packages as wipe_fn
-
-        logger.info("celery task %s cabinet_id=%s", job_names.WIPE_CABINET_PACKAGES, cabinet_id)
-        return wipe_fn(cabinet_id)
+        # MCP package blobs removed from cabinet entity; keep task name for queue compat.
+        logger.info("celery task %s cabinet_id=%s (noop)", job_names.WIPE_CABINET_PACKAGES, cabinet_id)
+        return {"ok": True, "deleted": 0, "remaining": 0, "cabinet_id": cabinet_id, "noop": True}
 
     @app.task(name=job_names.WIPE_PROJECT_TREE, bind=False)
     def wipe_project_tree(workspace_key: str) -> dict[str, Any]:

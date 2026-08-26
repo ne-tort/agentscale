@@ -1,16 +1,50 @@
-"""Admin cabinet maintenance (P0 orphan schema GC)."""
+"""Admin cabinets — CRUD + orphan schema GC."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Query
+from pydantic import BaseModel, Field
 
 from prodavan.api.deps import PlatformAdminDep, SessionDep
 from prodavan.api.rate_limit import enforce_rate_limit
+from prodavan.application.cabinets.instance_service import CabinetInstanceService
 from prodavan.application.cabinets.schema_gc import gc_orphan_cabinet_schemas
 from prodavan.config.settings import settings
 from prodavan.core.infra.cache import cache_key
 
 router = APIRouter(prefix="/admin/cabinets", tags=["admin-cabinets"])
+
+
+class CreateAdminCabinetBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    name: str = Field(min_length=1, max_length=200)
+    company_id: str = Field(min_length=3, max_length=40)
+
+
+class PatchAdminCabinetBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    company_id: str | None = Field(default=None, min_length=3, max_length=40)
+
+
+@router.get("")
+async def list_cabinets(_: PlatformAdminDep, session: SessionDep) -> dict:
+    items = await CabinetInstanceService(session).list_all_admin()
+    return {"items": items}
+
+
+@router.post("")
+async def create_cabinet(
+    body: CreateAdminCabinetBody,
+    _: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    return await CabinetInstanceService(session).create_for_admin(
+        name=body.name,
+        company_id=body.company_id,
+    )
 
 
 @router.post("/gc-orphan-schemas")
@@ -21,11 +55,7 @@ async def gc_orphan_schemas(
     limit: int = Query(default=50, ge=1, le=200),
     enqueue: bool = Query(default=False),
 ) -> dict:
-    """List or DROP ``cab_inst_*`` schemas without a ``cabinet_instances`` row.
-
-    When ``enqueue=true``, schedules Celery task (ignores dry_run for listing —
-    task uses the same dry_run/limit kwargs).
-    """
+    """List or DROP ``cab_inst_*`` schemas without a ``cabinet_instances`` row."""
     await enforce_rate_limit(
         cache_key("rl", "admin", "gc-orphan-schemas"),
         limit=int(settings.admin_ops_rate_limit_per_minute or 0),
@@ -36,3 +66,27 @@ async def gc_orphan_schemas(
 
         return enqueue_gc_orphan_cabinet_schemas(dry_run=dry_run, limit=limit)
     return await gc_orphan_cabinet_schemas(session, dry_run=dry_run, limit=limit)
+
+
+@router.get("/{cabinet_id}")
+async def get_cabinet(cabinet_id: str, _: PlatformAdminDep, session: SessionDep) -> dict:
+    return await CabinetInstanceService(session).get_admin(cabinet_id=cabinet_id)
+
+
+@router.patch("/{cabinet_id}")
+async def patch_cabinet(
+    cabinet_id: str,
+    body: PatchAdminCabinetBody,
+    _: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    return await CabinetInstanceService(session).update_admin(
+        cabinet_id=cabinet_id,
+        name=body.name,
+        company_id=body.company_id,
+    )
+
+
+@router.delete("/{cabinet_id}")
+async def delete_cabinet(cabinet_id: str, _: PlatformAdminDep, session: SessionDep) -> dict:
+    return await CabinetInstanceService(session).delete_with_cascade(cabinet_id=cabinet_id)

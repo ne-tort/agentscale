@@ -328,9 +328,19 @@
   "adminNoAiKeys": "Нет AI-ключей",
   "adminNoCompanies": "Нет компаний",
   "adminNoContainers": "Нет контейнеров",
-  "adminContainersHint": "Контейнеры появляются при создании проектов",
-  "adminCabinetsComingSoonTitle": "Скоро",
-  "adminCabinetsComingSoonHint": "Админка кабинетов будет здесь. Стартовые бандлы остаются в employee import.",
+  "adminNoCabinets": "Нет кабинетов",
+  "adminAddCabinet": "Добавить кабинет",
+  "adminDeleteCabinetConfirm": "Удалить кабинет «{name}»? Будут удалены все проекты и схема кабинета.",
+  "@adminDeleteCabinetConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "adminCabinetCopied": "ID кабинета скопирован",
+  "adminSelectCompanyForCabinet": "Выберите компанию",
+  "cabinetOpenedPlaceholder": "Кабинет открыт. Meta UI вернётся в следующей итерации.",
   "adminContainerColProject": "Проект",
   "adminContainerColStatus": "Статус",
   "adminContainerColCompany": "Компания",
@@ -696,6 +706,7 @@
   "commonCreate": "Создать",
   "commonCreating": "Создание…",
   "commonDelete": "Удалить",
+  "commonCopy": "Копировать",
   "commonEdit": "Изменить",
   "commonDeleting": "Удаление…",
   "commonDisable": "Отключить",

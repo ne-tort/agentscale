@@ -108,10 +108,6 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
     ).then((_) => _reload());
   }
 
-  Future<void> _editCompany(AppEntityRow row) async {
-    _openCompany(row);
-  }
-
   Future<void> _deleteCompany(AppEntityRow row) async {
     final l10n = AppLocalizations.of(context);
     final ok = await AppConfirmPage.push(
@@ -190,7 +186,6 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
                 ),
               ],
               onOpen: _openCompany,
-              onEdit: _editCompany,
               onDelete: _deleteCompany,
               empty: EmptyPlaceholder(
                 title: l10n.adminNoCompanies,

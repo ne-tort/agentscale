@@ -1,4 +1,4 @@
-"""Materialize project workspace from cabinet (L07)."""
+"""Materialize project workspace from cabinet (minimal — no MCP packages)."""
 
 from __future__ import annotations
 
@@ -7,8 +7,6 @@ from typing import Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from prodavan.application.cabinets.packages_service import CabinetPackagesService
-from prodavan.application.cabinets.workspace_docs_service import CabinetWorkspaceDocsService
 from prodavan.domain.projects import workspace_key_for
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
@@ -54,44 +52,8 @@ class ProjectMaterializeService:
         ws_key = workspace_key_for(project_id)
         writer = WorkspaceLayoutWriter(workspace_key=ws_key)
         writer.ensure_dirs()
-
-        agents_md: str | None = None
-        agents_source = "default"
-        schema_name = inst.schema_name if inst else ""
-        if schema_name:
-            agents_md = await CabinetWorkspaceDocsService(session).load_agents_md(schema_name=schema_name)
-            if agents_md:
-                agents_source = "cabinet_meta"
-        writer.write_agents(cabinet_name=cab_name, project_name=proj_name, agents_md=agents_md)
-
-        packages = CabinetPackagesService(session)
-        artifacts: list[tuple[str, bytes]] = []
-        pkg_names: list[str] = []
-        if schema_name:
-            raw_list = await packages.load_enabled_artifacts(schema_name=schema_name)
-            for fname, raw in raw_list:
-                name = fname.rsplit("-", 1)[0] if "-" in fname else fname.removesuffix(".zip")
-                artifacts.append((name, raw))
-                pkg_names.append(name)
-            writer.extract_packages(artifacts)
-
-        sandbox_records = writer.prepare_package_sandboxes(pkg_names) if pkg_names else []
-        mcp_packages = [
-            {
-                "name": rec["name"],
-                "root": rec.get("root") or f"packages/{rec['name']}",
-                "sandbox": {
-                    "status": rec.get("status"),
-                    "entry": rec.get("entry"),
-                    "tools": rec.get("tools", []),
-                    "process": rec.get("process"),
-                    "pid": rec.get("pid"),
-                },
-            }
-            for rec in sandbox_records
-        ]
-
-        writer.write_mcp_config(cabinet_id=cabinet_id, packages=mcp_packages)
+        writer.write_agents(cabinet_name=cab_name, project_name=proj_name, agents_md=None)
+        writer.write_mcp_config(cabinet_id=cabinet_id, packages=[])
         root = writer.workspace_root
         return MaterializeResult(
             project_id=project_id,
@@ -99,9 +61,9 @@ class ProjectMaterializeService:
             workspace_root=str(root),
             mcp_config_path=str(writer.mcp_config_path),
             status="materialized",
-            package_names=tuple(pkg_names),
-            sandbox_packages=tuple(sandbox_records),
-            agents_source=agents_source,
+            package_names=(),
+            sandbox_packages=(),
+            agents_source="default",
         )
 
 

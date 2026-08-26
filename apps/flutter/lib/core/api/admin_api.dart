@@ -407,6 +407,56 @@ class AdminApi {
     return const [];
   }
 
+  Future<List<Map<String, dynamic>>> listCabinets() async {
+    final res = await AuthHttp.get(_uri('/admin/cabinets'));
+    _throwIfError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = body['items'];
+    if (items is List) {
+      return items.cast<Map<String, dynamic>>();
+    }
+    return const [];
+  }
+
+  Future<Map<String, dynamic>> createCabinet({
+    required String name,
+    required String companyId,
+  }) async {
+    final res = await AuthHttp.post(
+      _uri('/admin/cabinets'),
+      body: jsonEncode({'name': name, 'company_id': companyId}),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getCabinet(String cabinetId) async {
+    final res = await AuthHttp.get(_uri('/admin/cabinets/$cabinetId'));
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> updateCabinet({
+    required String cabinetId,
+    String? name,
+    String? companyId,
+  }) async {
+    final payload = <String, dynamic>{};
+    if (name != null) payload['name'] = name;
+    if (companyId != null) payload['company_id'] = companyId;
+    final res = await AuthHttp.patch(
+      _uri('/admin/cabinets/$cabinetId'),
+      body: jsonEncode(payload),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> deleteCabinet(String cabinetId) async {
+    final res = await AuthHttp.delete(_uri('/admin/cabinets/$cabinetId'));
+    _throwIfError(res);
+  }
+
   Future<Map<String, dynamic>> drainTriggers({
     int maxProjects = 20,
     int maxPerProject = 10,

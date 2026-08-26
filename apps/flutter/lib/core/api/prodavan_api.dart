@@ -26,56 +26,6 @@ class ProdavanApi {
 
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
 
-  Future<List<Map<String, dynamic>>> listAuditEvents({
-    required String cabinetId,
-    int limit = 50,
-  }) async {
-    final prev = this.cabinetId;
-    this.cabinetId = cabinetId;
-    try {
-      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId/audit-events?limit=$limit'), extraHeaders: _workHeaders);
-      _throwIfError(res);
-      final body = jsonDecode(res.body);
-      if (body is List) {
-        return body.cast<Map<String, dynamic>>();
-      }
-      return const [];
-    } finally {
-      this.cabinetId = prev;
-    }
-  }
-
-  Future<Map<String, dynamic>> getWorkspaceDoc({
-    required String cabinetId,
-    required String slug,
-  }) async {
-    final prev = this.cabinetId;
-    this.cabinetId = cabinetId;
-    try {
-      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId/workspace-docs/$slug'), extraHeaders: _workHeaders);
-      _throwIfError(res);
-      return jsonDecode(res.body) as Map<String, dynamic>;
-    } finally {
-      this.cabinetId = prev;
-    }
-  }
-
-  Future<Map<String, dynamic>> putWorkspaceDoc({
-    required String cabinetId,
-    required String slug,
-    required String body,
-  }) async {
-    final prev = this.cabinetId;
-    this.cabinetId = cabinetId;
-    try {
-      final res = await AuthHttp.put(_uri('/cabinets/$cabinetId/workspace-docs/$slug'), body: jsonEncode({'body': body}), extraHeaders: _workHeaders);
-      _throwIfError(res);
-      return jsonDecode(res.body) as Map<String, dynamic>;
-    } finally {
-      this.cabinetId = prev;
-    }
-  }
-
   Future<Map<String, dynamic>> me() async {
     final res = await AuthHttp.get(_uri('/me'), extraHeaders: _workHeaders);
     _throwIfError(res);
@@ -89,6 +39,12 @@ class ProdavanApi {
     if (body is List) {
       return body.cast<Map<String, dynamic>>();
     }
+    if (body is Map<String, dynamic>) {
+      final items = body['items'];
+      if (items is List) {
+        return items.cast<Map<String, dynamic>>();
+      }
+    }
     return const [];
   }
 
@@ -96,39 +52,13 @@ class ProdavanApi {
     required String name,
     required String companyId,
   }) async {
-    final res = await AuthHttp.post(_uri('/cabinets'), body: jsonEncode({'name': name, 'company_id': companyId}), extraHeaders: _workHeaders);
+    final res = await AuthHttp.post(
+      _uri('/cabinets'),
+      body: jsonEncode({'name': name, 'company_id': companyId}),
+      extraHeaders: _workHeaders,
+    );
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
-  }
-
-  Future<Map<String, dynamic>> importCabinetBundle({
-    required String companyId,
-    required List<int> zipBytes,
-    String? name,
-  }) async {
-    final res = await AuthHttp.post(_uri('/cabinets/import'), body: jsonEncode({
-        'company_id': companyId,
-        'zip_base64': base64Encode(zipBytes),
-        if (name != null && name.isNotEmpty) 'name': name,
-      }), extraHeaders: _workHeaders);
-    _throwIfError(res);
-    return jsonDecode(res.body) as Map<String, dynamic>;
-  }
-
-  Future<Map<String, dynamic>> exportCabinetBundle(
-    String cabinetId, {
-    bool includeData = true,
-  }) async {
-    final prev = this.cabinetId;
-    this.cabinetId = cabinetId;
-    try {
-      final query = includeData ? '' : '?include_data=false';
-      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId/bundle$query'), extraHeaders: _workHeaders);
-      _throwIfError(res);
-      return jsonDecode(res.body) as Map<String, dynamic>;
-    } finally {
-      this.cabinetId = prev;
-    }
   }
 
   Future<Map<String, dynamic>> getCabinet(String cabinetId) async {
@@ -143,149 +73,18 @@ class ProdavanApi {
     }
   }
 
-  Future<List<Map<String, dynamic>>> listMetaTabs(String cabinetId) async {
-    final prev = this.cabinetId;
-    this.cabinetId = cabinetId;
-    try {
-      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId/meta/tabs'), extraHeaders: _workHeaders);
-      _throwIfError(res);
-      final body = jsonDecode(res.body);
-      if (body is List) {
-        return body.cast<Map<String, dynamic>>();
-      }
-      return const [];
-    } finally {
-      this.cabinetId = prev;
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> listMetaTables(
-    String cabinetId, {
-    bool includeArchived = false,
-  }) async {
-    final prev = this.cabinetId;
-    this.cabinetId = cabinetId;
-    try {
-      final query = includeArchived ? '?include_archived=true' : '';
-      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId/meta/tables$query'), extraHeaders: _workHeaders);
-      _throwIfError(res);
-      final body = jsonDecode(res.body);
-      if (body is List) {
-        return body.cast<Map<String, dynamic>>();
-      }
-      return const [];
-    } finally {
-      this.cabinetId = prev;
-    }
-  }
-
-  Future<Map<String, dynamic>> createMetaTable({
+  Future<Map<String, dynamic>> renameCabinet({
     required String cabinetId,
-    required String slug,
-    required String label,
-    required List<Map<String, dynamic>> columns,
-    String storageKind = 'physical',
-  }) async {
-    final prev = this.cabinetId;
-    this.cabinetId = cabinetId;
-    try {
-      final res = await AuthHttp.post(_uri('/cabinets/$cabinetId/meta/tables'), body: jsonEncode({
-          'slug': slug,
-          'label': label,
-          'storage_kind': storageKind,
-          'columns': columns,
-        }), extraHeaders: _workHeaders);
-      _throwIfError(res);
-      return jsonDecode(res.body) as Map<String, dynamic>;
-    } finally {
-      this.cabinetId = prev;
-    }
-  }
-
-  Future<Map<String, dynamic>> updateMetaTable({
-    required String cabinetId,
-    required String tableSlug,
-    required String label,
-  }) async {
-    final prev = this.cabinetId;
-    this.cabinetId = cabinetId;
-    try {
-      final res = await AuthHttp.patch(_uri('/cabinets/$cabinetId/meta/tables/$tableSlug'), body: jsonEncode({'label': label}), extraHeaders: _workHeaders);
-      _throwIfError(res);
-      return jsonDecode(res.body) as Map<String, dynamic>;
-    } finally {
-      this.cabinetId = prev;
-    }
-  }
-
-  Future<Map<String, dynamic>> archiveMetaTable({
-    required String cabinetId,
-    required String tableSlug,
-  }) async {
-    final prev = this.cabinetId;
-    this.cabinetId = cabinetId;
-    try {
-      final res = await AuthHttp.post(_uri('/cabinets/$cabinetId/meta/tables/$tableSlug/archive'), extraHeaders: _workHeaders);
-      _throwIfError(res);
-      return jsonDecode(res.body) as Map<String, dynamic>;
-    } finally {
-      this.cabinetId = prev;
-    }
-  }
-
-  Future<void> deleteMetaTable({
-    required String cabinetId,
-    required String tableSlug,
-  }) async {
-    final prev = this.cabinetId;
-    this.cabinetId = cabinetId;
-    try {
-      final res = await AuthHttp.delete(_uri('/cabinets/$cabinetId/meta/tables/$tableSlug'), extraHeaders: _workHeaders);
-      _throwIfError(res);
-    } finally {
-      this.cabinetId = prev;
-    }
-  }
-
-  Future<Map<String, dynamic>> updateMetaView({
-    required String cabinetId,
-    required String viewSlug,
-    Map<String, dynamic>? uiJson,
-    String? tableSlug,
-    int? version,
-  }) async {
-    final prev = this.cabinetId;
-    this.cabinetId = cabinetId;
-    try {
-      final body = <String, dynamic>{};
-      if (uiJson != null) body['ui_json'] = uiJson;
-      if (tableSlug != null) body['table_slug'] = tableSlug;
-      if (version != null) body['version'] = version;
-      final res = await AuthHttp.patch(_uri('/cabinets/$cabinetId/meta/views/$viewSlug'), body: jsonEncode(body), extraHeaders: _workHeaders);
-      _throwIfError(res);
-      return jsonDecode(res.body) as Map<String, dynamic>;
-    } finally {
-      this.cabinetId = prev;
-    }
-  }
-
-  Future<Map<String, dynamic>> addMetaColumn({
-    required String cabinetId,
-    required String tableSlug,
     required String name,
-    required String type,
-    bool required = false,
-    bool unique = false,
   }) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await AuthHttp.post(_uri('/cabinets/$cabinetId/meta/tables/$tableSlug/columns'), body: jsonEncode({
-          'name': name,
-          'type': type,
-          'required': required,
-          'unique': unique,
-        }), extraHeaders: _workHeaders);
+      final res = await AuthHttp.patch(
+        _uri('/cabinets/$cabinetId'),
+        body: jsonEncode({'name': name}),
+        extraHeaders: _workHeaders,
+      );
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -293,22 +92,14 @@ class ProdavanApi {
     }
   }
 
-  Future<Map<String, dynamic>> updateMetaColumn({
-    required String cabinetId,
-    required String tableSlug,
-    required String columnName,
-    String? type,
-    bool? required,
-    bool? unique,
-  }) async {
+  Future<Map<String, dynamic>> archiveCabinet(String cabinetId) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final body = <String, dynamic>{};
-      if (type != null) body['type'] = type;
-      if (required != null) body['required'] = required;
-      if (unique != null) body['unique'] = unique;
-      final res = await AuthHttp.patch(_uri('/cabinets/$cabinetId/meta/tables/$tableSlug/columns/$columnName'), body: jsonEncode(body), extraHeaders: _workHeaders);
+      final res = await AuthHttp.post(
+        _uri('/cabinets/$cabinetId/archive'),
+        extraHeaders: _workHeaders,
+      );
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -316,168 +107,33 @@ class ProdavanApi {
     }
   }
 
-  Future<void> deleteMetaColumn({
-    required String cabinetId,
-    required String tableSlug,
-    required String columnName,
-  }) async {
+  Future<void> deleteCabinet(String cabinetId) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await AuthHttp.delete(_uri('/cabinets/$cabinetId/meta/tables/$tableSlug/columns/$columnName'), extraHeaders: _workHeaders);
+      final res = await AuthHttp.delete(
+        _uri('/cabinets/$cabinetId'),
+        extraHeaders: _workHeaders,
+      );
       _throwIfError(res);
     } finally {
       this.cabinetId = prev;
     }
   }
 
-  Future<List<Map<String, dynamic>>> listMetaViews(String cabinetId) async {
+  Future<List<Map<String, dynamic>>> listMetaDocuments(String cabinetId) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId/meta/views'), extraHeaders: _workHeaders);
-      _throwIfError(res);
-      final body = jsonDecode(res.body);
-      if (body is List) {
-        return body.cast<Map<String, dynamic>>();
-      }
-      return const [];
-    } finally {
-      this.cabinetId = prev;
-    }
-  }
-
-  Future<Map<String, dynamic>> createMetaView({
-    required String cabinetId,
-    required String slug,
-    String? tableSlug,
-    Map<String, dynamic>? uiJson,
-    int version = 1,
-  }) async {
-    final prev = this.cabinetId;
-    this.cabinetId = cabinetId;
-    try {
-      final res = await AuthHttp.post(_uri('/cabinets/$cabinetId/meta/views'), body: jsonEncode({
-          'slug': slug,
-          if (tableSlug != null) 'table_slug': tableSlug,
-          'ui_json': uiJson ?? const {'version': 1, 'kind': 'collection', 'title_field': 'title'},
-          'version': version,
-        }), extraHeaders: _workHeaders);
-      _throwIfError(res);
-      return jsonDecode(res.body) as Map<String, dynamic>;
-    } finally {
-      this.cabinetId = prev;
-    }
-  }
-
-  Future<Map<String, dynamic>> createMetaTab({
-    required String cabinetId,
-    required String title,
-    required int order,
-    required String viewSlug,
-  }) async {
-    final prev = this.cabinetId;
-    this.cabinetId = cabinetId;
-    try {
-      final res = await AuthHttp.post(_uri('/cabinets/$cabinetId/meta/tabs'), body: jsonEncode({
-          'title': title,
-          'order': order,
-          'view_slug': viewSlug,
-        }), extraHeaders: _workHeaders);
-      _throwIfError(res);
-      return jsonDecode(res.body) as Map<String, dynamic>;
-    } finally {
-      this.cabinetId = prev;
-    }
-  }
-
-  Future<void> deleteMetaTab({
-    required String cabinetId,
-    required String tabId,
-  }) async {
-    final prev = this.cabinetId;
-    this.cabinetId = cabinetId;
-    try {
-      final res = await AuthHttp.delete(_uri('/cabinets/$cabinetId/meta/tabs/$tabId'), extraHeaders: _workHeaders);
-      _throwIfError(res);
-    } finally {
-      this.cabinetId = prev;
-    }
-  }
-
-  Future<void> deleteMetaView({
-    required String cabinetId,
-    required String viewSlug,
-  }) async {
-    final prev = this.cabinetId;
-    this.cabinetId = cabinetId;
-    try {
-      final res = await AuthHttp.delete(_uri('/cabinets/$cabinetId/meta/views/$viewSlug'), extraHeaders: _workHeaders);
-      _throwIfError(res);
-    } finally {
-      this.cabinetId = prev;
-    }
-  }
-
-  Future<Map<String, dynamic>> queryCabinetRows({
-    required String cabinetId,
-    required String tableSlug,
-    int limit = 50,
-    int offset = 0,
-  }) async {
-    final prev = this.cabinetId;
-    this.cabinetId = cabinetId;
-    try {
-      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId/data/$tableSlug/rows?limit=$limit&offset=$offset'), extraHeaders: _workHeaders);
-      _throwIfError(res);
-      return jsonDecode(res.body) as Map<String, dynamic>;
-    } finally {
-      this.cabinetId = prev;
-    }
-  }
-
-  Future<Map<String, dynamic>> getMetaTable({
-    required String cabinetId,
-    required String tableSlug,
-  }) async {
-    final prev = this.cabinetId;
-    this.cabinetId = cabinetId;
-    try {
-      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId/meta/tables/$tableSlug'), extraHeaders: _workHeaders);
-      _throwIfError(res);
-      return jsonDecode(res.body) as Map<String, dynamic>;
-    } finally {
-      this.cabinetId = prev;
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> listStarterBundles() async {
-    final res = await AuthHttp.get(_uri('/starter-bundles'), extraHeaders: _workHeaders);
-    _throwIfError(res);
-    final body = jsonDecode(res.body) as Map<String, dynamic>;
-    final items = body['items'];
-    if (items is List) {
-      return items.cast<Map<String, dynamic>>();
-    }
-    return const [];
-  }
-
-  Future<Map<String, dynamic>> downloadStarterBundle(String bundleId) async {
-    final res = await AuthHttp.get(_uri('/starter-bundles/$bundleId/bundle'), extraHeaders: _workHeaders);
-    _throwIfError(res);
-    return jsonDecode(res.body) as Map<String, dynamic>;
-  }
-
-  Future<List<Map<String, dynamic>>> listCabinetMcpTools(String cabinetId) async {
-    final prev = this.cabinetId;
-    this.cabinetId = cabinetId;
-    try {
-      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId/mcp/tools'), extraHeaders: _workHeaders);
+      final res = await AuthHttp.get(
+        _uri('/cabinets/$cabinetId/meta/documents'),
+        extraHeaders: _workHeaders,
+      );
       _throwIfError(res);
       final body = jsonDecode(res.body) as Map<String, dynamic>;
-      final tools = body['tools'];
-      if (tools is List) {
-        return tools.cast<Map<String, dynamic>>();
+      final items = body['items'];
+      if (items is List) {
+        return items.cast<Map<String, dynamic>>();
       }
       return const [];
     } finally {
@@ -485,19 +141,17 @@ class ProdavanApi {
     }
   }
 
-  Future<Map<String, dynamic>> upsertCabinetRow({
+  Future<Map<String, dynamic>> getMetaDocument({
     required String cabinetId,
-    required String tableSlug,
-    required Map<String, dynamic> values,
-    String? rowId,
+    required String slug,
   }) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await AuthHttp.post(_uri('/cabinets/$cabinetId/data/$tableSlug/rows'), body: jsonEncode({
-          'values': values,
-          if (rowId != null && rowId.isNotEmpty) 'id': rowId,
-        }), extraHeaders: _workHeaders);
+      final res = await AuthHttp.get(
+        _uri('/cabinets/$cabinetId/meta/documents/$slug'),
+        extraHeaders: _workHeaders,
+      );
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -505,15 +159,37 @@ class ProdavanApi {
     }
   }
 
-  Future<void> deleteCabinetRow({
+  Future<Map<String, dynamic>> putMetaDocument({
     required String cabinetId,
-    required String tableSlug,
-    required String rowId,
+    required String slug,
+    required Object body,
   }) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await AuthHttp.delete(_uri('/cabinets/$cabinetId/data/$tableSlug/rows/$rowId'), extraHeaders: _workHeaders);
+      final res = await AuthHttp.put(
+        _uri('/cabinets/$cabinetId/meta/documents/$slug'),
+        body: jsonEncode({'body': body}),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
+  Future<void> deleteMetaDocument({
+    required String cabinetId,
+    required String slug,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await AuthHttp.delete(
+        _uri('/cabinets/$cabinetId/meta/documents/$slug'),
+        extraHeaders: _workHeaders,
+      );
       _throwIfError(res);
     } finally {
       this.cabinetId = prev;

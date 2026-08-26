@@ -326,9 +326,19 @@
   "adminNoAiKeys": "No AI keys",
   "adminNoCompanies": "No companies",
   "adminNoContainers": "No containers",
-  "adminContainersHint": "Containers appear when projects are created",
-  "adminCabinetsComingSoonTitle": "Coming soon",
-  "adminCabinetsComingSoonHint": "Cabinets admin will land here. Starter bundles stay in employee import.",
+  "adminNoCabinets": "No cabinets",
+  "adminAddCabinet": "Add cabinet",
+  "adminDeleteCabinetConfirm": "Delete cabinet \"{name}\"? All projects and the cabinet schema will be removed.",
+  "@adminDeleteCabinetConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
+  "adminCabinetCopied": "Cabinet ID copied",
+  "adminSelectCompanyForCabinet": "Select company",
+  "cabinetOpenedPlaceholder": "Cabinet is open. Meta UI will return in a later iteration.",
   "adminContainerColProject": "Project",
   "adminContainerColStatus": "Status",
   "adminContainerColCompany": "Company",
@@ -694,6 +704,7 @@
   "commonCreate": "Create",
   "commonCreating": "Creating…",
   "commonDelete": "Delete",
+  "commonCopy": "Copy",
   "commonEdit": "Edit",
   "commonDeleting": "Deleting…",
   "commonDisable": "Disable",

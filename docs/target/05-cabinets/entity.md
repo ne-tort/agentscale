@@ -1,7 +1,7 @@
 # Cabinet — сущность (канон)
 
-Кабинет — **оболочка рабочего пространства** + **meta/data**.  
-Назначение сотрудникам — **Company** ([assignment.md](assignment.md)).  
+Кабинет — **оболочка рабочего пространства** (registry) + **отдельный meta-слой**.  
+Назначение сотрудникам — **Company** ([assignment.md](assignment.md)); MVP Admin привязывает кабинет к Company.  
 Карта: [00-entities](../00-entities.md).
 
 ## Реестр (platform DB)
@@ -10,43 +10,37 @@
 |------|--------|
 | `id` | `cab_*` |
 | `name` | имя |
-| `company_id` | орг-владелец |
+| `company_id` | орг-владелец (Admin create/bind) |
+| `owner_employee_id` | nullable; audit / employee create |
 | `schema_name` | PG schema (`cab_inst_…`) |
 | `status` | active / archived / … |
 | timestamps | |
 
-Доступ сотрудников — через **assignment** (N:M), не единственный `owner_employee_id` как единственный ACL (owner-поле может остаться для audit).
+Доступ сотрудников через **assignment** (N:M) — следующий этап после Admin CRUD ([09-gap-map](../09-gap-map.md)).
 
-## Meta + data (суть)
+## Meta (отдельно от «ядра»)
 
-| Вид | Примеры |
-|-----|---------|
-| UI | tabs, views, columns |
-| MCP | tool defs, packages |
-| Промпты | AGENTS.md, rules, skills (MD / MinIO refs) |
-| Файлы | `file_ref` → MinIO object key |
-| Данные | обычные таблицы строк |
+MVP: таблица `meta_documents` в schema инстанса — `slug` + свободный **JSONB** `body`.  
+Валидация только формата (object/array). Typed DDL, tabs/views/columns, MCP packages, starter bundles — **не** часть cabinet entity в MVP.
 
-UI = интерпретатор meta. Сырой SQL от модели запрещён.  
-Агент в Pod — только `cabinet.*` MCP ([mcp-contracts](mcp-contracts.md)).  
-Файлы в Pod — [materialize-from-meta](materialize-from-meta.md).
+UI = будущий интерпретатор documents. Сырой SQL от модели запрещён.
 
 ## Связи и каскад
 
 ```text
-Company ──assigns──► Employee ↔ Cabinet
+Company ──binds──► Cabinet
 Cabinet ──has──► Project (N) ──1:1──► ProjectContainer
 ```
 
-**Delete Cabinet** → все Projects кабинета (всех сотрудников) wipe + Pod/MinIO + schema + grants.
+**Delete Cabinet** (Admin) → wipe всех Projects кабинета + Pod/MinIO + DROP schema + delete row.
 
 ## Не путать
 
 | | |
 |--|--|
-| Cabinet | meta workspace shell |
+| Cabinet | registry + schema shell |
+| meta_documents | free-form JSON workspace meta |
 | Project | единица работы в кабинете |
 | ProjectContainer | k8s Pod |
-| starter bundle | seed zip |
 
-Дальше: [assignment](assignment.md) · [dynamic-cabinets](dynamic-cabinets.md) · [materialize](materialize-from-meta.md).
+Дальше: [assignment](assignment.md) · [backend](backend.md) · [materialize](materialize-from-meta.md).

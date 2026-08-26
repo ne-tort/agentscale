@@ -9,7 +9,6 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/employee/cabinet_create_page.dart';
-import 'package:prodavan/features/employee/cabinet_import_bundle_page.dart';
 import 'package:prodavan/features/employee/dynamic_cabinet_shell.dart';
 import 'package:prodavan/features/settings/open_app_settings.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -77,12 +76,6 @@ class _CabinetListPageState extends State<CabinetListPage> {
     await _reload();
   }
 
-  void _openImportBundle() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => const CabinetImportBundlePage()),
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -99,11 +92,6 @@ class _CabinetListPageState extends State<CabinetListPage> {
     return AppScaffold(
       title: Text(l10n.commonCabinets),
       actions: [
-        IconButton(
-          onPressed: _openImportBundle,
-          icon: const Icon(Icons.upload_file),
-          tooltip: l10n.cabinetImportBundleTooltip,
-        ),
         IconButton(onPressed: _createCabinet, icon: const Icon(Icons.add)),
         IconButton(
           tooltip: l10n.settings,

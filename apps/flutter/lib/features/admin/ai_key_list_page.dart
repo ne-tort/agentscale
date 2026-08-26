@@ -105,10 +105,6 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
         .then((_) => _reload());
   }
 
-  Future<void> _editKey(AppEntityRow row) async {
-    _openKey(row);
-  }
-
   Future<void> _deleteKey(AppEntityRow row) async {
     final l10n = AppLocalizations.of(context);
     final ok = await AppConfirmPage.push(
@@ -270,7 +266,6 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
               ),
             ],
             onOpen: _openKey,
-            onEdit: _editKey,
             onDelete: _deleteKey,
             enabledOf: _keyEnabled,
             onEnabledChanged: _setKeyEnabled,

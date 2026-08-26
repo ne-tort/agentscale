@@ -53,8 +53,8 @@ class AppEntityRow {
 
 /// Unified entity collection — table on wide, list on narrow (canon 07).
 ///
-/// Long-press enters mutate mode when [onEdit] / [onDelete] / [onEnabledChanged]
-/// are set (edit + delete icons; optional enable switch as rightmost).
+/// Long-press enters mutate mode when [onCopy] / [onDelete] / [onEnabledChanged]
+/// are set (copy + delete icons; optional enable switch as rightmost).
 class AppEntityCollection extends StatefulWidget {
   const AppEntityCollection({
     super.key,
@@ -67,7 +67,7 @@ class AppEntityCollection extends StatefulWidget {
     this.mode,
     this.primaryColumnLabel,
     this.showHeader = true,
-    this.onEdit,
+    this.onCopy,
     this.onDelete,
     this.enabledOf,
     this.onEnabledChanged,
@@ -85,7 +85,7 @@ class AppEntityCollection extends StatefulWidget {
   /// When false (table mode), hides the heading row entirely.
   final bool showHeader;
 
-  final Future<void> Function(AppEntityRow row)? onEdit;
+  final Future<void> Function(AppEntityRow row)? onCopy;
   final Future<void> Function(AppEntityRow row)? onDelete;
 
   /// When set with [onEnabledChanged], long-press shows a trailing switch.
@@ -104,7 +104,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
   String? _editFocusId;
 
   bool get _mutateEnabled =>
-      widget.onEdit != null ||
+      widget.onCopy != null ||
       widget.onDelete != null ||
       widget.onEnabledChanged != null;
 
@@ -139,10 +139,10 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (widget.onEdit != null)
+        if (widget.onCopy != null)
           IconButton(
-            tooltip: l10n.commonEdit,
-            icon: Icon(Icons.edit_outlined, size: 20, color: onSurface),
+            tooltip: l10n.commonCopy,
+            icon: Icon(Icons.copy_outlined, size: 20, color: onSurface),
             padding: EdgeInsets.zero,
             visualDensity: VisualDensity.compact,
             constraints: const BoxConstraints(
@@ -150,7 +150,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
               minHeight: AppInsets.trailingIconExtent,
             ),
             onPressed: () async {
-              await widget.onEdit!(row);
+              await widget.onCopy!(row);
               if (mounted) _clearEdit();
             },
           ),

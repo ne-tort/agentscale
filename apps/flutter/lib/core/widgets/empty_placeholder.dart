@@ -19,7 +19,7 @@ class EmptyPlaceholder extends StatelessWidget {
   const EmptyPlaceholder({
     super.key,
     this.icon = Icons.inbox_outlined,
-    this.iconSize = 48,
+    this.iconSize = 72,
     this.iconColor,
     this.onIconTap,
     this.title,

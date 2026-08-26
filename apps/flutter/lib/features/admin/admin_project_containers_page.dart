@@ -165,11 +165,9 @@ class _AdminProjectContainersPageState extends State<AdminProjectContainersPage>
           AppEntityColumn(id: 'cabinet', label: l10n.adminContainerColCabinet, flex: 2),
         ],
         onOpen: _open,
-        onEdit: _open,
         onDelete: _delete,
         empty: EmptyPlaceholder(
           title: l10n.adminNoContainers,
-          subtitle: l10n.adminContainersHint,
         ),
       ),
     );

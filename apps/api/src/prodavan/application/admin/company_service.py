@@ -622,14 +622,8 @@ class AdminCompanyService:
         )
         cabinets = CabinetInstanceService(self._session)
         cabinets_deleted: list[str] = []
-        for cabinet_id, status in cab_q.all():
-            if status != CabinetStatus.ARCHIVED:
-                await cabinets.archive(
-                    cabinet_id=cabinet_id, principal=principal, employee=None
-                )
-            await cabinets.hard_delete(
-                cabinet_id=cabinet_id, principal=principal, employee=None
-            )
+        for cabinet_id, _status in cab_q.all():
+            await cabinets.delete_with_cascade(cabinet_id=cabinet_id)
             cabinets_deleted.append(cabinet_id)
 
         # Re-load then Core DELETE: DB ON DELETE CASCADE handles memberships/quotas/keys.

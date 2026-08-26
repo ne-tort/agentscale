@@ -1,4 +1,4 @@
-"""Cabinet access control — peer isolation (L06)."""
+"""Cabinet access control — peer isolation."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ class CabinetAccessService:
             return inst
         if employee is None:
             raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
-        if inst.owner_employee_id != employee.id:
+        if inst.owner_employee_id is None or inst.owner_employee_id != employee.id:
             raise AppError(
                 code="FORBIDDEN",
                 title="Forbidden",

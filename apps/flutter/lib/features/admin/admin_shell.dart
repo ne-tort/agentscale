@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/responsive/app_breakpoints.dart';
 import 'package:prodavan/core/widgets/app_layout.dart';
-import 'package:prodavan/features/admin/admin_cabinets_stub_page.dart';
+import 'package:prodavan/features/admin/admin_cabinet_list_page.dart';
 import 'package:prodavan/features/admin/admin_management_page.dart';
 import 'package:prodavan/features/admin/admin_metrics_overview_page.dart';
 import 'package:prodavan/features/admin/admin_project_containers_page.dart';
@@ -61,7 +61,7 @@ class _AdminShellState extends State<AdminShell> {
       AdminCompanyListPage(embedded: true),
       AdminAiKeyListPage(embedded: true),
       AdminProjectContainersPage(embedded: true),
-      AdminCabinetsStubPage(embedded: true),
+      AdminCabinetListPage(embedded: true),
     ];
 
     return AppLayout(

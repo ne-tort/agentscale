@@ -13,15 +13,15 @@
 | **P-CO-01** | Company shell = **локальный Admin** (сотрудники, контейнеры, keys, кабинеты) | 3 tabs: metrics / employees / cabinets RO; нет Keys/Containers | Тонкий org-shell ≠ Admin parity ([03](03-companies/)) |
 | **P-CO-02** | Company **CRUD своих** AI keys (SDK/API) + видит Admin-bound **RO** | API `/companies/{id}/ai-keys` + `owner_scope` (**partial**); Flutter tab — open | Backend link live; UI later |
 | **P-CO-03** | Company list/manage containers **своих** сотрудников | Только Admin `/admin/containers` | Нет company-scoped containers |
-| **P-CO-04** | Cabinets от Admin → Company **RO**; later local CRUD | Employee create + `owner_employee`; нет Admin→Company assign | Неверная модель выдачи ([assignment](05-cabinets/assignment.md)) |
+| **P-CO-04** | Cabinets от Admin → Company **RO**; later local CRUD | **Admin CRUD + company bind** (MVP); Company RO shell / local CRUD — open | RO list + Company CRUD next ([assignment](05-cabinets/assignment.md)) |
 | **P-ID-01** | **Company** имеет **Keycloak-креды** | `companies.keycloak_sub` + role `company` + provisioning (**partial**); live realm cutover / Flutter OIDC — open | Org principal in API; see [session](10-identity-keycloak/session.md) |
 | **P-ID-02** | Admin / Company / Employee — три KC-сущности | Realm roles in `infra/keycloak/realm-prodavan.json`; API resolution live | Cluster Keycloak deploy still open |
-| **P-CAB-01** | Company **назначает** Employee ↔ Cabinet | ACL = `owner_employee_id`; нет Assignment API | Нет grant |
-| **P-CAB-02** | UI кабинета из meta | Meta/`cabinet.*` partial | Gaps E2E |
+| **P-CAB-01** | Company **назначает** Employee ↔ Cabinet | Admin binds Cabinet→Company; **assignment N:M** Employee↔Cabinet — **next after Admin CRUD** | Нет grant API |
+| **P-CAB-02** | UI кабинета из meta | Free-form `meta_documents` JSONB API; employee UI = placeholder | Generic meta UI next |
 | **P-MAT-01** | Pod hydrate из meta/MinIO | object-ws; нет Pod; file_ref слаб | Materialize/Pod debt |
 | **P-POD-01** | `ProjectContainer` = k8s Pod | `object-ws:…`; pause no-op | [14](14-project-containers/) |
-| **P-MCP-01** | Агент в Pod ↔ `cabinet.*` | Subset; не в Pod | Изоляция + контракт |
-| **P-CAS-01** | Delete Cabinet → все Projects wipe | CASCADE hard-delete partial | Archive vs wipe UX |
+| **P-MCP-01** | Агент в Pod ↔ `cabinet.*` | **Out of MVP cabinet entity** (removed typed MCP/packages); future contract | Изоляция + контракт |
+| **P-CAS-01** | Delete Cabinet → все Projects wipe | Admin `delete_with_cascade` wipe → DROP schema → delete row | Employee archive-then-delete remains |
 | **P-INF-01** | MinIO / Kafka / Celery | Local FS / in-process | [13](13-platform-infra/) |
 | **P-KC-01** | Live Keycloak cutover | Часто `AUTH_MODE=test`; provisioning + realm scaffold + brokers docs ready | Cutover `AUTH_MODE=oidc` на shared env |
 | **P-KC-02** | IdP broker live (VK/Yandex) | Docs + realm placeholders; providers **not** live; secrets вне git | Enable IdP + Flutter social buttons |
@@ -32,7 +32,7 @@
 | Тема | Статус |
 |------|--------|
 | Invite employees (Company) | есть (тонкий UI) |
-| Org cabinets list RO | есть (источник — employee-owned, не Admin-assign) |
+| Org cabinets list RO | Admin list + company bind (MVP); Company shell RO still employee-sourced |
 | Admin keys + containers | есть |
 | Company metrics aggregates | есть |
 
@@ -65,7 +65,7 @@
 |--------------------|--------|
 | Company = org без login; UI = Employee + `company.admin` | Company = org **+ KC** + **локальный Admin shell** (**P-CO-01**, **P-ID-01**) |
 | CompanyApi не ведёт Projects / Keys | Company **ведёт** containers + **свои** AI keys (**P-CO-02/03**) |
-| Employee сам создаёт cabinets; Company только metrics | Admin→Company cabinets RO; Company→Employee assign (**P-CO-04**, **P-CAB-01**) |
+| Employee сам создаёт cabinets; Company только metrics | Admin CRUD + company bind (MVP); Company→Employee assign next (**P-CO-04**, **P-CAB-01**) |
 | Keys только Admin inventory + bindings | `owner_scope` platform \| company (**P-CO-02**) |
 
 Остаётся в силе:
@@ -122,7 +122,7 @@ flowchart TB
 |----|-----------------|-----------|
 | Company | Локальный Admin: employees, containers, **company keys**, assign cabinets, policy narrow | Issue JWT; edit platform keys; peer schema без grant |
 | Admin + Keys | Companies (+KC), platform keys + bind, quotas, metrics, assign cabinets→company | Workspace files |
-| Cabinet Runtime | Meta UI, schema, `cabinet.*`, packages | Pod lifecycle |
+| Cabinet Runtime | Registry + `meta_documents` JSONB; Admin CRUD | Typed meta UI / MCP packages / Pod lifecycle |
 | Projects / Containers | Project, Pod port, triggers, materialize hydrate | Hardcoded domain packs |
 | Agent | Port + adapters in Pod | GLM, OpenClaw |
 | UI core | Primitives | Feature ListTile zoos |

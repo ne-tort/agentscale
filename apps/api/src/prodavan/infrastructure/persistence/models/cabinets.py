@@ -1,4 +1,4 @@
-"""Cabinet instance registry — platform DB (L06)."""
+"""Cabinet instance registry — platform DB."""
 
 from __future__ import annotations
 
@@ -21,7 +21,11 @@ class CabinetInstanceRow(Base):
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=_cab_id)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     schema_name: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
-    owner_employee_id: Mapped[str] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    # Nullable: Admin-created cabinets have no employee owner until assignment exists.
+    owner_employee_id: Mapped[str | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     company_id: Mapped[str] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     base_template: Mapped[str] = mapped_column(String(64), nullable=False, default="base")
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
