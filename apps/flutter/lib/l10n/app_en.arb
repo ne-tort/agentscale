@@ -324,6 +324,28 @@
   },
   "adminNoAiKeys": "No AI keys",
   "adminNoCompanies": "No companies",
+  "adminNoContainers": "No containers",
+  "adminContainersHint": "Containers appear when projects are created",
+  "adminCabinetsComingSoonTitle": "Coming soon",
+  "adminCabinetsComingSoonHint": "Cabinets admin will land here. Starter bundles stay in employee import.",
+  "adminContainerColProject": "Project",
+  "adminContainerColStatus": "Status",
+  "adminContainerColCompany": "Company",
+  "adminContainerColEmployee": "Employee",
+  "adminContainerColProvider": "Provider",
+  "adminContainerColCabinet": "Cabinet",
+  "adminContainerStatusActive": "Running",
+  "adminContainerStatusPaused": "Paused",
+  "adminContainerRuntimeRef": "Runtime ref",
+  "adminContainerMetricsHole": "K8s metrics",
+  "adminDeleteContainerConfirm": "Delete project \"{name}\"? Workspace will be wiped.",
+  "@adminDeleteContainerConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "adminDeleteCompanyConfirm": "Delete company \"{name}\"? This disables employees, pauses and deletes projects (workspace wipe), and hard-deletes cabinets.",
   "@adminDeleteCompanyConfirm": {
     "placeholders": {
@@ -781,6 +803,7 @@
   "galleryTwo": "Two",
   "navAiKeys": "AI Keys",
   "navBundles": "Bundles",
+  "navContainers": "Containers",
   "navCabinets": "Cabinets",
   "navCompanies": "Companies",
   "navEmployees": "Employees",

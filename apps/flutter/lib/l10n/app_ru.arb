@@ -326,6 +326,28 @@
   },
   "adminNoAiKeys": "Нет AI-ключей",
   "adminNoCompanies": "Нет компаний",
+  "adminNoContainers": "Нет контейнеров",
+  "adminContainersHint": "Контейнеры появляются при создании проектов",
+  "adminCabinetsComingSoonTitle": "Скоро",
+  "adminCabinetsComingSoonHint": "Админка кабинетов будет здесь. Стартовые бандлы остаются в employee import.",
+  "adminContainerColProject": "Проект",
+  "adminContainerColStatus": "Статус",
+  "adminContainerColCompany": "Компания",
+  "adminContainerColEmployee": "Сотрудник",
+  "adminContainerColProvider": "Провайдер",
+  "adminContainerColCabinet": "Кабинет",
+  "adminContainerStatusActive": "Работает",
+  "adminContainerStatusPaused": "Пауза",
+  "adminContainerRuntimeRef": "Runtime ref",
+  "adminContainerMetricsHole": "K8s метрики",
+  "adminDeleteContainerConfirm": "Удалить проект «{name}»? Workspace будет очищен.",
+  "@adminDeleteContainerConfirm": {
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "adminDeleteCompanyConfirm": "Удалить компанию «{name}»? Будут отключены сотрудники, приостановлены и удалены проекты (wipe workspace), кабинеты удалятся навсегда.",
   "@adminDeleteCompanyConfirm": {
     "placeholders": {
@@ -783,6 +805,7 @@
   "galleryTwo": "Два",
   "navAiKeys": "AI-ключи",
   "navBundles": "Бандлы",
+  "navContainers": "Контейнеры",
   "navCabinets": "Кабинеты",
   "navCompanies": "Компании",
   "navEmployees": "Сотрудники",

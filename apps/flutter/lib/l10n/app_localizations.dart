@@ -830,6 +830,96 @@ abstract class AppLocalizations {
   /// **'No companies'**
   String get adminNoCompanies;
 
+  /// No description provided for @adminNoContainers.
+  ///
+  /// In en, this message translates to:
+  /// **'No containers'**
+  String get adminNoContainers;
+
+  /// No description provided for @adminContainersHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Containers appear when projects are created'**
+  String get adminContainersHint;
+
+  /// No description provided for @adminCabinetsComingSoonTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Coming soon'**
+  String get adminCabinetsComingSoonTitle;
+
+  /// No description provided for @adminCabinetsComingSoonHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Cabinets admin will land here. Starter bundles stay in employee import.'**
+  String get adminCabinetsComingSoonHint;
+
+  /// No description provided for @adminContainerColProject.
+  ///
+  /// In en, this message translates to:
+  /// **'Project'**
+  String get adminContainerColProject;
+
+  /// No description provided for @adminContainerColStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Status'**
+  String get adminContainerColStatus;
+
+  /// No description provided for @adminContainerColCompany.
+  ///
+  /// In en, this message translates to:
+  /// **'Company'**
+  String get adminContainerColCompany;
+
+  /// No description provided for @adminContainerColEmployee.
+  ///
+  /// In en, this message translates to:
+  /// **'Employee'**
+  String get adminContainerColEmployee;
+
+  /// No description provided for @adminContainerColProvider.
+  ///
+  /// In en, this message translates to:
+  /// **'Provider'**
+  String get adminContainerColProvider;
+
+  /// No description provided for @adminContainerColCabinet.
+  ///
+  /// In en, this message translates to:
+  /// **'Cabinet'**
+  String get adminContainerColCabinet;
+
+  /// No description provided for @adminContainerStatusActive.
+  ///
+  /// In en, this message translates to:
+  /// **'Running'**
+  String get adminContainerStatusActive;
+
+  /// No description provided for @adminContainerStatusPaused.
+  ///
+  /// In en, this message translates to:
+  /// **'Paused'**
+  String get adminContainerStatusPaused;
+
+  /// No description provided for @adminContainerRuntimeRef.
+  ///
+  /// In en, this message translates to:
+  /// **'Runtime ref'**
+  String get adminContainerRuntimeRef;
+
+  /// No description provided for @adminContainerMetricsHole.
+  ///
+  /// In en, this message translates to:
+  /// **'K8s metrics'**
+  String get adminContainerMetricsHole;
+
+  /// No description provided for @adminDeleteContainerConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete project \"{name}\"? Workspace will be wiped.'**
+  String adminDeleteContainerConfirm(String name);
+
   /// No description provided for @adminDeleteCompanyConfirm.
   ///
   /// In en, this message translates to:
@@ -2419,6 +2509,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Bundles'**
   String get navBundles;
+
+  /// No description provided for @navContainers.
+  ///
+  /// In en, this message translates to:
+  /// **'Containers'**
+  String get navContainers;
 
   /// No description provided for @navCabinets.
   ///

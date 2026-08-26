@@ -1,14 +1,15 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/widgets/app_layout.dart';
+import 'package:prodavan/features/admin/admin_cabinets_stub_page.dart';
 import 'package:prodavan/features/admin/admin_metrics_overview_page.dart';
-import 'package:prodavan/features/admin/admin_starter_bundles_page.dart';
+import 'package:prodavan/features/admin/admin_project_containers_page.dart';
 import 'package:prodavan/features/admin/ai_key_list_page.dart';
 import 'package:prodavan/features/admin/company_list_page.dart';
 import 'package:prodavan/features/settings/open_app_settings.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Platform Admin shell — Overview + Companies + AI Keys + Bundles (L04).
+/// Platform Admin shell — Overview + Companies + AI Keys + Containers + Cabinets.
 class AdminShell extends StatefulWidget {
   const AdminShell({super.key});
 
@@ -26,14 +27,16 @@ class _AdminShellState extends State<AdminShell> {
       AppNavDestination(icon: Icons.dashboard_outlined, label: l10n.navOverview),
       AppNavDestination(icon: Icons.business_outlined, label: l10n.navCompanies),
       AppNavDestination(icon: Icons.key_outlined, label: l10n.navAiKeys),
-      AppNavDestination(icon: Icons.inventory_2_outlined, label: l10n.navBundles),
+      AppNavDestination(icon: Icons.dns_outlined, label: l10n.navContainers),
+      AppNavDestination(icon: Icons.folder_outlined, label: l10n.navCabinets),
     ];
 
     final pages = const [
       AdminMetricsOverviewPage(embedded: true),
       AdminCompanyListPage(embedded: true),
       AdminAiKeyListPage(embedded: true),
-      AdminStarterBundlesPage(embedded: true),
+      AdminProjectContainersPage(embedded: true),
+      AdminCabinetsStubPage(embedded: true),
     ];
 
     return AppLayout(

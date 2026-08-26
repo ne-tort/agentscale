@@ -436,6 +436,55 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminNoCompanies => 'Нет компаний';
 
   @override
+  String get adminNoContainers => 'Нет контейнеров';
+
+  @override
+  String get adminContainersHint =>
+      'Контейнеры появляются при создании проектов';
+
+  @override
+  String get adminCabinetsComingSoonTitle => 'Скоро';
+
+  @override
+  String get adminCabinetsComingSoonHint =>
+      'Админка кабинетов будет здесь. Стартовые бандлы остаются в employee import.';
+
+  @override
+  String get adminContainerColProject => 'Проект';
+
+  @override
+  String get adminContainerColStatus => 'Статус';
+
+  @override
+  String get adminContainerColCompany => 'Компания';
+
+  @override
+  String get adminContainerColEmployee => 'Сотрудник';
+
+  @override
+  String get adminContainerColProvider => 'Провайдер';
+
+  @override
+  String get adminContainerColCabinet => 'Кабинет';
+
+  @override
+  String get adminContainerStatusActive => 'Работает';
+
+  @override
+  String get adminContainerStatusPaused => 'Пауза';
+
+  @override
+  String get adminContainerRuntimeRef => 'Runtime ref';
+
+  @override
+  String get adminContainerMetricsHole => 'K8s метрики';
+
+  @override
+  String adminDeleteContainerConfirm(String name) {
+    return 'Удалить проект «$name»? Workspace будет очищен.';
+  }
+
+  @override
   String adminDeleteCompanyConfirm(String name) {
     return 'Удалить компанию «$name»? Будут отключены сотрудники, приостановлены и удалены проекты (wipe workspace), кабинеты удалятся навсегда.';
   }
@@ -1306,6 +1355,9 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get navBundles => 'Бандлы';
+
+  @override
+  String get navContainers => 'Контейнеры';
 
   @override
   String get navCabinets => 'Кабинеты';

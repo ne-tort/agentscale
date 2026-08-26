@@ -93,7 +93,8 @@ void main() {
     expect(find.text('Overview'), findsWidgets);
     expect(find.text('Companies'), findsWidgets);
     expect(find.text('AI Keys'), findsWidgets);
-    expect(find.text('Bundles'), findsWidgets);
+    expect(find.text('Containers'), findsWidgets);
+    expect(find.text('Cabinets'), findsWidgets);
     expect(find.text('Prodavan'), findsWidgets);
 
     // Phone-width surface → bottom NavigationBar (+ Settings).
@@ -104,7 +105,7 @@ void main() {
     await tester.pumpWidget(_enApp(const AdminShell()));
     await tester.pumpAndSettle();
     expect(find.byType(NavigationBar), findsOneWidget);
-    expect(find.byType(NavigationDestination), findsNWidgets(5));
+    expect(find.byType(NavigationDestination), findsNWidgets(6));
     expect(find.text('Settings'), findsWidgets);
   });
 }

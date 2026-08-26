@@ -219,6 +219,55 @@ class AdminApi {
     return const [];
   }
 
+  /// P1 Project Containers read-model (Project proxy until Container ORM).
+  Future<List<Map<String, dynamic>>> listContainers({int limit = 200}) async {
+    final res = await http.get(
+      _uri('/admin/containers').replace(queryParameters: {'limit': '$limit'}),
+      headers: _headers,
+    );
+    _throwIfError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = body['items'];
+    if (items is List) {
+      return items.cast<Map<String, dynamic>>();
+    }
+    return const [];
+  }
+
+  Future<Map<String, dynamic>> getContainer(String projectId) async {
+    final res = await http.get(_uri('/admin/containers/$projectId'), headers: _headers);
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> pauseContainer(String projectId) async {
+    final res = await http.post(
+      _uri('/admin/containers/$projectId/pause'),
+      headers: _headers,
+      body: '{}',
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> resumeContainer(String projectId) async {
+    final res = await http.post(
+      _uri('/admin/containers/$projectId/resume'),
+      headers: _headers,
+      body: '{}',
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> deleteContainer(String projectId) async {
+    final res = await http.delete(
+      _uri('/admin/containers/$projectId'),
+      headers: _headers,
+    );
+    _throwIfError(res);
+  }
+
   Future<List<Map<String, dynamic>>> listAiKeys() async {
     final res = await http.get(_uri('/admin/ai-keys'), headers: _headers);
     _throwIfError(res);

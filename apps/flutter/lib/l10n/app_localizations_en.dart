@@ -436,6 +436,55 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminNoCompanies => 'No companies';
 
   @override
+  String get adminNoContainers => 'No containers';
+
+  @override
+  String get adminContainersHint =>
+      'Containers appear when projects are created';
+
+  @override
+  String get adminCabinetsComingSoonTitle => 'Coming soon';
+
+  @override
+  String get adminCabinetsComingSoonHint =>
+      'Cabinets admin will land here. Starter bundles stay in employee import.';
+
+  @override
+  String get adminContainerColProject => 'Project';
+
+  @override
+  String get adminContainerColStatus => 'Status';
+
+  @override
+  String get adminContainerColCompany => 'Company';
+
+  @override
+  String get adminContainerColEmployee => 'Employee';
+
+  @override
+  String get adminContainerColProvider => 'Provider';
+
+  @override
+  String get adminContainerColCabinet => 'Cabinet';
+
+  @override
+  String get adminContainerStatusActive => 'Running';
+
+  @override
+  String get adminContainerStatusPaused => 'Paused';
+
+  @override
+  String get adminContainerRuntimeRef => 'Runtime ref';
+
+  @override
+  String get adminContainerMetricsHole => 'K8s metrics';
+
+  @override
+  String adminDeleteContainerConfirm(String name) {
+    return 'Delete project \"$name\"? Workspace will be wiped.';
+  }
+
+  @override
   String adminDeleteCompanyConfirm(String name) {
     return 'Delete company \"$name\"? This disables employees, pauses and deletes projects (workspace wipe), and hard-deletes cabinets.';
   }
@@ -1304,6 +1353,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get navBundles => 'Bundles';
+
+  @override
+  String get navContainers => 'Containers';
 
   @override
   String get navCabinets => 'Cabinets';
