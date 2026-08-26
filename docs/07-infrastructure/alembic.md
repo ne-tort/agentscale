@@ -46,6 +46,8 @@ PR merge → CI Images (API образ) → Argo sync
 | Место | Поведение |
 |-------|-----------|
 | `infra/k3s/base/prodavan-api/deployment.yaml` | initContainer `migrate` → `./scripts/migrate.sh` |
+| `infra/k3s/overlays/dev/patch-dev.yaml` | `imagePullPolicy: Always` на **api и migrate** (иначе кэш старого `:latest` → upgrade noop) |
+| `apps/api/scripts/migrate.sh` | `upgrade head` → **current == head** → `alembic check` |
 | `apps/api/Dockerfile` | `src` + `alembic` в **одном COPY** (buildx cache не должен рассинхронить ORM и revisions) |
 | `.github/workflows/ci-api.yml` | Postgres → `upgrade head` → **`alembic check`** → downgrade/upgrade smoke → pytest |
 | `.github/workflows/ci-images.yml` | После сборки образа — migration smoke (`migrate.sh` на ephemeral Postgres) |
@@ -62,8 +64,9 @@ Readiness `/health/ready` проверяет доступность Postgres, **
 ## Если миграция «не доехала»
 
 Симптом: 500 на API (missing column), initContainer в CrashLoop, `alembic check` падает в CI.
+Типичный dev-баг: **api** тянет новый `:latest` (`Always`), а **migrate** сидит на кэше (`IfNotPresent`) → `upgrade` noop на старом head, UI ловит ORM 500.
 
-**Делать:** исправить цепочку поставки (Dockerfile, migrate.sh, CI smoke, образ `:latest` после merge) и **передеплоить** через GitOps.
+**Делать:** исправить цепочку поставки (Dockerfile, migrate.sh, Always на migrate, CI smoke, образ `:latest` после merge) и **передеплоить** через GitOps.
 
 **Не делать:** `kubectl exec alembic upgrade`, ручной `ALTER`, `alembic stamp` на shared env, обход Argo.
 

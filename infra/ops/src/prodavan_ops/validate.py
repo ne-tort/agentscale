@@ -182,6 +182,32 @@ def validate_all() -> None:
         raise RuntimeError("dev overlay must set imagePullPolicy: Always for :latest")
     if "name: ghcr-pull" not in manifest:
         raise RuntimeError("dev overlay must reference imagePullSecrets ghcr-pull")
+    _require_api_migrate_always(manifest)
     print("ok")
 
     print("prodavan-ops validate OK")
+
+
+def _require_api_migrate_always(manifest: str) -> None:
+    """migrate initContainer must Always-pull :latest (else schema skew vs api)."""
+    for doc in yaml.safe_load_all(manifest):
+        if not isinstance(doc, dict):
+            continue
+        if doc.get("kind") != "Deployment":
+            continue
+        meta = doc.get("metadata") or {}
+        if meta.get("name") != "prodavan-api":
+            continue
+        inits = ((doc.get("spec") or {}).get("template") or {}).get("spec", {}).get(
+            "initContainers"
+        ) or []
+        migrate = next((c for c in inits if isinstance(c, dict) and c.get("name") == "migrate"), None)
+        if migrate is None:
+            raise RuntimeError("prodavan-api must define initContainer migrate")
+        if migrate.get("imagePullPolicy") != "Always":
+            raise RuntimeError(
+                "prodavan-api migrate initContainer must use imagePullPolicy: Always "
+                "(IfNotPresent caches an old head → upgrade noop + API 500s)"
+            )
+        return
+    raise RuntimeError("prodavan-api Deployment missing from overlays/dev render")
