@@ -4,6 +4,7 @@ import 'package:prodavan/core/responsive/app_breakpoints.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_content_frame.dart';
+import 'package:prodavan/features/settings/settings_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Material defaults — keep leading/trailing on the same icon column as destinations.
@@ -29,8 +30,8 @@ class AppNavDestination {
 ///
 /// - narrow: bottom [NavigationBar] (+ Settings as last item)
 /// - medium: **left** [NavigationRail] icon over label + logo leading + Settings trailing
-/// - expanded: **left** extended rail
-class AppLayout extends StatelessWidget {
+/// - expanded: **left** extended rail (compact on subpages unless very wide)
+class AppLayout extends StatefulWidget {
   const AppLayout({
     super.key,
     required this.body,
@@ -42,6 +43,7 @@ class AppLayout extends StatelessWidget {
     this.constrainBody = true,
     this.onOpenSettings,
     this.onLogoTap,
+    this.subpageOpen = false,
   });
 
   final Widget body;
@@ -54,16 +56,76 @@ class AppLayout extends StatelessWidget {
   final VoidCallback? onOpenSettings;
   final VoidCallback? onLogoTap;
 
-  bool get _hasAppBar => title != null || (actions != null && actions!.isNotEmpty);
+  /// True when a nested shell route (detail, settings, …) is open in the content pane.
+  final bool subpageOpen;
+
+  @override
+  State<AppLayout> createState() => _AppLayoutState();
+}
+
+class _AppLayoutState extends State<AppLayout> {
+  final GlobalKey<NavigatorState> _contentNavKey = GlobalKey<NavigatorState>();
+  bool _settingsOpen = false;
+
+  bool get _subpageOpen => widget.subpageOpen || _settingsOpen;
+
+  void _openSettings() {
+    if (widget.onOpenSettings != null) {
+      widget.onOpenSettings!();
+      return;
+    }
+    setState(() => _settingsOpen = true);
+  }
+
+  bool _onPopPage(Route<dynamic> route, dynamic result) {
+    if (!route.didPop(result)) return false;
+    if (_settingsOpen) setState(() => _settingsOpen = false);
+    return true;
+  }
+
+  List<Page<void>> _contentPages() {
+    final main = _wrapContent(
+      Scaffold(
+        primary: false,
+        appBar: _hasAppBar
+            ? AppBar(title: widget.title, actions: widget.actions)
+            : null,
+        body: widget.body,
+      ),
+    );
+
+    return [
+      MaterialPage<void>(
+        key: const ValueKey<String>('app-layout-main'),
+        child: main,
+      ),
+      if (_settingsOpen)
+        MaterialPage<void>(
+          key: const ValueKey<String>('app-layout-settings'),
+          child: _wrapContent(
+            const Scaffold(
+              primary: false,
+              body: SettingsPage(),
+            ),
+          ),
+        ),
+    ];
+  }
+
+  bool get _hasAppBar =>
+      widget.title != null || (widget.actions != null && widget.actions!.isNotEmpty);
+
+  Widget _wrapContent(Widget child) {
+    if (!widget.constrainBody) return child;
+    return AppContentFrame(child: child);
+  }
 
   Widget _contentColumn() {
-    final page = Scaffold(
-      primary: false,
-      appBar: _hasAppBar ? AppBar(title: title, actions: actions) : null,
-      body: body,
+    return Navigator(
+      key: _contentNavKey,
+      pages: _contentPages(),
+      onPopPage: _onPopPage,
     );
-    if (!constrainBody) return page;
-    return AppContentFrame(child: page);
   }
 
   /// Same horizontal geometry as [NavigationRail] destinations: icon centered in
@@ -131,12 +193,12 @@ class AppLayout extends StatelessWidget {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: onLogoTap,
+        onTap: widget.onLogoTap,
         borderRadius: BorderRadius.circular(12),
         child: MouseRegion(
-          cursor: onLogoTap != null ? SystemMouseCursors.click : MouseCursor.defer,
+          cursor: widget.onLogoTap != null ? SystemMouseCursors.click : MouseCursor.defer,
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
             child: _railIconLabel(extended: extended, icon: badge, label: label),
           ),
         ),
@@ -147,7 +209,6 @@ class AppLayout extends StatelessWidget {
   Widget _settingsControl(BuildContext context, {required bool extended}) {
     final l10n = AppLocalizations.of(context);
     final colors = context.appColors;
-    // Match default NavigationRail icon size (24).
     final icon = Icon(Icons.settings_outlined, color: colors.muted, size: 24);
     final label = Text(
       l10n.settings,
@@ -162,7 +223,7 @@ class AppLayout extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.md),
       child: InkWell(
-        onTap: onOpenSettings,
+        onTap: _openSettings,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
@@ -175,25 +236,25 @@ class AppLayout extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final narrow = AppBreakpoints.isNarrow(context);
-    final expanded = AppBreakpoints.isExpanded(context);
+    final expanded = AppBreakpoints.railExtended(context, subpageOpen: _subpageOpen);
     final content = _contentColumn();
     final l10n = AppLocalizations.of(context);
 
     if (narrow) {
-      final settingsIndex = destinations.length;
+      final settingsIndex = widget.destinations.length;
       return Scaffold(
         body: content,
         bottomNavigationBar: NavigationBar(
-          selectedIndex: selectedIndex.clamp(0, destinations.length - 1),
+          selectedIndex: widget.selectedIndex.clamp(0, widget.destinations.length - 1),
           onDestinationSelected: (i) {
             if (i == settingsIndex) {
-              onOpenSettings?.call();
+              _openSettings();
               return;
             }
-            onDestinationSelected(i);
+            widget.onDestinationSelected(i);
           },
           destinations: [
-            for (final d in destinations)
+            for (final d in widget.destinations)
               NavigationDestination(
                 icon: Icon(d.icon),
                 selectedIcon: Icon(d.selectedIcon ?? d.icon),
@@ -209,31 +270,27 @@ class AppLayout extends StatelessWidget {
     }
 
     final rail = NavigationRail(
-      selectedIndex: selectedIndex,
-      onDestinationSelected: onDestinationSelected,
+      selectedIndex: widget.selectedIndex,
+      onDestinationSelected: widget.onDestinationSelected,
       extended: expanded,
       minWidth: _kRailMinWidth,
       minExtendedWidth: _kExtendedRailWidth,
       labelType: expanded ? NavigationRailLabelType.none : NavigationRailLabelType.all,
+      trailingAtBottom: true,
       leading: expanded
           ? SizedBox(
               width: _kExtendedRailWidth,
               child: _logo(context, extended: true),
             )
           : _logo(context, extended: false),
-      trailing: Expanded(
-        child: Align(
-          alignment: expanded ? Alignment.bottomLeft : Alignment.bottomCenter,
-          child: expanded
-              ? SizedBox(
-                  width: _kExtendedRailWidth,
-                  child: _settingsControl(context, extended: true),
-                )
-              : _settingsControl(context, extended: false),
-        ),
-      ),
+      trailing: expanded
+          ? SizedBox(
+              width: _kExtendedRailWidth,
+              child: _settingsControl(context, extended: true),
+            )
+          : _settingsControl(context, extended: false),
       destinations: [
-        for (final d in destinations)
+        for (final d in widget.destinations)
           NavigationRailDestination(
             icon: Icon(d.icon),
             selectedIcon: Icon(d.selectedIcon ?? d.icon),

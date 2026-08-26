@@ -68,6 +68,9 @@ def test_admin_cabinet_crud_and_meta_documents(client: TestClient) -> None:
     assert body["schema_name"].startswith("cab_inst_")
     assert body["company_id"] == company_id
     assert body["owner_employee_id"] is None
+    assert body["owner_scope"] == "platform"
+    assert company_id in body["company_ids"]
+    assert body["writable"] is False
     cabinet_id = body["id"]
 
     listed = client.get("/api/v1/admin/cabinets", headers={"Authorization": f"Bearer {admin}"})
@@ -156,3 +159,59 @@ def test_employee_cabinet_peer_isolation(client: TestClient) -> None:
         headers={"Authorization": f"Bearer {peer}"},
     )
     assert denied.status_code in (403, 404)
+
+
+@requires_postgres
+def test_admin_cabinet_grants_company_visibility_and_assignment(client: TestClient) -> None:
+    admin = _token(sub="padmin-grant", platform_admin=True)
+    created = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "GrantCo", "password": "test-company-pass", "admin_email": "boss@grantco.test"},
+    )
+    assert created.status_code == 201, created.text
+    company_id = created.json()["company"]["id"]
+
+    cab = client.post(
+        "/api/v1/admin/cabinets",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "Shared Ops", "company_ids": [company_id]},
+    )
+    assert cab.status_code == 200, cab.text
+    cabinet_id = cab.json()["id"]
+
+    boss_tok = _token(sub="boss-grant", email="boss@grantco.test")
+    org = client.get(
+        f"/api/v1/companies/{company_id}/cabinets",
+        headers={"Authorization": f"Bearer {boss_tok}"},
+    )
+    assert org.status_code == 200, org.text
+    assert any(i["id"] == cabinet_id for i in org.json()["items"])
+    assert org.json()["items"][0]["writable"] is False
+
+    invite = client.post(
+        f"/api/v1/companies/{company_id}/employees",
+        headers={"Authorization": f"Bearer {boss_tok}"},
+        json={"email": "member@grantco.test", "display_name": "Member"},
+    )
+    assert invite.status_code == 201, invite.text
+    member_id = invite.json()["employee"]["id"]
+
+    assigned = client.post(
+        f"/api/v1/companies/{company_id}/cabinets/{cabinet_id}/assignments",
+        headers={"Authorization": f"Bearer {boss_tok}"},
+        json={"employee_id": member_id},
+    )
+    assert assigned.status_code == 200, assigned.text
+
+    member_tok = _token(sub="member-grant", email="member@grantco.test")
+    listed = client.get("/api/v1/cabinets", headers={"Authorization": f"Bearer {member_tok}"})
+    assert listed.status_code == 200, listed.text
+    assert any(i["id"] == cabinet_id for i in listed.json()["items"])
+
+    meta_denied = client.put(
+        f"/api/v1/cabinets/{cabinet_id}/meta/documents/ui",
+        headers={"Authorization": f"Bearer {boss_tok}"},
+        json={"body": {"version": 1}},
+    )
+    assert meta_denied.status_code == 403

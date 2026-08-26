@@ -10,6 +10,7 @@ import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/company/company_invite_employee_page.dart';
+import 'package:prodavan/features/company/company_employee_cabinets_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Company employees — invite + disable (L04). No static cabinet grants.
@@ -148,7 +149,19 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
                 AppEntityColumn(id: 'role', label: l10n.companyRole),
                 AppEntityColumn(id: 'status', label: l10n.commonStatus),
               ],
-              onOpen: (_) {},
+              onOpen: (row) {
+                Navigator.of(context)
+                    .push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => CompanyEmployeeCabinetsPage(
+                          companyId: widget.companyId,
+                          employeeId: row.id,
+                          employeeEmail: row.title,
+                        ),
+                      ),
+                    )
+                    .then((_) => _reload());
+              },
               empty: EmptyPlaceholder(
                 title: l10n.companyNoEmployees,
                 subtitle: l10n.companyInviteViaKeycloakNoPassword,

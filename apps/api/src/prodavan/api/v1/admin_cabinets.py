@@ -19,7 +19,8 @@ class CreateAdminCabinetBody(BaseModel):
     model_config = {"extra": "forbid"}
 
     name: str = Field(min_length=1, max_length=200)
-    company_id: str = Field(min_length=3, max_length=40)
+    company_id: str | None = Field(default=None, min_length=3, max_length=40)
+    company_ids: list[str] = Field(default_factory=list)
 
 
 class PatchAdminCabinetBody(BaseModel):
@@ -27,6 +28,7 @@ class PatchAdminCabinetBody(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
     company_id: str | None = Field(default=None, min_length=3, max_length=40)
+    company_ids: list[str] | None = None
 
 
 @router.get("")
@@ -44,6 +46,7 @@ async def create_cabinet(
     return await CabinetInstanceService(session).create_for_admin(
         name=body.name,
         company_id=body.company_id,
+        company_ids=body.company_ids,
     )
 
 
@@ -84,6 +87,7 @@ async def patch_cabinet(
         cabinet_id=cabinet_id,
         name=body.name,
         company_id=body.company_id,
+        company_ids=body.company_ids,
     )
 
 

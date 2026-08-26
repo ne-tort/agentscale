@@ -62,6 +62,47 @@ class CompanyApi {
     return const [];
   }
 
+  Future<List<Map<String, dynamic>>> listCabinetAssignments({
+    required String companyId,
+    required String cabinetId,
+  }) async {
+    final res = await AuthHttp.get(
+      _uri('/companies/$companyId/cabinets/$cabinetId/assignments'),
+    );
+    _throwIfError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = body['items'];
+    if (items is List) {
+      return items.cast<Map<String, dynamic>>();
+    }
+    return const [];
+  }
+
+  Future<Map<String, dynamic>> assignCabinetEmployee({
+    required String companyId,
+    required String cabinetId,
+    required String employeeId,
+  }) async {
+    final res = await AuthHttp.post(
+      _uri('/companies/$companyId/cabinets/$cabinetId/assignments'),
+      body: jsonEncode({'employee_id': employeeId}),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> revokeCabinetAssignment({
+    required String companyId,
+    required String cabinetId,
+    required String employeeId,
+  }) async {
+    final res = await AuthHttp.delete(
+      _uri('/companies/$companyId/cabinets/$cabinetId/assignments/$employeeId'),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> inviteEmployee({
     required String companyId,
     required String email,

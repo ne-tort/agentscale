@@ -7,7 +7,7 @@ import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
-import 'package:prodavan/core/widgets/app_snack_bar.dart';
+import 'package:prodavan/features/company/company_cabinet_detail_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Org cabinets list — metadata only, read-mostly (L04).
@@ -68,6 +68,23 @@ class _CompanyCabinetsPageState extends State<CompanyCabinetsPage> {
     }
   }
 
+  void _openCabinet(AppEntityRow row) {
+    final cab = _cabinets.firstWhere((c) => c['id'] == row.id);
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute<void>(
+            builder: (_) => CompanyCabinetDetailPage(
+              companyId: widget.companyId,
+              cabinetId: row.id,
+              cabinetName: row.title,
+              writable: cab['writable'] == true,
+              ownerScope: cab['owner_scope'] as String? ?? 'platform',
+            ),
+          ),
+        )
+        .then((_) => _reload());
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -76,9 +93,10 @@ class _CompanyCabinetsPageState extends State<CompanyCabinetsPage> {
           (c) => AppEntityRow(
             id: c['id'] as String,
             title: c['name'] as String? ?? c['id'] as String,
-            subtitle: c['owner_email'] as String?,
+            subtitle: c['owner_scope'] as String?,
             cells: {
-              'owner': c['owner_email'] as String? ?? '—',
+              'scope': c['owner_scope'] as String? ?? '—',
+              'assignments': '${c['assignments_count'] ?? 0}',
               'status': c['status'] as String? ?? '—',
             },
           ),
@@ -99,15 +117,11 @@ class _CompanyCabinetsPageState extends State<CompanyCabinetsPage> {
               rows: rows,
               primaryColumnLabel: l10n.companyCabinet,
               columns: [
-                AppEntityColumn(id: 'owner', label: l10n.companyOwner),
+                AppEntityColumn(id: 'scope', label: l10n.adminCabinetOwnerScope, width: 96),
+                AppEntityColumn(id: 'assignments', label: l10n.companyAssignedEmployees, width: 96),
                 AppEntityColumn(id: 'status', label: l10n.commonStatus, width: 96),
               ],
-              onOpen: (row) {
-                AppSnackBar.info(
-                  context,
-                  l10n.companyReadOnlyOrgView(row.title),
-                );
-              },
+              onOpen: _openCabinet,
               empty: EmptyPlaceholder(
                 title: l10n.companyNoCabinets,
                 subtitle: l10n.companyCabinetsEmptyHint,

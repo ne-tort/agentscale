@@ -1,8 +1,8 @@
 # Cabinet — сущность (канон)
 
 Кабинет — **оболочка рабочего пространства** (registry) + **отдельный meta-слой**.  
-Назначение сотрудникам — **Company** ([assignment.md](assignment.md)); MVP Admin привязывает кабинет к Company.  
-Карта: [00-entities](../00-entities.md).
+Назначение: N:M grants Admin→Company + Company→Employee ([assignment.md](assignment.md)).  
+Карта: [00-entities](../00-entities.md) · Ownership: [00-ownership-matrix](../00-ownership-matrix.md).
 
 ## Реестр (platform DB)
 
@@ -10,29 +10,34 @@
 |------|--------|
 | `id` | `cab_*` |
 | `name` | имя |
-| `company_id` | орг-владелец (Admin create/bind) |
+| `owner_scope` | `platform` \| `company` |
+| `owner_company_id` | creator company при `owner_scope=company` |
+| `company_id` | legacy anchor (primary grant); nullable |
 | `owner_employee_id` | nullable; audit / employee create |
 | `schema_name` | PG schema (`cab_inst_…`) |
 | `status` | active / archived / … |
 | timestamps | |
 
-Доступ сотрудников через **assignment** (N:M) — следующий этап после Admin CRUD ([09-gap-map](../09-gap-map.md)).
+### Grant tables
+
+- `cabinet_company_grants` — N:M cabinet ↔ company (`mode`, `status`)
+- `cabinet_employee_assignments` — N:M cabinet ↔ employee (`role`, `status`)
+
+Доступ сотрудников через **assignment**; доступ компании через **company grant**.
 
 ## Meta (отдельно от «ядра»)
 
 MVP: таблица `meta_documents` в schema инстанса — `slug` + свободный **JSONB** `body`.  
-Валидация только формата (object/array). Typed DDL, tabs/views/columns, MCP packages, starter bundles — **не** часть cabinet entity в MVP.
-
-UI = будущий интерпретатор documents. Сырой SQL от модели запрещён.
+Platform-owned cabinets: Company/Employee **read** meta; **write** только Admin или company-owned.
 
 ## Связи и каскад
 
 ```text
-Company ──binds──► Cabinet
+Company ──grants (N:M)──► Cabinet
 Cabinet ──has──► Project (N) ──1:1──► ProjectContainer
 ```
 
-**Delete Cabinet** (Admin) → wipe всех Projects кабинета + Pod/MinIO + DROP schema + delete row.
+**Delete Cabinet** (Admin) → wipe всех Projects кабинета + Pod/MinIO + DROP schema + delete row + grants.
 
 ## Не путать
 

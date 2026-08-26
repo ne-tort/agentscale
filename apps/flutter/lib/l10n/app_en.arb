@@ -337,6 +337,15 @@
     }
   },
   "adminCabinetCopied": "Cabinet ID copied",
+  "adminCabinetOwnerScope": "Owner scope",
+  "adminCabinetCompaniesCount": "{count} companies",
+  "@adminCabinetCompaniesCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "adminSelectCompanyForCabinet": "Select company",
   "cabinetOpenedPlaceholder": "Cabinet is open. Meta UI will return in a later iteration.",
   "adminContainerColProject": "Project",
@@ -698,12 +707,14 @@
   "commonCabinets": "Cabinets",
   "commonCancel": "Cancel",
   "commonCompany": "Company",
+  "commonCompanies": "Companies",
   "commonDescription": "Description",
   "commonEntity": "Name",
   "commonContinueAction": "Continue",
   "commonCreate": "Create",
   "commonCreating": "Creating…",
   "commonDelete": "Delete",
+  "commonRemove": "Remove",
   "commonCopy": "Copy",
   "commonEdit": "Edit",
   "commonDeleting": "Deleting…",
@@ -771,6 +782,10 @@
   "companyInviteViaKeycloakPasswordNotAccepted": "Invite via Keycloak — password is not accepted here.",
   "companyInviting": "Inviting…",
   "companyNoCabinets": "No cabinets",
+  "companyAssignEmployeeToCabinet": "Assign employee",
+  "companyAssignedEmployees": "Assigned",
+  "companyNoAssignedEmployees": "No employees assigned",
+  "companyAssignCabinetsToEmployee": "Cabinet access",
   "companyNoEmployees": "No employees",
   "companyOrgMetrics": "Org metrics",
   "companyLoginId": "Company ID",

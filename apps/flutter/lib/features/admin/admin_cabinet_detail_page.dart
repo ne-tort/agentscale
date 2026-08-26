@@ -8,7 +8,7 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Admin cabinet detail — name + company binding (seamless preferences).
+/// Admin cabinet detail — name, multi-company grants, owner_scope badge.
 class AdminCabinetDetailPage extends StatefulWidget {
   const AdminCabinetDetailPage({
     super.key,
@@ -27,8 +27,8 @@ class _AdminCabinetDetailPageState extends State<AdminCabinetDetailPage> {
   bool _loading = true;
   Object? _error;
   String _name = '';
-  String _companyId = '';
-  String _companyName = '';
+  String _ownerScope = 'platform';
+  Set<String> _companyIds = {};
   List<Map<String, dynamic>> _companies = const [];
 
   @override
@@ -47,12 +47,13 @@ class _AdminCabinetDetailPageState extends State<AdminCabinetDetailPage> {
       final cab = await adminContext.api.getCabinet(widget.cabinetId);
       final companies = await adminContext.api.listCompanies();
       if (!mounted) return;
+      final ids = cab['company_ids'];
       setState(() {
         _name = cab['name'] as String? ?? widget.cabinetName;
-        _companyId = cab['company_id'] as String? ?? '';
-        _companyName = cab['company_name'] as String? ??
-            cab['company_id'] as String? ??
-            '';
+        _ownerScope = cab['owner_scope'] as String? ?? 'platform';
+        _companyIds = ids is List
+            ? ids.map((e) => e.toString()).toSet()
+            : <String>{};
         _companies = companies;
         _loading = false;
       });
@@ -83,18 +84,19 @@ class _AdminCabinetDetailPageState extends State<AdminCabinetDetailPage> {
     }
   }
 
-  Future<void> _saveCompany(String companyId) async {
-    if (companyId.isEmpty || companyId == _companyId) return;
+  Future<void> _saveCompanies(Set<String> companyIds) async {
+    if (companyIds.isEmpty || companyIds == _companyIds) return;
     try {
       final updated = await adminContext.api.updateCabinet(
         cabinetId: widget.cabinetId,
-        companyId: companyId,
+        companyIds: companyIds.toList(),
       );
       if (!mounted) return;
+      final ids = updated['company_ids'];
       setState(() {
-        _companyId = updated['company_id'] as String? ?? companyId;
-        _companyName = updated['company_name'] as String? ??
-            _companyLabel(companyId);
+        _companyIds = ids is List
+            ? ids.map((e) => e.toString()).toSet()
+            : companyIds;
       });
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
@@ -111,6 +113,12 @@ class _AdminCabinetDetailPageState extends State<AdminCabinetDetailPage> {
     return id;
   }
 
+  String _companiesSubtitle(Set<String> ids, AppLocalizations l10n) {
+    if (ids.isEmpty) return l10n.commonNotSet;
+    if (ids.length == 1) return _companyLabel(ids.first);
+    return l10n.adminCabinetCompaniesCount(ids.length);
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -118,8 +126,8 @@ class _AdminCabinetDetailPageState extends State<AdminCabinetDetailPage> {
         .map((c) => c['id'] as String)
         .where((id) => id.isNotEmpty)
         .toList();
-    if (_companyId.isNotEmpty && !companyChoices.contains(_companyId)) {
-      companyChoices.insert(0, _companyId);
+    for (final id in _companyIds) {
+      if (!companyChoices.contains(id)) companyChoices.insert(0, id);
     }
 
     return AppScaffold(
@@ -134,6 +142,11 @@ class _AdminCabinetDetailPageState extends State<AdminCabinetDetailPage> {
                     severity: AppStatusSeverity.error,
                     message: AppErrors.localize(context, _error!),
                   ),
+                ListTile(
+                  leading: const Icon(Icons.shield_outlined),
+                  title: Text(l10n.adminCabinetOwnerScope),
+                  subtitle: Text(_ownerScope),
+                ),
                 AppValuePreference<String>(
                   title: l10n.commonName,
                   icon: Icons.label_outline_rounded,
@@ -142,22 +155,16 @@ class _AdminCabinetDetailPageState extends State<AdminCabinetDetailPage> {
                   onSave: _saveName,
                 ),
                 if (companyChoices.isNotEmpty)
-                  AppChoicePreference<String>(
-                    title: l10n.commonCompany,
+                  AppMultiChoicePreference<String>(
+                    title: l10n.commonCompanies,
                     icon: Icons.business_outlined,
-                    value: _companyId.isEmpty ? companyChoices.first : _companyId,
+                    values: _companyIds,
                     choices: companyChoices,
                     keyFor: (v) => v,
-                    labelFor: (id) =>
-                        id == _companyId && _companyName.isNotEmpty
-                            ? _companyName
-                            : _companyLabel(id),
-                    presentValue: (id) =>
-                        id == _companyId && _companyName.isNotEmpty
-                            ? _companyName
-                            : _companyLabel(id),
+                    labelFor: _companyLabel,
+                    presentValues: (ids) => _companiesSubtitle(ids, l10n),
                     pickerTitle: l10n.adminSelectCompanyForCabinet,
-                    onSave: _saveCompany,
+                    onSave: _saveCompanies,
                   ),
               ],
             ),

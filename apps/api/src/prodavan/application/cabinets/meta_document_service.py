@@ -135,7 +135,7 @@ class CabinetMetaDocumentService:
         slug = _check_slug(slug)
         body = _ensure_json_body(body)
         inst = await self._access.require_access(
-            cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
+            cabinet_id=cabinet_id, principal=principal, employee=employee, write=True, registry_write=True
         )
         qschema = qident(inst.schema_name)
         await self._session.execute(
@@ -164,7 +164,7 @@ class CabinetMetaDocumentService:
     ) -> None:
         slug = _check_slug(slug)
         inst = await self._access.require_access(
-            cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
+            cabinet_id=cabinet_id, principal=principal, employee=employee, write=True, registry_write=True
         )
         qschema = qident(inst.schema_name)
         result = await self._session.execute(

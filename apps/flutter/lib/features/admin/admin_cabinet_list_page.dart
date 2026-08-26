@@ -85,6 +85,7 @@ class _AdminCabinetListPageState extends State<AdminCabinetListPage> {
       MaterialPageRoute(
         builder: (_) => AppCatalogSelectPage(
           title: l10n.adminSelectCompanyForCabinet,
+          multiSelect: true,
           items: [
             for (final c in companies)
               AppCatalogSelectItem(
@@ -96,12 +97,11 @@ class _AdminCabinetListPageState extends State<AdminCabinetListPage> {
       ),
     );
     if (picked == null || picked.isEmpty || !mounted) return;
-    final companyId = picked.first;
 
     try {
       final body = await adminContext.api.createCabinet(
         name: name,
-        companyId: companyId,
+        companyIds: picked.toList(),
       );
       if (!mounted) return;
       await _reload();
@@ -166,16 +166,19 @@ class _AdminCabinetListPageState extends State<AdminCabinetListPage> {
     final l10n = AppLocalizations.of(context);
     final rows = _cabinets
         .map(
-          (c) => AppEntityRow(
-            id: c['id'] as String,
-            title: c['name'] as String? ?? c['id'] as String,
-            cells: {
-              'company': c['company_name'] as String? ??
-                  c['company_id'] as String? ??
-                  l10n.commonNotSet,
-              'status': c['status'] as String? ?? '',
-            },
-          ),
+          (c) {
+            final companyIds = c['company_ids'];
+            final count = companyIds is List ? companyIds.length : 0;
+            return AppEntityRow(
+              id: c['id'] as String,
+              title: c['name'] as String? ?? c['id'] as String,
+              cells: {
+                'companies': count > 0 ? '$count' : l10n.commonNotSet,
+                'scope': c['owner_scope'] as String? ?? '—',
+                'status': c['status'] as String? ?? '',
+              },
+            );
+          },
         )
         .toList();
 
@@ -196,7 +199,8 @@ class _AdminCabinetListPageState extends State<AdminCabinetListPage> {
               rows: rows,
               primaryColumnLabel: l10n.commonCabinets,
               columns: [
-                AppEntityColumn(id: 'company', label: l10n.commonCompany),
+                AppEntityColumn(id: 'companies', label: l10n.commonCompanies),
+                AppEntityColumn(id: 'scope', label: l10n.adminCabinetOwnerScope, width: 100),
                 AppEntityColumn(
                   id: 'status',
                   label: l10n.commonStatus,

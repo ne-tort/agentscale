@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from prodavan.api.deps import PlatformAdminDep, PrincipalDep, SessionDep, get_current_employee
 from prodavan.application.admin.company_service import AdminCompanyService
+from prodavan.application.cabinets.instance_service import CabinetInstanceService
 from prodavan.application.identity.service import EntitlementService
 from prodavan.domain.admin import CompanyAgentRuntimePolicy, CompanyCabinetQuota
 from prodavan.domain.errors import AppError
@@ -63,6 +64,12 @@ class CompanyPasswordBody(BaseModel):
     model_config = {"extra": "forbid"}
 
     password: str = Field(min_length=8, max_length=200)
+
+
+class AssignCabinetEmployeeBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    employee_id: str = Field(min_length=3, max_length=40)
 
 
 @router.get("")
@@ -232,6 +239,62 @@ async def list_company_cabinets(
             await EntitlementService(session).require_membership(employee.id, company_id)
     items = await AdminCompanyService(session).list_org_cabinets(company_id)
     return {"items": items}
+
+
+@company_router.get("/{company_id}/cabinets/{cabinet_id}/assignments")
+async def list_cabinet_assignments(
+    company_id: str,
+    cabinet_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    items = await CabinetInstanceService(session).list_assignments_for_company(
+        cabinet_id=cabinet_id,
+        company_id=company_id,
+        principal=principal,
+        employee=employee,
+    )
+    return {"items": items}
+
+
+@company_router.post("/{company_id}/cabinets/{cabinet_id}/assignments")
+async def assign_cabinet_employee(
+    company_id: str,
+    cabinet_id: str,
+    body: AssignCabinetEmployeeBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    return await CabinetInstanceService(session).assign_employee(
+        cabinet_id=cabinet_id,
+        company_id=company_id,
+        employee_id=body.employee_id,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@company_router.delete("/{company_id}/cabinets/{cabinet_id}/assignments/{employee_id}")
+async def revoke_cabinet_assignment(
+    company_id: str,
+    cabinet_id: str,
+    employee_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    return await CabinetInstanceService(session).revoke_employee_assignment(
+        cabinet_id=cabinet_id,
+        company_id=company_id,
+        employee_id=employee_id,
+        principal=principal,
+        employee=employee,
+    )
 
 
 @company_router.get("/{company_id}/employees")

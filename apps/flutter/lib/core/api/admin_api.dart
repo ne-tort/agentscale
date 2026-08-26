@@ -420,11 +420,18 @@ class AdminApi {
 
   Future<Map<String, dynamic>> createCabinet({
     required String name,
-    required String companyId,
+    String? companyId,
+    List<String>? companyIds,
   }) async {
+    final payload = <String, dynamic>{'name': name};
+    if (companyIds != null && companyIds.isNotEmpty) {
+      payload['company_ids'] = companyIds;
+    } else if (companyId != null) {
+      payload['company_id'] = companyId;
+    }
     final res = await AuthHttp.post(
       _uri('/admin/cabinets'),
-      body: jsonEncode({'name': name, 'company_id': companyId}),
+      body: jsonEncode(payload),
     );
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
@@ -440,10 +447,12 @@ class AdminApi {
     required String cabinetId,
     String? name,
     String? companyId,
+    List<String>? companyIds,
   }) async {
     final payload = <String, dynamic>{};
     if (name != null) payload['name'] = name;
     if (companyId != null) payload['company_id'] = companyId;
+    if (companyIds != null) payload['company_ids'] = companyIds;
     final res = await AuthHttp.patch(
       _uri('/admin/cabinets/$cabinetId'),
       body: jsonEncode(payload),

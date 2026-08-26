@@ -13,10 +13,10 @@
 | **P-CO-01** | Company shell = **локальный Admin** (сотрудники, контейнеры, keys, кабинеты) | 3 tabs: metrics / employees / cabinets RO; нет Keys/Containers | Тонкий org-shell ≠ Admin parity ([03](03-companies/)) |
 | **P-CO-02** | Company **CRUD своих** AI keys (SDK/API) + видит Admin-bound **RO** | API `/companies/{id}/ai-keys` + `owner_scope` (**partial**); Flutter tab — open | Backend link live; UI later |
 | **P-CO-03** | Company list/manage containers **своих** сотрудников | Только Admin `/admin/containers` | Нет company-scoped containers |
-| **P-CO-04** | Cabinets от Admin → Company **RO**; later local CRUD | **Admin CRUD + company bind** (MVP); Company RO shell / local CRUD — open | RO list + Company CRUD next ([assignment](05-cabinets/assignment.md)) |
+| **P-CO-04** | Cabinets от Admin → Company **RO**; later local CRUD | **Admin CRUD + N:M company grants**; Company RO + employee assign | Company assign UI shipped; Verify Dev |
 | **P-ID-01** | **Company** имеет **Keycloak-креды** | `companies.keycloak_sub` + role `company` + provisioning (**partial**); live realm cutover / Flutter OIDC — open | Org principal in API; see [session](10-identity-keycloak/session.md) |
 | **P-ID-02** | Admin / Company / Employee — три KC-сущности | Realm roles in `infra/keycloak/realm-prodavan.json`; API resolution live | Cluster Keycloak deploy still open |
-| **P-CAB-01** | Company **назначает** Employee ↔ Cabinet | Admin binds Cabinet→Company; **assignment N:M** Employee↔Cabinet — **next after Admin CRUD** | Нет grant API |
+| **P-CAB-01** | Company **назначает** Employee ↔ Cabinet | **Grants + assignment API + Flutter** | Verify Dev E2E |
 | **P-CAB-02** | UI кабинета из meta | Free-form `meta_documents` JSONB API; employee UI = placeholder | Generic meta UI next |
 | **P-MAT-01** | Pod hydrate из meta/MinIO | object-ws; нет Pod; file_ref слаб | Materialize/Pod debt |
 | **P-POD-01** | `ProjectContainer` = k8s Pod | `object-ws:…`; pause no-op | [14](14-project-containers/) |

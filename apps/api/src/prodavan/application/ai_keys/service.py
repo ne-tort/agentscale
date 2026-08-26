@@ -516,26 +516,39 @@ class AiKeysService:
 
     async def _company_lost_runtime_key(self, company_id: str, *, exclude_key_id: str) -> bool:
         """True when company has no other ACTIVE runtime-capable binding for preferred_provider."""
+        from sqlalchemy import and_, or_
+
         from prodavan.application.admin.company_service import AdminCompanyService
 
         policy = await AdminCompanyService(self._session).get_agent_policy(company_id)
         preferred = policy.preferred_provider
         q = await self._session.execute(
             select(AiProviderKeyRow)
-            .join(CompanyAiKeyBindingRow, CompanyAiKeyBindingRow.key_id == AiProviderKeyRow.id)
+            .outerjoin(CompanyAiKeyBindingRow, CompanyAiKeyBindingRow.key_id == AiProviderKeyRow.id)
             .where(
-                CompanyAiKeyBindingRow.company_id == company_id,
                 AiProviderKeyRow.id != exclude_key_id,
                 AiProviderKeyRow.status == KeyStatus.ACTIVE,
+                or_(
+                    CompanyAiKeyBindingRow.company_id == company_id,
+                    and_(
+                        AiProviderKeyRow.owner_scope == "company",
+                        AiProviderKeyRow.owner_company_id == company_id,
+                    ),
+                ),
             )
         )
-        remaining = [
-            row
-            for row in q.scalars().all()
-            if is_runtime_api_kind(row.api_kind)
-            and (row.secret_ref or "").strip()
-            and (not preferred or row.provider == preferred)
-        ]
+        seen: set[str] = set()
+        remaining = []
+        for row in q.scalars().unique().all():
+            if row.id in seen:
+                continue
+            seen.add(row.id)
+            if (
+                is_runtime_api_kind(row.api_kind)
+                and (row.secret_ref or "").strip()
+                and (not preferred or row.provider == preferred)
+            ):
+                remaining.append(row)
         return len(remaining) == 0
 
     async def resolve_credentials(
@@ -613,10 +626,14 @@ class AiKeysService:
         return row
 
     async def _company_ids(self, key_id: str) -> list[str]:
+        row = await self._get_row(key_id)
         q = await self._session.execute(
             select(CompanyAiKeyBindingRow.company_id).where(CompanyAiKeyBindingRow.key_id == key_id)
         )
-        return list(q.scalars().all())
+        ids = list(dict.fromkeys(q.scalars().all()))
+        if row.owner_scope == "company" and row.owner_company_id and row.owner_company_id not in ids:
+            ids.append(row.owner_company_id)
+        return ids
 
     async def list_audit_events(self, *, key_id: str | None = None, limit: int = 50) -> list[dict]:
         return await self._audit.list_events(key_id=key_id, limit=limit)

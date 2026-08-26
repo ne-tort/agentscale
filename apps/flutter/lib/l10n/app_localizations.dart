@@ -866,6 +866,18 @@ abstract class AppLocalizations {
   /// **'Cabinet ID copied'**
   String get adminCabinetCopied;
 
+  /// No description provided for @adminCabinetOwnerScope.
+  ///
+  /// In en, this message translates to:
+  /// **'Owner scope'**
+  String get adminCabinetOwnerScope;
+
+  /// No description provided for @adminCabinetCompaniesCount.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} companies'**
+  String adminCabinetCompaniesCount(int count);
+
   /// No description provided for @adminSelectCompanyForCabinet.
   ///
   /// In en, this message translates to:
@@ -1964,6 +1976,12 @@ abstract class AppLocalizations {
   /// **'Company'**
   String get commonCompany;
 
+  /// No description provided for @commonCompanies.
+  ///
+  /// In en, this message translates to:
+  /// **'Companies'**
+  String get commonCompanies;
+
   /// No description provided for @commonDescription.
   ///
   /// In en, this message translates to:
@@ -1999,6 +2017,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Delete'**
   String get commonDelete;
+
+  /// No description provided for @commonRemove.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove'**
+  String get commonRemove;
 
   /// No description provided for @commonCopy.
   ///
@@ -2317,6 +2341,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No cabinets'**
   String get companyNoCabinets;
+
+  /// No description provided for @companyAssignEmployeeToCabinet.
+  ///
+  /// In en, this message translates to:
+  /// **'Assign employee'**
+  String get companyAssignEmployeeToCabinet;
+
+  /// No description provided for @companyAssignedEmployees.
+  ///
+  /// In en, this message translates to:
+  /// **'Assigned'**
+  String get companyAssignedEmployees;
+
+  /// No description provided for @companyNoAssignedEmployees.
+  ///
+  /// In en, this message translates to:
+  /// **'No employees assigned'**
+  String get companyNoAssignedEmployees;
+
+  /// No description provided for @companyAssignCabinetsToEmployee.
+  ///
+  /// In en, this message translates to:
+  /// **'Cabinet access'**
+  String get companyAssignCabinetsToEmployee;
 
   /// No description provided for @companyNoEmployees.
   ///

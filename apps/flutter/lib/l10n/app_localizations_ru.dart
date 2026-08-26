@@ -456,6 +456,14 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminCabinetCopied => 'ID кабинета скопирован';
 
   @override
+  String get adminCabinetOwnerScope => 'Владение';
+
+  @override
+  String adminCabinetCompaniesCount(int count) {
+    return '$count компаний';
+  }
+
+  @override
   String get adminSelectCompanyForCabinet => 'Выберите компанию';
 
   @override
@@ -1073,6 +1081,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get commonCompany => 'Компания';
 
   @override
+  String get commonCompanies => 'Компании';
+
+  @override
   String get commonDescription => 'Описание';
 
   @override
@@ -1089,6 +1100,9 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get commonDelete => 'Удалить';
+
+  @override
+  String get commonRemove => 'Убрать';
 
   @override
   String get commonCopy => 'Копировать';
@@ -1255,6 +1269,18 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get companyNoCabinets => 'Нет кабинетов';
+
+  @override
+  String get companyAssignEmployeeToCabinet => 'Назначить сотрудника';
+
+  @override
+  String get companyAssignedEmployees => 'Назначены';
+
+  @override
+  String get companyNoAssignedEmployees => 'Сотрудники не назначены';
+
+  @override
+  String get companyAssignCabinetsToEmployee => 'Доступ к кабинетам';
 
   @override
   String get companyNoEmployees => 'Нет сотрудников';

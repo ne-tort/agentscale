@@ -2,10 +2,10 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/session/company_context.dart';
 import 'package:prodavan/core/widgets/app_layout.dart';
+import 'package:prodavan/core/widgets/app_shell_branch.dart';
 import 'package:prodavan/features/company/company_cabinets_page.dart';
 import 'package:prodavan/features/company/company_employees_page.dart';
 import 'package:prodavan/features/company/company_overview_page.dart';
-import 'package:prodavan/features/settings/open_app_settings.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Company admin shell — adaptive nav per ux-contract (L04).
@@ -19,6 +19,18 @@ class CompanyShell extends StatefulWidget {
 
 class _CompanyShellState extends State<CompanyShell> {
   int _index = 0;
+  bool _subpageOpen = false;
+
+  void _onSubpageOpenChanged(bool open) {
+    if (_subpageOpen != open) setState(() => _subpageOpen = open);
+  }
+
+  void _selectTab(int index) {
+    setState(() {
+      _index = index;
+      _subpageOpen = false;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -32,16 +44,26 @@ class _CompanyShellState extends State<CompanyShell> {
 
     return AppLayout(
       constrainBody: false,
+      subpageOpen: _subpageOpen,
       selectedIndex: _index,
-      onDestinationSelected: (i) => setState(() => _index = i),
-      onOpenSettings: () => openAppSettings(context),
-      onLogoTap: () => setState(() => _index = 0),
+      onDestinationSelected: _selectTab,
+      onLogoTap: () => _selectTab(0),
       destinations: [
         AppNavDestination(icon: Icons.dashboard_outlined, label: l10n.navOverview),
         AppNavDestination(icon: Icons.group_outlined, label: l10n.navEmployees),
         AppNavDestination(icon: Icons.view_module_outlined, label: l10n.navCabinets),
       ],
-      body: IndexedStack(index: _index, children: pages),
+      body: IndexedStack(
+        index: _index,
+        children: [
+          for (var i = 0; i < pages.length; i++)
+            AppShellBranch(
+              active: _index == i,
+              onSubpageOpenChanged: _index == i ? _onSubpageOpenChanged : null,
+              root: pages[i],
+            ),
+        ],
+      ),
     );
   }
 }

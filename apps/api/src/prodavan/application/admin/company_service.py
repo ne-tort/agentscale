@@ -493,23 +493,45 @@ class AdminCompanyService:
 
     async def list_org_cabinets(self, company_id: str) -> list[dict]:
         await self._require_company(company_id)
+        from prodavan.application.cabinets.grant_service import CabinetGrantService
+        from prodavan.domain.cabinets import CabinetOwnerScope
+        from prodavan.infrastructure.persistence.models.cabinets import (
+            CabinetCompanyGrantRow,
+            CabinetInstanceRow,
+        )
+
+        grants = CabinetGrantService(self._session)
         q = await self._session.execute(
-            select(CabinetInstanceRow, EmployeeRow.email)
-            .join(EmployeeRow, EmployeeRow.id == CabinetInstanceRow.owner_employee_id)
-            .where(CabinetInstanceRow.company_id == company_id)
+            select(CabinetInstanceRow)
+            .join(
+                CabinetCompanyGrantRow,
+                CabinetCompanyGrantRow.cabinet_id == CabinetInstanceRow.id,
+            )
+            .where(
+                CabinetCompanyGrantRow.company_id == company_id,
+                CabinetCompanyGrantRow.status == "active",
+            )
             .order_by(CabinetInstanceRow.created_at.desc())
         )
-        return [
-            {
-                "id": inst.id,
-                "name": inst.name,
-                "status": inst.status,
-                "owner_employee_id": inst.owner_employee_id,
-                "owner_email": owner_email,
-                "created_at": inst.created_at.isoformat() if inst.created_at else None,
-            }
-            for inst, owner_email in q.all()
-        ]
+        out: list[dict] = []
+        for inst in q.scalars().unique().all():
+            assignments_count = await grants.assignment_count(inst.id)
+            writable = inst.owner_scope == CabinetOwnerScope.COMPANY and inst.owner_company_id == company_id
+            out.append(
+                {
+                    "id": inst.id,
+                    "name": inst.name,
+                    "status": inst.status,
+                    "owner_scope": inst.owner_scope,
+                    "owner_company_id": inst.owner_company_id,
+                    "owner_employee_id": inst.owner_employee_id,
+                    "assignments_count": assignments_count,
+                    "writable": writable,
+                    "source": "company_local" if inst.owner_scope == CabinetOwnerScope.COMPANY else "platform_assigned",
+                    "created_at": inst.created_at.isoformat() if inst.created_at else None,
+                }
+            )
+        return out
 
     async def list_company_employees(self, company_id: str) -> list[dict]:
         await self._require_company(company_id)

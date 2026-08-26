@@ -339,6 +339,15 @@
     }
   },
   "adminCabinetCopied": "ID кабинета скопирован",
+  "adminCabinetOwnerScope": "Владение",
+  "adminCabinetCompaniesCount": "{count} компаний",
+  "@adminCabinetCompaniesCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "adminSelectCompanyForCabinet": "Выберите компанию",
   "cabinetOpenedPlaceholder": "Кабинет открыт. Meta UI вернётся в следующей итерации.",
   "adminContainerColProject": "Проект",
@@ -700,12 +709,14 @@
   "commonCabinets": "Кабинеты",
   "commonCancel": "Отмена",
   "commonCompany": "Компания",
+  "commonCompanies": "Компании",
   "commonDescription": "Описание",
   "commonEntity": "Название",
   "commonContinueAction": "Продолжить",
   "commonCreate": "Создать",
   "commonCreating": "Создание…",
   "commonDelete": "Удалить",
+  "commonRemove": "Убрать",
   "commonCopy": "Копировать",
   "commonEdit": "Изменить",
   "commonDeleting": "Удаление…",
@@ -773,6 +784,10 @@
   "companyInviteViaKeycloakPasswordNotAccepted": "Приглашение через Keycloak — пароль здесь не принимается.",
   "companyInviting": "Приглашение…",
   "companyNoCabinets": "Нет кабинетов",
+  "companyAssignEmployeeToCabinet": "Назначить сотрудника",
+  "companyAssignedEmployees": "Назначены",
+  "companyNoAssignedEmployees": "Сотрудники не назначены",
+  "companyAssignCabinetsToEmployee": "Доступ к кабинетам",
   "companyNoEmployees": "Нет сотрудников",
   "companyOrgMetrics": "Метрики организации",
   "companyLoginId": "ID компании",

@@ -456,6 +456,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminCabinetCopied => 'Cabinet ID copied';
 
   @override
+  String get adminCabinetOwnerScope => 'Owner scope';
+
+  @override
+  String adminCabinetCompaniesCount(int count) {
+    return '$count companies';
+  }
+
+  @override
   String get adminSelectCompanyForCabinet => 'Select company';
 
   @override
@@ -1071,6 +1079,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get commonCompany => 'Company';
 
   @override
+  String get commonCompanies => 'Companies';
+
+  @override
   String get commonDescription => 'Description';
 
   @override
@@ -1087,6 +1098,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get commonDelete => 'Delete';
+
+  @override
+  String get commonRemove => 'Remove';
 
   @override
   String get commonCopy => 'Copy';
@@ -1253,6 +1267,18 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get companyNoCabinets => 'No cabinets';
+
+  @override
+  String get companyAssignEmployeeToCabinet => 'Assign employee';
+
+  @override
+  String get companyAssignedEmployees => 'Assigned';
+
+  @override
+  String get companyNoAssignedEmployees => 'No employees assigned';
+
+  @override
+  String get companyAssignCabinetsToEmployee => 'Cabinet access';
 
   @override
   String get companyNoEmployees => 'No employees';
