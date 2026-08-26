@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from prodavan.application.ai_keys.service import API_KINDS, PROVIDERS
-from prodavan.application.catalog.service import CATALOG_AI_HTTP_PROVIDERS, _AI_HTTP_SEED
+from prodavan.application.catalog.service import _AI_HTTP_SEED, CATALOG_AI_HTTP_PROVIDERS
 
 
 def test_ai_http_seed_payloads_are_valid() -> None:
