@@ -56,7 +56,7 @@ class AppScaffold extends StatelessWidget {
       chrome = inner;
     } else {
       chrome = Align(
-        alignment: Alignment.topCenter,
+        alignment: Alignment.topLeft,
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: AppBreakpoints.contentMaxWidth),
           child: SizedBox(width: double.infinity, height: double.infinity, child: inner),

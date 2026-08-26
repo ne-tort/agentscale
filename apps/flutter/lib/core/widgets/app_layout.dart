@@ -56,8 +56,9 @@ class AppLayout extends StatelessWidget {
       body: body,
     );
     if (!constrainBody) return page;
+    // Stick to the rail (left), not the screen center.
     return Align(
-      alignment: Alignment.topCenter,
+      alignment: Alignment.topLeft,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: AppBreakpoints.contentMaxWidth),
         child: SizedBox(width: double.infinity, height: double.infinity, child: page),
@@ -95,13 +96,13 @@ class AppLayout extends StatelessWidget {
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
     );
+    // Extended rail destinations are left-aligned; compact centers icon+label.
     final content = extended
         ? Row(
-            mainAxisSize: MainAxisSize.min,
             children: [
               badge,
               const SizedBox(width: AppSpacing.sm),
-              Flexible(child: label),
+              Expanded(child: label),
             ],
           )
         : Column(
@@ -122,9 +123,9 @@ class AppLayout extends StatelessWidget {
           cursor: onLogoTap != null ? SystemMouseCursors.click : MouseCursor.defer,
           child: Padding(
             padding: EdgeInsets.fromLTRB(
+              extended ? AppSpacing.md : AppSpacing.sm,
               AppSpacing.md,
-              AppSpacing.md,
-              AppSpacing.md,
+              extended ? AppSpacing.md : AppSpacing.sm,
               extended ? AppSpacing.md : AppSpacing.sm,
             ),
             child: content,
@@ -142,7 +143,14 @@ class AppLayout extends StatelessWidget {
             children: [
               Icon(Icons.settings_outlined, color: colors.muted),
               const SizedBox(width: AppSpacing.sm),
-              Text(l10n.settings, style: TextStyle(color: colors.onSurface, fontSize: 14)),
+              Expanded(
+                child: Text(
+                  l10n.settings,
+                  style: TextStyle(color: colors.onSurface, fontSize: 14),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
             ],
           )
         : Column(
@@ -168,7 +176,6 @@ class AppLayout extends StatelessWidget {
       ),
     );
   }
-
   @override
   Widget build(BuildContext context) {
     final narrow = AppBreakpoints.isNarrow(context);
@@ -210,11 +217,22 @@ class AppLayout extends StatelessWidget {
       onDestinationSelected: onDestinationSelected,
       extended: expanded,
       labelType: expanded ? NavigationRailLabelType.none : NavigationRailLabelType.all,
-      leading: _logo(context, extended: expanded),
+      // Match destination alignment: left when extended, centered when compact.
+      leading: expanded
+          ? SizedBox(
+              width: double.infinity,
+              child: _logo(context, extended: true),
+            )
+          : _logo(context, extended: false),
       trailing: Expanded(
         child: Align(
-          alignment: Alignment.bottomCenter,
-          child: _settingsControl(context, extended: expanded),
+          alignment: expanded ? Alignment.bottomLeft : Alignment.bottomCenter,
+          child: expanded
+              ? SizedBox(
+                  width: double.infinity,
+                  child: _settingsControl(context, extended: true),
+                )
+              : _settingsControl(context, extended: false),
         ),
       ),
       destinations: [
