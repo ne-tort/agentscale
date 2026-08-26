@@ -467,6 +467,21 @@ class AppLocalizationsRu extends AppLocalizations {
   }
 
   @override
+  String get adminModuleJson => 'JSON';
+
+  @override
+  String get adminModulePreview => 'Предпросмотр';
+
+  @override
+  String get adminModuleJsonInvalid => 'Неверный JSON';
+
+  @override
+  String get adminMetaInvalid => 'Метаданные';
+
+  @override
+  String get adminModulePreviewMode => 'Предпросмотр';
+
+  @override
   String get adminSelectCabinetsForModule => 'Выберите кабинеты для модуля';
 
   @override

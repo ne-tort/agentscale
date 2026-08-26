@@ -37,4 +37,4 @@ Module ──N:M──► Project (precondition: cabinet grant exists)
 | CabinetInstance | runtime shell + `cab_inst_*` schema |
 | Legacy code-pack «module» | deprecated; см. [05-cabinets/dynamic-cabinets](../05-cabinets/dynamic-cabinets.md) |
 
-Дальше: [backend](backend.md)
+Дальше: [backend](backend.md) · **[meta-syntax](meta-syntax/README.md)** — полная спецификация синтаксиса

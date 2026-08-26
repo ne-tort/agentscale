@@ -349,6 +349,11 @@
       }
     }
   },
+  "adminModuleJson": "JSON",
+  "adminModulePreview": "Предпросмотр",
+  "adminModuleJsonInvalid": "Неверный JSON",
+  "adminMetaInvalid": "Метаданные",
+  "adminModulePreviewMode": "Предпросмотр",
   "adminSelectCabinetsForModule": "Выберите кабинеты для модуля",
   "adminDeleteCabinetConfirm": "Удалить кабинет «{name}»? Будут удалены все проекты и схема кабинета.",
   "@adminDeleteCabinetConfirm": {

@@ -884,6 +884,36 @@ abstract class AppLocalizations {
   /// **'{count} cabinets'**
   String adminModuleCabinetsCount(int count);
 
+  /// No description provided for @adminModuleJson.
+  ///
+  /// In en, this message translates to:
+  /// **'JSON'**
+  String get adminModuleJson;
+
+  /// No description provided for @adminModulePreview.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview'**
+  String get adminModulePreview;
+
+  /// No description provided for @adminModuleJsonInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid JSON'**
+  String get adminModuleJsonInvalid;
+
+  /// No description provided for @adminMetaInvalid.
+  ///
+  /// In en, this message translates to:
+  /// **'Metadata'**
+  String get adminMetaInvalid;
+
+  /// No description provided for @adminModulePreviewMode.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview'**
+  String get adminModulePreviewMode;
+
   /// No description provided for @adminSelectCabinetsForModule.
   ///
   /// In en, this message translates to:

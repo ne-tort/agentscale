@@ -8,6 +8,7 @@ export 'app_error_presenter.dart';
 export 'app_hairline_divider.dart';
 export 'app_icon_button.dart';
 export 'app_inline_add_field.dart';
+export 'app_json_editor_field.dart';
 export 'app_list_item.dart';
 export 'app_radio.dart';
 export 'app_scaffold.dart';

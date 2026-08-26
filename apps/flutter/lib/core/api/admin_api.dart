@@ -513,6 +513,49 @@ class AdminApi {
     _throwIfError(res);
   }
 
+  Future<List<String>> listModuleMetaSlugs(String moduleId) async {
+    final res = await AuthHttp.get(_uri('/admin/modules/$moduleId/meta/documents'));
+    _throwIfError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = body['items'];
+    if (items is List) {
+      return items
+          .map((e) => e is Map ? e['slug'] as String? : null)
+          .whereType<String>()
+          .toList();
+    }
+    return const [];
+  }
+
+  Future<Map<String, dynamic>> getModuleMetaDocument({
+    required String moduleId,
+    required String slug,
+  }) async {
+    final res = await AuthHttp.get(_uri('/admin/modules/$moduleId/meta/documents/$slug'));
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> putModuleMetaDocument({
+    required String moduleId,
+    required String slug,
+    required Object body,
+  }) async {
+    final res = await AuthHttp.put(
+      _uri('/admin/modules/$moduleId/meta/documents/$slug'),
+      body: jsonEncode({'body': body}),
+    );
+    _throwIfError(res);
+  }
+
+  Future<void> deleteModuleMetaDocument({
+    required String moduleId,
+    required String slug,
+  }) async {
+    final res = await AuthHttp.delete(_uri('/admin/modules/$moduleId/meta/documents/$slug'));
+    _throwIfError(res);
+  }
+
   Future<Map<String, dynamic>> drainTriggers({
     int maxProjects = 20,
     int maxPerProject = 10,

@@ -347,6 +347,11 @@
       }
     }
   },
+  "adminModuleJson": "JSON",
+  "adminModulePreview": "Preview",
+  "adminModuleJsonInvalid": "Invalid JSON",
+  "adminMetaInvalid": "Metadata",
+  "adminModulePreviewMode": "Preview",
   "adminSelectCabinetsForModule": "Select cabinets for module",
   "adminDeleteCabinetConfirm": "Delete cabinet \"{name}\"? All projects and the cabinet schema will be removed.",
   "@adminDeleteCabinetConfirm": {

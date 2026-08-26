@@ -467,6 +467,21 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get adminModuleJson => 'JSON';
+
+  @override
+  String get adminModulePreview => 'Preview';
+
+  @override
+  String get adminModuleJsonInvalid => 'Invalid JSON';
+
+  @override
+  String get adminMetaInvalid => 'Metadata';
+
+  @override
+  String get adminModulePreviewMode => 'Preview';
+
+  @override
   String get adminSelectCabinetsForModule => 'Select cabinets for module';
 
   @override

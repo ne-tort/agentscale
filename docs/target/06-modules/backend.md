@@ -51,5 +51,6 @@ Unbind cabinet → delete that cabinet's module_data_rows for module_id
 ## Future
 
 - Physical DDL from `tables`/`columns` meta (`storage_kind=physical`)
+- Meta syntax validators + Flutter/backend interpreters — см. [meta-syntax](meta-syntax/README.md)
 - Company/Employee UI for module visibility
 - Propagate template updates to installed cabinets (policy TBD)

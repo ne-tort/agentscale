@@ -27,8 +27,9 @@ Admin (KC) → Company (KC, **локальный Admin**: employees / containers
 | 02 | AI Provider Keys | Ключи Cursor/Codex/Claude |
 | 03 | Companies | Org, quotas, policy |
 | 04 | Employees | Работа в кабинетах |
-| 05 | Cabinets | Оболочка + meta/data |
-| 06 | Projects | Unit работы, triggers, chat |
+| 05 | Cabinets | Оболочка + module data |
+| 06 | Modules | Reusable meta · [meta-syntax](06-modules/meta-syntax/) |
+| — | [Projects runtime](06-projects-runtime/) | Unit работы, triggers, chat |
 | 07 | UI mobile core | M3, EntityCollection |
 | 08 | Agent providers | SDK adapters |
 | 09 | Gap map | канон ↔ код |

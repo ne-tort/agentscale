@@ -2,6 +2,8 @@
 
 Как из таблиц и JSON метаданных строится интерфейс. Канон UI: [07](../07-ui-mobile-core/).
 
+> **Полная спецификация синтаксиса:** [06-modules/meta-syntax](../06-modules/meta-syntax/README.md) — tables, columns, views, tabs, actions, materialize, MCP, правила для ИИ.
+
 ## Принцип
 
 Meta slugs (`tables`, `columns`, `views`, `tabs`) хранятся в **Module** (platform DB, shared template).  
@@ -17,7 +19,11 @@ AppEntityCollection / dynamic preference fields / empty states
 
 Нет доменных экранов «ПоставщикиScreen» в коде продукта — есть renderer + meta.
 
-## TableDefinition (data schema)
+## Краткая справка (legacy summary)
+
+Детали — в [meta-syntax](../06-modules/meta-syntax/). Здесь — orientation.
+
+### TableDefinition (data schema)
 
 | Field | Описание |
 |-------|----------|
@@ -30,7 +36,7 @@ AppEntityCollection / dynamic preference fields / empty states
 
 `text` · `number` · `bool` · `datetime` · `json` · `enum` · `ref` · `file_ref`
 
-## ViewDefinition (UI schema)
+### ViewDefinition (UI schema)
 
 Минимальный `ui_json` (эволюция допустима, version field):
 
@@ -49,31 +55,28 @@ AppEntityCollection / dynamic preference fields / empty states
 }
 ```
 
-Laconic: labels короткие; никаких instructional paragraphs в meta.
-
-## TabDefinition
+### TabDefinition
 
 | Field | Описание |
 |-------|----------|
 | `id` | uuid |
-| `title` | 1–3 слова («Поставщики») |
+| `title` | 1–3 слова («Поставщики») — **nav label** |
 | `order` | int |
-| `view_id` | link to view |
+| `view_id` / `view_slug` | link to view |
 | `system` | bool — base tabs нельзя удалить агентом без flag |
 
-Base system tabs: Projects, Chat, Context (prompts/skills/rules/MCP/seeds), **Tables**, **Tools**.
+Base system tabs: Projects, Chat, Context, **Tables**, **Tools**.
 
 ## Flutter interpreters
 
 | kind | Renderer |
 |------|----------|
-| `collection` | `AppEntityCollection` (list/table per breakpoints) |
-| `form` | Dynamic fields → `AppValuePreference` / `AppChoicePreference` |
+| `collection` | `AppEntityCollection` |
+| `form` | Dynamic fields → preference kit |
+| `hub` | `AppNavPreference` list |
 | `board` | later |
-
-Невалидный `ui_json` → EmptyPlaceholder «Метаданные» + факт ошибки (без простыни), строка в audit.
 
 ## Refresh после агента
 
-v1: pull-to-refresh + invalidate on MCP success callback to UI.  
-v2: websocket `cabinet.meta.changed`.
+v1: pull-to-refresh + invalidate on MCP success.  
+v2: websocket `cabinet.data.changed`.
