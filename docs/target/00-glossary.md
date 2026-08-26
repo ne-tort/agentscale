@@ -8,7 +8,7 @@
 
 | Термин | Определение | Legacy-аналог |
 |--------|-------------|---------------|
-| **Platform Admin** | Оператор платформы. Свой UI. Компании, AI-ключи, квоты/policy кабинетов, optional starter bundles, кросс-мониторинг. | `platform.admin` |
+| **Platform Admin** | Оператор платформы. Свой UI. Компании, AI-ключи, **Контейнеры** (project runtime), **Кабинеты** (stub); квоты/policy; кросс-мониторинг. Admin chrome «Бандлы» — **deprecate** (starter `cabinet.bundle` остаётся packaging кабинетов, не admin tab). | `platform.admin` |
 | **Company** | Организация-клиент (org). Свой UI-контур для `company.admin`. **Не** User. | Tenant |
 | **Employee** | Человек с `keycloak_sub`; membership в Company; работа в cabinets. | `tenant.member` / operator |
 | **Company account** | Employee с ролью `company.admin` (открывает Company UI). | Tenant admin user |
@@ -24,14 +24,16 @@
 | **Prodavan** | Универсальный облачный SaaS автоматизации задач агентами (не только закупки). |
 | **Cabinet** | Динамический instance: schema + meta (tables/tabs/views/MCP) + data; UI из метаданных; export/import. |
 | **Base cabinet** | Обязательный шаблон instance (projects, chat, context, Tables, Tools + `cabinet.*` contracts). |
-| **Cabinet bundle** | Переносимый zip/json артефакт meta(+seed); import = новая копия. |
+| **Cabinet bundle** | Переносимый zip/json артефакт meta(+seed); import = новая копия. **Не** Project Container. |
+| **Starter bundle** | Seed `cabinet.bundle` в каталоге (employee import). **Не** k8s/runtime; admin label «Бандлы» deprecate. |
 | **Cabinet module** | *(устарело как code-pack)* → см. Cabinet Runtime + bundle. |
 | **Cabinet ownership** | Employee (operate) + Company (org) + Platform Admin (oversee); peers isolated. |
 | **MCP package** | Agent-built zip (code + mcp manifest), deployed via `cabinet.mcp_packages.deploy`, reused across projects of the cabinet. |
 | **Meta catalog** | Системные таблицы описания схемы/UI/MCP внутри instance. |
 | **Dynamic tab** | Вкладка UI, зарегистрированная в meta.tabs, не Flutter-feature. |
 | **Cabinet allowlist** | *(legacy)* → квоты + optional starter bundle catalog. |
-| **Project (unit)** | Изолированная единица работы внутри кабинета; агент может мутировать cabinet meta через MCP. |
+| **Project (unit)** | Изолированная единица работы внутри кабинета; агент может мутировать cabinet meta через MCP. Связан с **Project Container** (1:1 MVP). |
+| **Project Container** | BC runtime-изоляции проекта: сущность + единственный k8s writer (`ContainerRuntimePort`). Канон: [14-project-containers](14-project-containers/). As-is transitional: `object-ws:{key}` без Pod. **Не** Cabinet bundle. |
 | **Materialize** | Сборка workspace проекта из кабинета (prompts/skills/MCP registry → FS). |
 | **Trigger** | Событие, запускающее/продолжающее агента (сообщение чата, webhook кабинета, cron…). |
 | **AI Provider Key** | Сущность ключа доступа к ИИ-провайдеру с профилем, сроками и привязками к компаниям. |

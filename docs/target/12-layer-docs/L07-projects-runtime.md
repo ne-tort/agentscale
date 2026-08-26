@@ -6,15 +6,15 @@
 | Quality | 7 |
 | Quality note | Project CRUD+lifecycle+materialize+local MCP spawn; k8s isolator — Job PVC probe + SA on API, spawn not on create |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
-| Canon | [06-projects-runtime](../06-projects-runtime/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-24 — I8 SA on API + Job spec in code; create path object-ws |
+| Canon | [06-projects-runtime](../06-projects-runtime/), [**14-project-containers**](../14-project-containers/) (isolator BC), [workspace-context](../08-agent-providers/workspace-context.md) |
+| Last updated | 2026-08-26 — canon 14: ProjectContainer BC; as-is still object-ws + PVC probe only |
 | Owners | — |
 
 ---
 
 ## Семантика
 
-Project = workspace + `object-ws:{key}` container ref (legacy `local-ws:` still parsed) внутри CabinetInstance. Materialize из cabinet meta + enabled MCP packages. Triggers — project-scoped queue; attachments → inbox.
+Project = work unit + workspace; **as-is** `container_ref=object-ws:{key}` (legacy `local-ws:` still parsed). **Target isolator** — [14 Project Containers](../14-project-containers/) (`ProjectContainer` + `ContainerRuntimePort`; sole k8s writer). PVC probe Job ≠ project runtime. Materialize из cabinet meta + enabled MCP packages. Triggers — project-scoped queue; attachments → inbox.
 
 ## Что сделано
 

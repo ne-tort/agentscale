@@ -27,7 +27,7 @@
 | Mobile UI, no modals | widget-catalog | Theme + core widgets; no feature shells | EntityCollection / screens по [07](07-ui-mobile-core/) |
 | Cabinet **dynamic** + bundles | static packs / M00 | **stub** | Runtime + meta-UI + `cabinet.*` MCP по [05](05-cabinets/dynamic-cabinets.md) |
 | Starter equipment bundle | electronics-procurement | Pack JSON remnants | Bundle seed, не Flutter module |
-| Project container | agent-isolation | **stub** / local-ws FS | Pod lifecycle + idle policy; blobs → MinIO (**P0**) |
+| Project container | agent-isolation | **stub** / object-ws (no Pod); admin «Bundles» ≠ containers | BC [14](14-project-containers/): entity + Port + NetworkPolicy Pod; phases P1–P4; blobs → MinIO (**P0**/13) |
 | Triggers / attachments | — | PG outbox-lite / local inbox | Durable bus = **Kafka** (**P0**); chat attach UI; object store |
 | AgentProviderPort | bot SDK | **stub** | Sidecar + persist + AgentEvent |
 | Keycloak OIDC | HS256 login | **stub** (+ infra/keycloak sketches) | Cutover + AppAuth |

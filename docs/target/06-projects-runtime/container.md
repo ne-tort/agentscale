@@ -1,8 +1,13 @@
 # Project container
 
+> **Канон isolator:** [14 — Project Containers](../14-project-containers/).  
+> Этот файл — layout workspace + связка Project ↔ blobs. End-state «container = только object-ws» **deprecated**.
+
 ## Семантика
 
-Изолированное runtime-пространство проекта. Default: **per-project pod**.
+Изолированное runtime-пространство проекта. Default target: **per-project pod** (модуль 14).
+
+**As-is (transitional):** `container_ref = object-ws:{workspace_key}` — логический workspace в object store / local FS; `pause_container` — no-op; PVC probe Job — **не** runtime агента.
 
 **Blobs / workspace files:** канон — **object store (MinIO / S3)** ([13-platform-infra](../13-platform-infra/)).  
 **Сейчас:** AGENTS/mcp/inbox/package.zip через `ObjectStorageManager`; sandbox extract + **hydrate from zip** если дерево отсутствует; live mount из MinIO в pod — hole. `local-ws:` — transitional.
@@ -11,13 +16,15 @@
 
 ## Lifecycle
 
+Владелец k8s / pause–start–force-kill — **ContainerRuntimePort** ([14 lifecycle](../14-project-containers/lifecycle.md)). ProjectService вызывает Port; не AiKeys напрямую.
+
 | Действие | Эффект |
 |----------|--------|
-| create | Volume + materialize + `container_ref` |
+| create | Materialize + ensure Container (`container_ref` opaque) |
 | update context | Re-materialize after prompts/MCP package changes |
-| pause | Cancel agent sessions + **pause container** (API: `pause_container`; keep volume; k8s pod stop — hole). Triggered by project pause only (incl. key cascade → `ProjectService.pause`), never key→container directly |
-| resume | Manual; requires valid AI key (`resolve_credentials`); then start; resume agent if supported. Key re-enable does **not** auto-resume projects |
-| delete | Soft-delete + wipe workspace + cabinet event |
+| pause | Cancel agent sessions + **Container.pause** (keep volume; pod stop — hole until P3). Triggered by project pause only (incl. key cascade → `ProjectService.pause`), never key→container directly |
+| resume | Manual; requires valid AI key (`resolve_credentials`); then Container.start. Key re-enable does **not** auto-resume projects |
+| delete | Soft-delete + wipe workspace + cabinet event + Container.delete |
 
 См. также каскад ключей/компаний: [02 domain](../02-ai-provider-keys/domain.md), [01 domain](../01-platform-admin/domain.md).
 

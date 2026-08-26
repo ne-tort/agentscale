@@ -9,4 +9,4 @@
 | [ux-contract.md](ux-contract.md) | Профессиональный IA / density / DoD |
 | [metrics.md](metrics.md) | Кросс-компанийный мониторинг |
 
-Связанные модули: [02-ai-provider-keys](../02-ai-provider-keys/), [03-companies](../03-companies/), [05-cabinets](../05-cabinets/).
+Связанные модули: [02-ai-provider-keys](../02-ai-provider-keys/), [03-companies](../03-companies/), [05-cabinets](../05-cabinets/), [14-project-containers](../14-project-containers/) (admin tab Контейнеры).

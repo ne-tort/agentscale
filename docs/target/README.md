@@ -14,7 +14,7 @@
 3. [Identity / Keycloak](10-identity-keycloak/) ← session + entitlements
 4. [Platform Admin](01-platform-admin/) → [AI Provider Keys](02-ai-provider-keys/)
 5. [Companies](03-companies/) → [Employees](04-employees/)
-6. [Cabinets](05-cabinets/) → [Projects & runtime](06-projects-runtime/)
+6. [Cabinets](05-cabinets/) → [Projects & runtime](06-projects-runtime/) → [**Project Containers**](14-project-containers/)
 7. [UI mobile core](07-ui-mobile-core/) (+ [ux-system](07-ui-mobile-core/ux-system.md))
 8. [Agent providers](08-agent-providers/) (+ [workspace-context](08-agent-providers/workspace-context.md))
 9. [Platform infra](13-platform-infra/) ← **P0**: Kafka / MinIO / Celery / Redis / core managers
@@ -32,10 +32,11 @@
 | 03 | Companies | Org: сотрудники, cabinet quotas/metrics, policy |
 | 04 | Employees | Сотрудник: выбор кабинета → работа в кабинете |
 | 05 | Cabinets | **Dynamic** instances: meta-UI, MCP contracts, bundles |
-| 06 | Projects & runtime | Project unit, контейнер, materialize, триггеры, чат с вложениями |
+| 06 | Projects & runtime | Project unit, materialize, триггеры, чат; workspace layout (pointer → 14) |
 | 07 | UI mobile core | Material 3, EntityCollection, laconic, без модалок |
 | 08 | Agent providers | SDK matrix, wrap, permissions, models, usage, Admin control |
 | 09 | Gap map | target ↔ legacy ↔ stub-код (+ блок P0 infra) |
 | 11 | Implementation plan | P0 platform-infra + L00–L09: контракты, DoD, sequence, checklists |
 | 12 | Layer docs (as-built) | Живая семантика/контракты/связи + оценка качества 0–10 |
 | 13 | Platform infra | **P0**: Kafka, MinIO, Celery, Redis, LifespanManager / core managers |
+| 14 | Project Containers | Isolator BC: `ProjectContainer`, Port, NetworkPolicy Pod; admin Контейнеры ≠ Бандлы |

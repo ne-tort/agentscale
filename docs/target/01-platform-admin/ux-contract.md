@@ -14,8 +14,11 @@ Control plane платформы. Нет chat проектов, нет доме�
 | Сводка | `AdminOverviewPage` | Alerts first, затем StatTiles |
 | Компании | `AdminCompaniesPage` | EntityCollection companies |
 | Ключи ИИ | `AdminAiKeysPage` | Keys → detail / create |
-| Bundles | `AdminStarterBundlesPage` | Optional starter cabinet bundles |
+| **Контейнеры** | `AdminProjectContainersPage` | Project runtime isolators ([14](../14-project-containers/admin-ui.md)) |
+| **Кабинеты** | stub | Placeholder; не starter-bundle catalog |
 | Профиль | `AdminProfilePage` | Аккаунт admin |
+
+**Deprecate:** tab Bundles / `AdminStarterBundlesPage` в admin chrome.
 
 (Agent policy / quotas — sections в company detail или отдельный tab «Политики».)
 

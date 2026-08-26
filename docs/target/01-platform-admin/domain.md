@@ -7,7 +7,7 @@ Platform Admin:
 1. Создаёт и сопровождает **Company**.
 2. Управляет **AI Provider Keys** (модуль 02).
 3. Задаёт **квоты / feature flags** динамических кабинетов (max instances, tables, MCP packages, storage).
-4. Опционально ведёт **catalog starter bundles** (удобство, не обязательный гейт создания).
+4. Oversight **Project Containers** (admin list/detail; cascade via Project — [14](../14-project-containers/)). Starter `cabinet.bundle` catalog CRUD может оставаться API-only (не admin tab «Бандлы»).
 5. Видит **агрегированный мониторинг** (компании, usage, cabinet counts).
 6. Управляет **agent runtime policy**: tool presets, model allowlists, quotas ([08](../08-agent-providers/admin-control-plane.md)).
 7. Break-glass к cabinet data — только с audit; в обычном режиме не читает workspace/rows.
@@ -21,7 +21,8 @@ Platform Admin:
 |----------|----------|
 | `Company` | Организация: name (обяз.), description, contact_email, phone (опц.), subscription, status |
 | `CompanySubscription` | `ends_at` nullable = бессрочно; `plan` опционально |
-| `StarterBundleCatalogEntry` | Опциональный official/company starter (`cabinet.bundle`) |
+| `StarterBundleCatalogEntry` | Optional starter (`cabinet.bundle`) — packaging; **не** Project Container; admin chrome deprecate |
+| `ProjectContainer` | Runtime isolator (BC 14); admin tab Контейнеры |
 | `CompanyCabinetQuota` | Лимиты на create/import cabinets & packages |
 | `AiProviderKey` | См. модуль 02 |
 | `CompanyAiKeyBinding` | M:N: ключ ↔ компании |
