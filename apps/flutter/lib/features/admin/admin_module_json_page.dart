@@ -2,8 +2,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/preferences/app_nav_preference.dart';
 import 'package:prodavan/core/session/admin_context.dart';
-import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_json_editor_field.dart';
@@ -120,7 +120,6 @@ class _AdminModuleJsonPageState extends State<AdminModuleJsonPage> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final tokens = Theme.of(context).extension<AppColorTokens>()!;
     final jsonField = _jsonFieldKey.currentState;
     final domainError = jsonField?.errorText;
 
@@ -147,7 +146,7 @@ class _AdminModuleJsonPageState extends State<AdminModuleJsonPage> {
                 ),
                 if (domainError != null &&
                     _jsonController.text.trim().isNotEmpty &&
-                    jsonField?.isValidJson == true) ...[
+                    jsonField?.isValidJson == true)
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md).add(
                       const EdgeInsets.only(top: AppSpacing.sm),
@@ -157,25 +156,12 @@ class _AdminModuleJsonPageState extends State<AdminModuleJsonPage> {
                       message: domainError,
                     ),
                   ),
-                ],
-                if (_showPreview) ...[
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md).add(
-                      const EdgeInsets.only(top: AppSpacing.md, bottom: AppSpacing.lg),
-                    ),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: FilledButton(
-                        onPressed: _openPreview,
-                        child: Text(
-                          l10n.adminModulePreview,
-                          style: TextStyle(color: tokens.warning),
-                        ),
-                      ),
-                    ),
+                if (_showPreview)
+                  AppNavPreference(
+                    title: l10n.adminModulePreview,
+                    icon: Icons.visibility_outlined,
+                    onTap: _openPreview,
                   ),
-                ] else
-                  const SizedBox(height: AppSpacing.lg),
               ],
             ),
     );

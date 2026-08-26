@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:prodavan/core/preferences/app_nav_preference.dart';
 import 'package:prodavan/core/theme/app_theme.dart';
 import 'package:prodavan/core/widgets/app_json_editor_field.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
@@ -298,46 +299,28 @@ void main() {
   });
 
   group('AppJsonEditorField', () {
-    testWidgets('invalid JSON keeps preview button disabled', (tester) async {
+    testWidgets('invalid JSON is not valid', (tester) async {
       final controller = TextEditingController(text: '{ invalid');
       addTearDown(controller.dispose);
-      var canPreview = false;
 
       await tester.pumpWidget(
         _ruApp(
           Scaffold(
-            body: Column(
-              children: [
-                AppJsonEditorField(
-                  controller: controller,
-                  validator: ModuleMetaValidator.validate,
-                  onChanged: (_) {},
-                ),
-                Builder(
-                  builder: (context) {
-                    final state = context
-                        .findAncestorStateOfType<AppJsonEditorFieldState>();
-                    canPreview = state?.isValidJson ?? false;
-                    return FilledButton(
-                      onPressed: canPreview ? () {} : null,
-                      child: const Text('Preview'),
-                    );
-                  },
-                ),
-              ],
+            body: AppJsonEditorField(
+              controller: controller,
+              validator: ModuleMetaValidator.validate,
             ),
           ),
         ),
       );
       await tester.pump();
-      expect(canPreview, isFalse);
-      expect(
-        tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
-        isNull,
+      final field = tester.state<AppJsonEditorFieldState>(
+        find.byType(AppJsonEditorField),
       );
+      expect(field.isValidJson, isFalse);
     });
 
-    testWidgets('valid JSON enables preview button', (tester) async {
+    testWidgets('valid JSON passes validation', (tester) async {
       final controller = TextEditingController(
         text: const JsonEncoder.withIndent('  ').convert(suppliersManifestJson()),
       );
@@ -345,24 +328,11 @@ void main() {
 
       await tester.pumpWidget(
         _ruApp(
-          StatefulBuilder(
-            builder: (context, setState) {
-              return Scaffold(
-                body: Column(
-                  children: [
-                    AppJsonEditorField(
-                      controller: controller,
-                      validator: ModuleMetaValidator.validate,
-                      onChanged: (_) => setState(() {}),
-                    ),
-                    const FilledButton(
-                      onPressed: null,
-                      child: Text('Preview'),
-                    ),
-                  ],
-                ),
-              );
-            },
+          Scaffold(
+            body: AppJsonEditorField(
+              controller: controller,
+              validator: ModuleMetaValidator.validate,
+            ),
           ),
         ),
       );
@@ -372,6 +342,66 @@ void main() {
       );
       expect(field.isValidJson, isTrue);
       expect(field.isFullyValid, isTrue);
+    });
+  });
+
+  group('AdminModuleJsonPage preview nav', () {
+    testWidgets('shows preview row for non-empty manifest', (tester) async {
+      await tester.pumpWidget(
+        _ruApp(
+          Scaffold(
+            body: Builder(
+              builder: (context) {
+                final l10n = AppLocalizations.of(context);
+                return Column(
+                  children: [
+                    if (ModuleMetaManifest.isNonEmptyStubText(
+                      const JsonEncoder.withIndent('  ').convert(suppliersManifestJson()),
+                    ))
+                      AppNavPreference(
+                        title: l10n.adminModulePreview,
+                        icon: Icons.visibility_outlined,
+                        onTap: () {},
+                      ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('Предпросмотр'), findsOneWidget);
+      expect(find.byType(AppNavPreference), findsOneWidget);
+    });
+
+    testWidgets('hides preview row for empty stub', (tester) async {
+      await tester.pumpWidget(
+        _ruApp(
+          Scaffold(
+            body: Builder(
+              builder: (context) {
+                final l10n = AppLocalizations.of(context);
+                final show = ModuleMetaManifest.isNonEmptyStubText(
+                  ModuleMetaManifest.empty().toPrettyJson(),
+                );
+                return Column(
+                  children: [
+                    if (show)
+                      AppNavPreference(
+                        title: l10n.adminModulePreview,
+                        icon: Icons.visibility_outlined,
+                        onTap: () {},
+                      ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(AppNavPreference), findsNothing);
     });
   });
 }

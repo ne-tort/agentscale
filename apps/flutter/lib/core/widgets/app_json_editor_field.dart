@@ -29,7 +29,11 @@ class AppJsonEditorField extends StatefulWidget {
 }
 
 class AppJsonEditorFieldState extends State<AppJsonEditorField> {
+  static const _lineHeight = 1.45;
+  static const _fontSize = 13.0;
+
   final _focusNode = FocusNode();
+  final _scrollController = ScrollController();
   String? _parseError;
   String? _domainError;
 
@@ -37,6 +41,7 @@ class AppJsonEditorFieldState extends State<AppJsonEditorField> {
   void initState() {
     super.initState();
     widget.controller.addListener(_handleChange);
+    _scrollController.addListener(_onScroll);
     _validate(widget.controller.text);
   }
 
@@ -47,19 +52,27 @@ class AppJsonEditorFieldState extends State<AppJsonEditorField> {
       oldWidget.controller.removeListener(_handleChange);
       widget.controller.addListener(_handleChange);
       _validate(widget.controller.text);
+      setState(() {});
     }
   }
 
   @override
   void dispose() {
     widget.controller.removeListener(_handleChange);
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
     _focusNode.dispose();
     super.dispose();
+  }
+
+  void _onScroll() {
+    setState(() {});
   }
 
   void _handleChange() {
     _validate(widget.controller.text);
     widget.onChanged?.call(widget.controller.text);
+    setState(() {});
   }
 
   void _validate(String text) {
@@ -78,12 +91,8 @@ class AppJsonEditorFieldState extends State<AppJsonEditorField> {
     if (parseError == null && parsed != null && widget.validator != null) {
       domainError = widget.validator!(parsed);
     }
-    if (parseError != _parseError || domainError != _domainError) {
-      setState(() {
-        _parseError = parseError;
-        _domainError = domainError;
-      });
-    }
+    _parseError = parseError;
+    _domainError = domainError;
   }
 
   bool get isValidJson => _parseError == null && widget.controller.text.trim().isNotEmpty;
@@ -97,74 +106,110 @@ class AppJsonEditorFieldState extends State<AppJsonEditorField> {
 
   String? get errorText => _parseError ?? _domainError;
 
+  TextStyle _baseStyle(ThemeData theme) {
+    return theme.textTheme.bodyMedium?.copyWith(
+          fontFamily: 'monospace',
+          fontSize: _fontSize,
+          height: _lineHeight,
+        ) ??
+        const TextStyle(fontFamily: 'monospace', fontSize: _fontSize, height: _lineHeight);
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final hasError = errorText != null && widget.controller.text.trim().isNotEmpty;
-    final borderColor = hasError ? theme.colorScheme.error : theme.dividerColor;
-    final baseStyle = theme.textTheme.bodyMedium?.copyWith(
-      fontFamily: 'monospace',
-      fontSize: 13,
-      height: 1.45,
+    final baseStyle = _baseStyle(theme);
+    final editorHeight = widget.minLines * (_fontSize * _lineHeight) + AppSpacing.sm;
+    const fieldPadding = EdgeInsets.symmetric(
+      horizontal: AppSpacing.sm,
+      vertical: AppSpacing.xs,
+    );
+    final scrollOffset = _scrollController.hasClients ? _scrollController.offset : 0.0;
+
+    Widget editor = SizedBox(
+      height: editorHeight,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Padding(
+            padding: fieldPadding,
+            child: ClipRect(
+              child: Transform.translate(
+                offset: Offset(0, -scrollOffset),
+                child: RichText(
+                  text: _JsonHighlight.build(
+                    widget.controller.text,
+                    baseStyle,
+                    theme,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: fieldPadding,
+            child: TextField(
+              controller: widget.controller,
+              focusNode: _focusNode,
+              scrollController: _scrollController,
+              readOnly: widget.readOnly,
+              maxLines: null,
+              expands: true,
+              style: baseStyle.copyWith(color: Colors.transparent),
+              cursorColor: theme.colorScheme.primary,
+              scrollPadding: EdgeInsets.zero,
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                disabledBorder: InputBorder.none,
+                errorBorder: InputBorder.none,
+                focusedErrorBorder: InputBorder.none,
+                isDense: true,
+                contentPadding: EdgeInsets.zero,
+                filled: false,
+              ),
+              keyboardType: TextInputType.multiline,
+              autocorrect: false,
+              enableSuggestions: false,
+              inputFormatters: [LengthLimitingTextInputFormatter(200000)],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (hasError) {
+      editor = DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border.all(color: theme.colorScheme.error),
+          borderRadius: BorderRadius.circular(AppSpacing.sm),
+        ),
+        child: editor,
+      );
+    }
+
+    editor = Theme(
+      data: theme.copyWith(
+        focusColor: Colors.transparent,
+        hoverColor: Colors.transparent,
+        splashColor: Colors.transparent,
+        highlightColor: Colors.transparent,
+      ),
+      child: editor,
     );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Container(
-          height: widget.minLines * 20.0 + 24,
-          decoration: BoxDecoration(
-            border: Border.all(color: borderColor),
-            borderRadius: BorderRadius.circular(AppSpacing.sm),
-            color: theme.colorScheme.surfaceContainerLowest,
-          ),
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.sm,
-            vertical: AppSpacing.xs,
-          ),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(top: AppSpacing.xs),
-                child: RichText(
-                  text: _JsonHighlight.build(
-                    widget.controller.text,
-                    baseStyle ?? const TextStyle(fontSize: 13, height: 1.45),
-                    theme,
-                  ),
-                ),
-              ),
-              TextField(
-                controller: widget.controller,
-                focusNode: _focusNode,
-                readOnly: widget.readOnly,
-                maxLines: null,
-                expands: true,
-                style: baseStyle?.copyWith(color: Colors.transparent),
-                cursorColor: theme.colorScheme.primary,
-                decoration: const InputDecoration(
-                  border: InputBorder.none,
-                  isDense: true,
-                  contentPadding: EdgeInsets.zero,
-                ),
-                keyboardType: TextInputType.multiline,
-                autocorrect: false,
-                enableSuggestions: false,
-                inputFormatters: [LengthLimitingTextInputFormatter(200000)],
-              ),
-            ],
-          ),
-        ),
+        editor,
         if (hasError) ...[
           const SizedBox(height: AppSpacing.xs),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-            child: Text(
-              errorText!,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.error,
-              ),
+          Text(
+            errorText!,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.error,
             ),
           ),
         ],
