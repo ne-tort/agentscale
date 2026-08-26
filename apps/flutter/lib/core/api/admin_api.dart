@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:prodavan/core/auth/auth_http.dart';
 import 'package:prodavan/core/api/prodavan_api.dart';
 
 /// Platform Admin API client (L04) — separate from employee shell.
@@ -13,21 +14,16 @@ class AdminApi {
   final String baseUrl;
   String bearerToken;
 
-  Map<String, String> get _headers => {
-        'Authorization': 'Bearer $bearerToken',
-        'Content-Type': 'application/json',
-      };
-
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
 
   Future<Map<String, dynamic>> me() async {
-    final res = await http.get(_uri('/me'), headers: _headers);
+    final res = await AuthHttp.get(_uri('/me'));
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<List<Map<String, dynamic>>> listCompanies() async {
-    final res = await http.get(_uri('/admin/companies'), headers: _headers);
+    final res = await AuthHttp.get(_uri('/admin/companies'));
     _throwIfError(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     final items = body['items'];
@@ -38,16 +34,13 @@ class AdminApi {
   }
 
   Future<Map<String, dynamic>> getCompany(String companyId) async {
-    final res = await http.get(_uri('/admin/companies/$companyId'), headers: _headers);
+    final res = await AuthHttp.get(_uri('/admin/companies/$companyId'));
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<void> deleteCompany(String companyId) async {
-    final res = await http.delete(
-      _uri('/admin/companies/$companyId'),
-      headers: _headers,
-    );
+    final res = await AuthHttp.delete(_uri('/admin/companies/$companyId'));
     _throwIfError(res);
   }
 
@@ -66,10 +59,7 @@ class AdminApi {
     if (patchDescription) payload['description'] = description;
     if (patchContactEmail) payload['contact_email'] = contactEmail;
     if (patchPhone) payload['phone'] = phone;
-    final res = await http.patch(
-      _uri('/admin/companies/$companyId'),
-      headers: _headers,
-      body: jsonEncode(payload),
+    final res = await AuthHttp.patch(_uri('/admin/companies/$companyId'), body: jsonEncode(payload),
     );
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
@@ -82,10 +72,7 @@ class AdminApi {
     String? adminDisplayName,
     String? description,
   }) async {
-    final res = await http.post(
-      _uri('/companies'),
-      headers: _headers,
-      body: jsonEncode({
+    final res = await AuthHttp.post(_uri('/companies'), body: jsonEncode({
         'name': name,
         'password': password,
         if (adminEmail != null && adminEmail.isNotEmpty) 'admin_email': adminEmail,
@@ -102,10 +89,7 @@ class AdminApi {
     required String companyId,
     required String password,
   }) async {
-    final res = await http.put(
-      _uri('/admin/companies/$companyId/password'),
-      headers: _headers,
-      body: jsonEncode({'password': password}),
+    final res = await AuthHttp.put(_uri('/admin/companies/$companyId/password'), body: jsonEncode({'password': password}),
     );
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
@@ -117,10 +101,7 @@ class AdminApi {
     String? displayName,
     String role = 'member',
   }) async {
-    final res = await http.post(
-      _uri('/companies/$companyId/employees'),
-      headers: _headers,
-      body: jsonEncode({
+    final res = await AuthHttp.post(_uri('/companies/$companyId/employees'), body: jsonEncode({
         'email': email,
         if (displayName != null && displayName.isNotEmpty) 'display_name': displayName,
         'role': role,
@@ -135,10 +116,7 @@ class AdminApi {
     required bool subscriptionLifetime,
     String? subscriptionEndsAt,
   }) async {
-    final res = await http.put(
-      _uri('/admin/companies/$companyId/subscription'),
-      headers: _headers,
-      body: jsonEncode({
+    final res = await AuthHttp.put(_uri('/admin/companies/$companyId/subscription'), body: jsonEncode({
         'subscription_lifetime': subscriptionLifetime,
         if (subscriptionEndsAt != null && subscriptionEndsAt.isNotEmpty)
           'subscription_ends_at': subscriptionEndsAt,
@@ -154,10 +132,7 @@ class AdminApi {
     required int maxPackagesPerCabinet,
     required int maxBundleImportMb,
   }) async {
-    final res = await http.put(
-      _uri('/admin/companies/$companyId/cabinet-quotas'),
-      headers: _headers,
-      body: jsonEncode({
+    final res = await AuthHttp.put(_uri('/admin/companies/$companyId/cabinet-quotas'), body: jsonEncode({
         'max_cabinets': maxCabinets,
         'max_packages_per_cabinet': maxPackagesPerCabinet,
         'max_bundle_import_mb': maxBundleImportMb,
@@ -181,10 +156,7 @@ class AdminApi {
     String? webhookHmacSecret,
     String? telegramHmacSecret,
   }) async {
-    final res = await http.put(
-      _uri('/admin/companies/$companyId/agent-policy'),
-      headers: _headers,
-      body: jsonEncode({
+    final res = await AuthHttp.put(_uri('/admin/companies/$companyId/agent-policy'), body: jsonEncode({
         'tool_preset': toolPreset,
         'preferred_provider': preferredProvider,
         'platform_fallback': platformFallback,
@@ -207,13 +179,13 @@ class AdminApi {
     final path = companyId == null || companyId.isEmpty
         ? '/admin/triggers/idle-pause/sweep'
         : '/admin/companies/$companyId/idle-pause/sweep';
-    final res = await http.post(_uri(path), headers: _headers);
+    final res = await AuthHttp.post(_uri(path));
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<List<Map<String, dynamic>>> listCompaniesMetrics() async {
-    final res = await http.get(_uri('/admin/metrics/companies'), headers: _headers);
+    final res = await AuthHttp.get(_uri('/admin/metrics/companies'));
     _throwIfError(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     final items = body['items'];
@@ -224,7 +196,7 @@ class AdminApi {
   }
 
   Future<List<Map<String, dynamic>>> listStarterBundles() async {
-    final res = await http.get(_uri('/admin/starter-bundles'), headers: _headers);
+    final res = await AuthHttp.get(_uri('/admin/starter-bundles'));
     _throwIfError(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     final items = body['items'];
@@ -236,10 +208,7 @@ class AdminApi {
 
   /// P1 Project Containers read-model (Project proxy until Container ORM).
   Future<List<Map<String, dynamic>>> listContainers({int limit = 200}) async {
-    final res = await http.get(
-      _uri('/admin/containers').replace(queryParameters: {'limit': '$limit'}),
-      headers: _headers,
-    );
+    final res = await AuthHttp.get(_uri('/admin/containers').replace(queryParameters: {'limit': '$limit'}));
     _throwIfError(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     final items = body['items'];
@@ -250,41 +219,30 @@ class AdminApi {
   }
 
   Future<Map<String, dynamic>> getContainer(String projectId) async {
-    final res = await http.get(_uri('/admin/containers/$projectId'), headers: _headers);
+    final res = await AuthHttp.get(_uri('/admin/containers/$projectId'));
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> pauseContainer(String projectId) async {
-    final res = await http.post(
-      _uri('/admin/containers/$projectId/pause'),
-      headers: _headers,
-      body: '{}',
-    );
+    final res = await AuthHttp.post(_uri('/admin/containers/$projectId/pause'), body: '{}',);
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> resumeContainer(String projectId) async {
-    final res = await http.post(
-      _uri('/admin/containers/$projectId/resume'),
-      headers: _headers,
-      body: '{}',
-    );
+    final res = await AuthHttp.post(_uri('/admin/containers/$projectId/resume'), body: '{}',);
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<void> deleteContainer(String projectId) async {
-    final res = await http.delete(
-      _uri('/admin/containers/$projectId'),
-      headers: _headers,
-    );
+    final res = await AuthHttp.delete(_uri('/admin/containers/$projectId'));
     _throwIfError(res);
   }
 
   Future<List<Map<String, dynamic>>> listAiKeys() async {
-    final res = await http.get(_uri('/admin/ai-keys'), headers: _headers);
+    final res = await AuthHttp.get(_uri('/admin/ai-keys'));
     _throwIfError(res);
     final body = jsonDecode(res.body);
     if (body is List) {
@@ -294,7 +252,7 @@ class AdminApi {
   }
 
   Future<Map<String, dynamic>> getAiKey(String keyId) async {
-    final res = await http.get(_uri('/admin/ai-keys/$keyId'), headers: _headers);
+    final res = await AuthHttp.get(_uri('/admin/ai-keys/$keyId'));
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
@@ -306,10 +264,7 @@ class AdminApi {
     String? secret,
     List<String> companyIds = const [],
   }) async {
-    final res = await http.post(
-      _uri('/admin/ai-keys'),
-      headers: _headers,
-      body: jsonEncode({
+    final res = await AuthHttp.post(_uri('/admin/ai-keys'), body: jsonEncode({
         'name': name,
         'provider': provider,
         'api_kind': apiKind,
@@ -330,10 +285,7 @@ class AdminApi {
     String? nextRenewalAt,
     bool clearNextRenewalAt = false,
   }) async {
-    final res = await http.patch(
-      _uri('/admin/ai-keys/$keyId'),
-      headers: _headers,
-      body: jsonEncode({
+    final res = await AuthHttp.patch(_uri('/admin/ai-keys/$keyId'), body: jsonEncode({
         if (status != null) 'status': status,
         if (name != null) 'name': name,
         if (provider != null) 'provider': provider,
@@ -347,10 +299,7 @@ class AdminApi {
   }
 
   Future<List<Map<String, dynamic>>> listCatalogEntries(String catalogId) async {
-    final res = await http.get(
-      _uri('/admin/catalogs/$catalogId/entries'),
-      headers: _headers,
-    );
+    final res = await AuthHttp.get(_uri('/admin/catalogs/$catalogId/entries'));
     _throwIfError(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     final items = body['items'];
@@ -366,10 +315,7 @@ class AdminApi {
     String? iconName,
     Map<String, dynamic>? payload,
   }) async {
-    final res = await http.post(
-      _uri('/admin/catalogs/$catalogId/entries'),
-      headers: _headers,
-      body: jsonEncode({
+    final res = await AuthHttp.post(_uri('/admin/catalogs/$catalogId/entries'), body: jsonEncode({
         'title': title,
         if (id != null) 'id': id,
         if (subtitle != null) 'subtitle': subtitle,
@@ -388,10 +334,7 @@ class AdminApi {
     String? subtitle,
     Map<String, dynamic>? payload,
   }) async {
-    final res = await http.patch(
-      _uri('/admin/catalogs/$catalogId/entries/$entryId'),
-      headers: _headers,
-      body: jsonEncode({
+    final res = await AuthHttp.patch(_uri('/admin/catalogs/$catalogId/entries/$entryId'), body: jsonEncode({
         if (title != null) 'title': title,
         if (subtitle != null) 'subtitle': subtitle,
         if (payload != null) 'payload': payload,
@@ -405,18 +348,12 @@ class AdminApi {
     required String catalogId,
     required String entryId,
   }) async {
-    final res = await http.delete(
-      _uri('/admin/catalogs/$catalogId/entries/$entryId'),
-      headers: _headers,
-    );
+    final res = await AuthHttp.delete(_uri('/admin/catalogs/$catalogId/entries/$entryId'));
     _throwIfError(res);
   }
 
   Future<void> deleteAiKey(String keyId) async {
-    final res = await http.delete(
-      _uri('/admin/ai-keys/$keyId'),
-      headers: _headers,
-    );
+    final res = await AuthHttp.delete(_uri('/admin/ai-keys/$keyId'));
     _throwIfError(res);
   }
 
@@ -424,10 +361,7 @@ class AdminApi {
     required String keyId,
     int months = 1,
   }) async {
-    final res = await http.post(
-      _uri('/admin/ai-keys/$keyId/renew'),
-      headers: _headers,
-      body: jsonEncode({'months': months}),
+    final res = await AuthHttp.post(_uri('/admin/ai-keys/$keyId/renew'), body: jsonEncode({'months': months}),
     );
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
@@ -437,10 +371,7 @@ class AdminApi {
     required String keyId,
     required String secret,
   }) async {
-    final res = await http.post(
-      _uri('/admin/ai-keys/$keyId/rotate-secret'),
-      headers: _headers,
-      body: jsonEncode({'secret': secret}),
+    final res = await AuthHttp.post(_uri('/admin/ai-keys/$keyId/rotate-secret'), body: jsonEncode({'secret': secret}),
     );
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
@@ -450,10 +381,7 @@ class AdminApi {
     required String keyId,
     required List<String> companyIds,
   }) async {
-    final res = await http.put(
-      _uri('/admin/ai-keys/$keyId/companies'),
-      headers: _headers,
-      body: jsonEncode({'company_ids': companyIds}),
+    final res = await AuthHttp.put(_uri('/admin/ai-keys/$keyId/companies'), body: jsonEncode({'company_ids': companyIds}),
     );
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
@@ -469,10 +397,7 @@ class AdminApi {
       if (companyId != null && companyId.isNotEmpty) 'company_id': companyId,
       if (eventType != null && eventType.isNotEmpty) 'event_type': eventType,
     };
-    final res = await http.get(
-      _uri('/admin/platform-events').replace(queryParameters: params),
-      headers: _headers,
-    );
+    final res = await AuthHttp.get(_uri('/admin/platform-events').replace(queryParameters: params));
     _throwIfError(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     final items = body['items'];
@@ -486,12 +411,11 @@ class AdminApi {
     int maxProjects = 20,
     int maxPerProject = 10,
   }) async {
-    final res = await http.post(
+    final res = await AuthHttp.post(
       _uri('/admin/triggers/drain').replace(queryParameters: {
         'max_projects': '$maxProjects',
         'max_per_project': '$maxPerProject',
       }),
-      headers: _headers,
     );
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;

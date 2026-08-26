@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:prodavan/core/auth/auth_http.dart';
 
 /// Minimal Prodavan API client (L05) — Bearer + work context headers.
 class ProdavanApi {
@@ -18,9 +19,7 @@ class ProdavanApi {
   String? cabinetId;
   String? projectId;
 
-  Map<String, String> get _headers => {
-        'Authorization': 'Bearer $bearerToken',
-        'Content-Type': 'application/json',
+  Map<String, String> get _workHeaders => {
         if (cabinetId != null) 'X-Cabinet-Id': cabinetId!,
         if (projectId != null) 'X-Project-Id': projectId!,
       };
@@ -34,10 +33,7 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.get(
-        _uri('/cabinets/$cabinetId/audit-events?limit=$limit'),
-        headers: _headers,
-      );
+      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId/audit-events?limit=$limit'), extraHeaders: _workHeaders);
       _throwIfError(res);
       final body = jsonDecode(res.body);
       if (body is List) {
@@ -56,10 +52,7 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.get(
-        _uri('/cabinets/$cabinetId/workspace-docs/$slug'),
-        headers: _headers,
-      );
+      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId/workspace-docs/$slug'), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -75,11 +68,7 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.put(
-        _uri('/cabinets/$cabinetId/workspace-docs/$slug'),
-        headers: _headers,
-        body: jsonEncode({'body': body}),
-      );
+      final res = await AuthHttp.put(_uri('/cabinets/$cabinetId/workspace-docs/$slug'), body: jsonEncode({'body': body}), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -88,13 +77,13 @@ class ProdavanApi {
   }
 
   Future<Map<String, dynamic>> me() async {
-    final res = await http.get(_uri('/me'), headers: _headers);
+    final res = await AuthHttp.get(_uri('/me'), extraHeaders: _workHeaders);
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<List<Map<String, dynamic>>> listCabinets() async {
-    final res = await http.get(_uri('/cabinets'), headers: _headers);
+    final res = await AuthHttp.get(_uri('/cabinets'), extraHeaders: _workHeaders);
     _throwIfError(res);
     final body = jsonDecode(res.body);
     if (body is List) {
@@ -107,11 +96,7 @@ class ProdavanApi {
     required String name,
     required String companyId,
   }) async {
-    final res = await http.post(
-      _uri('/cabinets'),
-      headers: _headers,
-      body: jsonEncode({'name': name, 'company_id': companyId}),
-    );
+    final res = await AuthHttp.post(_uri('/cabinets'), body: jsonEncode({'name': name, 'company_id': companyId}), extraHeaders: _workHeaders);
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
@@ -121,15 +106,11 @@ class ProdavanApi {
     required List<int> zipBytes,
     String? name,
   }) async {
-    final res = await http.post(
-      _uri('/cabinets/import'),
-      headers: _headers,
-      body: jsonEncode({
+    final res = await AuthHttp.post(_uri('/cabinets/import'), body: jsonEncode({
         'company_id': companyId,
         'zip_base64': base64Encode(zipBytes),
         if (name != null && name.isNotEmpty) 'name': name,
-      }),
-    );
+      }), extraHeaders: _workHeaders);
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
@@ -142,7 +123,7 @@ class ProdavanApi {
     this.cabinetId = cabinetId;
     try {
       final query = includeData ? '' : '?include_data=false';
-      final res = await http.get(_uri('/cabinets/$cabinetId/bundle$query'), headers: _headers);
+      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId/bundle$query'), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -154,7 +135,7 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.get(_uri('/cabinets/$cabinetId'), headers: _headers);
+      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId'), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -166,7 +147,7 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.get(_uri('/cabinets/$cabinetId/meta/tabs'), headers: _headers);
+      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId/meta/tabs'), extraHeaders: _workHeaders);
       _throwIfError(res);
       final body = jsonDecode(res.body);
       if (body is List) {
@@ -186,7 +167,7 @@ class ProdavanApi {
     this.cabinetId = cabinetId;
     try {
       final query = includeArchived ? '?include_archived=true' : '';
-      final res = await http.get(_uri('/cabinets/$cabinetId/meta/tables$query'), headers: _headers);
+      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId/meta/tables$query'), extraHeaders: _workHeaders);
       _throwIfError(res);
       final body = jsonDecode(res.body);
       if (body is List) {
@@ -208,16 +189,12 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.post(
-        _uri('/cabinets/$cabinetId/meta/tables'),
-        headers: _headers,
-        body: jsonEncode({
+      final res = await AuthHttp.post(_uri('/cabinets/$cabinetId/meta/tables'), body: jsonEncode({
           'slug': slug,
           'label': label,
           'storage_kind': storageKind,
           'columns': columns,
-        }),
-      );
+        }), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -233,11 +210,7 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.patch(
-        _uri('/cabinets/$cabinetId/meta/tables/$tableSlug'),
-        headers: _headers,
-        body: jsonEncode({'label': label}),
-      );
+      final res = await AuthHttp.patch(_uri('/cabinets/$cabinetId/meta/tables/$tableSlug'), body: jsonEncode({'label': label}), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -252,10 +225,7 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.post(
-        _uri('/cabinets/$cabinetId/meta/tables/$tableSlug/archive'),
-        headers: _headers,
-      );
+      final res = await AuthHttp.post(_uri('/cabinets/$cabinetId/meta/tables/$tableSlug/archive'), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -270,10 +240,7 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.delete(
-        _uri('/cabinets/$cabinetId/meta/tables/$tableSlug'),
-        headers: _headers,
-      );
+      final res = await AuthHttp.delete(_uri('/cabinets/$cabinetId/meta/tables/$tableSlug'), extraHeaders: _workHeaders);
       _throwIfError(res);
     } finally {
       this.cabinetId = prev;
@@ -294,11 +261,7 @@ class ProdavanApi {
       if (uiJson != null) body['ui_json'] = uiJson;
       if (tableSlug != null) body['table_slug'] = tableSlug;
       if (version != null) body['version'] = version;
-      final res = await http.patch(
-        _uri('/cabinets/$cabinetId/meta/views/$viewSlug'),
-        headers: _headers,
-        body: jsonEncode(body),
-      );
+      final res = await AuthHttp.patch(_uri('/cabinets/$cabinetId/meta/views/$viewSlug'), body: jsonEncode(body), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -317,16 +280,12 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.post(
-        _uri('/cabinets/$cabinetId/meta/tables/$tableSlug/columns'),
-        headers: _headers,
-        body: jsonEncode({
+      final res = await AuthHttp.post(_uri('/cabinets/$cabinetId/meta/tables/$tableSlug/columns'), body: jsonEncode({
           'name': name,
           'type': type,
           'required': required,
           'unique': unique,
-        }),
-      );
+        }), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -349,11 +308,7 @@ class ProdavanApi {
       if (type != null) body['type'] = type;
       if (required != null) body['required'] = required;
       if (unique != null) body['unique'] = unique;
-      final res = await http.patch(
-        _uri('/cabinets/$cabinetId/meta/tables/$tableSlug/columns/$columnName'),
-        headers: _headers,
-        body: jsonEncode(body),
-      );
+      final res = await AuthHttp.patch(_uri('/cabinets/$cabinetId/meta/tables/$tableSlug/columns/$columnName'), body: jsonEncode(body), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -369,10 +324,7 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.delete(
-        _uri('/cabinets/$cabinetId/meta/tables/$tableSlug/columns/$columnName'),
-        headers: _headers,
-      );
+      final res = await AuthHttp.delete(_uri('/cabinets/$cabinetId/meta/tables/$tableSlug/columns/$columnName'), extraHeaders: _workHeaders);
       _throwIfError(res);
     } finally {
       this.cabinetId = prev;
@@ -383,7 +335,7 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.get(_uri('/cabinets/$cabinetId/meta/views'), headers: _headers);
+      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId/meta/views'), extraHeaders: _workHeaders);
       _throwIfError(res);
       final body = jsonDecode(res.body);
       if (body is List) {
@@ -405,16 +357,12 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.post(
-        _uri('/cabinets/$cabinetId/meta/views'),
-        headers: _headers,
-        body: jsonEncode({
+      final res = await AuthHttp.post(_uri('/cabinets/$cabinetId/meta/views'), body: jsonEncode({
           'slug': slug,
           if (tableSlug != null) 'table_slug': tableSlug,
           'ui_json': uiJson ?? const {'version': 1, 'kind': 'collection', 'title_field': 'title'},
           'version': version,
-        }),
-      );
+        }), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -431,15 +379,11 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.post(
-        _uri('/cabinets/$cabinetId/meta/tabs'),
-        headers: _headers,
-        body: jsonEncode({
+      final res = await AuthHttp.post(_uri('/cabinets/$cabinetId/meta/tabs'), body: jsonEncode({
           'title': title,
           'order': order,
           'view_slug': viewSlug,
-        }),
-      );
+        }), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -454,10 +398,7 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.delete(
-        _uri('/cabinets/$cabinetId/meta/tabs/$tabId'),
-        headers: _headers,
-      );
+      final res = await AuthHttp.delete(_uri('/cabinets/$cabinetId/meta/tabs/$tabId'), extraHeaders: _workHeaders);
       _throwIfError(res);
     } finally {
       this.cabinetId = prev;
@@ -471,10 +412,7 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.delete(
-        _uri('/cabinets/$cabinetId/meta/views/$viewSlug'),
-        headers: _headers,
-      );
+      final res = await AuthHttp.delete(_uri('/cabinets/$cabinetId/meta/views/$viewSlug'), extraHeaders: _workHeaders);
       _throwIfError(res);
     } finally {
       this.cabinetId = prev;
@@ -490,10 +428,7 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.get(
-        _uri('/cabinets/$cabinetId/data/$tableSlug/rows?limit=$limit&offset=$offset'),
-        headers: _headers,
-      );
+      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId/data/$tableSlug/rows?limit=$limit&offset=$offset'), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -508,7 +443,7 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.get(_uri('/cabinets/$cabinetId/meta/tables/$tableSlug'), headers: _headers);
+      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId/meta/tables/$tableSlug'), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -517,7 +452,7 @@ class ProdavanApi {
   }
 
   Future<List<Map<String, dynamic>>> listStarterBundles() async {
-    final res = await http.get(_uri('/starter-bundles'), headers: _headers);
+    final res = await AuthHttp.get(_uri('/starter-bundles'), extraHeaders: _workHeaders);
     _throwIfError(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     final items = body['items'];
@@ -528,7 +463,7 @@ class ProdavanApi {
   }
 
   Future<Map<String, dynamic>> downloadStarterBundle(String bundleId) async {
-    final res = await http.get(_uri('/starter-bundles/$bundleId/bundle'), headers: _headers);
+    final res = await AuthHttp.get(_uri('/starter-bundles/$bundleId/bundle'), extraHeaders: _workHeaders);
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
@@ -537,7 +472,7 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.get(_uri('/cabinets/$cabinetId/mcp/tools'), headers: _headers);
+      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId/mcp/tools'), extraHeaders: _workHeaders);
       _throwIfError(res);
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final tools = body['tools'];
@@ -559,14 +494,10 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.post(
-        _uri('/cabinets/$cabinetId/data/$tableSlug/rows'),
-        headers: _headers,
-        body: jsonEncode({
+      final res = await AuthHttp.post(_uri('/cabinets/$cabinetId/data/$tableSlug/rows'), body: jsonEncode({
           'values': values,
           if (rowId != null && rowId.isNotEmpty) 'id': rowId,
-        }),
-      );
+        }), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -582,10 +513,7 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.delete(
-        _uri('/cabinets/$cabinetId/data/$tableSlug/rows/$rowId'),
-        headers: _headers,
-      );
+      final res = await AuthHttp.delete(_uri('/cabinets/$cabinetId/data/$tableSlug/rows/$rowId'), extraHeaders: _workHeaders);
       _throwIfError(res);
     } finally {
       this.cabinetId = prev;
@@ -596,7 +524,7 @@ class ProdavanApi {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.get(_uri('/cabinets/$cabinetId/projects'), headers: _headers);
+      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId/projects'), extraHeaders: _workHeaders);
       _throwIfError(res);
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final items = body['items'];
@@ -617,14 +545,10 @@ class ProdavanApi {
     final prevCab = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
-      final res = await http.post(
-        _uri('/cabinets/$cabinetId/projects'),
-        headers: _headers,
-        body: jsonEncode({
+      final res = await AuthHttp.post(_uri('/cabinets/$cabinetId/projects'), body: jsonEncode({
           'name': name,
           if (agentProvider != null && agentProvider.isNotEmpty) 'agent_provider': agentProvider,
-        }),
-      );
+        }), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -636,7 +560,7 @@ class ProdavanApi {
     final prevProj = this.projectId;
     this.projectId = projectId;
     try {
-      final res = await http.get(_uri('/projects/$projectId'), headers: _headers);
+      final res = await AuthHttp.get(_uri('/projects/$projectId'), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -660,11 +584,7 @@ class ProdavanApi {
       } else if (agentProvider != null) {
         body['agent_provider'] = agentProvider;
       }
-      final res = await http.patch(
-        _uri('/projects/$projectId'),
-        headers: _headers,
-        body: jsonEncode(body),
-      );
+      final res = await AuthHttp.patch(_uri('/projects/$projectId'), body: jsonEncode(body), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -676,10 +596,7 @@ class ProdavanApi {
     final prevProj = this.projectId;
     this.projectId = projectId;
     try {
-      final res = await http.post(
-        _uri('/projects/$projectId/rematerialize'),
-        headers: _headers,
-      );
+      final res = await AuthHttp.post(_uri('/projects/$projectId/rematerialize'), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -691,10 +608,7 @@ class ProdavanApi {
     final prevProj = this.projectId;
     this.projectId = projectId;
     try {
-      final res = await http.post(
-        _uri('/projects/$projectId/pause'),
-        headers: _headers,
-      );
+      final res = await AuthHttp.post(_uri('/projects/$projectId/pause'), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -706,10 +620,7 @@ class ProdavanApi {
     final prevProj = this.projectId;
     this.projectId = projectId;
     try {
-      final res = await http.post(
-        _uri('/projects/$projectId/resume'),
-        headers: _headers,
-      );
+      final res = await AuthHttp.post(_uri('/projects/$projectId/resume'), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -726,15 +637,11 @@ class ProdavanApi {
     final prevProj = this.projectId;
     this.projectId = projectId;
     try {
-      final res = await http.post(
-        _uri('/projects/$projectId/chat'),
-        headers: _headers,
-        body: jsonEncode({
+      final res = await AuthHttp.post(_uri('/projects/$projectId/chat'), body: jsonEncode({
           'text': text,
           if (sessionId != null) 'session_id': sessionId,
           if (attachmentRefs.isNotEmpty) 'attachment_refs': attachmentRefs,
-        }),
-      );
+        }), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -746,7 +653,7 @@ class ProdavanApi {
     final prevProj = this.projectId;
     this.projectId = projectId;
     try {
-      final res = await http.get(_uri('/projects/$projectId/attachments'), headers: _headers);
+      final res = await AuthHttp.get(_uri('/projects/$projectId/attachments'), extraHeaders: _workHeaders);
       _throwIfError(res);
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final items = body['items'];
@@ -768,15 +675,11 @@ class ProdavanApi {
     final prevProj = this.projectId;
     this.projectId = projectId;
     try {
-      final res = await http.post(
-        _uri('/projects/$projectId/attachments'),
-        headers: _headers,
-        body: jsonEncode({
+      final res = await AuthHttp.post(_uri('/projects/$projectId/attachments'), body: jsonEncode({
           'filename': filename,
           'content_base64': base64Encode(bytes),
           if (contentType != null && contentType.isNotEmpty) 'content_type': contentType,
-        }),
-      );
+        }), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -791,10 +694,7 @@ class ProdavanApi {
     final prevProj = this.projectId;
     this.projectId = projectId;
     try {
-      final res = await http.delete(
-        _uri('/projects/$projectId/attachments/$attachmentId'),
-        headers: _headers,
-      );
+      final res = await AuthHttp.delete(_uri('/projects/$projectId/attachments/$attachmentId'), extraHeaders: _workHeaders);
       _throwIfError(res);
     } finally {
       this.projectId = prevProj;
@@ -808,10 +708,7 @@ class ProdavanApi {
     final prevProj = this.projectId;
     this.projectId = projectId;
     try {
-      final res = await http.get(
-        _uri('/projects/$projectId/attachments/$attachmentId/content'),
-        headers: _headers,
-      );
+      final res = await AuthHttp.get(_uri('/projects/$projectId/attachments/$attachmentId/content'), extraHeaders: _workHeaders);
       _throwIfError(res);
       return res.bodyBytes;
     } finally {
@@ -834,7 +731,7 @@ class ProdavanApi {
     Future<void> pump() async {
       try {
         final request = http.Request('POST', _uri('/projects/$projectId/chat/stream'))
-          ..headers.addAll(_headers)
+          ..headers.addAll(await AuthHttp.headers(_workHeaders))
           ..body = jsonEncode({
             'text': text,
             if (sessionId != null) 'session_id': sessionId,
@@ -897,10 +794,7 @@ class ProdavanApi {
     this.projectId = projectId;
     try {
       final query = sessionId == null ? '' : '?session_id=$sessionId';
-      final res = await http.get(
-        _uri('/projects/$projectId/chat/transcript$query'),
-        headers: _headers,
-      );
+      final res = await AuthHttp.get(_uri('/projects/$projectId/chat/transcript$query'), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
@@ -915,10 +809,7 @@ class ProdavanApi {
     final prevProj = this.projectId;
     this.projectId = projectId;
     try {
-      final res = await http.post(
-        _uri('/projects/$projectId/agent/sessions/$sessionId/cancel'),
-        headers: _headers,
-      );
+      final res = await AuthHttp.post(_uri('/projects/$projectId/agent/sessions/$sessionId/cancel'), extraHeaders: _workHeaders);
       _throwIfError(res);
     } finally {
       this.projectId = prevProj;
@@ -932,10 +823,7 @@ class ProdavanApi {
     final prevProj = this.projectId;
     this.projectId = projectId;
     try {
-      final res = await http.get(
-        _uri('/projects/$projectId/agent/sessions/$sessionId/pending-approvals'),
-        headers: _headers,
-      );
+      final res = await AuthHttp.get(_uri('/projects/$projectId/agent/sessions/$sessionId/pending-approvals'), extraHeaders: _workHeaders);
       _throwIfError(res);
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final items = body['items'];
@@ -957,11 +845,7 @@ class ProdavanApi {
     final prevProj = this.projectId;
     this.projectId = projectId;
     try {
-      final res = await http.post(
-        _uri('/projects/$projectId/agent/sessions/$sessionId/tool-approvals'),
-        headers: _headers,
-        body: jsonEncode({'id': approvalId, 'decision': decision}),
-      );
+      final res = await AuthHttp.post(_uri('/projects/$projectId/agent/sessions/$sessionId/tool-approvals'), body: jsonEncode({'id': approvalId, 'decision': decision}), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {

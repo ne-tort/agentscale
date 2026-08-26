@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 class SessionStore {
   static const _keyBaseUrl = 'prodavan.api.base_url';
   static const _keyCompanyId = 'prodavan.api.company_id';
+  static const _keyExpiresAt = 'prodavan.api.access_expires_at';
   static const _secureToken = 'prodavan.secure.bearer_token';
   static const _secureRefresh = 'prodavan.secure.refresh_token';
   static const _secureIdToken = 'prodavan.secure.id_token';
@@ -19,6 +20,7 @@ class SessionStore {
     required String bearerToken,
     String? refreshToken,
     String? idToken,
+    DateTime? expiresAt,
     String? companyId,
     bool keepRefreshIfNull = false,
     bool keepIdTokenIfNull = false,
@@ -37,6 +39,12 @@ class SessionStore {
       await _secure.write(key: _secureIdToken, value: idToken);
     } else if (!keepIdTokenIfNull) {
       await _secure.delete(key: _secureIdToken);
+    }
+
+    if (expiresAt != null) {
+      await prefs.setString(_keyExpiresAt, expiresAt.toUtc().toIso8601String());
+    } else {
+      await prefs.remove(_keyExpiresAt);
     }
 
     if (companyId != null) {
@@ -61,11 +69,18 @@ class SessionStore {
       await prefs.remove(_legacyToken);
     }
 
+    DateTime? expiresAt;
+    final expRaw = prefs.getString(_keyExpiresAt);
+    if (expRaw != null && expRaw.isNotEmpty) {
+      expiresAt = DateTime.tryParse(expRaw)?.toLocal();
+    }
+
     return StoredSession(
       baseUrl: baseUrl,
       bearerToken: token,
       refreshToken: await _secure.read(key: _secureRefresh),
       idToken: await _secure.read(key: _secureIdToken),
+      expiresAt: expiresAt,
       companyId: prefs.getString(_keyCompanyId),
     );
   }
@@ -74,6 +89,7 @@ class SessionStore {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_keyBaseUrl);
     await prefs.remove(_keyCompanyId);
+    await prefs.remove(_keyExpiresAt);
     await prefs.remove(_legacyToken);
     await _secure.delete(key: _secureToken);
     await _secure.delete(key: _secureRefresh);
@@ -87,6 +103,7 @@ class StoredSession {
     required this.bearerToken,
     this.refreshToken,
     this.idToken,
+    this.expiresAt,
     this.companyId,
   });
 
@@ -94,6 +111,7 @@ class StoredSession {
   final String bearerToken;
   final String? refreshToken;
   final String? idToken;
+  final DateTime? expiresAt;
   final String? companyId;
 }
 

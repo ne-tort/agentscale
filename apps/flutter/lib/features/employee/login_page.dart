@@ -3,7 +3,7 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/auth/auth_config.dart';
 import 'package:prodavan/core/auth/oidc_auth_service.dart';
-import 'package:prodavan/core/auth/session_store.dart';
+import 'package:prodavan/core/auth/token_session.dart';
 import 'package:prodavan/core/config/api_base.dart';
 import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/session/work_context.dart';
@@ -105,22 +105,25 @@ class _LoginPageState extends State<LoginPage> {
     required String token,
     String? refreshToken,
     String? idToken,
+    DateTime? expiresAt,
+    int? expiresInSeconds,
   }) async {
-    workContext.setSession(baseUrl: baseUrl, bearerToken: token);
-    final me = await workContext.api.me();
-    final memberships = me['employee']?['memberships'];
-    String? companyId;
-    if (memberships is List && memberships.length == 1) {
-      companyId = memberships.first['company_id'] as String?;
-    }
-    await sessionStore.save(
+    await tokenSession.applyTokens(
       baseUrl: baseUrl,
-      bearerToken: token,
+      accessToken: token,
       refreshToken: refreshToken,
       idToken: idToken,
-      companyId: companyId,
+      expiresAt: expiresAt,
+      expiresInSeconds: expiresInSeconds,
     );
-    if (companyId != null) workContext.companyId = companyId;
+    final me = await workContext.api.me();
+    final memberships = me['employee']?['memberships'];
+    if (memberships is List && memberships.length == 1) {
+      final companyId = memberships.first['company_id'] as String?;
+      if (companyId != null) {
+        await tokenSession.setCompanyId(companyId);
+      }
+    }
     await _navigateAfterMe(me);
   }
 
@@ -139,6 +142,7 @@ class _LoginPageState extends State<LoginPage> {
         token: result.accessToken,
         refreshToken: result.refreshToken,
         idToken: result.idToken,
+        expiresAt: result.accessTokenExpiration,
       );
     } catch (e) {
       if (!mounted) return;
@@ -161,7 +165,14 @@ class _LoginPageState extends State<LoginPage> {
       if (token == null || token.isEmpty) {
         throw Exception(l10n.authNoAccessTokenInTestLogin);
       }
-      await _finishSession(baseUrl: _baseCtrl.text.trim(), token: token);
+      final expiresIn = body['expires_in'];
+      await _finishSession(
+        baseUrl: _baseCtrl.text.trim(),
+        token: token,
+        expiresInSeconds: expiresIn is int
+            ? expiresIn
+            : int.tryParse('$expiresIn'),
+      );
     } catch (e) {
       if (!mounted) return;
       setState(() {

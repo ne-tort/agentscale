@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:prodavan/core/auth/auth_http.dart';
 import 'package:prodavan/core/api/prodavan_api.dart';
 
 /// Company admin contour API client (L04) — org employees, cabinets, summary.
@@ -15,21 +16,16 @@ class CompanyApi {
   String bearerToken;
   String? companyId;
 
-  Map<String, String> get _headers => {
-        'Authorization': 'Bearer $bearerToken',
-        'Content-Type': 'application/json',
-      };
-
   Uri _uri(String path) => Uri.parse('$baseUrl$path');
 
   Future<Map<String, dynamic>> me() async {
-    final res = await http.get(_uri('/me'), headers: _headers);
+    final res = await AuthHttp.get(_uri('/me'));
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<Map<String, dynamic>> getSummary(String companyId) async {
-    final res = await http.get(_uri('/companies/$companyId/summary'), headers: _headers);
+    final res = await AuthHttp.get(_uri('/companies/$companyId/summary'));
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
@@ -38,17 +34,14 @@ class CompanyApi {
     required String companyId,
     required String password,
   }) async {
-    final res = await http.put(
-      _uri('/companies/$companyId/password'),
-      headers: _headers,
-      body: jsonEncode({'password': password}),
+    final res = await AuthHttp.put(_uri('/companies/$companyId/password'), body: jsonEncode({'password': password}),
     );
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<List<Map<String, dynamic>>> listEmployees(String companyId) async {
-    final res = await http.get(_uri('/companies/$companyId/employees'), headers: _headers);
+    final res = await AuthHttp.get(_uri('/companies/$companyId/employees'));
     _throwIfError(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     final items = body['items'];
@@ -59,7 +52,7 @@ class CompanyApi {
   }
 
   Future<List<Map<String, dynamic>>> listOrgCabinets(String companyId) async {
-    final res = await http.get(_uri('/companies/$companyId/cabinets'), headers: _headers);
+    final res = await AuthHttp.get(_uri('/companies/$companyId/cabinets'));
     _throwIfError(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     final items = body['items'];
@@ -75,10 +68,7 @@ class CompanyApi {
     String? displayName,
     String role = 'member',
   }) async {
-    final res = await http.post(
-      _uri('/companies/$companyId/employees'),
-      headers: _headers,
-      body: jsonEncode({
+    final res = await AuthHttp.post(_uri('/companies/$companyId/employees'), body: jsonEncode({
         'email': email,
         if (displayName != null && displayName.isNotEmpty) 'display_name': displayName,
         'role': role,
@@ -89,10 +79,7 @@ class CompanyApi {
   }
 
   Future<Map<String, dynamic>> disableEmployee(String employeeId) async {
-    final res = await http.post(
-      _uri('/employees/$employeeId/disable'),
-      headers: _headers,
-    );
+    final res = await AuthHttp.post(_uri('/employees/$employeeId/disable'));
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
   }

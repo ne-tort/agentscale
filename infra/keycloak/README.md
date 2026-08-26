@@ -17,9 +17,19 @@ Interim: DB membership `company.admin` на Employee ещё может откр�
 
 | Client | Type | Notes |
 |--------|------|-------|
-| `prodavan-flutter` | public + PKCE | UI; **Direct Access Grants off**; default scope includes `prodavan-audience` → `aud=prodavan-api` |
+| `prodavan-flutter` | public + PKCE | UI; **Direct Access Grants on** for first-party username/password (company_id); default scope includes `prodavan-audience` → `aud=prodavan-api`; request `offline_access` for long-lived refresh |
 | `prodavan-api` | audience | claim target for mapper |
 | `prodavan-services` | confidential + service account | Admin API invite / workers; default scope includes `prodavan-audience` |
+
+## Token lifetimes (realm)
+
+| Setting | Value | Meaning |
+|---------|-------|---------|
+| `accessTokenLifespan` | `3600` (1h) | Short-lived access JWT |
+| `ssoSessionIdleTimeout` / `ssoSessionMaxLifespan` | `315360000` (~10y) | Online session ceiling |
+| `offlineSessionIdleTimeout` / `offlineSessionMaxLifespan` | `315360000` (~10y) | Offline refresh (with `offline_access` scope) |
+
+Flutter requests `offline_access` so refresh survives days/weeks without re-login. Access is refreshed proactively (~60s skew) and on HTTP 401.
 
 ## Audience
 
@@ -50,7 +60,7 @@ When enabling social login (humans only — Employee / Admin):
 3. Enable **First Broker Login** + **Account Linking** (email conflict → KC linking UI, not silent merge in Prodavan API).
 4. Flutter social buttons pass `kc_idp_hint=vk|yandex` on authorize; one OIDC client stays `prodavan-flutter`.
 
-**Company org principal does not use brokers** — login remains `company_id` + password (KC login form / username). Prefer Direct Access Grants **off** for `prodavan-flutter`; company signs in via KC UI with username=`company_id`.
+**Company org principal** — login is `company_id` + password. Native Flutter uses Resource Owner Password (Direct Access Grants) via `TokenSession.loginWithPassword`; browser/IdP flows stay on PKCE.
 
 ## Import (dev)
 

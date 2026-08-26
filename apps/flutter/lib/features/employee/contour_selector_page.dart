@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'package:prodavan/core/auth/session_store.dart';
-import 'package:prodavan/core/session/work_context.dart';
+import 'package:prodavan/core/auth/token_session.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
@@ -16,17 +15,7 @@ class ContourSelectorPage extends StatelessWidget {
   final Map<String, dynamic> me;
 
   Future<void> _select(BuildContext context, String companyId) async {
-    workContext.companyId = companyId;
-    final existing = await sessionStore.load();
-    await sessionStore.save(
-      baseUrl: workContext.baseUrl,
-      bearerToken: workContext.bearerToken,
-      refreshToken: existing?.refreshToken,
-      idToken: existing?.idToken,
-      companyId: companyId,
-      keepRefreshIfNull: true,
-      keepIdTokenIfNull: true,
-    );
+    await tokenSession.setCompanyId(companyId);
     if (!context.mounted) return;
     Navigator.of(context).pushReplacement(
       MaterialPageRoute<void>(builder: (_) => const CabinetListPage()),

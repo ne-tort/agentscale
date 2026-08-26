@@ -1,9 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'package:prodavan/core/auth/auth_config.dart';
-import 'package:prodavan/core/auth/oidc_auth_service.dart';
-import 'package:prodavan/core/auth/session_store.dart';
-import 'package:prodavan/core/session/admin_context.dart';
+import 'package:prodavan/core/auth/token_session.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/features/admin/admin_shell.dart';
@@ -29,23 +26,20 @@ class _SessionGatePageState extends State<SessionGatePage> {
     _restore();
   }
 
-  Future<void> _navigateAfterMe(Map<String, dynamic> me, StoredSession stored) async {
+  Future<void> _navigateAfterMe(Map<String, dynamic> me) async {
     if (!mounted) return;
     final contours = me['contours'];
     final memberships = me['employee']?['memberships'];
     final isPlatformAdmin = contours is List && contours.contains('platform_admin');
     final hasMemberships = memberships is List && memberships.isNotEmpty;
+    final companyId = tokenSession.companyId;
     if (isPlatformAdmin && !hasMemberships) {
-      adminContext.setSession(
-        baseUrl: stored.baseUrl,
-        bearerToken: workContext.bearerToken,
-      );
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(builder: (_) => const AdminShell()),
       );
       return;
     }
-    if (stored.companyId == null && memberships is List && memberships.length > 1) {
+    if (companyId == null && memberships is List && memberships.length > 1) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(builder: (_) => ContourSelectorPage(me: me)),
       );
@@ -56,52 +50,28 @@ class _SessionGatePageState extends State<SessionGatePage> {
     );
   }
 
-  Future<bool> _tryRefresh(StoredSession stored) async {
-    final refresh = stored.refreshToken;
-    if (refresh == null || refresh.isEmpty) return false;
-    try {
-      final cfg = await AuthConfigClient(baseUrl: stored.baseUrl).fetch();
-      final oidc = cfg['oidc'];
-      if (oidc is! Map<String, dynamic>) return false;
-      final result = await oidcAuthService.refresh(oidc: oidc, refreshToken: refresh);
-      if (result == null) return false;
-      workContext.setSession(baseUrl: stored.baseUrl, bearerToken: result.accessToken);
-      await sessionStore.save(
-        baseUrl: stored.baseUrl,
-        bearerToken: result.accessToken,
-        refreshToken: result.refreshToken ?? refresh,
-        idToken: result.idToken ?? stored.idToken,
-        companyId: stored.companyId,
-        keepIdTokenIfNull: true,
-      );
-      return true;
-    } catch (_) {
-      return false;
-    }
-  }
-
   Future<void> _restore() async {
-    final stored = await sessionStore.load();
-    if (stored == null) {
+    final restored = await tokenSession.restore();
+    if (restored == null) {
       if (!mounted) return;
       setState(() => _checking = false);
       return;
     }
-    workContext.setSession(baseUrl: stored.baseUrl, bearerToken: stored.bearerToken);
-    workContext.companyId = stored.companyId;
     try {
+      // Proactive refresh if access is near expiry / expired.
+      await tokenSession.requireAccessToken();
       final me = await workContext.api.me();
-      await _navigateAfterMe(me, stored);
+      await _navigateAfterMe(me);
     } catch (_) {
-      if (await _tryRefresh(stored)) {
+      final refreshed = await tokenSession.refresh(force: true);
+      if (refreshed) {
         try {
           final me = await workContext.api.me();
-          await _navigateAfterMe(me, stored);
+          await _navigateAfterMe(me);
           return;
         } catch (_) {}
       }
-      await sessionStore.clear();
-      workContext.clear();
+      await tokenSession.clear();
       if (!mounted) return;
       setState(() => _checking = false);
     }

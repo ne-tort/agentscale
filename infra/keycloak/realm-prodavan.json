@@ -6,6 +6,14 @@
   "duplicateEmailsAllowed": false,
   "resetPasswordAllowed": true,
   "editUsernameAllowed": false,
+  "accessTokenLifespan": 3600,
+  "ssoSessionIdleTimeout": 315360000,
+  "ssoSessionMaxLifespan": 315360000,
+  "clientSessionIdleTimeout": 0,
+  "clientSessionMaxLifespan": 0,
+  "offlineSessionIdleTimeout": 315360000,
+  "offlineSessionMaxLifespan": 315360000,
+  "offlineSessionMaxLifespanEnabled": true,
   "roles": {
     "realm": [
       {
@@ -34,7 +42,7 @@
       "name": "Prodavan Flutter",
       "enabled": true,
       "publicClient": true,
-      "directAccessGrantsEnabled": false,
+      "directAccessGrantsEnabled": true,
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
       "serviceAccountsEnabled": false,
@@ -46,7 +54,9 @@
       ],
       "webOrigins": ["+"],
       "attributes": {
-        "pkce.code.challenge.method": "S256"
+        "pkce.code.challenge.method": "S256",
+        "client.offline.session.idle.timeout": "315360000",
+        "client.offline.session.max.lifespan": "315360000"
       },
       "fullScopeAllowed": true,
       "defaultClientScopes": [

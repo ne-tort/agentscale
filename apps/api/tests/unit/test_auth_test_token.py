@@ -15,7 +15,7 @@ from prodavan.infrastructure.auth.test_token import mint_test_access_token
 
 def test_mint_test_access_token_platform_admin() -> None:
     token, ttl = mint_test_access_token(sub="u-admin", platform_admin=True)
-    assert ttl == 3600
+    assert ttl == 28800
     claims = jwt.decode(
         token,
         settings.auth_test_secret,

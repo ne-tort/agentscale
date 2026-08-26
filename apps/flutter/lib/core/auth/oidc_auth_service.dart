@@ -26,7 +26,7 @@ class OidcAuthResult {
 class OidcAuthService {
   const OidcAuthService();
 
-  static const scopes = ['openid', 'profile', 'email'];
+  static const scopes = ['openid', 'profile', 'email', 'offline_access'];
   static const _appAuth = FlutterAppAuth();
 
   /// Builds authorize query for KC (incl. optional [kcIdpHint] for Identity Broker).
@@ -91,6 +91,48 @@ class OidcAuthService {
     return OidcAuthResult(
       accessToken: access,
       refreshToken: body['refresh_token'] as String? ?? refreshToken,
+      idToken: body['id_token'] as String?,
+      accessTokenExpiration: _parseExpiry(body['expires_in']),
+    );
+  }
+
+  /// First-party Resource Owner Password Credentials (company_id / username + password).
+  ///
+  /// Requires Keycloak client `directAccessGrantsEnabled`. Prefer PKCE for browsers;
+  /// use this for native credential forms and automation.
+  Future<OidcAuthResult> loginWithPassword({
+    required Map<String, dynamic> oidc,
+    required String username,
+    required String password,
+  }) async {
+    final tokenEndpoint = oidc['token_endpoint'] as String?;
+    final clientId = oidc['client_id'] as String?;
+    final user = username.trim();
+    if (tokenEndpoint == null || clientId == null || user.isEmpty) {
+      throw StateError('Incomplete OIDC config for password login');
+    }
+    final res = await http.post(
+      Uri.parse(tokenEndpoint),
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: {
+        'grant_type': 'password',
+        'client_id': clientId,
+        'username': user,
+        'password': password,
+        'scope': scopes.join(' '),
+      },
+    );
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw StateError('Password login failed: ${res.statusCode}');
+    }
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final access = body['access_token'] as String?;
+    if (access == null || access.isEmpty) {
+      throw StateError('Token response missing access_token');
+    }
+    return OidcAuthResult(
+      accessToken: access,
+      refreshToken: body['refresh_token'] as String?,
       idToken: body['id_token'] as String?,
       accessTokenExpiration: _parseExpiry(body['expires_in']),
     );
@@ -244,7 +286,6 @@ class OidcAuthService {
         redirectUri,
         discoveryUrl: discoveryUrl,
         scopes: scopes,
-        promptValues: ['login'],
         additionalParameters: (hint != null && hint.isNotEmpty)
             ? {'kc_idp_hint': hint}
             : null,

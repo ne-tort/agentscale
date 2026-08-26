@@ -19,7 +19,7 @@ DEMO_EMPLOYEE_DISPLAY_NAME = "Demo Employee"
 
 PLATFORM_ADMIN_SUB = "test-platform-admin"
 
-DEFAULT_TTL_SECONDS = 3600
+DEFAULT_TTL_SECONDS = 28800  # 8h — AUTH_MODE=test only; OIDC TTL is Keycloak realm
 
 
 def mint_test_access_token(
