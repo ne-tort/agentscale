@@ -638,6 +638,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get authSigningIn => 'Signing in…';
 
   @override
+  String get authSignOut => 'Sign out';
+
+  @override
   String get cabinetAddAtLeastOneColumn => 'Add at least one column';
 
   @override

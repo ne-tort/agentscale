@@ -437,6 +437,7 @@
   "authSignIn": "Вход",
   "authSignInWithKeycloak": "Войти через Keycloak",
   "authSigningIn": "Входим…",
+  "authSignOut": "Выйти",
   "cabinetAddAtLeastOneColumn": "Добавьте хотя бы одну колонку",
   "cabinetAddColumn": "Добавить колонку",
   "cabinetAddRow": "Добавить строку",

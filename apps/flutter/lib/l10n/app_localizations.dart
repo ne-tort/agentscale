@@ -1190,6 +1190,12 @@ abstract class AppLocalizations {
   /// **'Signing in…'**
   String get authSigningIn;
 
+  /// No description provided for @authSignOut.
+  ///
+  /// In en, this message translates to:
+  /// **'Sign out'**
+  String get authSignOut;
+
   /// No description provided for @cabinetAddAtLeastOneColumn.
   ///
   /// In en, this message translates to:

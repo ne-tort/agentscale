@@ -638,6 +638,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get authSigningIn => 'Входим…';
 
   @override
+  String get authSignOut => 'Выйти';
+
+  @override
   String get cabinetAddAtLeastOneColumn => 'Добавьте хотя бы одну колонку';
 
   @override

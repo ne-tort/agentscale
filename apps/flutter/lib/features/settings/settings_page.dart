@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/auth/sign_out.dart';
 import 'package:prodavan/core/settings/app_settings_controller.dart';
 import 'package:prodavan/core/theme/app_palette.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
@@ -82,6 +83,12 @@ class SettingsPage extends StatelessWidget {
                 labelFor: (v) => _refreshLabel(l10n, v),
                 presentValue: (v) => _refreshLabel(l10n, v),
                 onSave: (v) async => appSettings.setAutoRefreshSeconds(v),
+              ),
+              AppNavPreference(
+                title: l10n.authSignOut,
+                icon: Icons.logout_rounded,
+                accentColor: Theme.of(context).colorScheme.error,
+                onTap: () => signOut(context),
               ),
             ],
           ),

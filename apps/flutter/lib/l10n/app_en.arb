@@ -437,6 +437,7 @@
   "authSignIn": "Sign in",
   "authSignInWithKeycloak": "Sign in with Keycloak",
   "authSigningIn": "Signing in…",
+  "authSignOut": "Sign out",
   "cabinetAddAtLeastOneColumn": "Add at least one column",
   "cabinetAddColumn": "Add column",
   "cabinetAddRow": "Add row",
