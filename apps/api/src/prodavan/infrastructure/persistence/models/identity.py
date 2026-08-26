@@ -27,7 +27,11 @@ class CompanyRow(Base):
     subscription_lifetime: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    memberships: Mapped[list[MembershipRow]] = relationship(back_populates="company")
+    # DB ON DELETE CASCADE — do not ORM-NULL memberships.company_id (NOT NULL).
+    memberships: Mapped[list[MembershipRow]] = relationship(
+        back_populates="company",
+        passive_deletes=True,
+    )
 
 
 class EmployeeRow(Base):
@@ -40,7 +44,10 @@ class EmployeeRow(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="invited")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    memberships: Mapped[list[MembershipRow]] = relationship(back_populates="employee")
+    memberships: Mapped[list[MembershipRow]] = relationship(
+        back_populates="employee",
+        passive_deletes=True,
+    )
 
 
 class MembershipRow(Base):

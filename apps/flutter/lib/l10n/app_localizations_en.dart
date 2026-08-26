@@ -468,7 +468,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminContainerColCabinet => 'Cabinet';
 
   @override
-  String get adminContainerStatusActive => 'Running';
+  String get adminContainerStatusActive => 'Active';
 
   @override
   String get adminContainerStatusPaused => 'Paused';

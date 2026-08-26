@@ -402,6 +402,9 @@ class ProjectService:
             write=True,
             allow_paused=True,
         )
+        # Align with pause / company-delete: stop agent compute before wipe.
+        await stop_project_runtime(self._session, project_id=row.id)
+        await pause_container(container_ref=row.container_ref)
         row.status = ProjectStatus.DELETED
         await self._platform_events.emit(
             event_type="project.deleted",

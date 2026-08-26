@@ -356,6 +356,27 @@ def test_admin_company_description_and_running_cabinets(client: TestClient) -> N
 
 
 @requires_postgres
+def test_admin_delete_company_with_invited_admin_only(client: TestClient) -> None:
+    """Regression: memberships loaded by disable_employee must not block company DELETE."""
+    admin = _token(sub="padmin-del-invite", platform_admin=True)
+    admin_h = {"Authorization": f"Bearer {admin}"}
+    created = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "InviteOnlyDelete", "admin_email": "boss@inviteonly.test"},
+    )
+    assert created.status_code == 201, created.text
+    company_id = created.json()["company"]["id"]
+
+    deleted = client.delete(f"/api/v1/admin/companies/{company_id}", headers=admin_h)
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["deleted"] is True
+    assert deleted.json()["employees_disabled"]
+    gone = client.get(f"/api/v1/admin/companies/{company_id}", headers=admin_h)
+    assert gone.status_code == 404
+
+
+@requires_postgres
 def test_admin_delete_company_cascades(client: TestClient) -> None:
     admin = _token(sub="padmin-del", email="padmin-del@example.com", platform_admin=True)
     admin_h = {"Authorization": f"Bearer {admin}"}

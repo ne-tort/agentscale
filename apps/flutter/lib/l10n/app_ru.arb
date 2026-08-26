@@ -336,7 +336,7 @@
   "adminContainerColEmployee": "Сотрудник",
   "adminContainerColProvider": "Провайдер",
   "adminContainerColCabinet": "Кабинет",
-  "adminContainerStatusActive": "Работает",
+  "adminContainerStatusActive": "Активен",
   "adminContainerStatusPaused": "Пауза",
   "adminContainerRuntimeRef": "Runtime ref",
   "adminContainerMetricsHole": "K8s метрики",

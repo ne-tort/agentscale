@@ -126,13 +126,14 @@ class ObjectStorageManager(LifespanResource):
         return deleted
 
     def delete_prefix_verified_sync(self, prefix: str) -> dict[str, Any]:
-        """delete_prefix then list_prefix(limit=1) — report leftovers for GC/retry."""
+        """delete_prefix then list_prefix — report leftovers for GC/retry."""
         deleted = self.delete_prefix_sync(prefix)
-        remaining = self.list_prefix_sync(prefix, limit=1)
+        remaining_keys = self.list_prefix_sync(prefix, limit=5)
         return {
-            "ok": len(remaining) == 0,
+            "ok": len(remaining_keys) == 0,
             "deleted": int(deleted),
-            "remaining": len(remaining),
+            "remaining": len(remaining_keys),
+            "remaining_sample": remaining_keys,
             "prefix": prefix,
         }
 

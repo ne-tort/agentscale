@@ -334,7 +334,7 @@
   "adminContainerColEmployee": "Employee",
   "adminContainerColProvider": "Provider",
   "adminContainerColCabinet": "Cabinet",
-  "adminContainerStatusActive": "Running",
+  "adminContainerStatusActive": "Active",
   "adminContainerStatusPaused": "Paused",
   "adminContainerRuntimeRef": "Runtime ref",
   "adminContainerMetricsHole": "K8s metrics",

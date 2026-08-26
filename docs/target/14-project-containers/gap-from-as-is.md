@@ -11,7 +11,7 @@
 | Delete | Soft-delete + wipe tree |
 | K8s | PVC probe Job only (`SANDBOX_K8S_JOBS`, admin endpoints); isolator `not_wired` |
 | Owner | `ProjectService` owns lifecycle; no Container BC |
-| Admin UI | Tab «Бандлы» = starter cabinet.bundle catalog (unrelated) |
+| Admin UI | P1: tabs Контейнеры + Кабинеты stub (Bundles chrome removed); starter-bundle API remains for employee import |
 
 ## Цель (канон 14)
 

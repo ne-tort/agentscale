@@ -468,7 +468,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminContainerColCabinet => 'Кабинет';
 
   @override
-  String get adminContainerStatusActive => 'Работает';
+  String get adminContainerStatusActive => 'Активен';
 
   @override
   String get adminContainerStatusPaused => 'Пауза';

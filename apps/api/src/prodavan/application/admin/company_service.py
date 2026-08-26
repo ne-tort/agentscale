@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.quota_service import CompanyQuotaService
@@ -606,9 +606,11 @@ class AdminCompanyService:
             )
             cabinets_deleted.append(cabinet_id)
 
-        # Re-load: earlier commits may have expired the instance.
-        company = await self._require_company(company_id)
-        await self._session.delete(company)
+        # Re-load then Core DELETE: DB ON DELETE CASCADE handles memberships/quotas/keys.
+        # Avoid ORM unit-of-work NULLing membership.company_id (NOT NULL) when rows are
+        # already in the session from disable_employee(selectinload memberships).
+        await self._require_company(company_id)
+        await self._session.execute(delete(CompanyRow).where(CompanyRow.id == company_id))
         await self._session.commit()
 
         from prodavan.application.admin.company_runtime_cache import invalidate_company_runtime_cache

@@ -893,7 +893,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminContainerStatusActive.
   ///
   /// In en, this message translates to:
-  /// **'Running'**
+  /// **'Active'**
   String get adminContainerStatusActive;
 
   /// No description provided for @adminContainerStatusPaused.
