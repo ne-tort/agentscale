@@ -19,7 +19,7 @@ class AdminCompanyEventsPage extends StatelessWidget {
       listenable: ctrl,
       builder: (context, _) {
         return AppScaffold(
-          title: Text(l10n.adminPlatformEvents),
+          title: Text(l10n.adminEvents),
           body: ListView(
             padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
             children: [

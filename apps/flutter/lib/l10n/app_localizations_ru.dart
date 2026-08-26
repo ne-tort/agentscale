@@ -22,7 +22,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminAgentPolicySaved => 'Политика агента сохранена';
 
   @override
-  String get adminAgentRuntimePolicy => 'Политика агента';
+  String get adminAgentRuntimePolicy => 'Политика';
 
   @override
   String get adminAiKeysBound => 'API-ключи';
@@ -109,7 +109,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminBundle => 'Бандл';
 
   @override
-  String get adminCabinetQuotas => 'Квоты кабинетов';
+  String get adminCabinetQuotas => 'Квоты';
 
   @override
   String get adminCabinetQuotasMustBePositive =>
@@ -133,6 +133,32 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get adminCompanyName => 'Название компании';
+
+  @override
+  String get adminAddAiKey => 'Добавить ключ';
+
+  @override
+  String get adminAddCompany => 'Добавить компанию';
+
+  @override
+  String get adminCompanyGeneral => 'Общее';
+
+  @override
+  String get adminEvents => 'События';
+
+  @override
+  String get adminInviteAdmin => 'Админ';
+
+  @override
+  String get adminPolicy => 'Политика';
+
+  @override
+  String get adminQuotas => 'Квоты';
+
+  @override
+  String adminQuotasSummary(String cabinets, String packages, String bundleMb) {
+    return '$cabinets · $packages · $bundleMb';
+  }
 
   @override
   String get adminCreateAiKey => 'Создать AI-ключ';
@@ -167,7 +193,7 @@ class AppLocalizationsRu extends AppLocalizations {
   }
 
   @override
-  String get adminDrainProjectTriggers => 'Сбросить триггеры проектов';
+  String get adminDrainProjectTriggers => 'Триггеры';
 
   @override
   String adminDrainedTriggers(String count) {
@@ -234,16 +260,16 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminMaxAgentTokensMonth => 'Токены агента / месяц';
 
   @override
-  String get adminMaxBundleImportMb => 'Импорт бандла';
+  String get adminMaxBundleImportMb => 'Бандл';
 
   @override
-  String get adminMaxCabinets => 'Макс. кабинетов';
+  String get adminMaxCabinets => 'Кабинеты';
 
   @override
   String get adminMaxChatAttachmentMb => 'Вложение в чат';
 
   @override
-  String get adminMaxPackagesPerCabinet => 'Макс. пакетов на кабинет';
+  String get adminMaxPackagesPerCabinet => 'Пакеты';
 
   @override
   String get adminMaxTokensPerRun => 'Токены за запуск';
@@ -314,7 +340,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminNoStarterBundles => 'Нет стартовых бандлов';
 
   @override
-  String get adminPlatformEvents => 'События платформы';
+  String get adminPlatformEvents => 'События';
 
   @override
   String get adminPlatformFallback => 'Fallback платформы';
@@ -416,10 +442,10 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminSubscriptionSaved => 'Подписка сохранена';
 
   @override
-  String get adminSweepIdlePause => 'Пауза по простою';
+  String get adminSweepIdlePause => 'Простой';
 
   @override
-  String get adminSweepIdlePauseAll => 'Пауза по простою (все компании)';
+  String get adminSweepIdlePauseAll => 'Простой · все';
 
   @override
   String get adminSweeping => 'Выполнение…';

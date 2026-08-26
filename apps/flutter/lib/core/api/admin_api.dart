@@ -45,12 +45,17 @@ class AdminApi {
 
   Future<Map<String, dynamic>> patchCompany({
     required String companyId,
+    String? name,
     String? description,
+    bool patchDescription = false,
   }) async {
+    final payload = <String, dynamic>{};
+    if (name != null) payload['name'] = name;
+    if (patchDescription) payload['description'] = description;
     final res = await http.patch(
       _uri('/admin/companies/$companyId'),
       headers: _headers,
-      body: jsonEncode({'description': description}),
+      body: jsonEncode(payload),
     );
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
@@ -58,7 +63,7 @@ class AdminApi {
 
   Future<Map<String, dynamic>> createCompany({
     required String name,
-    required String adminEmail,
+    String? adminEmail,
     String? adminDisplayName,
     String? description,
   }) async {
@@ -67,10 +72,29 @@ class AdminApi {
       headers: _headers,
       body: jsonEncode({
         'name': name,
-        'admin_email': adminEmail,
+        if (adminEmail != null && adminEmail.isNotEmpty) 'admin_email': adminEmail,
         if (adminDisplayName != null && adminDisplayName.isNotEmpty)
           'admin_display_name': adminDisplayName,
         if (description != null && description.isNotEmpty) 'description': description,
+      }),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> inviteEmployee({
+    required String companyId,
+    required String email,
+    String? displayName,
+    String role = 'member',
+  }) async {
+    final res = await http.post(
+      _uri('/companies/$companyId/employees'),
+      headers: _headers,
+      body: jsonEncode({
+        'email': email,
+        if (displayName != null && displayName.isNotEmpty) 'display_name': displayName,
+        'role': role,
       }),
     );
     _throwIfError(res);

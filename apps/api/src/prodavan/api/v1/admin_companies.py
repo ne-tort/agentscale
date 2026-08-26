@@ -30,6 +30,7 @@ class CabinetQuotaBody(BaseModel):
 class CompanyPatchBody(BaseModel):
     model_config = {"extra": "forbid"}
 
+    name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=2000)
 
 
@@ -74,7 +75,10 @@ async def patch_company(
     _: PlatformAdminDep,
     session: SessionDep,
 ) -> dict:
-    return await AdminCompanyService(session).set_description(company_id, body.description)
+    return await AdminCompanyService(session).patch_company(
+        company_id,
+        **body.model_dump(exclude_unset=True),
+    )
 
 
 @router.put("/{company_id}/cabinet-quotas")

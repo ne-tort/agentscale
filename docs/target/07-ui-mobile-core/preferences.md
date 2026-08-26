@@ -14,9 +14,17 @@
 | `AppNavPreference` | Hub-строка с chevron → подстраница |
 | `AppSubscriptionPreference` | Дата окончания: пусто = бессрочно |
 | `AppMultiChoicePreference` | Множественный выбор через `AppSelectorPage` |
-| `AppInlineAddField` | Inline add в списках сущностей (Hiddify clients pattern) |
+| `AppInlineAddField` | Inline add в списках сущностей (Hiddify clients pattern); full-bleed divider под полем |
 
-Barrel: `package:prodavan/core/preferences/preferences.dart`.
+Barrel: `package:prodavan/core/preferences/preferences.dart` (preference tiles).  
+`AppInlineAddField` живёт в `lib/core/widgets/` (экспорт из `widgets.dart`).
+
+## Create vs settings
+
+| Контекст | Паттерн |
+|----------|---------|
+| Список сущностей (companies, AI keys) | `AppInlineAddField` → create по имени → detail |
+| Detail/settings | Preference kit → PATCH сразу (нет page Save) |
 
 ## AppChoicePreference
 
@@ -42,7 +50,8 @@ AppChoicePreference<String>(
 
 | Контекст | `onSave` |
 |----------|----------|
-| Страница создания (submit по кнопке Create/Save) | Только `setState` — значение уходит на API при submit формы |
+| Inline create (`AppInlineAddField`) | API create сразу; остальное на detail |
+| Оставшиеся multi-field create-формы | Только `setState` — значение уходит на API при submit |
 | Detail/settings (seamless save) | `setState` + немедленный PATCH/PUT |
 
 ## AppValuePreference / AppSwitchPreference

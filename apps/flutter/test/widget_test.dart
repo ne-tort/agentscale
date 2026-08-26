@@ -43,8 +43,7 @@ void main() {
         AppScaffold(
           title: const Text('T'),
           body: AppEntityCollection(
-            initialMode: AppEntityCollectionMode.list,
-            allowModeToggle: false,
+            mode: AppEntityCollectionMode.list,
             rows: const [
               AppEntityRow(id: '1', title: 'Row A', cells: {}),
             ],

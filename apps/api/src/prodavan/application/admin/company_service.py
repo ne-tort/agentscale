@@ -124,8 +124,33 @@ class AdminCompanyService:
         return out
 
     async def set_description(self, company_id: str, description: str | None) -> dict:
+        return await self.patch_company(company_id, description=description)
+
+    async def patch_company(self, company_id: str, **fields: object) -> dict:
         company = await self._require_company(company_id)
-        company.description = description.strip() if description and description.strip() else None
+        if "name" in fields:
+            raw_name = fields["name"]
+            if not isinstance(raw_name, str) or not raw_name.strip():
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail="name required",
+                )
+            company.name = raw_name.strip()
+        if "description" in fields:
+            description = fields["description"]
+            if description is None:
+                company.description = None
+            elif isinstance(description, str):
+                company.description = description.strip() if description.strip() else None
+            else:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail="invalid description",
+                )
         await self._session.commit()
         await self._session.refresh(company)
         return {

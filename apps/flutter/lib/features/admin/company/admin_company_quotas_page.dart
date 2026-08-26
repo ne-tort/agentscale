@@ -18,7 +18,7 @@ class AdminCompanyQuotasPage extends StatelessWidget {
       listenable: ctrl,
       builder: (context, _) {
         return AppScaffold(
-          title: Text(l10n.adminCabinetQuotas),
+          title: Text(l10n.adminQuotas),
           body: ListView(
             padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
             children: [

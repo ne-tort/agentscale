@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/session/work_context.dart';
+import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/cabinet_tab_host.dart';
@@ -20,11 +21,16 @@ class DynamicCabinetShell extends StatefulWidget {
   State<DynamicCabinetShell> createState() => _DynamicCabinetShellState();
 }
 
-class _DynamicCabinetShellState extends State<DynamicCabinetShell> with SingleTickerProviderStateMixin {
+class _DynamicCabinetShellState extends State<DynamicCabinetShell>
+    with SingleTickerProviderStateMixin {
+  static const _projectsViewPageKey = 'cabinet.projects';
+
+  final _projectsViewMode = AppCollectionViewModeStore(_projectsViewPageKey);
   TabController? _tabs;
   List<Map<String, dynamic>> _metaTabs = const [];
   String? _error;
   int _metaEpoch = 0;
+  int _tabIndex = 0;
 
   @override
   void initState() {
@@ -32,6 +38,7 @@ class _DynamicCabinetShellState extends State<DynamicCabinetShell> with SingleTi
     workContext.enterCabinet(widget.cabinetId);
     workContext.addListener(_onWorkContext);
     _metaEpoch = workContext.cabinetMetaEpoch;
+    _projectsViewMode.load();
     _loadTabs();
   }
 
@@ -48,8 +55,11 @@ class _DynamicCabinetShellState extends State<DynamicCabinetShell> with SingleTi
       if (!mounted) return;
       setState(() {
         _metaTabs = tabs;
+        _tabs?.removeListener(_onTabChanged);
         _tabs?.dispose();
         _tabs = TabController(length: tabs.isEmpty ? 1 : tabs.length, vsync: this);
+        _tabs!.addListener(_onTabChanged);
+        _tabIndex = 0;
         _error = null;
       });
     } catch (e) {
@@ -58,10 +68,27 @@ class _DynamicCabinetShellState extends State<DynamicCabinetShell> with SingleTi
     }
   }
 
+  void _onTabChanged() {
+    if (_tabs == null || _tabs!.indexIsChanging) return;
+    if (_tabIndex != _tabs!.index) {
+      setState(() => _tabIndex = _tabs!.index);
+    }
+  }
+
+  bool get _isProjectsTab {
+    if (_metaTabs.isEmpty || _tabIndex < 0 || _tabIndex >= _metaTabs.length) {
+      return false;
+    }
+    final slug = _metaTabs[_tabIndex]['view_slug'] as String? ?? '';
+    return slug == 'projects' || slug == 'chat';
+  }
+
   @override
   void dispose() {
     workContext.removeListener(_onWorkContext);
+    _tabs?.removeListener(_onTabChanged);
     _tabs?.dispose();
+    _projectsViewMode.dispose();
     super.dispose();
   }
 
@@ -70,6 +97,7 @@ class _DynamicCabinetShellState extends State<DynamicCabinetShell> with SingleTi
       cabinetId: widget.cabinetId,
       cabinetName: widget.cabinetName,
       tab: tab,
+      projectsViewModeStore: _projectsViewMode,
     );
   }
 
@@ -78,6 +106,9 @@ class _DynamicCabinetShellState extends State<DynamicCabinetShell> with SingleTi
     final tabs = _metaTabs;
     return AppScaffold(
       title: Text(widget.cabinetName),
+      actions: [
+        if (_isProjectsTab) AppCollectionViewModeButton(store: _projectsViewMode),
+      ],
       bottom: tabs.isEmpty || _tabs == null
           ? null
           : TabBar(

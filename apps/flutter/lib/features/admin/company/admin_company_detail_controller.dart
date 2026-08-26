@@ -11,7 +11,8 @@ class AdminCompanyDetailController extends ChangeNotifier {
   });
 
   final String companyId;
-  final String companyName;
+  String companyName;
+
 
   bool loading = true;
   bool busy = false;
@@ -58,6 +59,7 @@ class AdminCompanyDetailController extends ChangeNotifier {
       final allow = policy['model_allowlist'];
       metrics = m;
       platformEvents = events;
+      companyName = detail['name'] as String? ?? companyName;
       description = detail['description'] as String? ?? '';
       maxCabinets = (quota['max_cabinets'] as num?)?.toInt() ?? 10;
       maxPackages = (quota['max_packages_per_cabinet'] as num?)?.toInt() ?? 20;
@@ -93,13 +95,35 @@ class AdminCompanyDetailController extends ChangeNotifier {
     }
   }
 
+  Future<void> saveName(String value) async {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) return;
+    await adminContext.api.patchCompany(companyId: companyId, name: trimmed);
+    companyName = trimmed;
+    notifyListeners();
+  }
+
   Future<void> saveDescription(String value) async {
+    final trimmed = value.trim();
     await adminContext.api.patchCompany(
       companyId: companyId,
-      description: value.trim().isEmpty ? null : value.trim(),
+      description: trimmed.isEmpty ? null : trimmed,
+      patchDescription: true,
     );
-    description = value.trim();
+    description = trimmed;
     notifyListeners();
+  }
+
+  Future<void> inviteCompanyAdmin(String email) async {
+    final trimmed = email.trim();
+    if (trimmed.isEmpty || !trimmed.contains('@')) {
+      throw FormatException('invalid email');
+    }
+    await adminContext.api.inviteEmployee(
+      companyId: companyId,
+      email: trimmed,
+      role: 'company.admin',
+    );
   }
 
   Future<void> saveQuotas({int? maxCabinets, int? maxPackages, int? maxBundleMb}) async {

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/session/company_context.dart';
+import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
+import 'package:prodavan/core/widgets/app_icon_button.dart';
+import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/danger_confirm_page.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
@@ -19,6 +22,9 @@ class CompanyEmployeesPage extends StatefulWidget {
 }
 
 class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
+  static const _viewPageKey = 'company.employees';
+
+  final _viewMode = AppCollectionViewModeStore(_viewPageKey);
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _employees = const [];
@@ -26,7 +32,14 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
   @override
   void initState() {
     super.initState();
+    _viewMode.load();
     _reload();
+  }
+
+  @override
+  void dispose() {
+    _viewMode.dispose();
+    super.dispose();
   }
 
   Future<void> _reload() async {
@@ -94,7 +107,7 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
             trailing: e['status'] == 'disabled'
                 ? null
                 : IconButton(
-                    icon: Icon(Icons.block),
+                    icon: const Icon(Icons.block),
                     tooltip: l10n.commonDisable,
                     onPressed: () => _disable(e),
                   ),
@@ -102,39 +115,46 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
         )
         .toList();
 
-    return Column(
-      children: [
-        if (_error != null) InlineErrorBanner(message: _error!),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-          child: Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
+    return ListenableBuilder(
+      listenable: _viewMode,
+      builder: (context, _) {
+        return AppScaffold(
+          title: Text(l10n.navEmployees),
+          actions: [
+            IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
+            AppCollectionViewModeButton(store: _viewMode),
+            AppIconButton(
+              icon: Icons.person_add,
+              tooltip: l10n.commonInvite,
               onPressed: _invite,
-              icon: Icon(Icons.person_add),
-              label: Text(l10n.commonInvite),
             ),
-          ),
-        ),
-        Expanded(
-          child: AppEntityCollection(
-            loading: _loading,
-            rows: rows,
-            primaryColumnLabel: l10n.commonEmail,
-            columns: [
-              AppEntityColumn(id: 'email', label: l10n.commonEmail),
-              AppEntityColumn(id: 'role', label: l10n.companyRole),
-              AppEntityColumn(id: 'status', label: l10n.commonStatus),
+          ],
+          body: Column(
+            children: [
+              if (_error != null) InlineErrorBanner(message: _error!),
+              Expanded(
+                child: AppEntityCollection(
+                  loading: _loading,
+                  mode: _viewMode.resolve(context),
+                  rows: rows,
+                  primaryColumnLabel: l10n.commonEmail,
+                  columns: [
+                    AppEntityColumn(id: 'email', label: l10n.commonEmail),
+                    AppEntityColumn(id: 'role', label: l10n.companyRole),
+                    AppEntityColumn(id: 'status', label: l10n.commonStatus),
+                  ],
+                  onOpen: (_) {},
+                  empty: EmptyPlaceholder(
+                    title: l10n.companyNoEmployees,
+                    subtitle: l10n.companyInviteViaKeycloakNoPassword,
+                    action: TextButton(onPressed: _invite, child: Text(l10n.commonInvite)),
+                  ),
+                ),
+              ),
             ],
-            onOpen: (_) {},
-            empty: EmptyPlaceholder(
-              title: l10n.companyNoEmployees,
-              subtitle: l10n.companyInviteViaKeycloakNoPassword,
-              action: TextButton(onPressed: _invite, child: Text(l10n.commonInvite)),
-            ),
           ),
-        ),
-      ],
+        );
+      },
     );
   }
 }

@@ -13,7 +13,7 @@ import 'package:prodavan/features/admin/company/admin_company_quotas_page.dart';
 import 'package:prodavan/features/admin/widgets/admin_metrics_alerts.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Platform Admin company hub — metrics + navigation to sub-pages (L04).
+/// Platform Admin company hub — metrics + laconic nav to preference sub-pages.
 class AdminCompanyDetailPage extends StatefulWidget {
   const AdminCompanyDetailPage({
     super.key,
@@ -57,6 +57,14 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
     super.dispose();
   }
 
+  String _generalSubtitle(AppLocalizations l10n, AdminCompanyDetailController ctrl) {
+    final desc = ctrl.description.trim();
+    if (desc.isNotEmpty) return desc;
+    final ends = ctrl.subscriptionEnds.trim();
+    if (ends.isNotEmpty) return ends;
+    return l10n.commonUnlimited;
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -67,7 +75,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
         builder: (context, _) {
           final ctrl = _controller;
           return AppScaffold(
-            title: Text(widget.companyName),
+            title: Text(ctrl.companyName),
             actions: [
               IconButton(
                 onPressed: ctrl.loading ? null : ctrl.load,
@@ -77,39 +85,60 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
             body: ctrl.loading
                 ? const Center(child: CircularProgressIndicator())
                 : ListView(
-                    padding: const EdgeInsets.all(AppSpacing.md),
+                    padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
                     children: [
-                      AdminMetricsAlerts(metrics: ctrl.metrics),
-                      const SizedBox(height: AppSpacing.sm),
-                      CompanyMetricsWrap(metrics: ctrl.metrics, includeAgentDetail: true),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            AdminMetricsAlerts(metrics: ctrl.metrics),
+                            const SizedBox(height: AppSpacing.sm),
+                            CompanyMetricsWrap(
+                              metrics: ctrl.metrics,
+                              includeAgentDetail: true,
+                            ),
+                          ],
+                        ),
+                      ),
                       const SizedBox(height: AppSpacing.md),
                       AppNavPreference(
-                        title: l10n.commonCompany,
+                        title: l10n.adminCompanyGeneral,
                         icon: Icons.business_outlined,
+                        subtitle: Text(_generalSubtitle(l10n, ctrl)),
                         onTap: () => pushCompanySubPage(
                           context,
                           const AdminCompanyGeneralPage(),
                         ),
                       ),
                       AppNavPreference(
-                        title: l10n.adminCabinetQuotas,
+                        title: l10n.adminQuotas,
                         icon: Icons.inventory_2_outlined,
+                        subtitle: Text(
+                          l10n.adminQuotasSummary(
+                            '${ctrl.maxCabinets}',
+                            '${ctrl.maxPackages}',
+                            '${ctrl.maxBundleMb}',
+                          ),
+                        ),
                         onTap: () => pushCompanySubPage(
                           context,
                           const AdminCompanyQuotasPage(),
                         ),
                       ),
                       AppNavPreference(
-                        title: l10n.adminAgentRuntimePolicy,
+                        title: l10n.adminPolicy,
                         icon: Icons.smart_toy_outlined,
+                        subtitle: Text(ctrl.toolPreset),
                         onTap: () => pushCompanySubPage(
                           context,
                           const AdminCompanyAgentPolicyPage(),
                         ),
                       ),
                       AppNavPreference(
-                        title: l10n.adminPlatformEvents,
+                        title: l10n.adminEvents,
                         icon: Icons.event_note_outlined,
+                        subtitle: Text('${ctrl.platformEvents.length}'),
                         onTap: () => pushCompanySubPage(
                           context,
                           const AdminCompanyEventsPage(),

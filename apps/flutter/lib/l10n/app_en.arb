@@ -4,7 +4,7 @@
   "adminAdminEmail": "Admin email",
   "adminAgentMessages": "AI requests",
   "adminAgentPolicySaved": "Agent policy saved",
-  "adminAgentRuntimePolicy": "Agent policy",
+  "adminAgentRuntimePolicy": "Policy",
   "adminAiKeysBound": "API keys",
   "adminAlertHighUsageTitle": "{companyName}: high agent token usage",
   "@adminAlertHighUsageTitle": {
@@ -112,7 +112,7 @@
     }
   },
   "adminBundle": "Bundle",
-  "adminCabinetQuotas": "Cabinet quotas",
+  "adminCabinetQuotas": "Quotas",
   "adminCabinetQuotasMustBePositive": "Cabinet quotas must be positive integers",
   "adminCabinetsProjectsSubtitle": "{cabinets} cabinets · {projects} projects",
   "@adminCabinetsProjectsSubtitle": {
@@ -139,6 +139,21 @@
   "adminCompanyAdminInvite": "Company admin invite",
   "adminCompanyBindings": "Company bindings",
   "adminCompanyName": "Company name",
+  "adminAddAiKey": "Add key",
+  "adminAddCompany": "Add company",
+  "adminCompanyGeneral": "General",
+  "adminEvents": "Events",
+  "adminInviteAdmin": "Admin",
+  "adminPolicy": "Policy",
+  "adminQuotas": "Quotas",
+  "adminQuotasSummary": "{cabinets} · {packages} · {bundleMb}",
+  "@adminQuotasSummary": {
+    "placeholders": {
+      "cabinets": { "type": "String" },
+      "packages": { "type": "String" },
+      "bundleMb": { "type": "String" }
+    }
+  },
   "adminCreateAiKey": "Create AI key",
   "adminCreateCompany": "Create company",
   "adminCreateCompanyAndInviteAdmin": "Create a company and invite company.admin",
@@ -155,7 +170,7 @@
       }
     }
   },
-  "adminDrainProjectTriggers": "Drain project triggers",
+  "adminDrainProjectTriggers": "Triggers",
   "adminDrainedTriggers": "Drained {count} trigger(s)",
   "@adminDrainedTriggers": {
     "placeholders": {
@@ -208,10 +223,10 @@
   "adminLifecycle": "Lifecycle",
   "adminLifetimeSubscription": "Lifetime subscription",
   "adminMaxAgentTokensMonth": "Agent tokens / month",
-  "adminMaxBundleImportMb": "Bundle import",
-  "adminMaxCabinets": "Max cabinets",
+  "adminMaxBundleImportMb": "Bundle",
+  "adminMaxCabinets": "Cabinets",
   "adminMaxChatAttachmentMb": "Chat attachment",
-  "adminMaxPackagesPerCabinet": "Max packages per cabinet",
+  "adminMaxPackagesPerCabinet": "Packages",
   "adminMaxTokensPerRun": "Tokens per run",
   "adminMaxUsdCostMonth": "USD cost / month",
   "adminMetadataOnly": "metadata only",
@@ -269,7 +284,7 @@
   "adminNoCompaniesYet": "No companies yet",
   "adminNoPlatformEventsYet": "No platform events yet",
   "adminNoStarterBundles": "No starter bundles",
-  "adminPlatformEvents": "Platform events",
+  "adminPlatformEvents": "Events",
   "adminPlatformFallback": "Platform fallback",
   "adminPlatformIdleSweep": "Platform idle sweep: {count} project(s) ({companies} companies with policy)",
   "@adminPlatformIdleSweep": {
@@ -342,8 +357,8 @@
     }
   },
   "adminSubscriptionSaved": "Subscription saved",
-  "adminSweepIdlePause": "Sweep idle pause",
-  "adminSweepIdlePauseAll": "Sweep idle pause (all companies)",
+  "adminSweepIdlePause": "Idle pause",
+  "adminSweepIdlePauseAll": "Idle pause · all",
   "adminSweeping": "Sweeping…",
   "adminTelegramHmacConfigured": "Telegram HMAC: configured (leave blank to keep)",
   "adminTelegramHmacNotSet": "Telegram HMAC: not set",

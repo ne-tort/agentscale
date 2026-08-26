@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/responsive/app_breakpoints.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
-import 'package:prodavan/core/widgets/app_icon_button.dart';
 import 'package:prodavan/core/widgets/app_list_item.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -46,7 +45,11 @@ class AppEntityRow {
 }
 
 /// Unified list/table surface — primary entity management chrome (canon 07).
-class AppEntityCollection extends StatefulWidget {
+///
+/// Mode is controlled by the page (typically via [AppCollectionViewModeStore]
+/// + AppBar [AppCollectionViewModeButton]). When [mode] is null, falls back to
+/// breakpoint (wide → table, narrow → list).
+class AppEntityCollection extends StatelessWidget {
   const AppEntityCollection({
     super.key,
     required this.rows,
@@ -55,8 +58,7 @@ class AppEntityCollection extends StatefulWidget {
     this.toolbar,
     this.empty,
     this.loading = false,
-    this.allowModeToggle = true,
-    this.initialMode,
+    this.mode,
     this.primaryColumnLabel,
   });
 
@@ -66,24 +68,15 @@ class AppEntityCollection extends StatefulWidget {
   final List<Widget>? toolbar;
   final Widget? empty;
   final bool loading;
-  final bool allowModeToggle;
-  final AppEntityCollectionMode? initialMode;
+  final AppEntityCollectionMode? mode;
   final String? primaryColumnLabel;
 
   static const double _columnSpacing = 12;
   static const double _horizontalMargin = 12;
   static const double _primaryMinWidth = 140;
 
-  @override
-  State<AppEntityCollection> createState() => _AppEntityCollectionState();
-}
-
-class _AppEntityCollectionState extends State<AppEntityCollection> {
-  AppEntityCollectionMode? _override;
-
   AppEntityCollectionMode _effectiveMode(BuildContext context) {
-    if (_override != null) return _override!;
-    if (widget.initialMode != null) return widget.initialMode!;
+    if (mode != null) return mode!;
     return AppBreakpoints.isWide(context)
         ? AppEntityCollectionMode.table
         : AppEntityCollectionMode.list;
@@ -91,74 +84,45 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
 
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final mode = _effectiveMode(context);
+    final effective = _effectiveMode(context);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (widget.toolbar != null || widget.allowModeToggle)
+        if (toolbar != null)
           Padding(
             padding: const EdgeInsets.symmetric(
               horizontal: AppSpacing.md,
               vertical: AppSpacing.xs,
             ),
-            child: Row(
-              children: [
-                ...?widget.toolbar,
-                const Spacer(),
-                if (widget.allowModeToggle)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      AppIconToggle(
-                        icon: Icons.view_list_outlined,
-                        tooltip: l10n.commonList,
-                        selected: mode == AppEntityCollectionMode.list,
-                        onPressed: () => setState(
-                          () => _override = AppEntityCollectionMode.list,
-                        ),
-                      ),
-                      AppIconToggle(
-                        icon: Icons.table_rows_outlined,
-                        tooltip: l10n.commonTable,
-                        selected: mode == AppEntityCollectionMode.table,
-                        onPressed: () => setState(
-                          () => _override = AppEntityCollectionMode.table,
-                        ),
-                      ),
-                    ],
-                  ),
-              ],
-            ),
+            child: Row(children: [...?toolbar, const Spacer()]),
           ),
-        Expanded(child: _body(context, mode)),
+        Expanded(child: _body(context, effective)),
       ],
     );
   }
 
   Widget _body(BuildContext context, AppEntityCollectionMode mode) {
     final l10n = AppLocalizations.of(context);
-    if (widget.loading) {
+    if (loading) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
     }
-    if (widget.rows.isEmpty) {
-      return widget.empty ??
-          EmptyPlaceholder(title: l10n.commonEmpty);
+    if (rows.isEmpty) {
+      return empty ?? EmptyPlaceholder(title: l10n.commonEmpty);
     }
     if (mode == AppEntityCollectionMode.list) {
       return ListView.separated(
         padding: const EdgeInsets.all(AppSpacing.sm),
-        itemCount: widget.rows.length,
+        itemCount: rows.length,
         separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
         itemBuilder: (context, i) {
-          final row = widget.rows[i];
+          final row = rows[i];
           return AppListItem(
             title: Text(row.title),
             subtitle: row.subtitle != null ? Text(row.subtitle!) : null,
             leading: row.leading,
             trailing: row.trailing ?? const Icon(Icons.chevron_right),
-            onTap: () => widget.onOpen(row),
+            onTap: () => onOpen(row),
           );
         },
       );
@@ -170,37 +134,36 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
             ? constraints.maxWidth
             : maxTableWidth;
         final tableWidth = parentWidth.clamp(0.0, maxTableWidth).toDouble();
-        final primaryLabel =
-            widget.primaryColumnLabel ?? l10n.commonEntity;
-        final fixedWidth = widget.columns.fold<double>(
+        final primaryLabel = primaryColumnLabel ?? l10n.commonEntity;
+        final fixedWidth = columns.fold<double>(
           0,
           (sum, c) => sum + (c.width ?? 0),
         );
-        final minTableWidth = AppEntityCollection._horizontalMargin * 2 +
-            AppEntityCollection._primaryMinWidth +
+        final minTableWidth = _horizontalMargin * 2 +
+            _primaryMinWidth +
             fixedWidth +
-            widget.columns.length * AppEntityCollection._columnSpacing;
+            columns.length * _columnSpacing;
         final needsScroll = minTableWidth > tableWidth;
 
         final table = DataTable(
           showCheckboxColumn: false,
-          columnSpacing: AppEntityCollection._columnSpacing,
-          horizontalMargin: AppEntityCollection._horizontalMargin,
+          columnSpacing: _columnSpacing,
+          horizontalMargin: _horizontalMargin,
           dataRowMinHeight: 40,
           headingRowHeight: 44,
           columns: [
             DataColumn(label: Text(primaryLabel)),
-            ...widget.columns.map((c) => DataColumn(label: Text(c.label))),
+            ...columns.map((c) => DataColumn(label: Text(c.label))),
           ],
           rows: [
-            for (final row in widget.rows)
+            for (final row in rows)
               DataRow(
-                onSelectChanged: (_) => widget.onOpen(row),
+                onSelectChanged: (_) => onOpen(row),
                 cells: [
                   DataCell(
                     Text(row.title, overflow: TextOverflow.ellipsis),
                   ),
-                  ...widget.columns.map((c) => _dataCell(row.cells[c.id] ?? '', c)),
+                  ...columns.map((c) => _dataCell(row.cells[c.id] ?? '', c)),
                 ],
               ),
           ],

@@ -35,7 +35,7 @@ class AdminCompanyAgentPolicyPage extends StatelessWidget {
           ..sort();
 
         return AppScaffold(
-          title: Text(l10n.adminAgentRuntimePolicy),
+          title: Text(l10n.adminPolicy),
           body: ListView(
             padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
             children: [

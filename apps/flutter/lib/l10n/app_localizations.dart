@@ -125,7 +125,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminAgentRuntimePolicy.
   ///
   /// In en, this message translates to:
-  /// **'Agent policy'**
+  /// **'Policy'**
   String get adminAgentRuntimePolicy;
 
   /// No description provided for @adminAiKeysBound.
@@ -251,7 +251,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminCabinetQuotas.
   ///
   /// In en, this message translates to:
-  /// **'Cabinet quotas'**
+  /// **'Quotas'**
   String get adminCabinetQuotas;
 
   /// No description provided for @adminCabinetQuotasMustBePositive.
@@ -289,6 +289,54 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Company name'**
   String get adminCompanyName;
+
+  /// No description provided for @adminAddAiKey.
+  ///
+  /// In en, this message translates to:
+  /// **'Add key'**
+  String get adminAddAiKey;
+
+  /// No description provided for @adminAddCompany.
+  ///
+  /// In en, this message translates to:
+  /// **'Add company'**
+  String get adminAddCompany;
+
+  /// No description provided for @adminCompanyGeneral.
+  ///
+  /// In en, this message translates to:
+  /// **'General'**
+  String get adminCompanyGeneral;
+
+  /// No description provided for @adminEvents.
+  ///
+  /// In en, this message translates to:
+  /// **'Events'**
+  String get adminEvents;
+
+  /// No description provided for @adminInviteAdmin.
+  ///
+  /// In en, this message translates to:
+  /// **'Admin'**
+  String get adminInviteAdmin;
+
+  /// No description provided for @adminPolicy.
+  ///
+  /// In en, this message translates to:
+  /// **'Policy'**
+  String get adminPolicy;
+
+  /// No description provided for @adminQuotas.
+  ///
+  /// In en, this message translates to:
+  /// **'Quotas'**
+  String get adminQuotas;
+
+  /// No description provided for @adminQuotasSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'{cabinets} · {packages} · {bundleMb}'**
+  String adminQuotasSummary(String cabinets, String packages, String bundleMb);
 
   /// No description provided for @adminCreateAiKey.
   ///
@@ -347,7 +395,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminDrainProjectTriggers.
   ///
   /// In en, this message translates to:
-  /// **'Drain project triggers'**
+  /// **'Triggers'**
   String get adminDrainProjectTriggers;
 
   /// No description provided for @adminDrainedTriggers.
@@ -461,13 +509,13 @@ abstract class AppLocalizations {
   /// No description provided for @adminMaxBundleImportMb.
   ///
   /// In en, this message translates to:
-  /// **'Bundle import'**
+  /// **'Bundle'**
   String get adminMaxBundleImportMb;
 
   /// No description provided for @adminMaxCabinets.
   ///
   /// In en, this message translates to:
-  /// **'Max cabinets'**
+  /// **'Cabinets'**
   String get adminMaxCabinets;
 
   /// No description provided for @adminMaxChatAttachmentMb.
@@ -479,7 +527,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminMaxPackagesPerCabinet.
   ///
   /// In en, this message translates to:
-  /// **'Max packages per cabinet'**
+  /// **'Packages'**
   String get adminMaxPackagesPerCabinet;
 
   /// No description provided for @adminMaxTokensPerRun.
@@ -599,7 +647,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminPlatformEvents.
   ///
   /// In en, this message translates to:
-  /// **'Platform events'**
+  /// **'Events'**
   String get adminPlatformEvents;
 
   /// No description provided for @adminPlatformFallback.
@@ -773,13 +821,13 @@ abstract class AppLocalizations {
   /// No description provided for @adminSweepIdlePause.
   ///
   /// In en, this message translates to:
-  /// **'Sweep idle pause'**
+  /// **'Idle pause'**
   String get adminSweepIdlePause;
 
   /// No description provided for @adminSweepIdlePauseAll.
   ///
   /// In en, this message translates to:
-  /// **'Sweep idle pause (all companies)'**
+  /// **'Idle pause · all'**
   String get adminSweepIdlePauseAll;
 
   /// No description provided for @adminSweeping.

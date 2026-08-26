@@ -151,19 +151,29 @@ class IdentityCommandService:
         self,
         *,
         name: str,
-        admin_email: str,
+        admin_email: str | None,
         admin_display_name: str | None,
         description: str | None = None,
-    ) -> tuple[CompanyRow, EmployeeRow]:
-        if not admin_email or "@" not in admin_email:
-            raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="email required")
-        # No password accepted — invite via KC only
-        email = admin_email.lower()
-        await self._invites.invite_user(email=email, display_name=admin_display_name)
+    ) -> tuple[CompanyRow, EmployeeRow | None]:
         company = CompanyRow(
             name=name.strip(),
             description=description.strip() if description and description.strip() else None,
         )
+        self._session.add(company)
+        await self._session.flush()
+
+        email_raw = (admin_email or "").strip()
+        if not email_raw:
+            await self._session.commit()
+            await self._session.refresh(company)
+            return company, None
+
+        if "@" not in email_raw:
+            raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="email required")
+
+        # No password accepted — invite via KC only
+        email = email_raw.lower()
+        await self._invites.invite_user(email=email, display_name=admin_display_name)
         existing = await self._session.execute(
             select(EmployeeRow).where(EmployeeRow.email == email).order_by(EmployeeRow.created_at.asc())
         )
@@ -176,8 +186,6 @@ class IdentityCommandService:
             )
             self._session.add(employee)
             await self._session.flush()
-        self._session.add(company)
-        await self._session.flush()
         self._session.add(
             MembershipRow(
                 company_id=company.id,

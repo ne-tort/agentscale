@@ -16,6 +16,7 @@
 
 ## Потоки (кратко)
 
-- Создать компанию: form + email invite company.admin (**без password**) + cabinet quotas.
+- Создать компанию: inline name → detail; invite company.admin и квоты — seamless на detail (**без password**, без batch Save).
+- AI keys: inline name → detail; preference kit.
 - AI key bindings / agent policy: selectors на company detail.
 - Опасные действия: `DangerConfirmPage`.

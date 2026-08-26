@@ -163,3 +163,34 @@ def test_create_company_invite_no_password_and_disable(client: TestClient) -> No
 
     blocked = client.get("/api/v1/me", headers={"Authorization": f"Bearer {boss_tok}"})
     assert blocked.status_code == 403
+
+
+@requires_postgres
+def test_create_company_name_only_then_invite_admin(client: TestClient) -> None:
+    admin = _token(sub="padmin-name", email="padmin-name@example.com", platform_admin=True)
+    created = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "NameOnlyCo"},
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["company"]["name"] == "NameOnlyCo"
+    assert "admin_employee" not in body
+    company_id = body["company"]["id"]
+
+    invited = client.post(
+        f"/api/v1/companies/{company_id}/employees",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"email": "later-admin@nameonly.test", "role": "company.admin"},
+    )
+    assert invited.status_code == 201, invited.text
+    assert invited.json()["email"] == "later-admin@nameonly.test"
+
+    patched = client.patch(
+        f"/api/v1/admin/companies/{company_id}",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "NameOnlyCo Renamed"},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["name"] == "NameOnlyCo Renamed"

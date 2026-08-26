@@ -9,6 +9,7 @@ import 'package:prodavan/features/settings/open_app_settings.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Company admin shell — adaptive nav per ux-contract (L04).
+/// Page titles/actions live on each tab's [AppScaffold] (same pattern as AdminShell).
 class CompanyShell extends StatefulWidget {
   const CompanyShell({super.key});
 
@@ -23,7 +24,6 @@ class _CompanyShellState extends State<CompanyShell> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final companyId = companyContext.companyId!;
-    final title = companyContext.companyName ?? companyId;
     final pages = [
       CompanyOverviewPage(companyId: companyId),
       CompanyEmployeesPage(companyId: companyId),
@@ -31,7 +31,7 @@ class _CompanyShellState extends State<CompanyShell> {
     ];
 
     return AppLayout(
-      title: Text(title),
+      constrainBody: false,
       selectedIndex: _index,
       onDestinationSelected: (i) => setState(() => _index = i),
       onOpenSettings: () => openAppSettings(context),
@@ -41,7 +41,7 @@ class _CompanyShellState extends State<CompanyShell> {
         AppNavDestination(icon: Icons.group_outlined, label: l10n.navEmployees),
         AppNavDestination(icon: Icons.view_module_outlined, label: l10n.navCabinets),
       ],
-      body: pages[_index],
+      body: IndexedStack(index: _index, children: pages),
     );
   }
 }

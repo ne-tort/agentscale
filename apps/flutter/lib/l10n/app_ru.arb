@@ -4,7 +4,7 @@
   "adminAdminEmail": "Email администратора",
   "adminAgentMessages": "AI-Запросы",
   "adminAgentPolicySaved": "Политика агента сохранена",
-  "adminAgentRuntimePolicy": "Политика агента",
+  "adminAgentRuntimePolicy": "Политика",
   "adminAiKeysBound": "API-ключи",
   "adminAlertHighUsageTitle": "{companyName}: высокий расход токенов агента",
   "@adminAlertHighUsageTitle": {
@@ -112,7 +112,7 @@
     }
   },
   "adminBundle": "Бандл",
-  "adminCabinetQuotas": "Квоты кабинетов",
+  "adminCabinetQuotas": "Квоты",
   "adminCabinetQuotasMustBePositive": "Квоты кабинетов — целые числа больше нуля",
   "adminCabinetsProjectsSubtitle": "{cabinets} кабинетов · {projects} проектов",
   "@adminCabinetsProjectsSubtitle": {
@@ -139,6 +139,21 @@
   "adminCompanyAdminInvite": "Приглашение admin компании",
   "adminCompanyBindings": "Привязки компаний",
   "adminCompanyName": "Название компании",
+  "adminAddAiKey": "Добавить ключ",
+  "adminAddCompany": "Добавить компанию",
+  "adminCompanyGeneral": "Общее",
+  "adminEvents": "События",
+  "adminInviteAdmin": "Админ",
+  "adminPolicy": "Политика",
+  "adminQuotas": "Квоты",
+  "adminQuotasSummary": "{cabinets} · {packages} · {bundleMb}",
+  "@adminQuotasSummary": {
+    "placeholders": {
+      "cabinets": { "type": "String" },
+      "packages": { "type": "String" },
+      "bundleMb": { "type": "String" }
+    }
+  },
   "adminCreateAiKey": "Создать AI-ключ",
   "adminCreateCompany": "Создать компанию",
   "adminCreateCompanyAndInviteAdmin": "Создайте компанию и пригласите company.admin",
@@ -155,7 +170,7 @@
       }
     }
   },
-  "adminDrainProjectTriggers": "Сбросить триггеры проектов",
+  "adminDrainProjectTriggers": "Триггеры",
   "adminDrainedTriggers": "Сброшено триггеров: {count}",
   "@adminDrainedTriggers": {
     "placeholders": {
@@ -208,10 +223,10 @@
   "adminLifecycle": "Жизненный цикл",
   "adminLifetimeSubscription": "Бессрочная подписка",
   "adminMaxAgentTokensMonth": "Токены агента / месяц",
-  "adminMaxBundleImportMb": "Импорт бандла",
-  "adminMaxCabinets": "Макс. кабинетов",
+  "adminMaxBundleImportMb": "Бандл",
+  "adminMaxCabinets": "Кабинеты",
   "adminMaxChatAttachmentMb": "Вложение в чат",
-  "adminMaxPackagesPerCabinet": "Макс. пакетов на кабинет",
+  "adminMaxPackagesPerCabinet": "Пакеты",
   "adminMaxTokensPerRun": "Токены за запуск",
   "adminMaxUsdCostMonth": "Стоимость USD / месяц",
   "adminMetadataOnly": "только метаданные",
@@ -269,7 +284,7 @@
   "adminNoCompaniesYet": "Компаний пока нет",
   "adminNoPlatformEventsYet": "Событий платформы пока нет",
   "adminNoStarterBundles": "Нет стартовых бандлов",
-  "adminPlatformEvents": "События платформы",
+  "adminPlatformEvents": "События",
   "adminPlatformFallback": "Fallback платформы",
   "adminPlatformIdleSweep": "Пауза по простою: {count} проект(ов) ({companies} компаний с политикой)",
   "@adminPlatformIdleSweep": {
@@ -342,8 +357,8 @@
     }
   },
   "adminSubscriptionSaved": "Подписка сохранена",
-  "adminSweepIdlePause": "Пауза по простою",
-  "adminSweepIdlePauseAll": "Пауза по простою (все компании)",
+  "adminSweepIdlePause": "Простой",
+  "adminSweepIdlePauseAll": "Простой · все",
   "adminSweeping": "Выполнение…",
   "adminTelegramHmacConfigured": "Telegram HMAC: задан (оставьте пустым, чтобы не менять)",
   "adminTelegramHmacNotSet": "Telegram HMAC: не задан",

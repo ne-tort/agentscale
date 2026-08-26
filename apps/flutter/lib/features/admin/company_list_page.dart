@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/session/admin_context.dart';
-import 'package:prodavan/core/widgets/app_error_presenter.dart';
+import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
+import 'package:prodavan/core/widgets/app_inline_add_field.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
-import 'package:prodavan/features/admin/admin_company_create_page.dart';
 import 'package:prodavan/features/admin/company/admin_company_detail_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -20,13 +21,23 @@ class AdminCompanyListPage extends StatefulWidget {
 }
 
 class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
+  static const _viewPageKey = 'admin.companies';
+
+  final _viewMode = AppCollectionViewModeStore(_viewPageKey);
   bool _loading = true;
   List<Map<String, dynamic>> _companies = const [];
 
   @override
   void initState() {
     super.initState();
+    _viewMode.load();
     _reload();
+  }
+
+  @override
+  void dispose() {
+    _viewMode.dispose();
+    super.dispose();
   }
 
   Future<void> _reload() async {
@@ -45,23 +56,24 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
     }
   }
 
-  Future<void> _createCompany() async {
-    final created = await Navigator.of(context).push<Map<String, String>>(
-      MaterialPageRoute<Map<String, String>>(
-        builder: (_) => const AdminCompanyCreatePage(),
-      ),
-    );
-    if (created == null) return;
+  Future<void> _createCompany(String name) async {
+    final body = await adminContext.api.createCompany(name: name);
+    if (!mounted) return;
     await _reload();
     if (!mounted) return;
-    final companyId = created['id'];
-    final companyName = created['name'];
-    if (companyId == null || companyName == null) return;
+    final company = body['company'] as Map<String, dynamic>? ?? body;
+    final companyId = company['id'] as String?;
+    final companyName = company['name'] as String? ?? name;
+    if (companyId == null) return;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => AdminCompanyDetailPage(companyId: companyId, companyName: companyName),
+        builder: (_) => AdminCompanyDetailPage(
+          companyId: companyId,
+          companyName: companyName,
+        ),
       ),
     );
+    if (mounted) await _reload();
   }
 
   void _openCompany(AppEntityRow row) {
@@ -69,7 +81,7 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
       MaterialPageRoute<void>(
         builder: (_) => AdminCompanyDetailPage(companyId: row.id, companyName: row.title),
       ),
-    );
+    ).then((_) => _reload());
   }
 
   String _cell(dynamic v, AppLocalizations l10n) {
@@ -100,38 +112,55 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
       );
     }).toList();
 
-    return AppScaffold(
-      title: Text(l10n.navCompanies),
-      actions: [
-        IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
-        IconButton(onPressed: _createCompany, icon: const Icon(Icons.add)),
-      ],
-      body: AppEntityCollection(
-        loading: _loading,
-        rows: rows,
-        primaryColumnLabel: l10n.commonCompany,
-        columns: [
-          AppEntityColumn(id: 'description', label: l10n.commonDescription),
-          AppEntityColumn(
-            id: 'employees',
-            label: l10n.commonEmployees,
-            width: 72,
-            align: AppEntityColumnAlign.end,
+    return ListenableBuilder(
+      listenable: _viewMode,
+      builder: (context, _) {
+        return AppScaffold(
+          title: Text(l10n.navCompanies),
+          actions: [
+            IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
+            AppCollectionViewModeButton(store: _viewMode),
+          ],
+          body: Column(
+            children: [
+              AppInlineAddField(
+                title: l10n.adminAddCompany,
+                hintText: l10n.adminAddCompany,
+                validator: (v) => v.trim().isNotEmpty,
+                invalidMessage: l10n.commonRequired,
+                onSave: _createCompany,
+              ),
+              Expanded(
+                child: AppEntityCollection(
+                  loading: _loading,
+                  mode: _viewMode.resolve(context),
+                  rows: rows,
+                  primaryColumnLabel: l10n.commonCompany,
+                  columns: [
+                    AppEntityColumn(id: 'description', label: l10n.commonDescription),
+                    AppEntityColumn(
+                      id: 'employees',
+                      label: l10n.commonEmployees,
+                      width: 72,
+                      align: AppEntityColumnAlign.end,
+                    ),
+                    AppEntityColumn(
+                      id: 'cabinets',
+                      label: l10n.commonCabinets,
+                      width: 88,
+                      align: AppEntityColumnAlign.end,
+                    ),
+                  ],
+                  onOpen: _openCompany,
+                  empty: EmptyPlaceholder(
+                    title: l10n.adminNoCompanies,
+                  ),
+                ),
+              ),
+            ],
           ),
-          AppEntityColumn(
-            id: 'cabinets',
-            label: l10n.commonCabinets,
-            width: 88,
-            align: AppEntityColumnAlign.end,
-          ),
-        ],
-        onOpen: _openCompany,
-        empty: EmptyPlaceholder(
-          title: l10n.adminNoCompanies,
-          subtitle: l10n.adminCreateCompanyAndInviteAdmin,
-          action: TextButton(onPressed: _createCompany, child: Text(l10n.adminCreateCompany)),
-        ),
-      ),
+        );
+      },
     );
   }
 }

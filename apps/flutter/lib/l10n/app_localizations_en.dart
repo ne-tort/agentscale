@@ -22,7 +22,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminAgentPolicySaved => 'Agent policy saved';
 
   @override
-  String get adminAgentRuntimePolicy => 'Agent policy';
+  String get adminAgentRuntimePolicy => 'Policy';
 
   @override
   String get adminAiKeysBound => 'API keys';
@@ -110,7 +110,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminBundle => 'Bundle';
 
   @override
-  String get adminCabinetQuotas => 'Cabinet quotas';
+  String get adminCabinetQuotas => 'Quotas';
 
   @override
   String get adminCabinetQuotasMustBePositive =>
@@ -134,6 +134,32 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get adminCompanyName => 'Company name';
+
+  @override
+  String get adminAddAiKey => 'Add key';
+
+  @override
+  String get adminAddCompany => 'Add company';
+
+  @override
+  String get adminCompanyGeneral => 'General';
+
+  @override
+  String get adminEvents => 'Events';
+
+  @override
+  String get adminInviteAdmin => 'Admin';
+
+  @override
+  String get adminPolicy => 'Policy';
+
+  @override
+  String get adminQuotas => 'Quotas';
+
+  @override
+  String adminQuotasSummary(String cabinets, String packages, String bundleMb) {
+    return '$cabinets · $packages · $bundleMb';
+  }
 
   @override
   String get adminCreateAiKey => 'Create AI key';
@@ -167,7 +193,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get adminDrainProjectTriggers => 'Drain project triggers';
+  String get adminDrainProjectTriggers => 'Triggers';
 
   @override
   String adminDrainedTriggers(String count) {
@@ -234,16 +260,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminMaxAgentTokensMonth => 'Agent tokens / month';
 
   @override
-  String get adminMaxBundleImportMb => 'Bundle import';
+  String get adminMaxBundleImportMb => 'Bundle';
 
   @override
-  String get adminMaxCabinets => 'Max cabinets';
+  String get adminMaxCabinets => 'Cabinets';
 
   @override
   String get adminMaxChatAttachmentMb => 'Chat attachment';
 
   @override
-  String get adminMaxPackagesPerCabinet => 'Max packages per cabinet';
+  String get adminMaxPackagesPerCabinet => 'Packages';
 
   @override
   String get adminMaxTokensPerRun => 'Tokens per run';
@@ -314,7 +340,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminNoStarterBundles => 'No starter bundles';
 
   @override
-  String get adminPlatformEvents => 'Platform events';
+  String get adminPlatformEvents => 'Events';
 
   @override
   String get adminPlatformFallback => 'Platform fallback';
@@ -416,10 +442,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminSubscriptionSaved => 'Subscription saved';
 
   @override
-  String get adminSweepIdlePause => 'Sweep idle pause';
+  String get adminSweepIdlePause => 'Idle pause';
 
   @override
-  String get adminSweepIdlePauseAll => 'Sweep idle pause (all companies)';
+  String get adminSweepIdlePauseAll => 'Idle pause · all';
 
   @override
   String get adminSweeping => 'Sweeping…';

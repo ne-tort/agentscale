@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/session/work_context.dart';
+import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
+import 'package:prodavan/core/widgets/app_icon_button.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
 import 'package:prodavan/features/employee/project_create_page.dart';
@@ -11,9 +13,14 @@ import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Projects tab — list + chat workspace (L05/L09).
 class ProjectListPage extends StatefulWidget {
-  const ProjectListPage({super.key, required this.cabinetId});
+  const ProjectListPage({
+    super.key,
+    required this.cabinetId,
+    required this.viewModeStore,
+  });
 
   final String cabinetId;
+  final AppCollectionViewModeStore viewModeStore;
 
   @override
   State<ProjectListPage> createState() => _ProjectListPageState();
@@ -92,35 +99,44 @@ class _ProjectListPageState extends State<ProjectListPage> {
         )
         .toList();
 
-    return Column(
-      children: [
-        if (_error != null) InlineErrorBanner(message: _error!),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-          child: Align(
-            alignment: Alignment.centerRight,
-            child: TextButton.icon(
-              onPressed: _createProject,
-              icon: Icon(Icons.add),
-              label: Text(l10n.projectNewProject),
+    return ListenableBuilder(
+      listenable: widget.viewModeStore,
+      builder: (context, _) {
+        return Column(
+          children: [
+            if (_error != null) InlineErrorBanner(message: _error!),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: Align(
+                alignment: Alignment.centerRight,
+                child: AppIconButton(
+                  icon: Icons.add,
+                  tooltip: l10n.projectNewProject,
+                  onPressed: _createProject,
+                ),
+              ),
             ),
-          ),
-        ),
-        Expanded(
-          child: AppEntityCollection(
-            loading: _loading,
-            rows: rows,
-            primaryColumnLabel: l10n.projectProject,
-            columns: const [],
-            onOpen: _openProject,
-            empty: EmptyPlaceholder(
-              title: l10n.projectNoProjects,
-              subtitle: l10n.projectCreateProjectHint,
-              action: TextButton(onPressed: _createProject, child: Text(l10n.projectCreateProject)),
+            Expanded(
+              child: AppEntityCollection(
+                loading: _loading,
+                mode: widget.viewModeStore.resolve(context),
+                rows: rows,
+                primaryColumnLabel: l10n.projectProject,
+                columns: const [],
+                onOpen: _openProject,
+                empty: EmptyPlaceholder(
+                  title: l10n.projectNoProjects,
+                  subtitle: l10n.projectCreateProjectHint,
+                  action: TextButton(
+                    onPressed: _createProject,
+                    child: Text(l10n.projectCreateProject),
+                  ),
+                ),
+              ),
             ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     );
   }
 }

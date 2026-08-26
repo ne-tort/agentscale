@@ -6,7 +6,7 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/features/admin/company/admin_company_detail_controller.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Company identity + subscription fields (no section headers).
+/// Company identity + subscription — seamless preference saves (AI-key style).
 class AdminCompanyGeneralPage extends StatelessWidget {
   const AdminCompanyGeneralPage({super.key});
 
@@ -18,14 +18,16 @@ class AdminCompanyGeneralPage extends StatelessWidget {
       listenable: ctrl,
       builder: (context, _) {
         return AppScaffold(
-          title: Text(l10n.commonCompany),
+          title: Text(l10n.adminCompanyGeneral),
           body: ListView(
             padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
             children: [
-              AppPreferenceTile(
-                title: l10n.adminCompanyName,
-                icon: Icons.badge_outlined,
-                subtitle: Text(ctrl.companyName),
+              AppValuePreference<String>(
+                title: l10n.commonName,
+                icon: Icons.label_outline_rounded,
+                value: ctrl.companyName,
+                validateInput: (v) => v.trim().isNotEmpty,
+                onSave: ctrl.saveName,
               ),
               AppValuePreference<String>(
                 title: l10n.commonDescription,
@@ -35,6 +37,20 @@ class AdminCompanyGeneralPage extends StatelessWidget {
                 presentValue: (v) =>
                     v.trim().isEmpty ? l10n.commonNotSet : v,
                 onSave: ctrl.saveDescription,
+              ),
+              AppValuePreference<String>(
+                title: l10n.adminInviteAdmin,
+                icon: Icons.person_add_outlined,
+                value: '',
+                hintText: l10n.adminAdminEmail,
+                keyboardType: TextInputType.emailAddress,
+                presentValue: (_) => l10n.commonNotSet,
+                formatInputValue: (_) => '',
+                validateInput: (v) {
+                  final email = v.trim();
+                  return email.isNotEmpty && email.contains('@');
+                },
+                onSave: ctrl.inviteCompanyAdmin,
               ),
               AppSubscriptionPreference(
                 endsAt: ctrl.subscriptionEnds,

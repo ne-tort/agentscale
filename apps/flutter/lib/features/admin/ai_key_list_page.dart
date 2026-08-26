@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/session/admin_context.dart';
+import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_inline_add_field.dart';
@@ -20,13 +21,23 @@ class AdminAiKeyListPage extends StatefulWidget {
 }
 
 class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
+  static const _viewPageKey = 'admin.aiKeys';
+
+  final _viewMode = AppCollectionViewModeStore(_viewPageKey);
   bool _loading = true;
   List<Map<String, dynamic>> _keys = const [];
 
   @override
   void initState() {
     super.initState();
+    _viewMode.load();
     _reload();
+  }
+
+  @override
+  void dispose() {
+    _viewMode.dispose();
+    super.dispose();
   }
 
   Future<void> _reload() async {
@@ -87,46 +98,53 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
       );
     }).toList();
 
-    final body = Column(
-      children: [
-        AppInlineAddField(
-          title: l10n.commonName,
-          hintText: l10n.commonName,
-          validator: (v) => v.trim().isNotEmpty,
-          invalidMessage: l10n.commonRequired,
-          onSave: _createKey,
-        ),
-        Expanded(
-          child: AppEntityCollection(
-            loading: _loading,
-            rows: rows,
-            primaryColumnLabel: l10n.adminKey,
-            columns: [
-              AppEntityColumn(id: 'provider', label: l10n.commonProvider),
-              AppEntityColumn(id: 'status', label: l10n.commonStatus),
-              AppEntityColumn(
-                id: 'bindings',
-                label: l10n.navCompanies,
-                width: 72,
-                align: AppEntityColumnAlign.end,
-              ),
-            ],
-            onOpen: _openKey,
-            empty: EmptyPlaceholder(
-              title: l10n.adminNoAiKeys,
-              subtitle: l10n.adminCreateRuntimeKeyHint,
+    return ListenableBuilder(
+      listenable: _viewMode,
+      builder: (context, _) {
+        final body = Column(
+          children: [
+            AppInlineAddField(
+              title: l10n.adminAddAiKey,
+              hintText: l10n.adminAddAiKey,
+              validator: (v) => v.trim().isNotEmpty,
+              invalidMessage: l10n.commonRequired,
+              onSave: _createKey,
             ),
-          ),
-        ),
-      ],
-    );
+            Expanded(
+              child: AppEntityCollection(
+                loading: _loading,
+                mode: _viewMode.resolve(context),
+                rows: rows,
+                primaryColumnLabel: l10n.adminKey,
+                columns: [
+                  AppEntityColumn(id: 'provider', label: l10n.commonProvider),
+                  AppEntityColumn(id: 'status', label: l10n.commonStatus),
+                  AppEntityColumn(
+                    id: 'bindings',
+                    label: l10n.navCompanies,
+                    width: 72,
+                    align: AppEntityColumnAlign.end,
+                  ),
+                ],
+                onOpen: _openKey,
+                empty: EmptyPlaceholder(
+                  title: l10n.adminNoAiKeys,
+                  subtitle: l10n.adminCreateRuntimeKeyHint,
+                ),
+              ),
+            ),
+          ],
+        );
 
-    return AppScaffold(
-      title: Text(l10n.navAiKeys),
-      actions: [
-        IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
-      ],
-      body: body,
+        return AppScaffold(
+          title: Text(l10n.navAiKeys),
+          actions: [
+            IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
+            AppCollectionViewModeButton(store: _viewMode),
+          ],
+          body: body,
+        );
+      },
     );
   }
 }

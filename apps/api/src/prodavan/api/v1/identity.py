@@ -43,7 +43,7 @@ class CreateCompanyBody(BaseModel):
 
     name: str = Field(min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=2000)
-    admin_email: str = Field(min_length=3, max_length=320)
+    admin_email: str | None = Field(default=None, max_length=320)
     admin_display_name: str | None = None
 
     @model_validator(mode="before")
@@ -110,10 +110,12 @@ async def create_company(
         admin_email=body.admin_email,
         admin_display_name=body.admin_display_name,
     )
-    return {
+    out: dict = {
         "company": {"id": company.id, "name": company.name, "description": company.description},
-        "admin_employee": {"id": admin.id, "email": admin.email, "status": admin.status},
     }
+    if admin is not None:
+        out["admin_employee"] = {"id": admin.id, "email": admin.email, "status": admin.status}
+    return out
 
 
 @router.post("/companies/{company_id}/employees", status_code=201)

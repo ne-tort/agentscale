@@ -28,9 +28,9 @@ Control plane платформы. Нет chat проектов, нет доме�
 
 ### Создать компанию
 
-Form: name, slug, subscription.  
-Invite `company.admin`: **email only** → Keycloak.  
-Задать cabinet quotas (defaults).
+Inline `AppInlineAddField` «Добавить компанию» (только name) → detail page.  
+Invite `company.admin`: preference на general (email only → Keycloak).  
+Cabinet quotas / subscription — seamless preferences на detail sub-pages.
 
 ### Keys / policy
 

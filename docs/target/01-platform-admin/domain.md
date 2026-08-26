@@ -35,7 +35,7 @@ Platform Admin:
 
 | Операция | Инвариант |
 |----------|-----------|
-| `company.create` | Уникальный slug; invite company.admin (email → Keycloak) |
+| `company.create` | Name required; optional invite company.admin (email → Keycloak) on create or later on detail |
 | `company.suspend` / `activate` | Suspend → block employee login |
 | `company.set_subscription` | Дата или `lifetime=true` |
 | `company.set_cabinet_quotas` | Лимиты dynamic cabinets |

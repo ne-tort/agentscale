@@ -22,7 +22,7 @@ Platform Admin — компании, keys (L03), квоты/policy, metrics read
 |---------|------|
 | AdminShell NavigationBar: Overview + Companies + AI Keys + Bundles | E2E widget tests |
 | Platform Overview tab + no-keys / key-expiring / subscription alerts | |
-| Create company full-page + quotas on create | |
+| Create company inline name → detail | |
 | AI Keys: list, create, bind, disable, renew, rotate | |
 | Agent policy UI incl. token budgets + max_attachment_mb + HMAC secrets + idle pause hours + model allowlist | USD authoritative billing sync |
 | Company contour: Overview / Employees / Cabinets | |
@@ -41,8 +41,9 @@ Platform Admin — компании, keys (L03), квоты/policy, metrics read
 apps/flutter/lib/features/admin/
   admin_shell.dart
   admin_metrics_overview_page.dart
-  admin_company_create_page.dart
-  {company_list,company_detail,ai_key_list,ai_key_detail}_page.dart
+  company_list_page.dart (AppInlineAddField)
+  company/admin_company_detail_page.dart + general/quotas/policy/events
+  {ai_key_list,ai_key_detail}_page.dart
   admin_starter_bundles_page.dart
   widgets/admin_metrics_alerts.dart
 apps/flutter/test/admin_widgets_test.dart
@@ -61,13 +62,13 @@ apps/api/alembic/versions/2026082309_company_subscription.py
 |------------|--------|---------|
 | Key rotate / renew UI | done | detail + rotate page |
 | Invite full-page (Company) | done | company_invite_employee_page |
-| Create company full-page | done | admin_company_create_page + navigate to detail |
+| Create company inline → detail | done | AppInlineAddField name-only; invite/quotas on detail |
 | Overview no-keys alert | done | ai_keys_bound in metrics |
 | Key expiring alert | done | ai_keys_expiring_soon + next_key_renewal_at |
 | High usage alert | done | high_agent_usage + ADMIN_METRICS_TOKEN_ALERT_THRESHOLD |
 | Subscription expiring alert | done | subscription_expiring_soon + Flutter Overview |
 | Subscription expired alert | done | subscription_expired flag |
-| Subscription UI on create/edit | done | lifetime + ends_at |
+| Subscription UI on create/edit | done | lifetime + ends_at on general (seamless) |
 | Starter bundle catalog | live | metadata + Admin UI + shipped zip in fixtures |
 | Starter bundle download | live | `GET .../bundle` base64 |
 | `storage_bytes` / `last_activity_at` | done | workspace scan + activity max |

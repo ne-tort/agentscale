@@ -9,10 +9,11 @@
 
 | Режим | Когда | Рендер строки |
 |-------|-------|---------------|
-| `list` | narrow / phone (`AppBreakpoints`) | `AppListItem` |
-| `table` | wide | Те же поля как колонки; row tap = тот же `onOpen` |
+| `list` | preference или narrow (`AppBreakpoints`) | `AppListItem` |
+| `table` | preference или wide | Те же поля как колонки; row tap = тот же `onOpen` |
 
-Переключение list/table — `AppIconToggle` в toolbar коллекции (если оба режима доступны), не два разных экрана.
+Переключение list/table — **одна** кнопка `AppCollectionViewModeButton` в **AppBar страницы** (справа, рядом с refresh), не в toolbar коллекции и не два разных экрана.  
+Режим **персистентен** per page via `AppCollectionViewModeStore` (`SharedPreferences` ключ `prodavan.entityView.<pageKey>`). Коллекция **controlled**: страница передаёт `mode`.
 
 ## Где применяется
 
@@ -25,14 +26,17 @@
 ## Слоты оболочки (декомпозиция)
 
 ```text
+Page AppBar.actions
+  └── AppCollectionViewModeButton  # list ↔ table; persist per pageKey
+
 AppEntityCollection
-  ├── toolbar?     # AppIconButton: add, search, filter; без простыней текста
-  ├── body         # list | table
+  ├── toolbar?     # AppIconButton: add, search, filter; без mode toggle
+  ├── body         # list | table (mode from page)
   ├── empty        # EmptyPlaceholder: факт + короткое noun-label действия
   └── loading      # skeleton rows (не обязательный full-screen spinner)
 ```
 
-Feature передаёт: columns/fields, row builder / cell values, `onOpen`, toolbar actions.  
+Feature передаёт: columns/fields, row builder / cell values, `onOpen`, `mode`, toolbar actions.  
 Feature **не** копирует ListView/DataTable стили.
 
 ## Строка / колонки
@@ -68,7 +72,8 @@ Feature передаёт `primaryColumnLabel` когда первая колон
 ## Toolbar
 
 - По умолчанию icon buttons (`AppIconButton`).
-- Primary create — icon «add» **или** labeled «Создать» (noun), если без подписи неочевидно.
+- Primary create — icon «add» **или** labeled «Создать» (noun), если без подписи неочевидно; либо `AppInlineAddField` над коллекцией.
+- Mode toggle **не** в toolbar коллекции.
 - Нет абзацев над таблицей «здесь вы можете…».
 
 ## Empty / laconic

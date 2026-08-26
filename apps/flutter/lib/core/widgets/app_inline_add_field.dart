@@ -15,6 +15,7 @@ class AppInlineAddField extends StatefulWidget {
     required this.onSave,
     this.hintText,
     this.invalidMessage,
+    this.showBottomDivider = true,
   });
 
   final String title;
@@ -22,6 +23,9 @@ class AppInlineAddField extends StatefulWidget {
   final Future<void> Function(String raw) onSave;
   final String? hintText;
   final String? invalidMessage;
+
+  /// Full-bleed hairline under the field (separates from EntityCollection).
+  final bool showBottomDivider;
 
   @override
   State<AppInlineAddField> createState() => _AppInlineAddFieldState();
@@ -102,8 +106,7 @@ class _AppInlineAddFieldState extends State<AppInlineAddField> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _field(BuildContext context) {
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context);
 
@@ -160,6 +163,20 @@ class _AppInlineAddFieldState extends State<AppInlineAddField> {
         ),
       ),
       onTap: _saving ? null : _beginEdit,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final field = _field(context);
+    if (!widget.showBottomDivider) return field;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        field,
+        const Divider(height: 1, thickness: 1),
+      ],
     );
   }
 }
