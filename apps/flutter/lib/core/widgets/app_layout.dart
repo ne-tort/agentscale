@@ -6,9 +6,11 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_content_frame.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Material default [NavigationRail.minExtendedWidth] — keep leading/trailing
-/// finite; `width: infinity` under Row's unbounded max width breaks the rail.
+/// Material defaults — keep leading/trailing on the same icon column as destinations.
+const double _kRailMinWidth = 80;
 const double _kExtendedRailWidth = 256;
+const double _kRailIconLabelGap = 8; // Material `_horizontalDestinationPadding`
+const double _kLogoBadgeSize = 36;
 
 /// One adaptive nav destination (bottom bar or left rail).
 class AppNavDestination {
@@ -64,21 +66,52 @@ class AppLayout extends StatelessWidget {
     return AppContentFrame(child: page);
   }
 
+  /// Same horizontal geometry as [NavigationRail] destinations: icon centered in
+  /// [minWidth], then label (extended only).
+  Widget _railIconLabel({
+    required bool extended,
+    required Widget icon,
+    required Widget label,
+  }) {
+    if (!extended) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            icon,
+            const SizedBox(height: AppSpacing.xs),
+            label,
+          ],
+        ),
+      );
+    }
+    return Row(
+      children: [
+        SizedBox(
+          width: _kRailMinWidth,
+          child: Center(child: icon),
+        ),
+        Expanded(child: label),
+        const SizedBox(width: _kRailIconLabelGap),
+      ],
+    );
+  }
+
   Widget _logo(BuildContext context, {required bool extended}) {
     final colors = context.appColors;
     final badge = Container(
-      width: 28,
-      height: 28,
+      width: _kLogoBadgeSize,
+      height: _kLogoBadgeSize,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: colors.primary.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(10),
       ),
       child: Text(
         'AI',
         style: TextStyle(
           color: colors.primary,
-          fontSize: 12,
+          fontSize: 14,
           fontWeight: FontWeight.w700,
           height: 1,
         ),
@@ -94,23 +127,6 @@ class AppLayout extends StatelessWidget {
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
     );
-    // Extended rail destinations are left-aligned; compact centers icon+label.
-    final content = extended
-        ? Row(
-            children: [
-              badge,
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(child: label),
-            ],
-          )
-        : Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              badge,
-              const SizedBox(height: AppSpacing.xs),
-              label,
-            ],
-          );
 
     return Material(
       color: Colors.transparent,
@@ -120,13 +136,8 @@ class AppLayout extends StatelessWidget {
         child: MouseRegion(
           cursor: onLogoTap != null ? SystemMouseCursors.click : MouseCursor.defer,
           child: Padding(
-            padding: EdgeInsets.fromLTRB(
-              extended ? AppSpacing.md : AppSpacing.sm,
-              AppSpacing.md,
-              extended ? AppSpacing.md : AppSpacing.sm,
-              extended ? AppSpacing.md : AppSpacing.sm,
-            ),
-            child: content,
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+            child: _railIconLabel(extended: extended, icon: badge, label: label),
           ),
         ),
       ),
@@ -136,44 +147,31 @@ class AppLayout extends StatelessWidget {
   Widget _settingsControl(BuildContext context, {required bool extended}) {
     final l10n = AppLocalizations.of(context);
     final colors = context.appColors;
-    final child = extended
-        ? Row(
-            children: [
-              Icon(Icons.settings_outlined, color: colors.muted),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: Text(
-                  l10n.settings,
-                  style: TextStyle(color: colors.onSurface, fontSize: 14),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          )
-        : Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.settings_outlined, color: colors.muted, size: 24),
-              const SizedBox(height: AppSpacing.xs),
-              Text(l10n.settings, style: TextStyle(color: colors.muted, fontSize: 12)),
-            ],
-          );
+    // Match default NavigationRail icon size (24).
+    final icon = Icon(Icons.settings_outlined, color: colors.muted, size: 24);
+    final label = Text(
+      l10n.settings,
+      style: TextStyle(
+        color: extended ? colors.onSurface : colors.muted,
+        fontSize: extended ? 14 : 12,
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+
     return Padding(
       padding: const EdgeInsets.only(bottom: AppSpacing.md),
       child: InkWell(
         onTap: onOpenSettings,
         borderRadius: BorderRadius.circular(12),
         child: Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: extended ? AppSpacing.md : AppSpacing.sm,
-            vertical: AppSpacing.sm,
-          ),
-          child: child,
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+          child: _railIconLabel(extended: extended, icon: icon, label: label),
         ),
       ),
     );
   }
+
   @override
   Widget build(BuildContext context) {
     final narrow = AppBreakpoints.isNarrow(context);
@@ -214,9 +212,9 @@ class AppLayout extends StatelessWidget {
       selectedIndex: selectedIndex,
       onDestinationSelected: onDestinationSelected,
       extended: expanded,
+      minWidth: _kRailMinWidth,
+      minExtendedWidth: _kExtendedRailWidth,
       labelType: expanded ? NavigationRailLabelType.none : NavigationRailLabelType.all,
-      // Match destination alignment: left when extended, centered when compact.
-      // Finite width only — never infinity (Row gives the rail unbounded max).
       leading: expanded
           ? SizedBox(
               width: _kExtendedRailWidth,
