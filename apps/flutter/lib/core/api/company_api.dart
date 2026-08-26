@@ -125,6 +125,157 @@ class CompanyApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<List<Map<String, dynamic>>> listAiKeys(String companyId) async {
+    final res = await AuthHttp.get(_uri('/companies/$companyId/ai-keys'));
+    _throwIfError(res);
+    final body = jsonDecode(res.body);
+    if (body is List) return body.cast<Map<String, dynamic>>();
+    return const [];
+  }
+
+  Future<Map<String, dynamic>> getAiKey({
+    required String companyId,
+    required String keyId,
+  }) async {
+    final res = await AuthHttp.get(_uri('/companies/$companyId/ai-keys/$keyId'));
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> createAiKey({
+    required String companyId,
+    required String name,
+    String provider = 'cursor',
+    String apiKind = 'cursor_sdk',
+    String? secret,
+  }) async {
+    final res = await AuthHttp.post(
+      _uri('/companies/$companyId/ai-keys'),
+      body: jsonEncode({
+        'name': name,
+        'provider': provider,
+        'api_kind': apiKind,
+        if (secret != null && secret.isNotEmpty) 'secret': secret,
+      }),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> patchAiKey({
+    required String companyId,
+    required String keyId,
+    String? status,
+    String? name,
+    String? provider,
+    String? apiKind,
+    String? nextRenewalAt,
+    bool clearNextRenewalAt = false,
+  }) async {
+    final res = await AuthHttp.patch(
+      _uri('/companies/$companyId/ai-keys/$keyId'),
+      body: jsonEncode({
+        if (status != null) 'status': status,
+        if (name != null) 'name': name,
+        if (provider != null) 'provider': provider,
+        if (apiKind != null) 'api_kind': apiKind,
+        if (clearNextRenewalAt) 'next_renewal_at': null,
+        if (!clearNextRenewalAt && nextRenewalAt != null) 'next_renewal_at': nextRenewalAt,
+      }),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> deleteAiKey({
+    required String companyId,
+    required String keyId,
+  }) async {
+    final res = await AuthHttp.delete(_uri('/companies/$companyId/ai-keys/$keyId'));
+    _throwIfError(res);
+  }
+
+  Future<Map<String, dynamic>> renewAiKey({
+    required String companyId,
+    required String keyId,
+    int months = 1,
+  }) async {
+    final res = await AuthHttp.post(
+      _uri('/companies/$companyId/ai-keys/$keyId/renew'),
+      body: jsonEncode({'months': months}),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> rotateAiKeySecret({
+    required String companyId,
+    required String keyId,
+    required String secret,
+  }) async {
+    final res = await AuthHttp.post(
+      _uri('/companies/$companyId/ai-keys/$keyId/rotate-secret'),
+      body: jsonEncode({'secret': secret}),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> listContainers({
+    required String companyId,
+    int limit = 200,
+  }) async {
+    final res = await AuthHttp.get(
+      _uri('/companies/$companyId/containers').replace(queryParameters: {'limit': '$limit'}),
+    );
+    _throwIfError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = body['items'];
+    if (items is List) return items.cast<Map<String, dynamic>>();
+    return const [];
+  }
+
+  Future<Map<String, dynamic>> getContainer({
+    required String companyId,
+    required String projectId,
+  }) async {
+    final res = await AuthHttp.get(_uri('/companies/$companyId/containers/$projectId'));
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> pauseContainer({
+    required String companyId,
+    required String projectId,
+  }) async {
+    final res = await AuthHttp.post(
+      _uri('/companies/$companyId/containers/$projectId/pause'),
+      body: '{}',
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> resumeContainer({
+    required String companyId,
+    required String projectId,
+  }) async {
+    final res = await AuthHttp.post(
+      _uri('/companies/$companyId/containers/$projectId/resume'),
+      body: '{}',
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> deleteContainer({
+    required String companyId,
+    required String projectId,
+  }) async {
+    final res = await AuthHttp.delete(_uri('/companies/$companyId/containers/$projectId'));
+    _throwIfError(res);
+  }
+
   void _throwIfError(http.Response res) {
     if (res.statusCode >= 400) {
       throw ProdavanApiException(res.statusCode, res.body);

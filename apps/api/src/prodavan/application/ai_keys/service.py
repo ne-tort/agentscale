@@ -334,6 +334,12 @@ class AiKeysService:
             )
         return row
 
+    async def get_key_for_company(self, key_id: str, company_id: str) -> dict:
+        for item in await self.list_keys_for_company(company_id):
+            if item.get("id") == key_id:
+                return item
+        raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Key not found")
+
     async def patch_key(
         self, key_id: str, updates: dict[str, Any], *, principal: Principal | None = None
     ) -> dict:

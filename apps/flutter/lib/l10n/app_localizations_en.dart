@@ -1339,6 +1339,25 @@ class AppLocalizationsEn extends AppLocalizations {
   String get companyPasswordChanged => 'Password changed successfully';
 
   @override
+  String get companyAddAiKey => 'Add key';
+
+  @override
+  String get companyNoAiKeys => 'No AI keys';
+
+  @override
+  String get companyKeyPlatformBound => 'From platform';
+
+  @override
+  String get companyKeySourceLocal => 'Local';
+
+  @override
+  String get companyKeyReadOnlyBanner => 'Platform-bound key — read only';
+
+  @override
+  String get companyCreateRuntimeKeyHint =>
+      'Add a company-owned key for your employees\' projects';
+
+  @override
   String get errorConflict => 'Data conflict. Refresh and try again.';
 
   @override

@@ -16,6 +16,18 @@ from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 router = APIRouter(prefix="/companies/{company_id}/ai-keys", tags=["company-ai-keys"])
 
 
+class RenewBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    months: int = Field(default=1, ge=1, le=24)
+
+
+class RotateSecretBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    secret: str = Field(min_length=1)
+
+
 class CreateCompanyKeyBody(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -54,6 +66,18 @@ async def list_company_keys(
 ) -> list[dict]:
     await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
     return await AiKeysService(session).list_keys_for_company(company_id)
+
+
+@router.get("/{key_id}")
+async def get_company_key(
+    company_id: str,
+    key_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    return await AiKeysService(session).get_key_for_company(key_id, company_id)
 
 
 @router.post("", status_code=201)
@@ -107,3 +131,33 @@ async def delete_company_key(
     svc = AiKeysService(session)
     await svc.require_company_writable_key(key_id, company_id)
     await svc.delete_key(key_id, principal=principal)
+
+
+@router.post("/{key_id}/renew")
+async def renew_company_key(
+    company_id: str,
+    key_id: str,
+    body: RenewBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    svc = AiKeysService(session)
+    await svc.require_company_writable_key(key_id, company_id)
+    return await svc.renew(key_id, body.months, principal=principal)
+
+
+@router.post("/{key_id}/rotate-secret")
+async def rotate_company_key_secret(
+    company_id: str,
+    key_id: str,
+    body: RotateSecretBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    svc = AiKeysService(session)
+    await svc.require_company_writable_key(key_id, company_id)
+    return await svc.rotate_secret(key_id, body.secret, principal=principal)

@@ -238,6 +238,17 @@ def test_company_principal_owns_ai_keys(client: TestClient) -> None:
     assert listed.status_code == 200
     assert any(k["id"] == body["id"] for k in listed.json())
 
+    fetched = client.get(
+        f"/api/v1/companies/{company_id}/ai-keys/{body['id']}",
+        headers=h,
+    )
+    assert fetched.status_code == 200
+    assert fetched.json()["id"] == body["id"]
+
+    containers = client.get(f"/api/v1/companies/{company_id}/containers", headers=h)
+    assert containers.status_code == 200
+    assert "items" in containers.json()
+
 
 @requires_postgres
 def test_create_company_name_only_then_invite_admin(client: TestClient) -> None:

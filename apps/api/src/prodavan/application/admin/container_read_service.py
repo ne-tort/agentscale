@@ -58,8 +58,8 @@ class AdminContainerReadService:
         self._session = session
         self._projects = ProjectService(session)
 
-    async def list_containers(self, *, limit: int = 200) -> dict:
-        stmt = (
+    def _base_stmt(self):
+        return (
             select(
                 ProjectRow,
                 CompanyRow.name,
@@ -71,6 +71,31 @@ class AdminContainerReadService:
             .join(CabinetInstanceRow, CabinetInstanceRow.id == ProjectRow.cabinet_id)
             .join(EmployeeRow, EmployeeRow.id == ProjectRow.owner_employee_id)
             .where(ProjectRow.status != ProjectStatus.DELETED)
+        )
+
+    async def list_containers(self, *, limit: int = 200) -> dict:
+        stmt = (
+            self._base_stmt()
+            .order_by(_STATUS_ORDER, ProjectRow.updated_at.desc())
+            .limit(limit)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        items = [
+            _item(
+                project=project,
+                company_name=company_name,
+                cabinet_name=cabinet_name,
+                owner_email=owner_email,
+                owner_display_name=owner_display_name,
+            )
+            for project, company_name, cabinet_name, owner_email, owner_display_name in rows
+        ]
+        return {"items": items}
+
+    async def list_containers_for_company(self, company_id: str, *, limit: int = 200) -> dict:
+        stmt = (
+            self._base_stmt()
+            .where(ProjectRow.company_id == company_id)
             .order_by(_STATUS_ORDER, ProjectRow.updated_at.desc())
             .limit(limit)
         )
@@ -88,20 +113,7 @@ class AdminContainerReadService:
         return {"items": items}
 
     async def get_container(self, project_id: str) -> dict:
-        stmt = (
-            select(
-                ProjectRow,
-                CompanyRow.name,
-                CabinetInstanceRow.name,
-                EmployeeRow.email,
-                EmployeeRow.display_name,
-            )
-            .join(CompanyRow, CompanyRow.id == ProjectRow.company_id)
-            .join(CabinetInstanceRow, CabinetInstanceRow.id == ProjectRow.cabinet_id)
-            .join(EmployeeRow, EmployeeRow.id == ProjectRow.owner_employee_id)
-            .where(ProjectRow.id == project_id)
-            .where(ProjectRow.status != ProjectStatus.DELETED)
-        )
+        stmt = self._base_stmt().where(ProjectRow.id == project_id)
         row = (await self._session.execute(stmt)).one_or_none()
         if row is None:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Container not found")
@@ -114,6 +126,20 @@ class AdminContainerReadService:
             owner_display_name=owner_display_name,
         )
 
+    async def get_container_for_company(self, company_id: str, project_id: str) -> dict:
+        item = await self.get_container(project_id)
+        if item.get("company_id") != company_id:
+            raise AppError(
+                code="NOT_FOUND",
+                title="Not Found",
+                status=404,
+                detail="Container not found",
+            )
+        return item
+
+    async def _require_company_container(self, company_id: str, project_id: str) -> None:
+        await self.get_container_for_company(company_id, project_id)
+
     async def pause(self, *, project_id: str, principal: Principal) -> dict:
         await self._projects.pause(project_id=project_id, principal=principal, employee=None)
         return await self.get_container(project_id)
@@ -124,3 +150,21 @@ class AdminContainerReadService:
 
     async def delete(self, *, project_id: str, principal: Principal) -> dict:
         return await self._projects.delete(project_id=project_id, principal=principal, employee=None)
+
+    async def pause_for_company(
+        self, *, company_id: str, project_id: str, principal: Principal
+    ) -> dict:
+        await self._require_company_container(company_id, project_id)
+        return await self.pause(project_id=project_id, principal=principal)
+
+    async def resume_for_company(
+        self, *, company_id: str, project_id: str, principal: Principal
+    ) -> dict:
+        await self._require_company_container(company_id, project_id)
+        return await self.resume(project_id=project_id, principal=principal)
+
+    async def delete_for_company(
+        self, *, company_id: str, project_id: str, principal: Principal
+    ) -> dict:
+        await self._require_company_container(company_id, project_id)
+        return await self.delete(project_id=project_id, principal=principal)

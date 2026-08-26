@@ -1341,6 +1341,26 @@ class AppLocalizationsRu extends AppLocalizations {
   String get companyPasswordChanged => 'Пароль успешно изменен';
 
   @override
+  String get companyAddAiKey => 'Добавить ключ';
+
+  @override
+  String get companyNoAiKeys => 'Нет AI-ключей';
+
+  @override
+  String get companyKeyPlatformBound => 'От платформы';
+
+  @override
+  String get companyKeySourceLocal => 'Свой';
+
+  @override
+  String get companyKeyReadOnlyBanner =>
+      'Ключ привязан платформой — только просмотр';
+
+  @override
+  String get companyCreateRuntimeKeyHint =>
+      'Добавьте свой ключ для проектов сотрудников';
+
+  @override
   String get errorConflict =>
       'Конфликт данных. Обновите страницу и попробуйте снова.';
 

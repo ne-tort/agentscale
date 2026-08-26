@@ -2474,6 +2474,42 @@ abstract class AppLocalizations {
   /// **'Password changed successfully'**
   String get companyPasswordChanged;
 
+  /// No description provided for @companyAddAiKey.
+  ///
+  /// In en, this message translates to:
+  /// **'Add key'**
+  String get companyAddAiKey;
+
+  /// No description provided for @companyNoAiKeys.
+  ///
+  /// In en, this message translates to:
+  /// **'No AI keys'**
+  String get companyNoAiKeys;
+
+  /// No description provided for @companyKeyPlatformBound.
+  ///
+  /// In en, this message translates to:
+  /// **'From platform'**
+  String get companyKeyPlatformBound;
+
+  /// No description provided for @companyKeySourceLocal.
+  ///
+  /// In en, this message translates to:
+  /// **'Local'**
+  String get companyKeySourceLocal;
+
+  /// No description provided for @companyKeyReadOnlyBanner.
+  ///
+  /// In en, this message translates to:
+  /// **'Platform-bound key — read only'**
+  String get companyKeyReadOnlyBanner;
+
+  /// No description provided for @companyCreateRuntimeKeyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Add a company-owned key for your employees\' projects'**
+  String get companyCreateRuntimeKeyHint;
+
   /// No description provided for @errorConflict.
   ///
   /// In en, this message translates to:
