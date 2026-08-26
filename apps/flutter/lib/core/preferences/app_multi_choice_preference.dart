@@ -41,9 +41,17 @@ class AppMultiChoicePreference<T> extends StatelessWidget {
     return '${values.length}';
   }
 
+  Set<T> _resolve(Set<String> picked) {
+    final next = <T>{};
+    for (final c in choices) {
+      if (picked.contains(keyFor(c))) next.add(c);
+    }
+    return next;
+  }
+
   Future<void> _pick(BuildContext context) async {
     if (!enabled) return;
-    final picked = await Navigator.of(context).push<Set<String>>(
+    await Navigator.of(context).push<Set<String>>(
       MaterialPageRoute(
         builder: (_) => AppCatalogSelectPage(
           title: pickerTitle ?? title,
@@ -57,20 +65,16 @@ class AppMultiChoicePreference<T> extends StatelessWidget {
                 icon: iconFor?.call(c),
               ),
           ],
-          onConfirm: (_) {},
+          onConfirm: (picked) async {
+            try {
+              await onSave(_resolve(picked));
+            } catch (e) {
+              if (context.mounted) AppErrors.showSnack(context, e);
+            }
+          },
         ),
       ),
     );
-    if (picked == null) return;
-    final next = <T>{};
-    for (final c in choices) {
-      if (picked.contains(keyFor(c))) next.add(c);
-    }
-    try {
-      await onSave(next);
-    } catch (e) {
-      if (context.mounted) AppErrors.showSnack(context, e);
-    }
   }
 
   @override

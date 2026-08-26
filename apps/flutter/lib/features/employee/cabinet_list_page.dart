@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
@@ -25,6 +26,7 @@ class _CabinetListPageState extends State<CabinetListPage> {
   static const _viewPageKey = 'employee.cabinets';
 
   final _viewMode = AppCollectionViewModeStore(_viewPageKey);
+  late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _cabinets = const [];
@@ -32,30 +34,40 @@ class _CabinetListPageState extends State<CabinetListPage> {
   @override
   void initState() {
     super.initState();
+    _autoRefresh = AppAutoRefreshBinder(
+      onTick: () => _reload(silent: true),
+      isActive: () => appAutoRefreshIsActive(context),
+    )..attach();
     _viewMode.load();
     _reload();
   }
 
   @override
   void dispose() {
+    _autoRefresh.dispose();
     _viewMode.dispose();
     super.dispose();
   }
 
-  Future<void> _reload() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  Future<void> _reload({bool silent = false}) async {
+    if (!silent && mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final items = await workContext.api.listCabinets();
       if (!mounted) return;
+      if (silent && appRefreshDataEquals(_cabinets, items) && !_loading) return;
       setState(() {
         _cabinets = items;
         _loading = false;
+        _error = null;
       });
     } catch (e) {
       if (!mounted) return;
+      if (silent) return;
       setState(() {
         _error = e.toString();
         _loading = false;
@@ -95,7 +107,6 @@ class _CabinetListPageState extends State<CabinetListPage> {
         return AppScaffold(
           title: Text(l10n.commonCabinets),
           actions: [
-            IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
             AppCollectionViewModeButton(store: _viewMode),
             IconButton(
               onPressed: _openImportBundle,

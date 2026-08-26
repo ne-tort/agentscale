@@ -524,6 +524,156 @@ abstract class AppLocalizations {
   /// **'Add provider'**
   String get adminAddHttpProvider;
 
+  /// No description provided for @adminHttpBaseUrl.
+  ///
+  /// In en, this message translates to:
+  /// **'Base URL'**
+  String get adminHttpBaseUrl;
+
+  /// No description provided for @adminHttpApiKind.
+  ///
+  /// In en, this message translates to:
+  /// **'API kind'**
+  String get adminHttpApiKind;
+
+  /// No description provided for @adminHttpApiKindOpenai.
+  ///
+  /// In en, this message translates to:
+  /// **'OpenAI API'**
+  String get adminHttpApiKindOpenai;
+
+  /// No description provided for @adminHttpApiKindAnthropic.
+  ///
+  /// In en, this message translates to:
+  /// **'Anthropic API'**
+  String get adminHttpApiKindAnthropic;
+
+  /// No description provided for @adminHttpApiKindOpenrouter.
+  ///
+  /// In en, this message translates to:
+  /// **'OpenRouter'**
+  String get adminHttpApiKindOpenrouter;
+
+  /// No description provided for @adminHttpApiKindCustom.
+  ///
+  /// In en, this message translates to:
+  /// **'Custom / OpenAPI'**
+  String get adminHttpApiKindCustom;
+
+  /// No description provided for @adminHttpOpenaiCompatible.
+  ///
+  /// In en, this message translates to:
+  /// **'OpenAI-compatible'**
+  String get adminHttpOpenaiCompatible;
+
+  /// No description provided for @adminHttpAuthScheme.
+  ///
+  /// In en, this message translates to:
+  /// **'Auth'**
+  String get adminHttpAuthScheme;
+
+  /// No description provided for @adminHttpAuthBearer.
+  ///
+  /// In en, this message translates to:
+  /// **'Bearer'**
+  String get adminHttpAuthBearer;
+
+  /// No description provided for @adminHttpAuthXApiKey.
+  ///
+  /// In en, this message translates to:
+  /// **'x-api-key'**
+  String get adminHttpAuthXApiKey;
+
+  /// No description provided for @adminHttpAuthNone.
+  ///
+  /// In en, this message translates to:
+  /// **'No auth'**
+  String get adminHttpAuthNone;
+
+  /// No description provided for @adminHttpChatPath.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat completions path'**
+  String get adminHttpChatPath;
+
+  /// No description provided for @adminHttpModelsPath.
+  ///
+  /// In en, this message translates to:
+  /// **'Models path'**
+  String get adminHttpModelsPath;
+
+  /// No description provided for @adminToolPresetChatReadonly.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat (read-only)'**
+  String get adminToolPresetChatReadonly;
+
+  /// No description provided for @adminToolPresetWorkspaceDev.
+  ///
+  /// In en, this message translates to:
+  /// **'Development'**
+  String get adminToolPresetWorkspaceDev;
+
+  /// No description provided for @adminToolPresetWorkspaceFull.
+  ///
+  /// In en, this message translates to:
+  /// **'Full access'**
+  String get adminToolPresetWorkspaceFull;
+
+  /// No description provided for @adminIdlePauseNever.
+  ///
+  /// In en, this message translates to:
+  /// **'Never pause'**
+  String get adminIdlePauseNever;
+
+  /// No description provided for @adminIdlePauseHours.
+  ///
+  /// In en, this message translates to:
+  /// **'{hours} h'**
+  String adminIdlePauseHours(String hours);
+
+  /// No description provided for @adminAlertTag.
+  ///
+  /// In en, this message translates to:
+  /// **'Tag'**
+  String get adminAlertTag;
+
+  /// No description provided for @adminAlertTagNoKeys.
+  ///
+  /// In en, this message translates to:
+  /// **'no keys'**
+  String get adminAlertTagNoKeys;
+
+  /// No description provided for @adminAlertTagKeyRenewal.
+  ///
+  /// In en, this message translates to:
+  /// **'renewal · {count}'**
+  String adminAlertTagKeyRenewal(int count);
+
+  /// No description provided for @adminAlertTagHighUsage.
+  ///
+  /// In en, this message translates to:
+  /// **'high usage'**
+  String get adminAlertTagHighUsage;
+
+  /// No description provided for @adminAlertTagSubExpiring.
+  ///
+  /// In en, this message translates to:
+  /// **'subscription'**
+  String get adminAlertTagSubExpiring;
+
+  /// No description provided for @adminAlertTagSubExpired.
+  ///
+  /// In en, this message translates to:
+  /// **'expired'**
+  String get adminAlertTagSubExpired;
+
+  /// No description provided for @commonPhone.
+  ///
+  /// In en, this message translates to:
+  /// **'Phone'**
+  String get commonPhone;
+
   /// No description provided for @adminKeyMetadata.
   ///
   /// In en, this message translates to:
@@ -2605,6 +2755,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Ultra dark'**
   String get settingsThemeUltraDark;
+
+  /// No description provided for @settingsRefresh.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh'**
+  String get settingsRefresh;
+
+  /// No description provided for @settingsRefreshOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Off'**
+  String get settingsRefreshOff;
+
+  /// No description provided for @settingsRefreshSeconds.
+  ///
+  /// In en, this message translates to:
+  /// **'{n} s'**
+  String settingsRefreshSeconds(String n);
+
+  /// No description provided for @settingsRefreshMinutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{n} min'**
+  String settingsRefreshMinutes(String n);
 }
 
 class _AppLocalizationsDelegate

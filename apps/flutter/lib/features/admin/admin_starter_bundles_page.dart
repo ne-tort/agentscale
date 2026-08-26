@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
@@ -18,6 +19,7 @@ class AdminStarterBundlesPage extends StatefulWidget {
 }
 
 class _AdminStarterBundlesPageState extends State<AdminStarterBundlesPage> {
+  late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _items = const [];
@@ -25,23 +27,38 @@ class _AdminStarterBundlesPageState extends State<AdminStarterBundlesPage> {
   @override
   void initState() {
     super.initState();
+    _autoRefresh = AppAutoRefreshBinder(
+      onTick: () => _reload(silent: true),
+      isActive: () => appAutoRefreshIsActive(context),
+    )..attach();
     _reload();
   }
 
-  Future<void> _reload() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  @override
+  void dispose() {
+    _autoRefresh.dispose();
+    super.dispose();
+  }
+
+  Future<void> _reload({bool silent = false}) async {
+    if (!silent && mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final items = await adminContext.api.listStarterBundles();
       if (!mounted) return;
+      if (silent && appRefreshDataEquals(_items, items) && !_loading) return;
       setState(() {
         _items = items;
         _loading = false;
+        _error = null;
       });
     } catch (e) {
       if (!mounted) return;
+      if (silent) return;
       setState(() {
         _error = e.toString();
         _loading = false;
@@ -53,9 +70,6 @@ class _AdminStarterBundlesPageState extends State<AdminStarterBundlesPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      actions: [
-        IconButton(onPressed: _loading ? null : _reload, icon: const Icon(Icons.refresh)),
-      ],
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

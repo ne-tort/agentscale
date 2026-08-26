@@ -269,6 +269,85 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminAddHttpProvider => 'Add provider';
 
   @override
+  String get adminHttpBaseUrl => 'Base URL';
+
+  @override
+  String get adminHttpApiKind => 'API kind';
+
+  @override
+  String get adminHttpApiKindOpenai => 'OpenAI API';
+
+  @override
+  String get adminHttpApiKindAnthropic => 'Anthropic API';
+
+  @override
+  String get adminHttpApiKindOpenrouter => 'OpenRouter';
+
+  @override
+  String get adminHttpApiKindCustom => 'Custom / OpenAPI';
+
+  @override
+  String get adminHttpOpenaiCompatible => 'OpenAI-compatible';
+
+  @override
+  String get adminHttpAuthScheme => 'Auth';
+
+  @override
+  String get adminHttpAuthBearer => 'Bearer';
+
+  @override
+  String get adminHttpAuthXApiKey => 'x-api-key';
+
+  @override
+  String get adminHttpAuthNone => 'No auth';
+
+  @override
+  String get adminHttpChatPath => 'Chat completions path';
+
+  @override
+  String get adminHttpModelsPath => 'Models path';
+
+  @override
+  String get adminToolPresetChatReadonly => 'Chat (read-only)';
+
+  @override
+  String get adminToolPresetWorkspaceDev => 'Development';
+
+  @override
+  String get adminToolPresetWorkspaceFull => 'Full access';
+
+  @override
+  String get adminIdlePauseNever => 'Never pause';
+
+  @override
+  String adminIdlePauseHours(String hours) {
+    return '$hours h';
+  }
+
+  @override
+  String get adminAlertTag => 'Tag';
+
+  @override
+  String get adminAlertTagNoKeys => 'no keys';
+
+  @override
+  String adminAlertTagKeyRenewal(int count) {
+    return 'renewal · $count';
+  }
+
+  @override
+  String get adminAlertTagHighUsage => 'high usage';
+
+  @override
+  String get adminAlertTagSubExpiring => 'subscription';
+
+  @override
+  String get adminAlertTagSubExpired => 'expired';
+
+  @override
+  String get commonPhone => 'Phone';
+
+  @override
   String get adminKeyMetadata => 'Key metadata';
 
   @override
@@ -1413,4 +1492,20 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settingsThemeUltraDark => 'Ultra dark';
+
+  @override
+  String get settingsRefresh => 'Refresh';
+
+  @override
+  String get settingsRefreshOff => 'Off';
+
+  @override
+  String settingsRefreshSeconds(String n) {
+    return '$n s';
+  }
+
+  @override
+  String settingsRefreshMinutes(String n) {
+    return '$n min';
+  }
 }

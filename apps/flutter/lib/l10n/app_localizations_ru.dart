@@ -269,6 +269,85 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminAddHttpProvider => 'Добавить провайдера';
 
   @override
+  String get adminHttpBaseUrl => 'Base URL';
+
+  @override
+  String get adminHttpApiKind => 'API kind';
+
+  @override
+  String get adminHttpApiKindOpenai => 'OpenAI API';
+
+  @override
+  String get adminHttpApiKindAnthropic => 'Anthropic API';
+
+  @override
+  String get adminHttpApiKindOpenrouter => 'OpenRouter';
+
+  @override
+  String get adminHttpApiKindCustom => 'Custom / OpenAPI';
+
+  @override
+  String get adminHttpOpenaiCompatible => 'OpenAI-compatible';
+
+  @override
+  String get adminHttpAuthScheme => 'Auth';
+
+  @override
+  String get adminHttpAuthBearer => 'Bearer';
+
+  @override
+  String get adminHttpAuthXApiKey => 'x-api-key';
+
+  @override
+  String get adminHttpAuthNone => 'Без auth';
+
+  @override
+  String get adminHttpChatPath => 'Chat completions path';
+
+  @override
+  String get adminHttpModelsPath => 'Models path';
+
+  @override
+  String get adminToolPresetChatReadonly => 'Чат (только чтение)';
+
+  @override
+  String get adminToolPresetWorkspaceDev => 'Разработка';
+
+  @override
+  String get adminToolPresetWorkspaceFull => 'Полный доступ';
+
+  @override
+  String get adminIdlePauseNever => 'Без остановки';
+
+  @override
+  String adminIdlePauseHours(String hours) {
+    return '$hours ч';
+  }
+
+  @override
+  String get adminAlertTag => 'Тег';
+
+  @override
+  String get adminAlertTagNoKeys => 'нет ключей';
+
+  @override
+  String adminAlertTagKeyRenewal(int count) {
+    return 'продление · $count';
+  }
+
+  @override
+  String get adminAlertTagHighUsage => 'высокий usage';
+
+  @override
+  String get adminAlertTagSubExpiring => 'подписка';
+
+  @override
+  String get adminAlertTagSubExpired => 'истекла';
+
+  @override
+  String get commonPhone => 'Телефон';
+
+  @override
   String get adminKeyMetadata => 'Метаданные ключа';
 
   @override
@@ -1415,4 +1494,20 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get settingsThemeUltraDark => 'Ультратёмная';
+
+  @override
+  String get settingsRefresh => 'Обновление';
+
+  @override
+  String get settingsRefreshOff => 'Не обновлять';
+
+  @override
+  String settingsRefreshSeconds(String n) {
+    return '$n с';
+  }
+
+  @override
+  String settingsRefreshMinutes(String n) {
+    return '$n мин';
+  }
 }

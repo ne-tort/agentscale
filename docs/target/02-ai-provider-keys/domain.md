@@ -88,6 +88,20 @@ Rotate / disable → существующие сессии дорабатыва�
 Таблица `reference_catalog_entries`, `catalog_id = ai.http_providers`.  
 Admin CRUD: `/admin/catalogs/{catalog_id}/entries`. Seed idempotent при первом list. Seeded entries редактируемы/удаляемы.
 
+### Payload (Clowbot / OpenAPI-compatible)
+
+| Ключ | Тип | Смысл |
+|------|-----|--------|
+| `api_kind` | string | `openai_api` \| `anthropic_api` \| `openrouter` \| `custom` |
+| `agent_provider` | string | `codex` \| `claude_code` \| `cursor` |
+| `base_url` | string | Origin + prefix (Ollama: `http://127.0.0.1:11434/v1`) |
+| `openai_compatible` | bool | Chat Completions / Models как у OpenAI |
+| `auth_scheme` | string | `bearer` \| `x-api-key` \| `none` |
+| `chat_completions_path` | string | Относительный path |
+| `models_path` | string | Относительный path для list models |
+
+Seed: OpenAI, Anthropic, OpenRouter, Cursor, Ollama. UI edit — preference page с мгновенным PATCH.
+
 ## Инварианты
 
 - После create секрет не возвращается (mask / `secret_ref` prefix only).

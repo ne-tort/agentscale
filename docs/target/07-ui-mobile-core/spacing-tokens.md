@@ -15,12 +15,15 @@ Named insets (код `AppInsets`, поверх шкалы):
 
 | Token | значение | Применение |
 |-------|----------|------------|
-| `trailingActionRight` | `AppSpacing.md` (16) | Правый отступ trailing icons: ListTile / preference / overview alerts / inline add |
+| `trailingActionRight` | `AppSpacing.sm` (8) | Правый отступ trailing chrome: ListTile / preference / AppListItem / inline `+` / radio |
+| `trailingIconExtent` | 40 | Hit-target ширины compact IconButton |
 | `appBarActionsRight` | `AppSpacing.lg` (24) | AppBar `actionsPadding` |
+
+Если родитель уже даёт горизонтальный padding — компенсировать (`trailingActionRight − parentPad`), иначе визуальный край уезжает.
 
 ## Правила для составных виджетов
 
-- `AppListItem` horizontal padding = `space.lg`, vertical = `space.md`.
-- `AppSelectorPage` list = те же paddings, что `AppListItem`.
-- Checkbox/radio hit target ≥ 48×48; визуальный box не обязан быть 48, но tap area — да.
+- `AppListItem`: left = `sm`/`md`, right = `trailingActionRight` (не symmetric).
+- `AppEntityCollection` list: только vertical padding у ListView — горизонталь из item.
+- Checkbox/radio: `MaterialTapTargetSize.shrinkWrap` + compact density; внешний правый край = константа.
 - Не добавлять «магические» 6/10/14 px вне шкалы.

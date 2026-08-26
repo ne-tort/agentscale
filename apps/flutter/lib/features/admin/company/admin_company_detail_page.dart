@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/preferences.dart';
+import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
@@ -30,6 +31,7 @@ class AdminCompanyDetailPage extends StatefulWidget {
 
 class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
   late final AdminCompanyDetailController _controller;
+  late final AppAutoRefreshBinder _autoRefresh;
 
   @override
   void initState() {
@@ -39,6 +41,10 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
       companyName: widget.companyName,
     );
     _controller.addListener(_onControllerUpdate);
+    _autoRefresh = AppAutoRefreshBinder(
+      onTick: () => _controller.load(silent: true),
+      isActive: () => appAutoRefreshIsActive(context),
+    )..attach();
     _controller.load();
   }
 
@@ -52,6 +58,7 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
 
   @override
   void dispose() {
+    _autoRefresh.dispose();
     _controller.removeListener(_onControllerUpdate);
     _controller.dispose();
     super.dispose();
@@ -60,9 +67,12 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
   String _generalSubtitle(AppLocalizations l10n, AdminCompanyDetailController ctrl) {
     final desc = ctrl.description.trim();
     if (desc.isNotEmpty) return desc;
-    final ends = ctrl.subscriptionEnds.trim();
-    if (ends.isNotEmpty) return ends;
-    return l10n.commonUnlimited;
+    final phone = ctrl.phone.trim();
+    final email = ctrl.contactEmail.trim();
+    if (phone.isNotEmpty && email.isNotEmpty) return '$phone · $email';
+    if (phone.isNotEmpty) return phone;
+    if (email.isNotEmpty) return email;
+    return ctrl.companyName;
   }
 
   @override
@@ -76,12 +86,6 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
           final ctrl = _controller;
           return AppScaffold(
             title: Text(ctrl.companyName),
-            actions: [
-              IconButton(
-                onPressed: ctrl.loading ? null : ctrl.load,
-                icon: const Icon(Icons.refresh),
-              ),
-            ],
             body: ctrl.loading
                 ? const Center(child: CircularProgressIndicator())
                 : ListView(
@@ -129,7 +133,13 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                       AppNavPreference(
                         title: l10n.adminPolicy,
                         icon: Icons.smart_toy_outlined,
-                        subtitle: Text(ctrl.toolPreset),
+                        subtitle: Text(
+                          switch (ctrl.toolPreset) {
+                            'chat_readonly' => l10n.adminToolPresetChatReadonly,
+                            'workspace_full' => l10n.adminToolPresetWorkspaceFull,
+                            _ => l10n.adminToolPresetWorkspaceDev,
+                          },
+                        ),
                         onTap: () => pushCompanySubPage(
                           context,
                           const AdminCompanyAgentPolicyPage(),

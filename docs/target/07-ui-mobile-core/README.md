@@ -19,6 +19,7 @@ Mobile-first Material 3. Единые виджеты в `apps/flutter/lib/core/�
 | [app-radio.md](app-radio.md) | Radio (несколько визуальных видов) |
 | [app-section-header.md](app-section-header.md) | Заголовки крупных секций |
 | [preferences.md](preferences.md) | Preference kit (seamless save) |
+| [auto-refresh.md](auto-refresh.md) | Фоновый poll без AppBar refresh |
 
 Составные виджеты **обязаны** использовать одинаковые spacing tokens и атомы (`AppListItem`, кнопки) внутри.  
 HelpSystem (справки) — вне этого модуля; в экранах нет instructional copy.

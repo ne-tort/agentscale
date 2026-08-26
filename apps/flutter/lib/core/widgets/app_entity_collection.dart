@@ -119,8 +119,10 @@ class AppEntityCollection extends StatelessWidget {
       return empty ?? EmptyPlaceholder(title: l10n.commonEmpty);
     }
     if (mode == AppEntityCollectionMode.list) {
+      // Vertical-only list padding — horizontal edge comes from AppListItem /
+      // AppInsets.trailingActionRight so trailing chrome aligns with prefs.
       return ListView.builder(
-        padding: const EdgeInsets.all(AppSpacing.sm),
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         itemCount: rows.length,
         itemBuilder: (context, i) {
           final row = rows[i];
@@ -161,61 +163,68 @@ class AppEntityCollection extends StatelessWidget {
             columns.length * _columnSpacing;
         final needsScroll = minTableWidth > tableWidth;
 
-        final table = DataTable(
-          showCheckboxColumn: false,
-          dividerThickness: 0,
-          columnSpacing: _columnSpacing,
-          horizontalMargin: _horizontalMargin,
-          dataRowMinHeight: 40,
-          headingRowHeight: 44,
-          headingRowColor: WidgetStatePropertyAll(colors.surface),
-          border: TableBorder(
-            horizontalInside: BorderSide.none,
-            verticalInside: BorderSide.none,
-            top: BorderSide.none,
-            bottom: BorderSide.none,
-            left: BorderSide.none,
-            right: BorderSide.none,
+        // Material DataTable draws row hairlines from Theme.dividerColor even when
+    // dividerThickness is 0 / TableBorder is none — force transparent dividers.
+    final table = Theme(
+          data: Theme.of(context).copyWith(
+            dividerColor: Colors.transparent,
+            dividerTheme: const DividerThemeData(
+              color: Colors.transparent,
+              thickness: 0,
+              space: 0,
+            ),
           ),
-          columns: [
-            DataColumn(
-              label: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(primaryLabel, style: headingStyle),
-              ),
-            ),
-            ...columns.map(
-              (c) => DataColumn(
-                label: SizedBox(
-                  width: c.width,
-                  child: Align(
-                    alignment: _alignment(c.align),
-                    child: Text(
-                      c.label,
-                      style: headingStyle,
-                      textAlign: _textAlign(c.align),
-                    ),
-                  ),
+          child: DataTable(
+            showCheckboxColumn: false,
+            dividerThickness: 0,
+            showBottomBorder: false,
+            columnSpacing: _columnSpacing,
+            horizontalMargin: _horizontalMargin,
+            dataRowMinHeight: 40,
+            headingRowHeight: 44,
+            headingRowColor: WidgetStatePropertyAll(colors.surface),
+            decoration: const BoxDecoration(),
+            border: TableBorder.all(width: 0, color: Colors.transparent),
+            columns: [
+              DataColumn(
+                label: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(primaryLabel, style: headingStyle),
                 ),
-                numeric: c.align == AppEntityColumnAlign.end,
               ),
-            ),
-          ],
-          rows: [
-            for (final row in rows)
-              DataRow(
-                onSelectChanged: (_) => onOpen(row),
-                cells: [
-                  DataCell(
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Text(row.title, overflow: TextOverflow.ellipsis),
+              ...columns.map(
+                (c) => DataColumn(
+                  label: SizedBox(
+                    width: c.width,
+                    child: Align(
+                      alignment: _alignment(c.align),
+                      child: Text(
+                        c.label,
+                        style: headingStyle,
+                        textAlign: _textAlign(c.align),
+                      ),
                     ),
                   ),
-                  ...columns.map((c) => _dataCell(row.cells[c.id] ?? '', c)),
-                ],
+                  numeric: c.align == AppEntityColumnAlign.end,
+                ),
               ),
-          ],
+            ],
+            rows: [
+              for (final row in rows)
+                DataRow(
+                  onSelectChanged: (_) => onOpen(row),
+                  cells: [
+                    DataCell(
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(row.title, overflow: TextOverflow.ellipsis),
+                      ),
+                    ),
+                    ...columns.map((c) => _dataCell(row.cells[c.id] ?? '', c)),
+                  ],
+                ),
+            ],
+          ),
         );
 
         final child = ConstrainedBox(

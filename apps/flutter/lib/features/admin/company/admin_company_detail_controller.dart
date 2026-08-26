@@ -21,6 +21,8 @@ class AdminCompanyDetailController extends ChangeNotifier {
   List<Map<String, dynamic>> platformEvents = const [];
 
   String description = '';
+  String contactEmail = '';
+  String phone = '';
   int maxCabinets = 10;
   int maxPackages = 20;
   int maxBundleMb = 50;
@@ -40,13 +42,16 @@ class AdminCompanyDetailController extends ChangeNotifier {
 
   static const toolPresets = ['chat_readonly', 'workspace_dev', 'workspace_full'];
   static const providerChoices = ['', 'cursor', 'codex', 'claude_code'];
-  static const idlePauseChoices = ['', '1', '2', '4', '8', '12', '24'];
+  /// Idle pause after N hours (`''` = off / never).
+  static const idlePauseChoices = ['', '5', '10', '20', '40', '50', '60'];
   static const attachmentMbChoices = [10, 20, 50, 100, 200];
 
-  Future<void> load() async {
-    loading = true;
-    error = null;
-    notifyListeners();
+  Future<void> load({bool silent = false}) async {
+    if (!silent) {
+      loading = true;
+      error = null;
+      notifyListeners();
+    }
     try {
       final detail = await adminContext.api.getCompany(companyId);
       final events = await adminContext.api.listPlatformEvents(
@@ -57,38 +62,91 @@ class AdminCompanyDetailController extends ChangeNotifier {
       final policy = detail['agent_policy'] as Map<String, dynamic>? ?? const {};
       final m = detail['metrics'] as Map<String, dynamic>? ?? const {};
       final allow = policy['model_allowlist'];
-      metrics = m;
-      platformEvents = events;
-      companyName = detail['name'] as String? ?? companyName;
-      description = detail['description'] as String? ?? '';
-      maxCabinets = (quota['max_cabinets'] as num?)?.toInt() ?? 10;
-      maxPackages = (quota['max_packages_per_cabinet'] as num?)?.toInt() ?? 20;
-      maxBundleMb = (quota['max_bundle_import_mb'] as num?)?.toInt() ?? 50;
-      toolPreset = policy['tool_preset'] as String? ?? 'workspace_dev';
-      preferredProvider = policy['preferred_provider'] as String? ?? '';
-      platformFallback = policy['platform_fallback'] as bool? ?? true;
-      modelAllowlist = allow is List
+
+      final nextName = detail['name'] as String? ?? companyName;
+      final nextDescription = detail['description'] as String? ?? '';
+      final nextEmail = detail['contact_email'] as String? ?? '';
+      final nextPhone = detail['phone'] as String? ?? '';
+      final nextMaxCabinets = (quota['max_cabinets'] as num?)?.toInt() ?? 10;
+      final nextMaxPackages = (quota['max_packages_per_cabinet'] as num?)?.toInt() ?? 20;
+      final nextMaxBundleMb = (quota['max_bundle_import_mb'] as num?)?.toInt() ?? 50;
+      final nextToolPreset = policy['tool_preset'] as String? ?? 'workspace_dev';
+      final nextPreferredProvider = policy['preferred_provider'] as String? ?? '';
+      final nextPlatformFallback = policy['platform_fallback'] as bool? ?? true;
+      final nextModelAllowlist = allow is List
           ? allow.map((e) => e.toString()).where((s) => s.trim().isNotEmpty).join(', ')
           : '';
-      maxTokensMonth = policy['max_agent_tokens_month']?.toString() ?? '';
-      maxTokensPerRun = policy['max_tokens_per_run']?.toString() ?? '';
-      maxCostUsdMonth = policy['max_cost_usd_month']?.toString() ?? '';
-      maxAttachmentMb = (policy['max_attachment_mb'] as num?)?.toInt() ?? 20;
-      idlePauseHours = policy['idle_pause_after_hours']?.toString() ?? '';
-      webhookHmacConfigured = policy['webhook_hmac_configured'] == true;
-      telegramHmacConfigured = policy['telegram_hmac_configured'] == true;
-      subscriptionLifetime = m['subscription_lifetime'] == true;
+      final nextMaxTokensMonth = policy['max_agent_tokens_month']?.toString() ?? '';
+      final nextMaxTokensPerRun = policy['max_tokens_per_run']?.toString() ?? '';
+      final nextMaxCostUsdMonth = policy['max_cost_usd_month']?.toString() ?? '';
+      final nextMaxAttachmentMb = (policy['max_attachment_mb'] as num?)?.toInt() ?? 20;
+      final nextIdlePauseHours = policy['idle_pause_after_hours']?.toString() ?? '';
+      final nextWebhook = policy['webhook_hmac_configured'] == true;
+      final nextTelegram = policy['telegram_hmac_configured'] == true;
+      final nextLifetime = m['subscription_lifetime'] == true;
       final endsAt = m['subscription_ends_at'];
-      if (subscriptionLifetime || endsAt == null) {
-        subscriptionEnds = '';
+      final String nextSubscriptionEnds;
+      if (nextLifetime || endsAt == null) {
+        nextSubscriptionEnds = '';
       } else if (endsAt is String) {
-        subscriptionEnds = formatSubscriptionDate(endsAt);
+        nextSubscriptionEnds = formatSubscriptionDate(endsAt);
       } else {
-        subscriptionEnds = '';
+        nextSubscriptionEnds = '';
       }
+
+      final unchanged = silent &&
+          !loading &&
+          companyName == nextName &&
+          description == nextDescription &&
+          contactEmail == nextEmail &&
+          phone == nextPhone &&
+          maxCabinets == nextMaxCabinets &&
+          maxPackages == nextMaxPackages &&
+          maxBundleMb == nextMaxBundleMb &&
+          toolPreset == nextToolPreset &&
+          preferredProvider == nextPreferredProvider &&
+          platformFallback == nextPlatformFallback &&
+          modelAllowlist == nextModelAllowlist &&
+          maxTokensMonth == nextMaxTokensMonth &&
+          maxTokensPerRun == nextMaxTokensPerRun &&
+          maxCostUsdMonth == nextMaxCostUsdMonth &&
+          maxAttachmentMb == nextMaxAttachmentMb &&
+          idlePauseHours == nextIdlePauseHours &&
+          webhookHmacConfigured == nextWebhook &&
+          telegramHmacConfigured == nextTelegram &&
+          subscriptionLifetime == nextLifetime &&
+          subscriptionEnds == nextSubscriptionEnds &&
+          metrics == m &&
+          platformEvents == events;
+      if (unchanged) return;
+
+      metrics = m;
+      platformEvents = events;
+      companyName = nextName;
+      description = nextDescription;
+      contactEmail = nextEmail;
+      phone = nextPhone;
+      maxCabinets = nextMaxCabinets;
+      maxPackages = nextMaxPackages;
+      maxBundleMb = nextMaxBundleMb;
+      toolPreset = nextToolPreset;
+      preferredProvider = nextPreferredProvider;
+      platformFallback = nextPlatformFallback;
+      modelAllowlist = nextModelAllowlist;
+      maxTokensMonth = nextMaxTokensMonth;
+      maxTokensPerRun = nextMaxTokensPerRun;
+      maxCostUsdMonth = nextMaxCostUsdMonth;
+      maxAttachmentMb = nextMaxAttachmentMb;
+      idlePauseHours = nextIdlePauseHours;
+      webhookHmacConfigured = nextWebhook;
+      telegramHmacConfigured = nextTelegram;
+      subscriptionLifetime = nextLifetime;
+      subscriptionEnds = nextSubscriptionEnds;
       loading = false;
+      if (!silent) error = null;
       notifyListeners();
     } catch (e) {
+      if (silent) rethrow;
       error = e.toString();
       loading = false;
       notifyListeners();
@@ -111,6 +169,28 @@ class AdminCompanyDetailController extends ChangeNotifier {
       patchDescription: true,
     );
     description = trimmed;
+    notifyListeners();
+  }
+
+  Future<void> saveContactEmail(String value) async {
+    final trimmed = value.trim();
+    await adminContext.api.patchCompany(
+      companyId: companyId,
+      contactEmail: trimmed.isEmpty ? null : trimmed,
+      patchContactEmail: true,
+    );
+    contactEmail = trimmed;
+    notifyListeners();
+  }
+
+  Future<void> savePhone(String value) async {
+    final trimmed = value.trim();
+    await adminContext.api.patchCompany(
+      companyId: companyId,
+      phone: trimmed.isEmpty ? null : trimmed,
+      patchPhone: true,
+    );
+    phone = trimmed;
     notifyListeners();
   }
 

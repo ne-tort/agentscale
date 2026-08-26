@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
@@ -27,6 +28,7 @@ class ProjectListPage extends StatefulWidget {
 }
 
 class _ProjectListPageState extends State<ProjectListPage> {
+  late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _projects = const [];
@@ -34,23 +36,38 @@ class _ProjectListPageState extends State<ProjectListPage> {
   @override
   void initState() {
     super.initState();
+    _autoRefresh = AppAutoRefreshBinder(
+      onTick: () => _reload(silent: true),
+      isActive: () => appAutoRefreshIsActive(context),
+    )..attach();
     _reload();
   }
 
-  Future<void> _reload() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  @override
+  void dispose() {
+    _autoRefresh.dispose();
+    super.dispose();
+  }
+
+  Future<void> _reload({bool silent = false}) async {
+    if (!silent && mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final items = await workContext.api.listProjects(widget.cabinetId);
       if (!mounted) return;
+      if (silent && appRefreshDataEquals(_projects, items) && !_loading) return;
       setState(() {
         _projects = items;
         _loading = false;
+        _error = null;
       });
     } catch (e) {
       if (!mounted) return;
+      if (silent) return;
       setState(() {
         _error = e.toString();
         _loading = false;

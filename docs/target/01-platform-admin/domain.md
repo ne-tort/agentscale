@@ -19,7 +19,7 @@ Platform Admin:
 
 | Сущность | Описание |
 |----------|----------|
-| `Company` | Организация: name (обяз.), description (опц.), subscription, status |
+| `Company` | Организация: name (обяз.), description, contact_email, phone (опц.), subscription, status |
 | `CompanySubscription` | `ends_at` nullable = бессрочно; `plan` опционально |
 | `StarterBundleCatalogEntry` | Опциональный official/company starter (`cabinet.bundle`) |
 | `CompanyCabinetQuota` | Лимиты на create/import cabinets & packages |

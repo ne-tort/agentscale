@@ -14,6 +14,12 @@ class AdminCompanyAgentPolicyPage extends StatelessWidget {
   static const _idleChoices = AdminCompanyDetailController.idlePauseChoices;
   static const _attachmentChoices = AdminCompanyDetailController.attachmentMbChoices;
 
+  String _toolPresetLabel(AppLocalizations l10n, String v) => switch (v) {
+        'chat_readonly' => l10n.adminToolPresetChatReadonly,
+        'workspace_full' => l10n.adminToolPresetWorkspaceFull,
+        _ => l10n.adminToolPresetWorkspaceDev,
+      };
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -47,7 +53,8 @@ class AdminCompanyAgentPolicyPage extends StatelessWidget {
                     : 'workspace_dev',
                 choices: AdminCompanyDetailController.toolPresets,
                 keyFor: (v) => v,
-                labelFor: (v) => v,
+                labelFor: (v) => _toolPresetLabel(l10n, v),
+                presentValue: (v) => _toolPresetLabel(l10n, v),
                 iconFor: (v) => switch (v) {
                   'chat_readonly' => Icons.chat_bubble_outline_rounded,
                   'workspace_full' => Icons.code_rounded,
@@ -75,8 +82,12 @@ class AdminCompanyAgentPolicyPage extends StatelessWidget {
                 value: idleValue,
                 choices: _idleChoices,
                 keyFor: (v) => v.isEmpty ? '__off__' : v,
-                labelFor: (v) => v.isEmpty ? l10n.commonOff : v,
-                presentValue: (v) => v.isEmpty ? l10n.commonOff : '$v ч',
+                labelFor: (v) => v.isEmpty
+                    ? l10n.adminIdlePauseNever
+                    : l10n.adminIdlePauseHours(v),
+                presentValue: (v) => v.isEmpty
+                    ? l10n.adminIdlePauseNever
+                    : l10n.adminIdlePauseHours(v),
                 onSave: (v) async {
                   await ctrl.savePolicy(idlePauseHours: v);
                 },
@@ -91,24 +102,6 @@ class AdminCompanyAgentPolicyPage extends StatelessWidget {
                 presentValue: (v) => '$v ${l10n.commonMbUnit}',
                 onSave: (v) async {
                   await ctrl.savePolicy(maxAttachmentMb: v);
-                },
-              ),
-              AppSwitchPreference(
-                title: l10n.adminPlatformFallback,
-                icon: Icons.swap_horiz_rounded,
-                value: ctrl.platformFallback,
-                onChanged: (v) async {
-                  await ctrl.savePolicy(platformFallback: v);
-                },
-              ),
-              AppValuePreference<String>(
-                title: l10n.adminModelAllowlist,
-                icon: Icons.list_alt_rounded,
-                value: ctrl.modelAllowlist,
-                presentValue: (v) =>
-                    v.trim().isEmpty ? l10n.commonNotSet : v,
-                onSave: (v) async {
-                  await ctrl.savePolicy(modelAllowlist: v);
                 },
               ),
               AppValuePreference<String>(

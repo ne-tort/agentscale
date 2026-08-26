@@ -33,24 +33,32 @@ class AdminCompanyGeneralPage extends StatelessWidget {
                 title: l10n.commonDescription,
                 icon: Icons.notes_rounded,
                 value: ctrl.description,
-                maxLines: 3,
                 presentValue: (v) =>
                     v.trim().isEmpty ? l10n.commonNotSet : v,
                 onSave: ctrl.saveDescription,
               ),
               AppValuePreference<String>(
-                title: l10n.adminInviteAdmin,
-                icon: Icons.person_add_outlined,
-                value: '',
-                hintText: l10n.adminAdminEmail,
+                title: l10n.commonEmail,
+                icon: Icons.email_outlined,
+                value: ctrl.contactEmail,
+                hintText: l10n.commonEmail,
                 keyboardType: TextInputType.emailAddress,
-                presentValue: (_) => l10n.commonNotSet,
-                formatInputValue: (_) => '',
+                presentValue: (v) =>
+                    v.trim().isEmpty ? l10n.commonNotSet : v,
                 validateInput: (v) {
                   final email = v.trim();
-                  return email.isNotEmpty && email.contains('@');
+                  return email.isEmpty || email.contains('@');
                 },
-                onSave: ctrl.inviteCompanyAdmin,
+                onSave: ctrl.saveContactEmail,
+              ),
+              AppValuePreference<String>(
+                title: l10n.commonPhone,
+                icon: Icons.phone_outlined,
+                value: ctrl.phone,
+                keyboardType: TextInputType.phone,
+                presentValue: (v) =>
+                    v.trim().isEmpty ? l10n.commonNotSet : v,
+                onSave: ctrl.savePhone,
               ),
               AppSubscriptionPreference(
                 endsAt: ctrl.subscriptionEnds,

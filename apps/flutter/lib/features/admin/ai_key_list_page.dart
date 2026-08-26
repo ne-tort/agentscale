@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
@@ -26,6 +27,7 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
   static const _viewPageKey = 'admin.aiKeys';
 
   final _viewMode = AppCollectionViewModeStore(_viewPageKey);
+  late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
   List<Map<String, dynamic>> _keys = const [];
   List<Map<String, dynamic>> _httpProviders = const [];
@@ -33,18 +35,25 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
   @override
   void initState() {
     super.initState();
+    _autoRefresh = AppAutoRefreshBinder(
+      onTick: () => _reload(silent: true),
+      isActive: () => appAutoRefreshIsActive(context),
+    )..attach();
     _viewMode.load();
     _reload();
   }
 
   @override
   void dispose() {
+    _autoRefresh.dispose();
     _viewMode.dispose();
     super.dispose();
   }
 
-  Future<void> _reload() async {
-    setState(() => _loading = true);
+  Future<void> _reload({bool silent = false}) async {
+    if (!silent && mounted) {
+      setState(() => _loading = true);
+    }
     try {
       final items = await adminContext.api.listAiKeys();
       List<Map<String, dynamic>> providers = const [];
@@ -53,6 +62,12 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
             .listCatalogEntries(kAiHttpProvidersCatalogId);
       } catch (_) {}
       if (!mounted) return;
+      if (silent &&
+          appRefreshDataEquals(_keys, items) &&
+          appRefreshDataEquals(_httpProviders, providers) &&
+          !_loading) {
+        return;
+      }
       setState(() {
         _keys = items;
         _httpProviders = providers;
@@ -60,6 +75,7 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
       });
     } catch (e) {
       if (!mounted) return;
+      if (silent) return;
       setState(() => _loading = false);
       AppErrors.showSnack(context, e);
     }
@@ -193,7 +209,6 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
 
         return AppScaffold(
           actions: [
-            IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
             AppCollectionViewModeButton(store: _viewMode),
           ],
           body: body,

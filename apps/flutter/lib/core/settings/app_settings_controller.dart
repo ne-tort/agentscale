@@ -1,19 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/theme/app_palette.dart';
 
-/// Persisted locale + appearance.
+/// Persisted locale + appearance + auto-refresh interval.
 class AppSettingsController extends ChangeNotifier {
   static const _keyLocale = 'prodavan.settings.locale';
   static const _keyTheme = 'prodavan.settings.theme';
+  static const _keyAutoRefresh = 'prodavan.settings.auto_refresh_seconds';
 
   Locale _locale = const Locale('ru');
   AppThemeMode _themeMode = AppThemeMode.light;
+  int _autoRefreshSeconds = kAppAutoRefreshDefaultSeconds;
   bool _loaded = false;
 
   Locale get locale => _locale;
   AppThemeMode get themeMode => _themeMode;
+
+  /// Seconds between silent UI refreshes. `0` = off.
+  int get autoRefreshSeconds => _autoRefreshSeconds;
   bool get isLoaded => _loaded;
 
   Future<void> load() async {
@@ -30,6 +36,12 @@ class AppSettingsController extends ChangeNotifier {
       'ultraDark' => AppThemeMode.ultraDark,
       _ => AppThemeMode.light,
     };
+    final refresh = prefs.getInt(_keyAutoRefresh);
+    if (refresh != null && kAppAutoRefreshChoicesSeconds.contains(refresh)) {
+      _autoRefreshSeconds = refresh;
+    } else {
+      _autoRefreshSeconds = kAppAutoRefreshDefaultSeconds;
+    }
     _loaded = true;
     notifyListeners();
   }
@@ -54,6 +66,15 @@ class AppSettingsController extends ChangeNotifier {
         AppThemeMode.ultraDark => 'ultraDark',
       },
     );
+  }
+
+  Future<void> setAutoRefreshSeconds(int seconds) async {
+    if (!kAppAutoRefreshChoicesSeconds.contains(seconds)) return;
+    if (_autoRefreshSeconds == seconds) return;
+    _autoRefreshSeconds = seconds;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_keyAutoRefresh, seconds);
   }
 }
 

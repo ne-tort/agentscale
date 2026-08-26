@@ -223,6 +223,45 @@
   "adminTypeApiKey": "API key",
   "adminNextRenewal": "Дата продления",
   "adminAddHttpProvider": "Добавить провайдера",
+  "adminHttpBaseUrl": "Base URL",
+  "adminHttpApiKind": "API kind",
+  "adminHttpApiKindOpenai": "OpenAI API",
+  "adminHttpApiKindAnthropic": "Anthropic API",
+  "adminHttpApiKindOpenrouter": "OpenRouter",
+  "adminHttpApiKindCustom": "Custom / OpenAPI",
+  "adminHttpOpenaiCompatible": "OpenAI-compatible",
+  "adminHttpAuthScheme": "Auth",
+  "adminHttpAuthBearer": "Bearer",
+  "adminHttpAuthXApiKey": "x-api-key",
+  "adminHttpAuthNone": "Без auth",
+  "adminHttpChatPath": "Chat completions path",
+  "adminHttpModelsPath": "Models path",
+  "adminToolPresetChatReadonly": "Чат (только чтение)",
+  "adminToolPresetWorkspaceDev": "Разработка",
+  "adminToolPresetWorkspaceFull": "Полный доступ",
+  "adminIdlePauseNever": "Без остановки",
+  "adminIdlePauseHours": "{hours} ч",
+  "@adminIdlePauseHours": {
+    "placeholders": {
+      "hours": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlertTag": "Тег",
+  "adminAlertTagNoKeys": "нет ключей",
+  "adminAlertTagKeyRenewal": "продление · {count}",
+  "@adminAlertTagKeyRenewal": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "adminAlertTagHighUsage": "высокий usage",
+  "adminAlertTagSubExpiring": "подписка",
+  "adminAlertTagSubExpired": "истекла",
+  "commonPhone": "Телефон",
   "adminKeyMetadata": "Метаданные ключа",
   "adminLifecycle": "Жизненный цикл",
   "adminLifetimeSubscription": "Бессрочная подписка",
@@ -844,5 +883,23 @@
   "settingsTheme": "Тема",
   "settingsThemeDark": "Тёмная",
   "settingsThemeLight": "Светлая",
-  "settingsThemeUltraDark": "Ультратёмная"
+  "settingsThemeUltraDark": "Ультратёмная",
+  "settingsRefresh": "Обновление",
+  "settingsRefreshOff": "Не обновлять",
+  "settingsRefreshSeconds": "{n} с",
+  "@settingsRefreshSeconds": {
+    "placeholders": {
+      "n": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsRefreshMinutes": "{n} мин",
+  "@settingsRefreshMinutes": {
+    "placeholders": {
+      "n": {
+        "type": "String"
+      }
+    }
+  }
 }

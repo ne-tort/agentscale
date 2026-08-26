@@ -2,6 +2,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
+import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
@@ -71,6 +72,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   final _inboxAttachments = <Map<String, dynamic>>[];
   String? _sessionId;
   late String _projectName;
+  late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
   bool _sending = false;
   bool _uploadingAttachment = false;
@@ -84,6 +86,21 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   bool get _chatBlocked => _companySuspended || _projectPaused;
   /// Inbox cleanup allowed while paused; blocked only when company suspended.
   bool get _inboxMutationsBlocked => _companySuspended;
+
+  List<Map<String, dynamic>> _messagesSnapshot(List<_ChatLine> lines) {
+    return [
+      for (final m in lines)
+        {
+          'role': m.role,
+          'text': m.text,
+          'streaming': m.streaming,
+          'approvalId': m.approvalId,
+          'toolName': m.toolName,
+          'toolInput': m.toolInput,
+          'attachmentRefs': m.attachmentRefs,
+        },
+    ];
+  }
 
   Future<void> _resumeFromBanner() async {
     if (_resuming || !_projectPaused || _companySuspended) return;
@@ -109,11 +126,19 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     super.initState();
     _projectName = widget.projectName;
     workContext.enterProject(widget.projectId);
+    _autoRefresh = AppAutoRefreshBinder(
+      onTick: () async {
+        if (_sending || _activeStream != null) return;
+        await _loadTranscript(silent: true);
+      },
+      isActive: () => appAutoRefreshIsActive(context),
+    )..attach();
     _loadTranscript();
   }
 
   @override
   void dispose() {
+    _autoRefresh.dispose();
     _activeStream?.abort();
     _composer.dispose();
     _scroll.dispose();
@@ -280,16 +305,20 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     );
   }
 
-  Future<void> _loadTranscript() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  Future<void> _loadTranscript({bool silent = false}) async {
+    if (!silent && mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final project = await workContext.api.getProject(widget.projectId);
       final sub = project['company_subscription'] as Map<String, dynamic>? ?? const {};
       final result = await workContext.api.projectChatTranscript(projectId: widget.projectId);
       if (!mounted) return;
+      // Avoid overwriting an in-progress stream that started while we were fetching.
+      if (silent && (_sending || _activeStream != null)) return;
       final items = result['messages'];
       final lines = <_ChatLine>[];
       if (items is List) {
@@ -315,25 +344,38 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
           );
         }
       }
+      final status = result['session_status'] as String?;
+      final nextSessionId = status == 'active' ? result['session_id'] as String? : null;
+      final nextSuspended = sub['subscription_expired'] == true;
+      final nextPaused = (project['status'] as String?) == 'paused';
+      if (silent &&
+          appRefreshDataEquals(_messagesSnapshot(_messages), _messagesSnapshot(lines)) &&
+          _sessionId == nextSessionId &&
+          _companySuspended == nextSuspended &&
+          _projectPaused == nextPaused &&
+          !_loading) {
+        return;
+      }
       setState(() {
-        final status = result['session_status'] as String?;
         // Only keep sendable session; cancelled leftovers after pause must not be reused.
-        _sessionId = status == 'active' ? result['session_id'] as String? : null;
-        _companySuspended = sub['subscription_expired'] == true;
-        _projectPaused = (project['status'] as String?) == 'paused';
+        _sessionId = nextSessionId;
+        _companySuspended = nextSuspended;
+        _projectPaused = nextPaused;
         _messages
           ..clear()
           ..addAll(lines);
         _loading = false;
+        if (!silent) _error = null;
       });
       if (_projectPaused || _companySuspended) {
         await _abortLocalStreamIfSending();
       }
-      _scrollToEnd();
+      if (!silent) _scrollToEnd();
       await _loadInbox();
-      await _openPendingApprovalsIfAny();
+      if (!silent) await _openPendingApprovalsIfAny();
     } catch (e) {
       if (!mounted) return;
+      if (silent) return;
       setState(() {
         _error = e.toString();
         _loading = false;
@@ -624,11 +666,6 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                 },
           icon: Icon(Icons.settings_outlined),
           tooltip: l10n.projectProjectSettings,
-        ),
-        IconButton(
-          onPressed: _loading || _sending ? null : _loadTranscript,
-          icon: Icon(Icons.refresh),
-          tooltip: l10n.projectReloadTranscript,
         ),
       ],
       body: Column(

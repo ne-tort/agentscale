@@ -93,6 +93,11 @@ class AppPreferenceInlineActions extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.check_rounded, size: 22),
             visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(
+              minWidth: AppInsets.trailingIconExtent,
+              minHeight: AppInsets.trailingIconExtent,
+            ),
             tooltip: MaterialLocalizations.of(context).okButtonLabel,
             onPressed: onSave,
           ),
@@ -102,6 +107,11 @@ class AppPreferenceInlineActions extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.close_rounded, size: 22),
             visualDensity: VisualDensity.compact,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(
+              minWidth: AppInsets.trailingIconExtent,
+              minHeight: AppInsets.trailingIconExtent,
+            ),
             tooltip: MaterialLocalizations.of(context).cancelButtonLabel,
             onPressed: onCancel,
           ),
@@ -117,6 +127,11 @@ class AppPreferenceInlineActions extends StatelessWidget {
                 size: 22,
               ),
               visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(
+                minWidth: AppInsets.trailingIconExtent,
+                minHeight: AppInsets.trailingIconExtent,
+              ),
               onPressed: onToggleObscure,
             ),
           ),

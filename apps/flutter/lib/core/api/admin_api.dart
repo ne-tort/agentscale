@@ -48,10 +48,16 @@ class AdminApi {
     String? name,
     String? description,
     bool patchDescription = false,
+    String? contactEmail,
+    bool patchContactEmail = false,
+    String? phone,
+    bool patchPhone = false,
   }) async {
     final payload = <String, dynamic>{};
     if (name != null) payload['name'] = name;
     if (patchDescription) payload['description'] = description;
+    if (patchContactEmail) payload['contact_email'] = contactEmail;
+    if (patchPhone) payload['phone'] = phone;
     final res = await http.patch(
       _uri('/admin/companies/$companyId'),
       headers: _headers,

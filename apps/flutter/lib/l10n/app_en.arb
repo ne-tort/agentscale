@@ -223,6 +223,45 @@
   "adminTypeApiKey": "API key",
   "adminNextRenewal": "Renewal date",
   "adminAddHttpProvider": "Add provider",
+  "adminHttpBaseUrl": "Base URL",
+  "adminHttpApiKind": "API kind",
+  "adminHttpApiKindOpenai": "OpenAI API",
+  "adminHttpApiKindAnthropic": "Anthropic API",
+  "adminHttpApiKindOpenrouter": "OpenRouter",
+  "adminHttpApiKindCustom": "Custom / OpenAPI",
+  "adminHttpOpenaiCompatible": "OpenAI-compatible",
+  "adminHttpAuthScheme": "Auth",
+  "adminHttpAuthBearer": "Bearer",
+  "adminHttpAuthXApiKey": "x-api-key",
+  "adminHttpAuthNone": "No auth",
+  "adminHttpChatPath": "Chat completions path",
+  "adminHttpModelsPath": "Models path",
+  "adminToolPresetChatReadonly": "Chat (read-only)",
+  "adminToolPresetWorkspaceDev": "Development",
+  "adminToolPresetWorkspaceFull": "Full access",
+  "adminIdlePauseNever": "Never pause",
+  "adminIdlePauseHours": "{hours} h",
+  "@adminIdlePauseHours": {
+    "placeholders": {
+      "hours": {
+        "type": "String"
+      }
+    }
+  },
+  "adminAlertTag": "Tag",
+  "adminAlertTagNoKeys": "no keys",
+  "adminAlertTagKeyRenewal": "renewal · {count}",
+  "@adminAlertTagKeyRenewal": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "adminAlertTagHighUsage": "high usage",
+  "adminAlertTagSubExpiring": "subscription",
+  "adminAlertTagSubExpired": "expired",
+  "commonPhone": "Phone",
   "adminKeyMetadata": "Key metadata",
   "adminLifecycle": "Lifecycle",
   "adminLifetimeSubscription": "Lifetime subscription",
@@ -844,5 +883,23 @@
   "settingsTheme": "Theme",
   "settingsThemeDark": "Dark",
   "settingsThemeLight": "Light",
-  "settingsThemeUltraDark": "Ultra dark"
+  "settingsThemeUltraDark": "Ultra dark",
+  "settingsRefresh": "Refresh",
+  "settingsRefreshOff": "Off",
+  "settingsRefreshSeconds": "{n} s",
+  "@settingsRefreshSeconds": {
+    "placeholders": {
+      "n": {
+        "type": "String"
+      }
+    }
+  },
+  "settingsRefreshMinutes": "{n} min",
+  "@settingsRefreshMinutes": {
+    "placeholders": {
+      "n": {
+        "type": "String"
+      }
+    }
+  }
 }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/preferences.dart';
+import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
@@ -26,6 +27,7 @@ class AdminAiKeyDetailPage extends StatefulWidget {
 }
 
 class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
+  late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
   Map<String, dynamic>? _key;
   List<Map<String, dynamic>> _companies = const [];
@@ -36,11 +38,23 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
   void initState() {
     super.initState();
     _displayName = widget.keyName;
+    _autoRefresh = AppAutoRefreshBinder(
+      onTick: () => _load(silent: true),
+      isActive: () => appAutoRefreshIsActive(context),
+    )..attach();
     _load();
   }
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  @override
+  void dispose() {
+    _autoRefresh.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load({bool silent = false}) async {
+    if (!silent && mounted) {
+      setState(() => _loading = true);
+    }
     try {
       final key = await adminContext.api.getAiKey(widget.keyId);
       final companies = await adminContext.api.listCompanies();
@@ -52,6 +66,13 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
         // Catalog optional until migration applied.
       }
       if (!mounted) return;
+      if (silent &&
+          appRefreshDataEquals(_key, key) &&
+          appRefreshDataEquals(_companies, companies) &&
+          appRefreshDataEquals(_httpProviders, providers) &&
+          !_loading) {
+        return;
+      }
       setState(() {
         _key = key;
         _companies = companies;
@@ -61,6 +82,7 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
       });
     } catch (e) {
       if (!mounted) return;
+      if (silent) return;
       setState(() => _loading = false);
       AppErrors.showSnack(context, e);
     }
@@ -207,9 +229,6 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
 
     return AppScaffold(
       title: Text(_displayName),
-      actions: [
-        IconButton(onPressed: _load, icon: const Icon(Icons.refresh)),
-      ],
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         children: [

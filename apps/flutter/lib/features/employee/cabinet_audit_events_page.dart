@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
@@ -18,6 +19,7 @@ class CabinetAuditEventsPage extends StatefulWidget {
 }
 
 class _CabinetAuditEventsPageState extends State<CabinetAuditEventsPage> {
+  late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _events = const [];
@@ -25,23 +27,38 @@ class _CabinetAuditEventsPageState extends State<CabinetAuditEventsPage> {
   @override
   void initState() {
     super.initState();
+    _autoRefresh = AppAutoRefreshBinder(
+      onTick: () => _load(silent: true),
+      isActive: () => appAutoRefreshIsActive(context),
+    )..attach();
     _load();
   }
 
-  Future<void> _load() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  @override
+  void dispose() {
+    _autoRefresh.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load({bool silent = false}) async {
+    if (!silent && mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final events = await workContext.api.listAuditEvents(cabinetId: widget.cabinetId, limit: 100);
       if (!mounted) return;
+      if (silent && appRefreshDataEquals(_events, events) && !_loading) return;
       setState(() {
         _events = events;
         _loading = false;
+        _error = null;
       });
     } catch (e) {
       if (!mounted) return;
+      if (silent) return;
       setState(() {
         _error = e.toString();
         _loading = false;

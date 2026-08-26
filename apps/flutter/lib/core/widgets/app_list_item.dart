@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/theme/app_color_tokens.dart';
+import 'package:prodavan/core/theme/app_insets.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 
 enum AppListTone { neutral, warning, danger, success }
@@ -51,7 +52,7 @@ class AppListItem extends StatelessWidget {
     final border = borderless
         ? BorderSide.none
         : BorderSide(color: selected ? tokens.primary : _toneBorder(tokens));
-    final pad = dense ? AppSpacing.sm : AppSpacing.md;
+    final leftPad = dense ? AppSpacing.sm : AppSpacing.md;
 
     final trailingSlot = trailing ?? selectionControl;
 
@@ -66,9 +67,11 @@ class AppListItem extends StatelessWidget {
         onLongPress: enabled ? onLongPress : null,
         borderRadius: BorderRadius.circular(borderless ? 0 : 8),
         child: Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: pad,
-            vertical: dense ? AppSpacing.sm : AppSpacing.md,
+          padding: EdgeInsets.only(
+            left: leftPad,
+            right: AppInsets.trailingActionRight,
+            top: dense ? AppSpacing.sm : AppSpacing.md,
+            bottom: dense ? AppSpacing.sm : AppSpacing.md,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,

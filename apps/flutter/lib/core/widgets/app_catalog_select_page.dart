@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/theme/app_insets.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_inline_add_field.dart';
 import 'package:prodavan/core/widgets/app_list_item.dart';
@@ -101,6 +102,9 @@ class _AppCatalogSelectPageState extends State<AppCatalogSelectPage> {
     if (oldWidget.items != widget.items) {
       _items = List.of(widget.items);
     }
+    if (oldWidget.selectedIds != widget.selectedIds) {
+      _selected = {...widget.selectedIds};
+    }
   }
 
   List<AppCatalogSelectItem> get _filtered {
@@ -132,11 +136,13 @@ class _AppCatalogSelectPageState extends State<AppCatalogSelectPage> {
         }
       } else {
         _selected = {id};
-        if (widget.popOnSelect) {
-          Navigator.of(context).pop(_selected);
-        }
       }
     });
+    // Apply immediately — no external Done / Save.
+    widget.onConfirm?.call({..._selected});
+    if (!widget.multiSelect && widget.popOnSelect) {
+      Navigator.of(context).pop(_selected);
+    }
   }
 
   Future<void> _create(String name) async {
@@ -180,115 +186,125 @@ class _AppCatalogSelectPageState extends State<AppCatalogSelectPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final items = _filtered;
-    return AppScaffold(
-      title: Text(widget.title),
-      actions: [
-        if (widget.multiSelect)
-          TextButton(
-            onPressed: () {
-              widget.onConfirm?.call(_selected);
-              Navigator.of(context).pop(_selected);
-            },
-            child: Text(l10n.commonDone),
-          ),
-      ],
-      body: Column(
-        children: [
-          if (widget.warningBanner != null)
-            Padding(
-              padding: const EdgeInsets.all(AppSpacing.md),
-              child: InlineErrorBanner(message: widget.warningBanner!),
-            ),
-          if (widget.allowCreate && widget.onCreate != null)
-            AppInlineAddField(
-              title: widget.addFieldTitle ?? l10n.commonAdd,
-              hintText: widget.addFieldTitle ?? l10n.commonAdd,
-              validator: (v) => v.trim().isNotEmpty,
-              invalidMessage: l10n.commonRequired,
-              onSave: _create,
-            ),
-          if (widget.searchEnabled)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.md,
-                AppSpacing.sm,
-                AppSpacing.md,
-                AppSpacing.sm,
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        Navigator.of(context).pop(_selected);
+      },
+      child: AppScaffold(
+        title: Text(widget.title),
+        body: Column(
+          children: [
+            if (widget.warningBanner != null)
+              Padding(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: InlineErrorBanner(message: widget.warningBanner!),
               ),
-              child: TextField(
-                decoration: InputDecoration(
-                  labelText: l10n.commonSearch,
-                  isDense: true,
+            if (widget.allowCreate && widget.onCreate != null)
+              AppInlineAddField(
+                title: widget.addFieldTitle ?? l10n.commonAdd,
+                hintText: widget.addFieldTitle ?? l10n.commonAdd,
+                validator: (v) => v.trim().isNotEmpty,
+                invalidMessage: l10n.commonRequired,
+                onSave: _create,
+              ),
+            if (widget.searchEnabled)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.md,
+                  AppSpacing.sm,
+                  AppSpacing.md,
+                  AppSpacing.sm,
                 ),
-                onChanged: (v) => setState(() => _query = v),
-              ),
-            ),
-          Expanded(
-            child: items.isEmpty
-                ? (widget.empty ??
-                    EmptyPlaceholder(title: l10n.commonNothingFound))
-                : ListView.builder(
-                    padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-                    itemCount: items.length,
-                    itemBuilder: (context, index) {
-                      final item = items[index];
-                      final selected = _selected.contains(item.id);
-                      final editing = _editFocusId == item.id;
-                      final Widget trailing;
-                      if (editing && _mutateEnabled) {
-                        trailing = Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (widget.allowEdit && widget.onEdit != null)
-                              IconButton(
-                                tooltip: l10n.commonEdit,
-                                icon: const Icon(Icons.edit_outlined, size: 20),
-                                onPressed: () => _edit(item),
-                              ),
-                            if (widget.allowDelete && widget.onDelete != null)
-                              IconButton(
-                                tooltip: l10n.commonDelete,
-                                icon: const Icon(Icons.delete_outline, size: 20),
-                                onPressed: () => _delete(item),
-                              ),
-                          ],
-                        );
-                      } else if (widget.multiSelect) {
-                        trailing = AppSwitch(
-                          value: selected,
-                          onChanged: item.enabled
-                              ? (_) => _toggle(item.id)
-                              : null,
-                        );
-                      } else {
-                        trailing = AppRadio<String>(
-                          value: item.id,
-                          groupValue: _selected.isEmpty ? null : _selected.first,
-                          onChanged: item.enabled
-                              ? (_) => _toggle(item.id)
-                              : null,
-                        );
-                      }
-                      return AppListItem(
-                        borderless: true,
-                        dense: true,
-                        title: Text(item.title),
-                        subtitle: item.subtitle != null
-                            ? Text(item.subtitle!)
-                            : null,
-                        leading: item.effectiveLeading,
-                        trailing: trailing,
-                        selected: selected || editing,
-                        enabled: item.enabled,
-                        onTap: item.enabled ? () => _toggle(item.id) : null,
-                        onLongPress: _mutateEnabled && item.enabled
-                            ? () => setState(() => _editFocusId = item.id)
-                            : null,
-                      );
-                    },
+                child: TextField(
+                  decoration: InputDecoration(
+                    labelText: l10n.commonSearch,
+                    isDense: true,
                   ),
-          ),
-        ],
+                  onChanged: (v) => setState(() => _query = v),
+                ),
+              ),
+            Expanded(
+              child: items.isEmpty
+                  ? (widget.empty ??
+                      EmptyPlaceholder(title: l10n.commonNothingFound))
+                  : ListView.builder(
+                      padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+                      itemCount: items.length,
+                      itemBuilder: (context, index) {
+                        final item = items[index];
+                        final selected = _selected.contains(item.id);
+                        final editing = _editFocusId == item.id;
+                        final Widget trailing;
+                        if (editing && _mutateEnabled) {
+                          trailing = Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (widget.allowEdit && widget.onEdit != null)
+                                IconButton(
+                                  tooltip: l10n.commonEdit,
+                                  icon: const Icon(Icons.edit_outlined, size: 20),
+                                  padding: EdgeInsets.zero,
+                                  visualDensity: VisualDensity.compact,
+                                  constraints: const BoxConstraints(
+                                    minWidth: AppInsets.trailingIconExtent,
+                                    minHeight: AppInsets.trailingIconExtent,
+                                  ),
+                                  onPressed: () => _edit(item),
+                                ),
+                              if (widget.allowDelete && widget.onDelete != null)
+                                IconButton(
+                                  tooltip: l10n.commonDelete,
+                                  icon: const Icon(Icons.delete_outline, size: 20),
+                                  padding: EdgeInsets.zero,
+                                  visualDensity: VisualDensity.compact,
+                                  constraints: const BoxConstraints(
+                                    minWidth: AppInsets.trailingIconExtent,
+                                    minHeight: AppInsets.trailingIconExtent,
+                                  ),
+                                  onPressed: () => _delete(item),
+                                ),
+                            ],
+                          );
+                        } else if (widget.multiSelect) {
+                          trailing = AppSwitch(
+                            value: selected,
+                            onChanged: item.enabled
+                                ? (_) => _toggle(item.id)
+                                : null,
+                          );
+                        } else {
+                          trailing = AppRadio<String>(
+                            value: item.id,
+                            groupValue:
+                                _selected.isEmpty ? null : _selected.first,
+                            onChanged: item.enabled
+                                ? (_) => _toggle(item.id)
+                                : null,
+                          );
+                        }
+                        return AppListItem(
+                          borderless: true,
+                          dense: true,
+                          title: Text(item.title),
+                          subtitle: item.subtitle != null
+                              ? Text(item.subtitle!)
+                              : null,
+                          leading: item.effectiveLeading,
+                          trailing: trailing,
+                          selected: selected || editing,
+                          enabled: item.enabled,
+                          onTap: item.enabled ? () => _toggle(item.id) : null,
+                          onLongPress: _mutateEnabled && item.enabled
+                              ? () => setState(() => _editFocusId = item.id)
+                              : null,
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }

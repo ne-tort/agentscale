@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/app_preference_tile.dart';
 import 'package:prodavan/core/preferences/app_value_preference.dart';
+import 'package:prodavan/core/theme/app_insets.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -155,7 +156,10 @@ class _AppInlineAddFieldState extends State<AppInlineAddField> {
         icon: const Icon(Icons.add_rounded, size: 22),
         padding: EdgeInsets.zero,
         visualDensity: VisualDensity.compact,
-        constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+        constraints: const BoxConstraints(
+          minWidth: AppInsets.trailingIconExtent,
+          minHeight: AppInsets.trailingIconExtent,
+        ),
         onPressed: _saving ? null : _beginEdit,
       ),
       onTap: _saving ? null : _beginEdit,

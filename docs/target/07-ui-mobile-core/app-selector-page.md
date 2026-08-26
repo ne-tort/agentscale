@@ -14,7 +14,7 @@
 | `searchEnabled` | bool | Поле поиска сверху |
 | `warningBanner` | String? | Плашка над списком |
 | `empty` | Widget? | EmptyPlaceholder |
-| `onConfirm` | `ValueChanged<Set<String>>` | Кнопка «Готово» (multi) |
+| `onConfirm` | `ValueChanged<Set<String>>` | Вызывается **сразу** при каждом изменении выбора (multi и single); внешней кнопки «Готово» нет |
 | `popOnSelect` | bool | Single: выбрать и pop сразу |
 | `allowCreate` / `allowEdit` / `allowDelete` | bool | Мутации каталога |
 | `onCreate` / `onEdit` / `onDelete` | callbacks | Create через inline add; edit/delete после **long-press** |
@@ -43,3 +43,5 @@ Long-press → edit mode (highlight) + actions edit/delete.
 
 - Нет `DropdownButton` для тех же items.
 - Preferences открывают catalog page, не legacy popup menus.
+- Multi-select: сохранение через `onConfirm` на каждый toggle; назад возвращает текущий `_selected`.
+- Нет AppBar-кнопки «Готово» / внешних Save на picker.

@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/danger_confirm_page.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
@@ -29,6 +30,7 @@ class CabinetTablesTabPage extends StatefulWidget {
 }
 
 class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
+  late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _tables = const [];
@@ -39,11 +41,58 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
   @override
   void initState() {
     super.initState();
+    _autoRefresh = AppAutoRefreshBinder(
+      onTick: () => _silentRefresh(),
+      isActive: () => appAutoRefreshIsActive(context),
+    )..attach();
     _loadTables().then((_) {
       final slug = widget.initialTableSlug;
       if (slug != null && slug.isNotEmpty && mounted) {
         _loadRows(slug);
       }
+    });
+  }
+
+  @override
+  void dispose() {
+    _autoRefresh.dispose();
+    super.dispose();
+  }
+
+  Future<void> _silentRefresh() async {
+    final tables = await workContext.api.listMetaTables(widget.cabinetId);
+    if (!mounted) return;
+    final slug = _selectedSlug;
+    List<Map<String, dynamic>>? nextRows;
+    List<Map<String, dynamic>>? nextColumns;
+    if (slug != null && slug.isNotEmpty) {
+      final meta = await workContext.api.getMetaTable(
+        cabinetId: widget.cabinetId,
+        tableSlug: slug,
+      );
+      final result = await workContext.api.queryCabinetRows(
+        cabinetId: widget.cabinetId,
+        tableSlug: slug,
+      );
+      if (!mounted) return;
+      final cols = meta['columns'];
+      final rows = result['rows'];
+      nextColumns =
+          cols is List ? cols.cast<Map<String, dynamic>>() : const [];
+      nextRows = rows is List ? rows.cast<Map<String, dynamic>>() : const [];
+    }
+    if (appRefreshDataEquals(_tables, tables) &&
+        (slug == null ||
+            (appRefreshDataEquals(_rows, nextRows) &&
+                appRefreshDataEquals(_columns, nextColumns))) &&
+        !_loading) {
+      return;
+    }
+    setState(() {
+      _tables = tables;
+      if (nextRows != null) _rows = nextRows;
+      if (nextColumns != null) _columns = nextColumns;
+      _loading = false;
     });
   }
 

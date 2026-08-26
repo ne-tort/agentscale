@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
@@ -16,6 +17,7 @@ class CabinetToolsTabPage extends StatefulWidget {
 }
 
 class _CabinetToolsTabPageState extends State<CabinetToolsTabPage> {
+  late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _tools = const [];
@@ -23,23 +25,38 @@ class _CabinetToolsTabPageState extends State<CabinetToolsTabPage> {
   @override
   void initState() {
     super.initState();
+    _autoRefresh = AppAutoRefreshBinder(
+      onTick: () => _reload(silent: true),
+      isActive: () => appAutoRefreshIsActive(context),
+    )..attach();
     _reload();
   }
 
-  Future<void> _reload() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  @override
+  void dispose() {
+    _autoRefresh.dispose();
+    super.dispose();
+  }
+
+  Future<void> _reload({bool silent = false}) async {
+    if (!silent && mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final tools = await workContext.api.listCabinetMcpTools(widget.cabinetId);
       if (!mounted) return;
+      if (silent && appRefreshDataEquals(_tools, tools) && !_loading) return;
       setState(() {
         _tools = tools;
         _loading = false;
+        _error = null;
       });
     } catch (e) {
       if (!mounted) return;
+      if (silent) return;
       setState(() {
         _error = e.toString();
         _loading = false;
@@ -50,17 +67,13 @@ class _CabinetToolsTabPageState extends State<CabinetToolsTabPage> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-if (_loading) {
+    if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (_error != null) InlineErrorBanner(message: _error!),
-        Align(
-          alignment: Alignment.centerRight,
-          child: IconButton(onPressed: _reload, icon: Icon(Icons.refresh), tooltip: l10n.commonReload),
-        ),
         Expanded(
           child: _tools.isEmpty
               ? EmptyPlaceholder(title: l10n.cabinetNoMcpTools)

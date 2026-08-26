@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 
+import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/inline_error_banner.dart';
@@ -30,6 +31,7 @@ class CabinetContextTabPage extends StatefulWidget {
 }
 
 class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
+  late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
   String? _error;
   Map<String, dynamic>? _cabinet;
@@ -41,14 +43,26 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
   @override
   void initState() {
     super.initState();
+    _autoRefresh = AppAutoRefreshBinder(
+      onTick: () => _reload(silent: true),
+      isActive: () => appAutoRefreshIsActive(context),
+    )..attach();
     _reload();
   }
 
-  Future<void> _reload() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
+  @override
+  void dispose() {
+    _autoRefresh.dispose();
+    super.dispose();
+  }
+
+  Future<void> _reload({bool silent = false}) async {
+    if (!silent && mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       final results = await Future.wait([
         workContext.api.getCabinet(widget.cabinetId),
@@ -58,16 +72,32 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
         workContext.api.listAuditEvents(cabinetId: widget.cabinetId, limit: 20),
       ]);
       if (!mounted) return;
+      final cabinet = results[0] as Map<String, dynamic>;
+      final projects = (results[1] as List).length;
+      final tables = (results[2] as List).length;
+      final tools = (results[3] as List).length;
+      final auditEvents = (results[4] as List).length;
+      if (silent &&
+          appRefreshDataEquals(_cabinet, cabinet) &&
+          _projects == projects &&
+          _tables == tables &&
+          _tools == tools &&
+          _auditEvents == auditEvents &&
+          !_loading) {
+        return;
+      }
       setState(() {
-        _cabinet = results[0] as Map<String, dynamic>;
-        _projects = (results[1] as List).length;
-        _tables = (results[2] as List).length;
-        _tools = (results[3] as List).length;
-        _auditEvents = (results[4] as List).length;
+        _cabinet = cabinet;
+        _projects = projects;
+        _tables = tables;
+        _tools = tools;
+        _auditEvents = auditEvents;
         _loading = false;
+        _error = null;
       });
     } catch (e) {
       if (!mounted) return;
+      if (silent) return;
       setState(() {
         _error = e.toString();
         _loading = false;

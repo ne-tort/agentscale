@@ -113,6 +113,8 @@ class AdminCompanyService:
                     "id": company.id,
                     "name": company.name,
                     "description": company.description,
+                    "contact_email": company.contact_email,
+                    "phone": company.phone,
                     "created_at": company.created_at.isoformat() if company.created_at else None,
                     "cabinet_quota": _quota_public(quota),
                     "active_cabinets": active_cabinets,
@@ -151,12 +153,42 @@ class AdminCompanyService:
                     status=422,
                     detail="invalid description",
                 )
+        if "contact_email" in fields:
+            raw = fields["contact_email"]
+            if raw is None:
+                company.contact_email = None
+            elif isinstance(raw, str):
+                email = raw.strip()
+                company.contact_email = email if email else None
+            else:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail="invalid contact_email",
+                )
+        if "phone" in fields:
+            raw = fields["phone"]
+            if raw is None:
+                company.phone = None
+            elif isinstance(raw, str):
+                phone = raw.strip()
+                company.phone = phone if phone else None
+            else:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail="invalid phone",
+                )
         await self._session.commit()
         await self._session.refresh(company)
         return {
             "id": company.id,
             "name": company.name,
             "description": company.description,
+            "contact_email": company.contact_email,
+            "phone": company.phone,
         }
 
     async def get_company(self, company_id: str) -> dict:
@@ -169,6 +201,8 @@ class AdminCompanyService:
             "id": company.id,
             "name": company.name,
             "description": company.description,
+            "contact_email": company.contact_email,
+            "phone": company.phone,
             "created_at": company.created_at.isoformat() if company.created_at else None,
             "cabinet_quota": _quota_public(quota),
             "agent_policy": _policy_public(

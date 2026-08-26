@@ -4,15 +4,23 @@ import 'package:prodavan/core/settings/app_settings_controller.dart';
 import 'package:prodavan/core/theme/app_palette.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/preferences/preferences.dart';
+import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Language + appearance (page, not dialog).
+/// Language + appearance + auto-refresh (page, not dialog).
 class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
   static const _locales = ['ru', 'en'];
   static const _themes = ['light', 'dark', 'ultraDark'];
+
+  String _refreshLabel(AppLocalizations l10n, int seconds) {
+    if (seconds <= 0) return l10n.settingsRefreshOff;
+    if (seconds < 60) return l10n.settingsRefreshSeconds('$seconds');
+    final minutes = seconds ~/ 60;
+    return l10n.settingsRefreshMinutes('$minutes');
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -28,7 +36,7 @@ class SettingsPage extends StatelessWidget {
         return AppScaffold(
           title: Text(l10n.settings),
           body: ListView(
-            padding: const EdgeInsets.all(AppSpacing.lg),
+            padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
             children: [
               AppChoicePreference<String>(
                 title: l10n.settingsLanguage,
@@ -64,6 +72,16 @@ class SettingsPage extends StatelessWidget {
                   };
                   await appSettings.setThemeMode(mode);
                 },
+              ),
+              AppChoicePreference<int>(
+                title: l10n.settingsRefresh,
+                icon: Icons.update_rounded,
+                value: appSettings.autoRefreshSeconds,
+                choices: kAppAutoRefreshChoicesSeconds,
+                keyFor: (v) => '$v',
+                labelFor: (v) => _refreshLabel(l10n, v),
+                presentValue: (v) => _refreshLabel(l10n, v),
+                onSave: (v) async => appSettings.setAutoRefreshSeconds(v),
               ),
             ],
           ),

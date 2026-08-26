@@ -27,6 +27,8 @@ class AppRadio<T> extends StatelessWidget {
       groupValue: groupValue,
       onChanged: onChanged,
       toggleable: false,
+      visualDensity: VisualDensity.compact,
+      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
     );
     if (label == null) return radio;
     return InkWell(
