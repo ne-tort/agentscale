@@ -27,12 +27,26 @@ Clowbot в списке `agent_provider` нет: это будущий HTTP-кл
 
 Resolve-контракт и adapters **не меняются** — UI только маппит в существующие enums.
 
+## Владение (owner_scope)
+
+Одна инвентаризация ключей; разные владельцы:
+
+| `owner_scope` | Кто создаёт / CRUD | Кто видит |
+|---------------|--------------------|-----------|
+| `platform` | **только** Platform Admin | Admin всегда; Company — **только** если есть `CompanyAiKeyBinding` → **RO** (без edit/rotate/delete) |
+| `company` | Company (`owner_company_id`) или Admin от имени компании | Владелец-Company: полный CRUD; Admin: видит все (надзор) |
+
+Company UI показывает **один list** = local company keys ∪ Admin-bound platform keys (с chip «платформа», write запрещён).  
+Формы SDK / API key — **паритет** Admin ([03 ux](../03-companies/ux-contract.md)).
+
 ## Сущность `AiProviderKey`
 
 | Поле | Тип | Описание |
 |------|-----|----------|
 | `id` | string | `aik_*` |
 | `name` | string | Человекочитаемое имя профиля |
+| `owner_scope` | enum | `platform` \| `company` |
+| `owner_company_id` | string? | Обязателен при `owner_scope=company` |
 | `provider` | enum | `cursor` \| `codex` \| `claude_code` |
 | `api_kind` | enum | См. ниже |
 | `secret_ref` | string | **Единственный** способ хранения секрета (vault/KMS). Нет `secret_ciphertext` в API/каноне |
@@ -63,11 +77,13 @@ Resolve-контракт и adapters **не меняются** — UI тольк
 Порядок выбора секрета для agent session:
 
 ```text
-1. Active CompanyAiKeyBinding для company_id
-2. Filter: status=active, api_kind is runtime-capable (не cli_subscription)
+1. Candidate set for company_id:
+   a. AiProviderKey where owner_scope=company AND owner_company_id=company_id
+   b. PLUS platform keys with active CompanyAiKeyBinding
+2. Filter: status=active, api_kind runtime-capable (не cli_subscription)
 3. Match: preferred_provider (CompanyAgentPolicy или Project.agent_provider)
-4. Else: first binding for that provider by Admin priority / created_at
-5. Else: platform default key (только если Admin явно разрешил platform_fallback) — **unbound keys** (без bindings)
+4. Else: first candidate by priority / created_at (company-owned before platform-bound, unless policy says otherwise)
+5. Else: platform unbound pool (только если Admin разрешил platform_fallback)
 6. Else: fail session start with NO_AI_KEY
 ```
 
@@ -104,9 +120,11 @@ Re-enabling a key does **not** resume projects.
 - Ручной PATCH `next_renewal_at` (ISO) из UI (формат даты `DD.MM.YY` / `DD.MM.YYYY`).
 - `renew(months)` ∈ {1..12}: `next_renewal_at = max(now, current) + months`. Audit `ai_key.renewed`.
 
-## Привязка
+## Привязка (только platform → company)
 
-`CompanyAiKeyBinding` M:N. UI: multi `AppCatalogSelectPage`.
+`CompanyAiKeyBinding` M:N: Admin привязывает **platform** key к компаниям.  
+Company-owned keys **не** требуют binding (они уже принадлежат компании).  
+UI Admin: multi `AppCatalogSelectPage` на detail platform-ключа.
 
 ## Каталог HTTP-провайдеров
 

@@ -1,10 +1,11 @@
 # 06 — Projects & runtime
 
-Project — унифицированная единица работы; runtime-изоляция — **[14 Project Containers](../14-project-containers/)** (сущность + k8s Port). Здесь — контракт Project и layout workspace.
+Project — единица работы агента.  
+Изоляция Pod — **[14](../14-project-containers/)**. Сущности — **[00-entities](../00-entities.md)**.
 
 | Документ | Содержание |
 |----------|------------|
-| [project-contract.md](project-contract.md) | Контракт для кабинетов |
-| [container.md](container.md) | Workspace layout + pointer → 14 (object-ws transitional) |
-| [triggers.md](triggers.md) | Универсальные триггеры |
-| [chat-attachments.md](chat-attachments.md) | Файлы и картинки в чате |
+| [project-contract.md](project-contract.md) | API/контракт Project |
+| [container.md](container.md) | Workspace layout + MinIO (compute → 14) |
+| [triggers.md](triggers.md) | Триггеры |
+| [chat-attachments.md](chat-attachments.md) | Вложения чата |

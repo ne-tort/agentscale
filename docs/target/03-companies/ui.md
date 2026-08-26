@@ -1,8 +1,8 @@
 # Companies — UI
 
-Контур отделён от Admin и Employee.
+Контур **отделён** от Admin и Employee, по IA **зеркалит Admin** (локальный scope).
 
-Полный UX-контракт: **[ux-contract.md](ux-contract.md)**.
+Полный UX: **[ux-contract.md](ux-contract.md)**. Домен: **[domain.md](domain.md)**.
 
 ## NavigationBar
 
@@ -10,12 +10,15 @@
 |-----|-------|
 | Сводка | `CompanyOverviewPage` |
 | Сотрудники | `CompanyEmployeesPage` → detail |
-| Кабинеты | `CompanyCabinetsPage` (org list / metrics) |
+| Контейнеры | `CompanyContainersPage` → detail |
+| Ключи ИИ | `CompanyAiKeyListPage` → detail |
+| Кабинеты | `CompanyCabinetsPage` (RO MVP) |
 | Профиль | `CompanyProfilePage` |
 
 ## Потоки (кратко)
 
-- Invite employee: email + display name; **нет password**; **нет** static cabinet grants multi-select.
-- Enable/disable: status / danger page.
-- Cabinets: read-mostly org overview (owner, name) — не чужие rows.
-- Metrics: read-only; без входа в чужой чат по умолчанию.
+- Invite / enable / disable employee.
+- Assign cabinet ↔ employee.
+- Oversight containers сотрудников (pause/resume/delete).
+- AI keys: create local (SDK/API); see Admin-linked RO.
+- Cabinets: view Admin-assigned RO; local create — future.

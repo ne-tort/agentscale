@@ -1,25 +1,24 @@
-# Project Containers — Kubernetes contract
+# ProjectContainer — Kubernetes contract
 
 ## Mapping
 
-| Platform | Kubernetes |
-|----------|------------|
+| Platform | k8s |
+|----------|-----|
 | `ProjectContainer.id` | label `prodavan.io/container-id` |
 | `Project.id` | label `prodavan.io/project-id` |
-| `company_id` / `cabinet_id` | labels (index / NetworkPolicy later) |
-| `runtime_ref` | Pod name (or Job name) + uid |
-| workspace | PVC **or** emptyDir+hydrate (MVP profile documented per env) |
+| workspace | hydrate → `/workspace` (PVC или emptyDir+copy) |
+| `runtime_ref` | Pod name + uid |
 
-Namespace: dedicated `prodavan-sandboxes` (рекомендация) или тот же cluster ns с жёсткими labels — зафиксировать в overlay; **не** смешивать с Traefik/Argo без labels.
+Namespace: рекомендуется `prodavan-sandboxes` (или тот же ns с жёсткими labels).
 
-## Workload shape (целевой MVP P3)
+## Workload
 
-- **Pod** (long-running) или **Job** with restart policy — выбрать long-running Pod для agent cwd.
-- Resources: requests/limits CPU+memory (profile from company policy later; default platform profile).
-- Probes: readiness on workspace ready; liveness conservative.
-- Image: platform sandbox image (agent tools + network); **не** prodavan-api image.
+- Long-running **Pod** (cwd агента).
+- Image: sandbox (tools + network), **не** image API.
+- requests/limits CPU+memory.
+- readiness: workspace ready.
 
-## Labels / selectors (обязательные)
+## Labels
 
 ```text
 app.kubernetes.io/part-of: prodavan
@@ -31,27 +30,13 @@ prodavan.io/managed-by: container-runtime
 
 Только модуль 14 создаёт/удаляет объекты с `managed-by=container-runtime`.
 
-## Metrics (собирать через Port.get_metrics)
+## Metrics
 
-| Source | Fields |
-|--------|--------|
-| Pod status | phase, reason, restarts, conditions (Ready, ContainersReady) |
-| metrics.k8s.io | cpu/memory usage vs limits |
-| PVC / ephemeral | used bytes / capacity when available |
-| Node (optional) | not required for MVP admin UI |
+Pod phase/restarts; metrics-server CPU/RAM; PVC usage если есть.  
+Tokens/messages — join `agent_usage` по `project_id` (не k8s).
 
-Связанные **не-k8s** метрики (tokens, messages) — join из `agent_usage` / sessions по `project_id` в admin read-model (не в Port).
+## Zombies
 
-## Zombie detection
+Pod с `managed-by=container-runtime` без живого Project / при Project deleted → reap.
 
-**Zombie** = объект k8s с `managed-by=container-runtime`, для которого:
-
-- нет строки `ProjectContainer`, или
-- Project `deleted` / отсутствует, или
-- `runtime_ref` в DB указывает другой uid, а старый pod жив
-
-`list_orphans` + `reconcile` (Celery beat / admin sweep): force delete + audit `container.zombie_reaped`.
-
-## As-is probe (не путать)
-
-Существующий PVC probe Job / `SANDBOX_K8S_JOBS` ([L07](../12-layer-docs/L07-projects-runtime.md)) — **инфра-проверка**, не Project Container. Не использовать как runtime агента.
+PVC probe Job (`SANDBOX_K8S_JOBS`) — **не** ProjectContainer.

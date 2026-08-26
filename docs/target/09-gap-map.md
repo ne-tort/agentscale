@@ -1,134 +1,149 @@
-# Gap map — target ↔ legacy ↔ код
+# Gap map — target ↔ код
 
-> **Код сейчас = STUB** ([STUB.md](../../STUB.md)): API/Flutter/DB без доменной логики. Таблица ниже — карта **целевой** реализации относительно legacy-доков; не копировать удалённый код из git history.
+> Канон (как должно): **[00-entities.md](00-entities.md)**.  
+> Код / as-built: [12-layer-docs](12-layer-docs/), [STUB.md](../../STUB.md).  
+> Этот файл — **расхождения = проблемы**, не «канон подстроили под stub».
 
-Сводка расхождений. Не backlog задач с оценками — карта для реализации.
+## Проблемы vs канон сущностей (P0 product / runtime)
 
-## P0 — Platform infra (приоритет, допускается крупный рефакторинг)
+Проверка as-built (API + Flutter + docs/12) относительно [00-entities](00-entities.md):
 
-Канон: [13-platform-infra/](13-platform-infra/). План: [P0-platform-infra](11-implementation-plan/P0-platform-infra.md).  
-Значительный рефакторинг L00 / L03 / L07 / L08 **разрешён**, чтобы закрыть эти gaps.
+| ID | Канон | Сейчас в коде | Проблема |
+|----|-------|---------------|----------|
+| **P-CO-01** | Company shell = **локальный Admin** (сотрудники, контейнеры, keys, кабинеты) | 3 tabs: metrics / employees / cabinets RO; нет Keys/Containers | Тонкий org-shell ≠ Admin parity ([03](03-companies/)) |
+| **P-CO-02** | Company **CRUD своих** AI keys (SDK/API) + видит Admin-bound **RO** | Keys только `/admin/ai-keys`; нет `owner_scope`; нет company API/UI | Нет company-owned keys ([02](02-ai-provider-keys/)) |
+| **P-CO-03** | Company list/manage containers **своих** сотрудников | Только Admin `/admin/containers` | Нет company-scoped containers |
+| **P-CO-04** | Cabinets от Admin → Company **RO**; later local CRUD | Employee create + `owner_employee`; нет Admin→Company assign | Неверная модель выдачи ([assignment](05-cabinets/assignment.md)) |
+| **P-ID-01** | **Company** имеет **Keycloak-креды** | `CompanyRow` без KC principal; UI через `company.admin` | Нет орг-логина |
+| **P-ID-02** | Admin / Company / Employee — три KC-сущности | Admin=role; Employee=KC; Company=DB only | Неполная identity |
+| **P-CAB-01** | Company **назначает** Employee ↔ Cabinet | ACL = `owner_employee_id`; нет Assignment API | Нет grant |
+| **P-CAB-02** | UI кабинета из meta | Meta/`cabinet.*` partial | Gaps E2E |
+| **P-MAT-01** | Pod hydrate из meta/MinIO | object-ws; нет Pod; file_ref слаб | Materialize/Pod debt |
+| **P-POD-01** | `ProjectContainer` = k8s Pod | `object-ws:…`; pause no-op | [14](14-project-containers/) |
+| **P-MCP-01** | Агент в Pod ↔ `cabinet.*` | Subset; не в Pod | Изоляция + контракт |
+| **P-CAS-01** | Delete Cabinet → все Projects wipe | CASCADE hard-delete partial | Archive vs wipe UX |
+| **P-INF-01** | MinIO / Kafka / Celery | Local FS / in-process | [13](13-platform-infra/) |
+| **P-KC-01** | Live Keycloak cutover | Часто `AUTH_MODE=test` | Cutover |
+| **P-UNI-01** | Универсальная иерархия (Admin→Employee без Company; local cabinets) | Не моделировано | Future после P-CO-* |
 
-| Gap | Сейчас в коде | Цель (канон 13) |
-|-----|---------------|-----------------|
-| Local workspace FS | `data/storage`, `local-ws:{key}`, path как SoT | **MinIO** (S3); DB хранит object refs |
-| In-process workers | `TRIGGER_WORKER` / idle asyncio в API lifespan | **Celery** + Redis |
-| Нет event bus | PG outbox-lite (`project_triggers`) как шина | **Kafka** для project triggers + platform events |
-| Нет Redis / MinIO / Kafka в стеке | только Postgres + local FS | Redis + MinIO + Kafka обязательны |
-| Lifespan без register | ad-hoc start/stop в `main.py` | `LifespanManager` + `LifespanResource` + infra managers в `core` |
+### Что уже близко к канону
 
-Связанные строки ниже («Durable bus», «Project container») закрываются этим P0-треком, не отдельным «когда-нибудь».
+| Тема | Статус |
+|------|--------|
+| Invite employees (Company) | есть (тонкий UI) |
+| Org cabinets list RO | есть (источник — employee-owned, не Admin-assign) |
+| Admin keys + containers | есть |
+| Company metrics aggregates | есть |
 
-| Target | Legacy docs | Код сейчас | Gap |
-|--------|-------------|------------|-----|
-| Platform Admin UI + metrics | M08 / admin screens | **stub** | Реализовать по [ux-contract](01-platform-admin/ux-contract.md) |
-| Company / Employee | Tenant / membership | **stub** | Schema + shells по [session](10-identity-keycloak/session.md) |
-| AI Provider Keys | env secrets | **stub** | Models/API + resolve policy; UI |
-| Mobile UI, no modals | widget-catalog | Theme + core widgets; no feature shells | EntityCollection / screens по [07](07-ui-mobile-core/) |
-| Cabinet **dynamic** + bundles | static packs / M00 | **stub** | Runtime + meta-UI + `cabinet.*` MCP по [05](05-cabinets/dynamic-cabinets.md) |
-| Starter equipment bundle | electronics-procurement | Pack JSON remnants | Bundle seed, не Flutter module |
-| Project container | agent-isolation | **stub** / object-ws (no Pod); admin «Bundles» ≠ containers | BC [14](14-project-containers/): entity + Port + NetworkPolicy Pod; phases P1–P4; blobs → MinIO (**P0**/13) |
-| Triggers / attachments | — | PG outbox-lite / local inbox | Durable bus = **Kafka** (**P0**); chat attach UI; object store |
-| AgentProviderPort | bot SDK | **stub** | Sidecar + persist + AgentEvent |
-| Keycloak OIDC | HS256 login | **stub** (+ infra/keycloak sketches) | Cutover + AppAuth |
-| OpenClaw / GLM | mentions | Нет | Не внедрять |
+## P0 — Platform infra
 
-## Решённые противоречия канона
+Канон: [13-platform-infra/](13-platform-infra/). План: [P0-platform-infra](11-implementation-plan/P0-platform-infra.md).
 
-| Было | Решение (зафиксировано) |
-|------|-------------------------|
-| Static cabinet code-packs vs dynamic | **Dynamic cabinets** (meta+bundle+MCP contracts); code-packs не канон ([05](05-cabinets/dynamic-cabinets.md)) |
-| Password в Company create vs Keycloak-only | Invite = email → Keycloak; нет password в Prodavan API |
-| `cli_subscription` vs ban personal CLI runtime | Учётная метка биллинга; **не** runtime credential ([02 domain](02-ai-provider-keys/domain.md)) |
-| Company = «вид пользователя» vs KC roles | Company = org; Company account = Employee + `company.admin` |
-| Admin создаёт «учётку» vs KC provisioning | Admin создаёт Company + KC invite company.admin |
-| CompanyApi → Projects на диаграмме | Projects создаёт Employee в cabinet; Company смотрит metrics read-only |
-| Admin metrics без usage events | `AgentEvent.usage` обязателен в порте ([adapter-port](08-agent-providers/adapter-port.md)) |
-| Project triggers vs platform events | Две шины ([triggers](06-projects-runtime/triggers.md)) |
-| AI key preference UI | `CompanyAgentPolicy` / Project override в resolve policy |
-| «Отклонение = дефект» vs multi-wave gap | Канон docs finished; код догоняет волнами ниже |
+| Gap | Сейчас | Цель |
+|-----|--------|------|
+| Local workspace FS | `data/storage`, `local-ws` | **MinIO** |
+| In-process workers | asyncio в API | **Celery** + Redis |
+| Нет event bus | PG outbox-lite | **Kafka** |
+| Lifespan ad-hoc | `main.py` | `LifespanManager` + infra managers |
 
-## Декомпозиция BC + контракты
+## Прочие gaps (модули)
 
-Изолируемые bounded contexts. Слои: `api` → `application` → `domain` ← `infrastructure`.
+| Target | Код сейчас | Gap |
+|--------|------------|-----|
+| Platform Admin UI + metrics | partial / stub | [01 ux](01-platform-admin/ux-contract.md) |
+| AI Provider Keys | partial | [02](02-ai-provider-keys/) |
+| Mobile UI, no modals | Theme + core; feature shells | [07](07-ui-mobile-core/) |
+| AgentProviderPort | stub / partial | [08](08-agent-providers/) |
+| OpenClaw / GLM | нет | **не внедрять** |
+
+## Бывшие «решения канона» → пересмотр
+
+Старые строки, которые **больше не цель** (заменены [00-entities](00-entities.md)):
+
+| Было зафиксировано | Теперь |
+|--------------------|--------|
+| Company = org без login; UI = Employee + `company.admin` | Company = org **+ KC** + **локальный Admin shell** (**P-CO-01**, **P-ID-01**) |
+| CompanyApi не ведёт Projects / Keys | Company **ведёт** containers + **свои** AI keys (**P-CO-02/03**) |
+| Employee сам создаёт cabinets; Company только metrics | Admin→Company cabinets RO; Company→Employee assign (**P-CO-04**, **P-CAB-01**) |
+| Keys только Admin inventory + bindings | `owner_scope` platform \| company (**P-CO-02**) |
+
+Остаётся в силе:
+
+| Тема | Решение |
+|------|---------|
+| Dynamic cabinets (не static code-packs) | да |
+| Password только в Keycloak | да |
+| `cli_subscription` ≠ runtime credential | да |
+| Admin metrics ← `AgentEvent.usage` | да |
+
+## Декомпозиция BC
 
 ```mermaid
 flowchart TB
-  subgraph identity [Identity]
-    KC[Keycloak_OIDC]
+  subgraph identity [Identity_Keycloak]
+    KC[Keycloak]
   end
   subgraph control [Control_plane]
     Admin[PlatformAdmin]
     Keys[AiProviderKeys]
-    Quotas[CabinetQuotas_Bundles]
   end
   subgraph org [Org_plane]
-    Company[Company]
-    Employees[Employees]
+    Company[Company_KC]
+    Employees[Employees_KC]
   end
   subgraph work [Work_plane]
     CabInst[CabinetInstance]
-    Runtime[CabinetRuntime_MetaUI]
+    Assign[CabinetAssignment]
     Project[Project]
-    Container[Container_Triggers]
-    Agent[AgentProviderPort]
+    Pod[ProjectContainer_Pod]
+    Agent[Agent_in_Pod]
   end
 
   KC --> Admin
   KC --> Company
   KC --> Employees
-  Admin --> Keys
-  Admin --> Quotas
   Admin --> Company
   Company --> Employees
-  Employees --> CabInst
-  Company -.->|"org metrics/policy"| CabInst
-  CabInst --> Runtime
+  Company --> CabInst
+  Company --> Assign
+  Assign --> Employees
+  Assign --> CabInst
+  Employees --> Project
   CabInst --> Project
-  Project --> Container
-  Runtime -->|"materialize + MCP packages"| Project
+  Project --> Pod
+  CabInst -->|"materialize meta"| Pod
+  Pod --> Agent
+  Agent -->|"cabinet.* MCP"| CabInst
   Keys --> Agent
-  Container --> Agent
 ```
 
 | BC | Ответственность | Запрещено |
 |----|-----------------|-----------|
-| Identity | OIDC, JWKS, Principal→Employee | Cabinets, AI keys |
-| Admin + Keys | Companies, quotas/bundles, keys, metrics | Workspace files, cabinet data rows |
-| Company / Employee | Invite; Employee create/import cabinets | Issue JWT; peer schema access |
-| Cabinet Runtime | Meta UI, schema, `cabinet.*`, MCP packages | Container lifecycle, raw AI secrets |
-| Projects / Runtime | Project, container_ref, triggers, attachments | Hardcoded domain packs |
-| Agent | Port + adapters + usage | GLM, OpenClaw, CLI sub as key |
-| UI core | Primitives + UX system | Feature-specific ListTile zoos |
+| Company | Локальный Admin: employees, containers, **company keys**, assign cabinets, policy narrow | Issue JWT; edit platform keys; peer schema без grant |
+| Admin + Keys | Companies (+KC), platform keys + bind, quotas, metrics, assign cabinets→company | Workspace files |
+| Cabinet Runtime | Meta UI, schema, `cabinet.*`, packages | Pod lifecycle |
+| Projects / Containers | Project, Pod port, triggers, materialize hydrate | Hardcoded domain packs |
+| Agent | Port + adapters in Pod | GLM, OpenClaw |
+| UI core | Primitives | Feature ListTile zoos |
 
-### Волны кода (после канона)
+### Волны (ориентир) — сначала Company parity
 
-Операционный план со слоями **L00–L09**, жёсткими DoD и реестром контрактов: **[11-implementation-plan/](11-implementation-plan/)**.  
-Живые карточки «что/как сделано»: **[12-layer-docs/](12-layer-docs/)**.
-
-1. Identity schema Company/Employee + headers enforcement → **L01** (+ **L00**)  
-2. Admin/Company/Employee shells по UX contracts → **L04**, **L05** (+ **L02**)  
-3. Key resolve + cabinet quotas/ACL → **L03**, **L04**, ACL в **L06**  
-4. Cabinet Runtime + meta UI + `cabinet.*` MCP → **L06**  
-5. Agent sidecar + persist + AgentEvent → **L08**  
-6. Container/triggers/attachments + MCP packages deploy → **L07**, **L09** (packages в **L06**)  
-
-Параллельный старт: **L00 ∥ L02 ∥ L03 ∥ каркас L06** — см. [sequence.md](11-implementation-plan/sequence.md).
+1. **P-CO-01..04** + **P-CO-02** model `owner_scope` — Company shell = Admin-like ([03](03-companies/))  
+2. **P-ID-01 / P-ID-02** — Company KC principal  
+3. **P-CAB-01** — Employee↔Cabinet grants  
+4. **P-INF-01 / P-POD-01 / P-MAT-01** — MinIO + Pod  
+5. **P-UNI-01** — универсальная иерархия (после паритета Company)  
+6. Остальное — L04–L08 по [11](11-implementation-plan/)
 
 ### Явно не делать
 
 - OpenClaw; GLM; personal Max/Pro как tenant runtime credentials  
 - Канонизация `POST /auth/login`  
-- Static `profile_id` code-pack modules как канон  
-- Admin/Company логика внутри Employee screens  
+- Static `profile_id` code-packs  
 - JWT reissue на switch/open  
+- Подгонять канон под object-ws «как контейнер»
 
 ## Ссылки
 
-- Identity session: [10-identity-keycloak/session.md](10-identity-keycloak/session.md)
-- UX system: [07-ui-mobile-core/ux-system.md](07-ui-mobile-core/ux-system.md)
-- Keys policy: [02-ai-provider-keys/domain.md](02-ai-provider-keys/domain.md)
-- Cabinet contract: [05-cabinets/module-contract.md](05-cabinets/module-contract.md)
-- Agent port: [08-agent-providers/adapter-port.md](08-agent-providers/adapter-port.md)
-- Implementation plan: [11-implementation-plan/](11-implementation-plan/)
-- Legacy: [../LEGACY.md](../LEGACY.md)
+- [00-entities](00-entities.md) · [03 Companies](03-companies/) · [02 Keys](02-ai-provider-keys/)  
+- [05 assignment](05-cabinets/assignment.md) · [14 containers](14-project-containers/) · [10 session](10-identity-keycloak/session.md)

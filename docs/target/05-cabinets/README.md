@@ -1,21 +1,23 @@
-# 05 — Cabinets (dynamic)
+# 05 — Cabinets
 
-Кабинет — **динамическая** сущность: данные + метаданные UI + MCP registry; UI строится интерпретатором; ИИ достраивает через контракты; export/import bundle.
+**Кабинет** = абстрактный реестр + meta/data в своей PG schema. UI и домен — из метаданных.
 
-**Главный документ:** [dynamic-cabinets.md](dynamic-cabinets.md).
+Старт: **[entity.md](entity.md)** · иерархия: [00-entities](../00-entities.md).
 
 | Документ | Содержание |
 |----------|------------|
-| [dynamic-cabinets.md](dynamic-cabinets.md) | Концепция, ownership, isolation, patterns |
-| [architecture.md](architecture.md) | Слои runtime vs instance |
-| [meta-and-ui.md](meta-and-ui.md) | Table/view/tab meta → Flutter |
-| [mcp-packages.md](mcp-packages.md) | Custom MCP zip: agent builds & deploys |
-| [mcp-contracts.md](mcp-contracts.md) | Platform `cabinet.*` + deploy entrypoints |
+| [entity.md](entity.md) | Оболочка vs meta — канон сущности |
+| [assignment.md](assignment.md) | Company назначает Employee ↔ Cabinet |
+| [materialize-from-meta.md](materialize-from-meta.md) | Meta / MinIO → Pod `/workspace` |
+| [dynamic-cabinets.md](dynamic-cabinets.md) | Patterns, isolation, MCP |
+| [architecture.md](architecture.md) | Runtime vs instance |
+| [meta-and-ui.md](meta-and-ui.md) | tables/tabs/views → Flutter |
+| [mcp-packages.md](mcp-packages.md) | Custom MCP zip |
+| [mcp-contracts.md](mcp-contracts.md) | Platform `cabinet.*` |
 | [bundle-format.md](bundle-format.md) | Export/import |
-| [default-cabinets.md](default-cabinets.md) | Base template + starter bundles |
-| [packaging.md](packaging.md) | Изоляция schema / эволюция |
-| [module-contract.md](module-contract.md) | Runtime SPI (платформа) |
-| [backend.md](backend.md) | Persistence defaults |
-| [frontend.md](frontend.md) | Dynamic shell |
+| [default-cabinets.md](default-cabinets.md) | Base + starter bundles |
+| [packaging.md](packaging.md) | Schema isolation |
+| [module-contract.md](module-contract.md) | Runtime SPI |
+| [backend.md](backend.md) / [frontend.md](frontend.md) | Persistence / shell |
 
-См. [06-projects-runtime](../06-projects-runtime/), [08-agent-providers](../08-agent-providers/).
+Связано: [06 Projects](../06-projects-runtime/), [14 Containers](../14-project-containers/), [08 Agents](../08-agent-providers/).

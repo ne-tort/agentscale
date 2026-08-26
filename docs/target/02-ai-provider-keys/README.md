@@ -1,11 +1,13 @@
 # 02 — AI Provider Keys
 
-Унифицированная таблица ключей ИИ-провайдеров с профилями, продлением и привязкой к компаниям.
+Инвентарь ключей ИИ: **platform-owned** (Admin) и **company-owned** (Company CRUD).  
+Company в одном list видит свои + Admin-bound (RO).
 
 | Документ | Содержание |
 |----------|------------|
-| [domain.md](domain.md) | Модель сущности |
-| [api.md](api.md) | HTTP-контракт Admin |
+| [domain.md](domain.md) | `owner_scope`, resolve, api_kind |
+| [api.md](api.md) | Admin + Company HTTP |
 | [persistence.md](persistence.md) | Таблицы и секреты |
 
-Минимальный набор `provider`: **cursor**, **codex**, **claude_code**.
+Минимальный `provider`: **cursor**, **codex**, **claude_code**.  
+Связано: [03 Companies](../03-companies/), [01 Admin](../01-platform-admin/).

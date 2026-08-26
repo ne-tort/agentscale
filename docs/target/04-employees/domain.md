@@ -3,28 +3,32 @@
 ## Семантика
 
 Employee = человек (Keycloak `sub`) в Company.  
-Создаёт и владеет **динамическими кабинетами** (default); работает в projects внутри выбранного кабинета.
+Работает в кабинетах, которые **Company назначила** ([assignment](../05-cabinets/assignment.md)).  
+Создаёт Projects внутри назначенного кабинета (`cabinet_id` + `owner_employee_id`).
 
-## Жизненный цикл сессии (канон)
+Карта: [00-entities](../00-entities.md).
+
+## Жизненный цикл сессии
 
 1. OIDC login → access_token (Keycloak).
-2. API: `sub` → Employee; загрузить **owned / accessible CabinetInstances** из DB.
-3. `cabinets.length == 0` → EmptyPlaceholder + «Создать» / «Импорт».
-4. `cabinets.length == 1` → auto-enter; client `X-Cabinet-Id`.
+2. API: `sub` → Employee; загрузить **assigned** CabinetInstances.
+3. `cabinets.length == 0` → EmptyPlaceholder (нет назначений; создание кабинета — по политике Company, не «свободный zoo» без grant).
+4. `cabinets.length == 1` → auto-enter; `X-Cabinet-Id`.
 5. `cabinets.length > 1` → **CabinetSelectorPage**.
-6. Внутри: dynamic shell (meta tabs) + projects → workspace.
+6. Внутри: UI из meta + projects → Pod workspace.
 
 **Запрещено:** cabinets в JWT; reissue при switch.  
 См. [session.md](../10-identity-keycloak/session.md).
 
 ## Инварианты
 
-- Employee не видит Admin UI; не управляет чужими сотрудниками (без company.admin).
-- Создание кабинета: из Base или import bundle (квоты Company/Admin).
+- Employee не видит Admin UI; не управляет чужими сотрудниками.
+- Доступ к кабинету только через **active assignment**.
 - Смена кабинета — selector page; `X-Cabinet-Id` на клиенте.
 - Disabled employee → 403.
 
 ## Проекты
 
 `(company_id, cabinet_id, owner_employee_id)`.  
-Агент проекта может вызывать `cabinet.*` MCP **этого** cabinet_id.
+Агент: `cabinet.*` MCP **этого** cabinet_id.  
+Delete cabinet → проекты сотрудника в нём удаляются вместе со всеми остальными.

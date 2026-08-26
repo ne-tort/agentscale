@@ -1,54 +1,62 @@
 # Identity — session & entitlements (канон)
 
-## Семантика
+Карта сущностей: [00-entities](../00-entities.md).
 
-| Сущность | Что это | Не путать с |
-|----------|---------|-------------|
-| **Company** | Организация (org), бывший Tenant | User / login |
-| **Employee** | Человек с `keycloak_sub`, membership в Company | Company account как «логин компании» |
-| **Company account** | Employee с ролью `company.admin` (открывает Company UI) | Отдельная таблица «аккаунт компании» |
-| **Platform Admin** | Пользователь с realm role `platform.admin` | Employee компании |
+## Семантика: у кого Keycloak
 
-**Жёстко:** `Company ≠ User`. Один Employee может состоять в нескольких Company (редко); активная Company выбирается после login через selector или единственный membership.
+| Сущность | Keycloak | Смысл |
+|----------|----------|--------|
+| **Platform Admin** | Да, realm role `platform.admin` | Оператор платформы |
+| **Company** | Да, **орг-аккаунт** (company principal) | Логин в Company UI: сотрудники, assign кабинетов, квоты, метрики |
+| **Employee** | Да, `keycloak_sub` на Employee row | Работа в назначенных кабинетах |
 
-## Session model (законченный)
+Один человек может иметь несколько principals (редко): например platform.admin + employee membership — после login выбор контура.
+
+**Устарело как единственная модель:** «Company ≠ login; Company UI только через Employee + `company.admin`».  
+Допустимо временно в коде; **цель** — у Company свои KC-креды (см. [gap](../09-gap-map.md)).
+
+## Session model
 
 ```text
 OIDC access_token (Keycloak)
   → API: JWKS validate → Principal { sub, roles, email? }
-  → DB: Employee by keycloak_sub (+ memberships, owned/accessible cabinets)
+  → DB bind:
+       platform.admin → Admin contour
+       company principal → Company contour (company_id)
+       employee sub → Employee + memberships + cabinet assignments
 
 Контекст работы (НЕ в access_token):
   X-Cabinet-Id: <uuid>
-  X-Project-Id: <proj_*>   # когда операция project-scoped
+  X-Project-Id: <proj_*>
 ```
 
 | Инвариант | Правило |
 |-----------|---------|
-| API **не** issuer | `POST .../switch`, `.../open` **не** перевыпускают access JWT |
-| Entitlements | Только DB: membership + cabinet ownership/ACL (peers isolated) |
-| Cabinets в токене | **Запрещено** как канон (legacy HS256 claims — dual-verify only) |
-| Пароли | Только Keycloak; Prodavan API **не** принимает password на invite/create |
-| Authorization | Даже при claim `company_id` — re-check membership в DB |
+| API **не** issuer | switch/open **не** перевыпускают access JWT |
+| Entitlements | DB: membership + **cabinet assignment** + peer isolation |
+| Пароли | Только Keycloak; Prodavan API **не** принимает password |
+| Authorization | re-check в DB на каждый scoped запрос |
 
 ## Роли → UI contour
 
 | После OIDC | Shell |
 |------------|-------|
 | `platform.admin` | Admin |
-| `company.admin` (+ membership) | Company |
-| иначе employee membership | Employee (cabinet selector → workspace) |
+| company principal (org KC) | Company |
+| employee membership | Employee (cabinet selector → только **assigned**) |
 
-Если у человека и `company.admin`, и employee cabinets — после login: выбор контура page (`AppSelectorPage`: «Админ компании» / «Работа в кабинетах»), не modal.
+Если несколько контуров у одного человека — `AppSelectorPage`, не modal.
 
 ## Provisioning
 
-1. **Admin → create Company** → row в DB + (опционально) KC group/`company_id` attribute; invite first `company.admin` через Keycloak Admin API (email + required actions).
-2. **Company → invite Employee** → KC user create/invite + DB Employee stub со статусом `invited` → после первого login sync `keycloak_sub` → `active`.
-3. **Disable Employee** → DB status + (опционально) KC disable; API 403; не удалять историю проектов.
+1. **Admin → create Company** → DB Company + **Keycloak credentials для орг-аккаунта** (+ optional first human invite).
+2. **Company → invite Employee** → KC user + DB Employee `invited` → login sync `keycloak_sub` → `active`.
+3. **Company → assign Cabinet** → grant Employee↔Cabinet ([assignment](../05-cabinets/assignment.md)).
+4. **Disable Employee** → DB status + optional KC disable; API 403.
 
 ## Связанные документы
 
-- [architecture.md](architecture.md) — IdP / clients / JWKS
-- [migration.md](migration.md) — cutover с HS256
-- [../04-employees/domain.md](../04-employees/domain.md) — employee session flow
+- [architecture.md](architecture.md) — IdP / clients / JWKS  
+- [migration.md](migration.md) — cutover  
+- [../03-companies/domain.md](../03-companies/domain.md)  
+- [../04-employees/domain.md](../04-employees/domain.md)  

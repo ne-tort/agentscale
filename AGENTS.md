@@ -11,12 +11,16 @@
 
 | Что | Где | Когда читать |
 |-----|-----|----------------|
-| Суть / принципы продукта | [`00-principles.md`](docs/target/00-principles.md), [`00-glossary.md`](docs/target/00-glossary.md) | Старт любой задачи |
-| Канон BC | [`01`](docs/target/01-platform-admin/)…[`10`](docs/target/10-identity-keycloak/) | Модуль по теме |
-| Platform infra (P0) | [`13-platform-infra/`](docs/target/13-platform-infra/) | До крупных backend-задач |
-| Gap / запреты | [`09-gap-map.md`](docs/target/09-gap-map.md) | Перед крупными решениями |
-| План слоёв | [`11-implementation-plan/`](docs/target/11-implementation-plan/) | Перед реализацией |
-| As-built | [`12-layer-docs/`](docs/target/12-layer-docs/) | Сначала при работе со слоем |
+| **Сущности / иерархия** | [`00-entities.md`](docs/target/00-entities.md) | Старт любой задачи |
+| Принципы / глоссарий | [`00-principles.md`](docs/target/00-principles.md), [`00-glossary.md`](docs/target/00-glossary.md) | Рядом с entities |
+| Канон BC | [`01`](docs/target/01-platform-admin/)…[`14`](docs/target/14-project-containers/) | Модуль по теме |
+| Containers = **Pod** | [`14-project-containers/`](docs/target/14-project-containers/) | Runtime изоляция Project |
+| Cabinets = оболочка+meta | [`05-cabinets/entity.md`](docs/target/05-cabinets/entity.md) | Кабинеты |
+| Platform infra | [`13-platform-infra/`](docs/target/13-platform-infra/) | До крупных backend-задач |
+| Gap (код ≠ канон) | [`09-gap-map.md`](docs/target/09-gap-map.md) | Перед крупными решениями |
+| As-built | [`12-layer-docs/`](docs/target/12-layer-docs/) | Что уже в коде |
+
+**Правило:** `docs/target/` = как **должно**; `12-layer-docs` / код = что есть. Не возводить object-ws без Pod в «канон контейнера».
 
 ## Git / CI / кластер (GitOps)
 
@@ -54,8 +58,8 @@ ORM-модель → autogenerate в PR → CI (upgrade + alembic check) → mer
 
 ## Суть продукта
 
-Admin → Company → Employee → **динамический Cabinet** → **Project**.  
-Не static `profile_id` code-packs.
+Admin (KC) → Company (KC) как **локальный Admin** (сотрудники, контейнеры, свои AI keys) → Employee → Project → Pod.  
+Канон: [`docs/target/00-entities.md`](docs/target/00-entities.md) · Company: [`03-companies/`](docs/target/03-companies/) · Gaps: [`09-gap-map.md`](docs/target/09-gap-map.md).
 
 ## Субагенты
 

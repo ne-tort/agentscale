@@ -1,38 +1,43 @@
 # Companies — UX contract
 
-Эталон: **Notion Members** + org metrics.  
-Кабинеты: [dynamic](../05-cabinets/dynamic-cabinets.md). EntityCollection + laconic UI.
+Эталон IA: **тот же паттерн, что Admin shell**, но локальный org.  
+EntityCollection + laconic UI. Не Notion-only metrics page.
 
 ## IA (bottom NavigationBar)
 
-| Tab | Экран |
-|-----|-------|
-| Сводка | `CompanyOverviewPage` — сотрудники, подписка, usage |
-| Сотрудники | `CompanyEmployeesPage` → detail |
-| Кабинеты | `CompanyCabinetsPage` — EntityCollection instances компании (owner, name, counts) read-mostly |
-| Профиль | `CompanyProfilePage` |
+| Tab | Экран | Как у Admin |
+|-----|-------|-------------|
+| Сводка | `CompanyOverviewPage` | Alerts + usage (сотрудники, ключи, контейнеры, подписка) |
+| Сотрудники | `CompanyEmployeesPage` → detail | Как Admin→Companies: invite, enable/disable, assign cabinets |
+| Контейнеры | `CompanyContainersPage` → detail | Как Admin→Containers: list/pause/resume/delete **своих** сотрудников |
+| Ключи ИИ | `CompanyAiKeyListPage` → detail | Как Admin→Keys: CRUD **local**; Admin-bound — badge RO, без edit |
+| Кабинеты | `CompanyCabinetsPage` | Admin-assigned: list/detail **RO** (MVP). Future: local CRUD |
+| Профиль | `CompanyProfilePage` | Org profile / subscription read |
 
-Не открывать Employee dynamic shell как основной путь Company; явный «Кабинеты» только для org overview (или switch contour если тот же человек — employee).
+Не открывать Employee dynamic shell как основной путь Company.
 
-## Потоки
+## Ключи ИИ (одна таблица / один list)
 
-### Invite
+| Строка | Происхождение | UI |
+|--------|---------------|-----|
+| Local | Company создала (`owner_scope=company`) | Full CRUD, rotate, renew — паритет Admin forms (SDK + API key) |
+| Linked | Admin bound platform key | Видна в том же list; chip «от платформы»; **нельзя** edit/rotate/delete |
 
-Form: email, display name. **Нет** multi-select статических cabinet grants.  
-CTA: «Создать» / «Сохранить».
+## Контейнеры
 
-### Enable / disable
+List всех Project/Container сотрудников компании.  
+Actions: pause / resume / delete — те же confirm pages, что Admin.  
+Chat/rows кабинета — default off.
 
-Full pages / `DangerConfirmPage`.
+## Кабинеты (MVP)
 
-### Кабинеты (org)
+List Admin-assigned (+ org-visible). Tap → RO summary (не meta edit).  
+CTA «Создать» — **не** в MVP (future local cabinets).
 
-List: name, owner employee, updated — tap → read-only summary (counts, not rows).  
-Нет редактирования чужих tables без break-glass policy.
+## Invite / disable
 
-### Метрики
-
-Projects, tokens, last activity — drill-down read-only. Chat сотрудника — default off.
+Form: email, display name; без password.  
+Enable/disable: full pages / `DangerConfirmPage`.
 
 ## Density / feedback
 

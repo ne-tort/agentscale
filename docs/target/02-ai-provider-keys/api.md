@@ -1,20 +1,35 @@
 # AI Provider Keys — API
 
-Префикс: `/api/v1/admin/ai-keys`. Только `platform.admin`.
+Два префикса, **один** домен ([domain](domain.md) `owner_scope`).
 
-## Endpoints
+## Admin — `/api/v1/admin/ai-keys`
+
+Только `platform.admin`. Видит все keys; создаёт обычно `owner_scope=platform` (может создавать company-owned от имени org).
 
 | Method | Path | Описание |
 |--------|------|----------|
 | GET | `/admin/ai-keys` | Список (без секрета) |
-| POST | `/admin/ai-keys` | Создать (body включает `secret` один раз) |
+| POST | `/admin/ai-keys` | Создать (`secret` один раз; default `owner_scope=platform`) |
 | GET | `/admin/ai-keys/{id}` | Detail + bindings |
 | PATCH | `/admin/ai-keys/{id}` | Имя, цена, notes, status, next_renewal_at |
 | POST | `/admin/ai-keys/{id}/renew` | `{ "months": 1..12 }` |
 | POST | `/admin/ai-keys/{id}/rotate-secret` | Новый secret |
-| PUT | `/admin/ai-keys/{id}/companies` | Заменить набор company ids |
+| PUT | `/admin/ai-keys/{id}/companies` | Bindings (только platform keys) |
 | DELETE | `/admin/ai-keys/{id}` | Удалить (если политика позволяет) |
 | GET | `/admin/ai-keys/audit-events` | Audit log (`?key_id=` optional) |
+
+## Company — `/api/v1/companies/{company_id}/ai-keys`
+
+Company principal (или interim `company.admin`).
+
+| Method | Path | Описание |
+|--------|------|----------|
+| GET | `.../ai-keys` | Local company-owned **∪** Admin-bound platform (флаг `writable` / `source`) |
+| POST | `.../ai-keys` | Создать **только** `owner_scope=company` для этого `company_id` |
+| GET | `.../ai-keys/{id}` | Detail если в scope list |
+| PATCH / renew / rotate / DELETE | `.../ai-keys/{id}` | **Только** local company-owned; bound platform → **403** |
+
+Company **не** вызывает `PUT .../companies` (bindings — только Admin).
 
 ## Audit events
 

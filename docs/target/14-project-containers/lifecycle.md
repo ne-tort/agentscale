@@ -1,84 +1,34 @@
-# Project Containers — lifecycle
+# ProjectContainer — lifecycle
 
-## Кто кого вызывает
+## Каскад
 
 ```text
-Admin UI (Контейнеры)
-  └─▶ ProjectService.pause | resume | delete
-         └─▶ ContainerRuntimePort.pause | start | delete
-
-Key disable cascade
-  └─▶ ProjectService.pause
-         └─▶ ContainerRuntimePort.pause
-
-Idle pause / company suspend
-  └─▶ ProjectService.pause / stop_company_runtime
-         └─▶ (per project) ContainerRuntimePort.pause
+Admin / key disable / idle
+  → ProjectService.pause|resume|delete
+    → ContainerRuntimePort.pause|start|delete
 ```
-
-**Запрещено:** key → ContainerPort напрямую; ContainerPort → delete Company; UI → raw kubectl.
 
 ## Операции
 
-| Op | Project side | Container side |
-|----|--------------|----------------|
-| **create project** | insert Project, materialize | `ensure_created` (workspace ready; P3: schedule pod) |
-| **pause** | status=paused; cancel ACTIVE sessions | `pause` (stop compute; keep volume/blobs) |
-| **resume** | require valid AI key; status=active; drain triggers | `start` (only after Project gate OK) |
-| **delete** | soft-delete; wipe workspace policy | `delete` (+ wipe if purge) |
-| **force-kill** | optional project stay paused/failed | `force_kill` then reconcile |
-| **reconcile** | read desired from Project.status | list orphans; fix drift |
+| Op | Project | Container |
+|----|---------|-----------|
+| **create** | insert, materialize workspace → MinIO | `ensure` + `start` (Pod + hydrate) |
+| **pause** | status=paused; cancel sessions | sync workspace → MinIO; **delete Pod**; status=`paused` |
+| **resume** | AI key gate; status=active | **new Pod** + hydrate from MinIO; status=`running` |
+| **delete** | soft-delete | wipe MinIO + delete Pod |
+| **force-kill** | опционально paused/failed | grace=0 Pod delete |
 
-## Desired state
+## Почему pause ≠ «замороженный Pod»
 
-Источник желаемого состояния для Container — **Project.status** (+ explicit admin force-kill).
+Paused Pod держит RAM requests. При многих спящих проектах это дорого.  
+Канон: **compute off**, файлы в MinIO (дешёвое хранение). Image слои Docker общие на нодах — не копируются на каждый проект.
 
-| Desired | Action if drift |
-|---------|-----------------|
-| Project active, Container paused | `start` (если resume path уже прошёл gate) |
-| Project paused, Container running | `pause` |
-| Project deleted, Pod exists | `delete` / force |
-| Pod exists, no Project / deleted | zombie → `force_kill` + audit |
+Resume медленнее (create Pod + hydrate), зато масштабируется.
 
-Reconcile **не** auto-resume Project при появлении ключа (см. [02 domain](../02-ai-provider-keys/domain.md)).
+## Desired state / reconcile
 
-## Create path (целевой)
+Источник желаемого: `Project.status` (+ admin force-kill).  
+Drift (Project paused, Pod ещё Running) → Port.pause.  
+Zombie Pod (нет Project / deleted) → force_kill + audit.
 
-```text
-1. ProjectService.create
-2. Materialize workspace → object store (13)
-3. ContainerRuntimePort.ensure_created(project_id, workspace_key)
-4. (P3) Create Pod/Job with hydrate init + NetworkPolicy
-5. Store runtime_ref on ProjectContainer (+ opaque on Project)
-```
-
-## Pause path (уже частично в коде)
-
-```text
-ProjectService.pause
-  → stop_project_runtime (sessions)
-  → ContainerRuntimePort.pause   # today: pause_container no-op stub
-```
-
-Целевой stub остаётся в модуле 14; `application/projects/container_lifecycle.py` → thin adapter to Port.
-
-## Resume path
-
-```text
-ProjectService.resume
-  → resolve_credentials (NO_AI_KEY → abort, project stays paused)
-  → Project ACTIVE
-  → ContainerRuntimePort.start
-```
-
-## Delete path
-
-```text
-ProjectService.delete(purge_workspace=…)
-  → ContainerRuntimePort.delete(wipe=purge)
-  → soft-delete Project
-```
-
-## Force-kill / zombies
-
-См. [errors-ops.md](errors-ops.md), [k8s-contract.md](k8s-contract.md). Admin detail: действие «Force kill» → Port.force_kill → audit `container.force_killed`.
+Key re-enable **не** auto-resume Project.

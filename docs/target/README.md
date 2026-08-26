@@ -1,42 +1,38 @@
 # Target architecture — канон
 
-Документация **целевой** архитектуры Prodavan. Всё в `docs/01`…`10` — [LEGACY](../LEGACY.md).  
-Код `apps/*` — [STUB](../../STUB.md); инструкции агенту — [AGENTS.md](../../AGENTS.md).
+Документация **целевой** архитектуры Prodavan. Legacy: [LEGACY](../LEGACY.md).  
+Агенту: [AGENTS.md](../../AGENTS.md). Код может отставать — канон важнее stub.
 
-## Суть (одной строкой)
+## Суть
 
-Универсальный облачный SaaS: Admin → Company → Employee → **динамический Cabinet** (meta+data+MCP, UI из схемы) → **Project** (агент достраивает кабинет контрактами).
+Admin (KC) → Company (KC, **локальный Admin**: employees / containers / own AI keys) → Employee → Cabinet → Project → Pod.  
+Фокус сущности: [03-companies](03-companies/). Gaps: [09-gap-map](09-gap-map.md).
 
-## Порядок чтения
+## Читать сначала
 
-1. [Принципы](00-principles.md) ← суть продукта + правила (вкл. §7 infra)
-2. [Глоссарий](00-glossary.md)
-3. [Identity / Keycloak](10-identity-keycloak/) ← session + entitlements
-4. [Platform Admin](01-platform-admin/) → [AI Provider Keys](02-ai-provider-keys/)
-5. [Companies](03-companies/) → [Employees](04-employees/)
-6. [Cabinets](05-cabinets/) → [Projects & runtime](06-projects-runtime/) → [**Project Containers**](14-project-containers/)
-7. [UI mobile core](07-ui-mobile-core/) (+ [ux-system](07-ui-mobile-core/ux-system.md))
-8. [Agent providers](08-agent-providers/) (+ [workspace-context](08-agent-providers/workspace-context.md))
-9. [Platform infra](13-platform-infra/) ← **P0**: Kafka / MinIO / Celery / Redis / core managers
-10. [Gap map](09-gap-map.md)
-11. [Implementation plan](11-implementation-plan/) ← P0 + слои L00–L09, DoD, контракты, чеклисты
-12. [Layer docs (as-built)](12-layer-docs/) ← что сделано / как / семантика / связи по факту кода
+1. **[Сущности и иерархия](00-entities.md)** ← карта продукта  
+2. [Принципы](00-principles.md) · [Глоссарий](00-glossary.md)  
+3. [Cabinets](05-cabinets/) · [Projects](06-projects-runtime/) · [**Containers / Pods**](14-project-containers/)  
+4. [Identity](10-identity-keycloak/) · [Admin](01-platform-admin/) · [AI Keys](02-ai-provider-keys/)  
+5. [UI](07-ui-mobile-core/) · [Agents](08-agent-providers/) · [Infra](13-platform-infra/)  
+6. [Gap](09-gap-map.md) · [As-built](12-layer-docs/) · [Plan](11-implementation-plan/)
 
 ## Карта модулей
 
 | ID | Модуль | Суть |
 |----|--------|------|
-| 10 | Identity (Keycloak) | OIDC IdP; JWKS; без локального password-login |
-| 01 | Platform Admin | UI админа: компании, ключи ИИ, мониторинг, квоты/policy кабинетов |
-| 02 | AI Provider Keys | Унифицированные ключи Cursor / Codex / Claude + профили |
-| 03 | Companies | Org: сотрудники, cabinet quotas/metrics, policy |
-| 04 | Employees | Сотрудник: выбор кабинета → работа в кабинете |
-| 05 | Cabinets | **Dynamic** instances: meta-UI, MCP contracts, bundles |
-| 06 | Projects & runtime | Project unit, materialize, триггеры, чат; workspace layout (pointer → 14) |
-| 07 | UI mobile core | Material 3, EntityCollection, laconic, без модалок |
-| 08 | Agent providers | SDK matrix, wrap, permissions, models, usage, Admin control |
-| 09 | Gap map | target ↔ legacy ↔ stub-код (+ блок P0 infra) |
-| 11 | Implementation plan | P0 platform-infra + L00–L09: контракты, DoD, sequence, checklists |
-| 12 | Layer docs (as-built) | Живая семантика/контракты/связи + оценка качества 0–10 |
-| 13 | Platform infra | **P0**: Kafka, MinIO, Celery, Redis, LifespanManager / core managers |
-| 14 | Project Containers | Isolator BC: `ProjectContainer`, Port, NetworkPolicy Pod; admin Контейнеры ≠ Бандлы |
+| 00 | Entities | Иерархия и краткие определения |
+| 10 | Identity | Keycloak OIDC |
+| 01 | Platform Admin | Компании, ключи, контейнеры |
+| 02 | AI Provider Keys | Ключи Cursor/Codex/Claude |
+| 03 | Companies | Org, quotas, policy |
+| 04 | Employees | Работа в кабинетах |
+| 05 | Cabinets | Оболочка + meta/data |
+| 06 | Projects | Unit работы, triggers, chat |
+| 07 | UI mobile core | M3, EntityCollection |
+| 08 | Agent providers | SDK adapters |
+| 09 | Gap map | канон ↔ код |
+| 11 | Implementation plan | Слои / DoD |
+| 12 | Layer docs | As-built |
+| 13 | Platform infra | Kafka, MinIO, Celery, Redis |
+| 14 | Project Containers | **Isolated Pod** per Project |

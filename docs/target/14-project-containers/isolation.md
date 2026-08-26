@@ -1,49 +1,35 @@
-# Project Containers — isolation
+# ProjectContainer — isolation
 
 ## Цель
 
-Песочница проекта **изолирована** от платформенного API и от чужих проектов. Доступ наружу — **только интернет** (и DNS). Нет доступа к Postgres платформы, Redis, Kafka internal, vault mount API, соседним PVC.
+Pod проекта изолирован от:
 
-## Принципы
+- платформенного API / Postgres / Redis / Kafka / Keycloak admin;
+- чужих Project Pod и их volumes;
+- hostPath и platform secrets.
 
-1. **Отдельный ServiceAccount** для sandbox pods (не `prodavan-api` / не `prodavan-sandbox` probe SA как runtime identity агента).
-2. **NetworkPolicy**: default deny ingress+egress; allow DNS (kube-dns); allow egress TCP 80/443 (и при необходимости S3/MinIO endpoint **только** если hydrate идёт из pod — иначе hydrate только init из API-side object store copy).
-3. **Нет** hostPath к API storage; **нет** mount Secret с platform DB / OIDC admin.
-4. **AI credentials** в pod — только через узкий inject на старте сессии / env из resolve (короткоживущие), не весь vault.
-5. **Peer isolation**: один Project → один Pod; labels обязательны; запрет cross-namespace без явной политики.
-6. Workspace files: hydrate from **object store** ([13](../13-platform-infra/)) at create/start; live MinIO CSI mount — future enhancement (hole today).
+Разрешено: DNS + интернет (80/443). Данные кабинета — scoped MCP / schema creds, не суперюзер platform DB.
 
-## NetworkPolicy (канон-скелет)
+## Правила
+
+1. Отдельный ServiceAccount sandbox (не API SA).
+2. NetworkPolicy: deny-all; allow DNS; egress 80/443.
+3. Нет mount Secret с DB/OIDC admin.
+4. AI credentials — узкий inject на сессию.
+5. 1 Project → 1 Pod; labels обязательны.
+6. Workspace: SoT = MinIO; в Pod — hydrate (CSI live mount — усиление позже).
+
+## NetworkPolicy (скелет)
 
 ```text
-ingress: deny all (except same-pod / metrics scrape if needed via API proxy)
+ingress: deny
 egress:
-  - UDP/TCP 53 → kube-dns
-  - TCP 443, 80 → 0.0.0.0/0   # internet
-  # optional: TCP → MinIO CIDR only if pod pulls blobs itself
+  - DNS → kube-dns
+  - TCP 80,443 → internet
 ```
 
-Платформенные сервисы (Postgres, Redis, Kafka, Keycloak admin) — **не** в allowlist.
+## Не изоляция
 
-## RBAC
-
-| Actor | Rights |
-|-------|--------|
-| Container module (API SA with Role) | create/get/list/watch/delete pods, jobs; get metrics; get PVC usage |
-| Sandbox Pod SA | минимальный; без list secrets cluster-wide |
-| Probe Job SA (`prodavan-sandbox`) | остаётся для PVC probe; **не** runtime project pods |
-
-## Volume / data copy
-
-| Phase | Mechanism |
-|-------|-----------|
-| Materialize | API / worker пишет object-ws prefix (существующий path) |
-| Start pod | initContainer copies or CSI mounts workspace → `/workspace` |
-| Pause | Pod stopped; PVC/ephemeral keep per profile; blobs remain in MinIO |
-| Delete | Port.delete + Project wipe tree |
-
-## Что не считается изоляцией
-
-- Локальный `MCP_SANDBOX_SPAWN` на API node
+- Процессы MCP на ноде API (`MCP_SANDBOX_SPAWN`)
 - Общий PVC API без NetworkPolicy
-- `object-ws` без pod (логический container) — transitional, не end-state
+- «Только object-ws без Pod»

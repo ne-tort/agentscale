@@ -8,6 +8,8 @@
 |--------|-------|
 | `id` PK | `aik_*` |
 | `name` | |
+| `owner_scope` | `platform` \| `company` |
+| `owner_company_id` | FK nullable; required if company-owned |
 | `provider` | indexed |
 | `api_kind` | indexed |
 | `secret_ciphertext` / `secret_ref` | не логировать |
@@ -20,10 +22,12 @@
 
 ### `company_ai_key_bindings`
 
+Привязка **platform** key → company (не нужна для `owner_scope=company`).
+
 | Column | Notes |
 |--------|-------|
 | `company_id` FK | |
-| `ai_provider_key_id` FK | |
+| `ai_provider_key_id` FK | platform-owned key |
 | PK | (`company_id`, `ai_provider_key_id`) |
 
 ## Секреты

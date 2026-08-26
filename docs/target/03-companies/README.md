@@ -1,11 +1,11 @@
 # 03 — Companies
 
-Company = org-контур (`company.admin`). Не User.
+**Фокус выравнивания канона:** Company = локальный Admin-контур (сотрудники, контейнеры, AI keys, кабинеты RO).
 
 | Документ | Содержание |
 |----------|------------|
-| [domain.md](domain.md) | Invite без password, org cabinets, policy |
-| [ui.md](ui.md) | Экраны (кратко) |
-| [ux-contract.md](ux-contract.md) | Профессиональный IA / DoD |
+| [domain.md](domain.md) | Паритет Admin, keys ownership, containers, future hierarchy |
+| [ui.md](ui.md) | Tabs |
+| [ux-contract.md](ux-contract.md) | IA / DoD |
 
-См. [01-platform-admin](../01-platform-admin/), [04-employees](../04-employees/), [10-identity-keycloak/session](../10-identity-keycloak/session.md).
+См. [00-entities](../00-entities.md), [01-platform-admin](../01-platform-admin/), [02-ai-provider-keys](../02-ai-provider-keys/), [14](../14-project-containers/).

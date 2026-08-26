@@ -1,30 +1,30 @@
-# Dynamic cabinets — смена концепции (канон)
+# Dynamic cabinets — концепция
 
-> **Supersedes** прежнюю модель «статический code-pack на каждый домен (`equipment-procurement` как Flutter/Python модуль)».  
-> Статичность остаётся только у **платформенного runtime** кабинета и у **базового шаблона**. Домен = данные + метаданные + MCP-определения.
+> Канон сущности (оболочка + meta): **[entity.md](entity.md)**.  
+> Иерархия продукта: [00-entities](../00-entities.md).
 
-## Суть одной фразой
-
-**Кабинет** — динамическая, импортируемая/экспортируемая сущность сотрудника: изолированное хранилище + каталог таблиц/вкладок/MCP + UI, который **строится из метаданных**, а не из захардкоженных экранов. ИИ в проекте достраивает кабинет через **контрактные MCP** (таблицы, вкладки, инструменты), и результат можно переиспользовать в других проектах и у других сотрудников.
+**Кабинет** — оболочка workspace: изолированная schema + meta (таблицы/вкладки/MCP/docs/files) + UI из метаданных.  
+Company **назначает** кабинет сотрудникам ([assignment](assignment.md)). ИИ достраивает через `cabinet.*` MCP; при старте Pod — [materialize](materialize-from-meta.md).
 
 ```text
-Company ──owns (org)──► CabinetInstance ◄──creates/edits── Employee
-                              ▲
-                              └── oversees ── Platform Admin
-        peers cannot read each other's schemas
+Company ──owns──► CabinetInstance ◄──assigned── Employee
+                        │
+                        └── Projects → ProjectContainers (Pods)
 ```
+
+Peers без assignment не читают schema.
 
 ---
 
-## Решения (зафиксировано по ответам)
+## Решения (зафиксировано)
 
 | Тема | Решение |
 |------|---------|
-| **Ownership** | Кабинет принадлежит одновременно **Employee** (создатель/редактор), **Company** (орг-владение, метрики, политика) и виден **Platform Admin** (надзор, квоты, break-glass). Сотрудники **не** видят чужие instances. |
-| **Import** | Всегда **deep copy** → новый `cabinet_id` / новая schema; не live-link на чужие данные |
-| **Catalog** | Employee создаёт свободно в рамках квот. Platform/Company держат **опциональный** catalog starter bundles (удобство, не гейт). Модерация bundle’ов компании — later, не блокер v1 |
-| **Custom MCP** | ИИ **разрабатывает** MCP-пакет (скрипты/файлы + manifest) и сдаёт через **унифицированный platform tool** (`cabinet.mcp_packages.deploy` zip) со строгим контрактом. Пакет переиспользуется в проектах кабинета. См. [mcp-packages.md](mcp-packages.md) |
-| **Изоляция данных** | **Schema per CabinetInstance** (`cab_inst_<id>`). Копии схем независимы: правка своей не трогает чужие. Employee A не имеет доступа к schema Employee B |
+| **Ownership / access** | Company org-owns cabinet; **assign** Employee↔Cabinet; Admin — надзор/квоты. Без grant — нет доступа. |
+| **Import** | Всегда **deep copy** → новый `cabinet_id` / schema |
+| **Catalog** | Starter bundles опциональны; создание instance — Company / делегированное право Employee |
+| **Custom MCP** | Пакет через `cabinet.mcp_packages.deploy` (строгий контракт) |
+| **Изоляция** | Schema per CabinetInstance; нет peer access без assignment |
 
 ---
 
@@ -36,7 +36,7 @@ Company ──owns (org)──► CabinetInstance ◄──creates/edits── E
 | Доменные вкладки в Flutter `cabinets/equipment_…` | Вкладки из **meta.tabs** + generic renderers |
 | Новый кабинет = копировать код | Новый = clone Base / import **bundle** |
 | SPI доменных commands в Python pack | **Cabinet Runtime SPI** платформы + user MCP defs |
-| Admin allowlist profile_id | Admin: квоты/feature; Employee **создаёт** кабинеты |
+| Admin allowlist profile_id | Admin квоты; Company assign cabinets; meta UI |
 | «Подбор оборудования» = отдельный модуль | **Starter bundle** (seed tables+meta+MCP) в каталоге |
 
 Изоляция monolit→service ([packaging](packaging.md)) **сохраняется** для *runtime*, не для доменных packs кода.

@@ -1,70 +1,47 @@
 # Глоссарий (target)
 
-Канонический словарь. Legacy-термины — только для маппинга к старому коду/docs.
+Карта сущностей: **[00-entities.md](00-entities.md)**.  
+Legacy — только маппинг.
 
 ---
 
-## Роли и контуры UI
-
-| Термин | Определение | Legacy-аналог |
-|--------|-------------|---------------|
-| **Platform Admin** | Оператор платформы. Свой UI. Компании, AI-ключи, **Контейнеры** (project runtime), **Кабинеты** (stub); квоты/policy; кросс-мониторинг. Admin chrome «Бандлы» — **deprecate** (starter `cabinet.bundle` остаётся packaging кабинетов, не admin tab). | `platform.admin` |
-| **Company** | Организация-клиент (org). Свой UI-контур для `company.admin`. **Не** User. | Tenant |
-| **Employee** | Человек с `keycloak_sub`; membership в Company; работа в cabinets. | `tenant.member` / operator |
-| **Company account** | Employee с ролью `company.admin` (открывает Company UI). | Tenant admin user |
-
-Один физический человек может иметь разные контуры (редко); в продукте контур определяется ролью при логине.
-
----
-
-## Домен продукта
+## Identity (все с Keycloak)
 
 | Термин | Определение |
 |--------|-------------|
-| **Prodavan** | Универсальный облачный SaaS автоматизации задач агентами (не только закупки). |
-| **Cabinet** | Динамический instance: schema + meta (tables/tabs/views/MCP) + data; UI из метаданных; export/import. |
-| **Base cabinet** | Обязательный шаблон instance (projects, chat, context, Tables, Tools + `cabinet.*` contracts). |
-| **Cabinet bundle** | Переносимый zip/json артефакт meta(+seed); import = новая копия. **Не** Project Container. |
-| **Starter bundle** | Seed `cabinet.bundle` в каталоге (employee import). **Не** k8s/runtime; admin label «Бандлы» deprecate. |
-| **Cabinet module** | *(устарело как code-pack)* → см. Cabinet Runtime + bundle. |
-| **Cabinet ownership** | Employee (operate) + Company (org) + Platform Admin (oversee); peers isolated. |
-| **MCP package** | Agent-built zip (code + mcp manifest), deployed via `cabinet.mcp_packages.deploy`, reused across projects of the cabinet. |
-| **Meta catalog** | Системные таблицы описания схемы/UI/MCP внутри instance. |
-| **Dynamic tab** | Вкладка UI, зарегистрированная в meta.tabs, не Flutter-feature. |
-| **Cabinet allowlist** | *(legacy)* → квоты + optional starter bundle catalog. |
-| **Project (unit)** | Изолированная единица работы внутри кабинета; агент может мутировать cabinet meta через MCP. Связан с **Project Container** (1:1 MVP). |
-| **Project Container** | BC runtime-изоляции проекта: сущность + единственный k8s writer (`ContainerRuntimePort`). Канон: [14-project-containers](14-project-containers/). As-is transitional: `object-ws:{key}` без Pod. **Не** Cabinet bundle. |
-| **Materialize** | Сборка workspace проекта из кабинета (prompts/skills/MCP registry → FS). |
-| **Trigger** | Событие, запускающее/продолжающее агента (сообщение чата, webhook кабинета, cron…). |
-| **AI Provider Key** | Сущность ключа доступа к ИИ-провайдеру с профилем, сроками и привязками к компаниям. |
-| **api_kind** | Тип интеграции ключа: `cursor_sdk`, `openai_api`, `openrouter`, `anthropic_api`, `cli_subscription`, … |
-| **provider** | Продуктовый провайдер минимального набора: `cursor`, `codex`, `claude_code` (+ расширяемо). |
+| **Platform Admin** | Оператор платформы; KC `platform.admin`. |
+| **Company** | Организация + KC орг-аккаунт; **локальный Admin**-контур (сотрудники, контейнеры, свои AI keys). [03](03-companies/) |
+| **Employee** | Человек с `keycloak_sub`; membership в Company (future: и без Company). |
+| **Company account** *(переходный)* | As-built = Employee + `company.admin`. Цель — отдельный KC principal Company. |
 
 ---
 
-## UI (mobile core)
+## Домен
 
 | Термин | Определение |
 |--------|-------------|
-| **AppListItem** | Единый элемент списка во всём приложении. |
-| **AppSelectorPage** | Полноэкранная страница выбора (single/multi); замена dropdown/modal. |
-| **Modal ban** | Запрет диалогов, bottom sheets, popup menus для выбора и confirm. |
+| **Cabinet** | Оболочка workspace: реестр + **meta/data**. UI из meta. [05](05-cabinets/entity.md) |
+| **Cabinet assignment** | Grant Company: Employee ↔ Cabinet. [assignment](05-cabinets/assignment.md) |
+| **Base cabinet** | Шаблон (projects, chat, Tables, Tools + `cabinet.*`). |
+| **Cabinet bundle** | Zip/json meta(+seed) для import. Не runtime. |
+| **MCP package** | Zip; deploy через `cabinet.mcp_packages.deploy`. |
+| **Meta** | tables/tabs/views/MCP defs/docs/file refs внутри cabinet schema. |
+| **Project** | Единица работы: Employee в Cabinet; 1:1 Container. |
+| **Project Container** | **k8s Pod** + workspace MinIO. [14](14-project-containers/). |
+| **Materialize** | Meta (+ MinIO file ids) → workspace Pod. [materialize](05-cabinets/materialize-from-meta.md) |
+| **Trigger** | Событие запуска/продолжения агента. |
+| **AI Provider Key** | Ключ ИИ: `owner_scope=platform\|company`; Company видит bound platform RO. [02](02-ai-provider-keys/) |
+| **provider** / **api_kind** | `cursor` \| `codex` \| … / `cursor_sdk` \| … |
+
+Устарело: static `profile_id` code-packs; «только owner создал кабинет без company assign» как единственный ACL.
 
 ---
 
-## Runtime / агенты
+## UI / Runtime
 
 | Термин | Определение |
 |--------|-------------|
-| **AgentProviderPort** | Абстракция запуска агента (create/resume/stream/cancel). |
-| **Cursor SDK adapter** | Primary реализация порта через `@cursor/sdk`. |
-| **OpenClaw** | Исторический концепт в legacy-docs; **не** используется как runtime в Prodavan. |
-
----
-
-## Подписка и метрики
-
-| Термин | Определение |
-|--------|-------------|
-| **Company subscription** | Срок доступа компании к сервису Prodavan; может быть **бессрочной**. |
-| **Usage metrics** | Счётчики потребления: сотрудники, проекты, токены, сообщения агента, storage… |
+| **AppListItem** / **AppSelectorPage** | List / full-screen select. |
+| **Modal ban** | Без dialog/sheet для выбора и confirm. |
+| **AgentProviderPort** | create/resume/stream/cancel. |
+| **Usage metrics** | Сотрудники, проекты, токены, storage… |
