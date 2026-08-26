@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/theme/app_color_tokens.dart';
+import 'package:prodavan/core/theme/app_insets.dart';
 
 /// Toolbar / chrome icon action — default button kind (see docs/target/07 buttons).
+///
+/// Hit target and padding match list trailing chrome ([AppInsets]) so AppBar
+/// actions align with radios / chevrons / inline `+` on the same right edge.
 class AppIconButton extends StatelessWidget {
   const AppIconButton({
     super.key,
@@ -23,10 +27,21 @@ class AppIconButton extends StatelessWidget {
     return IconButton(
       onPressed: onPressed,
       tooltip: tooltip,
-      icon: Icon(icon),
+      icon: Icon(icon, size: 22),
+      padding: EdgeInsets.zero,
+      visualDensity: VisualDensity.compact,
+      constraints: const BoxConstraints(
+        minWidth: AppInsets.trailingIconExtent,
+        minHeight: AppInsets.trailingIconExtent,
+      ),
       style: IconButton.styleFrom(
-        minimumSize: const Size(48, 48),
-        foregroundColor: selected ? colors.primary : null,
+        padding: EdgeInsets.zero,
+        minimumSize: const Size(
+          AppInsets.trailingIconExtent,
+          AppInsets.trailingIconExtent,
+        ),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        foregroundColor: selected ? colors.primary : colors.onSurface,
         backgroundColor: selected ? colors.primary.withValues(alpha: 0.12) : null,
       ),
     );

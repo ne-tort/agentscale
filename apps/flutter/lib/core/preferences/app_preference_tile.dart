@@ -85,13 +85,14 @@ class AppPreferenceInlineActions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         _wrap(
           onGuardBlur,
           IconButton(
-            icon: const Icon(Icons.check_rounded, size: 22),
+            icon: Icon(Icons.check_rounded, size: 22, color: onSurface),
             visualDensity: VisualDensity.compact,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(
@@ -105,7 +106,7 @@ class AppPreferenceInlineActions extends StatelessWidget {
         _wrap(
           onGuardBlur,
           IconButton(
-            icon: const Icon(Icons.close_rounded, size: 22),
+            icon: Icon(Icons.close_rounded, size: 22, color: onSurface),
             visualDensity: VisualDensity.compact,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(
@@ -125,6 +126,7 @@ class AppPreferenceInlineActions extends StatelessWidget {
                     ? Icons.visibility_off_rounded
                     : Icons.visibility_rounded,
                 size: 22,
+                color: onSurface,
               ),
               visualDensity: VisualDensity.compact,
               padding: EdgeInsets.zero,

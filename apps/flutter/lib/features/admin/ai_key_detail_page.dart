@@ -266,7 +266,7 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
           ),
           if (type.isApiKey)
             AppNavPreference(
-              title: l10n.commonProvider,
+              title: l10n.adminHttpEndpoint,
               icon: Icons.cloud_outlined,
               subtitle: Text(_providerSubtitle(l10n)),
               onTap: _pickProvider,
@@ -304,7 +304,7 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
             },
           ),
           AppSubscriptionPreference(
-            title: l10n.adminNextRenewal,
+            title: l10n.adminSubscription,
             endsAt: nextDisplay,
             emptyLabel: l10n.commonNotSet,
             onEndsAtSave: (raw) async {
@@ -324,11 +324,12 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
               await _load();
             },
           ),
-          AppNavPreference(
-            title: l10n.adminRenewPlusOneMonth,
-            icon: Icons.update_rounded,
-            onTap: _renewKey,
-          ),
+          if (nextDisplay.trim().isNotEmpty)
+            AppNavPreference(
+              title: l10n.adminRenewPlusOneMonth,
+              icon: Icons.update_rounded,
+              onTap: _renewKey,
+            ),
           if (status != 'disabled')
             AppNavPreference(
               title: l10n.adminDisableKey,

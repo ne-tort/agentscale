@@ -2,9 +2,11 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/app_preference_tile.dart';
 import 'package:prodavan/core/preferences/app_value_preference.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_insets.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
+import 'package:prodavan/core/widgets/app_hairline_divider.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Expand-to-edit add field (Hiddify clients style) with inline + button.
@@ -110,6 +112,7 @@ class _AppInlineAddFieldState extends State<AppInlineAddField> {
   Widget _field(BuildContext context) {
     final theme = Theme.of(context);
     final l10n = AppLocalizations.of(context);
+    final onSurface = context.appColors.onSurface;
 
     if (_expanded) {
       return AppPreferenceTile(
@@ -153,7 +156,7 @@ class _AppInlineAddFieldState extends State<AppInlineAddField> {
       enabled: !_saving,
       trailing: IconButton(
         tooltip: l10n.commonAdd,
-        icon: const Icon(Icons.add_rounded, size: 22),
+        icon: Icon(Icons.add_rounded, size: 28, color: onSurface),
         padding: EdgeInsets.zero,
         visualDensity: VisualDensity.compact,
         constraints: const BoxConstraints(
@@ -175,7 +178,7 @@ class _AppInlineAddFieldState extends State<AppInlineAddField> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         field,
-        const Divider(height: 1, thickness: 1),
+        const AppHairlineDivider(),
       ],
     );
   }

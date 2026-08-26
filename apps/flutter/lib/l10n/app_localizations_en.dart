@@ -207,7 +207,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminEditBindings => 'Edit bindings';
 
   @override
-  String get adminEndsAt => 'Ends at';
+  String get adminEndsAt => 'Subscription';
 
   @override
   String get adminDateFormatHint => 'DD.MM.YY';
@@ -216,8 +216,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminInvalidDate => 'Format: DD.MM.YY or DD.MM.YYYY';
 
   @override
-  String get adminEndsAtIfNotLifetime =>
-      'Ends at (YYYY-MM-DD, if not lifetime)';
+  String get adminEndsAtIfNotLifetime => 'Subscription (if not lifetime)';
+
+  @override
+  String get adminSubscription => 'Subscription';
 
   @override
   String adminEnterIntegerMin(String min) {
@@ -263,10 +265,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminTypeApiKey => 'API key';
 
   @override
-  String get adminNextRenewal => 'Renewal date';
+  String get adminNextRenewal => 'Subscription';
 
   @override
-  String get adminAddHttpProvider => 'Add provider';
+  String get adminAddHttpProvider => 'Add HTTP endpoint';
+
+  @override
+  String get adminHttpEndpoint => 'HTTP endpoint';
 
   @override
   String get adminHttpBaseUrl => 'Base URL';

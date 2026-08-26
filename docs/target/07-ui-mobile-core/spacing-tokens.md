@@ -17,7 +17,7 @@ Named insets (код `AppInsets`, поверх шкалы):
 |-------|----------|------------|
 | `trailingActionRight` | `AppSpacing.sm` (8) | Правый отступ trailing chrome: ListTile / preference / AppListItem / inline `+` / radio |
 | `trailingIconExtent` | 40 | Hit-target ширины compact IconButton |
-| `appBarActionsRight` | `AppSpacing.lg` (24) | AppBar `actionsPadding` |
+| `appBarActionsRight` | `= trailingActionRight` (8) | AppBar `actionsPadding` — тот же правый край, что у list trailing |
 
 Если родитель уже даёт горизонтальный padding — компенсировать (`trailingActionRight − parentPad`), иначе визуальный край уезжает.
 

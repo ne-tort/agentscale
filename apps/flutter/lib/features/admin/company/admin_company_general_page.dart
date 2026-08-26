@@ -17,6 +17,7 @@ class AdminCompanyGeneralPage extends StatelessWidget {
     return ListenableBuilder(
       listenable: ctrl,
       builder: (context, _) {
+        final hasEnds = ctrl.subscriptionEnds.trim().isNotEmpty;
         return AppScaffold(
           title: Text(l10n.adminCompanyGeneral),
           body: ListView(
@@ -61,9 +62,16 @@ class AdminCompanyGeneralPage extends StatelessWidget {
                 onSave: ctrl.savePhone,
               ),
               AppSubscriptionPreference(
+                title: l10n.adminSubscription,
                 endsAt: ctrl.subscriptionEnds,
                 onEndsAtSave: (v) => ctrl.saveSubscription(endsAt: v),
               ),
+              if (hasEnds)
+                AppNavPreference(
+                  title: l10n.adminRenewPlusOneMonth,
+                  icon: Icons.update_rounded,
+                  onTap: () => ctrl.renewSubscriptionMonth(),
+                ),
             ],
           ),
         );

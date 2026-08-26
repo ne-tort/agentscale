@@ -28,8 +28,23 @@ abstract final class AiHttpProviderPayload {
     'custom',
   ];
 
-  static const agentProviders = ['codex', 'claude_code', 'cursor'];
   static const authSchemes = ['bearer', 'x-api-key', 'none'];
+
+  static String agentProviderForApiKind(String apiKind) => switch (apiKind) {
+        'anthropic_api' => 'claude_code',
+        'cursor' => 'cursor',
+        _ => 'codex',
+      };
+
+  static Map<String, dynamic> defaultsForCustom() => {
+        apiKind: 'custom',
+        agentProvider: 'codex',
+        baseUrl: '',
+        openaiCompatible: true,
+        authScheme: 'bearer',
+        chatCompletionsPath: '/v1/chat/completions',
+        modelsPath: '/v1/models',
+      };
 }
 
 /// Editable catalog picker for AI HTTP providers (`ai.http_providers`).
@@ -73,6 +88,7 @@ class AiHttpProviderSelectPage extends StatefulWidget {
           payload: {
             ...((r['payload'] as Map?)?.cast<String, dynamic>() ?? const {}),
             'title': r['title'],
+            'seeded': r['seeded'] == true,
           },
         );
       }
@@ -112,6 +128,7 @@ class _AiHttpProviderSelectPageState extends State<AiHttpProviderSelectPage> {
               payload: {
                 ...((r['payload'] as Map?)?.cast<String, dynamic>() ??
                     const {}),
+                'seeded': r['seeded'] == true,
               },
             ),
         ];
@@ -157,15 +174,7 @@ class _AiHttpProviderSelectPageState extends State<AiHttpProviderSelectPage> {
       catalogId: kAiHttpProvidersCatalogId,
       title: name.trim(),
       subtitle: null,
-      payload: const {
-        AiHttpProviderPayload.apiKind: 'custom',
-        AiHttpProviderPayload.agentProvider: 'codex',
-        AiHttpProviderPayload.baseUrl: '',
-        AiHttpProviderPayload.openaiCompatible: true,
-        AiHttpProviderPayload.authScheme: 'bearer',
-        AiHttpProviderPayload.chatCompletionsPath: '/v1/chat/completions',
-        AiHttpProviderPayload.modelsPath: '/v1/models',
-      },
+      payload: AiHttpProviderPayload.defaultsForCustom(),
     );
     await _reload();
     if (!mounted) return;
@@ -175,6 +184,7 @@ class _AiHttpProviderSelectPageState extends State<AiHttpProviderSelectPage> {
       subtitle: created['subtitle'] as String?,
       payload: {
         ...((created['payload'] as Map?)?.cast<String, dynamic>() ?? const {}),
+        'seeded': created['seeded'] == true,
       },
     );
     await Navigator.of(context).push<void>(
@@ -206,14 +216,14 @@ class _AiHttpProviderSelectPageState extends State<AiHttpProviderSelectPage> {
     final l10n = AppLocalizations.of(context);
     if (_loading && _items.isEmpty) {
       return AppScaffold(
-        title: Text(l10n.commonProvider),
+        title: Text(l10n.adminHttpEndpoint),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
 
     final selected = _selectedId;
     return AppCatalogSelectPage(
-      title: l10n.commonProvider,
+      title: l10n.adminHttpEndpoint,
       items: _items,
       selectedIds: selected == null ? const {} : {selected},
       popOnSelect: true,
@@ -229,6 +239,10 @@ class _AiHttpProviderSelectPageState extends State<AiHttpProviderSelectPage> {
 }
 
 /// Preference editor for one HTTP provider catalog entry (immediate saves).
+///
+/// Seeded presets: name only (endpoints known). Custom OpenAPI-compatible:
+/// base URL + auth + paths. No OpenAI-compat checkbox (always true for custom).
+/// `agent_provider` is derived from api_kind for resolve — not shown in UI.
 class AiHttpProviderEditPage extends StatefulWidget {
   const AiHttpProviderEditPage({super.key, required this.item});
 
@@ -242,11 +256,13 @@ class _AiHttpProviderEditPageState extends State<AiHttpProviderEditPage> {
   late String _title;
   late String _baseUrl;
   late String _apiKind;
-  late String _agentProvider;
-  late bool _openaiCompatible;
   late String _authScheme;
   late String _chatPath;
   late String _modelsPath;
+
+  /// OpenAPI-compatible custom endpoints (incl. seeded Ollama/Cursor) expose
+  /// base URL / auth / paths. Known cloud presets only allow renaming.
+  bool get _isCustomEndpoint => _apiKind == 'custom';
 
   @override
   void initState() {
@@ -258,12 +274,6 @@ class _AiHttpProviderEditPageState extends State<AiHttpProviderEditPage> {
     if (!AiHttpProviderPayload.apiKinds.contains(_apiKind)) {
       _apiKind = 'custom';
     }
-    _agentProvider =
-        p[AiHttpProviderPayload.agentProvider]?.toString() ?? 'codex';
-    if (!AiHttpProviderPayload.agentProviders.contains(_agentProvider)) {
-      _agentProvider = 'codex';
-    }
-    _openaiCompatible = p[AiHttpProviderPayload.openaiCompatible] != false;
     _authScheme = p[AiHttpProviderPayload.authScheme]?.toString() ?? 'bearer';
     if (!AiHttpProviderPayload.authSchemes.contains(_authScheme)) {
       _authScheme = 'bearer';
@@ -274,15 +284,23 @@ class _AiHttpProviderEditPageState extends State<AiHttpProviderEditPage> {
         p[AiHttpProviderPayload.modelsPath]?.toString() ?? '/v1/models';
   }
 
-  Map<String, dynamic> get _payload => {
-        AiHttpProviderPayload.apiKind: _apiKind,
-        AiHttpProviderPayload.agentProvider: _agentProvider,
-        AiHttpProviderPayload.baseUrl: _baseUrl.trim(),
-        AiHttpProviderPayload.openaiCompatible: _openaiCompatible,
-        AiHttpProviderPayload.authScheme: _authScheme,
-        AiHttpProviderPayload.chatCompletionsPath: _chatPath.trim(),
-        AiHttpProviderPayload.modelsPath: _modelsPath.trim(),
-      };
+  String get _resolvedAgentProvider {
+    if (widget.item.id == 'cursor') return 'cursor';
+    return AiHttpProviderPayload.agentProviderForApiKind(_apiKind);
+  }
+
+  Map<String, dynamic> get _payload {
+    final openaiCompat = _apiKind != 'anthropic_api';
+    return {
+      AiHttpProviderPayload.apiKind: _apiKind,
+      AiHttpProviderPayload.agentProvider: _resolvedAgentProvider,
+      AiHttpProviderPayload.baseUrl: _baseUrl.trim(),
+      AiHttpProviderPayload.openaiCompatible: openaiCompat,
+      AiHttpProviderPayload.authScheme: _authScheme,
+      AiHttpProviderPayload.chatCompletionsPath: _chatPath.trim(),
+      AiHttpProviderPayload.modelsPath: _modelsPath.trim(),
+    };
+  }
 
   String? _hostSubtitle() {
     final raw = _baseUrl.trim();
@@ -305,19 +323,6 @@ class _AiHttpProviderEditPageState extends State<AiHttpProviderEditPage> {
     );
   }
 
-  String _apiKindLabel(AppLocalizations l10n, String kind) => switch (kind) {
-        'openai_api' => l10n.adminHttpApiKindOpenai,
-        'anthropic_api' => l10n.adminHttpApiKindAnthropic,
-        'openrouter' => l10n.adminHttpApiKindOpenrouter,
-        _ => l10n.adminHttpApiKindCustom,
-      };
-
-  String _agentLabel(AppLocalizations l10n, String v) => switch (v) {
-        'cursor' => l10n.adminTypeCursorSdk,
-        'claude_code' => l10n.adminTypeClaudeSdk,
-        _ => l10n.adminTypeCodexSdk,
-      };
-
   String _authLabel(AppLocalizations l10n, String v) => switch (v) {
         'x-api-key' => l10n.adminHttpAuthXApiKey,
         'none' => l10n.adminHttpAuthNone,
@@ -328,7 +333,7 @@ class _AiHttpProviderEditPageState extends State<AiHttpProviderEditPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      title: Text(l10n.commonProvider),
+      title: Text(l10n.adminHttpEndpoint),
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         children: [
@@ -344,98 +349,60 @@ class _AiHttpProviderEditPageState extends State<AiHttpProviderEditPage> {
               setState(() {});
             },
           ),
-          AppValuePreference<String>(
-            title: l10n.adminHttpBaseUrl,
-            icon: Icons.link_rounded,
-            value: _baseUrl,
-            hintText: 'https://api.openai.com/v1',
-            keyboardType: TextInputType.url,
-            presentValue: (v) =>
-                v.trim().isEmpty ? l10n.commonNotSet : v.trim(),
-            onSave: (v) async {
-              _baseUrl = v.trim();
-              await _patch();
-              setState(() {});
-            },
-          ),
-          AppChoicePreference<String>(
-            title: l10n.adminHttpApiKind,
-            icon: Icons.api_rounded,
-            value: _apiKind,
-            choices: AiHttpProviderPayload.apiKinds,
-            keyFor: (v) => v,
-            labelFor: (v) => _apiKindLabel(l10n, v),
-            onSave: (v) async {
-              _apiKind = v;
-              if (v == 'openai_api' || v == 'openrouter' || v == 'custom') {
-                _openaiCompatible = true;
-              } else if (v == 'anthropic_api') {
-                _openaiCompatible = false;
-              }
-              await _patch();
-              setState(() {});
-            },
-          ),
-          AppChoicePreference<String>(
-            title: l10n.adminPreferredProvider,
-            icon: Icons.smart_toy_outlined,
-            value: _agentProvider,
-            choices: AiHttpProviderPayload.agentProviders,
-            keyFor: (v) => v,
-            labelFor: (v) => _agentLabel(l10n, v),
-            onSave: (v) async {
-              _agentProvider = v;
-              await _patch();
-              setState(() {});
-            },
-          ),
-          AppSwitchPreference(
-            title: l10n.adminHttpOpenaiCompatible,
-            icon: Icons.sync_alt_rounded,
-            value: _openaiCompatible,
-            onChanged: (v) async {
-              _openaiCompatible = v;
-              await _patch();
-              setState(() {});
-            },
-          ),
-          AppChoicePreference<String>(
-            title: l10n.adminHttpAuthScheme,
-            icon: Icons.key_outlined,
-            value: _authScheme,
-            choices: AiHttpProviderPayload.authSchemes,
-            keyFor: (v) => v,
-            labelFor: (v) => _authLabel(l10n, v),
-            onSave: (v) async {
-              _authScheme = v;
-              await _patch();
-              setState(() {});
-            },
-          ),
-          AppValuePreference<String>(
-            title: l10n.adminHttpChatPath,
-            icon: Icons.chat_outlined,
-            value: _chatPath,
-            presentValue: (v) =>
-                v.trim().isEmpty ? l10n.commonNotSet : v.trim(),
-            onSave: (v) async {
-              _chatPath = v.trim().isEmpty ? '/v1/chat/completions' : v.trim();
-              await _patch();
-              setState(() {});
-            },
-          ),
-          AppValuePreference<String>(
-            title: l10n.adminHttpModelsPath,
-            icon: Icons.list_alt_rounded,
-            value: _modelsPath,
-            presentValue: (v) =>
-                v.trim().isEmpty ? l10n.commonNotSet : v.trim(),
-            onSave: (v) async {
-              _modelsPath = v.trim().isEmpty ? '/v1/models' : v.trim();
-              await _patch();
-              setState(() {});
-            },
-          ),
+          if (_isCustomEndpoint) ...[
+            AppValuePreference<String>(
+              title: l10n.adminHttpBaseUrl,
+              icon: Icons.link_rounded,
+              value: _baseUrl,
+              hintText: 'http://127.0.0.1:11434/v1',
+              keyboardType: TextInputType.url,
+              presentValue: (v) =>
+                  v.trim().isEmpty ? l10n.commonNotSet : v.trim(),
+              onSave: (v) async {
+                _baseUrl = v.trim();
+                await _patch();
+                setState(() {});
+              },
+            ),
+            AppChoicePreference<String>(
+              title: l10n.adminHttpAuthScheme,
+              icon: Icons.key_outlined,
+              value: _authScheme,
+              choices: AiHttpProviderPayload.authSchemes,
+              keyFor: (v) => v,
+              labelFor: (v) => _authLabel(l10n, v),
+              onSave: (v) async {
+                _authScheme = v;
+                await _patch();
+                setState(() {});
+              },
+            ),
+            AppValuePreference<String>(
+              title: l10n.adminHttpChatPath,
+              icon: Icons.chat_outlined,
+              value: _chatPath,
+              presentValue: (v) =>
+                  v.trim().isEmpty ? l10n.commonNotSet : v.trim(),
+              onSave: (v) async {
+                _chatPath =
+                    v.trim().isEmpty ? '/v1/chat/completions' : v.trim();
+                await _patch();
+                setState(() {});
+              },
+            ),
+            AppValuePreference<String>(
+              title: l10n.adminHttpModelsPath,
+              icon: Icons.list_alt_rounded,
+              value: _modelsPath,
+              presentValue: (v) =>
+                  v.trim().isEmpty ? l10n.commonNotSet : v.trim(),
+              onSave: (v) async {
+                _modelsPath = v.trim().isEmpty ? '/v1/models' : v.trim();
+                await _patch();
+                setState(() {});
+              },
+            ),
+          ],
         ],
       ),
     );

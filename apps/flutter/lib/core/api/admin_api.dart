@@ -340,6 +340,14 @@ class AdminApi {
     _throwIfError(res);
   }
 
+  Future<void> deleteAiKey(String keyId) async {
+    final res = await http.delete(
+      _uri('/admin/ai-keys/$keyId'),
+      headers: _headers,
+    );
+    _throwIfError(res);
+  }
+
   Future<Map<String, dynamic>> renewAiKey({
     required String keyId,
     int months = 1,

@@ -21,6 +21,10 @@
 При любом SDK поле «Провайдер» скрыто. При **API key** — editable catalog picker (`AppCatalogSelectPage` + seed OpenAI / Anthropic / OpenRouter / Cursor).  
 `cli_subscription` в Type UI не показывается.
 
+**API key ≠ выбор runtime-агента в UI.** Каталог `ai.http_providers` описывает **HTTP endpoint** (OpenAPI-compatible / Clowbot).  
+`payload.agent_provider` пишется в ключ для resolve (`cursor` / `codex` / `claude_code`) и **выводится из seed / `api_kind`**, а не выбирается отдельно в форме HTTP-провайдера.  
+Clowbot в списке `agent_provider` нет: это будущий HTTP-клиент к любому OpenAPI-совместимому endpoint из каталога, а не ещё один SDK-runtime рядом с Cursor/Codex/Claude.
+
 Resolve-контракт и adapters **не меняются** — UI только маппит в существующие enums.
 
 ## Сущность `AiProviderKey`
@@ -90,17 +94,21 @@ Admin CRUD: `/admin/catalogs/{catalog_id}/entries`. Seed idempotent при пе�
 
 ### Payload (Clowbot / OpenAPI-compatible)
 
+Платформа работает только с **OpenAPI-совместимыми** HTTP endpoints (Chat Completions / Models).  
+Отдельный UI-чекбокс `openai_compatible` не нужен: для seed-пресетов значение фиксировано; для `custom` всегда `true` (Anthropic seed — Messages API, `openai_compatible=false` только в payload seed).
+
 | Ключ | Тип | Смысл |
 |------|-----|--------|
 | `api_kind` | string | `openai_api` \| `anthropic_api` \| `openrouter` \| `custom` |
-| `agent_provider` | string | `codex` \| `claude_code` \| `cursor` |
+| `agent_provider` | string | `codex` \| `claude_code` \| `cursor` — для resolve SDK-ключа; **не** поле UI редактора каталога |
 | `base_url` | string | Origin + prefix (Ollama: `http://127.0.0.1:11434/v1`) |
-| `openai_compatible` | bool | Chat Completions / Models как у OpenAI |
+| `openai_compatible` | bool | Хранится в payload; UI не редактирует |
 | `auth_scheme` | string | `bearer` \| `x-api-key` \| `none` |
 | `chat_completions_path` | string | Относительный path |
 | `models_path` | string | Относительный path для list models |
 
-Seed: OpenAI, Anthropic, OpenRouter, Cursor, Ollama. UI edit — preference page с мгновенным PATCH.
+Seed: OpenAI, Anthropic, OpenRouter, Cursor, Ollama.  
+**UI edit:** `api_kind` ≠ `custom` (облачные пресеты) — только имя; `custom` (Ollama/Cursor/свой endpoint) — base URL, auth, paths. Без выбора `agent_provider` и без openai-compatible switch.
 
 ## Инварианты
 

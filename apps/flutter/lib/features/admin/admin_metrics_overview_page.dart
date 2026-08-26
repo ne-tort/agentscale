@@ -5,6 +5,7 @@ import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
+import 'package:prodavan/core/widgets/app_hairline_divider.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/stat_tile.dart';
@@ -206,13 +207,16 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
                       AppSpacing.md,
                       AppSpacing.sm,
                       AppSpacing.md,
-                      AppSpacing.xs,
+                      AppSpacing.sm,
                     ),
                     child: Text(
                       l10n.adminAlerts,
-                      style: Theme.of(context).textTheme.titleSmall,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
                     ),
                   ),
+                  const AppHairlineDivider(),
                   Expanded(
                     child: AppEntityCollection(
                       mode: AppEntityCollectionMode.table,

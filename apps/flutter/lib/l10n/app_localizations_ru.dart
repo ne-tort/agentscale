@@ -207,7 +207,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminEditBindings => 'Изменить привязки';
 
   @override
-  String get adminEndsAt => 'Окончание';
+  String get adminEndsAt => 'Подписка';
 
   @override
   String get adminDateFormatHint => 'ДД.ММ.ГГ';
@@ -216,8 +216,10 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminInvalidDate => 'Формат: ДД.ММ.ГГ или ДД.ММ.ГГГГ';
 
   @override
-  String get adminEndsAtIfNotLifetime =>
-      'Окончание (ГГГГ-ММ-ДД, если не бессрочная)';
+  String get adminEndsAtIfNotLifetime => 'Подписка (если не бессрочная)';
+
+  @override
+  String get adminSubscription => 'Подписка';
 
   @override
   String adminEnterIntegerMin(String min) {
@@ -263,10 +265,13 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminTypeApiKey => 'API key';
 
   @override
-  String get adminNextRenewal => 'Дата продления';
+  String get adminNextRenewal => 'Подписка';
 
   @override
-  String get adminAddHttpProvider => 'Добавить провайдера';
+  String get adminAddHttpProvider => 'Добавить HTTP endpoint';
+
+  @override
+  String get adminHttpEndpoint => 'HTTP endpoint';
 
   @override
   String get adminHttpBaseUrl => 'Base URL';

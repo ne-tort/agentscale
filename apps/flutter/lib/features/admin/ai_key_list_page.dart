@@ -7,6 +7,7 @@ import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_inline_add_field.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/danger_confirm_page.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/admin/ai_http_provider_select_page.dart';
 import 'package:prodavan/features/admin/ai_key_detail_page.dart';
@@ -108,6 +109,46 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
         .then((_) => _reload());
   }
 
+  Future<void> _editKey(AppEntityRow row) async {
+    _openKey(row);
+  }
+
+  Future<void> _deleteKey(AppEntityRow row) async {
+    final l10n = AppLocalizations.of(context);
+    final ok = await DangerConfirmPage.push(
+      context,
+      title: l10n.commonDelete,
+      message: row.title,
+      confirmLabel: l10n.commonDelete,
+    );
+    if (!ok) return;
+    try {
+      await adminContext.api.deleteAiKey(row.id);
+      await _reload();
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    }
+  }
+
+  bool _keyEnabled(AppEntityRow row) {
+    for (final k in _keys) {
+      if (k['id'] == row.id) return k['status'] != 'disabled';
+    }
+    return true;
+  }
+
+  Future<void> _setKeyEnabled(AppEntityRow row, bool enabled) async {
+    try {
+      await adminContext.api.patchAiKey(
+        keyId: row.id,
+        status: enabled ? 'active' : 'disabled',
+      );
+      await _reload();
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    }
+  }
+
   String _typeLabel(AppLocalizations l10n, Map<String, dynamic> k) {
     final t = AiKeyIntegrationType.fromKey(
       provider: k['provider'] as String? ?? '',
@@ -198,6 +239,10 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
                   ),
                 ],
                 onOpen: _openKey,
+                onEdit: _editKey,
+                onDelete: _deleteKey,
+                enabledOf: _keyEnabled,
+                onEnabledChanged: _setKeyEnabled,
                 empty: EmptyPlaceholder(
                   title: l10n.adminNoAiKeys,
                   subtitle: l10n.adminCreateRuntimeKeyHint,

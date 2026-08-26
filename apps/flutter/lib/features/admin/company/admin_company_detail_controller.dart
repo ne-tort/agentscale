@@ -229,6 +229,9 @@ class AdminCompanyDetailController extends ChangeNotifier {
     if (!lifetime && endsIso == null) {
       throw FormatException('invalid date');
     }
+    if (!lifetime && !AppSubscriptionPreference.isValidDate(endsRaw)) {
+      throw FormatException('invalid date');
+    }
     await adminContext.api.setCompanySubscription(
       companyId: companyId,
       subscriptionLifetime: lifetime,
@@ -237,6 +240,13 @@ class AdminCompanyDetailController extends ChangeNotifier {
     subscriptionLifetime = lifetime;
     subscriptionEnds = endsRaw;
     await load();
+  }
+
+  Future<void> renewSubscriptionMonth() async {
+    final current = subscriptionEnds.trim();
+    if (current.isEmpty) return;
+    final next = addMonthsToSubscriptionDisplay(current, 1);
+    await saveSubscription(endsAt: next);
   }
 
   Future<void> savePolicy({

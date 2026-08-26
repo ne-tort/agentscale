@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/responsive/app_breakpoints.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
+import 'package:prodavan/core/theme/app_insets.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_list_item.dart';
+import 'package:prodavan/core/widgets/app_switch.dart';
 import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -48,10 +50,9 @@ class AppEntityRow {
 
 /// Unified list/table surface — primary entity management chrome (canon 07).
 ///
-/// Mode is controlled by the page (typically via [AppCollectionViewModeStore]
-/// + AppBar [AppCollectionViewModeButton]). When [mode] is null, falls back to
-/// breakpoint (wide → table, narrow → list).
-class AppEntityCollection extends StatelessWidget {
+/// Long-press enters mutate mode when [onEdit] / [onDelete] / [onEnabledChanged]
+/// are set (edit + delete icons; optional enable switch as rightmost).
+class AppEntityCollection extends StatefulWidget {
   const AppEntityCollection({
     super.key,
     required this.rows,
@@ -62,6 +63,10 @@ class AppEntityCollection extends StatelessWidget {
     this.loading = false,
     this.mode,
     this.primaryColumnLabel,
+    this.onEdit,
+    this.onDelete,
+    this.enabledOf,
+    this.onEnabledChanged,
   });
 
   final List<AppEntityRow> rows;
@@ -73,22 +78,101 @@ class AppEntityCollection extends StatelessWidget {
   final AppEntityCollectionMode? mode;
   final String? primaryColumnLabel;
 
+  final Future<void> Function(AppEntityRow row)? onEdit;
+  final Future<void> Function(AppEntityRow row)? onDelete;
+
+  /// When set with [onEnabledChanged], long-press shows a trailing switch.
+  final bool Function(AppEntityRow row)? enabledOf;
+  final Future<void> Function(AppEntityRow row, bool enabled)? onEnabledChanged;
+
+  @override
+  State<AppEntityCollection> createState() => _AppEntityCollectionState();
+}
+
+class _AppEntityCollectionState extends State<AppEntityCollection> {
   static const double _columnSpacing = 12;
   static const double _horizontalMargin = 12;
   static const double _primaryMinWidth = 140;
 
+  String? _editFocusId;
+
+  bool get _mutateEnabled =>
+      widget.onEdit != null ||
+      widget.onDelete != null ||
+      widget.onEnabledChanged != null;
+
   AppEntityCollectionMode _effectiveMode(BuildContext context) {
-    if (mode != null) return mode!;
+    if (widget.mode != null) return widget.mode!;
     return AppBreakpoints.isWide(context)
         ? AppEntityCollectionMode.table
         : AppEntityCollectionMode.list;
   }
 
   Alignment _alignment(AppEntityColumnAlign align) =>
-      align == AppEntityColumnAlign.end ? Alignment.centerRight : Alignment.centerLeft;
+      align == AppEntityColumnAlign.end
+          ? Alignment.centerRight
+          : Alignment.centerLeft;
 
   TextAlign _textAlign(AppEntityColumnAlign align) =>
       align == AppEntityColumnAlign.end ? TextAlign.right : TextAlign.left;
+
+  void _clearEdit() {
+    if (_editFocusId == null) return;
+    setState(() => _editFocusId = null);
+  }
+
+  void _enterEdit(AppEntityRow row) {
+    if (!_mutateEnabled) return;
+    setState(() => _editFocusId = row.id);
+  }
+
+  Widget _mutateTrailing(BuildContext context, AppEntityRow row) {
+    final l10n = AppLocalizations.of(context);
+    final onSurface = context.appColors.onSurface;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (widget.onEdit != null)
+          IconButton(
+            tooltip: l10n.commonEdit,
+            icon: Icon(Icons.edit_outlined, size: 20, color: onSurface),
+            padding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(
+              minWidth: AppInsets.trailingIconExtent,
+              minHeight: AppInsets.trailingIconExtent,
+            ),
+            onPressed: () async {
+              await widget.onEdit!(row);
+              if (mounted) _clearEdit();
+            },
+          ),
+        if (widget.onDelete != null)
+          IconButton(
+            tooltip: l10n.commonDelete,
+            icon: Icon(Icons.delete_outline, size: 20, color: onSurface),
+            padding: EdgeInsets.zero,
+            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(
+              minWidth: AppInsets.trailingIconExtent,
+              minHeight: AppInsets.trailingIconExtent,
+            ),
+            onPressed: () async {
+              await widget.onDelete!(row);
+              if (mounted) _clearEdit();
+            },
+          ),
+        if (widget.enabledOf != null && widget.onEnabledChanged != null)
+          AppSwitch(
+            value: widget.enabledOf!(row),
+            onChanged: (v) async {
+              await widget.onEnabledChanged!(row, v);
+              if (mounted) _clearEdit();
+            },
+          ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -97,13 +181,13 @@ class AppEntityCollection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (toolbar != null)
+        if (widget.toolbar != null)
           Padding(
             padding: const EdgeInsets.symmetric(
               horizontal: AppSpacing.md,
               vertical: AppSpacing.xs,
             ),
-            child: Row(children: [...?toolbar, const Spacer()]),
+            child: Row(children: [...?widget.toolbar, const Spacer()]),
           ),
         Expanded(child: _body(context, effective)),
       ],
@@ -112,28 +196,40 @@ class AppEntityCollection extends StatelessWidget {
 
   Widget _body(BuildContext context, AppEntityCollectionMode mode) {
     final l10n = AppLocalizations.of(context);
-    if (loading) {
+    if (widget.loading) {
       return const Center(child: CircularProgressIndicator(strokeWidth: 2));
     }
-    if (rows.isEmpty) {
-      return empty ?? EmptyPlaceholder(title: l10n.commonEmpty);
+    if (widget.rows.isEmpty) {
+      return widget.empty ?? EmptyPlaceholder(title: l10n.commonEmpty);
     }
     if (mode == AppEntityCollectionMode.list) {
-      // Vertical-only list padding — horizontal edge comes from AppListItem /
-      // AppInsets.trailingActionRight so trailing chrome aligns with prefs.
       return ListView.builder(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-        itemCount: rows.length,
+        itemCount: widget.rows.length,
         itemBuilder: (context, i) {
-          final row = rows[i];
+          final row = widget.rows[i];
+          final editing = _editFocusId == row.id;
           return Padding(
-            padding: EdgeInsets.only(bottom: i == rows.length - 1 ? 0 : AppSpacing.sm),
+            padding: EdgeInsets.only(
+              bottom: i == widget.rows.length - 1 ? 0 : AppSpacing.sm,
+            ),
             child: AppListItem(
               title: Text(row.title),
               subtitle: row.subtitle != null ? Text(row.subtitle!) : null,
               leading: row.leading,
-              trailing: row.trailing ?? const AppTrailingChevron(),
-              onTap: () => onOpen(row),
+              selected: editing,
+              trailing: editing
+                  ? _mutateTrailing(context, row)
+                  : (row.trailing ?? const AppTrailingChevron()),
+              onTap: () {
+                if (editing) {
+                  _clearEdit();
+                  return;
+                }
+                widget.onOpen(row);
+              },
+              onLongPress:
+                  _mutateEnabled ? () => _enterEdit(row) : null,
             ),
           );
         },
@@ -152,20 +248,21 @@ class AppEntityCollection extends StatelessWidget {
             ? constraints.maxWidth
             : maxTableWidth;
         final tableWidth = parentWidth.clamp(0.0, maxTableWidth).toDouble();
-        final primaryLabel = primaryColumnLabel ?? l10n.commonEntity;
-        final fixedWidth = columns.fold<double>(
+        final primaryLabel = widget.primaryColumnLabel ?? l10n.commonEntity;
+        final fixedWidth = widget.columns.fold<double>(
           0,
           (sum, c) => sum + (c.width ?? 0),
         );
+        final mutateCol =
+            _mutateEnabled ? AppInsets.trailingIconExtent * 3 + 24 : 0.0;
         final minTableWidth = _horizontalMargin * 2 +
             _primaryMinWidth +
             fixedWidth +
-            columns.length * _columnSpacing;
+            mutateCol +
+            widget.columns.length * _columnSpacing;
         final needsScroll = minTableWidth > tableWidth;
 
-        // Material DataTable draws row hairlines from Theme.dividerColor even when
-    // dividerThickness is 0 / TableBorder is none — force transparent dividers.
-    final table = Theme(
+        final table = Theme(
           data: Theme.of(context).copyWith(
             dividerColor: Colors.transparent,
             dividerTheme: const DividerThemeData(
@@ -192,7 +289,7 @@ class AppEntityCollection extends StatelessWidget {
                   child: Text(primaryLabel, style: headingStyle),
                 ),
               ),
-              ...columns.map(
+              ...widget.columns.map(
                 (c) => DataColumn(
                   label: SizedBox(
                     width: c.width,
@@ -208,11 +305,27 @@ class AppEntityCollection extends StatelessWidget {
                   numeric: c.align == AppEntityColumnAlign.end,
                 ),
               ),
+              if (_mutateEnabled)
+                DataColumn(
+                  label: SizedBox(
+                    width: mutateCol,
+                    child: const SizedBox.shrink(),
+                  ),
+                ),
             ],
             rows: [
-              for (final row in rows)
+              for (final row in widget.rows)
                 DataRow(
-                  onSelectChanged: (_) => onOpen(row),
+                  selected: _editFocusId == row.id,
+                  onSelectChanged: (_) {
+                    if (_editFocusId == row.id) {
+                      _clearEdit();
+                      return;
+                    }
+                    widget.onOpen(row);
+                  },
+                  onLongPress:
+                      _mutateEnabled ? () => _enterEdit(row) : null,
                   cells: [
                     DataCell(
                       Align(
@@ -220,7 +333,14 @@ class AppEntityCollection extends StatelessWidget {
                         child: Text(row.title, overflow: TextOverflow.ellipsis),
                       ),
                     ),
-                    ...columns.map((c) => _dataCell(row.cells[c.id] ?? '', c)),
+                    ...widget.columns
+                        .map((c) => _dataCell(row.cells[c.id] ?? '', c)),
+                    if (_mutateEnabled)
+                      DataCell(
+                        _editFocusId == row.id
+                            ? _mutateTrailing(context, row)
+                            : const SizedBox.shrink(),
+                      ),
                   ],
                 ),
             ],

@@ -419,7 +419,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminEndsAt.
   ///
   /// In en, this message translates to:
-  /// **'Ends at'**
+  /// **'Subscription'**
   String get adminEndsAt;
 
   /// No description provided for @adminDateFormatHint.
@@ -437,8 +437,14 @@ abstract class AppLocalizations {
   /// No description provided for @adminEndsAtIfNotLifetime.
   ///
   /// In en, this message translates to:
-  /// **'Ends at (YYYY-MM-DD, if not lifetime)'**
+  /// **'Subscription (if not lifetime)'**
   String get adminEndsAtIfNotLifetime;
+
+  /// No description provided for @adminSubscription.
+  ///
+  /// In en, this message translates to:
+  /// **'Subscription'**
+  String get adminSubscription;
 
   /// No description provided for @adminEnterIntegerMin.
   ///
@@ -515,14 +521,20 @@ abstract class AppLocalizations {
   /// No description provided for @adminNextRenewal.
   ///
   /// In en, this message translates to:
-  /// **'Renewal date'**
+  /// **'Subscription'**
   String get adminNextRenewal;
 
   /// No description provided for @adminAddHttpProvider.
   ///
   /// In en, this message translates to:
-  /// **'Add provider'**
+  /// **'Add HTTP endpoint'**
   String get adminAddHttpProvider;
+
+  /// No description provided for @adminHttpEndpoint.
+  ///
+  /// In en, this message translates to:
+  /// **'HTTP endpoint'**
+  String get adminHttpEndpoint;
 
   /// No description provided for @adminHttpBaseUrl.
   ///

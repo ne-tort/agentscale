@@ -19,8 +19,8 @@ abstract final class AppInsets {
   /// Hit-target width for compact trailing icon buttons (`+`, check, …).
   static const double trailingIconExtent = 40;
 
-  /// AppBar actions end padding (toolbar chrome).
-  static const double appBarActionsRight = AppSpacing.lg;
+  /// AppBar actions end padding — same visual edge as list trailing chrome.
+  static const double appBarActionsRight = trailingActionRight;
 
   /// [EdgeInsets] form of [appBarActionsRight].
   static const EdgeInsets appBarActionsRightOnly =

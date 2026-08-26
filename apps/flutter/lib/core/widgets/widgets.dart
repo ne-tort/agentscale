@@ -4,6 +4,8 @@ export 'app_catalog_select_page.dart';
 export 'app_checkbox.dart';
 export 'app_collection_view_mode.dart';
 export 'app_entity_collection.dart';
+export 'app_error_presenter.dart';
+export 'app_hairline_divider.dart';
 export 'app_icon_button.dart';
 export 'app_inline_add_field.dart';
 export 'app_list_item.dart';
