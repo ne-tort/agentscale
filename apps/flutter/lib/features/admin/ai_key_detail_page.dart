@@ -213,21 +213,32 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
     }
   }
 
-  Future<void> _resumeKey() async {
-    try {
-      await adminContext.api.patchAiKey(keyId: widget.keyId, status: 'active');
-      await _load();
-    } catch (e) {
-      if (mounted) AppErrors.showSnack(context, e);
-    }
+  bool _isSubscriptionExpired(Map<String, dynamic>? key) {
+    if (key == null) return false;
+    final raw = (key['next_renewal_at'] as String? ?? '').trim();
+    if (raw.isEmpty) return false;
+    final dt = DateTime.tryParse(raw);
+    if (dt == null) return false;
+    return !dt.toUtc().isAfter(DateTime.now().toUtc());
   }
 
   bool _isSuspended(Map<String, dynamic>? key) {
     if (key == null) return true;
     final status = key['status'] as String? ?? '';
     if (status == 'disabled' || status == 'expired') return true;
+    if (_isSubscriptionExpired(key)) return true;
     final secret = key['secret_ref_prefix'] as String? ?? '';
     return secret.trim().isEmpty;
+  }
+
+  Future<void> _resumeKey() async {
+    if (_isSubscriptionExpired(_key)) return;
+    try {
+      await adminContext.api.patchAiKey(keyId: widget.keyId, status: 'active');
+      await _load();
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    }
   }
 
   @override
@@ -243,6 +254,7 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
     final type = _type;
     final hasSecret = (_key?['secret_ref_prefix'] as String? ?? '').isNotEmpty;
     final suspended = _isSuspended(_key);
+    final subscriptionExpired = _isSubscriptionExpired(_key);
     final nextRaw = _key?['next_renewal_at'] as String? ?? '';
     final nextDisplay = formatSubscriptionDate(nextRaw);
     final warning = context.appColors.warning;
@@ -327,6 +339,7 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
             title: l10n.adminSubscription,
             endsAt: nextDisplay,
             emptyLabel: l10n.commonNotSet,
+            accentColor: subscriptionExpired ? warning : null,
             onEndsAtSave: (raw) async {
               if (raw.trim().isEmpty) {
                 await adminContext.api.patchAiKey(
@@ -350,14 +363,14 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
               icon: Icons.update_rounded,
               onTap: _renewKey,
             ),
-          if (suspended)
+          if (suspended && !subscriptionExpired)
             AppNavPreference(
               title: l10n.adminResumeKey,
               icon: Icons.play_circle_outline_rounded,
               accentColor: warning,
               onTap: _resumeKey,
             )
-          else
+          else if (!suspended)
             AppNavPreference(
               title: l10n.adminDisableKey,
               icon: Icons.pause_circle_outline_rounded,

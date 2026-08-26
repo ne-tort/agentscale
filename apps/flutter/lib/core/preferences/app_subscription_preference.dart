@@ -21,6 +21,7 @@ class AppSubscriptionPreference extends StatefulWidget {
     this.title,
     this.emptyLabel,
     this.icon = Icons.event_rounded,
+    this.accentColor,
   });
 
   final String endsAt;
@@ -29,6 +30,7 @@ class AppSubscriptionPreference extends StatefulWidget {
   final String? title;
   final String? emptyLabel;
   final IconData icon;
+  final Color? accentColor;
 
   static final _datePattern = RegExp(r'^\d{2}\.\d{2}\.\d{2,4}$');
 
@@ -154,6 +156,7 @@ class _AppSubscriptionPreferenceState extends State<AppSubscriptionPreference> {
         title: title,
         icon: widget.icon,
         enabled: widget.enabled && !_saving,
+        accentColor: widget.accentColor,
         subtitle: TextField(
           controller: _controller,
           focusNode: _focusNode,
@@ -185,10 +188,12 @@ class _AppSubscriptionPreferenceState extends State<AppSubscriptionPreference> {
       title: title,
       icon: widget.icon,
       enabled: widget.enabled,
+      accentColor: widget.accentColor,
       subtitle: Text(
         _subtitleText(l10n),
         style: theme.textTheme.bodyMedium?.copyWith(
-          color: widget.endsAt.trim().isEmpty ? colors.muted : null,
+          color: widget.accentColor ??
+              (widget.endsAt.trim().isEmpty ? colors.muted : null),
         ),
       ),
       trailing: const AppTrailingChevron(),

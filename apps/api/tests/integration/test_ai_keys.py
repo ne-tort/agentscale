@@ -299,3 +299,36 @@ def test_create_name_only_then_rotate_stays_disabled(
     assert resumed.json()["status"] == "active"
     assert resumed.json()["provider"] == "codex"
     assert resumed.json()["api_kind"] == "codex_sdk"
+
+
+@requires_postgres
+def test_cannot_activate_key_with_past_renewal(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    past = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+    create = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=auth_headers,
+        json={
+            "name": "Past locked",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-past-locked",
+            "next_renewal_at": past,
+        },
+    )
+    assert create.status_code == 201, create.text
+    key_id = create.json()["id"]
+
+    # Force disabled if create left active with past date (lazy may not run on create).
+    client.patch(
+        f"/api/v1/admin/ai-keys/{key_id}",
+        headers=auth_headers,
+        json={"status": "disabled"},
+    )
+    blocked = client.patch(
+        f"/api/v1/admin/ai-keys/{key_id}",
+        headers=auth_headers,
+        json={"status": "active"},
+    )
+    assert blocked.status_code == 422, blocked.text

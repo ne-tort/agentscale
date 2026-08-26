@@ -133,9 +133,18 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
     }
   }
 
+  bool _isSubscriptionExpired(Map<String, dynamic> k) {
+    final raw = (k['next_renewal_at'] as String? ?? '').trim();
+    if (raw.isEmpty) return false;
+    final dt = DateTime.tryParse(raw);
+    if (dt == null) return false;
+    return !dt.toUtc().isAfter(DateTime.now().toUtc());
+  }
+
   bool _isKeySuspended(Map<String, dynamic> k) {
     final status = k['status'] as String? ?? '';
     if (status == 'disabled' || status == 'expired') return true;
+    if (_isSubscriptionExpired(k)) return true;
     final secret = k['secret_ref_prefix'] as String? ?? '';
     return secret.trim().isEmpty;
   }
@@ -148,6 +157,14 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
   }
 
   Future<void> _setKeyEnabled(AppEntityRow row, bool enabled) async {
+    Map<String, dynamic>? key;
+    for (final k in _keys) {
+      if (k['id'] == row.id) {
+        key = k;
+        break;
+      }
+    }
+    if (enabled && key != null && _isSubscriptionExpired(key)) return;
     if (!enabled) {
       final l10n = AppLocalizations.of(context);
       final ok = await AppConfirmPage.push(

@@ -278,11 +278,6 @@ class AiKeysService:
             api_kind = str(updates["api_kind"]).strip()
             self._validate_provider_kind(row.provider, api_kind)
             row.api_kind = api_kind
-        if "status" in updates and updates["status"] is not None:
-            status = updates["status"]
-            if status not in {KeyStatus.ACTIVE, KeyStatus.EXPIRED, KeyStatus.DISABLED}:
-                raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="bad status")
-            row.status = status
         if "next_renewal_at" in updates:
             row.next_renewal_at = updates["next_renewal_at"]
         if "renewal_price" in updates:
@@ -291,6 +286,27 @@ class AiKeysService:
             row.currency = updates["currency"]
         if "notes" in updates:
             row.notes = updates["notes"]
+        if "status" in updates and updates["status"] is not None:
+            status = updates["status"]
+            if status not in {KeyStatus.ACTIVE, KeyStatus.EXPIRED, KeyStatus.DISABLED}:
+                raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="bad status")
+            if status == KeyStatus.ACTIVE:
+                now = datetime.now(UTC)
+                if row.next_renewal_at is not None and row.next_renewal_at <= now:
+                    raise AppError(
+                        code="VALIDATION_ERROR",
+                        title="Validation Error",
+                        status=422,
+                        detail="cannot activate key with past next_renewal_at",
+                    )
+                if not (row.secret_ref or "").strip():
+                    raise AppError(
+                        code="VALIDATION_ERROR",
+                        title="Validation Error",
+                        status=422,
+                        detail="cannot activate key without secret",
+                    )
+            row.status = status
         await self._session.commit()
         await self._session.refresh(row)
         event_type = (
