@@ -3,7 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/responsive/app_breakpoints.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/widgets/app_content_frame.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
+
+/// Material default [NavigationRail.minExtendedWidth] — keep leading/trailing
+/// finite; `width: infinity` under Row's unbounded max width breaks the rail.
+const double _kExtendedRailWidth = 256;
 
 /// One adaptive nav destination (bottom bar or left rail).
 class AppNavDestination {
@@ -56,14 +61,7 @@ class AppLayout extends StatelessWidget {
       body: body,
     );
     if (!constrainBody) return page;
-    // Stick to the rail (left), not the screen center.
-    return Align(
-      alignment: Alignment.topLeft,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: AppBreakpoints.contentMaxWidth),
-        child: SizedBox(width: double.infinity, height: double.infinity, child: page),
-      ),
-    );
+    return AppContentFrame(child: page);
   }
 
   Widget _logo(BuildContext context, {required bool extended}) {
@@ -218,9 +216,10 @@ class AppLayout extends StatelessWidget {
       extended: expanded,
       labelType: expanded ? NavigationRailLabelType.none : NavigationRailLabelType.all,
       // Match destination alignment: left when extended, centered when compact.
+      // Finite width only — never infinity (Row gives the rail unbounded max).
       leading: expanded
           ? SizedBox(
-              width: double.infinity,
+              width: _kExtendedRailWidth,
               child: _logo(context, extended: true),
             )
           : _logo(context, extended: false),
@@ -229,7 +228,7 @@ class AppLayout extends StatelessWidget {
           alignment: expanded ? Alignment.bottomLeft : Alignment.bottomCenter,
           child: expanded
               ? SizedBox(
-                  width: double.infinity,
+                  width: _kExtendedRailWidth,
                   child: _settingsControl(context, extended: true),
                 )
               : _settingsControl(context, extended: false),

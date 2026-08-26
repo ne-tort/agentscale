@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import 'package:prodavan/core/responsive/app_breakpoints.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/widgets/app_content_frame.dart';
 
 class AppScaffold extends StatelessWidget {
   const AppScaffold({
@@ -51,18 +51,7 @@ class AppScaffold extends StatelessWidget {
       floatingActionButton: floatingActionButton,
     );
 
-    final Widget chrome;
-    if (expandBody) {
-      chrome = inner;
-    } else {
-      chrome = Align(
-        alignment: Alignment.topLeft,
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: AppBreakpoints.contentMaxWidth),
-          child: SizedBox(width: double.infinity, height: double.infinity, child: inner),
-        ),
-      );
-    }
+    final Widget chrome = expandBody ? inner : AppContentFrame(child: inner);
 
     return Scaffold(
       drawer: drawer,
