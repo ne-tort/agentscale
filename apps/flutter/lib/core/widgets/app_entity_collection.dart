@@ -51,7 +51,7 @@ class AppEntityRow {
   final Color? titleColor;
 }
 
-/// Unified list/table surface — primary entity management chrome (canon 07).
+/// Unified entity collection — table on wide, list on narrow (canon 07).
 ///
 /// Long-press enters mutate mode when [onEdit] / [onDelete] / [onEnabledChanged]
 /// are set (edit + delete icons; optional enable switch as rightmost).

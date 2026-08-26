@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
-import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_inline_add_field.dart';
@@ -27,9 +26,6 @@ class AdminAiKeyListPage extends StatefulWidget {
 }
 
 class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
-  static const _viewPageKey = 'admin.aiKeys';
-
-  final _viewMode = AppCollectionViewModeStore(_viewPageKey);
   late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
   List<Map<String, dynamic>> _keys = const [];
@@ -42,14 +38,12 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
       onTick: () => _reload(silent: true),
       isActive: () => appAutoRefreshIsActive(context),
     )..attach();
-    _viewMode.load();
     _reload();
   }
 
   @override
   void dispose() {
     _autoRefresh.dispose();
-    _viewMode.dispose();
     super.dispose();
   }
 
@@ -251,55 +245,44 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
       );
     }).toList();
 
-    return ListenableBuilder(
-      listenable: _viewMode,
-      builder: (context, _) {
-        final body = Column(
-          children: [
-            AppInlineAddField(
-              title: l10n.adminAddAiKey,
-              hintText: l10n.adminAddAiKey,
-              validator: (v) => v.trim().isNotEmpty,
-              invalidMessage: l10n.commonRequired,
-              onSave: _createKey,
-            ),
-            Expanded(
-              child: AppEntityCollection(
-                loading: _loading,
-                mode: _viewMode.resolve(context),
-                rows: rows,
-                primaryColumnLabel: l10n.adminKey,
-                columns: [
-                  AppEntityColumn(id: 'type', label: l10n.adminIntegrationType),
-                  AppEntityColumn(id: 'provider', label: l10n.commonProvider),
-                  AppEntityColumn(
-                    id: 'bindings',
-                    label: l10n.navCompanies,
-                    width: 100,
-                    align: AppEntityColumnAlign.end,
-                  ),
-                ],
-                onOpen: _openKey,
-                onEdit: _editKey,
-                onDelete: _deleteKey,
-                enabledOf: _keyEnabled,
-                onEnabledChanged: _setKeyEnabled,
-                empty: EmptyPlaceholder(
-                  title: l10n.adminNoAiKeys,
-                  subtitle: l10n.adminCreateRuntimeKeyHint,
-                ),
+    final body = Column(
+      children: [
+        AppInlineAddField(
+          title: l10n.adminAddAiKey,
+          hintText: l10n.adminAddAiKey,
+          validator: (v) => v.trim().isNotEmpty,
+          invalidMessage: l10n.commonRequired,
+          onSave: _createKey,
+        ),
+        Expanded(
+          child: AppEntityCollection(
+            loading: _loading,
+            rows: rows,
+            primaryColumnLabel: l10n.adminKey,
+            columns: [
+              AppEntityColumn(id: 'type', label: l10n.adminIntegrationType),
+              AppEntityColumn(id: 'provider', label: l10n.commonProvider),
+              AppEntityColumn(
+                id: 'bindings',
+                label: l10n.navCompanies,
+                width: 100,
+                align: AppEntityColumnAlign.end,
               ),
+            ],
+            onOpen: _openKey,
+            onEdit: _editKey,
+            onDelete: _deleteKey,
+            enabledOf: _keyEnabled,
+            onEnabledChanged: _setKeyEnabled,
+            empty: EmptyPlaceholder(
+              title: l10n.adminNoAiKeys,
+              subtitle: l10n.adminCreateRuntimeKeyHint,
             ),
-          ],
-        );
-
-        return AppScaffold(
-          actions: [
-            AppCollectionViewModeButton(store: _viewMode),
-          ],
-          body: body,
-        );
-      },
+          ),
+        ),
+      ],
     );
+
+    return AppScaffold(body: body);
   }
 }

@@ -3,7 +3,6 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/company_context.dart';
-import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_icon_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
@@ -24,9 +23,6 @@ class CompanyEmployeesPage extends StatefulWidget {
 }
 
 class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
-  static const _viewPageKey = 'company.employees';
-
-  final _viewMode = AppCollectionViewModeStore(_viewPageKey);
   late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
   Object? _error;
@@ -39,14 +35,12 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
       onTick: () => _reload(silent: true),
       isActive: () => appAutoRefreshIsActive(context),
     )..attach();
-    _viewMode.load();
     _reload();
   }
 
   @override
   void dispose() {
     _autoRefresh.dispose();
-    _viewMode.dispose();
     super.dispose();
   }
 
@@ -129,44 +123,41 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
         )
         .toList();
 
-    return ListenableBuilder(
-      listenable: _viewMode,
-      builder: (context, _) {
-        return AppScaffold(
-          actions: [
-            AppCollectionViewModeButton(store: _viewMode),
-            AppIconButton(
-              icon: Icons.person_add,
-              tooltip: l10n.commonInvite,
-              onPressed: _invite,
+    return AppScaffold(
+      actions: [
+        AppIconButton(
+          icon: Icons.person_add,
+          tooltip: l10n.commonInvite,
+          onPressed: _invite,
+        ),
+      ],
+      body: Column(
+        children: [
+          if (_error != null)
+            AppStatusBanner(
+              severity: AppStatusSeverity.error,
+              message: AppErrors.localize(context, _error!),
             ),
-          ],
-          body: Column(
-            children: [
-              if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
-              Expanded(
-                child: AppEntityCollection(
-                  loading: _loading,
-                  mode: _viewMode.resolve(context),
-                  rows: rows,
-                  primaryColumnLabel: l10n.commonEmail,
-                  columns: [
-                    AppEntityColumn(id: 'email', label: l10n.commonEmail),
-                    AppEntityColumn(id: 'role', label: l10n.companyRole),
-                    AppEntityColumn(id: 'status', label: l10n.commonStatus),
-                  ],
-                  onOpen: (_) {},
-                  empty: EmptyPlaceholder(
-                    title: l10n.companyNoEmployees,
-                    subtitle: l10n.companyInviteViaKeycloakNoPassword,
-                    action: TextButton(onPressed: _invite, child: Text(l10n.commonInvite)),
-                  ),
-                ),
+          Expanded(
+            child: AppEntityCollection(
+              loading: _loading,
+              rows: rows,
+              primaryColumnLabel: l10n.commonEmail,
+              columns: [
+                AppEntityColumn(id: 'email', label: l10n.commonEmail),
+                AppEntityColumn(id: 'role', label: l10n.companyRole),
+                AppEntityColumn(id: 'status', label: l10n.commonStatus),
+              ],
+              onOpen: (_) {},
+              empty: EmptyPlaceholder(
+                title: l10n.companyNoEmployees,
+                subtitle: l10n.companyInviteViaKeycloakNoPassword,
+                action: TextButton(onPressed: _invite, child: Text(l10n.commonInvite)),
               ),
-            ],
+            ),
           ),
-        );
-      },
+        ],
+      ),
     );
   }
 }

@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/admin_context.dart';
-import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
 import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
@@ -27,9 +26,6 @@ class AdminCompanyListPage extends StatefulWidget {
 }
 
 class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
-  static const _viewPageKey = 'admin.companies';
-
-  final _viewMode = AppCollectionViewModeStore(_viewPageKey);
   late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
   List<Map<String, dynamic>> _companies = const [];
@@ -41,14 +37,12 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
       onTick: () => _reload(silent: true),
       isActive: () => appAutoRefreshIsActive(context),
     )..attach();
-    _viewMode.load();
     _reload();
   }
 
   @override
   void dispose() {
     _autoRefresh.dispose();
-    _viewMode.dispose();
     super.dispose();
   }
 
@@ -164,55 +158,46 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
       );
     }).toList();
 
-    return ListenableBuilder(
-      listenable: _viewMode,
-      builder: (context, _) {
-        return AppScaffold(
-          actions: [
-            AppCollectionViewModeButton(store: _viewMode),
-          ],
-          body: Column(
-            children: [
-              AppInlineAddField(
-                title: l10n.adminAddCompany,
-                hintText: l10n.adminAddCompany,
-                validator: (v) => v.trim().isNotEmpty,
-                invalidMessage: l10n.commonRequired,
-                onSave: _createCompany,
-              ),
-              Expanded(
-                child: AppEntityCollection(
-                  loading: _loading,
-                  mode: _viewMode.resolve(context),
-                  rows: rows,
-                  primaryColumnLabel: l10n.commonCompany,
-                  columns: [
-                    AppEntityColumn(id: 'description', label: l10n.commonDescription),
-                    AppEntityColumn(
-                      id: 'employees',
-                      label: l10n.commonEmployees,
-                      width: 110,
-                      align: AppEntityColumnAlign.end,
-                    ),
-                    AppEntityColumn(
-                      id: 'cabinets',
-                      label: l10n.commonCabinets,
-                      width: 100,
-                      align: AppEntityColumnAlign.end,
-                    ),
-                  ],
-                  onOpen: _openCompany,
-                  onEdit: _editCompany,
-                  onDelete: _deleteCompany,
-                  empty: EmptyPlaceholder(
-                    title: l10n.adminNoCompanies,
-                  ),
-                ),
-              ),
-            ],
+    return AppScaffold(
+      body: Column(
+        children: [
+          AppInlineAddField(
+            title: l10n.adminAddCompany,
+            hintText: l10n.adminAddCompany,
+            validator: (v) => v.trim().isNotEmpty,
+            invalidMessage: l10n.commonRequired,
+            onSave: _createCompany,
           ),
-        );
-      },
+          Expanded(
+            child: AppEntityCollection(
+              loading: _loading,
+              rows: rows,
+              primaryColumnLabel: l10n.commonCompany,
+              columns: [
+                AppEntityColumn(id: 'description', label: l10n.commonDescription),
+                AppEntityColumn(
+                  id: 'employees',
+                  label: l10n.commonEmployees,
+                  width: 110,
+                  align: AppEntityColumnAlign.end,
+                ),
+                AppEntityColumn(
+                  id: 'cabinets',
+                  label: l10n.commonCabinets,
+                  width: 100,
+                  align: AppEntityColumnAlign.end,
+                ),
+              ],
+              onOpen: _openCompany,
+              onEdit: _editCompany,
+              onDelete: _deleteCompany,
+              empty: EmptyPlaceholder(
+                title: l10n.adminNoCompanies,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

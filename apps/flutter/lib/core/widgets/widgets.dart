@@ -2,7 +2,6 @@ export 'app_button.dart';
 export 'app_card.dart';
 export 'app_catalog_select_page.dart';
 export 'app_checkbox.dart';
-export 'app_collection_view_mode.dart';
 export 'app_confirm_page.dart';
 export 'app_entity_collection.dart';
 export 'app_error_presenter.dart';

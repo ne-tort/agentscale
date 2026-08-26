@@ -48,7 +48,7 @@ class AppIconButton extends StatelessWidget {
   }
 }
 
-/// Two+ mode toggle (list/table, filter on/off).
+/// Icon toggle (e.g. filter on/off).
 class AppIconToggle extends StatelessWidget {
   const AppIconToggle({
     super.key,

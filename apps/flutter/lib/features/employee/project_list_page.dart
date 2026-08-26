@@ -3,7 +3,6 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
-import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_icon_button.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
@@ -18,11 +17,9 @@ class ProjectListPage extends StatefulWidget {
   const ProjectListPage({
     super.key,
     required this.cabinetId,
-    required this.viewModeStore,
   });
 
   final String cabinetId;
-  final AppCollectionViewModeStore viewModeStore;
 
   @override
   State<ProjectListPage> createState() => _ProjectListPageState();
@@ -117,44 +114,42 @@ class _ProjectListPageState extends State<ProjectListPage> {
         )
         .toList();
 
-    return ListenableBuilder(
-      listenable: widget.viewModeStore,
-      builder: (context, _) {
-        return Column(
-          children: [
-            if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-              child: Align(
-                alignment: Alignment.centerRight,
-                child: AppIconButton(
-                  icon: Icons.add,
-                  tooltip: l10n.projectNewProject,
-                  onPressed: _createProject,
-                ),
+    return Column(
+      children: [
+        if (_error != null)
+          AppStatusBanner(
+            severity: AppStatusSeverity.error,
+            message: AppErrors.localize(context, _error!),
+          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: AppIconButton(
+              icon: Icons.add,
+              tooltip: l10n.projectNewProject,
+              onPressed: _createProject,
+            ),
+          ),
+        ),
+        Expanded(
+          child: AppEntityCollection(
+            loading: _loading,
+            rows: rows,
+            primaryColumnLabel: l10n.projectProject,
+            columns: const [],
+            onOpen: _openProject,
+            empty: EmptyPlaceholder(
+              title: l10n.projectNoProjects,
+              subtitle: l10n.projectCreateProjectHint,
+              action: TextButton(
+                onPressed: _createProject,
+                child: Text(l10n.projectCreateProject),
               ),
             ),
-            Expanded(
-              child: AppEntityCollection(
-                loading: _loading,
-                mode: widget.viewModeStore.resolve(context),
-                rows: rows,
-                primaryColumnLabel: l10n.projectProject,
-                columns: const [],
-                onOpen: _openProject,
-                empty: EmptyPlaceholder(
-                  title: l10n.projectNoProjects,
-                  subtitle: l10n.projectCreateProjectHint,
-                  action: TextButton(
-                    onPressed: _createProject,
-                    child: Text(l10n.projectCreateProject),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
+          ),
+        ),
+      ],
     );
   }
 }

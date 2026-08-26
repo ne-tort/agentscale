@@ -3,7 +3,6 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/company_context.dart';
-import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
@@ -22,9 +21,6 @@ class CompanyCabinetsPage extends StatefulWidget {
 }
 
 class _CompanyCabinetsPageState extends State<CompanyCabinetsPage> {
-  static const _viewPageKey = 'company.cabinets';
-
-  final _viewMode = AppCollectionViewModeStore(_viewPageKey);
   late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
   Object? _error;
@@ -37,14 +33,12 @@ class _CompanyCabinetsPageState extends State<CompanyCabinetsPage> {
       onTick: () => _reload(silent: true),
       isActive: () => appAutoRefreshIsActive(context),
     )..attach();
-    _viewMode.load();
     _reload();
   }
 
   @override
   void dispose() {
     _autoRefresh.dispose();
-    _viewMode.dispose();
     super.dispose();
   }
 
@@ -91,42 +85,37 @@ class _CompanyCabinetsPageState extends State<CompanyCabinetsPage> {
         )
         .toList();
 
-    return ListenableBuilder(
-      listenable: _viewMode,
-      builder: (context, _) {
-        return AppScaffold(
-          actions: [
-            AppCollectionViewModeButton(store: _viewMode),
-          ],
-          body: Column(
-            children: [
-              if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
-              Expanded(
-                child: AppEntityCollection(
-                  loading: _loading,
-                  mode: _viewMode.resolve(context),
-                  rows: rows,
-                  primaryColumnLabel: l10n.companyCabinet,
-                  columns: [
-                    AppEntityColumn(id: 'owner', label: l10n.companyOwner),
-                    AppEntityColumn(id: 'status', label: l10n.commonStatus, width: 96),
-                  ],
-                  onOpen: (row) {
-                    AppSnackBar.info(
-                      context,
-                      l10n.companyReadOnlyOrgView(row.title),
-                    );
-                  },
-                  empty: EmptyPlaceholder(
-                    title: l10n.companyNoCabinets,
-                    subtitle: l10n.companyCabinetsEmptyHint,
-                  ),
-                ),
+    return AppScaffold(
+      body: Column(
+        children: [
+          if (_error != null)
+            AppStatusBanner(
+              severity: AppStatusSeverity.error,
+              message: AppErrors.localize(context, _error!),
+            ),
+          Expanded(
+            child: AppEntityCollection(
+              loading: _loading,
+              rows: rows,
+              primaryColumnLabel: l10n.companyCabinet,
+              columns: [
+                AppEntityColumn(id: 'owner', label: l10n.companyOwner),
+                AppEntityColumn(id: 'status', label: l10n.commonStatus, width: 96),
+              ],
+              onOpen: (row) {
+                AppSnackBar.info(
+                  context,
+                  l10n.companyReadOnlyOrgView(row.title),
+                );
+              },
+              empty: EmptyPlaceholder(
+                title: l10n.companyNoCabinets,
+                subtitle: l10n.companyCabinetsEmptyHint,
               ),
-            ],
+            ),
           ),
-        );
-      },
+        ],
+      ),
     );
   }
 }

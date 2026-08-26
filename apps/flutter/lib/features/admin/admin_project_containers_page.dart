@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
-import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
 import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
@@ -25,9 +24,6 @@ class AdminProjectContainersPage extends StatefulWidget {
 }
 
 class _AdminProjectContainersPageState extends State<AdminProjectContainersPage> {
-  static const _viewPageKey = 'admin.containers';
-
-  final _viewMode = AppCollectionViewModeStore(_viewPageKey);
   late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
   List<Map<String, dynamic>> _items = const [];
@@ -39,14 +35,12 @@ class _AdminProjectContainersPageState extends State<AdminProjectContainersPage>
       onTick: () => _reload(silent: true),
       isActive: () => appAutoRefreshIsActive(context),
     )..attach();
-    _viewMode.load();
     _reload();
   }
 
   @override
   void dispose() {
     _autoRefresh.dispose();
-    _viewMode.dispose();
     super.dispose();
   }
 
@@ -150,40 +144,33 @@ class _AdminProjectContainersPageState extends State<AdminProjectContainersPage>
       );
     }).toList();
 
-    return ListenableBuilder(
-      listenable: _viewMode,
-      builder: (context, _) {
-        return AppScaffold(
-          actions: [
-            IconButton(
-              tooltip: l10n.commonReload,
-              onPressed: _loading ? null : () => _reload(),
-              icon: const Icon(Icons.refresh),
-            ),
-            AppCollectionViewModeButton(store: _viewMode),
-          ],
-          body: AppEntityCollection(
-            loading: _loading,
-            rows: rows,
-            mode: _viewMode.resolve(context),
-            primaryColumnLabel: l10n.adminContainerColProject,
-            columns: [
-              AppEntityColumn(id: 'status', label: l10n.adminContainerColStatus, flex: 1),
-              AppEntityColumn(id: 'company', label: l10n.adminContainerColCompany, flex: 2),
-              AppEntityColumn(id: 'employee', label: l10n.adminContainerColEmployee, flex: 2),
-              AppEntityColumn(id: 'provider', label: l10n.adminContainerColProvider, flex: 1),
-              AppEntityColumn(id: 'cabinet', label: l10n.adminContainerColCabinet, flex: 2),
-            ],
-            onOpen: _open,
-            onEdit: _open,
-            onDelete: _delete,
-            empty: EmptyPlaceholder(
-              title: l10n.adminNoContainers,
-              subtitle: l10n.adminContainersHint,
-            ),
-          ),
-        );
-      },
+    return AppScaffold(
+      actions: [
+        IconButton(
+          tooltip: l10n.commonReload,
+          onPressed: _loading ? null : () => _reload(),
+          icon: const Icon(Icons.refresh),
+        ),
+      ],
+      body: AppEntityCollection(
+        loading: _loading,
+        rows: rows,
+        primaryColumnLabel: l10n.adminContainerColProject,
+        columns: [
+          AppEntityColumn(id: 'status', label: l10n.adminContainerColStatus, flex: 1),
+          AppEntityColumn(id: 'company', label: l10n.adminContainerColCompany, flex: 2),
+          AppEntityColumn(id: 'employee', label: l10n.adminContainerColEmployee, flex: 2),
+          AppEntityColumn(id: 'provider', label: l10n.adminContainerColProvider, flex: 1),
+          AppEntityColumn(id: 'cabinet', label: l10n.adminContainerColCabinet, flex: 2),
+        ],
+        onOpen: _open,
+        onEdit: _open,
+        onDelete: _delete,
+        empty: EmptyPlaceholder(
+          title: l10n.adminNoContainers,
+          subtitle: l10n.adminContainersHint,
+        ),
+      ),
     );
   }
 }

@@ -4,7 +4,6 @@ import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_checkbox.dart';
-import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_icon_button.dart';
 import 'package:prodavan/core/widgets/app_list_item.dart';
@@ -18,27 +17,8 @@ import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Demo of core primitives without backend (L02).
-class CoreGalleryPage extends StatefulWidget {
+class CoreGalleryPage extends StatelessWidget {
   const CoreGalleryPage({super.key});
-
-  @override
-  State<CoreGalleryPage> createState() => _CoreGalleryPageState();
-}
-
-class _CoreGalleryPageState extends State<CoreGalleryPage> {
-  final _viewMode = AppCollectionViewModeStore('gallery.entityCollection');
-
-  @override
-  void initState() {
-    super.initState();
-    _viewMode.load();
-  }
-
-  @override
-  void dispose() {
-    _viewMode.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -58,15 +38,9 @@ class _CoreGalleryPageState extends State<CoreGalleryPage> {
       ),
     ];
 
-    return ListenableBuilder(
-      listenable: _viewMode,
-      builder: (context, _) {
-        return AppScaffold(
-          title: Text(l10n.galleryCoreGallery),
-          actions: [
-            AppCollectionViewModeButton(store: _viewMode),
-          ],
-          body: ListView(
+    return AppScaffold(
+      title: Text(l10n.galleryCoreGallery),
+      body: ListView(
         padding: EdgeInsets.all(AppSpacing.md),
         children: [
           Text(l10n.galleryButtons, style: Theme.of(context).textTheme.titleMedium),
@@ -169,7 +143,6 @@ class _CoreGalleryPageState extends State<CoreGalleryPage> {
           SizedBox(
             height: 280,
             child: AppEntityCollection(
-              mode: _viewMode.resolve(context),
               rows: rows,
               primaryColumnLabel: l10n.commonName,
               columns: [
@@ -193,8 +166,6 @@ class _CoreGalleryPageState extends State<CoreGalleryPage> {
           ),
         ],
       ),
-        );
-      },
     );
   }
 }
