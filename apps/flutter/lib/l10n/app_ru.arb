@@ -325,6 +325,18 @@
   },
   "adminNoAiKeys": "Нет AI-ключей",
   "adminNoCompanies": "Нет компаний",
+  "adminDeleteCompanyConfirm": "Удалить компанию «{name}»? Будут отключены сотрудники, приостановлены и удалены проекты (wipe workspace), кабинеты удалятся навсегда.",
+  "@adminDeleteCompanyConfirm": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "adminDisableAiKeyConfirm": "Отключить AI-ключ «{name}»? Активные сессии с этим ключом будут отменены, а проекты могут уйти в pause, если это был их единственный runtime-ключ.",
+  "@adminDisableAiKeyConfirm": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
   "adminNoCompaniesBound": "Компании не привязаны",
   "adminNoCompaniesYet": "Компаний пока нет",
   "adminNoPlatformEventsYet": "Событий платформы пока нет",

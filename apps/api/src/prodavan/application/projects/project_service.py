@@ -11,6 +11,7 @@ from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.application.cabinets.access import CabinetAccessService
 from prodavan.application.projects.access import ProjectAccessService
+from prodavan.application.projects.container_lifecycle import pause_container
 from prodavan.application.projects.materialize import get_materialize_service
 from prodavan.application.projects.pause_runtime import stop_project_runtime
 from prodavan.application.projects.platform_event_service import PlatformEventService
@@ -317,6 +318,8 @@ class ProjectService:
         row.status = ProjectStatus.PAUSED
         # Stop in-flight runtime: cancel ACTIVE agent sessions (leave triggers queued).
         await stop_project_runtime(self._session, project_id=row.id)
+        # Contract: project → container pause (keep volume; pod stop when available).
+        await pause_container(container_ref=row.container_ref)
         await self._platform_events.emit(
             event_type="project.paused",
             company_id=row.company_id,

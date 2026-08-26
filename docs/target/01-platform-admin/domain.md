@@ -36,6 +36,7 @@ Platform Admin:
 | Операция | Инвариант |
 |----------|-----------|
 | `company.create` | Name required; optional invite company.admin (email → Keycloak) on create or later on detail |
+| `company.delete` | Confirm → disable employees → pause+delete projects (workspace wipe) → archive+hard-delete cabinets → delete company row (FK CASCADE remainder) |
 | `company.suspend` / `activate` | Suspend → block employee login |
 | `company.set_subscription` | Дата или `lifetime=true` |
 | `company.set_cabinet_quotas` | Лимиты dynamic cabinets |

@@ -43,6 +43,14 @@ class AdminApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<void> deleteCompany(String companyId) async {
+    final res = await http.delete(
+      _uri('/admin/companies/$companyId'),
+      headers: _headers,
+    );
+    _throwIfError(res);
+  }
+
   Future<Map<String, dynamic>> patchCompany({
     required String companyId,
     String? name,

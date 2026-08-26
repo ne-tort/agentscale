@@ -3,10 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
+import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_inline_add_field.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/admin/company/admin_company_detail_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -95,6 +97,28 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
     ).then((_) => _reload());
   }
 
+  Future<void> _editCompany(AppEntityRow row) async {
+    _openCompany(row);
+  }
+
+  Future<void> _deleteCompany(AppEntityRow row) async {
+    final l10n = AppLocalizations.of(context);
+    final ok = await AppConfirmPage.push(
+      context,
+      title: l10n.commonDelete,
+      message: l10n.adminDeleteCompanyConfirm(row.title),
+      confirmLabel: l10n.commonDelete,
+      severity: AppStatusSeverity.error,
+    );
+    if (!ok) return;
+    try {
+      await adminContext.api.deleteCompany(row.id);
+      await _reload();
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    }
+  }
+
   String _cell(dynamic v, AppLocalizations l10n) {
     if (v == null) return l10n.commonEmDash;
     final s = '$v'.trim();
@@ -161,6 +185,8 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
                     ),
                   ],
                   onOpen: _openCompany,
+                  onEdit: _editCompany,
+                  onDelete: _deleteCompany,
                   empty: EmptyPlaceholder(
                     title: l10n.adminNoCompanies,
                   ),

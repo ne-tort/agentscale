@@ -25,6 +25,7 @@ AgentProviderPort + frozen AgentEvent; credentials только через L03 r
 | `AgentProviderPort` + frozen `AgentEvent` types | Node sidecar (real Cursor SDK) |
 | `FixtureCursorAdapter` (cursor_sdk) + `FakeAgentAdapter` | Codex/Claude real adapters |
 | ORM agent_sessions / agent_events / agent_usage | Codex/Claude real adapters |
+| `agent_sessions.resolved_key_id` set on create; key disable cancels by snapshot | |
 | `POST /projects/{id}/chat` + `/chat/stream` (SSE) | Node sidecar (real Cursor SDK) |
 | `GET .../chat/transcript` + list sessions; user + tool bubbles | |
 | `AgentBudgetService` — monthly tokens + USD + per-run token hard-stop | Node sidecar (real Cursor SDK) |

@@ -325,6 +325,18 @@
   },
   "adminNoAiKeys": "No AI keys",
   "adminNoCompanies": "No companies",
+  "adminDeleteCompanyConfirm": "Delete company \"{name}\"? This disables employees, pauses and deletes projects (workspace wipe), and hard-deletes cabinets.",
+  "@adminDeleteCompanyConfirm": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "adminDisableAiKeyConfirm": "Disable AI key \"{name}\"? Active sessions using this key will be cancelled, and projects may pause if it was their only runtime key.",
+  "@adminDisableAiKeyConfirm": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
   "adminNoCompaniesBound": "No companies bound",
   "adminNoCompaniesYet": "No companies yet",
   "adminNoPlatformEventsYet": "No platform events yet",

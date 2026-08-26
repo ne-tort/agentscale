@@ -22,6 +22,10 @@ class AgentSessionRow(Base):
 
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: _id("ags"))
     project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    resolved_key_id: Mapped[str | None] = mapped_column(
+        ForeignKey("ai_provider_keys.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     api_kind: Mapped[str] = mapped_column(String(32), nullable=False)
     vendor_agent_id: Mapped[str] = mapped_column(String(128), nullable=False)

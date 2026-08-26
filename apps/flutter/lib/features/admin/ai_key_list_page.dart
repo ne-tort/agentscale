@@ -140,6 +140,17 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
   }
 
   Future<void> _setKeyEnabled(AppEntityRow row, bool enabled) async {
+    if (!enabled) {
+      final l10n = AppLocalizations.of(context);
+      final ok = await AppConfirmPage.push(
+        context,
+        title: l10n.commonDisable,
+        message: l10n.adminDisableAiKeyConfirm(row.title),
+        confirmLabel: l10n.commonDisable,
+        severity: AppStatusSeverity.warning,
+      );
+      if (!ok) return;
+    }
     try {
       await adminContext.api.patchAiKey(
         keyId: row.id,

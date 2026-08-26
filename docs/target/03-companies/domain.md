@@ -28,9 +28,17 @@ UI: роль `company.admin`.
 |----------|-----------|
 | `employee.invite` | Email → Keycloak; **без password** |
 | `employee.disable` / `enable` | Disabled → 403 cabinet/project API |
+| `company.delete` (Admin) | Disable employees → pause+delete projects → hard-delete cabinets → delete company |
 | `metrics.employees` / `metrics.cabinets` | Aggregates; list cabinet names/owners read-only |
 | `metrics.running_cabinets` | DISTINCT ACTIVE кабинеты с ≥1 ACTIVE проектом (см. [metrics](../01-platform-admin/metrics.md)) |
 | `policy.narrow` | Company может только **сужать** Admin policy |
+
+### Cascade (Admin)
+
+| Событие | Эффект вниз |
+|---------|-------------|
+| **Company delete** | Confirm → disable employees → pause+delete projects (wipe) → archive+hard-delete cabinets → delete company |
+| **Employee disable** | Без авто-delete cabinets (ownership). Pause owned active projects — **не** MVP (док-решение) |
 
 ## Поток кабинетов
 

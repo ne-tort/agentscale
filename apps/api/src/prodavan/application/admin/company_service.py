@@ -536,3 +536,90 @@ class AdminCompanyService:
             "metrics": metrics,
             "cabinet_quota": _quota_public(quota),
         }
+
+    async def delete_company(self, company_id: str, *, principal: Principal) -> dict:
+        """Hard-delete company after cascading employees → projects → cabinets.
+
+        Order: stop runtime → disable employees → pause+delete projects (wipe) →
+        archive+hard-delete cabinets → delete company row (FK CASCADE remainder).
+        """
+        from prodavan.application.cabinets.instance_service import CabinetInstanceService
+        from prodavan.application.identity.service import IdentityCommandService
+        from prodavan.application.projects.pause_runtime import stop_company_runtime
+        from prodavan.application.projects.project_service import ProjectService
+        from prodavan.infrastructure.keycloak.invite import get_invite_client
+
+        company = await self._require_company(company_id)
+        name = company.name
+
+        sessions_cancelled = await stop_company_runtime(self._session, company_id=company_id)
+        await self._session.flush()
+
+        emp_q = await self._session.execute(
+            select(MembershipRow.employee_id).where(MembershipRow.company_id == company_id)
+        )
+        employee_ids = list({eid for eid in emp_q.scalars().all()})
+        identity = IdentityCommandService(self._session, get_invite_client())
+        employees_disabled: list[str] = []
+        for employee_id in employee_ids:
+            emp = await self._session.get(EmployeeRow, employee_id)
+            if emp is None or emp.status == EmployeeStatus.DISABLED:
+                continue
+            await identity.disable_employee(employee_id=employee_id, principal=principal)
+            employees_disabled.append(employee_id)
+
+        proj_q = await self._session.execute(
+            select(ProjectRow.id, ProjectRow.status).where(
+                ProjectRow.company_id == company_id,
+                ProjectRow.status != ProjectStatus.DELETED,
+            )
+        )
+        projects = ProjectService(self._session)
+        projects_deleted: list[str] = []
+        for project_id, status in proj_q.all():
+            if status == ProjectStatus.ACTIVE:
+                await projects.pause(
+                    project_id=project_id, principal=principal, employee=None
+                )
+            await projects.delete(
+                project_id=project_id,
+                principal=principal,
+                employee=None,
+                purge_workspace=True,
+            )
+            projects_deleted.append(project_id)
+
+        cab_q = await self._session.execute(
+            select(CabinetInstanceRow.id, CabinetInstanceRow.status).where(
+                CabinetInstanceRow.company_id == company_id
+            )
+        )
+        cabinets = CabinetInstanceService(self._session)
+        cabinets_deleted: list[str] = []
+        for cabinet_id, status in cab_q.all():
+            if status != CabinetStatus.ARCHIVED:
+                await cabinets.archive(
+                    cabinet_id=cabinet_id, principal=principal, employee=None
+                )
+            await cabinets.hard_delete(
+                cabinet_id=cabinet_id, principal=principal, employee=None
+            )
+            cabinets_deleted.append(cabinet_id)
+
+        # Re-load: earlier commits may have expired the instance.
+        company = await self._require_company(company_id)
+        await self._session.delete(company)
+        await self._session.commit()
+
+        from prodavan.application.admin.company_runtime_cache import invalidate_company_runtime_cache
+
+        await invalidate_company_runtime_cache(company_id)
+        return {
+            "deleted": True,
+            "id": company_id,
+            "name": name,
+            "sessions_cancelled": sessions_cancelled,
+            "employees_disabled": employees_disabled,
+            "projects_deleted": projects_deleted,
+            "cabinets_deleted": cabinets_deleted,
+        }

@@ -70,6 +70,15 @@ async def get_company(company_id: str, _: PlatformAdminDep, session: SessionDep)
     return await AdminCompanyService(session).get_company(company_id)
 
 
+@router.delete("/{company_id}")
+async def delete_company(
+    company_id: str,
+    admin: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    return await AdminCompanyService(session).delete_company(company_id, principal=admin)
+
+
 @router.patch("/{company_id}")
 async def patch_company(
     company_id: str,

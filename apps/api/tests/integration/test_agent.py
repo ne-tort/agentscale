@@ -949,3 +949,78 @@ def test_project_prepare_allowed_while_paused(client: TestClient) -> None:
     )
     assert queued.status_code == 202, queued.text
     assert queued.json()["kind"] == "project.prepare"
+
+
+@requires_postgres
+def test_ai_key_disable_cancels_session_and_pauses_project(client: TestClient) -> None:
+    admin = _token(sub="adm-key-cascade", platform_admin=True)
+    admin_h = {"Authorization": f"Bearer {admin}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "KeyCascadeCo", "admin_email": "owner@keycascade.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "OnlyKey",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-cascade",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+    key_id = key.json()["id"]
+
+    owner_tok = _token(sub="owner-key-cascade", email="owner@keycascade.test")
+    owner_h = {"Authorization": f"Bearer {owner_tok}"}
+
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "CascadeCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "CascadeProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    sess = client.post(
+        f"/api/v1/projects/{project_id}/agent/sessions",
+        headers=owner_h,
+        json={},
+    )
+    assert sess.status_code == 201, sess.text
+    assert sess.json()["resolved_key_id"] == key_id
+    session_id = sess.json()["id"]
+
+    disabled = client.patch(
+        f"/api/v1/admin/ai-keys/{key_id}",
+        headers=admin_h,
+        json={"status": "disabled"},
+    )
+    assert disabled.status_code == 200, disabled.text
+    cascade = disabled.json()["runtime_cascade"]
+    assert cascade["sessions_cancelled"] >= 1
+    assert project_id in cascade["projects_paused"]
+
+    listed = client.get(f"/api/v1/projects/{project_id}/agent/sessions", headers=owner_h)
+    assert listed.status_code == 200
+    match = next(s for s in listed.json()["items"] if s["id"] == session_id)
+    assert match["status"] == "cancelled"
+
+    project = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
+    assert project.status_code == 200
+    assert project.json()["status"] == "paused"

@@ -99,6 +99,7 @@ def _session_public(row: AgentSessionRow) -> dict:
     return {
         "id": row.id,
         "project_id": row.project_id,
+        "resolved_key_id": row.resolved_key_id,
         "provider": row.provider,
         "api_kind": row.api_kind,
         "vendor_agent_id": row.vendor_agent_id,
@@ -159,6 +160,7 @@ class AgentSessionService:
         handle = await adapter.create(opts)
         row = AgentSessionRow(
             project_id=project_id,
+            resolved_key_id=credential.key_id,
             provider=credential.provider,
             api_kind=credential.api_kind,
             vendor_agent_id=handle.id,
@@ -562,6 +564,15 @@ class AgentSessionService:
             select(AgentSessionRow)
             .join(ProjectRow, ProjectRow.id == AgentSessionRow.project_id)
             .where(ProjectRow.company_id == company_id)
+            .where(AgentSessionRow.status == AgentSessionStatus.ACTIVE)
+        )
+        return await self._cancel_session_rows(list(result.scalars().all()))
+
+    async def cancel_active_for_key(self, *, key_id: str) -> int:
+        """Cancel ACTIVE sessions that resolved to this AI key (disable/delete cascade)."""
+        result = await self._session.execute(
+            select(AgentSessionRow)
+            .where(AgentSessionRow.resolved_key_id == key_id)
             .where(AgentSessionRow.status == AgentSessionStatus.ACTIVE)
         )
         return await self._cancel_session_rows(list(result.scalars().all()))

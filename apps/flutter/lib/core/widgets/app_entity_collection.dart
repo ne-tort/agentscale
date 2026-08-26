@@ -244,7 +244,6 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
           color: colors.muted,
           fontWeight: FontWeight.w600,
         );
-    final showMutateCol = _mutateEnabled && _editFocusId != null;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -258,16 +257,12 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
           0,
           (sum, c) => sum + (c.width ?? 0),
         );
-        // Reserve mutate width only while a row is in long-press edit mode.
-        final mutateCol = showMutateCol
-            ? AppInsets.trailingIconExtent * 3 + 24
-            : 0.0;
         final minTableWidth = _horizontalMargin * 2 +
             _primaryMinWidth +
             fixedWidth +
-            mutateCol +
             widget.columns.length * _columnSpacing;
         final needsScroll = minTableWidth > tableWidth;
+        final lastColIndex = widget.columns.isEmpty ? -1 : widget.columns.length - 1;
 
         final table = Theme(
           data: Theme.of(context).copyWith(
@@ -315,13 +310,6 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                   numeric: c.align == AppEntityColumnAlign.end,
                 ),
               ),
-              if (showMutateCol)
-                DataColumn(
-                  label: SizedBox(
-                    width: mutateCol,
-                    child: const SizedBox.shrink(),
-                  ),
-                ),
             ],
             rows: [
               for (final row in widget.rows)
@@ -343,14 +331,22 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                         child: Text(row.title, overflow: TextOverflow.ellipsis),
                       ),
                     ),
-                    ...widget.columns
-                        .map((c) => _dataCell(row.cells[c.id] ?? '', c)),
-                    if (showMutateCol)
-                      DataCell(
-                        _editFocusId == row.id
-                            ? _mutateTrailing(context, row)
-                            : SizedBox(width: mutateCol),
-                      ),
+                    ...[
+                      for (var i = 0; i < widget.columns.length; i++)
+                        _editFocusId == row.id &&
+                                _mutateEnabled &&
+                                i == lastColIndex
+                            ? DataCell(
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: _mutateTrailing(context, row),
+                                ),
+                              )
+                            : _dataCell(
+                                row.cells[widget.columns[i].id] ?? '',
+                                widget.columns[i],
+                              ),
+                    ],
                   ],
                 ),
             ],

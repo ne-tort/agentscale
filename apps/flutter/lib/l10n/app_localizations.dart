@@ -824,6 +824,18 @@ abstract class AppLocalizations {
   /// **'No companies'**
   String get adminNoCompanies;
 
+  /// No description provided for @adminDeleteCompanyConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete company \"{name}\"? This disables employees, pauses and deletes projects (workspace wipe), and hard-deletes cabinets.'**
+  String adminDeleteCompanyConfirm(String name);
+
+  /// No description provided for @adminDisableAiKeyConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Disable AI key \"{name}\"? Active sessions using this key will be cancelled, and projects may pause if it was their only runtime key.'**
+  String adminDisableAiKeyConfirm(String name);
+
   /// No description provided for @adminNoCompaniesBound.
   ///
   /// In en, this message translates to:

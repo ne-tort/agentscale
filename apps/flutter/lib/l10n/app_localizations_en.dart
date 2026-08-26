@@ -433,6 +433,16 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminNoCompanies => 'No companies';
 
   @override
+  String adminDeleteCompanyConfirm(String name) {
+    return 'Delete company \"$name\"? This disables employees, pauses and deletes projects (workspace wipe), and hard-deletes cabinets.';
+  }
+
+  @override
+  String adminDisableAiKeyConfirm(String name) {
+    return 'Disable AI key \"$name\"? Active sessions using this key will be cancelled, and projects may pause if it was their only runtime key.';
+  }
+
+  @override
   String get adminNoCompaniesBound => 'No companies bound';
 
   @override

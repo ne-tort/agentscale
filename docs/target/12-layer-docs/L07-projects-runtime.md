@@ -22,6 +22,7 @@ Project = workspace + `object-ws:{key}` container ref (legacy `local-ws:` still 
 |---------|------|
 | ORM projects / project_triggers / project_attachments + migration | k8s pod scheduler |
 | CRUD: create/list/get/PATCH (name, agent_provider); pause/resume/delete | |
+| Pause → `stop_project_runtime` + `pause_container` (keep object-ws; pod stop hole) | |
 | Materialize: AGENTS from cabinet workspace-docs + packages/sandbox | bubblewrap; per-project k8s Pod; live MinIO mount |
 | `container_ref=object-ws:{workspace_key}` (parse accepts `local-ws:`; Alembic+admin backfill) | SANDBOX_K8S_JOBS spawn on create |
 | In-cluster Job client + SA `prodavan-sandbox` + PVC probe Job | |

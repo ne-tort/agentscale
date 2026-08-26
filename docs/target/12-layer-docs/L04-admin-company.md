@@ -28,6 +28,7 @@ Platform Admin — компании, keys (L03), квоты/policy, metrics read
 | Company contour: Overview / Employees / Cabinets | |
 | Invite employee full-page form | |
 | `PUT /admin/companies/{id}/subscription` → emits `company.suspended` on expire transition (cancels ACTIVE agent sessions), `company.reactivated` on renew | |
+| `DELETE /admin/companies/{id}` → disable employees → pause+delete projects (wipe) → hard-delete cabinets → delete company | |
 | Natural expiry: `subscription_state` lazy-emits `company.suspended` (dedupe by latest transition; cancels sessions on emit) | |
 | Metrics: `subscription_ends_at`, expiring/expired flags | |
 | Starter bundle catalog API (`GET /admin/starter-bundles`) | |

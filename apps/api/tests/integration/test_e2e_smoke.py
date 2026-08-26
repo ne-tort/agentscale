@@ -287,14 +287,20 @@ def test_e2e_disabled_ai_key_blocks_session(client: TestClient) -> None:
         json={"status": "disabled"},
     )
     assert disabled.status_code == 200, disabled.text
+    cascade = disabled.json().get("runtime_cascade") or {}
+    assert project_id in (cascade.get("projects_paused") or [])
+
+    paused = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
+    assert paused.status_code == 200
+    assert paused.json()["status"] == "paused"
 
     blocked = client.post(
         f"/api/v1/projects/{project_id}/chat",
         headers=owner_h,
         json={"text": "no key"},
     )
-    assert blocked.status_code == 404
-    assert blocked.json()["code"] == "NO_AI_KEY"
+    assert blocked.status_code == 409
+    assert blocked.json()["code"] == "PROJECT_PAUSED"
 
 
 @requires_postgres

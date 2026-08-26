@@ -15,9 +15,11 @@
 |----------|--------|
 | create | Volume + materialize + `container_ref` |
 | update context | Re-materialize after prompts/MCP package changes |
-| pause | Stop agent; keep volume |
+| pause | Cancel agent sessions + **pause container** (API: `pause_container`; keep volume; k8s pod stop — hole) |
 | resume | Start; resume agent if supported |
-| delete | Destroy + cabinet event |
+| delete | Soft-delete + wipe workspace + cabinet event |
+
+См. также каскад ключей/компаний: [02 domain](../02-ai-provider-keys/domain.md), [01 domain](../01-platform-admin/domain.md).
 
 ## Откуда содержимое
 

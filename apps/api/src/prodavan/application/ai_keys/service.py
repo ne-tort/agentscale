@@ -276,7 +276,13 @@ class AiKeysService:
             principal=principal,
             detail={"fields": sorted(updates.keys()), "status": row.status},
         )
-        return self._to_public(row, company_ids=await self._company_ids(key_id))
+        cascade: dict[str, Any] = {}
+        if row.status == KeyStatus.DISABLED and old_status != KeyStatus.DISABLED:
+            cascade = await self.cascade_key_runtime_stop(key_id, principal=principal)
+        out = self._to_public(row, company_ids=await self._company_ids(key_id))
+        if cascade:
+            out["runtime_cascade"] = cascade
+        return out
 
     async def renew(self, key_id: str, months: int, *, principal: Principal | None = None) -> dict:
         if months < 1 or months > 12:
@@ -336,6 +342,9 @@ class AiKeysService:
         row = await self._get_row(key_id)
         ref = row.secret_ref
         name = row.name
+        cascade = await self.cascade_key_runtime_stop(key_id, principal=principal)
+        # Cascade may commit (project.pause); re-load before delete.
+        row = await self._get_row(key_id)
         await self._session.delete(row)
         await self._session.commit()
         self._secrets.delete(ref)
@@ -343,8 +352,77 @@ class AiKeysService:
             event_type="ai_key.deleted",
             key_id=key_id,
             principal=principal,
-            detail={"name": name},
+            detail={"name": name, "runtime_cascade": cascade},
         )
+
+    async def cascade_key_runtime_stop(
+        self, key_id: str, *, principal: Principal | None = None
+    ) -> dict[str, Any]:
+        """Cancel sessions resolved to this key; pause projects that lose last runtime binding.
+
+        Key does not own Project — effect goes through bindings + session snapshot.
+        Pause rule: company has no remaining ACTIVE runtime-capable binding for its
+        preferred_provider (or any provider if preferred_provider is unset).
+        """
+        from prodavan.application.agent.session_service import AgentSessionService
+        from prodavan.application.projects.project_service import ProjectService
+        from prodavan.domain.projects import ProjectStatus
+        from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+        actor = principal or Principal(sub="system:ai-key-cascade")
+        sessions_cancelled = await AgentSessionService(self._session).cancel_active_for_key(
+            key_id=key_id
+        )
+        await self._session.flush()
+
+        company_ids = await self._company_ids(key_id)
+        projects_paused: list[str] = []
+        projects = ProjectService(self._session)
+        for company_id in company_ids:
+            if not await self._company_lost_runtime_key(company_id, exclude_key_id=key_id):
+                continue
+            q = await self._session.execute(
+                select(ProjectRow.id).where(
+                    ProjectRow.company_id == company_id,
+                    ProjectRow.status == ProjectStatus.ACTIVE,
+                )
+            )
+            for project_id in q.scalars().all():
+                await projects.pause(project_id=project_id, principal=actor, employee=None)
+                projects_paused.append(project_id)
+
+        # Ensure session cancels are durable even if no project was paused.
+        if sessions_cancelled and not projects_paused:
+            await self._session.commit()
+
+        return {
+            "sessions_cancelled": sessions_cancelled,
+            "companies_considered": list(company_ids),
+            "projects_paused": projects_paused,
+        }
+
+    async def _company_lost_runtime_key(self, company_id: str, *, exclude_key_id: str) -> bool:
+        """True when company has no other ACTIVE runtime-capable binding for preferred_provider."""
+        from prodavan.application.admin.company_service import AdminCompanyService
+
+        policy = await AdminCompanyService(self._session).get_agent_policy(company_id)
+        preferred = policy.preferred_provider
+        q = await self._session.execute(
+            select(AiProviderKeyRow)
+            .join(CompanyAiKeyBindingRow, CompanyAiKeyBindingRow.key_id == AiProviderKeyRow.id)
+            .where(
+                CompanyAiKeyBindingRow.company_id == company_id,
+                AiProviderKeyRow.id != exclude_key_id,
+                AiProviderKeyRow.status == KeyStatus.ACTIVE,
+            )
+        )
+        remaining = [
+            row
+            for row in q.scalars().all()
+            if is_runtime_api_kind(row.api_kind)
+            and (not preferred or row.provider == preferred)
+        ]
+        return len(remaining) == 0
 
     async def resolve_credentials(
         self,

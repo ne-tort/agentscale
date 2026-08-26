@@ -32,6 +32,7 @@
 | Project.agent_provider override on resolve (via L07 create/PATCH) | — |
 | company_key_metrics(company_id) for L04 alerts | |
 | Bind/unbind companies; renew months 1..12; rotate-secret | |
+| Disable/delete cascade: cancel sessions by `resolved_key_id`; pause projects that lose last runtime binding for preferred_provider | |
 
 ## Как сделано
 

@@ -353,3 +353,48 @@ def test_admin_company_description_and_running_cabinets(client: TestClient) -> N
     assert listed_after.status_code == 200
     match_after = next(i for i in listed_after.json()["items"] if i["id"] == company_id)
     assert match_after["running_cabinets"] == 1
+
+
+@requires_postgres
+def test_admin_delete_company_cascades(client: TestClient) -> None:
+    admin = _token(sub="padmin-del", email="padmin-del@example.com", platform_admin=True)
+    admin_h = {"Authorization": f"Bearer {admin}"}
+    created = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "DeleteMe", "admin_email": "boss@deleteme.test"},
+    )
+    assert created.status_code == 201, created.text
+    company_id = created.json()["company"]["id"]
+
+    boss_tok = _token(sub="boss-del", email="boss@deleteme.test")
+    boss_h = {"Authorization": f"Bearer {boss_tok}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=boss_h,
+        json={"name": "DoomedCab", "company_id": company_id},
+    )
+    assert cab.status_code == 201, cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=boss_h,
+        json={"name": "DoomedProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    deleted = client.delete(f"/api/v1/admin/companies/{company_id}", headers=admin_h)
+    assert deleted.status_code == 200, deleted.text
+    body = deleted.json()
+    assert body["deleted"] is True
+    assert body["id"] == company_id
+    assert project_id in body["projects_deleted"]
+    assert cabinet_id in body["cabinets_deleted"]
+
+    gone = client.get(f"/api/v1/admin/companies/{company_id}", headers=admin_h)
+    assert gone.status_code == 404
+
+    proj_gone = client.get(f"/api/v1/projects/{project_id}", headers=boss_h)
+    assert proj_gone.status_code == 404

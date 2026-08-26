@@ -76,7 +76,17 @@ Resolve-контракт и adapters **не меняются** — UI тольк
 | `preferred_provider` | Company (default) или Project override | `cursor` / `codex` / `claude_code` |
 | `platform_fallback` | Company flag, default false | Разрешить platform-owned key |
 
-Rotate / disable → существующие сессии дорабатывают или cancel по политике; **новые** сессии ключ не получают. Audit: `ai_key.rotated` / `ai_key.disabled`.
+Rotate / disable → **cancel** ACTIVE `AgentSession` with `resolved_key_id` = this key;
+pause ACTIVE projects of bound companies when the key was the **last ACTIVE runtime-capable
+binding** for the company's `preferred_provider` (or any provider if preferred is unset).
+`platform_fallback` does **not** prevent that pause — company-owned binding path is gone.
+New sessions already fail with `NO_AI_KEY` when no binding remains (unless fallback).
+Audit: `ai_key.rotated` / `ai_key.disabled` / cascade detail on delete.
+
+### Session snapshot
+
+On session create, `agent_sessions.resolved_key_id` stores the credential key id from resolve.
+Key module does **not** own Project; cascade uses binding membership + session snapshot.
 
 ## Продление
 
@@ -115,6 +125,6 @@ Seed: OpenAI, Anthropic, OpenRouter, Cursor, Ollama.
 - После create секрет не возвращается (mask / `secret_ref` prefix only).
 - `cli_subscription` нельзя выбрать в resolve и нельзя передать в adapter.
 - Disabled/expired — не для новых сессий.
-- Delete с bindings — DangerConfirmPage + detach или cascade (явный выбор на странице).
+- Delete с bindings — AppConfirmPage + cascade runtime stop (sessions + selective project pause), then vault delete.
 
 См. [08-agent-providers](../08-agent-providers/), [api.md](api.md), [persistence.md](persistence.md).

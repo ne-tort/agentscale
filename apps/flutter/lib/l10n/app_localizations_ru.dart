@@ -433,6 +433,16 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminNoCompanies => 'Нет компаний';
 
   @override
+  String adminDeleteCompanyConfirm(String name) {
+    return 'Удалить компанию «$name»? Будут отключены сотрудники, приостановлены и удалены проекты (wipe workspace), кабинеты удалятся навсегда.';
+  }
+
+  @override
+  String adminDisableAiKeyConfirm(String name) {
+    return 'Отключить AI-ключ «$name»? Активные сессии с этим ключом будут отменены, а проекты могут уйти в pause, если это был их единственный runtime-ключ.';
+  }
+
+  @override
   String get adminNoCompaniesBound => 'Компании не привязаны';
 
   @override
