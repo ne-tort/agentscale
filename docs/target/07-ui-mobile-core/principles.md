@@ -79,4 +79,4 @@
 
 ## Связь с запретом модалок
 
-Выбор сущностей и confirm — pages (`AppSelectorPage`, `DangerConfirmPage`). См. [design-rules.md](design-rules.md).
+Выбор сущностей и confirm — pages (`AppSelectorPage`, `AppConfirmPage`). См. [design-rules.md](design-rules.md).

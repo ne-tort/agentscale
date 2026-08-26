@@ -7,7 +7,7 @@ import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/employee/cabinet_create_page.dart';
 import 'package:prodavan/features/employee/cabinet_import_bundle_page.dart';
 import 'package:prodavan/features/employee/dynamic_cabinet_shell.dart';
@@ -123,7 +123,7 @@ class _CabinetListPageState extends State<CabinetListPage> {
           body: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (_error != null) InlineErrorBanner(message: _error!),
+              if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
               Expanded(
                 child: AppEntityCollection(
                   loading: _loading,

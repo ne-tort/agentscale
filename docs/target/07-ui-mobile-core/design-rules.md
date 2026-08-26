@@ -26,9 +26,10 @@
 | Свободные заголовки/подсказки «как пользоваться» | Нарушение laconic |
 | Feature-local кнопки в обход core | Нарушение reuse |
 
-Допустимы: системный file picker OS; SnackBar для лёгкого feedback (не confirm).
+Допустимы: системный file picker OS; `AppSnackBar` для лёгкого feedback (не confirm).
+Inline status — `AppStatusBanner` с `AppStatusSeverity` (info / success / warning / error / critical), цвета только из `AppColorTokens`.
 
 ## Навигация
 
 - `AppScaffold` + optional `NavigationBar` / rail через `AppLayout`.
-- Деструктивные действия → `DangerConfirmPage` (full screen).
+- Деструктивные действия → `AppConfirmPage` (full screen, `AppStatusSeverity.error`).

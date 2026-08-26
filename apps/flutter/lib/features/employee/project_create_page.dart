@@ -5,7 +5,7 @@ import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/employee/project_workspace_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -95,7 +95,7 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.lg),
         children: [
-          if (_error != null) InlineErrorBanner(message: _error!),
+          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
           Form(
             key: _formKey,
             child: Column(

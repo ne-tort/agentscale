@@ -4,7 +4,7 @@ import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Full-page secret rotation — no modal (L04 ux-contract).
@@ -67,7 +67,7 @@ class _AdminAiKeyRotatePageState extends State<AdminAiKeyRotatePage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (_error != null) InlineErrorBanner(message: _error!),
+            if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
             Text(l10n.adminRotateSecretHint),
             const SizedBox(height: AppSpacing.md),
             Form(

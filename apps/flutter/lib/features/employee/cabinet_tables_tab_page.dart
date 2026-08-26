@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
-import 'package:prodavan/core/widgets/danger_confirm_page.dart';
+import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/employee/cabinet_column_add_page.dart';
 import 'package:prodavan/features/employee/cabinet_column_edit_page.dart';
 import 'package:prodavan/features/employee/cabinet_row_edit_page.dart';
@@ -264,11 +264,12 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
     final rowId = row['id'] as String?;
     if (slug == null || rowId == null) return;
 
-    final ok = await DangerConfirmPage.push(
+    final ok = await AppConfirmPage.push(
       context,
       title: l10n.cabinetDeleteRow,
       message: l10n.cabinetDeleteRowPermanently('$rowId'),
       confirmLabel: l10n.commonDelete,
+      severity: AppStatusSeverity.error,
     );
     if (ok != true) return;
 
@@ -295,7 +296,7 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (_error != null) InlineErrorBanner(message: _error!),
+          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
           Expanded(
             child: EmptyPlaceholder(title: l10n.cabinetNoMetaTablesYet),
           ),
@@ -314,7 +315,7 @@ class _CabinetTablesTabPageState extends State<CabinetTablesTabPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (_error != null) InlineErrorBanner(message: _error!),
+        if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
           child: Align(

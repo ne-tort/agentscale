@@ -7,9 +7,9 @@ import 'package:prodavan/core/widgets/app_list_item.dart';
 import 'package:prodavan/core/widgets/app_radio.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_switch.dart';
-import 'package:prodavan/core/widgets/danger_confirm_page.dart';
+import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Row model for [AppCatalogSelectPage] (static enums or catalog entries).
@@ -164,11 +164,12 @@ class _AppCatalogSelectPageState extends State<AppCatalogSelectPage> {
 
   Future<void> _delete(AppCatalogSelectItem item) async {
     final l10n = AppLocalizations.of(context);
-    final ok = await DangerConfirmPage.push(
+    final ok = await AppConfirmPage.push(
       context,
       title: l10n.commonDelete,
       message: item.title,
       confirmLabel: l10n.commonDelete,
+      severity: AppStatusSeverity.error,
     );
     if (!ok) return;
     final cb = widget.onDelete;
@@ -197,10 +198,7 @@ class _AppCatalogSelectPageState extends State<AppCatalogSelectPage> {
         body: Column(
           children: [
             if (widget.warningBanner != null)
-              Padding(
-                padding: const EdgeInsets.all(AppSpacing.md),
-                child: InlineErrorBanner(message: widget.warningBanner!),
-              ),
+              AppStatusBanner(severity: AppStatusSeverity.warning, message: widget.warningBanner!),
             if (widget.allowCreate && widget.onCreate != null)
               AppInlineAddField(
                 title: widget.addFieldTitle ?? l10n.commonAdd,

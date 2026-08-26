@@ -6,9 +6,9 @@ import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_icon_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/danger_confirm_page.dart';
+import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/company/company_invite_employee_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -87,11 +87,12 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
   Future<void> _disable(Map<String, dynamic> emp) async {
     final l10n = AppLocalizations.of(context);
     if (emp['status'] == 'disabled') return;
-    final ok = await DangerConfirmPage.push(
+    final ok = await AppConfirmPage.push(
       context,
       title: l10n.companyDisableEmployee,
       message: l10n.companyDisableEmployeeConfirm('${emp['email']}'),
       confirmLabel: l10n.commonDisable,
+      severity: AppStatusSeverity.warning,
     );
     if (!ok) return;
     try {
@@ -141,7 +142,7 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
           ],
           body: Column(
             children: [
-              if (_error != null) InlineErrorBanner(message: _error!),
+              if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
               Expanded(
                 child: AppEntityCollection(
                   loading: _loading,

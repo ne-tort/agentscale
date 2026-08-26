@@ -6,8 +6,8 @@ import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/danger_confirm_page.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/core/widgets/app_confirm_page.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Rename or archive a meta table (L06).
@@ -73,11 +73,12 @@ class _CabinetTableSettingsPageState extends State<CabinetTableSettingsPage> {
 
   Future<void> _archive() async {
     final l10n = AppLocalizations.of(context);
-    final ok = await DangerConfirmPage.push(
+    final ok = await AppConfirmPage.push(
       context,
       title: l10n.cabinetArchiveTableConfirm,
       message: l10n.cabinetArchiveTableMessage(widget.tableSlug),
       confirmLabel: l10n.commonArchive,
+      severity: AppStatusSeverity.warning,
     );
     if (ok != true) return;
 
@@ -106,11 +107,12 @@ class _CabinetTableSettingsPageState extends State<CabinetTableSettingsPage> {
 
   Future<void> _deletePermanently() async {
     final l10n = AppLocalizations.of(context);
-    final ok = await DangerConfirmPage.push(
+    final ok = await AppConfirmPage.push(
       context,
       title: l10n.cabinetDeleteTablePermanently,
       message: l10n.cabinetDropAllDataConfirm(widget.tableSlug),
       confirmLabel: l10n.commonDelete,
+      severity: AppStatusSeverity.error,
     );
     if (ok != true) return;
 
@@ -153,7 +155,7 @@ class _CabinetTableSettingsPageState extends State<CabinetTableSettingsPage> {
                   ),
             ),
           if (_archived) const SizedBox(height: AppSpacing.sm),
-          if (_error != null) InlineErrorBanner(message: _error!),
+          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
           if (!_archived)
             Form(
               key: _formKey,

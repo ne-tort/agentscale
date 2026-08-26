@@ -4,6 +4,7 @@ import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/features/admin/company/admin_company_detail_controller.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -33,10 +34,9 @@ class AdminCompanyEventsPage extends StatelessWidget {
                         try {
                           final result = await ctrl.drainTriggers();
                           if (!context.mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(l10n.adminDrainedTriggers('${result['count'] ?? 0}')),
-                            ),
+                          AppSnackBar.success(
+                            context,
+                            l10n.adminDrainedTriggers('${result['count'] ?? 0}'),
                           );
                         } catch (_) {}
                       },
@@ -53,11 +53,10 @@ class AdminCompanyEventsPage extends StatelessWidget {
                             targetCompanyId: ctrl.companyId,
                           );
                           if (!context.mounted) return;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                l10n.adminIdlePausedProjectsInCompany('${result['count'] ?? 0}'),
-                              ),
+                          AppSnackBar.success(
+                            context,
+                            l10n.adminIdlePausedProjectsInCompany(
+                              '${result['count'] ?? 0}',
                             ),
                           );
                         } catch (_) {}
@@ -77,10 +76,9 @@ class AdminCompanyEventsPage extends StatelessWidget {
                           final companies = (result['companies'] is List)
                               ? (result['companies'] as List).length
                               : 0;
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(l10n.adminPlatformIdleSweep('$count', '$companies')),
-                            ),
+                          AppSnackBar.success(
+                            context,
+                            l10n.adminPlatformIdleSweep('$count', '$companies'),
                           );
                         } catch (_) {}
                       },

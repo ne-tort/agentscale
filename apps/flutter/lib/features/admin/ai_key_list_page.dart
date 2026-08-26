@@ -7,7 +7,8 @@ import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_inline_add_field.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/danger_confirm_page.dart';
+import 'package:prodavan/core/widgets/app_confirm_page.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/admin/ai_http_provider_select_page.dart';
 import 'package:prodavan/features/admin/ai_key_detail_page.dart';
@@ -115,11 +116,12 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
 
   Future<void> _deleteKey(AppEntityRow row) async {
     final l10n = AppLocalizations.of(context);
-    final ok = await DangerConfirmPage.push(
+    final ok = await AppConfirmPage.push(
       context,
       title: l10n.commonDelete,
       message: row.title,
       confirmLabel: l10n.commonDelete,
+      severity: AppStatusSeverity.error,
     );
     if (!ok) return;
     try {

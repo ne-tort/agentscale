@@ -7,9 +7,9 @@
 ## Слои
 
 ```text
-atoms          AppIconButton, AppCheckbox, AppRadio, tokens
-molecules      AppListItem, AppButton, AppPreferenceTile
-organisms      AppEntityCollection, AppSelectorPage, AppScaffold, EmptyPlaceholder, preferences/*, DangerConfirmPage
+atoms          AppIconButton, AppCheckbox, AppRadio, AppSpacing, AppColorTokens, AppHairlineDivider
+molecules      AppListItem, AppButton, AppPreferenceTile, AppNavPreference, AppStatusBanner
+organisms      AppEntityCollection, AppSelectorPage, AppScaffold, EmptyPlaceholder, preferences/*, AppConfirmPage, AppSnackBar
 screens        feature pages (только сборка organisms/molecules)
 ```
 

@@ -6,9 +6,9 @@ import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/danger_confirm_page.dart';
+import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/employee/cabinet_meta_tab_create_page.dart';
 import 'package:prodavan/features/employee/cabinet_meta_view_edit_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -125,11 +125,12 @@ class _CabinetMetaTabsPageState extends State<CabinetMetaTabsPage> {
     final viewSlug = tab['view_slug'] as String?;
     if (tabId == null) return;
 
-    final ok = await DangerConfirmPage.push(
+    final ok = await AppConfirmPage.push(
       context,
       title: l10n.cabinetDeleteTab,
       message: l10n.cabinetRemoveTabAndView('${tab['title']}'),
       confirmLabel: l10n.commonDelete,
+      severity: AppStatusSeverity.error,
     );
     if (ok != true) return;
 
@@ -162,7 +163,7 @@ class _CabinetMetaTabsPageState extends State<CabinetMetaTabsPage> {
               child: ListView(
                 padding: const EdgeInsets.all(AppSpacing.lg),
                 children: [
-                  if (_error != null) InlineErrorBanner(message: _error!),
+                  if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
                   Align(
                     alignment: Alignment.centerRight,
                     child: TextButton.icon(

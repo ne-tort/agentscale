@@ -6,9 +6,9 @@ import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/danger_confirm_page.dart';
-import 'package:prodavan/features/admin/ai_http_provider_select_page.dart';
-import 'package:prodavan/features/admin/ai_key_integration_type.dart';
+import 'package:prodavan/core/widgets/app_confirm_page.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
+import 'package:prodavan/features/admin/ai_http_provider_select_page.dart';import 'package:prodavan/features/admin/ai_key_integration_type.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// AI key detail — type-first + optional HTTP provider catalog (L03/L04).
@@ -196,11 +196,12 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
   Future<void> _disableKey() async {
     final l10n = AppLocalizations.of(context);
     if (_key?['status'] == 'disabled') return;
-    final ok = await DangerConfirmPage.push(
+    final ok = await AppConfirmPage.push(
       context,
       title: l10n.adminDisableAiKey,
       message: l10n.adminDisableKeyConfirm(_displayName),
       confirmLabel: l10n.commonDisable,
+      severity: AppStatusSeverity.warning,
     );
     if (!ok) return;
     try {

@@ -5,7 +5,8 @@ import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/features/employee/widgets/project_status_chip.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -137,9 +138,7 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
         _projectStatus = result['status'] as String? ?? 'paused';
         _pausing = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.projectProjectPaused)),
-      );
+      AppSnackBar.success(context, l10n.projectProjectPaused);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -162,9 +161,7 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
         _projectStatus = result['status'] as String? ?? 'active';
         _pausing = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(l10n.projectProjectResumed)),
-      );
+      AppSnackBar.success(context, l10n.projectProjectResumed);
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -192,7 +189,7 @@ class _ProjectSettingsPageState extends State<ProjectSettingsPage> {
           : ListView(
               padding: const EdgeInsets.all(AppSpacing.lg),
               children: [
-                if (_error != null) InlineErrorBanner(message: _error!),
+                if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
                 if (_projectStatus != null)
                   ListTile(
                     contentPadding: EdgeInsets.zero,

@@ -7,8 +7,8 @@ import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/danger_confirm_page.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/core/widgets/app_confirm_page.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Edit column metadata / type (L06 PATCH columns).
@@ -80,11 +80,12 @@ class _CabinetColumnEditPageState extends State<CabinetColumnEditPage> {
 
   Future<void> _delete() async {
     final l10n = AppLocalizations.of(context);
-    final ok = await DangerConfirmPage.push(
+    final ok = await AppConfirmPage.push(
       context,
       title: l10n.cabinetDeleteColumnConfirm,
       message: l10n.cabinetRemoveColumnData(_columnName),
       confirmLabel: l10n.commonDelete,
+      severity: AppStatusSeverity.error,
     );
     if (ok != true) return;
 
@@ -133,7 +134,7 @@ class _CabinetColumnEditPageState extends State<CabinetColumnEditPage> {
             ),
           if (_error != null) ...[
             const SizedBox(height: AppSpacing.sm),
-            InlineErrorBanner(message: _error!),
+            AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
           ],
           if (!_isProtected) ...[
             const SizedBox(height: AppSpacing.md),

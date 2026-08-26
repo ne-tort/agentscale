@@ -25,6 +25,11 @@ class AppNavPreference extends StatelessWidget {
     return AppPreferenceTile(
       title: title,
       icon: icon,
+      leading: Icon(
+        icon,
+        size: 24,
+        color: accentColor ?? Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
       subtitle: subtitle,
       accentColor: accentColor,
       trailing: const AppTrailingChevron(),

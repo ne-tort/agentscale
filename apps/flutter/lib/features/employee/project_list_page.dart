@@ -6,7 +6,7 @@ import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_icon_button.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/employee/project_create_page.dart';
 import 'package:prodavan/features/employee/project_workspace_page.dart';
 import 'package:prodavan/features/employee/widgets/project_status_chip.dart';
@@ -121,7 +121,7 @@ class _ProjectListPageState extends State<ProjectListPage> {
       builder: (context, _) {
         return Column(
           children: [
-            if (_error != null) InlineErrorBanner(message: _error!),
+            if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
               child: Align(

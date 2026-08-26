@@ -12,7 +12,8 @@ import 'package:prodavan/core/widgets/app_radio.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_catalog_select_page.dart';
 import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
-import 'package:prodavan/core/widgets/danger_confirm_page.dart';
+import 'package:prodavan/core/widgets/app_confirm_page.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -131,10 +132,12 @@ class _CoreGalleryPageState extends State<CoreGalleryPage> {
             label: l10n.galleryDanger,
             variant: AppButtonVariant.outlined,
             onPressed: () {
-              DangerConfirmPage.push(
+              AppConfirmPage.push(
                 context,
                 title: l10n.commonDelete,
                 message: l10n.galleryDemoConfirm,
+                confirmLabel: l10n.commonDelete,
+                severity: AppStatusSeverity.error,
               );
             },
           ),

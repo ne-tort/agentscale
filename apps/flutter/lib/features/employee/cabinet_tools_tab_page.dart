@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Platform cabinet.* MCP tools list (L05/L06 interpreter).
@@ -73,7 +73,7 @@ class _CabinetToolsTabPageState extends State<CabinetToolsTabPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (_error != null) InlineErrorBanner(message: _error!),
+        if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
         Expanded(
           child: _tools.isEmpty
               ? EmptyPlaceholder(title: l10n.cabinetNoMcpTools)

@@ -43,7 +43,7 @@ abstract final class AppPalette {
   static const light = AppTonePalette(
     seed: Color(0xFF1565C0),
     success: Color(0xFF2E7D32),
-    warning: Color(0xFFED6C02),
+    warning: Color(0xFFFF7F00),
     info: Color(0xFF0277BD),
     danger: Color(0xFFC62828),
     onAccent: Color(0xFFFFFFFF),
@@ -57,7 +57,7 @@ abstract final class AppPalette {
   static const dark = AppTonePalette(
     seed: Color(0xFF90CAF9),
     success: Color(0xFF81C784),
-    warning: Color(0xFFFFB74D),
+    warning: Color(0xFFFF9933),
     info: Color(0xFF4FC3F7),
     danger: Color(0xFFEF9A9A),
     onAccent: Color(0xFF1C1B1F),
@@ -72,7 +72,7 @@ abstract final class AppPalette {
   static const ultraDark = AppTonePalette(
     seed: Color(0xFF64B5F6),
     success: Color(0xFF66BB6A),
-    warning: Color(0xFFFFA726),
+    warning: Color(0xFFFF9933),
     info: Color(0xFF29B6F6),
     danger: Color(0xFFE57373),
     onAccent: Color(0xFF0A0A0B),

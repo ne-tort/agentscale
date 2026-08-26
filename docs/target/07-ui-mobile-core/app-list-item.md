@@ -35,7 +35,7 @@ AppListItem(
   title: Text('Отключить сотрудника'),
   tone: AppListTone.danger,
   banner: 'Доступ будет закрыт', // status consequence, не «как пользоваться»
-  onTap: () => Navigator.push(… DangerConfirmPage …),
+  onTap: () => Navigator.push(… AppConfirmPage …),
 )
 ```
 

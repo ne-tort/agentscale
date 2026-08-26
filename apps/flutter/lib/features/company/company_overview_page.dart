@@ -5,7 +5,7 @@ import 'package:prodavan/core/session/company_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/company_metrics_wrap.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 
 /// Company overview — org metrics read-only (L04).
 class CompanyOverviewPage extends StatefulWidget {
@@ -74,7 +74,7 @@ class _CompanyOverviewPageState extends State<CompanyOverviewPage> {
           : ListView(
               padding: const EdgeInsets.all(AppSpacing.md),
               children: [
-                if (_error != null) InlineErrorBanner(message: _error!),
+                if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
                 CompanyMetricsWrap(metrics: _metrics),
               ],
             ),

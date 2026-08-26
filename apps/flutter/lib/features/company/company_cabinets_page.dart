@@ -6,7 +6,8 @@ import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Org cabinets list — metadata only, read-mostly (L04).
@@ -98,7 +99,7 @@ class _CompanyCabinetsPageState extends State<CompanyCabinetsPage> {
           ],
           body: Column(
             children: [
-              if (_error != null) InlineErrorBanner(message: _error!),
+              if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
               Expanded(
                 child: AppEntityCollection(
                   loading: _loading,
@@ -110,8 +111,9 @@ class _CompanyCabinetsPageState extends State<CompanyCabinetsPage> {
                     AppEntityColumn(id: 'status', label: l10n.commonStatus, width: 96),
                   ],
                   onOpen: (row) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(l10n.companyReadOnlyOrgView(row.title))),
+                    AppSnackBar.info(
+                      context,
+                      l10n.companyReadOnlyOrgView(row.title),
                     );
                   },
                   empty: EmptyPlaceholder(

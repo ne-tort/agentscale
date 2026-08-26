@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_collection_view_mode.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/employee/cabinet_tab_host.dart';
 
 /// Dynamic cabinet shell — tabs from L06 meta (L05).
@@ -118,7 +118,7 @@ class _DynamicCabinetShellState extends State<DynamicCabinetShell>
             ),
       body: Column(
         children: [
-          if (_error != null) InlineErrorBanner(message: _error!),
+          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
           Expanded(
             child: tabs.isEmpty || _tabs == null
                 ? const Center(child: CircularProgressIndicator())

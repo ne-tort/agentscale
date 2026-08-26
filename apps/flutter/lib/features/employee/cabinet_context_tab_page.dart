@@ -8,8 +8,9 @@ import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/stat_tile.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/features/employee/cabinet_agents_edit_page.dart';
 import 'package:prodavan/features/employee/cabinet_audit_events_page.dart';
 import 'package:prodavan/features/employee/cabinet_meta_tabs_page.dart';
@@ -128,10 +129,11 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
         bytes: bytes,
       );
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(saved == null ? l10n.cabinetExportReady('${bytes.length}') : l10n.cabinetSavedTo(saved)),
-        ),
+      AppSnackBar.success(
+        context,
+        saved == null
+            ? l10n.cabinetExportReady('${bytes.length}')
+            : l10n.cabinetSavedTo(saved),
       );
     } catch (e) {
       if (!mounted) return;
@@ -153,7 +155,7 @@ class _CabinetContextTabPageState extends State<CabinetContextTabPage> {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          if (_error != null) InlineErrorBanner(message: _error!),
+          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
           Text(widget.cabinetName, style: Theme.of(context).textTheme.titleLarge),
           if (cab != null) ...[
             const SizedBox(height: 8),

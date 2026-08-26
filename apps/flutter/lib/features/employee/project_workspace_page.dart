@@ -6,7 +6,7 @@ import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/employee/project_settings_page.dart';
 import 'package:prodavan/features/employee/tool_approve_page.dart';
 import 'package:prodavan/features/employee/widgets/attachment_image_viewer.dart';
@@ -678,7 +678,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                 ? _resumeFromBanner
                 : null,
           ),
-          if (_error != null) InlineErrorBanner(message: _error!),
+          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
           if (_inboxAttachments.isNotEmpty)
             ExpansionTile(
               initiallyExpanded: false,
