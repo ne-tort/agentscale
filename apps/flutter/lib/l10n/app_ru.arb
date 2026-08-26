@@ -205,20 +205,24 @@
   "adminInviteCompanyAdminViaKeycloak": "Приглашение company.admin через Keycloak — пароль не принимается.",
   "adminKey": "Ключ",
   "adminKeyInfo": "О ключе",
-  "adminKeyListSubtitle": "{provider} · {api_kind} · {status}",
+  "adminKeyListSubtitle": "{type} · {provider}",
   "@adminKeyListSubtitle": {
     "placeholders": {
+      "type": {
+        "type": "String"
+      },
       "provider": {
-        "type": "String"
-      },
-      "api_kind": {
-        "type": "String"
-      },
-      "status": {
         "type": "String"
       }
     }
   },
+  "adminIntegrationType": "Тип",
+  "adminTypeCursorSdk": "Cursor SDK",
+  "adminTypeCodexSdk": "Codex SDK",
+  "adminTypeClaudeSdk": "Claude Agent SDK",
+  "adminTypeApiKey": "API key",
+  "adminNextRenewal": "Дата продления",
+  "adminAddHttpProvider": "Добавить провайдера",
   "adminKeyMetadata": "Метаданные ключа",
   "adminLifecycle": "Жизненный цикл",
   "adminLifetimeSubscription": "Бессрочная подписка",
@@ -614,6 +618,7 @@
   "commonCreate": "Создать",
   "commonCreating": "Создание…",
   "commonDelete": "Удалить",
+  "commonEdit": "Изменить",
   "commonDeleting": "Удаление…",
   "commonDisable": "Отключить",
   "commonDisplayNameOptional": "Отображаемое имя",

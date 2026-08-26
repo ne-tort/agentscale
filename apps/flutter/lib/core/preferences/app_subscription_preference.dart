@@ -7,18 +7,24 @@ import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Subscription end date: empty = lifetime; otherwise DD.MM.YY / DD.MM.YYYY.
+/// Date preference (DD.MM.YY / DD.MM.YYYY). Empty = [emptyLabel] (default unlimited).
 class AppSubscriptionPreference extends StatefulWidget {
   const AppSubscriptionPreference({
     super.key,
     required this.endsAt,
     required this.onEndsAtSave,
     this.enabled = true,
+    this.title,
+    this.emptyLabel,
+    this.icon = Icons.event_rounded,
   });
 
   final String endsAt;
   final Future<void> Function(String endsAt) onEndsAtSave;
   final bool enabled;
+  final String? title;
+  final String? emptyLabel;
+  final IconData icon;
 
   static final _datePattern = RegExp(r'^\d{2}\.\d{2}\.\d{2,4}$');
 
@@ -118,7 +124,7 @@ class _AppSubscriptionPreferenceState extends State<AppSubscriptionPreference> {
 
   String _subtitleText(AppLocalizations l10n) {
     final raw = widget.endsAt.trim();
-    if (raw.isEmpty) return l10n.commonUnlimited;
+    if (raw.isEmpty) return widget.emptyLabel ?? l10n.commonUnlimited;
     return raw;
   }
 
@@ -127,11 +133,12 @@ class _AppSubscriptionPreferenceState extends State<AppSubscriptionPreference> {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
     final colors = context.appColors;
+    final title = widget.title ?? l10n.adminEndsAt;
 
     if (_expanded) {
       return AppPreferenceTile(
-        title: l10n.adminEndsAt,
-        icon: Icons.event_rounded,
+        title: title,
+        icon: widget.icon,
         enabled: widget.enabled && !_saving,
         subtitle: TextField(
           controller: _controller,
@@ -161,8 +168,8 @@ class _AppSubscriptionPreferenceState extends State<AppSubscriptionPreference> {
     }
 
     return AppPreferenceTile(
-      title: l10n.adminEndsAt,
-      icon: Icons.event_rounded,
+      title: title,
+      icon: widget.icon,
       enabled: widget.enabled,
       subtitle: Text(
         _subtitleText(l10n),

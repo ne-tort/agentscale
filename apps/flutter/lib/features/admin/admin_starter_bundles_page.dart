@@ -53,7 +53,6 @@ class _AdminStarterBundlesPageState extends State<AdminStarterBundlesPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     return AppScaffold(
-      title: Text(l10n.adminStarterBundles),
       actions: [
         IconButton(onPressed: _loading ? null : _reload, icon: const Icon(Icons.refresh)),
       ],

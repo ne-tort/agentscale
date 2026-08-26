@@ -1,59 +1,45 @@
-# AppSelectorPage
+# AppCatalogSelectPage / AppSelectorPage
 
-Полноэкранная страница выбора. Заменяет dropdown, popup menu и modal pickers.
+Полноэкранный picker в table/list UX. **Канон** — `AppCatalogSelectPage`.  
+`AppSelectorPage` — thin wrap для back-compat (делегирует в catalog page).
 
-## Возможности (включаются опционально)
+## Возможности
 
 | Опция | Тип | Описание |
 |-------|-----|----------|
 | `title` | String | AppBar title |
-| `items` | `List<AppSelectorItem>` | Данные |
-| `multiSelect` | bool | Множественный выбор |
+| `items` | `List<AppCatalogSelectItem>` | Данные |
+| `multiSelect` | bool | Multi: trailing `AppSwitch`; single: `AppRadio` |
 | `selectedIds` | `Set<String>` | Начальный выбор |
 | `searchEnabled` | bool | Поле поиска сверху |
-| `showCheckboxes` | bool | Явные checkbox (обычно с multi) |
-| `showRadios` | bool | Radio для single |
-| `itemBuilder` | optional | Кастом, по умолчанию `AppListItem` |
 | `warningBanner` | String? | Плашка над списком |
 | `empty` | Widget? | EmptyPlaceholder |
-| `onConfirm` | `ValueChanged<Set<String>>` | Кнопка «Готово» в AppBar (multi) |
+| `onConfirm` | `ValueChanged<Set<String>>` | Кнопка «Готово» (multi) |
 | `popOnSelect` | bool | Single: выбрать и pop сразу |
+| `allowCreate` / `allowEdit` / `allowDelete` | bool | Мутации каталога |
+| `onCreate` / `onEdit` / `onDelete` | callbacks | Create через inline add; edit/delete после **long-press** |
 
-## `AppSelectorItem`
+## `AppCatalogSelectItem`
 
 | Поле | Описание |
 |------|----------|
 | `id` | Стабильный id |
-| `title` | |
-| `subtitle` | |
-| `leading` | IconData / Widget |
-| `trailing` | Widget? |
-| `tone` | как у list item |
+| `title` / `subtitle` | |
+| `icon` / `leading` | Слева |
+| `payload` | Произвольный JSON (каталог) |
 | `enabled` | |
 
-## Синтаксис
+## Ряд
 
-```dart
-final ids = await Navigator.of(context).push<Set<String>>(
-  MaterialPageRoute(
-    builder: (_) => AppSelectorPage(
-      title: 'AI keys',
-      multiSelect: true,
-      showCheckboxes: true,
-      searchEnabled: true,
-      selectedIds: current,
-      items: keys.map((k) => AppSelectorItem(
-        id: k.id,
-        title: k.label,
-        subtitle: k.provider,
-        leading: Icon(Icons.key_outlined),
-      )).toList(),
-    ),
-  ),
-);
-```
+`AppListItem`: **leading + trailing одновременно**; `borderless`.  
+Long-press → edit mode (highlight) + actions edit/delete.
+
+## Enum vs catalog
+
+- Static enum (`AppChoicePreference` / `AppMultiChoicePreference`): items in-memory, flags mutate = false.
+- Editable catalog (AI HTTP providers `ai.http_providers`): `allowCreate/Edit/Delete: true`.
 
 ## Инварианты
 
-- Внутри только `AppListItem` (+ search field / banner).
-- Нет `DropdownButton` внутри страницы для тех же items.
+- Нет `DropdownButton` для тех же items.
+- Preferences открывают catalog page, не legacy popup menus.

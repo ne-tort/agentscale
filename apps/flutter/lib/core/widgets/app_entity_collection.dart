@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/responsive/app_breakpoints.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_list_item.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
@@ -82,6 +83,12 @@ class AppEntityCollection extends StatelessWidget {
         : AppEntityCollectionMode.list;
   }
 
+  Alignment _alignment(AppEntityColumnAlign align) =>
+      align == AppEntityColumnAlign.end ? Alignment.centerRight : Alignment.centerLeft;
+
+  TextAlign _textAlign(AppEntityColumnAlign align) =>
+      align == AppEntityColumnAlign.end ? TextAlign.right : TextAlign.left;
+
   @override
   Widget build(BuildContext context) {
     final effective = _effectiveMode(context);
@@ -111,22 +118,30 @@ class AppEntityCollection extends StatelessWidget {
       return empty ?? EmptyPlaceholder(title: l10n.commonEmpty);
     }
     if (mode == AppEntityCollectionMode.list) {
-      return ListView.separated(
+      return ListView.builder(
         padding: const EdgeInsets.all(AppSpacing.sm),
         itemCount: rows.length,
-        separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
         itemBuilder: (context, i) {
           final row = rows[i];
-          return AppListItem(
-            title: Text(row.title),
-            subtitle: row.subtitle != null ? Text(row.subtitle!) : null,
-            leading: row.leading,
-            trailing: row.trailing ?? const Icon(Icons.chevron_right),
-            onTap: () => onOpen(row),
+          return Padding(
+            padding: EdgeInsets.only(bottom: i == rows.length - 1 ? 0 : AppSpacing.sm),
+            child: AppListItem(
+              title: Text(row.title),
+              subtitle: row.subtitle != null ? Text(row.subtitle!) : null,
+              leading: row.leading,
+              trailing: row.trailing ?? const Icon(Icons.chevron_right),
+              onTap: () => onOpen(row),
+            ),
           );
         },
       );
     }
+    final colors = context.appColors;
+    final headingStyle = Theme.of(context).textTheme.labelLarge?.copyWith(
+          color: colors.muted,
+          fontWeight: FontWeight.w600,
+        );
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final maxTableWidth = AppBreakpoints.contentMaxWidth;
@@ -147,13 +162,43 @@ class AppEntityCollection extends StatelessWidget {
 
         final table = DataTable(
           showCheckboxColumn: false,
+          dividerThickness: 0,
           columnSpacing: _columnSpacing,
           horizontalMargin: _horizontalMargin,
           dataRowMinHeight: 40,
           headingRowHeight: 44,
+          headingRowColor: WidgetStatePropertyAll(colors.surface),
+          border: TableBorder(
+            horizontalInside: BorderSide.none,
+            verticalInside: BorderSide.none,
+            top: BorderSide.none,
+            bottom: BorderSide.none,
+            left: BorderSide.none,
+            right: BorderSide.none,
+          ),
           columns: [
-            DataColumn(label: Text(primaryLabel)),
-            ...columns.map((c) => DataColumn(label: Text(c.label))),
+            DataColumn(
+              label: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(primaryLabel, style: headingStyle),
+              ),
+            ),
+            ...columns.map(
+              (c) => DataColumn(
+                label: SizedBox(
+                  width: c.width,
+                  child: Align(
+                    alignment: _alignment(c.align),
+                    child: Text(
+                      c.label,
+                      style: headingStyle,
+                      textAlign: _textAlign(c.align),
+                    ),
+                  ),
+                ),
+                numeric: c.align == AppEntityColumnAlign.end,
+              ),
+            ),
           ],
           rows: [
             for (final row in rows)
@@ -161,7 +206,10 @@ class AppEntityCollection extends StatelessWidget {
                 onSelectChanged: (_) => onOpen(row),
                 cells: [
                   DataCell(
-                    Text(row.title, overflow: TextOverflow.ellipsis),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(row.title, overflow: TextOverflow.ellipsis),
+                    ),
                   ),
                   ...columns.map((c) => _dataCell(row.cells[c.id] ?? '', c)),
                 ],
@@ -187,16 +235,12 @@ class AppEntityCollection extends StatelessWidget {
   }
 
   DataCell _dataCell(String text, AppEntityColumn column) {
-    final alignment = column.align == AppEntityColumnAlign.end
-        ? Alignment.centerRight
-        : Alignment.centerLeft;
+    final alignment = _alignment(column.align);
     final child = Text(
       text,
       overflow: TextOverflow.ellipsis,
       maxLines: 1,
-      textAlign: column.align == AppEntityColumnAlign.end
-          ? TextAlign.right
-          : TextAlign.left,
+      textAlign: _textAlign(column.align),
     );
     if (column.width != null) {
       return DataCell(

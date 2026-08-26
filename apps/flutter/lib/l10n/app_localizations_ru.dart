@@ -243,9 +243,30 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminKeyInfo => 'О ключе';
 
   @override
-  String adminKeyListSubtitle(String provider, String api_kind, String status) {
-    return '$provider · $api_kind · $status';
+  String adminKeyListSubtitle(String type, String provider) {
+    return '$type · $provider';
   }
+
+  @override
+  String get adminIntegrationType => 'Тип';
+
+  @override
+  String get adminTypeCursorSdk => 'Cursor SDK';
+
+  @override
+  String get adminTypeCodexSdk => 'Codex SDK';
+
+  @override
+  String get adminTypeClaudeSdk => 'Claude Agent SDK';
+
+  @override
+  String get adminTypeApiKey => 'API key';
+
+  @override
+  String get adminNextRenewal => 'Дата продления';
+
+  @override
+  String get adminAddHttpProvider => 'Добавить провайдера';
 
   @override
   String get adminKeyMetadata => 'Метаданные ключа';
@@ -906,6 +927,9 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get commonDelete => 'Удалить';
+
+  @override
+  String get commonEdit => 'Изменить';
 
   @override
   String get commonDeleting => 'Удаление…';

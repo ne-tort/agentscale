@@ -10,7 +10,7 @@ import 'package:prodavan/core/widgets/app_icon_button.dart';
 import 'package:prodavan/core/widgets/app_list_item.dart';
 import 'package:prodavan/core/widgets/app_radio.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_selector_page.dart';
+import 'package:prodavan/core/widgets/app_catalog_select_page.dart';
 import 'package:prodavan/core/widgets/danger_confirm_page.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -112,14 +112,13 @@ class _CoreGalleryPageState extends State<CoreGalleryPage> {
             onPressed: () async {
               await Navigator.of(context).push<Set<String>>(
                 MaterialPageRoute(
-                  builder: (_) => AppSelectorPage(
+                  builder: (_) => AppCatalogSelectPage(
                     title: l10n.galleryPick,
                     multiSelect: true,
-                    showCheckboxes: true,
                     searchEnabled: true,
                     items: [
-                      AppSelectorItem(id: 'a', title: l10n.galleryOne),
-                      AppSelectorItem(id: 'b', title: l10n.galleryTwo),
+                      AppCatalogSelectItem(id: 'a', title: l10n.galleryOne),
+                      AppCatalogSelectItem(id: 'b', title: l10n.galleryTwo),
                     ],
                   ),
                 ),

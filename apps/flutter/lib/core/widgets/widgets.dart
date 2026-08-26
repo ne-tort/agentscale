@@ -1,5 +1,6 @@
 export 'app_button.dart';
 export 'app_card.dart';
+export 'app_catalog_select_page.dart';
 export 'app_checkbox.dart';
 export 'app_collection_view_mode.dart';
 export 'app_entity_collection.dart';
@@ -11,6 +12,7 @@ export 'app_scaffold.dart';
 export 'app_section_header.dart';
 export 'app_selector_page.dart';
 export 'app_snack_bar.dart';
+export 'app_switch.dart';
 export 'company_metrics_wrap.dart';
 export 'danger_confirm_page.dart';
 export 'empty_placeholder.dart';

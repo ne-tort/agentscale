@@ -18,9 +18,11 @@ class AppListItem extends StatelessWidget {
     this.tone = AppListTone.neutral,
     this.banner,
     this.onTap,
+    this.onLongPress,
     this.selectionControl,
     this.dense = false,
     this.semanticLabel,
+    this.borderless = false,
   });
 
   final Widget title;
@@ -32,28 +34,42 @@ class AppListItem extends StatelessWidget {
   final AppListTone tone;
   final String? banner;
   final VoidCallback? onTap;
+  final VoidCallback? onLongPress;
   final Widget? selectionControl;
   final bool dense;
   final String? semanticLabel;
 
+  /// Flat row without card border (catalog/table-like pickers).
+  final bool borderless;
+
   @override
   Widget build(BuildContext context) {
     final tokens = Theme.of(context).extension<AppColorTokens>()!;
-    final bg = _toneBg(tokens);
-    final border = _toneBorder(tokens);
+    final bg = borderless
+        ? (selected ? tokens.primary.withValues(alpha: 0.08) : Colors.transparent)
+        : (selected ? tokens.primary.withValues(alpha: 0.08) : _toneBg(tokens));
+    final border = borderless
+        ? BorderSide.none
+        : BorderSide(color: selected ? tokens.primary : _toneBorder(tokens));
     final pad = dense ? AppSpacing.sm : AppSpacing.md;
 
+    final trailingSlot = trailing ?? selectionControl;
+
     final child = Material(
-      color: selected ? tokens.primary.withValues(alpha: 0.08) : bg,
+      color: bg,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(8),
-        side: BorderSide(color: selected ? tokens.primary : border),
+        borderRadius: BorderRadius.circular(borderless ? 0 : 8),
+        side: border,
       ),
       child: InkWell(
         onTap: enabled ? onTap : null,
-        borderRadius: BorderRadius.circular(8),
+        onLongPress: enabled ? onLongPress : null,
+        borderRadius: BorderRadius.circular(borderless ? 0 : 8),
         child: Padding(
-          padding: EdgeInsets.all(pad),
+          padding: EdgeInsets.symmetric(
+            horizontal: pad,
+            vertical: dense ? AppSpacing.sm : AppSpacing.md,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -68,10 +84,7 @@ class AppListItem extends StatelessWidget {
               ],
               Row(
                 children: [
-                  if (selectionControl != null) ...[
-                    selectionControl!,
-                    const SizedBox(width: AppSpacing.sm),
-                  ] else if (leading != null) ...[
+                  if (leading != null) ...[
                     leading!,
                     const SizedBox(width: AppSpacing.sm),
                   ],
@@ -97,9 +110,9 @@ class AppListItem extends StatelessWidget {
                       ],
                     ),
                   ),
-                  if (trailing != null) ...[
+                  if (trailingSlot != null) ...[
                     const SizedBox(width: AppSpacing.sm),
-                    trailing!,
+                    trailingSlot,
                   ],
                 ],
               ),

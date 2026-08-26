@@ -1,14 +1,9 @@
 import 'package:flutter/material.dart';
 
-import 'package:prodavan/core/theme/app_spacing.dart';
-import 'package:prodavan/core/widgets/app_checkbox.dart';
+import 'package:prodavan/core/widgets/app_catalog_select_page.dart';
 import 'package:prodavan/core/widgets/app_list_item.dart';
-import 'package:prodavan/core/widgets/app_radio.dart';
-import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/empty_placeholder.dart';
-import 'package:prodavan/core/widgets/inline_error_banner.dart';
-import 'package:prodavan/l10n/app_localizations.dart';
 
+/// Back-compat item model — prefer [AppCatalogSelectItem].
 class AppSelectorItem {
   const AppSelectorItem({
     required this.id,
@@ -32,10 +27,19 @@ class AppSelectorItem {
 
   Widget? get effectiveLeading =>
       leading ?? (icon != null ? Icon(icon) : null);
+
+  AppCatalogSelectItem toCatalogItem() => AppCatalogSelectItem(
+        id: id,
+        title: title,
+        subtitle: subtitle,
+        icon: icon,
+        leading: leading,
+        enabled: enabled,
+      );
 }
 
-/// Full-screen entity picker — replaces Dropdown / PopupMenu / modal pickers.
-class AppSelectorPage extends StatefulWidget {
+/// Full-screen picker — thin wrapper over [AppCatalogSelectPage].
+class AppSelectorPage extends StatelessWidget {
   const AppSelectorPage({
     super.key,
     required this.title,
@@ -64,138 +68,17 @@ class AppSelectorPage extends StatefulWidget {
   final bool popOnSelect;
 
   @override
-  State<AppSelectorPage> createState() => _AppSelectorPageState();
-}
-
-class _AppSelectorPageState extends State<AppSelectorPage> {
-  late Set<String> _selected;
-  String _query = '';
-
-  @override
-  void initState() {
-    super.initState();
-    _selected = {...widget.selectedIds};
-  }
-
-  List<AppSelectorItem> get _filtered {
-    final q = _query.trim().toLowerCase();
-    if (q.isEmpty) return widget.items;
-    return widget.items
-        .where(
-          (i) =>
-              i.title.toLowerCase().contains(q) ||
-              (i.subtitle?.toLowerCase().contains(q) ?? false),
-        )
-        .toList();
-  }
-
-  void _toggle(String id) {
-    setState(() {
-      if (widget.multiSelect) {
-        if (_selected.contains(id)) {
-          _selected.remove(id);
-        } else {
-          _selected.add(id);
-        }
-      } else {
-        _selected = {id};
-        if (widget.popOnSelect) {
-          Navigator.of(context).pop(_selected);
-        }
-      }
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final items = _filtered;
-    return AppScaffold(
-      title: Text(widget.title),
-      actions: [
-        if (widget.multiSelect)
-          TextButton(
-            onPressed: () {
-              widget.onConfirm?.call(_selected);
-              Navigator.of(context).pop(_selected);
-            },
-            child: Text(l10n.commonDone),
-          ),
-      ],
-      body: Column(
-        children: [
-          if (widget.warningBanner != null)
-            Padding(
-              padding: const EdgeInsets.all(AppSpacing.md),
-              child: InlineErrorBanner(message: widget.warningBanner!),
-            ),
-          if (widget.searchEnabled)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.md,
-                AppSpacing.sm,
-                AppSpacing.md,
-                AppSpacing.sm,
-              ),
-              child: TextField(
-                decoration: InputDecoration(
-                  labelText: l10n.commonSearch,
-                  isDense: true,
-                ),
-                onChanged: (v) => setState(() => _query = v),
-              ),
-            ),
-          Expanded(
-            child: items.isEmpty
-                ? (widget.empty ??
-                    EmptyPlaceholder(title: l10n.commonNothingFound))
-                : ListView.separated(
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    itemCount: items.length,
-                    separatorBuilder: (_, __) =>
-                        const SizedBox(height: AppSpacing.sm),
-                    itemBuilder: (context, index) {
-                      final item = items[index];
-                      final selected = _selected.contains(item.id);
-                      Widget? control;
-                      if (widget.showCheckboxes && widget.multiSelect) {
-                        control = AppCheckbox(
-                          value: selected,
-                          onChanged: item.enabled
-                              ? (_) => _toggle(item.id)
-                              : null,
-                        );
-                      } else if (widget.showRadios && !widget.multiSelect) {
-                        control = AppRadio<String>(
-                          value: item.id,
-                          groupValue:
-                              _selected.isEmpty ? null : _selected.first,
-                          onChanged: item.enabled
-                              ? (_) => _toggle(item.id)
-                              : null,
-                        );
-                      }
-                      return AppListItem(
-                        title: Text(item.title),
-                        subtitle: item.subtitle != null
-                            ? Text(item.subtitle!)
-                            : null,
-                        leading: item.effectiveLeading,
-                        trailing: item.trailing ??
-                            (selected && !widget.showCheckboxes && !widget.showRadios
-                                ? const Icon(Icons.check)
-                                : null),
-                        selected: selected,
-                        enabled: item.enabled,
-                        tone: item.tone,
-                        selectionControl: control,
-                        onTap: item.enabled ? () => _toggle(item.id) : null,
-                      );
-                    },
-                  ),
-          ),
-        ],
-      ),
+    return AppCatalogSelectPage(
+      title: title,
+      multiSelect: multiSelect || showCheckboxes,
+      selectedIds: selectedIds,
+      searchEnabled: searchEnabled,
+      warningBanner: warningBanner,
+      empty: empty,
+      onConfirm: onConfirm,
+      popOnSelect: popOnSelect,
+      items: [for (final i in items) i.toCatalogItem()],
     );
   }
 }

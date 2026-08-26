@@ -8,12 +8,12 @@
 |--------|------------|
 | `AppPreferenceTile` | Базовая строка: title, subtitle, icon, trailing, onTap |
 | `AppPreferenceSection` | Группа контролов под `AppSectionHeader` |
-| `AppChoicePreference<T>` | Выбор из списка через `AppSelectorPage` (radio / checkbox) |
+| `AppChoicePreference<T>` | Выбор из списка через `AppCatalogSelectPage` (radio) |
+| `AppMultiChoicePreference` | Множественный выбор через `AppCatalogSelectPage` (switch) |
 | `AppValuePreference<T>` | Inline edit текста/числа с валидацией и `onSave` |
 | `AppSwitchPreference` | Boolean toggle с немедленным `onChanged` |
 | `AppNavPreference` | Hub-строка с chevron → подстраница |
-| `AppSubscriptionPreference` | Дата окончания: пусто = бессрочно |
-| `AppMultiChoicePreference` | Множественный выбор через `AppSelectorPage` |
+| `AppSubscriptionPreference` | Дата (DD.MM.YY): пусто = unlimited / not set |
 | `AppInlineAddField` | Inline add в списках сущностей (Hiddify clients pattern); full-bleed divider под полем |
 
 Barrel: `package:prodavan/core/preferences/preferences.dart` (preference tiles).  
@@ -28,7 +28,7 @@ Barrel: `package:prodavan/core/preferences/preferences.dart` (preference tiles).
 
 ## AppChoicePreference
 
-Открывает полноэкранный `AppSelectorPage`, возвращает выбор и вызывает `onSave`.
+Открывает полноэкранный `AppCatalogSelectPage`, возвращает выбор и вызывает `onSave`.
 
 ```dart
 AppChoicePreference<String>(
@@ -60,7 +60,7 @@ AppChoicePreference<String>(
 
 ## Запреты
 
-- **Не** использовать `DropdownButton` / `DropdownButtonFormField` — только `AppChoicePreference` или `AppSelectorPage`.
+- **Не** использовать `DropdownButton` / `DropdownButtonFormField` — только `AppChoicePreference` или `AppCatalogSelectPage`.
 - **Не** использовать удалённые `AppTextField`, `AppPasswordField`, `AppForm`.
 - Create/submit-формы: `Form` + `TextFormField` + явная кнопка Create/Save.
 - Dev session: `TextField` + `InputDecoration` (без `FormState`).

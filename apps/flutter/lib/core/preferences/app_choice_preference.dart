@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/app_preference_tile.dart';
+import 'package:prodavan/core/widgets/app_catalog_select_page.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
-import 'package:prodavan/core/widgets/app_selector_page.dart';
 
-/// Opens [AppSelectorPage] and saves selection seamlessly.
+/// Opens [AppCatalogSelectPage] and saves selection seamlessly.
 class AppChoicePreference<T> extends StatelessWidget {
   const AppChoicePreference({
     super.key,
@@ -17,7 +17,6 @@ class AppChoicePreference<T> extends StatelessWidget {
     this.icon,
     this.iconFor,
     this.enabled = true,
-    this.showRadios = true,
     this.multiSelect = false,
     this.pickerTitle,
     this.presentValue,
@@ -32,7 +31,6 @@ class AppChoicePreference<T> extends StatelessWidget {
   final IconData? icon;
   final IconData? Function(T value)? iconFor;
   final bool enabled;
-  final bool showRadios;
   final bool multiSelect;
   final String? pickerTitle;
   final String Function(T value)? presentValue;
@@ -41,15 +39,13 @@ class AppChoicePreference<T> extends StatelessWidget {
     if (!enabled) return;
     final picked = await Navigator.of(context).push<Set<String>>(
       MaterialPageRoute(
-        builder: (_) => AppSelectorPage(
+        builder: (_) => AppCatalogSelectPage(
           title: pickerTitle ?? title,
-          showRadios: showRadios && !multiSelect,
-          showCheckboxes: multiSelect,
           multiSelect: multiSelect,
           selectedIds: {keyFor(value)},
           items: [
             for (final c in choices)
-              AppSelectorItem(
+              AppCatalogSelectItem(
                 id: keyFor(c),
                 title: labelFor(c),
                 icon: iconFor?.call(c),

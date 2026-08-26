@@ -116,7 +116,6 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
       listenable: _viewMode,
       builder: (context, _) {
         return AppScaffold(
-          title: Text(l10n.navCompanies),
           actions: [
             IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
             AppCollectionViewModeButton(store: _viewMode),

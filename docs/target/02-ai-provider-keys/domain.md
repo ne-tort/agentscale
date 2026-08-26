@@ -7,6 +7,22 @@
 Провайдеры в scope: `cursor` \| `codex` \| `claude_code`.  
 **Вне scope:** GLM / Z.ai.
 
+## UI-ось «тип интеграции»
+
+В Admin UI первое поле — **тип**, поверх хранения `provider` + `api_kind`:
+
+| UI тип | `provider` | `api_kind` |
+|--------|------------|------------|
+| Cursor SDK | `cursor` | `cursor_sdk` |
+| Codex SDK | `codex` | `codex_sdk` |
+| Claude Agent SDK | `claude_code` | `claude_agent_sdk` |
+| API key | из каталога `ai.http_providers` (`payload.agent_provider`) | из каталога (`payload.api_kind`) |
+
+При любом SDK поле «Провайдер» скрыто. При **API key** — editable catalog picker (`AppCatalogSelectPage` + seed OpenAI / Anthropic / OpenRouter / Cursor).  
+`cli_subscription` в Type UI не показывается.
+
+Resolve-контракт и adapters **не меняются** — UI только маппит в существующие enums.
+
 ## Сущность `AiProviderKey`
 
 | Поле | Тип | Описание |
@@ -16,11 +32,11 @@
 | `provider` | enum | `cursor` \| `codex` \| `claude_code` |
 | `api_kind` | enum | См. ниже |
 | `secret_ref` | string | **Единственный** способ хранения секрета (vault/KMS). Нет `secret_ciphertext` в API/каноне |
-| `next_renewal_at` | datetime? | Дата следующего продления |
+| `next_renewal_at` | datetime? | Дата следующего продления (редактируется вручную или через renew) |
 | `renewal_price` | money? | Учётная цена |
 | `currency` | string? | ISO |
 | `notes` | text? | |
-| `status` | enum | `active` \| `expired` \| `disabled` |
+| `status` | enum | `active` \| `expired` \| `disabled` (в detail UI не показывается как read-only поле) |
 | `created_at` / `updated_at` | datetime | |
 
 ### `api_kind`
@@ -60,12 +76,17 @@ Rotate / disable → существующие сессии дорабатыва�
 
 ## Продление
 
-`renew(months)` ∈ {1..12} через `AppSelectorPage`.  
-`next_renewal_at = max(now, current) + months`. Audit `ai_key.renewed`.
+- Ручной PATCH `next_renewal_at` (ISO) из UI (формат даты `DD.MM.YY` / `DD.MM.YYYY`).
+- `renew(months)` ∈ {1..12}: `next_renewal_at = max(now, current) + months`. Audit `ai_key.renewed`.
 
 ## Привязка
 
-`CompanyAiKeyBinding` M:N. UI: Admin company detail → multi `AppSelectorPage`.
+`CompanyAiKeyBinding` M:N. UI: multi `AppCatalogSelectPage`.
+
+## Каталог HTTP-провайдеров
+
+Таблица `reference_catalog_entries`, `catalog_id = ai.http_providers`.  
+Admin CRUD: `/admin/catalogs/{catalog_id}/entries`. Seed idempotent при первом list. Seeded entries редактируемы/удаляемы.
 
 ## Инварианты
 

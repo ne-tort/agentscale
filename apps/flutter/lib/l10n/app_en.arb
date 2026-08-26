@@ -205,20 +205,24 @@
   "adminInviteCompanyAdminViaKeycloak": "Invite company.admin via Keycloak — password is not accepted.",
   "adminKey": "Key",
   "adminKeyInfo": "Key info",
-  "adminKeyListSubtitle": "{provider} · {api_kind} · {status}",
+  "adminKeyListSubtitle": "{type} · {provider}",
   "@adminKeyListSubtitle": {
     "placeholders": {
+      "type": {
+        "type": "String"
+      },
       "provider": {
-        "type": "String"
-      },
-      "api_kind": {
-        "type": "String"
-      },
-      "status": {
         "type": "String"
       }
     }
   },
+  "adminIntegrationType": "Type",
+  "adminTypeCursorSdk": "Cursor SDK",
+  "adminTypeCodexSdk": "Codex SDK",
+  "adminTypeClaudeSdk": "Claude Agent SDK",
+  "adminTypeApiKey": "API key",
+  "adminNextRenewal": "Renewal date",
+  "adminAddHttpProvider": "Add provider",
   "adminKeyMetadata": "Key metadata",
   "adminLifecycle": "Lifecycle",
   "adminLifetimeSubscription": "Lifetime subscription",
@@ -614,6 +618,7 @@
   "commonCreate": "Create",
   "commonCreating": "Creating…",
   "commonDelete": "Delete",
+  "commonEdit": "Edit",
   "commonDeleting": "Deleting…",
   "commonDisable": "Disable",
   "commonDisplayNameOptional": "Display name",

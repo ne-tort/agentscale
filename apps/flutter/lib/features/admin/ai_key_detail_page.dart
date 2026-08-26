@@ -6,9 +6,11 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/danger_confirm_page.dart';
+import 'package:prodavan/features/admin/ai_http_provider_select_page.dart';
+import 'package:prodavan/features/admin/ai_key_integration_type.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// AI key detail — seamless preference editing (L03/L04).
+/// AI key detail — type-first + optional HTTP provider catalog (L03/L04).
 class AdminAiKeyDetailPage extends StatefulWidget {
   const AdminAiKeyDetailPage({
     super.key,
@@ -24,18 +26,10 @@ class AdminAiKeyDetailPage extends StatefulWidget {
 }
 
 class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
-  static const _providers = ['cursor', 'codex', 'claude_code'];
-  static const _apiKinds = [
-    'cursor_sdk',
-    'codex_sdk',
-    'claude_agent_sdk',
-    'openai_api',
-    'anthropic_api',
-  ];
-
   bool _loading = true;
   Map<String, dynamic>? _key;
   List<Map<String, dynamic>> _companies = const [];
+  List<Map<String, dynamic>> _httpProviders = const [];
   String _displayName = '';
 
   @override
@@ -50,10 +44,18 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
     try {
       final key = await adminContext.api.getAiKey(widget.keyId);
       final companies = await adminContext.api.listCompanies();
+      List<Map<String, dynamic>> providers = const [];
+      try {
+        providers = await adminContext.api
+            .listCatalogEntries(kAiHttpProvidersCatalogId);
+      } catch (_) {
+        // Catalog optional until migration applied.
+      }
       if (!mounted) return;
       setState(() {
         _key = key;
         _companies = companies;
+        _httpProviders = providers;
         _displayName = key['name'] as String? ?? widget.keyName;
         _loading = false;
       });
@@ -85,6 +87,79 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
     if (count == 0) return l10n.commonNotSet;
     if (count == 1) return _companyLabel(_boundIds.first);
     return l10n.adminBindingsCount(count);
+  }
+
+  AiKeyIntegrationType get _type {
+    final provider = _key?['provider'] as String? ?? 'cursor';
+    final apiKind = _key?['api_kind'] as String? ?? 'cursor_sdk';
+    return AiKeyIntegrationType.fromKey(provider: provider, apiKind: apiKind);
+  }
+
+  String _typeLabel(AppLocalizations l10n, AiKeyIntegrationType t) {
+    switch (t.id) {
+      case 'cursor_sdk':
+        return l10n.adminTypeCursorSdk;
+      case 'codex_sdk':
+        return l10n.adminTypeCodexSdk;
+      case 'claude_agent_sdk':
+        return l10n.adminTypeClaudeSdk;
+      default:
+        return l10n.adminTypeApiKey;
+    }
+  }
+
+  String _providerSubtitle(AppLocalizations l10n) {
+    final apiKind = _key?['api_kind'] as String? ?? '';
+    final provider = _key?['provider'] as String? ?? '';
+    for (final p in _httpProviders) {
+      final payload = (p['payload'] as Map?)?.cast<String, dynamic>() ?? {};
+      if (payload['api_kind'] == apiKind &&
+          payload['agent_provider'] == provider) {
+        return p['title'] as String? ?? p['id'] as String;
+      }
+    }
+    for (final p in _httpProviders) {
+      final payload = (p['payload'] as Map?)?.cast<String, dynamic>() ?? {};
+      if (payload['api_kind'] == apiKind) {
+        return p['title'] as String? ?? p['id'] as String;
+      }
+    }
+    if (apiKind.isEmpty) return l10n.commonNotSet;
+    return apiKind;
+  }
+
+  Future<void> _saveType(AiKeyIntegrationType t) async {
+    if (t.isApiKey) {
+      // Keep current HTTP mapping until user picks a provider.
+      return;
+    }
+    await adminContext.api.patchAiKey(
+      keyId: widget.keyId,
+      provider: t.provider,
+      apiKind: t.apiKind,
+    );
+    await _load();
+  }
+
+  Future<void> _pickProvider() async {
+    final item = await AiHttpProviderSelectPage.push(
+      context,
+      selectedApiKind: _key?['api_kind'] as String?,
+      selectedProvider: _key?['provider'] as String?,
+    );
+    if (item == null) return;
+    final apiKind = item.payload['api_kind'] as String? ?? 'custom';
+    final provider = item.payload['agent_provider'] as String? ?? 'codex';
+    try {
+      await adminContext.api.patchAiKey(
+        keyId: widget.keyId,
+        provider: provider,
+        apiKind: apiKind,
+      );
+      await _load();
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    }
   }
 
   Future<void> _renewKey() async {
@@ -124,10 +199,11 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
       );
     }
 
-    final provider = _key?['provider'] as String? ?? 'cursor';
-    final apiKind = _key?['api_kind'] as String? ?? 'cursor_sdk';
-    final status = _key?['status'] as String? ?? '—';
+    final type = _type;
     final hasSecret = (_key?['secret_ref_prefix'] as String? ?? '').isNotEmpty;
+    final status = _key?['status'] as String? ?? '';
+    final nextRaw = _key?['next_renewal_at'] as String? ?? '';
+    final nextDisplay = formatSubscriptionDate(nextRaw);
 
     return AppScaffold(
       title: Text(_displayName),
@@ -142,31 +218,53 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
             icon: Icons.label_outline_rounded,
             value: _displayName,
             onSave: (v) async {
-              await adminContext.api.patchAiKey(keyId: widget.keyId, name: v.trim());
+              await adminContext.api
+                  .patchAiKey(keyId: widget.keyId, name: v.trim());
               await _load();
             },
           ),
-          AppChoicePreference<String>(
-            title: l10n.commonProvider,
-            icon: Icons.cloud_outlined,
-            value: _providers.contains(provider) ? provider : 'cursor',
-            choices: _providers,
-            keyFor: (v) => v,
-            labelFor: (v) => v,
+          AppChoicePreference<AiKeyIntegrationType>(
+            title: l10n.adminIntegrationType,
+            icon: Icons.category_outlined,
+            value: type,
+            choices: AiKeyIntegrationType.all,
+            keyFor: (v) => v.id,
+            labelFor: (v) => _typeLabel(l10n, v),
             onSave: (v) async {
-              await adminContext.api.patchAiKey(keyId: widget.keyId, provider: v);
-              await _load();
+              if (v.isApiKey) {
+                if (!type.isApiKey) {
+                  await adminContext.api.patchAiKey(
+                    keyId: widget.keyId,
+                    provider: 'codex',
+                    apiKind: 'openai_api',
+                  );
+                  await _load();
+                }
+                return;
+              }
+              await _saveType(v);
             },
           ),
-          AppChoicePreference<String>(
-            title: l10n.adminApiKind,
-            icon: Icons.api_outlined,
-            value: _apiKinds.contains(apiKind) ? apiKind : 'cursor_sdk',
-            choices: _apiKinds,
-            keyFor: (v) => v,
-            labelFor: (v) => v,
+          if (type.isApiKey)
+            AppNavPreference(
+              title: l10n.commonProvider,
+              icon: Icons.cloud_outlined,
+              subtitle: Text(_providerSubtitle(l10n)),
+              onTap: _pickProvider,
+            ),
+          AppValuePreference<String>(
+            title: l10n.commonSecret,
+            icon: Icons.key_outlined,
+            value: '',
+            obscureText: true,
+            presentValue: (_) => hasSecret ? '••••••••' : l10n.commonNotSet,
+            formatInputValue: (_) => '',
             onSave: (v) async {
-              await adminContext.api.patchAiKey(keyId: widget.keyId, apiKind: v);
+              if (v.trim().isEmpty) return;
+              await adminContext.api.rotateAiKeySecret(
+                keyId: widget.keyId,
+                secret: v.trim(),
+              );
               await _load();
             },
           ),
@@ -186,10 +284,26 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
               await _load();
             },
           ),
-          AppPreferenceTile(
-            title: l10n.commonStatus,
-            icon: Icons.info_outline_rounded,
-            subtitle: Text(status),
+          AppSubscriptionPreference(
+            title: l10n.adminNextRenewal,
+            endsAt: nextDisplay,
+            emptyLabel: l10n.commonNotSet,
+            onEndsAtSave: (raw) async {
+              if (raw.trim().isEmpty) {
+                await adminContext.api.patchAiKey(
+                  keyId: widget.keyId,
+                  clearNextRenewalAt: true,
+                );
+              } else {
+                final iso = subscriptionDateToIso(raw);
+                if (iso == null) return;
+                await adminContext.api.patchAiKey(
+                  keyId: widget.keyId,
+                  nextRenewalAt: iso,
+                );
+              }
+              await _load();
+            },
           ),
           AppNavPreference(
             title: l10n.adminRenewPlusOneMonth,
@@ -203,22 +317,6 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
               accentColor: Theme.of(context).colorScheme.error,
               onTap: _disableKey,
             ),
-          AppValuePreference<String>(
-            title: l10n.commonSecret,
-            icon: Icons.key_outlined,
-            value: '',
-            obscureText: true,
-            presentValue: (_) => hasSecret ? '••••••••' : l10n.commonNotSet,
-            formatInputValue: (_) => '',
-            onSave: (v) async {
-              if (v.trim().isEmpty) return;
-              await adminContext.api.rotateAiKeySecret(
-                keyId: widget.keyId,
-                secret: v.trim(),
-              );
-              await _load();
-            },
-          ),
         ],
       ),
     );

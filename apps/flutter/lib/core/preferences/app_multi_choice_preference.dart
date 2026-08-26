@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/app_preference_tile.dart';
+import 'package:prodavan/core/widgets/app_catalog_select_page.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
-import 'package:prodavan/core/widgets/app_selector_page.dart';
 
-/// Multi-select via [AppSelectorPage] with seamless save.
+/// Multi-select via [AppCatalogSelectPage] (switch trailing) with seamless save.
 class AppMultiChoicePreference<T> extends StatelessWidget {
   const AppMultiChoicePreference({
     super.key,
@@ -44,14 +44,13 @@ class AppMultiChoicePreference<T> extends StatelessWidget {
     if (!enabled) return;
     final picked = await Navigator.of(context).push<Set<String>>(
       MaterialPageRoute(
-        builder: (_) => AppSelectorPage(
+        builder: (_) => AppCatalogSelectPage(
           title: pickerTitle ?? title,
           multiSelect: true,
-          showCheckboxes: true,
           selectedIds: values.map(keyFor).toSet(),
           items: [
             for (final c in choices)
-              AppSelectorItem(
+              AppCatalogSelectItem(
                 id: keyFor(c),
                 title: labelFor(c),
                 icon: iconFor?.call(c),

@@ -249,6 +249,8 @@ class AdminApi {
     String? name,
     String? provider,
     String? apiKind,
+    String? nextRenewalAt,
+    bool clearNextRenewalAt = false,
   }) async {
     final res = await http.patch(
       _uri('/admin/ai-keys/$keyId'),
@@ -258,10 +260,78 @@ class AdminApi {
         if (name != null) 'name': name,
         if (provider != null) 'provider': provider,
         if (apiKind != null) 'api_kind': apiKind,
+        if (clearNextRenewalAt) 'next_renewal_at': null,
+        if (!clearNextRenewalAt && nextRenewalAt != null) 'next_renewal_at': nextRenewalAt,
       }),
     );
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> listCatalogEntries(String catalogId) async {
+    final res = await http.get(
+      _uri('/admin/catalogs/$catalogId/entries'),
+      headers: _headers,
+    );
+    _throwIfError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = body['items'];
+    if (items is List) return items.cast<Map<String, dynamic>>();
+    return const [];
+  }
+
+  Future<Map<String, dynamic>> createCatalogEntry({
+    required String catalogId,
+    required String title,
+    String? id,
+    String? subtitle,
+    String? iconName,
+    Map<String, dynamic>? payload,
+  }) async {
+    final res = await http.post(
+      _uri('/admin/catalogs/$catalogId/entries'),
+      headers: _headers,
+      body: jsonEncode({
+        'title': title,
+        if (id != null) 'id': id,
+        if (subtitle != null) 'subtitle': subtitle,
+        if (iconName != null) 'icon_name': iconName,
+        if (payload != null) 'payload': payload,
+      }),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> patchCatalogEntry({
+    required String catalogId,
+    required String entryId,
+    String? title,
+    String? subtitle,
+    Map<String, dynamic>? payload,
+  }) async {
+    final res = await http.patch(
+      _uri('/admin/catalogs/$catalogId/entries/$entryId'),
+      headers: _headers,
+      body: jsonEncode({
+        if (title != null) 'title': title,
+        if (subtitle != null) 'subtitle': subtitle,
+        if (payload != null) 'payload': payload,
+      }),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> deleteCatalogEntry({
+    required String catalogId,
+    required String entryId,
+  }) async {
+    final res = await http.delete(
+      _uri('/admin/catalogs/$catalogId/entries/$entryId'),
+      headers: _headers,
+    );
+    _throwIfError(res);
   }
 
   Future<Map<String, dynamic>> renewAiKey({

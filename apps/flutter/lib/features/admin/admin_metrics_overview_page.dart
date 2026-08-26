@@ -157,7 +157,6 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
     final l10n = AppLocalizations.of(context);
     final colors = context.appColors;
     return AppScaffold(
-      title: Text(l10n.commonOverview),
       actions: [
         IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
       ],
@@ -167,8 +166,6 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
               padding: const EdgeInsets.all(AppSpacing.md),
               children: [
                 if (_alerts.isNotEmpty) ...[
-                  Text(l10n.adminAlerts, style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: AppSpacing.sm),
                   for (final a in _alerts)
                     ListTile(
                       leading: Icon(
@@ -203,8 +200,6 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
                   const SizedBox(height: AppSpacing.lg),
                 ],
                 if (_items.isNotEmpty) ...[
-                  Text(l10n.adminMetrics, style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: AppSpacing.sm),
                   Wrap(
                     spacing: AppSpacing.sm,
                     runSpacing: AppSpacing.sm,

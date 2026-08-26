@@ -5,7 +5,7 @@ import 'package:prodavan/core/session/company_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_selector_page.dart';
+import 'package:prodavan/core/widgets/app_catalog_select_page.dart';
 import 'package:prodavan/features/company/company_shell.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -70,17 +70,16 @@ class _DevCompanySessionPageState extends State<DevCompanySessionPage> {
       }
       final picked = await Navigator.of(context).push<Set<String>>(
         MaterialPageRoute(
-          builder: (_) => AppSelectorPage(
+          builder: (_) => AppCatalogSelectPage(
             title: l10n.commonSelectCompany,
             items: [
               for (final m in adminMemberships)
-                AppSelectorItem(
+                AppCatalogSelectItem(
                   id: m['company_id'] as String,
                   title: m['company_id'] as String,
                   subtitle: m['role'] as String?,
                 ),
             ],
-            showRadios: true,
             popOnSelect: true,
           ),
         ),

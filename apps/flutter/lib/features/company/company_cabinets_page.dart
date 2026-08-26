@@ -81,7 +81,6 @@ class _CompanyCabinetsPageState extends State<CompanyCabinetsPage> {
       listenable: _viewMode,
       builder: (context, _) {
         return AppScaffold(
-          title: Text(l10n.navCabinets),
           actions: [
             IconButton(onPressed: _reload, icon: const Icon(Icons.refresh)),
             AppCollectionViewModeButton(store: _viewMode),

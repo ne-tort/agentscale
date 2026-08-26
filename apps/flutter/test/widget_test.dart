@@ -7,7 +7,7 @@ import 'package:prodavan/app.dart';
 import 'package:prodavan/core/theme/app_theme.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_selector_page.dart';
+import 'package:prodavan/core/widgets/app_catalog_select_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 Widget themed(Widget home, {Locale locale = const Locale('en')}) {
@@ -57,16 +57,15 @@ void main() {
     expect(opened, '1');
   });
 
-  testWidgets('selector page multi select', (tester) async {
+  testWidgets('catalog select page multi select', (tester) async {
     await tester.pumpWidget(
       themed(
-        AppSelectorPage(
+        AppCatalogSelectPage(
           title: 'Pick',
           multiSelect: true,
-          showCheckboxes: true,
           items: const [
-            AppSelectorItem(id: 'a', title: 'One'),
-            AppSelectorItem(id: 'b', title: 'Two'),
+            AppCatalogSelectItem(id: 'a', title: 'One'),
+            AppCatalogSelectItem(id: 'b', title: 'Two'),
           ],
         ),
       ),

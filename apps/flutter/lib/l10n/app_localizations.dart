@@ -479,8 +479,50 @@ abstract class AppLocalizations {
   /// No description provided for @adminKeyListSubtitle.
   ///
   /// In en, this message translates to:
-  /// **'{provider} · {api_kind} · {status}'**
-  String adminKeyListSubtitle(String provider, String api_kind, String status);
+  /// **'{type} · {provider}'**
+  String adminKeyListSubtitle(String type, String provider);
+
+  /// No description provided for @adminIntegrationType.
+  ///
+  /// In en, this message translates to:
+  /// **'Type'**
+  String get adminIntegrationType;
+
+  /// No description provided for @adminTypeCursorSdk.
+  ///
+  /// In en, this message translates to:
+  /// **'Cursor SDK'**
+  String get adminTypeCursorSdk;
+
+  /// No description provided for @adminTypeCodexSdk.
+  ///
+  /// In en, this message translates to:
+  /// **'Codex SDK'**
+  String get adminTypeCodexSdk;
+
+  /// No description provided for @adminTypeClaudeSdk.
+  ///
+  /// In en, this message translates to:
+  /// **'Claude Agent SDK'**
+  String get adminTypeClaudeSdk;
+
+  /// No description provided for @adminTypeApiKey.
+  ///
+  /// In en, this message translates to:
+  /// **'API key'**
+  String get adminTypeApiKey;
+
+  /// No description provided for @adminNextRenewal.
+  ///
+  /// In en, this message translates to:
+  /// **'Renewal date'**
+  String get adminNextRenewal;
+
+  /// No description provided for @adminAddHttpProvider.
+  ///
+  /// In en, this message translates to:
+  /// **'Add provider'**
+  String get adminAddHttpProvider;
 
   /// No description provided for @adminKeyMetadata.
   ///
@@ -1657,6 +1699,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Delete'**
   String get commonDelete;
+
+  /// No description provided for @commonEdit.
+  ///
+  /// In en, this message translates to:
+  /// **'Edit'**
+  String get commonEdit;
 
   /// No description provided for @commonDeleting.
   ///
