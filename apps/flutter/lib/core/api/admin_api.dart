@@ -77,6 +77,7 @@ class AdminApi {
 
   Future<Map<String, dynamic>> createCompany({
     required String name,
+    required String password,
     String? adminEmail,
     String? adminDisplayName,
     String? description,
@@ -86,11 +87,25 @@ class AdminApi {
       headers: _headers,
       body: jsonEncode({
         'name': name,
+        'password': password,
         if (adminEmail != null && adminEmail.isNotEmpty) 'admin_email': adminEmail,
         if (adminDisplayName != null && adminDisplayName.isNotEmpty)
           'admin_display_name': adminDisplayName,
         if (description != null && description.isNotEmpty) 'description': description,
       }),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> setCompanyPassword({
+    required String companyId,
+    required String password,
+  }) async {
+    final res = await http.put(
+      _uri('/admin/companies/$companyId/password'),
+      headers: _headers,
+      body: jsonEncode({'password': password}),
     );
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;

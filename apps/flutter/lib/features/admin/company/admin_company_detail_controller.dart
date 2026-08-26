@@ -39,6 +39,7 @@ class AdminCompanyDetailController extends ChangeNotifier {
   bool telegramHmacConfigured = false;
   bool subscriptionLifetime = false;
   String subscriptionEnds = '';
+  bool passwordSet = false;
 
   static const toolPresets = ['chat_readonly', 'workspace_dev', 'workspace_full'];
   static const providerChoices = ['', 'cursor', 'codex', 'claude_code'];
@@ -93,6 +94,7 @@ class AdminCompanyDetailController extends ChangeNotifier {
       } else {
         nextSubscriptionEnds = '';
       }
+      final nextPasswordSet = detail['password_set'] == true;
 
       final unchanged = silent &&
           !loading &&
@@ -116,6 +118,7 @@ class AdminCompanyDetailController extends ChangeNotifier {
           telegramHmacConfigured == nextTelegram &&
           subscriptionLifetime == nextLifetime &&
           subscriptionEnds == nextSubscriptionEnds &&
+          passwordSet == nextPasswordSet &&
           metrics == m &&
           platformEvents == events;
       if (unchanged) return;
@@ -142,6 +145,7 @@ class AdminCompanyDetailController extends ChangeNotifier {
       telegramHmacConfigured = nextTelegram;
       subscriptionLifetime = nextLifetime;
       subscriptionEnds = nextSubscriptionEnds;
+      passwordSet = nextPasswordSet;
       loading = false;
       if (!silent) error = null;
       notifyListeners();
@@ -151,6 +155,17 @@ class AdminCompanyDetailController extends ChangeNotifier {
       loading = false;
       notifyListeners();
     }
+  }
+
+  Future<void> savePassword(String value) async {
+    final trimmed = value.trim();
+    if (trimmed.length < 8) return;
+    await adminContext.api.setCompanyPassword(
+      companyId: companyId,
+      password: trimmed,
+    );
+    passwordSet = true;
+    notifyListeners();
   }
 
   Future<void> saveName(String value) async {

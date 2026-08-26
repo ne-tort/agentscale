@@ -48,7 +48,7 @@ def _setup_project(client: TestClient) -> tuple[str, str]:
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "CtrCo", "admin_email": "owner@ctrco.test"},
+        json={"name": "CtrCo", "password": "test-company-pass", "admin_email": "owner@ctrco.test"},
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]

@@ -1,13 +1,15 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/company_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/company_metrics_wrap.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Company overview — org metrics read-only (L04).
+/// Company overview — org metrics + Keycloak login credentials (L04).
 class CompanyOverviewPage extends StatefulWidget {
   const CompanyOverviewPage({super.key, required this.companyId});
 
@@ -22,6 +24,7 @@ class _CompanyOverviewPageState extends State<CompanyOverviewPage> {
   bool _loading = true;
   String? _error;
   Map<String, dynamic>? _metrics;
+  bool _passwordSet = false;
 
   @override
   void initState() {
@@ -50,9 +53,16 @@ class _CompanyOverviewPageState extends State<CompanyOverviewPage> {
       final summary = await companyContext.api.getSummary(widget.companyId);
       if (!mounted) return;
       final metrics = summary['metrics'] as Map<String, dynamic>?;
-      if (silent && appRefreshDataEquals(_metrics, metrics) && !_loading) return;
+      final passwordSet = summary['password_set'] == true;
+      if (silent &&
+          appRefreshDataEquals(_metrics, metrics) &&
+          _passwordSet == passwordSet &&
+          !_loading) {
+        return;
+      }
       setState(() {
         _metrics = metrics;
+        _passwordSet = passwordSet;
         _loading = false;
         _error = null;
       });
@@ -66,16 +76,59 @@ class _CompanyOverviewPageState extends State<CompanyOverviewPage> {
     }
   }
 
+  Future<void> _savePassword(String raw) async {
+    final trimmed = raw.trim();
+    if (trimmed.length < 8) return;
+    await companyContext.api.setCompanyPassword(
+      companyId: widget.companyId,
+      password: trimmed,
+    );
+    if (!mounted) return;
+    setState(() => _passwordSet = true);
+  }
+
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return AppScaffold(
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
-              padding: const EdgeInsets.all(AppSpacing.md),
+              padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
               children: [
-                if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: _error!),
-                CompanyMetricsWrap(metrics: _metrics),
+                if (_error != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                    child: AppStatusBanner(
+                      severity: AppStatusSeverity.error,
+                      message: _error!,
+                    ),
+                  ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                  child: CompanyMetricsWrap(metrics: _metrics),
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                AppValuePreference<String>(
+                  title: l10n.companyLoginId,
+                  icon: Icons.badge_outlined,
+                  value: widget.companyId,
+                  enabled: false,
+                  presentValue: (v) => v,
+                  onSave: (_) async {},
+                ),
+                AppValuePreference<String>(
+                  title: l10n.companyPassword,
+                  icon: Icons.key_outlined,
+                  value: '',
+                  obscureText: true,
+                  hintText: l10n.companyPasswordHint,
+                  presentValue: (_) =>
+                      _passwordSet ? '••••••••' : l10n.commonNotSet,
+                  formatInputValue: (_) => '',
+                  validateInput: (raw) => raw.trim().length >= 8,
+                  onSave: _savePassword,
+                ),
               ],
             ),
     );

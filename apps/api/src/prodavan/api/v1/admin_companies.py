@@ -59,6 +59,12 @@ class AgentPolicyBody(BaseModel):
     telegram_hmac_secret: str | None = Field(default=None, max_length=256)
 
 
+class CompanyPasswordBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    password: str = Field(min_length=8, max_length=200)
+
+
 @router.get("")
 async def list_companies(_: PlatformAdminDep, session: SessionDep) -> dict:
     items = await AdminCompanyService(session).list_companies()
@@ -193,6 +199,18 @@ async def company_metrics(company_id: str, _: PlatformAdminDep, session: Session
     return await AdminCompanyService(session).get_metrics(company_id)
 
 
+@router.put("/{company_id}/password")
+async def set_company_password_admin(
+    company_id: str,
+    body: CompanyPasswordBody,
+    _: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    return await AdminCompanyService(session).set_company_password(
+        company_id, password=body.password
+    )
+
+
 company_router = APIRouter(prefix="/companies", tags=["companies"])
 
 
@@ -204,9 +222,14 @@ async def list_company_cabinets(
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
 ) -> dict:
     if not principal.is_platform_admin:
-        if employee is None:
-            raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
-        await EntitlementService(session).require_membership(employee.id, company_id)
+        if principal.is_company_principal:
+            await EntitlementService(session).require_company_actor(
+                principal, company_id, employee=employee
+            )
+        else:
+            if employee is None:
+                raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
+            await EntitlementService(session).require_membership(employee.id, company_id)
     items = await AdminCompanyService(session).list_org_cabinets(company_id)
     return {"items": items}
 
@@ -218,10 +241,7 @@ async def list_company_employees(
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
 ) -> dict:
-    if not principal.is_platform_admin:
-        if employee is None:
-            raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
-        await EntitlementService(session).require_company_admin(employee.id, company_id)
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
     items = await AdminCompanyService(session).list_company_employees(company_id)
     return {"items": items}
 
@@ -233,8 +253,19 @@ async def company_summary(
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
 ) -> dict:
-    if not principal.is_platform_admin:
-        if employee is None:
-            raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
-        await EntitlementService(session).require_company_admin(employee.id, company_id)
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
     return await AdminCompanyService(session).get_company_summary(company_id)
+
+
+@company_router.put("/{company_id}/password")
+async def set_company_password(
+    company_id: str,
+    body: CompanyPasswordBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    return await AdminCompanyService(session).set_company_password(
+        company_id, password=body.password
+    )

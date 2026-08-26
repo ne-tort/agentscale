@@ -49,7 +49,7 @@ def _setup_cabinet(client: TestClient) -> tuple[str, str, str]:
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "ProjCo", "admin_email": "owner@projco.test"},
+        json={"name": "ProjCo", "password": "test-company-pass", "admin_email": "owner@projco.test"},
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
@@ -336,7 +336,7 @@ def test_attachment_respects_company_policy_and_extension(client: TestClient) ->
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "AttachCo", "admin_email": "owner@attachco.test"},
+        json={"name": "AttachCo", "password": "test-company-pass", "admin_email": "owner@attachco.test"},
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
@@ -524,7 +524,7 @@ def test_delete_attachment_and_signed_webhook(client: TestClient) -> None:
     created_co = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "HookCo", "admin_email": "owner@hookco.test"},
+        json={"name": "HookCo", "password": "test-company-pass", "admin_email": "owner@hookco.test"},
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
@@ -635,7 +635,7 @@ def test_company_suspended_emit_and_chat_gate(client: TestClient) -> None:
     created_co = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "SusCo", "admin_email": "owner@susco.test"},
+        json={"name": "SusCo", "password": "test-company-pass", "admin_email": "owner@susco.test"},
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
@@ -730,7 +730,7 @@ def test_company_suspended_invokes_package_platform_handler(client: TestClient) 
     created_co = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "PkgCo", "admin_email": "owner@pkgco.test"},
+        json={"name": "PkgCo", "password": "test-company-pass", "admin_email": "owner@pkgco.test"},
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
@@ -785,7 +785,7 @@ def test_subscription_suspend_event_is_idempotent(client: TestClient) -> None:
     created_co = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "IdemCo", "admin_email": "owner@idemco.test"},
+        json={"name": "IdemCo", "password": "test-company-pass", "admin_email": "owner@idemco.test"},
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
@@ -824,7 +824,7 @@ def test_subscription_reactivate_emits_event(client: TestClient) -> None:
     created_co = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "ReactCo", "admin_email": "owner@reactco.test"},
+        json={"name": "ReactCo", "password": "test-company-pass", "admin_email": "owner@reactco.test"},
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
@@ -878,7 +878,7 @@ def test_webhook_ingress_blocked_when_company_suspended(client: TestClient) -> N
     created_co = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "WhSusCo", "admin_email": "owner@whsusco.test"},
+        json={"name": "WhSusCo", "password": "test-company-pass", "admin_email": "owner@whsusco.test"},
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
@@ -936,7 +936,7 @@ def test_webhook_ingress_blocked_when_project_paused(client: TestClient) -> None
     created_co = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "HookPauseCo", "admin_email": "owner@hookpause.test"},
+        json={"name": "HookPauseCo", "password": "test-company-pass", "admin_email": "owner@hookpause.test"},
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
@@ -992,7 +992,7 @@ def test_telegram_webhook_blocked_when_project_paused(client: TestClient) -> Non
     created_co = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "TgPauseCo", "admin_email": "owner@tgpause.test"},
+        json={"name": "TgPauseCo", "password": "test-company-pass", "admin_email": "owner@tgpause.test"},
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
@@ -1043,7 +1043,7 @@ def test_queued_trigger_survives_pause_and_runs_after_resume(client: TestClient)
     created_co = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "LeaveQCo", "admin_email": "owner@leaveq.test"},
+        json={"name": "LeaveQCo", "password": "test-company-pass", "admin_email": "owner@leaveq.test"},
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
@@ -1115,7 +1115,7 @@ def test_create_project_blocked_when_company_suspended(client: TestClient) -> No
     created_co = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "ProjSusCo", "admin_email": "owner@projsusco.test"},
+        json={"name": "ProjSusCo", "password": "test-company-pass", "admin_email": "owner@projsusco.test"},
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
@@ -1159,7 +1159,7 @@ def test_package_platform_handler_invoked_when_enabled(
     created_co = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "InvCo", "admin_email": "owner@invco.test"},
+        json={"name": "InvCo", "password": "test-company-pass", "admin_email": "owner@invco.test"},
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
@@ -1214,7 +1214,7 @@ def test_get_project_includes_company_subscription(client: TestClient) -> None:
     created_co = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "SubDtoCo", "admin_email": "owner@subdtoco.test"},
+        json={"name": "SubDtoCo", "password": "test-company-pass", "admin_email": "owner@subdtoco.test"},
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
@@ -1259,7 +1259,7 @@ def test_upload_attachment_blocked_when_company_suspended(client: TestClient) ->
     created_co = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "AttSusCo", "admin_email": "owner@attsusco.test"},
+        json={"name": "AttSusCo", "password": "test-company-pass", "admin_email": "owner@attsusco.test"},
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
@@ -1306,7 +1306,7 @@ def test_trigger_drain_fails_queued_when_company_suspended(client: TestClient) -
     created_co = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "TrgSusCo", "admin_email": "owner@trgsusco.test"},
+        json={"name": "TrgSusCo", "password": "test-company-pass", "admin_email": "owner@trgsusco.test"},
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
@@ -1423,7 +1423,7 @@ def test_natural_subscription_expiry_emits_suspended_on_read(client: TestClient)
     created_co = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "NatExpCo", "admin_email": "owner@natexpco.test"},
+        json={"name": "NatExpCo", "password": "test-company-pass", "admin_email": "owner@natexpco.test"},
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
@@ -1488,7 +1488,7 @@ def test_project_pause_blocks_chat_and_attachment(client: TestClient) -> None:
     created_co = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "PauseChatCo", "admin_email": "owner@pausechat.test"},
+        json={"name": "PauseChatCo", "password": "test-company-pass", "admin_email": "owner@pausechat.test"},
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
@@ -1565,7 +1565,7 @@ def test_idle_pause_sweep_pauses_stale_project(client: TestClient) -> None:
     created_co = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "IdleCo", "admin_email": "owner@idleco.test"},
+        json={"name": "IdleCo", "password": "test-company-pass", "admin_email": "owner@idleco.test"},
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
@@ -1637,7 +1637,7 @@ def test_mcp_package_deploy_rematerializes_project(client: TestClient) -> None:
     created_co = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "RematCo", "admin_email": "owner@rematco.test"},
+        json={"name": "RematCo", "password": "test-company-pass", "admin_email": "owner@rematco.test"},
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
@@ -1697,7 +1697,7 @@ def test_project_resume_requires_valid_ai_key(client: TestClient) -> None:
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "ResumeKeyCo", "admin_email": "owner@resumekey.test"},
+        json={"name": "ResumeKeyCo", "password": "test-company-pass", "admin_email": "owner@resumekey.test"},
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]

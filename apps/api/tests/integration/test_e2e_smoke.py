@@ -53,7 +53,7 @@ def test_e2e_smoke_admin_to_agent_ping(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "E2E Co", "admin_email": "boss@e2e.test"},
+        json={"name": "E2E Co", "password": "test-company-pass", "admin_email": "boss@e2e.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -191,7 +191,7 @@ def test_e2e_disabled_employee_cannot_chat(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "Disabled Co", "admin_email": "disabled@e2e.test"},
+        json={"name": "Disabled Co", "password": "test-company-pass", "admin_email": "disabled@e2e.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -245,7 +245,7 @@ def test_e2e_disabled_ai_key_blocks_session(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "Key Co", "admin_email": "key@e2e.test"},
+        json={"name": "Key Co", "password": "test-company-pass", "admin_email": "key@e2e.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -311,7 +311,7 @@ def test_e2e_expired_ai_key_by_date_blocks_chat(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "Expire Co", "admin_email": "expire@e2e.test"},
+        json={"name": "Expire Co", "password": "test-company-pass", "admin_email": "expire@e2e.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -391,7 +391,7 @@ def test_e2e_agent_budget_blocks_followup(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "Budget E2E Co", "admin_email": "budget@e2e.test"},
+        json={"name": "Budget E2E Co", "password": "test-company-pass", "admin_email": "budget@e2e.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -458,7 +458,7 @@ def test_e2e_usd_cost_cap_blocks_followup(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "USD Cap Co", "admin_email": "usd@e2e.test"},
+        json={"name": "USD Cap Co", "password": "test-company-pass", "admin_email": "usd@e2e.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -526,7 +526,7 @@ def test_e2e_starter_bundle_import(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "Starter Co", "admin_email": "starter@e2e.test"},
+        json={"name": "Starter Co", "password": "test-company-pass", "admin_email": "starter@e2e.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -594,7 +594,7 @@ def test_e2e_tool_approval_hitl(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "HITL Co", "admin_email": "hitl@e2e.test"},
+        json={"name": "HITL Co", "password": "test-company-pass", "admin_email": "hitl@e2e.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -690,7 +690,7 @@ def test_e2e_company_suspend_blocks_chat_and_lists_subscription(client: TestClie
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "E2ESusCo", "admin_email": "owner@e2esus.test"},
+        json={"name": "E2ESusCo", "password": "test-company-pass", "admin_email": "owner@e2esus.test"},
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
@@ -770,7 +770,7 @@ def test_e2e_project_pause_blocks_chat(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "E2EPauseCo", "admin_email": "owner@e2epause.test"},
+        json={"name": "E2EPauseCo", "password": "test-company-pass", "admin_email": "owner@e2epause.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -849,7 +849,7 @@ def test_e2e_mcp_deploy_rematerializes_project(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "E2ERematCo", "admin_email": "owner@e2eremat.test"},
+        json={"name": "E2ERematCo", "password": "test-company-pass", "admin_email": "owner@e2eremat.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -891,7 +891,7 @@ def test_e2e_idle_pause_sweep_vertical(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "E2EIdleCo", "admin_email": "owner@e2eidle.test"},
+        json={"name": "E2EIdleCo", "password": "test-company-pass", "admin_email": "owner@e2eidle.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -952,7 +952,7 @@ def test_e2e_attachment_content_download_and_paused_read(client: TestClient) -> 
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "E2EAttCo", "admin_email": "owner@e2eatt.test"},
+        json={"name": "E2EAttCo", "password": "test-company-pass", "admin_email": "owner@e2eatt.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -1029,7 +1029,7 @@ def test_e2e_text_json_attachment_content_types(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "E2ETxtCo", "admin_email": "owner@e2etxt.test"},
+        json={"name": "E2ETxtCo", "password": "test-company-pass", "admin_email": "owner@e2etxt.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -1100,7 +1100,7 @@ def test_e2e_platform_idle_pause_sweep_all(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "E2EIdleAllCo", "admin_email": "owner@e2eidleall.test"},
+        json={"name": "E2EIdleAllCo", "password": "test-company-pass", "admin_email": "owner@e2eidleall.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -1153,7 +1153,7 @@ def test_e2e_paused_blocks_triggers_allows_metadata(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "E2EPauseMatrixCo", "admin_email": "owner@e2epm.test"},
+        json={"name": "E2EPauseMatrixCo", "password": "test-company-pass", "admin_email": "owner@e2epm.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]

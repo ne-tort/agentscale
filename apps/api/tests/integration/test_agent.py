@@ -52,7 +52,7 @@ def test_agent_session_send_persists_events(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "AgentCo", "admin_email": "owner@agentco.test"},
+        json={"name": "AgentCo", "password": "test-company-pass", "admin_email": "owner@agentco.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -139,7 +139,7 @@ def test_project_chat_turn_creates_and_reuses_session(client: TestClient) -> Non
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "ChatCo", "admin_email": "chat@co.test"},
+        json={"name": "ChatCo", "password": "test-company-pass", "admin_email": "chat@co.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -213,7 +213,7 @@ def test_agent_budget_per_run_blocks_followup(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "BudgetCo", "admin_email": "boss@budget.test"},
+        json={"name": "BudgetCo", "password": "test-company-pass", "admin_email": "boss@budget.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -282,7 +282,7 @@ def test_chat_stream_sse(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "StreamCo", "admin_email": "stream@agentco.test"},
+        json={"name": "StreamCo", "password": "test-company-pass", "admin_email": "stream@agentco.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -357,7 +357,7 @@ def test_chat_with_attachment_refs_emits_tool_call(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "AttachCo", "admin_email": "attach@agentco.test"},
+        json={"name": "AttachCo", "password": "test-company-pass", "admin_email": "attach@agentco.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -441,7 +441,7 @@ def test_chat_rejects_unknown_attachment_ref(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "RefCo", "admin_email": "ref@agentco.test"},
+        json={"name": "RefCo", "password": "test-company-pass", "admin_email": "ref@agentco.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -495,7 +495,7 @@ def test_chat_accepts_attachment_id_ref(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "IdRefCo", "admin_email": "idref@agentco.test"},
+        json={"name": "IdRefCo", "password": "test-company-pass", "admin_email": "idref@agentco.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -556,7 +556,7 @@ def test_agent_session_uses_platform_fallback_pool(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "FallbackAgentCo", "admin_email": "fb@agentco.test"},
+        json={"name": "FallbackAgentCo", "password": "test-company-pass", "admin_email": "fb@agentco.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -607,7 +607,7 @@ def test_trigger_dispatch_runs_chat_message(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "TrigCo", "admin_email": "trig@agentco.test"},
+        json={"name": "TrigCo", "password": "test-company-pass", "admin_email": "trig@agentco.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -676,7 +676,7 @@ def test_trigger_dispatch_drain_batch(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "DrainCo", "admin_email": "drain@agentco.test"},
+        json={"name": "DrainCo", "password": "test-company-pass", "admin_email": "drain@agentco.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -745,7 +745,7 @@ def test_trigger_regenerate_and_webhook_ack(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "RegenCo", "admin_email": "regen@agentco.test"},
+        json={"name": "RegenCo", "password": "test-company-pass", "admin_email": "regen@agentco.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -825,7 +825,7 @@ def test_agent_session_create_blocked_cancel_allowed_when_paused(client: TestCli
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "SessPauseCo", "admin_email": "owner@sesspause.test"},
+        json={"name": "SessPauseCo", "password": "test-company-pass", "admin_email": "owner@sesspause.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
@@ -917,7 +917,7 @@ def test_project_prepare_allowed_while_paused(client: TestClient) -> None:
     created_co = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "PrepPauseCo", "admin_email": "owner@preppause.test"},
+        json={"name": "PrepPauseCo", "password": "test-company-pass", "admin_email": "owner@preppause.test"},
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
@@ -959,7 +959,7 @@ def test_ai_key_disable_cancels_session_and_pauses_project(client: TestClient) -
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "KeyCascadeCo", "admin_email": "owner@keycascade.test"},
+        json={"name": "KeyCascadeCo", "password": "test-company-pass", "admin_email": "owner@keycascade.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]

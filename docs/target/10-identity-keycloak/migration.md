@@ -1,46 +1,57 @@
 # Identity — миграция на Keycloak
 
-## Сейчас (legacy код)
+## Сейчас (as-built)
 
 | Место | Поведение |
 |-------|-----------|
-| `POST /api/v1/auth/login` | `login_id` + password → HS256 JWT (`jwt_secret`) |
-| `auth_service.py` | bcrypt / локальные users |
-| Flutter login screen | Форма логин/пароль → API |
-| `deps.py` | `decode_access_token` локальным секретом |
+| `AUTH_MODE=test` | HS256 test JWT; `POST /auth/test/login` personas |
+| `AUTH_MODE=oidc` | JWKS Keycloak (`JwtValidator`); Flutter PKCE |
+| Пароли людей / Company | Только в Keycloak (Prodavan не хранит password hash для login) |
+| Provisioning | `IdentityProvisioningPort` → Fake или `HttpKeycloakAdminClient` |
+| Company create | username=`company_id` + password; `companies.keycloak_sub` |
+| Employee invite | email + required actions; `employees.keycloak_sub` сразу после invite |
+| Flutter | OIDC AppAuth / desktop PKCE; опциональный `kc_idp_hint` |
+| Legacy `POST /auth/login` | Удалён / не канон |
 
-## Target после cutover
+Realm scaffold: [`infra/keycloak/`](../../../infra/keycloak/). Brokers: [identity-brokers.md](identity-brokers.md).
+
+## Target после live cutover
 
 | Место | Поведение |
 |-------|-----------|
-| Login UI | Redirect / AppAuth → **Keycloak** |
-| `POST /auth/login` | **Удалён** (или 410 Gone) |
-| API | JWKS Keycloak; опционально introspection |
-| Users | Создание/invite через Keycloak Admin API или Admin UI + sync `sub` в DB |
-| Refresh | Keycloak refresh token (не свой refresh endpoint, если не нужен BFF) |
+| Login UI | Redirect / AppAuth → **Keycloak** (соц = broker + hint) |
+| API | Только OIDC JWKS; `AUTH_MODE=oidc` на shared env |
+| Users | Invite / company principal через Admin API; authz из DB |
+| Refresh | Keycloak refresh token |
 
 ## Этапы
 
-1. **Deploy Keycloak** (dev/stage): realm, clients, JWKS URL в settings.
-2. **API dual-verify** (короткое окно): принимать и legacy HS256, и Keycloak JWT; метрики по issuer.
-3. **Flutter OIDC**: убрать форму пароля; secure storage для tokens.
-4. **Provision**: миграция существующих users → Keycloak (required actions: update password); связать `sub` с rows в DB.
-5. **Cut legacy**: выключить HS256 login; удалить password columns / hashing path из auth use-cases (кроме break-glass если отдельно решено).
-6. **Admin bootstrap**: platform admin только через Keycloak role `platform.admin`.
+1. **Deploy Keycloak** (dev): import `realm-prodavan.json`, service-account roles, audience on clients.
+2. **API already dual-capable**: `test` \| `oidc` via settings (не смешивать HS256 prod).
+3. **Flutter OIDC**: готово; соцкнопки — UI later + `kc_idp_hint`.
+4. **IdP brokers** (VK/Yandex): secrets вне git; Account Linking в KC.
+5. **Cluster cutover**: `AUTH_MODE=oidc` на k3s (отдельный infra PR) — gap **P-KC-01**.
+6. **Admin bootstrap**: platform admin через realm role `platform.admin`.
 
-## Settings (целевые имена)
+## Settings
 
 ```text
+AUTH_MODE=oidc
 KEYCLOAK_URL=
 KEYCLOAK_REALM=prodavan
-KEYCLOAK_CLIENT_ID=prodavan-flutter   # public
-KEYCLOAK_API_AUDIENCE=prodavan-api
-KEYCLOAK_JWKS_URL=…/realms/prodavan/protocol/openid-connect/certs
+KEYCLOAK_AUDIENCE=prodavan-api
+KEYCLOAK_INVITE_MODE=admin
+KEYCLOAK_ADMIN_CLIENT_ID=prodavan-services
+KEYCLOAK_ADMIN_CLIENT_SECRET=
+OIDC_FLUTTER_CLIENT_ID=prodavan-flutter
+OIDC_JWKS_URL=…/realms/prodavan/protocol/openid-connect/certs
 ```
 
-`JWT_SECRET` / HS256 — только до конца dual-verify, затем удалить.
+`AUTH_TEST_SECRET` / HS256 — только `AUTH_MODE=test`.
 
-## Вне scope этого документа
+## Вне scope
 
-- Федерация корпоративных IdP компаний (SAML/OIDC broker) — later.
-- Telegram bot user ↔ Keycloak link — отдельное решение (не блокирует web/mobile cutover).
+- Живой cutover Keycloak в k3s (infra PR).
+- Реальные credentials VK/Yandex в prod realm.
+- Полный Account Linking UI + sync `identity_links` из KC Admin API.
+- Telegram bot user ↔ Keycloak.

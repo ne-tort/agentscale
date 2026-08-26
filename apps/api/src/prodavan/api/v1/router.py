@@ -17,6 +17,7 @@ from prodavan.api.v1 import (
     ai_keys,
     auth,
     cabinets,
+    company_ai_keys,
     health,
     identity,
     projects,
@@ -28,6 +29,7 @@ router.include_router(health.router)
 router.include_router(stub.router)
 router.include_router(auth.router)
 router.include_router(identity.router)
+router.include_router(company_ai_keys.router)
 router.include_router(admin_companies.router)
 router.include_router(admin_metrics.router)
 router.include_router(admin_starter_bundles.admin_router)

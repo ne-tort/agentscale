@@ -11,11 +11,11 @@
 | ID | Канон | Сейчас в коде | Проблема |
 |----|-------|---------------|----------|
 | **P-CO-01** | Company shell = **локальный Admin** (сотрудники, контейнеры, keys, кабинеты) | 3 tabs: metrics / employees / cabinets RO; нет Keys/Containers | Тонкий org-shell ≠ Admin parity ([03](03-companies/)) |
-| **P-CO-02** | Company **CRUD своих** AI keys (SDK/API) + видит Admin-bound **RO** | Keys только `/admin/ai-keys`; нет `owner_scope`; нет company API/UI | Нет company-owned keys ([02](02-ai-provider-keys/)) |
+| **P-CO-02** | Company **CRUD своих** AI keys (SDK/API) + видит Admin-bound **RO** | API `/companies/{id}/ai-keys` + `owner_scope` (**partial**); Flutter tab — open | Backend link live; UI later |
 | **P-CO-03** | Company list/manage containers **своих** сотрудников | Только Admin `/admin/containers` | Нет company-scoped containers |
 | **P-CO-04** | Cabinets от Admin → Company **RO**; later local CRUD | Employee create + `owner_employee`; нет Admin→Company assign | Неверная модель выдачи ([assignment](05-cabinets/assignment.md)) |
-| **P-ID-01** | **Company** имеет **Keycloak-креды** | `CompanyRow` без KC principal; UI через `company.admin` | Нет орг-логина |
-| **P-ID-02** | Admin / Company / Employee — три KC-сущности | Admin=role; Employee=KC; Company=DB only | Неполная identity |
+| **P-ID-01** | **Company** имеет **Keycloak-креды** | `companies.keycloak_sub` + role `company` + provisioning (**partial**); live realm cutover / Flutter OIDC — open | Org principal in API; see [session](10-identity-keycloak/session.md) |
+| **P-ID-02** | Admin / Company / Employee — три KC-сущности | Realm roles in `infra/keycloak/realm-prodavan.json`; API resolution live | Cluster Keycloak deploy still open |
 | **P-CAB-01** | Company **назначает** Employee ↔ Cabinet | ACL = `owner_employee_id`; нет Assignment API | Нет grant |
 | **P-CAB-02** | UI кабинета из meta | Meta/`cabinet.*` partial | Gaps E2E |
 | **P-MAT-01** | Pod hydrate из meta/MinIO | object-ws; нет Pod; file_ref слаб | Materialize/Pod debt |
@@ -23,7 +23,8 @@
 | **P-MCP-01** | Агент в Pod ↔ `cabinet.*` | Subset; не в Pod | Изоляция + контракт |
 | **P-CAS-01** | Delete Cabinet → все Projects wipe | CASCADE hard-delete partial | Archive vs wipe UX |
 | **P-INF-01** | MinIO / Kafka / Celery | Local FS / in-process | [13](13-platform-infra/) |
-| **P-KC-01** | Live Keycloak cutover | Часто `AUTH_MODE=test` | Cutover |
+| **P-KC-01** | Live Keycloak cutover | Часто `AUTH_MODE=test`; provisioning + realm scaffold + brokers docs ready | Cutover `AUTH_MODE=oidc` на shared env |
+| **P-KC-02** | IdP broker live (VK/Yandex) | Docs + realm placeholders; providers **not** live; secrets вне git | Enable IdP + Flutter social buttons |
 | **P-UNI-01** | Универсальная иерархия (Admin→Employee без Company; local cabinets) | Не моделировано | Future после P-CO-* |
 
 ### Что уже близко к канону

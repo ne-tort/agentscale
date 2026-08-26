@@ -24,6 +24,12 @@ class AiProviderKeyRow(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     provider: Mapped[str] = mapped_column(String(64), nullable=False)
     api_kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    # platform = Admin-owned (bind via company_ai_key_bindings); company = owned by owner_company_id
+    owner_scope: Mapped[str] = mapped_column(String(32), nullable=False, default="platform", server_default="platform")
+    owner_company_id: Mapped[str | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=True,
+    )
     secret_ref: Mapped[str] = mapped_column(String(512), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
     next_renewal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

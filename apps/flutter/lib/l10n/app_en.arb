@@ -761,6 +761,16 @@
   "companyNoCabinets": "No cabinets",
   "companyNoEmployees": "No employees",
   "companyOrgMetrics": "Org metrics",
+  "companyLoginId": "Company ID",
+  "companyPassword": "Password",
+  "companyPasswordHint": "Min 8 characters — Keycloak login password",
+  "companyCredentialsCreated": "Login: {companyId} · password: {password}",
+  "@companyCredentialsCreated": {
+    "placeholders": {
+      "companyId": { "type": "String" },
+      "password": { "type": "String" }
+    }
+  },
   "companyOwner": "Owner",
   "companyReadOnlyOrgView": "{title} — read-only org view",
   "@companyReadOnlyOrgView": {

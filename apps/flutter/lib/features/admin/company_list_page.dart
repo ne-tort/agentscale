@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
@@ -8,6 +10,7 @@ import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_inline_add_field.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/admin/company/admin_company_detail_page.dart';
@@ -70,7 +73,8 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
   }
 
   Future<void> _createCompany(String name) async {
-    final body = await adminContext.api.createCompany(name: name);
+    final password = _generateCompanyPassword();
+    final body = await adminContext.api.createCompany(name: name, password: password);
     if (!mounted) return;
     await _reload();
     if (!mounted) return;
@@ -78,6 +82,13 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
     final companyId = company['id'] as String?;
     final companyName = company['name'] as String? ?? name;
     if (companyId == null) return;
+    final l10n = AppLocalizations.of(context);
+    AppSnackBar.info(
+      context,
+      l10n.companyCredentialsCreated(companyId, password),
+      copyOnTap: true,
+      duration: const Duration(seconds: 12),
+    );
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => AdminCompanyDetailPage(
@@ -87,6 +98,12 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
       ),
     );
     if (mounted) await _reload();
+  }
+
+  static String _generateCompanyPassword() {
+    const chars = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    final rand = Random.secure();
+    return List.generate(16, (_) => chars[rand.nextInt(chars.length)]).join();
   }
 
   void _openCompany(AppEntityRow row) {

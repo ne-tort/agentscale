@@ -13,7 +13,12 @@ from prodavan.infrastructure.persistence.models.ai_keys import (
 from prodavan.infrastructure.persistence.models.base import Base
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 from prodavan.infrastructure.persistence.models.catalog import ReferenceCatalogEntryRow
-from prodavan.infrastructure.persistence.models.identity import CompanyRow, EmployeeRow, MembershipRow
+from prodavan.infrastructure.persistence.models.identity import (
+    CompanyRow,
+    EmployeeRow,
+    IdentityLinkRow,
+    MembershipRow,
+)
 from prodavan.infrastructure.persistence.models.platform_events import PlatformEventRow
 from prodavan.infrastructure.persistence.models.projects import (
     ProjectAttachmentRow,
@@ -34,6 +39,7 @@ __all__ = [
     "CompanyCabinetQuotaRow",
     "CompanyRow",
     "EmployeeRow",
+    "IdentityLinkRow",
     "MembershipRow",
     "PlatformEventRow",
     "ProjectAttachmentRow",

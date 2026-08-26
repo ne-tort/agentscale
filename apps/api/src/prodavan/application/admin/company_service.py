@@ -203,6 +203,9 @@ class AdminCompanyService:
             "description": company.description,
             "contact_email": company.contact_email,
             "phone": company.phone,
+            "username": company.id,
+            "password_set": company.keycloak_sub is not None,
+            "keycloak_sub": company.keycloak_sub,
             "created_at": company.created_at.isoformat() if company.created_at else None,
             "cabinet_quota": _quota_public(quota),
             "agent_policy": _policy_public(
@@ -529,12 +532,35 @@ class AdminCompanyService:
 
     async def get_company_summary(self, company_id: str) -> dict:
         """Read-only org metrics for company.admin contour (L04)."""
+        company = await self._require_company(company_id)
         metrics = await self.get_metrics(company_id)
         quota = await self._quotas.get_quota(company_id)
         return {
             "company_id": company_id,
+            "username": company.id,
+            "password_set": company.keycloak_sub is not None,
             "metrics": metrics,
             "cabinet_quota": _quota_public(quota),
+        }
+
+    async def set_company_password(self, company_id: str, *, password: str) -> dict:
+        """Set/rotate Keycloak password for company org principal (username = company_id)."""
+        pwd = (password or "").strip()
+        if len(pwd) < 8:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="password required (min 8 chars)",
+            )
+        company = await self._require_company(company_id)
+        from prodavan.infrastructure.keycloak.provisioning import get_provisioning
+
+        await get_provisioning().set_company_password(username=company.id, password=pwd)
+        return {
+            "id": company.id,
+            "username": company.id,
+            "password_set": True,
         }
 
     async def delete_company(self, company_id: str, *, principal: Principal) -> dict:
@@ -547,7 +573,7 @@ class AdminCompanyService:
         from prodavan.application.identity.service import IdentityCommandService
         from prodavan.application.projects.pause_runtime import stop_company_runtime
         from prodavan.application.projects.project_service import ProjectService
-        from prodavan.infrastructure.keycloak.invite import get_invite_client
+        from prodavan.infrastructure.keycloak.provisioning import get_provisioning
 
         company = await self._require_company(company_id)
         name = company.name
@@ -559,7 +585,7 @@ class AdminCompanyService:
             select(MembershipRow.employee_id).where(MembershipRow.company_id == company_id)
         )
         employee_ids = list({eid for eid in emp_q.scalars().all()})
-        identity = IdentityCommandService(self._session, get_invite_client())
+        identity = IdentityCommandService(self._session, get_provisioning())
         employees_disabled: list[str] = []
         for employee_id in employee_ids:
             emp = await self._session.get(EmployeeRow, employee_id)
@@ -610,6 +636,11 @@ class AdminCompanyService:
         # Avoid ORM unit-of-work NULLing membership.company_id (NOT NULL) when rows are
         # already in the session from disable_employee(selectinload memberships).
         await self._require_company(company_id)
+        try:
+            await get_provisioning().disable_username(username=company_id)
+        except Exception:
+            # Best-effort: DB delete proceeds even if Keycloak is down / fake.
+            pass
         await self._session.execute(delete(CompanyRow).where(CompanyRow.id == company_id))
         await self._session.commit()
 

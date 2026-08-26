@@ -2300,6 +2300,30 @@ abstract class AppLocalizations {
   /// **'Org metrics'**
   String get companyOrgMetrics;
 
+  /// No description provided for @companyLoginId.
+  ///
+  /// In en, this message translates to:
+  /// **'Company ID'**
+  String get companyLoginId;
+
+  /// No description provided for @companyPassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Password'**
+  String get companyPassword;
+
+  /// No description provided for @companyPasswordHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Min 8 characters — Keycloak login password'**
+  String get companyPasswordHint;
+
+  /// No description provided for @companyCredentialsCreated.
+  ///
+  /// In en, this message translates to:
+  /// **'Login: {companyId} · password: {password}'**
+  String companyCredentialsCreated(String companyId, String password);
+
   /// No description provided for @companyOwner.
   ///
   /// In en, this message translates to:

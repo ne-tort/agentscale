@@ -101,7 +101,13 @@ def _principal_from_claims(claims: dict[str, Any]) -> Principal:
     if claims.get("platform_admin") is True:
         roles.add(ROLE_PLATFORM_ADMIN)
     email = claims.get("email")
-    return Principal(sub=str(claims["sub"]), roles=frozenset(roles), email=str(email) if email else None)
+    username = claims.get("preferred_username") or claims.get("username")
+    return Principal(
+        sub=str(claims["sub"]),
+        roles=frozenset(roles),
+        email=str(email) if email else None,
+        username=str(username) if username else None,
+    )
 
 
 _validator: JwtValidator | None = None

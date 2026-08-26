@@ -18,7 +18,7 @@ from prodavan.api.deps import (
 from prodavan.application.identity.service import EntitlementService, IdentityCommandService
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import MembershipRole
-from prodavan.infrastructure.keycloak.invite import get_invite_client
+from prodavan.infrastructure.keycloak.provisioning import get_provisioning
 from prodavan.infrastructure.persistence.models.identity import CompanyRow, EmployeeRow
 
 router = APIRouter(tags=["identity"])
@@ -42,16 +42,23 @@ class CreateCompanyBody(BaseModel):
     model_config = {"extra": "forbid"}
 
     name: str = Field(min_length=1, max_length=200)
+    password: str = Field(
+        min_length=8,
+        max_length=200,
+        description="Company Keycloak password; login username = company id",
+    )
     description: str | None = Field(default=None, max_length=2000)
-    admin_email: str | None = Field(default=None, max_length=320)
+    contact_email: str | None = Field(
+        default=None,
+        max_length=320,
+        description="Optional contact email — not used for company login",
+    )
+    admin_email: str | None = Field(
+        default=None,
+        max_length=320,
+        description="Optional human Employee soft-linked as company.admin",
+    )
     admin_display_name: str | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def _reject_password(cls, data: object) -> object:
-        if isinstance(data, dict) and "password" in data:
-            raise ValueError("password is not accepted; invite via Keycloak")
-        return data
 
 
 class InviteEmployeeBody(BaseModel):
@@ -77,12 +84,23 @@ async def me(
     session: SessionDep,
 ) -> dict:
     svc = EntitlementService(session)
-    contours = svc.contours_for(principal, employee)
+    company = None
+    if principal.is_company_principal:
+        company = await svc.ensure_company_principal(principal)
+    contours = svc.contours_for(principal, employee, company=company)
     return {
         "sub": principal.sub,
         "email": principal.email,
         "roles": sorted(principal.roles),
         "contours": contours,
+        "company": None
+        if company is None
+        else {
+            "id": company.id,
+            "name": company.name,
+            "username": company.id,
+            "contact_email": company.contact_email,
+        },
         "employee": None
         if employee is None
         else {
@@ -104,17 +122,35 @@ async def create_company(
     _: PlatformAdminDep,
     session: SessionDep,
 ) -> dict:
-    company, admin = await IdentityCommandService(session, get_invite_client()).create_company_with_admin(
+    company, admin = await IdentityCommandService(session, get_provisioning()).create_company_with_admin(
         name=body.name,
+        password=body.password,
         description=body.description,
+        contact_email=body.contact_email,
         admin_email=body.admin_email,
         admin_display_name=body.admin_display_name,
     )
     out: dict = {
-        "company": {"id": company.id, "name": company.name, "description": company.description},
+        "company": {
+            "id": company.id,
+            "name": company.name,
+            "description": company.description,
+            "username": company.id,
+            "keycloak_sub": company.keycloak_sub,
+            "contact_email": company.contact_email,
+        },
+        "credentials": {
+            "username": company.id,
+            "password_set": True,
+        },
     }
     if admin is not None:
-        out["admin_employee"] = {"id": admin.id, "email": admin.email, "status": admin.status}
+        out["admin_employee"] = {
+            "id": admin.id,
+            "email": admin.email,
+            "status": admin.status,
+            "keycloak_sub": admin.keycloak_sub,
+        }
     return out
 
 
@@ -127,17 +163,14 @@ async def invite_employee(
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
 ) -> dict:
     svc = EntitlementService(session)
-    if not principal.is_platform_admin:
-        if employee is None:
-            raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
-        await svc.require_company_admin(employee.id, company_id)
-    emp = await IdentityCommandService(session, get_invite_client()).invite_employee(
+    await svc.require_company_actor(principal, company_id, employee=employee)
+    emp = await IdentityCommandService(session, get_provisioning()).invite_employee(
         company_id=company_id,
         email=body.email,
         display_name=body.display_name,
         role=body.role,
     )
-    return {"id": emp.id, "email": emp.email, "status": emp.status}
+    return {"id": emp.id, "email": emp.email, "status": emp.status, "keycloak_sub": emp.keycloak_sub}
 
 
 @router.post("/employees/{employee_id}/disable")
@@ -150,9 +183,8 @@ async def disable_employee(
     from sqlalchemy import select
     from sqlalchemy.orm import selectinload
 
+    svc = EntitlementService(session)
     if not principal.is_platform_admin:
-        if actor is None:
-            raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="forbidden")
         q = await session.execute(
             select(EmployeeRow)
             .where(EmployeeRow.id == employee_id)
@@ -161,13 +193,22 @@ async def disable_employee(
         target = q.scalar_one_or_none()
         if target is None:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Employee not found")
-        actor_companies = {
-            m.company_id for m in actor.memberships if m.role == MembershipRole.COMPANY_ADMIN
-        }
-        target_companies = {m.company_id for m in target.memberships}
-        if not actor_companies.intersection(target_companies):
-            raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="forbidden")
-    emp = await IdentityCommandService(session, get_invite_client()).disable_employee(
+        if principal.is_company_principal:
+            company = await svc.ensure_company_principal(principal)
+            assert company is not None
+            target_companies = {m.company_id for m in target.memberships}
+            if company.id not in target_companies:
+                raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="forbidden")
+        else:
+            if actor is None:
+                raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="forbidden")
+            actor_companies = {
+                m.company_id for m in actor.memberships if m.role == MembershipRole.COMPANY_ADMIN
+            }
+            target_companies = {m.company_id for m in target.memberships}
+            if not actor_companies.intersection(target_companies):
+                raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="forbidden")
+    emp = await IdentityCommandService(session, get_provisioning()).disable_employee(
         employee_id=employee_id,
         principal=principal,
     )
@@ -183,6 +224,12 @@ async def switch_company(
 ) -> dict:
     """Does NOT reissue JWT — client keeps access token; only validates membership."""
     if principal.is_platform_admin:
+        return {"company_id": company_id, "jwt_reissued": False}
+    if principal.is_company_principal:
+        company = await EntitlementService(session).ensure_company_principal(principal)
+        assert company is not None
+        if company.id != company_id:
+            raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="forbidden")
         return {"company_id": company_id, "jwt_reissued": False}
     if employee is None:
         raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")

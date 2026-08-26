@@ -13,6 +13,8 @@ class EmployeeStatus(StrEnum):
 
 
 class MembershipRole(StrEnum):
+    """Soft link Employee ↔ Company (human roles inside org)."""
+
     COMPANY_ADMIN = "company.admin"
     MEMBER = "member"
 
@@ -23,7 +25,12 @@ class Contour(StrEnum):
     EMPLOYEE = "employee"
 
 
+# Keycloak realm roles (independent principals)
 ROLE_PLATFORM_ADMIN = "platform.admin"
+ROLE_COMPANY = "company"
+ROLE_EMPLOYEE = "employee"
+
+# Legacy / interim: DB membership role that also unlocks Company contour for a human Employee
 ROLE_COMPANY_ADMIN = "company.admin"
 
 
@@ -34,10 +41,17 @@ class Principal:
     sub: str
     roles: frozenset[str] = field(default_factory=frozenset)
     email: str | None = None
+    # preferred_username — for company login username == company_id
+    username: str | None = None
 
     @property
     def is_platform_admin(self) -> bool:
         return ROLE_PLATFORM_ADMIN in self.roles
+
+    @property
+    def is_company_principal(self) -> bool:
+        """Org Keycloak user (Company entity), not an Employee row."""
+        return ROLE_COMPANY in self.roles
 
 
 @dataclass(frozen=True, slots=True)

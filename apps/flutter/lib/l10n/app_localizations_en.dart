@@ -1245,6 +1245,21 @@ class AppLocalizationsEn extends AppLocalizations {
   String get companyOrgMetrics => 'Org metrics';
 
   @override
+  String get companyLoginId => 'Company ID';
+
+  @override
+  String get companyPassword => 'Password';
+
+  @override
+  String get companyPasswordHint =>
+      'Min 8 characters — Keycloak login password';
+
+  @override
+  String companyCredentialsCreated(String companyId, String password) {
+    return 'Login: $companyId · password: $password';
+  }
+
+  @override
   String get companyOwner => 'Owner';
 
   @override

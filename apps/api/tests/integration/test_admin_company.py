@@ -56,7 +56,7 @@ def test_admin_company_quotas_and_metrics(client: TestClient) -> None:
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "QuotaCo", "admin_email": "boss@quotaco.test"},
+        json={"name": "QuotaCo", "password": "test-company-pass", "admin_email": "boss@quotaco.test"},
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
@@ -114,7 +114,7 @@ def test_list_platform_metrics_companies(client: TestClient) -> None:
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "MetricsCo", "admin_email": "boss@metricsco.test"},
+        json={"name": "MetricsCo", "password": "test-company-pass", "admin_email": "boss@metricsco.test"},
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
@@ -147,7 +147,7 @@ def test_company_subscription_expiring_metrics(client: TestClient) -> None:
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "SubCo", "admin_email": "boss@subco.test"},
+        json={"name": "SubCo", "password": "test-company-pass", "admin_email": "boss@subco.test"},
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
@@ -221,7 +221,7 @@ def test_platform_admin_dual_role_me(client: TestClient) -> None:
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "DualCo", "admin_email": "padmin@example.com", "admin_display_name": "Admin"},
+        json={"name": "DualCo", "password": "test-company-pass", "admin_email": "padmin@example.com", "admin_display_name": "Admin"},
     )
     assert created.status_code == 201
 
@@ -240,7 +240,7 @@ def test_company_org_cabinets_list(client: TestClient) -> None:
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "OrgCo", "admin_email": "owner@orgco.test"},
+        json={"name": "OrgCo", "password": "test-company-pass", "admin_email": "owner@orgco.test"},
     )
     company_id = created.json()["company"]["id"]
     boss_tok = _token(sub="owner-sub", email="owner@orgco.test")
@@ -265,7 +265,7 @@ def test_company_employees_and_summary(client: TestClient) -> None:
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "EmpCo", "admin_email": "boss@empco.test"},
+        json={"name": "EmpCo", "password": "test-company-pass", "admin_email": "boss@empco.test"},
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
@@ -308,7 +308,7 @@ def test_admin_company_description_and_running_cabinets(client: TestClient) -> N
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "DescCo", "admin_email": "boss@descco.test"},
+        json={"name": "DescCo", "password": "test-company-pass", "admin_email": "boss@descco.test"},
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
@@ -363,7 +363,7 @@ def test_admin_delete_company_with_invited_admin_only(client: TestClient) -> Non
     created = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "InviteOnlyDelete", "admin_email": "boss@inviteonly.test"},
+        json={"name": "InviteOnlyDelete", "password": "test-company-pass", "admin_email": "boss@inviteonly.test"},
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
@@ -383,7 +383,7 @@ def test_admin_delete_company_cascades(client: TestClient) -> None:
     created = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "DeleteMe", "admin_email": "boss@deleteme.test"},
+        json={"name": "DeleteMe", "password": "test-company-pass", "admin_email": "boss@deleteme.test"},
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]

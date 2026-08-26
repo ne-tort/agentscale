@@ -54,7 +54,7 @@ def test_create_cabinet_base_seed_and_peer_isolation(client: TestClient) -> None
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "CabCo", "admin_email": "owner@cabco.test"},
+        json={"name": "CabCo", "password": "test-company-pass", "admin_email": "owner@cabco.test"},
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
@@ -181,7 +181,7 @@ def test_mcp_tools_dispatch_and_ban_sql(client: TestClient) -> None:
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "McpCo", "admin_email": "mcp@cabco.test"},
+        json={"name": "McpCo", "password": "test-company-pass", "admin_email": "mcp@cabco.test"},
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
@@ -279,7 +279,7 @@ def test_bundle_export_import_new_schema(client: TestClient) -> None:
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "BundleCo", "admin_email": "bundle@cabco.test"},
+        json={"name": "BundleCo", "password": "test-company-pass", "admin_email": "bundle@cabco.test"},
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
@@ -350,7 +350,7 @@ def test_meta_mutate_columns_views_tabs(client: TestClient) -> None:
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "MetaMutCo", "admin_email": "meta@cabco.test"},
+        json={"name": "MetaMutCo", "password": "test-company-pass", "admin_email": "meta@cabco.test"},
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
@@ -532,7 +532,7 @@ def test_json_document_rows(client: TestClient) -> None:
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "JsonDocCo", "admin_email": "json@cabco.test"},
+        json={"name": "JsonDocCo", "password": "test-company-pass", "admin_email": "json@cabco.test"},
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
@@ -598,7 +598,7 @@ def test_meta_table_archive_and_rename(client: TestClient) -> None:
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "TblArchCo", "admin_email": "tblarch@cabco.test"},
+        json={"name": "TblArchCo", "password": "test-company-pass", "admin_email": "tblarch@cabco.test"},
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
@@ -738,7 +738,7 @@ def test_mcp_audit_events(client: TestClient) -> None:
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "AuditCo", "admin_email": "audit@cabco.test"},
+        json={"name": "AuditCo", "password": "test-company-pass", "admin_email": "audit@cabco.test"},
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]

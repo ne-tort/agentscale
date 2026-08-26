@@ -5,65 +5,69 @@
 | Тема | Target |
 |------|--------|
 | IdP | **Keycloak** |
-| Протокол | **OIDC** (Authorization Code + PKCE для Flutter; client credentials — только service-to-service) |
-| Валидация API | JWT access token → **JWKS Keycloak** (RS256/ES256), не shared HS256 secret |
+| Протокол | **OIDC** (Authorization Code + PKCE для Flutter; client credentials — service-to-service) |
+| Валидация API | JWT → **JWKS** (RS256), не shared HS256 |
 | Пароли / MFA / reset | **Только в Keycloak** |
-| Локальный `POST /auth/login` | Legacy dual-verify → **удалить** после cutover |
-| Dev bridge `POST /auth/test/login` | Только `AUTH_MODE=test` + `APP_ENV!=prod` — mint HS256 + seed Demo Employee; **не** целевой prod-путь |
-| Session / cabinets | См. [session.md](session.md) — headers + DB, **не** reissue JWT |
+| Dev bridge `POST /auth/test/login` | `AUTH_MODE=test` — personas `platform_admin` / `company_principal` / `demo_employee` |
+| Session / cabinets | [session.md](session.md) — headers + DB |
 
-## Семантика слоя
+Realm GitOps scaffold: [`infra/keycloak/`](../../../infra/keycloak/) (`realm-prodavan.json`).
 
-Identity = **аутентификация**. Prodavan API = **resource server** (авторизация по memberships).  
-`AiProviderKey` — **не** часть identity.
+## Три независимых principal
+
+```text
+platform.admin  → Platform Admin
+company         → Company org account (username = company_id + password; email optional)
+employee        → Employee human (employees.keycloak_sub)
+```
+
+Связи между ними — **soft** (memberships, key bindings, cabinet assignments), не «Company = Employee».
 
 ## Компоненты
 
 ```text
-Flutter / Web shell
-  → Keycloak (AppAuth PKCE)
-  → access_token (+ refresh via Keycloak)
-  → Prodavan API  Authorization: Bearer <access_token>
-       → JWKS verify
-       → map sub → Employee / platform admin
-       → authorize: DB memberships + X-Cabinet-Id / X-Project-Id
+Flutter (PKCE, optional kc_idp_hint)
+  → Keycloak (local users | Identity Broker VK/Yandex)
+  → Bearer access_token
+  → API JWKS → Principal { sub, roles, email }
+       → bind: Company by keycloak_sub | Employee by keycloak_sub
+       → authorize: memberships / assignments / owner_scope
 ```
 
-| Компонент | Роль |
-|-----------|------|
-| **Keycloak** | Login UI, credentials, MFA, refresh, realm roles |
-| **Prodavan API** | JWKS validate; enforce Company/Cabinet/Project access |
-| **Prodavan DB** | Employee, Company, memberships, CabinetInstance refs — не пароли |
-| **Flutter** | OIDC client; tokens в secure storage |
+Provisioning (invite / company principal / disable): `IdentityProvisioningPort` →
+`HttpKeycloakAdminClient` (Admin API) или Fake в tests.
 
-## Realm / clients
+Соцлогин: [identity-brokers.md](identity-brokers.md) — broker только в Keycloak; API не знает провайдера для authz.
+
+## Clients
 
 | Client | Тип | Назначение |
 |--------|-----|------------|
-| `prodavan-flutter` | public + PKCE | Mobile / web UI |
-| `prodavan-api` | audience / resource | Access token audience |
-| `prodavan-services` | confidential | Workers / MCP gateway |
+| `prodavan-flutter` | public + PKCE | UI |
+| `prodavan-api` | audience | `aud=prodavan-api` |
+| `prodavan-services` | confidential | Invite Admin API / workers |
 
-Один realm `prodavan` (или per-env). Per-company realm — **вне scope** на старте.
+## Realm roles
+
+| Role | Contour |
+|------|---------|
+| `platform.admin` | Admin |
+| `company` | Company (орг-аккаунт) |
+| `employee` | Employee workspace |
+
+Interim: DB membership `company.admin` на Employee ещё открывает Company contour (human bridge).
 
 ## Claims
 
 | Claim | Использование |
 |-------|---------------|
-| `sub` | Обязателен → `Employee.keycloak_sub` |
-| `email` / `preferred_username` | Профиль |
-| realm roles | `platform.admin`, `company.admin`, `company.member` |
+| `sub` | → `Company.keycloak_sub` или `Employee.keycloak_sub` (один sub на Employee, broker прозрачен) |
+| `preferred_username` | Company login = `company_id` |
+| `email` | Employee invite bind (fallback) |
+| realm roles | contour hint; **authz всегда из DB** |
 
-Optional `company_id` claim **не** заменяет DB membership check.
+Опциональный audit: `identity_links` (provider ↔ employee) — не для authz.
 
-## Роли
+## Что не identity
 
-| Keycloak | Prodavan contour |
-|----------|------------------|
-| `platform.admin` | Platform Admin UI |
-| `company.admin` | Company UI |
-| `company.member` (или только DB) | Employee workspace |
-
-## Что не является auth
-
-Ключи Cursor / Codex / Claude — [02-ai-provider-keys](../02-ai-provider-keys/).
+AI keys — [02](../02-ai-provider-keys/) (`owner_scope` platform\|company).

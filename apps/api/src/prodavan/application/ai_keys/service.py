@@ -137,6 +137,7 @@ class AiKeysService:
             select(AiProviderKeyRow)
             .where(
                 AiProviderKeyRow.status == KeyStatus.ACTIVE,
+                AiProviderKeyRow.owner_scope == "platform",
                 AiProviderKeyRow.id.not_in(bound),
             )
             .order_by(AiProviderKeyRow.created_at)
@@ -150,6 +151,8 @@ class AiKeysService:
             "name": row.name,
             "provider": row.provider,
             "api_kind": row.api_kind,
+            "owner_scope": row.owner_scope,
+            "owner_company_id": row.owner_company_id,
             "secret_ref_prefix": prefix,
             "status": row.status,
             "next_renewal_at": row.next_renewal_at.isoformat() if row.next_renewal_at else None,
@@ -159,6 +162,7 @@ class AiKeysService:
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
             "company_ids": company_ids,
+            "writable": True,
         }
 
     async def list_keys(self) -> list[dict]:
@@ -226,9 +230,28 @@ class AiKeysService:
         currency: str | None = None,
         notes: str | None = None,
         company_ids: list[str] | None = None,
+        owner_scope: str = "platform",
+        owner_company_id: str | None = None,
         principal: Principal | None = None,
     ) -> dict:
         self._validate_provider_kind(provider, api_kind)
+        scope = (owner_scope or "platform").strip().lower()
+        if scope not in {"platform", "company"}:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="owner_scope must be platform|company",
+            )
+        if scope == "company":
+            if not owner_company_id:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail="owner_company_id required for company-owned keys",
+                )
+            company_ids = []
         key_id = new_key_id()
         has_secret = secret is not None and secret.strip() != ""
         secret_ref = self._secrets.put(key_id, secret) if has_secret else ""
@@ -237,6 +260,8 @@ class AiKeysService:
             name=name.strip(),
             provider=provider,
             api_kind=api_kind,
+            owner_scope=scope,
+            owner_company_id=owner_company_id if scope == "company" else None,
             secret_ref=secret_ref,
             status=KeyStatus.ACTIVE if has_secret else KeyStatus.DISABLED,
             next_renewal_at=next_renewal_at,
@@ -258,10 +283,56 @@ class AiKeysService:
                 "name": row.name,
                 "provider": row.provider,
                 "api_kind": row.api_kind,
+                "owner_scope": row.owner_scope,
+                "owner_company_id": row.owner_company_id,
                 "company_ids": list(company_ids or []),
             },
         )
         return self._to_public(row, company_ids=list(company_ids or []))
+
+    async def list_keys_for_company(self, company_id: str) -> list[dict]:
+        """Company-owned keys ∪ Admin-bound platform keys (bound → writable=false)."""
+        owned_q = await self._session.execute(
+            select(AiProviderKeyRow)
+            .where(
+                AiProviderKeyRow.owner_scope == "company",
+                AiProviderKeyRow.owner_company_id == company_id,
+            )
+            .order_by(AiProviderKeyRow.created_at)
+        )
+        bound_q = await self._session.execute(
+            select(AiProviderKeyRow)
+            .join(CompanyAiKeyBindingRow, CompanyAiKeyBindingRow.key_id == AiProviderKeyRow.id)
+            .where(CompanyAiKeyBindingRow.company_id == company_id)
+            .order_by(AiProviderKeyRow.created_at)
+        )
+        out: list[dict] = []
+        seen: set[str] = set()
+        for row in owned_q.scalars().all():
+            seen.add(row.id)
+            pub = self._to_public(row, company_ids=[company_id])
+            pub["source"] = "company"
+            pub["writable"] = True
+            out.append(pub)
+        for row in bound_q.scalars().all():
+            if row.id in seen:
+                continue
+            pub = self._to_public(row, company_ids=await self._company_ids(row.id))
+            pub["source"] = "platform_bound"
+            pub["writable"] = False
+            out.append(pub)
+        return out
+
+    async def require_company_writable_key(self, key_id: str, company_id: str) -> AiProviderKeyRow:
+        row = await self._get_row(key_id)
+        if row.owner_scope != "company" or row.owner_company_id != company_id:
+            raise AppError(
+                code="FORBIDDEN",
+                title="Forbidden",
+                status=403,
+                detail="only company-owned keys are writable by company",
+            )
+        return row
 
     async def patch_key(
         self, key_id: str, updates: dict[str, Any], *, principal: Principal | None = None
@@ -475,7 +546,16 @@ class AiKeysService:
         platform_fallback: bool = False,
     ) -> ResolvedCredential:
         """Runtime path for L08. Never returns cli_subscription."""
-        q = await self._session.execute(
+        owned_q = await self._session.execute(
+            select(AiProviderKeyRow)
+            .where(
+                AiProviderKeyRow.owner_scope == "company",
+                AiProviderKeyRow.owner_company_id == company_id,
+                AiProviderKeyRow.status == KeyStatus.ACTIVE,
+            )
+            .order_by(AiProviderKeyRow.created_at.desc())
+        )
+        bound_q = await self._session.execute(
             select(AiProviderKeyRow)
             .join(CompanyAiKeyBindingRow, CompanyAiKeyBindingRow.key_id == AiProviderKeyRow.id)
             .where(
@@ -484,9 +564,10 @@ class AiKeysService:
             )
             .order_by(AiProviderKeyRow.created_at.desc())
         )
-        bound_rows = list(q.scalars().all())
+        # Prefer company-owned before Admin-bound platform keys.
+        candidate_rows = list(owned_q.scalars().all()) + list(bound_q.scalars().all())
         runtime, disabled_ids = self._pick_runtime_rows(
-            bound_rows, preferred_provider=preferred_provider
+            candidate_rows, preferred_provider=preferred_provider
         )
         await self._finalize_lazy_disabled(disabled_ids)
 
@@ -501,8 +582,8 @@ class AiKeysService:
             chosen = pool_runtime[0] if pool_runtime else None
 
         if chosen is None:
-            only_cli = bool(bound_rows) and all(
-                r.api_kind == ApiKind.CLI_SUBSCRIPTION for r in bound_rows
+            only_cli = bool(candidate_rows) and all(
+                r.api_kind == ApiKind.CLI_SUBSCRIPTION for r in candidate_rows
             )
             detail = (
                 "only cli_subscription bindings; not a runtime credential"

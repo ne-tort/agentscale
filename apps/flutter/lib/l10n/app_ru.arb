@@ -763,6 +763,16 @@
   "companyNoCabinets": "Нет кабинетов",
   "companyNoEmployees": "Нет сотрудников",
   "companyOrgMetrics": "Метрики организации",
+  "companyLoginId": "ID компании",
+  "companyPassword": "Пароль",
+  "companyPasswordHint": "Минимум 8 символов — пароль входа в Keycloak",
+  "companyCredentialsCreated": "Логин: {companyId} · пароль: {password}",
+  "@companyCredentialsCreated": {
+    "placeholders": {
+      "companyId": { "type": "String" },
+      "password": { "type": "String" }
+    }
+  },
   "companyOwner": "Владелец",
   "companyReadOnlyOrgView": "{title} — просмотр организации (только чтение)",
   "@companyReadOnlyOrgView": {

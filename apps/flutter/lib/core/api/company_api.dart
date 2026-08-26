@@ -34,6 +34,19 @@ class CompanyApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> setCompanyPassword({
+    required String companyId,
+    required String password,
+  }) async {
+    final res = await http.put(
+      _uri('/companies/$companyId/password'),
+      headers: _headers,
+      body: jsonEncode({'password': password}),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<List<Map<String, dynamic>>> listEmployees(String companyId) async {
     final res = await http.get(_uri('/companies/$companyId/employees'), headers: _headers);
     _throwIfError(res);

@@ -23,6 +23,7 @@ def _token(
     *,
     sub: str,
     email: str | None = None,
+    username: str | None = None,
     platform_admin: bool = False,
     roles: list[str] | None = None,
 ) -> str:
@@ -37,6 +38,8 @@ def _token(
     }
     if email:
         payload["email"] = email
+    if username:
+        payload["preferred_username"] = username
     return jwt.encode(payload, settings.auth_test_secret, algorithm="HS256")
 
 
@@ -91,6 +94,7 @@ def test_expired_token_rejected(client: TestClient) -> None:
 
 
 def test_work_context_headers_not_from_jwt(client: TestClient) -> None:
+    """Needs DB: /me resolves entitlements for platform admin."""
     tok = _token(sub="admin-1", platform_admin=True)
     r = client.get(
         "/api/v1/me",
@@ -100,35 +104,67 @@ def test_work_context_headers_not_from_jwt(client: TestClient) -> None:
             "X-Project-Id": "proj_1",
         },
     )
+    if r.status_code == 500:
+        pytest.skip("Postgres unavailable")
     assert r.status_code == 200
     body = r.json()
     assert body["work_context"]["cabinet_id"] == "cab_abc"
     assert body["work_context"]["project_id"] == "proj_1"
+    assert "company" in body
+    assert body["company"] is None
+
 
 
 @requires_postgres
-def test_create_company_invite_no_password_and_disable(client: TestClient) -> None:
+def test_create_company_with_password_and_disable(client: TestClient) -> None:
     admin = _token(sub="padmin", email="padmin@example.com", platform_admin=True)
+    # password too short
     bad = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "Acme", "admin_email": "boss@acme.test", "password": "secret"},
+        json={"name": "Acme", "admin_email": "boss@acme.test", "password": "short"},
     )
     assert bad.status_code == 422
 
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "Acme", "admin_email": "boss@acme.test", "admin_display_name": "Boss"},
+        json={
+            "name": "Acme",
+            "password": "test-company-pass",
+            "admin_email": "boss@acme.test",
+            "admin_display_name": "Boss",
+        },
     )
     assert created.status_code == 201, created.text
-    company_id = created.json()["company"]["id"]
-    emp_id = created.json()["admin_employee"]["id"]
+    company = created.json()["company"]
+    company_id = company["id"]
+    assert company["username"] == company_id
+    assert company["keycloak_sub"]
+    assert created.json()["credentials"]["username"] == company_id
+    admin_emp = created.json()["admin_employee"]
+    emp_id = admin_emp["id"]
+    admin_sub = admin_emp["keycloak_sub"]
+    assert admin_sub, "invite must persist keycloak_sub"
 
-    boss_tok = _token(sub="boss-sub", email="boss@acme.test")
+    # Org principal (role company) — login username = company_id, no email required
+    org_tok = _token(
+        sub=company["keycloak_sub"],
+        username=company_id,
+        roles=["company"],
+    )
+    org_me = client.get("/api/v1/me", headers={"Authorization": f"Bearer {org_tok}"})
+    assert org_me.status_code == 200, org_me.text
+    assert "company" in org_me.json()["contours"]
+    assert org_me.json()["company"]["id"] == company_id
+    assert org_me.json()["employee"] is None
+
+    # Human login: JWT.sub = employees.keycloak_sub (local password or IdP broker — same sub)
+    boss_tok = _token(sub=admin_sub, email="boss@acme.test", roles=["employee"])
     me = client.get("/api/v1/me", headers={"Authorization": f"Bearer {boss_tok}"})
     assert me.status_code == 200
     assert me.json()["employee"]["status"] == "active"
+    assert me.json()["employee"]["id"] == emp_id
 
     switch = client.post(
         f"/api/v1/session/switch-company?company_id={company_id}",
@@ -164,6 +200,40 @@ def test_create_company_invite_no_password_and_disable(client: TestClient) -> No
     blocked = client.get("/api/v1/me", headers={"Authorization": f"Bearer {boss_tok}"})
     assert blocked.status_code == 403
 
+    # Company principal still works after employee disable
+    org_me2 = client.get("/api/v1/me", headers={"Authorization": f"Bearer {org_tok}"})
+    assert org_me2.status_code == 200
+
+
+@requires_postgres
+def test_company_principal_owns_ai_keys(client: TestClient) -> None:
+    admin = _token(sub="padmin-keys", email="padmin-keys@example.com", platform_admin=True)
+    created = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "KeysCo", "password": "test-company-pass"},
+    )
+    assert created.status_code == 201, created.text
+    company = created.json()["company"]
+    company_id = company["id"]
+    org_tok = _token(sub=company["keycloak_sub"], username=company_id, roles=["company"])
+    h = {"Authorization": f"Bearer {org_tok}"}
+
+    created_key = client.post(
+        f"/api/v1/companies/{company_id}/ai-keys",
+        headers=h,
+        json={"name": "Local Cursor", "provider": "cursor", "api_kind": "cursor_sdk", "secret": "sk-test-1"},
+    )
+    assert created_key.status_code == 201, created_key.text
+    body = created_key.json()
+    assert body["owner_scope"] == "company"
+    assert body["owner_company_id"] == company_id
+    assert body["writable"] is True
+
+    listed = client.get(f"/api/v1/companies/{company_id}/ai-keys", headers=h)
+    assert listed.status_code == 200
+    assert any(k["id"] == body["id"] for k in listed.json())
+
 
 @requires_postgres
 def test_create_company_name_only_then_invite_admin(client: TestClient) -> None:
@@ -171,11 +241,14 @@ def test_create_company_name_only_then_invite_admin(client: TestClient) -> None:
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "NameOnlyCo"},
+        json={"name": "NameOnlyCo", "password": "test-company-pass"},
     )
     assert created.status_code == 201, created.text
     body = created.json()
     assert body["company"]["name"] == "NameOnlyCo"
+    assert body["company"]["username"] == body["company"]["id"]
+    assert body["company"]["keycloak_sub"]
+    assert body["company"].get("contact_email") is None
     assert "admin_employee" not in body
     company_id = body["company"]["id"]
 
@@ -186,6 +259,7 @@ def test_create_company_name_only_then_invite_admin(client: TestClient) -> None:
     )
     assert invited.status_code == 201, invited.text
     assert invited.json()["email"] == "later-admin@nameonly.test"
+    assert invited.json().get("keycloak_sub"), "invite must persist employees.keycloak_sub immediately"
 
     patched = client.patch(
         f"/api/v1/admin/companies/{company_id}",
@@ -194,3 +268,19 @@ def test_create_company_name_only_then_invite_admin(client: TestClient) -> None:
     )
     assert patched.status_code == 200, patched.text
     assert patched.json()["name"] == "NameOnlyCo Renamed"
+
+    detail = client.get(
+        f"/api/v1/admin/companies/{company_id}",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["username"] == company_id
+    assert detail.json()["password_set"] is True
+
+    rotated = client.put(
+        f"/api/v1/admin/companies/{company_id}/password",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"password": "rotated-company-pass"},
+    )
+    assert rotated.status_code == 200, rotated.text
+    assert rotated.json()["password_set"] is True

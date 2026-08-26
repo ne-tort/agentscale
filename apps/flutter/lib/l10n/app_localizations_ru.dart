@@ -1247,6 +1247,21 @@ class AppLocalizationsRu extends AppLocalizations {
   String get companyOrgMetrics => 'Метрики организации';
 
   @override
+  String get companyLoginId => 'ID компании';
+
+  @override
+  String get companyPassword => 'Пароль';
+
+  @override
+  String get companyPasswordHint =>
+      'Минимум 8 символов — пароль входа в Keycloak';
+
+  @override
+  String companyCredentialsCreated(String companyId, String password) {
+    return 'Логин: $companyId · пароль: $password';
+  }
+
+  @override
   String get companyOwner => 'Владелец';
 
   @override

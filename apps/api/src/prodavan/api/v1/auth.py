@@ -14,18 +14,21 @@ from prodavan.config.settings import settings
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.auth.test_token import (
     DEMO_COMPANY_NAME,
+    DEMO_COMPANY_PASSWORD,
+    DEMO_COMPANY_SUB,
     DEMO_EMPLOYEE_DISPLAY_NAME,
     DEMO_EMPLOYEE_EMAIL,
     DEMO_EMPLOYEE_SUB,
     PLATFORM_ADMIN_SUB,
+    mint_company_principal_token,
     mint_test_access_token,
 )
-from prodavan.infrastructure.keycloak.invite import get_invite_client
+from prodavan.infrastructure.keycloak.provisioning import get_provisioning
 from prodavan.infrastructure.persistence.models.identity import CompanyRow, EmployeeRow
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-Persona = Literal["platform_admin", "demo_employee"]
+Persona = Literal["platform_admin", "demo_employee", "company_principal"]
 
 
 def _issuer_base() -> str | None:
@@ -75,44 +78,55 @@ async def auth_config() -> dict:
 class TestLoginBody(BaseModel):
     model_config = {"extra": "forbid"}
 
-    persona: Persona = Field(description="platform_admin | demo_employee")
+    persona: Persona = Field(description="platform_admin | demo_employee | company_principal")
 
 
-async def _ensure_demo_employee(session: SessionDep) -> None:
-    """Idempotent seed: Prodavan Demo company + demo@prodavan.local company admin."""
+async def _ensure_demo_company(session: SessionDep) -> CompanyRow:
+    """Idempotent seed: demo company principal (id+password) + human employee."""
     from prodavan.domain.identity import MembershipRole
+
+    existing_co = await session.execute(
+        select(CompanyRow).where(CompanyRow.name == DEMO_COMPANY_NAME).order_by(CompanyRow.created_at.asc())
+    )
+    company = existing_co.scalars().first()
+    if company is None:
+        svc = IdentityCommandService(session, get_provisioning())
+        company, _ = await svc.create_company_with_admin(
+            name=DEMO_COMPANY_NAME,
+            password=DEMO_COMPANY_PASSWORD,
+            admin_email=DEMO_EMPLOYEE_EMAIL,
+            admin_display_name=DEMO_EMPLOYEE_DISPLAY_NAME,
+        )
+    if company.keycloak_sub != DEMO_COMPANY_SUB:
+        company.keycloak_sub = DEMO_COMPANY_SUB
+        await session.commit()
+        await session.refresh(company)
 
     email = DEMO_EMPLOYEE_EMAIL.lower()
     existing_emp = await session.execute(
         select(EmployeeRow).where(EmployeeRow.email == email).order_by(EmployeeRow.created_at.asc())
     )
-    if existing_emp.scalars().first() is not None:
-        return
-
-    svc = IdentityCommandService(session, get_invite_client())
-    existing_co = await session.execute(
-        select(CompanyRow).where(CompanyRow.name == DEMO_COMPANY_NAME).order_by(CompanyRow.created_at.asc())
-    )
-    company = existing_co.scalars().first()
-    if company is not None:
-        await svc.invite_employee(
+    emp = existing_emp.scalars().first()
+    if emp is None:
+        svc = IdentityCommandService(session, get_provisioning())
+        emp = await svc.invite_employee(
             company_id=company.id,
             email=email,
             display_name=DEMO_EMPLOYEE_DISPLAY_NAME,
             role=MembershipRole.COMPANY_ADMIN,
         )
-        return
-
-    await svc.create_company_with_admin(
-        name=DEMO_COMPANY_NAME,
-        admin_email=email,
-        admin_display_name=DEMO_EMPLOYEE_DISPLAY_NAME,
-    )
+    # Pin stable test sub so /auth/test/login JWT matches employees.keycloak_sub
+    # (Fake/admin invite ids are ephemeral; broker/password login use the same KC sub).
+    if emp.keycloak_sub != DEMO_EMPLOYEE_SUB:
+        emp.keycloak_sub = DEMO_EMPLOYEE_SUB
+        await session.commit()
+        await session.refresh(emp)
+    return company
 
 
 @router.post("/test/login")
 async def test_login(body: TestLoginBody, session: SessionDep) -> dict:
-    """Dev/CI only: mint HS256 JWT (+ seed demo company for demo_employee)."""
+    """Dev/CI only: mint HS256 JWT (+ seed demo company)."""
     _require_test_auth_mode()
 
     if body.persona == "platform_admin":
@@ -124,7 +138,22 @@ async def test_login(body: TestLoginBody, session: SessionDep) -> dict:
             "persona": body.persona,
         }
 
-    await _ensure_demo_employee(session)
+    company = await _ensure_demo_company(session)
+
+    if body.persona == "company_principal":
+        token, expires_in = mint_company_principal_token(
+            sub=company.keycloak_sub or DEMO_COMPANY_SUB,
+            company_id=company.id,
+        )
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "expires_in": expires_in,
+            "persona": body.persona,
+            "company_id": company.id,
+            "username": company.id,
+        }
+
     token, expires_in = mint_test_access_token(
         sub=DEMO_EMPLOYEE_SUB,
         email=DEMO_EMPLOYEE_EMAIL,

@@ -105,6 +105,31 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                           ],
                         ),
                       ),
+                      const SizedBox(height: AppSpacing.sm),
+                      AppValuePreference<String>(
+                        title: l10n.companyLoginId,
+                        icon: Icons.badge_outlined,
+                        value: widget.companyId,
+                        enabled: false,
+                        presentValue: (v) => v,
+                        onSave: (_) async {},
+                      ),
+                      AppValuePreference<String>(
+                        title: l10n.companyPassword,
+                        icon: Icons.key_outlined,
+                        value: '',
+                        obscureText: true,
+                        hintText: l10n.companyPasswordHint,
+                        presentValue: (_) =>
+                            ctrl.passwordSet ? '••••••••' : l10n.commonNotSet,
+                        formatInputValue: (_) => '',
+                        validateInput: (raw) => raw.trim().length >= 8,
+                        onSave: (v) async {
+                          final trimmed = v.trim();
+                          if (trimmed.length < 8) return;
+                          await ctrl.savePassword(trimmed);
+                        },
+                      ),
                       const SizedBox(height: AppSpacing.md),
                       AppNavPreference(
                         title: l10n.adminCompanyGeneral,

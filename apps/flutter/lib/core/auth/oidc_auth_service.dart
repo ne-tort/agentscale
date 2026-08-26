@@ -24,14 +24,42 @@ class OidcAuthResult {
 class OidcAuthService {
   const OidcAuthService();
 
-  static const _scopes = ['openid', 'profile', 'email'];
+  static const scopes = ['openid', 'profile', 'email'];
   static const _appAuth = FlutterAppAuth();
 
-  Future<OidcAuthResult> signIn(Map<String, dynamic> oidc) async {
-    if (Platform.isAndroid || Platform.isIOS) {
-      return _signInMobile(oidc);
+  /// Builds authorize query for KC (incl. optional [kcIdpHint] for Identity Broker).
+  static Map<String, String> authorizationQuery({
+    required String clientId,
+    required String redirectUri,
+    required String codeChallenge,
+    required String state,
+    String? kcIdpHint,
+    List<String> scopes = scopes,
+  }) {
+    final query = <String, String>{
+      'client_id': clientId,
+      'response_type': 'code',
+      'scope': scopes.join(' '),
+      'redirect_uri': redirectUri,
+      'code_challenge': codeChallenge,
+      'code_challenge_method': 'S256',
+      'state': state,
+    };
+    final hint = kcIdpHint?.trim();
+    if (hint != null && hint.isNotEmpty) {
+      query['kc_idp_hint'] = hint;
     }
-    return _signInDesktopLoopback(oidc);
+    return query;
+  }
+
+  Future<OidcAuthResult> signIn(
+    Map<String, dynamic> oidc, {
+    String? kcIdpHint,
+  }) async {
+    if (Platform.isAndroid || Platform.isIOS) {
+      return _signInMobile(oidc, kcIdpHint: kcIdpHint);
+    }
+    return _signInDesktopLoopback(oidc, kcIdpHint: kcIdpHint);
   }
 
   Future<OidcAuthResult?> refresh({
@@ -65,7 +93,10 @@ class OidcAuthService {
     );
   }
 
-  Future<OidcAuthResult> _signInMobile(Map<String, dynamic> oidc) async {
+  Future<OidcAuthResult> _signInMobile(
+    Map<String, dynamic> oidc, {
+    String? kcIdpHint,
+  }) async {
     final clientId = oidc['client_id'] as String?;
     final redirectUri = oidc['redirect_uri'] as String?;
     final discoveryUrl = oidc['discovery_url'] as String?;
@@ -73,13 +104,17 @@ class OidcAuthService {
       throw StateError('Incomplete OIDC config for AppAuth');
     }
 
+    final hint = kcIdpHint?.trim();
     final response = await _appAuth.authorizeAndExchangeCode(
       AuthorizationTokenRequest(
         clientId,
         redirectUri,
         discoveryUrl: discoveryUrl,
-        scopes: _scopes,
+        scopes: scopes,
         promptValues: ['login'],
+        additionalParameters: (hint != null && hint.isNotEmpty)
+            ? {'kc_idp_hint': hint}
+            : null,
       ),
     );
     final access = response.accessToken;
@@ -93,7 +128,10 @@ class OidcAuthService {
     );
   }
 
-  Future<OidcAuthResult> _signInDesktopLoopback(Map<String, dynamic> oidc) async {
+  Future<OidcAuthResult> _signInDesktopLoopback(
+    Map<String, dynamic> oidc, {
+    String? kcIdpHint,
+  }) async {
     final authEndpoint = oidc['authorization_endpoint'] as String?;
     final tokenEndpoint = oidc['token_endpoint'] as String?;
     final clientId = oidc['client_id'] as String?;
@@ -117,17 +155,14 @@ class OidcAuthService {
 
     final server = await HttpServer.bind(redirect.host.isEmpty ? '127.0.0.1' : redirect.host, port);
     try {
-      final authUri = Uri.parse(authEndpoint).replace(
-        queryParameters: {
-          'client_id': clientId,
-          'response_type': 'code',
-          'scope': _scopes.join(' '),
-          'redirect_uri': redirectUri,
-          'code_challenge': challenge,
-          'code_challenge_method': 'S256',
-          'state': state,
-        },
+      final query = authorizationQuery(
+        clientId: clientId,
+        redirectUri: redirectUri,
+        codeChallenge: challenge,
+        state: state,
+        kcIdpHint: kcIdpHint,
       );
+      final authUri = Uri.parse(authEndpoint).replace(queryParameters: query);
       final launched = await launchUrl(authUri, mode: LaunchMode.externalApplication);
       if (!launched) {
         throw StateError('Could not open browser for OIDC login');

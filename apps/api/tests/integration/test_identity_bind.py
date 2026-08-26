@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+import uuid
 from datetime import UTC, datetime, timedelta
+from urllib.parse import urlparse
 
+import asyncpg
 import jwt
 import pytest
 from fastapi.testclient import TestClient
@@ -16,10 +20,8 @@ from prodavan.config.settings import settings
 from prodavan.domain.identity import EmployeeStatus
 from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.infrastructure.keycloak.invite import reset_invite_client
-from prodavan.infrastructure.persistence.database import get_session_factory
-from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.main import create_app
-from tests.conftest import requires_postgres
+from tests.conftest import DATABASE_URL, requires_postgres
 
 
 def _token(*, sub: str, email: str | None = None, platform_admin: bool = False) -> str:
@@ -37,6 +39,36 @@ def _token(*, sub: str, email: str | None = None, platform_admin: bool = False) 
     return jwt.encode(payload, settings.auth_test_secret, algorithm="HS256")
 
 
+def _insert_employee_row(*, email: str, display_name: str, status: str) -> None:
+    """Sync-side insert via dedicated asyncpg connection (avoid shared SQLAlchemy loop)."""
+    dsn = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)
+    parsed = urlparse(dsn)
+
+    async def _go() -> None:
+        conn = await asyncpg.connect(
+            host=parsed.hostname or "localhost",
+            port=parsed.port or 5432,
+            user=parsed.username,
+            password=parsed.password,
+            database=(parsed.path or "/prodavan").lstrip("/") or "prodavan",
+        )
+        try:
+            await conn.execute(
+                """
+                INSERT INTO employees (id, email, display_name, status, keycloak_sub)
+                VALUES ($1, $2, $3, $4, NULL)
+                """,
+                f"emp_{uuid.uuid4().hex[:16]}",
+                email,
+                display_name,
+                status,
+            )
+        finally:
+            await conn.close()
+
+    asyncio.run(_go())
+
+
 @pytest.fixture()
 def client() -> TestClient:
     reset_jwt_validator()
@@ -52,37 +84,20 @@ def test_me_survives_duplicate_employee_email_rows(client: TestClient) -> None:
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "DupCo", "admin_email": email, "admin_display_name": "Dup Admin"},
+        json={"name": "DupCo", "password": "test-company-pass", "admin_email": email, "admin_display_name": "Dup Admin"},
     )
     assert created.status_code == 201, created.text
+    admin_sub = created.json()["admin_employee"]["keycloak_sub"]
+    assert admin_sub
 
-    async def _insert_duplicate_invited() -> None:
-        factory = get_session_factory()
-        async with factory() as session:
-            session.add(
-                EmployeeRow(
-                    email=email,
-                    display_name="Stale invite duplicate",
-                    status=EmployeeStatus.INVITED,
-                    keycloak_sub=None,
-                )
-            )
-            await session.commit()
+    _insert_employee_row(
+        email=email,
+        display_name="Stale invite duplicate",
+        status=EmployeeStatus.INVITED,
+    )
 
-    import asyncio
-    from concurrent.futures import ThreadPoolExecutor
-
-    def _run() -> None:
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(_insert_duplicate_invited())
-        finally:
-            loop.close()
-
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        pool.submit(_run).result(timeout=30)
-
-    owner_tok = _token(sub="owner-dup-sub", email=email)
+    # Authz by keycloak_sub (not silent email merge onto a different sub)
+    owner_tok = _token(sub=admin_sub, email=email)
     me = client.get("/api/v1/me", headers={"Authorization": f"Bearer {owner_tok}"})
     assert me.status_code == 200, me.text
     body = me.json()
@@ -98,7 +113,7 @@ def test_create_company_reuses_existing_employee_email(client: TestClient) -> No
     first = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "Co A", "admin_email": email},
+        json={"name": "Co A", "password": "test-company-pass", "admin_email": email},
     )
     assert first.status_code == 201, first.text
     emp_id = first.json()["admin_employee"]["id"]
@@ -106,7 +121,7 @@ def test_create_company_reuses_existing_employee_email(client: TestClient) -> No
     second = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"name": "Co B", "admin_email": email},
+        json={"name": "Co B", "password": "test-company-pass", "admin_email": email},
     )
     assert second.status_code == 201, second.text
     assert second.json()["admin_employee"]["id"] == emp_id

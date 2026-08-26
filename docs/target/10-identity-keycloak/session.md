@@ -1,62 +1,41 @@
 # Identity — session & entitlements (канон)
 
-Карта сущностей: [00-entities](../00-entities.md).
+Карта: [00-entities](../00-entities.md). Architecture: [architecture.md](architecture.md).
 
 ## Семантика: у кого Keycloak
 
-| Сущность | Keycloak | Смысл |
-|----------|----------|--------|
-| **Platform Admin** | Да, realm role `platform.admin` | Оператор платформы |
-| **Company** | Да, **орг-аккаунт** (company principal) | Логин в Company UI: сотрудники, assign кабинетов, квоты, метрики |
-| **Employee** | Да, `keycloak_sub` на Employee row | Работа в назначенных кабинетах |
+| Сущность | Realm role | Login | DB bind |
+|----------|------------|-------|---------|
+| **Platform Admin** | `platform.admin` | KC user | role only |
+| **Company** | `company` | **username = `company_id` + password** | `companies.keycloak_sub` |
+| **Employee** | `employee` | email invite | `employees.keycloak_sub` |
 
-Один человек может иметь несколько principals (редко): например platform.admin + employee membership — после login выбор контура.
+Email для Company **не обязателен** (опциональный `contact_email` — не логин).  
+Company и Employee — разные users. Membership = soft link.
 
-**Устарело как единственная модель:** «Company ≠ login; Company UI только через Employee + `company.admin`».  
-Допустимо временно в коде; **цель** — у Company свои KC-креды (см. [gap](../09-gap-map.md)).
-
-## Session model
+## Session
 
 ```text
-OIDC access_token (Keycloak)
-  → API: JWKS validate → Principal { sub, roles, email? }
-  → DB bind:
-       platform.admin → Admin contour
-       company principal → Company contour (company_id)
-       employee sub → Employee + memberships + cabinet assignments
-
-Контекст работы (НЕ в access_token):
-  X-Cabinet-Id: <uuid>
-  X-Project-Id: <proj_*>
+OIDC access_token
+  → Principal { sub, roles, email?, username? }
+  → role company → Company by keycloak_sub (else username==company_id soft-bind)
+  → else → Employee by keycloak_sub / invite email
 ```
 
-| Инвариант | Правило |
-|-----------|---------|
-| API **не** issuer | switch/open **не** перевыпускают access JWT |
-| Entitlements | DB: membership + **cabinet assignment** + peer isolation |
-| Пароли | Только Keycloak; Prodavan API **не** принимает password |
-| Authorization | re-check в DB на каждый scoped запрос |
+## Provisioning Company
 
-## Роли → UI contour
+1. Admin → `POST /companies` `{ name, password, contact_email?, admin_email? }`
+2. DB Company row → KC user `username=company.id`, password set, role `company`
+3. Credentials issued: **company_id + password** (no auto email)
+4. Optional `admin_email` → Employee + membership (soft)
 
-| После OIDC | Shell |
-|------------|-------|
-| `platform.admin` | Admin |
-| company principal (org KC) | Company |
-| employee membership | Employee (cabinet selector → только **assigned**) |
+## Soft links
 
-Если несколько контуров у одного человека — `AppSelectorPage`, не modal.
+| Link | Table |
+|------|-------|
+| Employee ↔ Company | `memberships` |
+| Platform AI key → Company | `company_ai_key_bindings` |
+| Company-owned AI key | `owner_scope=company` |
+| Employee ↔ IdP provider (UX) | `identity_links` (не authz) |
 
-## Provisioning
-
-1. **Admin → create Company** → DB Company + **Keycloak credentials для орг-аккаунта** (+ optional first human invite).
-2. **Company → invite Employee** → KC user + DB Employee `invited` → login sync `keycloak_sub` → `active`.
-3. **Company → assign Cabinet** → grant Employee↔Cabinet ([assignment](../05-cabinets/assignment.md)).
-4. **Disable Employee** → DB status + optional KC disable; API 403.
-
-## Связанные документы
-
-- [architecture.md](architecture.md) — IdP / clients / JWKS  
-- [migration.md](migration.md) — cutover  
-- [../03-companies/domain.md](../03-companies/domain.md)  
-- [../04-employees/domain.md](../04-employees/domain.md)  
+Authz: только `employees.keycloak_sub` / `companies.keycloak_sub`. Brokers: [identity-brokers.md](identity-brokers.md).
