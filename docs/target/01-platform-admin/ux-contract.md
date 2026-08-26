@@ -7,16 +7,26 @@
 
 Control plane платформы. Нет chat проектов, нет доменных cabinet screens.
 
-## IA (bottom NavigationBar)
+## IA (bottom NavigationBar) — narrow
+
+На телефоне секции управления сгруппированы, чтобы bottom bar не переполнялся.
 
 | Tab | Экран | Содержимое |
 |-----|-------|------------|
-| Сводка | `AdminOverviewPage` | Alerts first, затем StatTiles |
-| Компании | `AdminCompaniesPage` | EntityCollection companies |
-| Ключи ИИ | `AdminAiKeysPage` | Keys → detail / create |
-| **Контейнеры** | `AdminProjectContainersPage` | Project runtime isolators ([14](../14-project-containers/admin-ui.md)) |
-| **Кабинеты** | stub | Placeholder; не starter-bundle catalog |
-| Профиль | `AdminProfilePage` | Аккаунт admin |
+| Обзор | `AdminMetricsOverviewPage` | Alerts first, затем StatTiles |
+| **Управление** | `AdminManagementPage` | Список: Компании → AI-ключи → Контейнеры → Кабинеты (push full-screen) |
+| Настройки | `Settings` (chrome) | Аккаунт / prefs |
+
+### IA (rail) — medium / expanded
+
+| Destination | Экран |
+|-------------|-------|
+| Обзор | `AdminMetricsOverviewPage` |
+| Компании | `AdminCompanyListPage` |
+| AI-ключи | `AdminAiKeyListPage` |
+| Контейнеры | `AdminProjectContainersPage` |
+| Кабинеты | stub |
+| Настройки | trailing / bottom Settings |
 
 **Deprecate:** tab Bundles / `AdminStarterBundlesPage` в admin chrome.
 

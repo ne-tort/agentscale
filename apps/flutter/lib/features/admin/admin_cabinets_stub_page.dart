@@ -14,6 +14,7 @@ class AdminCabinetsStubPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     return AppScaffold(
+      title: embedded ? null : Text(l10n.navCabinets),
       body: EmptyPlaceholder(
         title: l10n.adminCabinetsComingSoonTitle,
         subtitle: l10n.adminCabinetsComingSoonHint,

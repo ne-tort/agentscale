@@ -283,6 +283,9 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
       ],
     );
 
-    return AppScaffold(body: body);
+    return AppScaffold(
+      title: widget.embedded ? null : Text(l10n.navAiKeys),
+      body: body,
+    );
   }
 }

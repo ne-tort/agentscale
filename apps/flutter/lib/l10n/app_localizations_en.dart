@@ -1430,6 +1430,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get navOverview => 'Overview';
 
   @override
+  String get navManagement => 'Management';
+
+  @override
   String get navProdavan => 'Prodavan';
 
   @override

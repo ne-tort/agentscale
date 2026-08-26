@@ -159,6 +159,7 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
     }).toList();
 
     return AppScaffold(
+      title: widget.embedded ? null : Text(l10n.navCompanies),
       body: Column(
         children: [
           AppInlineAddField(

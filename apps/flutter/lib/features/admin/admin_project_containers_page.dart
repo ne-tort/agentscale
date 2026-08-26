@@ -145,6 +145,7 @@ class _AdminProjectContainersPageState extends State<AdminProjectContainersPage>
     }).toList();
 
     return AppScaffold(
+      title: widget.embedded ? null : Text(l10n.navContainers),
       actions: [
         IconButton(
           tooltip: l10n.commonReload,

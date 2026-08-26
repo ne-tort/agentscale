@@ -2648,6 +2648,12 @@ abstract class AppLocalizations {
   /// **'Overview'**
   String get navOverview;
 
+  /// No description provided for @navManagement.
+  ///
+  /// In en, this message translates to:
+  /// **'Management'**
+  String get navManagement;
+
   /// No description provided for @navProdavan.
   ///
   /// In en, this message translates to:

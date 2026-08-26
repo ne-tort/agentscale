@@ -4,16 +4,26 @@
 
 Профессиональный контракт: **[ux-contract.md](ux-contract.md)**.
 
-## Навигация (bottom NavigationBar)
+## Навигация
+
+### Bottom NavigationBar (narrow)
 
 | Tab | Экран | Назначение |
 |-----|-------|------------|
-| Сводка | `AdminOverviewPage` | Alerts → компании, ключи, подписки |
-| Компании | `AdminCompaniesPage` | Список → detail (квоты, keys, policy) |
-| Ключи ИИ | `AdminAiKeysPage` | Список → detail / create |
-| **Контейнеры** | `AdminProjectContainersPage` (P1+) | Runtime isolators: list/detail; actions → Project cascade. Канон: [14 admin-ui](../14-project-containers/admin-ui.md) |
-| **Кабинеты** | stub page | Placeholder («скоро»); не starter-bundle catalog |
-| Профиль | `AdminProfilePage` | Аккаунт admin |
+| Обзор | `AdminMetricsOverviewPage` | Alerts → метрики |
+| **Управление** | `AdminManagementPage` | Хаб → Компании / AI-ключи / Контейнеры / Кабинеты |
+| Настройки | Settings chrome | Аккаунт admin |
+
+### Rail (medium / expanded)
+
+| Destination | Экран | Назначение |
+|-------------|-------|------------|
+| Обзор | `AdminMetricsOverviewPage` | Alerts → метрики |
+| Компании | `AdminCompanyListPage` | Список → detail |
+| AI-ключи | `AdminAiKeyListPage` | Список → detail / create |
+| Контейнеры | `AdminProjectContainersPage` | Runtime isolators ([14](../14-project-containers/admin-ui.md)) |
+| Кабинеты | stub | Placeholder («скоро») |
+| Настройки | trailing | Аккаунт admin |
 
 **Deprecate:** tab «Бандлы» / `AdminStarterBundlesPage` в admin shell. Starter `cabinet.bundle` catalog — employee import / API, не admin chrome ([05 bundle-format](../05-cabinets/bundle-format.md)).
 
