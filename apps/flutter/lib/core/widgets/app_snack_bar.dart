@@ -164,6 +164,7 @@ abstract final class AppSnackBar {
       SnackBar(
         elevation: resolved.elevation ?? 2,
         behavior: SnackBarBehavior.fixed,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
         backgroundColor: bg,
         padding: EdgeInsets.zero,
         duration: duration ?? defaultDuration(severity),

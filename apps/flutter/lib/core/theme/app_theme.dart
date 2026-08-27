@@ -96,8 +96,8 @@ class AppTheme {
         indicatorColor: tokens.primary.withValues(alpha: 0.14),
       ),
       snackBarTheme: SnackBarThemeData(
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: AppRadii.borderMd),
+        behavior: SnackBarBehavior.fixed,
+        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
       ),
       listTileTheme: ListTileThemeData(
         iconColor: tokens.muted,
