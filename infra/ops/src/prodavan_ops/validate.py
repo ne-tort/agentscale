@@ -230,4 +230,26 @@ def _require_minio_pvc(manifest: str) -> None:
         raise RuntimeError("overlay render must include PVC prodavan-minio-data")
     if "prodavan-minio-init" not in manifest:
         raise RuntimeError("overlay render must include prodavan-minio-init Job")
+    _require_minio_init_hook(manifest)
+
+
+def _require_minio_init_hook(manifest: str) -> None:
+    """Init Job must run as Sync hook before prodavan-api (wave 10)."""
+    for doc in yaml.safe_load_all(manifest):
+        if not isinstance(doc, dict) or doc.get("kind") != "Job":
+            continue
+        meta = doc.get("metadata") or {}
+        if meta.get("name") != "prodavan-minio-init":
+            continue
+        ann = meta.get("annotations") or {}
+        if ann.get("argocd.argoproj.io/hook") != "Sync":
+            raise RuntimeError(
+                "prodavan-minio-init must use argocd hook Sync (not PostSync) "
+                "so IAM exists before prodavan-api wave 10"
+            )
+        wave = str(ann.get("argocd.argoproj.io/sync-wave", ""))
+        if wave != "9":
+            raise RuntimeError("prodavan-minio-init sync-wave must be 9 (before prodavan-api 10)")
+        return
+    raise RuntimeError("prodavan-minio-init Job missing from overlay render")
 

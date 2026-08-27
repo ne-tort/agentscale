@@ -143,9 +143,10 @@ metadata:
     app.kubernetes.io/part-of: prodavan
     app.kubernetes.io/component: minio-init
   annotations:
-    argocd.argoproj.io/hook: PostSync
-    argocd.argoproj.io/hook-delete-policy: HookSucceeded
-    argocd.argoproj.io/sync-wave: "5"
+    # Sync hook wave 9 — must finish before prodavan-api (wave 10).
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    argocd.argoproj.io/sync-wave: "9"
 spec:
   ttlSecondsAfterFinished: 600
   backoffLimit: 6
@@ -206,12 +207,17 @@ spec:
               mc anonymous set none local/prodavan || true
               # Local SoT uses overwrite semantics; versioning off keeps PVC lean.
               mc version suspend local/prodavan || true
-              mc admin policy create local prodavan-api-policy /policy/minio-api-policy.json 2>/dev/null || \
-                mc admin policy update local prodavan-api-policy /policy/minio-api-policy.json
+              # mc admin policy update is deprecated; recreate idempotently.
+              mc admin policy remove local prodavan-api-policy 2>/dev/null || true
+              mc admin policy create local prodavan-api-policy /policy/minio-api-policy.json
               if ! mc admin user info local "$MINIO_API_USER" >/dev/null 2>&1; then
                 mc admin user add local "$MINIO_API_USER" "$MINIO_API_PASSWORD"
               fi
-              mc admin policy attach local prodavan-api-policy --user "$MINIO_API_USER" || true
+              mc admin policy attach local prodavan-api-policy --user "$MINIO_API_USER"
+              # Smoke: service user must head/list bucket before API (wave 10) starts.
+              mc alias set apiuser http://prodavan-minio:9000 "$MINIO_API_USER" "$MINIO_API_PASSWORD"
+              mc ls "apiuser/prodavan" >/dev/null
+              echo "minio-init: bucket + IAM user ok"
       volumes:
         - name: api-policy
           configMap:

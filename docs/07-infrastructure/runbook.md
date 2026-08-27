@@ -86,7 +86,7 @@ Self-hosted runners и kubeconfig для Verify — только [`infra/github-
 | Компонент | Значение |
 |-----------|----------|
 | Bucket | `prodavan` (private, versioning off) |
-| Init Job | `prodavan-minio-init` — PostSync hook; создаёт bucket + IAM user `prodavan-api` |
+| Init Job | `prodavan-minio-init` — **Sync hook, wave 9** (до `prodavan-api` wave 10); bucket + IAM user `prodavan-api` |
 | API creds | `S3_ACCESS_KEY=prodavan-api` в `prodavan-api-secrets` |
 | Root creds | `prodavan-minio` Secret — только init / break-glass |
 | PVC | `prodavan-minio-data` (10Gi, RWO) — данные переживают pod reschedule |
