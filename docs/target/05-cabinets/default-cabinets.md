@@ -1,20 +1,36 @@
 # Default cabinets & starters
 
-## Base cabinet (обязательный шаблон)
+## Platform bootstrap — кабинет «Базовый»
 
-При «Создать кабинет» Employee получает instance, склонированный с **Base**:
+При первом старте API (после migrate) `PlatformBootstrapService` idempotent создаёт:
 
-| System area | Содержание |
-|-------------|------------|
-| Projects | EntityCollection проектов |
-| Chat | Agent chat + attachments |
-| Context | Prompts, skills, rules, seeds, AGENTS |
-| Tables | UI над meta.tables (создать/архив) |
-| Tools | UI над mcp_tools registry |
-| MCP contracts | Platform `cabinet.*` уже подключены |
+| Entity | ID | Содержание |
+|--------|-----|------------|
+| Cabinet | `cab_basic` | «Базовый», `base_template=basic`, `company_grant_scope=all` |
+| Module bindings | — | `mod_prompts`, `mod_mcp`, `mod_files` |
 
-Base **независим** и достаточен для универсальной автоматизации.  
-Домен появляется только как **новые tables/tabs/tools** (человек или ИИ).
+Marker: `platform_bootstrap.platform_bootstrap.v1`.
+
+## Base / basic template (новые кабинеты)
+
+При создании кабинета с `base_template` **`basic`** или **`base`** автоматически bind:
+
+- `mod_prompts` — профили промптов, AGENTS.md, rules/skills/…
+- `mod_mcp` — zip MCP packages (local registry)
+- `mod_files` — файлы в workspace через content upload
+
+Admin-owned и employee-owned cabinets — одинаково через `CabinetInstanceService`.
+
+## Grant «Все компании»
+
+`cabinet_instances.company_grant_scope`:
+
+| Value | Effect |
+|-------|--------|
+| `selected` | Только явные grants в `cabinet_company_grants` |
+| `all` | Кабинет виден всем компаниям без per-row grant |
+
+`cab_basic` seed — `all`.
 
 ## Starter bundles (не code modules)
 
@@ -28,3 +44,5 @@ Base **независим** и достаточен для универсаль�
 ## Больше не канон
 
 Отдельные деревья `cabinets/electronics_procurement` в коде приложения как способ добавить домен.
+
+Example modules (`mod_example_*`) удалены — заменены product seed в Alembic `2026082711`.

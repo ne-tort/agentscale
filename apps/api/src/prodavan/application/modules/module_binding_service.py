@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.modules.module_materialize_service import ModuleMaterializeService
+from prodavan.domain.cabinets.types import CabinetCompanyGrantScope
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.persistence.models.cabinets import CabinetCompanyGrantRow, CabinetInstanceRow
 from prodavan.infrastructure.persistence.models.identity import CompanyRow
@@ -270,6 +271,13 @@ class ModuleBindingService:
         return unique
 
     async def org_cabinet_ids(self, company_id: str) -> set[str]:
+        all_scope = await self._session.execute(
+            select(CabinetInstanceRow.id).where(
+                CabinetInstanceRow.company_grant_scope == CabinetCompanyGrantScope.ALL,
+                CabinetInstanceRow.status != "deleted",
+            )
+        )
+        ids = set(all_scope.scalars().all())
         granted = await self._session.execute(
             select(CabinetInstanceRow.id)
             .join(
@@ -281,7 +289,7 @@ class ModuleBindingService:
                 CabinetCompanyGrantRow.status == "active",
             )
         )
-        ids = set(granted.scalars().all())
+        ids.update(granted.scalars().all())
         owned = await self._session.execute(
             select(CabinetInstanceRow.id).where(
                 CabinetInstanceRow.owner_scope == "company",

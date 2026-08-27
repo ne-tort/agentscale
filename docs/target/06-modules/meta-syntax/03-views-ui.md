@@ -164,4 +164,14 @@ EmptyPlaceholder(title: "Метаданные", subtitle: "<parse error code>")
 + audit log entry cabinet.ui.invalid_view
 ```
 
+## Product view kinds (Prompts / Files / MCP)
+
+| `ui_json.kind` | Interpreter | Notes |
+|----------------|-------------|-------|
+| `profile_hub` | ProfileHubInterpreter | Radio профилей + nav blocks |
+| `form` + `widget: markdown_editor` | MarkdownEditorField | AGENTS.md, prompt items |
+| `form` + `widget: file_upload` | FileUploadField | `file_ref` via `/cabinets/{id}/content/upload` |
+
+Collection extras: `inline_add`, `row_filter`, `context_bind.profile_id=contextRowId`.
+
 Дальше: [tabs-navigation](04-tabs-navigation.md)

@@ -380,6 +380,8 @@
   "adminModuleSeedEmpty": "Нет предзаполненных строк",
   "adminSelectCabinetsForModule": "Выберите кабинеты для модуля",
   "adminSelectModulesForCabinet": "Выберите модули для кабинета",
+  "adminGrantAllCompanies": "Все компании",
+  "adminPromptProfiles": "Профили промптов",
   "adminSelectCompaniesForModule": "Выберите компании для модуля",
   "adminDeleteCabinetConfirm": "Удалить кабинет «{name}»? Будут удалены все проекты и схема кабинета.",
   "@adminDeleteCabinetConfirm": {

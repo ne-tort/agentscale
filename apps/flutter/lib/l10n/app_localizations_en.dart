@@ -523,6 +523,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminSelectModulesForCabinet => 'Select modules for cabinet';
 
   @override
+  String get adminGrantAllCompanies => 'All companies';
+
+  @override
+  String get adminPromptProfiles => 'Prompt profiles';
+
+  @override
   String get adminSelectCompaniesForModule => 'Select companies for module';
 
   @override

@@ -5,7 +5,6 @@ import 'package:prodavan/core/widgets/app_icon_button.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/preview/preview_stub.dart';
-import 'package:prodavan/features/meta/preview/seed_data_controller.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 class CollectionViewInterpreter extends StatelessWidget {
@@ -16,13 +15,15 @@ class CollectionViewInterpreter extends StatelessWidget {
     required this.seeds,
     this.onOpenForm,
     this.readOnly = false,
+    this.contextRowId,
   });
 
   final ModuleMetaManifest manifest;
   final Map<String, dynamic> view;
-  final SeedDataController seeds;
+  final dynamic seeds;
   final void Function(String viewSlug, {String? rowId})? onOpenForm;
   final bool readOnly;
+  final String? contextRowId;
 
   @override
   Widget build(BuildContext context) {
@@ -38,17 +39,18 @@ class CollectionViewInterpreter extends StatelessWidget {
     }
 
     return ListenableBuilder(
-      listenable: seeds,
+      listenable: seeds is Listenable ? seeds as Listenable : ValueNotifier(0),
       builder: (context, _) {
         final columns = _columns(uiJson, l10n);
-        final rows = seeds.entityRows(tableSlug, uiJson);
+        final rows = _filteredRows(seeds, tableSlug, uiJson);
         final toolbar = _toolbar(context, uiJson, tableSlug, l10n);
         final emptyUi = uiJson['empty'];
         final emptyTitle = emptyUi is Map
             ? emptyUi['title'] as String? ?? l10n.adminModuleSeedEmpty
             : l10n.adminModuleSeedEmpty;
 
-        return AppEntityCollection(
+        final inline = _inlineAdd(context, uiJson, tableSlug);
+        final collection = AppEntityCollection(
           rows: rows,
           columns: columns,
           primaryColumnLabel: columns.isNotEmpty ? columns.first.label : l10n.commonEntity,
@@ -79,7 +81,80 @@ class CollectionViewInterpreter extends StatelessWidget {
                   seeds.deleteRow(row.id);
                 },
         );
+        if (inline == null) return collection;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [inline, Expanded(child: collection)],
+        );
       },
+    );
+  }
+
+  List<AppEntityRow> _filteredRows(dynamic seeds, String tableSlug, Map<String, dynamic> uiJson) {
+    final all = seeds.entityRows(tableSlug, uiJson) as List<AppEntityRow>;
+    final filter = uiJson['row_filter'];
+    if (filter is! Map) return all;
+    final contextBind = uiJson['context_bind'];
+    String? profileId = contextRowId;
+    if (contextBind is Map && contextBind['profile_id'] == 'contextRowId') {
+      profileId = contextRowId;
+    }
+    return all.where((row) {
+      final item = seeds.itemById(row.id);
+      final body = item?['body'];
+      if (body is! Map) return false;
+      for (final entry in filter.entries) {
+        if (body[entry.key]?.toString() != entry.value.toString()) return false;
+      }
+      if (profileId != null && body['profile_id']?.toString() != profileId) return false;
+      return true;
+    }).toList();
+  }
+
+  Widget? _inlineAdd(BuildContext context, Map<String, dynamic> uiJson, String tableSlug) {
+    if (readOnly) return null;
+    final inline = uiJson['inline_add'];
+    if (inline is! Map) return null;
+    final field = inline['field'] as String? ?? 'name';
+    final controller = TextEditingController();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: controller,
+              decoration: InputDecoration(
+                hintText: inline['label'] as String? ?? 'Add',
+                isDense: true,
+              ),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: () async {
+              final name = controller.text.trim();
+              if (name.isEmpty) return;
+              final body = seeds.defaultBodyForTable(tableSlug);
+              body[field] = name;
+              final filter = uiJson['row_filter'];
+              if (filter is Map) {
+                body.addAll(Map<String, dynamic>.from(filter));
+              }
+              if (contextRowId != null) {
+                body['profile_id'] = contextRowId;
+              }
+              if (seeds.runtimeType.toString().contains('RuntimeDataAdapter')) {
+                await seeds.createRowAsync(tableSlug, initial: body);
+              } else {
+                final rowId = seeds.createRow(tableSlug);
+                seeds.upsertBody(rowId, body);
+              }
+              controller.clear();
+            },
+          ),
+        ],
+      ),
     );
   }
 

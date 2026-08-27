@@ -523,6 +523,12 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminSelectModulesForCabinet => 'Выберите модули для кабинета';
 
   @override
+  String get adminGrantAllCompanies => 'Все компании';
+
+  @override
+  String get adminPromptProfiles => 'Профили промптов';
+
+  @override
   String get adminSelectCompaniesForModule => 'Выберите компании для модуля';
 
   @override

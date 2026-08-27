@@ -16,6 +16,11 @@ class CabinetOwnerScope(StrEnum):
     COMPANY = "company"
 
 
+class CabinetCompanyGrantScope(StrEnum):
+    SELECTED = "selected"
+    ALL = "all"
+
+
 class CabinetGrantMode(StrEnum):
     ASSIGNED_RO = "assigned_ro"
     OWNED_LOCAL = "owned_local"

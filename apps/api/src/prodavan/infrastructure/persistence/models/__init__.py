@@ -38,6 +38,7 @@ from prodavan.infrastructure.persistence.models.modules import (
     ModuleProjectBindingRow,
     ModuleRow,
 )
+from prodavan.infrastructure.persistence.models.platform import PlatformBootstrapRow
 from prodavan.infrastructure.persistence.models.platform_events import PlatformEventRow
 from prodavan.infrastructure.persistence.models.projects import (
     ProjectAttachmentRow,
@@ -73,6 +74,7 @@ __all__ = [
     "ModuleMetaDocumentRow",
     "ModuleProjectBindingRow",
     "ModuleRow",
+    "PlatformBootstrapRow",
     "PlatformEventRow",
     "ProjectAttachmentRow",
     "ProjectRow",

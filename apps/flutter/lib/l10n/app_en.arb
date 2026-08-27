@@ -378,6 +378,8 @@
   "adminModuleSeedEmpty": "No seed rows yet",
   "adminSelectCabinetsForModule": "Select cabinets for module",
   "adminSelectModulesForCabinet": "Select modules for cabinet",
+  "adminGrantAllCompanies": "All companies",
+  "adminPromptProfiles": "Prompt profiles",
   "adminSelectCompaniesForModule": "Select companies for module",
   "adminDeleteCabinetConfirm": "Delete cabinet \"{name}\"? All projects and the cabinet schema will be removed.",
   "@adminDeleteCabinetConfirm": {

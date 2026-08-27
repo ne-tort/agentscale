@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
 from pydantic import BaseModel, Field
 
 from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
 from prodavan.application.cabinets.cabinet_module_service import CabinetModuleService
 from prodavan.application.cabinets.instance_service import CabinetInstanceService
+from prodavan.application.content.cabinet_upload_service import CabinetContentUploadService
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
 router = APIRouter(prefix="/cabinets", tags=["cabinets"])
@@ -251,6 +252,25 @@ async def delete_module_data_row(
         module_id=module_id,
         table_slug=table_slug,
         row_id=row_id,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.post("/{cabinet_id}/content/upload")
+async def upload_cabinet_content(
+    cabinet_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    file: UploadFile = File(...),
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+) -> dict:
+    data = await file.read()
+    return await CabinetContentUploadService(session).upload_for_cabinet(
+        cabinet_id=cabinet_id,
+        data=data,
+        filename=file.filename or "upload.bin",
+        mime=file.content_type,
         principal=principal,
         employee=employee,
     )

@@ -42,6 +42,15 @@ class WorkspaceLayoutWriter:
         for rel in ("prompts", "rules", "skills", "packages", "inbox", "out", "cabinet-seed"):
             (self._root / rel).mkdir(parents=True, exist_ok=True)
 
+    def write_text_file(self, *, relative_path: str, text: str) -> None:
+        rel = relative_path.lstrip("/").replace("\\", "/")
+        raw = text.encode("utf-8")
+        self._put_workspace_bytes(rel, raw, content_type="text/plain; charset=utf-8")
+
+    def write_bytes_file(self, *, relative_path: str, data: bytes, content_type: str | None = None) -> None:
+        rel = relative_path.lstrip("/").replace("\\", "/")
+        self._put_workspace_bytes(rel, data, content_type=content_type or "application/octet-stream")
+
     def write_agents(self, *, cabinet_name: str, project_name: str, agents_md: str | None) -> None:
         text = agents_md or (
             f"# {project_name}\n\n"

@@ -13,7 +13,7 @@ abstract final class ModuleMetaValidator {
     'ref',
     'file_ref',
   };
-  static const viewKinds = {'collection', 'form', 'hub', 'detail', 'board'};
+  static const viewKinds = {'collection', 'form', 'hub', 'detail', 'board', 'profile_hub'};
 
   static String? validate(Object? parsed) {
     ModuleMetaManifest manifest;

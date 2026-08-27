@@ -5,10 +5,10 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/meta/interpreters/collection_interpreter.dart';
 import 'package:prodavan/features/meta/interpreters/form_interpreter.dart';
+import 'package:prodavan/features/meta/interpreters/profile_hub_interpreter.dart';
 import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/preview/preview_stub.dart';
-import 'package:prodavan/features/meta/preview/seed_data_controller.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 class HubViewInterpreter extends StatelessWidget {
@@ -73,7 +73,7 @@ class ViewInterpreterHost extends StatelessWidget {
 
   final ModuleMetaManifest manifest;
   final Map<String, dynamic> view;
-  final SeedDataController seeds;
+  final dynamic seeds;
   final void Function(String viewSlug, {String? rowId}) onOpenView;
   final String? rowId;
   final bool readOnly;
@@ -93,6 +93,7 @@ class ViewInterpreterHost extends StatelessWidget {
           seeds: seeds,
           onOpenForm: onOpenView,
           readOnly: readOnly,
+          contextRowId: rowId,
         );
       case 'form':
       case 'detail':
@@ -108,6 +109,14 @@ class ViewInterpreterHost extends StatelessWidget {
           manifest: manifest,
           view: view,
           onOpenView: onOpenView,
+        );
+      case 'profile_hub':
+        return ProfileHubInterpreter(
+          manifest: manifest,
+          view: view,
+          seeds: seeds,
+          onOpenView: onOpenView,
+          readOnly: readOnly,
         );
       default:
         return EmptyPlaceholder(title: AppLocalizations.of(context).adminMetaInvalid);

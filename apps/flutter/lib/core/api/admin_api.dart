@@ -452,12 +452,14 @@ class AdminApi {
     String? companyId,
     List<String>? companyIds,
     List<String>? moduleIds,
+    String? companyGrantScope,
   }) async {
     final payload = <String, dynamic>{};
     if (name != null) payload['name'] = name;
     if (companyId != null) payload['company_id'] = companyId;
     if (companyIds != null) payload['company_ids'] = companyIds;
     if (moduleIds != null) payload['module_ids'] = moduleIds;
+    if (companyGrantScope != null) payload['company_grant_scope'] = companyGrantScope;
     final res = await AuthHttp.patch(
       _uri('/admin/cabinets/$cabinetId'),
       body: jsonEncode(payload),

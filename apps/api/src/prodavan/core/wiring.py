@@ -5,6 +5,7 @@ from __future__ import annotations
 from prodavan.config.settings import settings
 from prodavan.core.infra.database_resource import DatabaseEngineResource
 from prodavan.core.infra.kafka_manager import KafkaManager
+from prodavan.core.infra.platform_bootstrap_resource import PlatformBootstrapResource
 from prodavan.core.infra.redis_manager import RedisManager
 from prodavan.core.infra.trigger_worker_resource import TriggerWorkerResource
 from prodavan.core.lifespan.manager import LifespanManager
@@ -67,6 +68,7 @@ def build_lifespan_manager() -> LifespanManager:
         )
     )
     manager.register(worker_manager_from_settings())
+    manager.register(PlatformBootstrapResource())
     manager.register(TriggerWorkerResource())
     _lifespan_manager = manager
     return manager

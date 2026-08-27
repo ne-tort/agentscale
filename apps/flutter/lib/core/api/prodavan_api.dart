@@ -205,6 +205,73 @@ class ProdavanApi {
     }
   }
 
+  Future<Map<String, dynamic>> updateModuleDataRow({
+    required String cabinetId,
+    required String moduleId,
+    required String tableSlug,
+    required String rowId,
+    required Map<String, dynamic> body,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await AuthHttp.patch(
+        _uri('/cabinets/$cabinetId/modules/$moduleId/data/$tableSlug/$rowId'),
+        body: jsonEncode({'body': body}),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
+  Future<void> deleteModuleDataRow({
+    required String cabinetId,
+    required String moduleId,
+    required String tableSlug,
+    required String rowId,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await AuthHttp.delete(
+        _uri('/cabinets/$cabinetId/modules/$moduleId/data/$tableSlug/$rowId'),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
+  Future<Map<String, dynamic>> uploadCabinetContent({
+    required String cabinetId,
+    required String filename,
+    required List<int> bytes,
+    String? mime,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final req = http.MultipartRequest(
+        'POST',
+        _uri('/cabinets/$cabinetId/content/upload'),
+      );
+      final h = await AuthHttp.headers(_workHeaders);
+      h.remove('Content-Type');
+      req.headers.addAll(h);
+      req.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+      final streamed = await req.send();
+      final res = await http.Response.fromStream(streamed);
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
   Future<List<Map<String, dynamic>>> listProjects(String cabinetId) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;

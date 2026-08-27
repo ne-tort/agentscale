@@ -44,6 +44,9 @@ class CabinetInstanceRow(Base):
         nullable=True,
     )
     base_template: Mapped[str] = mapped_column(String(64), nullable=False, default="base")
+    company_grant_scope: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="selected", server_default="selected"
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

@@ -29,6 +29,7 @@ class _AdminCabinetDetailPageState extends State<AdminCabinetDetailPage> {
   String _name = '';
   Set<String> _companyIds = {};
   Set<String> _moduleIds = {};
+  String _companyGrantScope = 'selected';
   List<Map<String, dynamic>> _companies = const [];
   List<Map<String, dynamic>> _modules = const [];
 
@@ -59,6 +60,8 @@ class _AdminCabinetDetailPageState extends State<AdminCabinetDetailPage> {
         _moduleIds = moduleIds is List
             ? moduleIds.map((e) => e.toString()).toSet()
             : <String>{};
+        _companyGrantScope =
+            cab['company_grant_scope'] as String? ?? 'selected';
         _companies = companies;
         _modules = modules;
         _loading = false;
@@ -103,6 +106,24 @@ class _AdminCabinetDetailPageState extends State<AdminCabinetDetailPage> {
         _moduleIds = ids is List
             ? ids.map((e) => e.toString()).toSet()
             : moduleIds;
+      });
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+      rethrow;
+    }
+  }
+
+  Future<void> _saveGrantScope(String scope) async {
+    if (scope == _companyGrantScope) return;
+    try {
+      final updated = await adminContext.api.updateCabinet(
+        cabinetId: widget.cabinetId,
+        companyGrantScope: scope,
+      );
+      if (!mounted) return;
+      setState(() {
+        _companyGrantScope =
+            updated['company_grant_scope'] as String? ?? scope;
       });
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
@@ -206,18 +227,26 @@ class _AdminCabinetDetailPageState extends State<AdminCabinetDetailPage> {
                   pickerTitle: l10n.adminSelectModulesForCabinet,
                   onSave: _saveModules,
                 ),
-                AppMultiChoicePreference<String>(
-                  title: l10n.commonCompanies,
-                  icon: Icons.business_outlined,
-                  values: _companyIds,
-                  choices: companyChoices,
-                  keyFor: (v) => v,
-                  labelFor: _companyLabel,
-                  presentValues: (ids) =>
-                      _bindingsSubtitle(ids, _companyLabel),
-                  pickerTitle: l10n.adminSelectCompanyForCabinet,
-                  onSave: _saveCompanies,
+                AppSwitchPreference(
+                  title: l10n.adminGrantAllCompanies,
+                  value: _companyGrantScope == 'all',
+                  onChanged: (v) async {
+                    await _saveGrantScope(v ? 'all' : 'selected');
+                  },
                 ),
+                if (_companyGrantScope != 'all')
+                  AppMultiChoicePreference<String>(
+                    title: l10n.commonCompanies,
+                    icon: Icons.business_outlined,
+                    values: _companyIds,
+                    choices: companyChoices,
+                    keyFor: (v) => v,
+                    labelFor: _companyLabel,
+                    presentValues: (ids) =>
+                        _bindingsSubtitle(ids, _companyLabel),
+                    pickerTitle: l10n.adminSelectCompanyForCabinet,
+                    onSave: _saveCompanies,
+                  ),
               ],
             ),
     );

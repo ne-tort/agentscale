@@ -5,11 +5,16 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from prodavan.domain.cabinets.types import CabinetAssignmentStatus, CabinetGrantStatus
+from prodavan.domain.cabinets.types import (
+    CabinetAssignmentStatus,
+    CabinetCompanyGrantScope,
+    CabinetGrantStatus,
+)
 from prodavan.infrastructure.persistence.models.ai_keys import CompanyAiKeyBindingRow
 from prodavan.infrastructure.persistence.models.cabinets import (
     CabinetCompanyGrantRow,
     CabinetEmployeeAssignmentRow,
+    CabinetInstanceRow,
 )
 from prodavan.infrastructure.persistence.models.identity import MembershipRow
 from prodavan.infrastructure.persistence.models.modules import (
@@ -49,6 +54,9 @@ class RelationsQuery:
         return set(q.scalars().all())
 
     async def has_cabinet_company_grant(self, *, cabinet_id: str, company_id: str) -> bool:
+        inst = await self._session.get(CabinetInstanceRow, cabinet_id)
+        if inst is not None and inst.company_grant_scope == CabinetCompanyGrantScope.ALL:
+            return True
         q = await self._session.execute(
             select(CabinetCompanyGrantRow.id).where(
                 CabinetCompanyGrantRow.cabinet_id == cabinet_id,

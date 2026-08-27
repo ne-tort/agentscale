@@ -986,6 +986,18 @@ abstract class AppLocalizations {
   /// **'Select modules for cabinet'**
   String get adminSelectModulesForCabinet;
 
+  /// No description provided for @adminGrantAllCompanies.
+  ///
+  /// In en, this message translates to:
+  /// **'All companies'**
+  String get adminGrantAllCompanies;
+
+  /// No description provided for @adminPromptProfiles.
+  ///
+  /// In en, this message translates to:
+  /// **'Prompt profiles'**
+  String get adminPromptProfiles;
+
   /// No description provided for @adminSelectCompaniesForModule.
   ///
   /// In en, this message translates to:

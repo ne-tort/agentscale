@@ -12,6 +12,7 @@ from prodavan.application.cabinets.access import CabinetAccessService
 from prodavan.application.cabinets.grant_service import CabinetGrantService
 from prodavan.application.identity.service import EntitlementService
 from prodavan.domain.cabinets import CabinetOwnerScope, CabinetStatus, schema_name_for_instance
+from prodavan.domain.cabinets.types import CabinetCompanyGrantScope
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.domain.ownership import is_company_registry, registry_source
@@ -55,6 +56,7 @@ async def _public_row(
         "operable": True,
         "source": registry_source(owner_scope=row.owner_scope),
         "base_template": row.base_template,
+        "company_grant_scope": row.company_grant_scope,
         "status": row.status,
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
@@ -118,6 +120,11 @@ class CabinetInstanceService:
         from prodavan.application.relations.commands import RelationsCommand
 
         await RelationsCommand(self._session).replace_cabinet_company_grants(row.id, ids)
+        from prodavan.application.platform.bootstrap_service import PlatformBootstrapService
+
+        await PlatformBootstrapService(self._session).apply_default_modules_for_cabinet(
+            row.id, base_template=row.base_template
+        )
         await self._session.commit()
         await self._session.refresh(row)
         return await _public_row(self._session, row, grants=self._grants, company_name=company_name)
@@ -157,6 +164,11 @@ class CabinetInstanceService:
             cabinet_id=row.id,
             employee_id=employee.id,
             company_id=company_id,
+        )
+        from prodavan.application.platform.bootstrap_service import PlatformBootstrapService
+
+        await PlatformBootstrapService(self._session).apply_default_modules_for_cabinet(
+            row.id, base_template=row.base_template
         )
         await self._session.commit()
         await self._session.refresh(row)
@@ -225,6 +237,7 @@ class CabinetInstanceService:
         company_id: str | None = None,
         company_ids: list[str] | None = None,
         module_ids: list[str] | None = None,
+        company_grant_scope: str | None = None,
     ) -> dict:
         inst = await self._access.get_instance(cabinet_id)
         if name is not None:
@@ -249,6 +262,19 @@ class CabinetInstanceService:
             await ModuleBindingService(self._session).replace_module_bindings_for_cabinet(
                 cabinet_id, module_ids
             )
+        if company_grant_scope is not None:
+            scope = company_grant_scope.strip().lower()
+            if scope not in (
+                CabinetCompanyGrantScope.SELECTED,
+                CabinetCompanyGrantScope.ALL,
+            ):
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail="company_grant_scope must be selected or all",
+                )
+            inst.company_grant_scope = scope
         await self._session.commit()
         await self._session.refresh(inst)
         return await _public_row(self._session, inst, grants=self._grants)

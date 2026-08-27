@@ -4,7 +4,9 @@ import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
-import 'package:prodavan/features/meta/preview/seed_data_controller.dart';
+import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
+import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
+import 'package:prodavan/features/meta/widgets/markdown_editor_field.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 class FormViewInterpreter extends StatefulWidget {
@@ -19,7 +21,7 @@ class FormViewInterpreter extends StatefulWidget {
 
   final ModuleMetaManifest manifest;
   final Map<String, dynamic> view;
-  final SeedDataController seeds;
+  final dynamic seeds;
   final String? rowId;
   final bool readOnly;
 
@@ -48,14 +50,18 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
   void _syncFromSeeds() {
     final tableSlug = widget.view['table_slug'] as String? ?? '';
     _rowId = widget.rowId;
+    if (_rowId != null && widget.seeds.itemById(_rowId!) != null) {
+      _values = Map<String, dynamic>.from(widget.seeds.bodyFor(_rowId!));
+      return;
+    }
     if (_rowId == null || widget.seeds.itemById(_rowId!) == null) {
       final items = widget.seeds.itemsForTable(tableSlug);
       _rowId = items.isNotEmpty ? items.first['row_id'] as String? : null;
     }
     if (_rowId != null) {
-      _values = widget.seeds.bodyFor(_rowId!);
+      _values = Map<String, dynamic>.from(widget.seeds.bodyFor(_rowId!));
     } else {
-      _values = widget.seeds.defaultBodyForTable(tableSlug);
+      _values = Map<String, dynamic>.from(widget.seeds.defaultBodyForTable(tableSlug));
     }
   }
 
@@ -64,8 +70,18 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     if (widget.readOnly) return;
     final tableSlug = widget.view['table_slug'] as String? ?? '';
     if (_rowId == null) {
+      final ui = widget.view['ui_json'];
+      final hidden = ui is Map ? ui['hidden_defaults'] : null;
+      if (hidden is Map) {
+        _values.addAll(Map<String, dynamic>.from(hidden));
+      }
+      if (widget.rowId != null) {
+        final profileField = widget.view['table_slug'] == 'agents_md' ? 'profile_id' : null;
+        if (profileField != null) {
+          _values[profileField] = widget.rowId;
+        }
+      }
       _rowId = widget.seeds.createRow(tableSlug);
-      // createRow already applied defaults — merge current edits
       final body = widget.seeds.bodyFor(_rowId!);
       body.addAll(_values);
       widget.seeds.upsertBody(_rowId!, body);
@@ -103,15 +119,56 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       children: [
         for (final name in fieldNames)
-          if (colByName[name] != null) _field(context, colByName[name]!, name),
+          if (colByName[name] != null) _field(context, colByName[name]!, name, uiJson),
       ],
     );
   }
 
-  Widget _field(BuildContext context, Map<String, dynamic> column, String name) {
+  Widget _field(BuildContext context, Map<String, dynamic> column, String name, Map<String, dynamic> uiJson) {
     final label = column['label'] as String? ?? name;
     final type = column['type'] as String? ?? 'text';
     final value = _values[name];
+    final fields = uiJson['fields'];
+    String? widgetKind;
+    if (fields is List) {
+      for (final f in fields.whereType<Map>()) {
+        if (f['column'] == name) {
+          widgetKind = f['widget'] as String?;
+          break;
+        }
+      }
+    }
+
+    if (widgetKind == 'markdown_editor') {
+      return MarkdownEditorField(
+        label: label,
+        value: value?.toString() ?? '',
+        readOnly: widget.readOnly,
+        onChanged: (v) => _persist(name, v),
+        onUploadMarkdown: widget.readOnly
+            ? null
+            : (text) async {
+                final picked = await pickMarkdownFileText();
+                if (picked != null) {
+                  _persist(name, picked);
+                }
+              },
+      );
+    }
+    if (widgetKind == 'file_upload') {
+      final scope = ModuleRuntimeScope.maybeOf(context);
+      if (scope == null) {
+        return ListTile(title: Text(label), subtitle: const Text('file (preview only)'));
+      }
+      return FileUploadField(
+        label: label,
+        value: value,
+        cabinetId: scope.cabinetId,
+        api: scope.api,
+        readOnly: widget.readOnly,
+        onChanged: (ref) => _persist(name, ref),
+      );
+    }
 
     switch (type) {
       case 'bool':

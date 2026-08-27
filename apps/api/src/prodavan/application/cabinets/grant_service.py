@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.domain.cabinets.types import (
     CabinetAssignmentStatus,
+    CabinetCompanyGrantScope,
     CabinetGrantMode,
     CabinetGrantStatus,
 )
@@ -125,6 +126,9 @@ class CabinetGrantService:
         await self._session.flush()
 
     async def has_active_company_grant(self, cabinet_id: str, company_id: str) -> bool:
+        inst = await self._session.get(CabinetInstanceRow, cabinet_id)
+        if inst is not None and inst.company_grant_scope == CabinetCompanyGrantScope.ALL:
+            return True
         q = await self._session.execute(
             select(CabinetCompanyGrantRow.id).where(
                 CabinetCompanyGrantRow.cabinet_id == cabinet_id,

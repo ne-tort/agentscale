@@ -17,6 +17,7 @@ from prodavan.domain.admin import (
     subscription_read_model,
 )
 from prodavan.domain.cabinets import CabinetStatus
+from prodavan.domain.cabinets.types import CabinetCompanyGrantScope
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import EmployeeStatus, Principal
 from prodavan.domain.projects import ProjectStatus
@@ -562,14 +563,18 @@ class AdminCompanyService:
         grants = CabinetGrantService(self._session)
         q = await self._session.execute(
             select(CabinetInstanceRow)
-            .join(
+            .outerjoin(
                 CabinetCompanyGrantRow,
-                CabinetCompanyGrantRow.cabinet_id == CabinetInstanceRow.id,
+                (CabinetCompanyGrantRow.cabinet_id == CabinetInstanceRow.id)
+                & (CabinetCompanyGrantRow.company_id == company_id)
+                & (CabinetCompanyGrantRow.status == "active"),
             )
             .where(
-                CabinetCompanyGrantRow.company_id == company_id,
-                CabinetCompanyGrantRow.status == "active",
                 CabinetInstanceRow.status != "deleted",
+                (
+                    (CabinetInstanceRow.company_grant_scope == CabinetCompanyGrantScope.ALL)
+                    | (CabinetCompanyGrantRow.id.isnot(None))
+                ),
             )
             .order_by(CabinetInstanceRow.created_at.desc())
         )
