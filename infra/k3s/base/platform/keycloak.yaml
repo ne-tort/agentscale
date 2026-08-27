@@ -307,4 +307,8 @@ spec:
                   --cclientid realm-management --rolename "$ROLE" 2>/dev/null || true
               done
 
+              # ROPC: declarative user profile must not block password grant.
+              "$KC" update authentication/required-actions/VERIFY_PROFILE -r prodavan \
+                -s enabled=false -s defaultAction=false 2>/dev/null || true
+
               echo "keycloak-init: realm + admin/admin + platform.admin ok"

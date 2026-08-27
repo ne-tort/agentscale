@@ -13,7 +13,9 @@ from prodavan.infrastructure.keycloak.provisioning import CompanyPrincipalResult
 
 logger = logging.getLogger(__name__)
 
-REQUIRED_ACTIONS = ["UPDATE_PASSWORD", "VERIFY_EMAIL"]
+# Admin-mode invites are ROPC-ready (no SMTP execute-actions). Profile fields must
+# satisfy Keycloak declarative user profile or ROPC returns "Account is not fully set up".
+REQUIRED_ACTIONS: list[str] = []
 _TOKEN_SKEW_SECONDS = 30.0
 
 
@@ -94,18 +96,26 @@ class HttpKeycloakAdminClient:
                 client, headers=headers, role_names=roles, fail_fast=True
             )
             users_url = self._users_url()
+            first_name = "Employee"
+            last_name = "User"
+            if display_name:
+                parts = display_name.strip().split(None, 1)
+                first_name = parts[0][:100] or first_name
+                if len(parts) > 1:
+                    last_name = parts[1][:100] or last_name
+            else:
+                local = normalized.split("@", 1)[0].strip()
+                if local:
+                    first_name = local[:100]
             payload: dict[str, object] = {
                 "username": normalized,
                 "email": normalized,
                 "enabled": True,
-                "emailVerified": False,
+                "emailVerified": True,
+                "firstName": first_name,
+                "lastName": last_name,
                 "requiredActions": list(REQUIRED_ACTIONS),
             }
-            if display_name:
-                parts = display_name.strip().split(None, 1)
-                payload["firstName"] = parts[0]
-                if len(parts) > 1:
-                    payload["lastName"] = parts[1]
 
             user_id = await self._create_or_reuse_user(
                 client,
@@ -114,12 +124,22 @@ class HttpKeycloakAdminClient:
                 payload=payload,
                 lookup={"email": normalized, "exact": "true"},
             )
+            # Ensure profile is ROPC-complete even when user already existed.
+            await client.put(
+                f"{users_url}/{user_id}",
+                json={
+                    "id": user_id,
+                    "username": normalized,
+                    "email": normalized,
+                    "enabled": True,
+                    "emailVerified": True,
+                    "firstName": first_name,
+                    "lastName": last_name,
+                    "requiredActions": [],
+                },
+                headers=headers,
+            )
             await self._map_realm_roles(client, headers=headers, user_id=user_id, roles=role_payload)
-
-            actions_url = f"{users_url}/{user_id}/execute-actions-email"
-            actions = await client.put(actions_url, json=REQUIRED_ACTIONS, headers=headers)
-            if actions.status_code >= 400:
-                logger.warning("execute-actions-email failed: %s", actions.status_code)
 
             return InviteResult(
                 keycloak_user_id=user_id,
@@ -152,10 +172,15 @@ class HttpKeycloakAdminClient:
                 client, headers=headers, role_names=roles, fail_fast=True
             )
             users_url = self._users_url()
+            # Synthetic email + names: KC user profile requires email/first/last for ROPC.
+            first_name = (display_name or "Company").strip()[:100] or "Company"
             payload: dict[str, object] = {
                 "username": uname,
+                "email": f"{uname}@companies.prodavan.local",
                 "enabled": True,
                 "emailVerified": True,
+                "firstName": first_name,
+                "lastName": "Org",
                 "requiredActions": [],
                 "credentials": [
                     {
@@ -165,8 +190,6 @@ class HttpKeycloakAdminClient:
                     }
                 ],
             }
-            if display_name:
-                payload["firstName"] = display_name.strip()[:100]
 
             user_id, reused = await self._create_or_reuse_user(
                 client,
@@ -177,7 +200,21 @@ class HttpKeycloakAdminClient:
                 return_reused=True,
             )
             if reused:
-                # Idempotent recreate: ensure password matches latest Admin-provided secret.
+                # Idempotent recreate: ensure password + profile match latest Admin intent.
+                await client.put(
+                    f"{users_url}/{user_id}",
+                    json={
+                        "id": user_id,
+                        "username": uname,
+                        "email": f"{uname}@companies.prodavan.local",
+                        "enabled": True,
+                        "emailVerified": True,
+                        "firstName": first_name,
+                        "lastName": "Org",
+                        "requiredActions": [],
+                    },
+                    headers=headers,
+                )
                 reset = await client.put(
                     f"{users_url}/{user_id}/reset-password",
                     json={"type": "password", "value": password, "temporary": False},

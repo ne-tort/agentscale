@@ -67,6 +67,24 @@ def set_password(c: httpx.Client, *, admin_tok: str, user_id: str, password: str
         json={"type": "password", "value": password, "temporary": False},
     )
     check(f"set password {user_id[:12]}", r.status_code in (204, 200), r.text[:200])
+    # Clear required actions + mark verified so ROPC is not blocked.
+    u = c.get(f"{KC}/admin/realms/prodavan/users/{user_id}", headers=hdr(admin_tok))
+    check(f"get user {user_id[:12]}", u.status_code == 200, u.text[:200])
+    body = u.json()
+    body["emailVerified"] = True
+    body["requiredActions"] = []
+    if not body.get("lastName"):
+        body["lastName"] = "User"
+    if not body.get("firstName"):
+        body["firstName"] = (body.get("username") or "User")[:50]
+    if not body.get("email") and "@" in str(body.get("username") or ""):
+        body["email"] = body["username"]
+    p = c.put(
+        f"{KC}/admin/realms/prodavan/users/{user_id}",
+        headers=hdr(admin_tok),
+        json=body,
+    )
+    check(f"profile ready {user_id[:12]}", p.status_code in (204, 200), p.text[:200])
 
 
 def main() -> None:

@@ -47,13 +47,12 @@ async def test_invite_employee_happy_path() -> None:
     role_resp.json.return_value = {"id": "role-emp", "name": "employee"}
 
     map_resp = MagicMock(status_code=204)
-    actions_resp = MagicMock(status_code=204)
 
-    # Order: token POST → role GET → create POST → map POST → actions PUT
+    # Order: token POST → role GET → create POST → profile PUT → map POST
     mock_http = _mock_http(
         post_side_effect=[token_resp, create_resp, map_resp],
         get_return=role_resp,
-        put_return=actions_resp,
+        put_return=MagicMock(status_code=204),
     )
 
     with patch("prodavan.infrastructure.keycloak.admin_client.httpx.AsyncClient", return_value=mock_http):
@@ -61,10 +60,12 @@ async def test_invite_employee_happy_path() -> None:
 
     assert result.keycloak_user_id == "kc-123"
     assert result.email == "user@test.com"
+    assert result.required_actions == []
     assert "employee" in result.realm_roles
     # Role resolved before create (no orphan user if role missing)
     assert mock_http.get.await_count >= 1
     assert mock_http.post.await_count == 3
+    assert mock_http.put.await_count >= 1
 
 
 @pytest.mark.asyncio
@@ -99,7 +100,9 @@ async def test_create_company_principal() -> None:
         json_body = call.kwargs.get("json")
         if isinstance(json_body, dict) and json_body.get("username") == "co_abc123":
             assert json_body["credentials"][0]["value"] == "secure-pass-1"
-            assert "email" not in json_body
+            assert json_body["email"] == "co_abc123@companies.prodavan.local"
+            assert json_body["lastName"] == "Org"
+            assert json_body["firstName"] == "Acme"
             found = True
     assert found
 
