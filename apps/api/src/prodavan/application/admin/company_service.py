@@ -512,6 +512,40 @@ class AdminCompanyService:
             out.append({"company_id": company.id, "name": company.name, **metrics})
         return out
 
+    async def list_cascade_pending(self) -> list[dict]:
+        """Soft-deleted companies still holding projects or cabinets (wipe lag / failure)."""
+        q = await self._session.execute(
+            select(CompanyRow).where(CompanyRow.deleted_at.is_not(None)).order_by(CompanyRow.deleted_at.desc())
+        )
+        pending: list[dict] = []
+        for company in q.scalars().all():
+            cab_q = await self._session.execute(
+                select(func.count()).select_from(CabinetInstanceRow).where(
+                    CabinetInstanceRow.company_id == company.id
+                )
+            )
+            proj_q = await self._session.execute(
+                select(func.count()).select_from(ProjectRow).where(
+                    ProjectRow.company_id == company.id,
+                    ProjectRow.status != ProjectStatus.DELETED,
+                )
+            )
+            cabinets = int(cab_q.scalar_one() or 0)
+            projects = int(proj_q.scalar_one() or 0)
+            if cabinets == 0 and projects == 0:
+                continue
+            pending.append(
+                {
+                    "company_id": company.id,
+                    "name": company.name,
+                    "deleted_at": company.deleted_at.isoformat() if company.deleted_at else None,
+                    "cabinets_remaining": cabinets,
+                    "projects_remaining": projects,
+                    "cascade_incomplete": True,
+                }
+            )
+        return pending
+
     async def list_org_cabinets(self, company_id: str) -> list[dict]:
         await self._require_company(company_id)
         from prodavan.application.cabinets.grant_service import CabinetGrantService

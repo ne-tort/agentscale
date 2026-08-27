@@ -364,6 +364,9 @@ class AppLocalizationsRu extends AppLocalizations {
   }
 
   @override
+  String get adminAlertTagCascadeIncomplete => 'каскад удаления незавершён';
+
+  @override
   String get commonPhone => 'Телефон';
 
   @override

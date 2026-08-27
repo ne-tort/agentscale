@@ -184,15 +184,18 @@ class AdminApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
-  Future<List<Map<String, dynamic>>> listCompaniesMetrics() async {
+  Future<({List<Map<String, dynamic>> items, List<Map<String, dynamic>> cascadePending})>
+      listCompaniesMetrics() async {
     final res = await AuthHttp.get(_uri('/admin/metrics/companies'));
     _throwIfError(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     final items = body['items'];
-    if (items is List) {
-      return items.cast<Map<String, dynamic>>();
-    }
-    return const [];
+    final pending = body['cascade_pending'];
+    return (
+      items: items is List ? items.cast<Map<String, dynamic>>() : const <Map<String, dynamic>>[],
+      cascadePending:
+          pending is List ? pending.cast<Map<String, dynamic>>() : const <Map<String, dynamic>>[],
+    );
   }
 
   Future<List<Map<String, dynamic>>> listStarterBundles() async {

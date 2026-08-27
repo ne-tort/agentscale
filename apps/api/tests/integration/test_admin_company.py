@@ -377,10 +377,12 @@ def test_admin_delete_company_with_invited_admin_only(client: TestClient) -> Non
         assert deleted.json().get("employees_disabled")
     gone = client.get(f"/api/v1/admin/companies/{company_id}", headers=admin_h)
     assert gone.status_code == 404
+    listed = client.get("/api/v1/admin/companies", headers=admin_h)
+    assert listed.status_code == 200
+    assert all(i["id"] != company_id for i in listed.json()["items"])
+    again = client.delete(f"/api/v1/admin/companies/{company_id}", headers=admin_h)
+    assert again.status_code == 404
 
-
-@requires_postgres
-def test_admin_delete_company_cascades(client: TestClient) -> None:
     admin = _token(sub="padmin-del", email="padmin-del@example.com", platform_admin=True)
     admin_h = {"Authorization": f"Bearer {admin}"}
     created = client.post(

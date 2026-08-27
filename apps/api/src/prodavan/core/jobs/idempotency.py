@@ -30,3 +30,8 @@ def wipe_cabinet_packages_task_id(cabinet_id: str) -> str:
 def wipe_project_tree_task_id(workspace_key: str) -> str:
     key = (workspace_key or "").strip()
     return f"{job_names.WIPE_PROJECT_TREE}:{key}"
+
+
+def cascade_company_deleted_task_id(company_id: str) -> str:
+    cid = (company_id or "").strip()
+    return f"{job_names.CASCADE_COMPANY_DELETED}:{cid}"

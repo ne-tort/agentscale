@@ -183,8 +183,9 @@ def enqueue_apply_auth_user_registered(payload: dict[str, Any]) -> dict[str, Any
 
 
 def enqueue_cascade_company_deleted(company_id: str, *, actor_sub: str = "system") -> dict[str, Any]:
-    """Enqueue async cascade after company soft-delete."""
+    """Enqueue async cascade after company soft-delete (idempotent task_id)."""
     from prodavan.core.infra.worker_manager import get_worker_manager
+    from prodavan.core.jobs.idempotency import cascade_company_deleted_task_id
 
     cid = (company_id or "").strip()
     if not cid:
@@ -192,16 +193,17 @@ def enqueue_cascade_company_deleted(company_id: str, *, actor_sub: str = "system
     mgr = get_worker_manager()
     if mgr is None or not mgr.enabled:
         return {"enqueued": False, "reason": "celery_disabled", "company_id": cid}
+    task_id = cascade_company_deleted_task_id(cid)
     mgr.send_task(
         job_names.CASCADE_COMPANY_DELETED,
         args=[cid],
         kwargs={"actor_sub": actor_sub or "system"},
-        task_id=f"cascade-company-{cid}",
+        task_id=task_id,
     )
     return {
         "enqueued": True,
         "task": job_names.CASCADE_COMPANY_DELETED,
         "company_id": cid,
-        "task_id": f"cascade-company-{cid}",
+        "task_id": task_id,
     }
 

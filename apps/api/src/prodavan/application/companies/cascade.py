@@ -33,6 +33,8 @@ async def cascade_company_deleted(company_id: str, *, actor_sub: str = "system")
         company = await session.get(CompanyRow, company_id)
         if company is None:
             return {"ok": False, "reason": "not_found", "company_id": company_id}
+        if company.deleted_at is None:
+            return {"ok": False, "reason": "not_soft_deleted", "company_id": company_id}
 
         sessions_cancelled = await stop_company_runtime(session, company_id=company_id)
         await session.flush()

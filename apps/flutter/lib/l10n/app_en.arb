@@ -272,6 +272,7 @@
       }
     }
   },
+  "adminAlertTagCascadeIncomplete": "delete cascade pending",
   "commonPhone": "Phone",
   "adminKeyMetadata": "Key metadata",
   "adminLifecycle": "Lifecycle",

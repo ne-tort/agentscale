@@ -364,6 +364,9 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get adminAlertTagCascadeIncomplete => 'delete cascade pending';
+
+  @override
   String get commonPhone => 'Phone';
 
   @override

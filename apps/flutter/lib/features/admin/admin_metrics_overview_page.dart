@@ -20,6 +20,7 @@ enum _AlertKind {
   subscriptionExpired,
   identityUnbound,
   employeesUnbound,
+  cascadeIncomplete,
 }
 
 class _OverviewAlert {
@@ -73,12 +74,12 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
       setState(() => _loading = true);
     }
     try {
-      final items = await adminContext.api.listCompaniesMetrics();
+      final payload = await adminContext.api.listCompaniesMetrics();
       if (!mounted) return;
-      if (silent && appRefreshDataEquals(_items, items) && !_loading) return;
+      if (silent && appRefreshDataEquals(_items, payload.items) && !_loading) return;
       setState(() {
-        _items = items;
-        _alerts = _buildAlerts(items);
+        _items = payload.items;
+        _alerts = _buildAlerts(payload.items, payload.cascadePending);
         _loading = false;
       });
     } catch (e) {
@@ -89,7 +90,10 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
     }
   }
 
-  List<_OverviewAlert> _buildAlerts(List<Map<String, dynamic>> companies) {
+  List<_OverviewAlert> _buildAlerts(
+    List<Map<String, dynamic>> companies,
+    List<Map<String, dynamic>> cascadePending,
+  ) {
     final l10n = AppLocalizations.of(context);
     final alerts = <_OverviewAlert>[];
     for (final c in companies) {
@@ -168,6 +172,18 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
           ),
         );
       }
+    }
+    for (final c in cascadePending) {
+      final id = _companyId(c);
+      final name = c['name'] as String? ?? id;
+      alerts.add(
+        _OverviewAlert(
+          kind: _AlertKind.cascadeIncomplete,
+          companyId: id,
+          companyName: name,
+          tag: l10n.adminAlertTagCascadeIncomplete,
+        ),
+      );
     }
     return alerts;
   }
@@ -270,6 +286,9 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
                         final alert = _alerts.firstWhere(
                           (a) => '${a.companyId}:${a.kind.name}' == row.id,
                         );
+                        if (alert.kind == _AlertKind.cascadeIncomplete) {
+                          return;
+                        }
                         _openCompany(alert.companyId, alert.companyName);
                       },
                     ),

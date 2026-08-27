@@ -704,6 +704,12 @@ abstract class AppLocalizations {
   /// **'employees unbound · {count}'**
   String adminAlertTagEmployeesUnbound(int count);
 
+  /// No description provided for @adminAlertTagCascadeIncomplete.
+  ///
+  /// In en, this message translates to:
+  /// **'delete cascade pending'**
+  String get adminAlertTagCascadeIncomplete;
+
   /// No description provided for @commonPhone.
   ///
   /// In en, this message translates to:

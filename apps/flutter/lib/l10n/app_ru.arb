@@ -274,6 +274,7 @@
       }
     }
   },
+  "adminAlertTagCascadeIncomplete": "каскад удаления незавершён",
   "commonPhone": "Телефон",
   "adminKeyMetadata": "Метаданные ключа",
   "adminLifecycle": "Жизненный цикл",

@@ -12,5 +12,7 @@ router = APIRouter(prefix="/admin/metrics", tags=["admin-metrics"])
 
 @router.get("/companies")
 async def list_companies_metrics(_: PlatformAdminDep, session: SessionDep) -> dict:
-    items = await AdminCompanyService(session).list_companies_metrics()
-    return {"items": items}
+    svc = AdminCompanyService(session)
+    items = await svc.list_companies_metrics()
+    cascade_pending = await svc.list_cascade_pending()
+    return {"items": items, "cascade_pending": cascade_pending}
