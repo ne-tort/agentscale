@@ -1,4 +1,4 @@
-"""Keycloak Admin HTTP client — provisioning adapter with token cache + fail-fast roles."""
+"""Keycloak Admin HTTP client — disable / password (registration via Auth UserAdmin)."""
 
 from __future__ import annotations
 
@@ -8,19 +8,14 @@ import time
 import httpx
 
 from prodavan.domain.errors import AppError
-from prodavan.domain.identity import ROLE_COMPANY, ROLE_EMPLOYEE
-from prodavan.infrastructure.keycloak.provisioning import CompanyPrincipalResult, InviteResult
 
 logger = logging.getLogger(__name__)
 
-# Admin-mode invites are ROPC-ready (no SMTP execute-actions). Profile fields must
-# satisfy Keycloak declarative user profile or ROPC returns "Account is not fully set up".
-REQUIRED_ACTIONS: list[str] = []
 _TOKEN_SKEW_SECONDS = 30.0
 
 
 class HttpKeycloakAdminClient:
-    """Live Keycloak Admin API — client credentials + realm roles."""
+    """Live Keycloak Admin API — client credentials (disable / set password)."""
 
     def __init__(
         self,
@@ -78,204 +73,6 @@ class HttpKeycloakAdminClient:
     def _users_url(self) -> str:
         return f"{self._base}/admin/realms/{self._realm}/users"
 
-    async def invite_employee(
-        self,
-        *,
-        email: str,
-        display_name: str | None,
-        realm_roles: list[str] | None = None,
-    ) -> InviteResult:
-        """Human Employee invite (email + required actions). Idempotent on existing email."""
-        normalized = email.lower().strip()
-        roles = list(realm_roles or [ROLE_EMPLOYEE])
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            token = await self._admin_token(client)
-            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-            # Resolve roles before create — avoid orphan users without realm roles.
-            role_payload = await self._resolve_realm_roles(
-                client, headers=headers, role_names=roles, fail_fast=True
-            )
-            users_url = self._users_url()
-            first_name = "Employee"
-            last_name = "User"
-            if display_name:
-                parts = display_name.strip().split(None, 1)
-                first_name = parts[0][:100] or first_name
-                if len(parts) > 1:
-                    last_name = parts[1][:100] or last_name
-            else:
-                local = normalized.split("@", 1)[0].strip()
-                if local:
-                    first_name = local[:100]
-            payload: dict[str, object] = {
-                "username": normalized,
-                "email": normalized,
-                "enabled": True,
-                "emailVerified": True,
-                "firstName": first_name,
-                "lastName": last_name,
-                "requiredActions": list(REQUIRED_ACTIONS),
-            }
-
-            user_id = await self._create_or_reuse_user(
-                client,
-                headers=headers,
-                users_url=users_url,
-                payload=payload,
-                lookup={"email": normalized, "exact": "true"},
-            )
-            # Ensure profile is ROPC-complete even when user already existed.
-            await client.put(
-                f"{users_url}/{user_id}",
-                json={
-                    "id": user_id,
-                    "username": normalized,
-                    "email": normalized,
-                    "enabled": True,
-                    "emailVerified": True,
-                    "firstName": first_name,
-                    "lastName": last_name,
-                    "requiredActions": [],
-                },
-                headers=headers,
-            )
-            await self._map_realm_roles(client, headers=headers, user_id=user_id, roles=role_payload)
-
-            return InviteResult(
-                keycloak_user_id=user_id,
-                email=normalized,
-                required_actions=list(REQUIRED_ACTIONS),
-                realm_roles=roles,
-            )
-
-    async def create_company_principal(
-        self,
-        *,
-        username: str,
-        password: str,
-        display_name: str | None,
-    ) -> CompanyPrincipalResult:
-        """Org login: username = company_id, password set now. No email required."""
-        uname = username.strip()
-        if not uname or not password:
-            raise AppError(
-                code="VALIDATION_ERROR",
-                title="Validation Error",
-                status=422,
-                detail="company username and password required",
-            )
-        roles = [ROLE_COMPANY]
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            token = await self._admin_token(client)
-            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-            role_payload = await self._resolve_realm_roles(
-                client, headers=headers, role_names=roles, fail_fast=True
-            )
-            users_url = self._users_url()
-            # Synthetic email + names: KC user profile requires email/first/last for ROPC.
-            first_name = (display_name or "Company").strip()[:100] or "Company"
-            payload: dict[str, object] = {
-                "username": uname,
-                "email": f"{uname}@companies.prodavan.local",
-                "enabled": True,
-                "emailVerified": True,
-                "firstName": first_name,
-                "lastName": "Org",
-                "requiredActions": [],
-                "credentials": [
-                    {
-                        "type": "password",
-                        "value": password,
-                        "temporary": False,
-                    }
-                ],
-            }
-
-            user_id, reused = await self._create_or_reuse_user(
-                client,
-                headers=headers,
-                users_url=users_url,
-                payload=payload,
-                lookup={"username": uname, "exact": "true"},
-                return_reused=True,
-            )
-            if reused:
-                # Idempotent recreate: ensure password + profile match latest Admin intent.
-                await client.put(
-                    f"{users_url}/{user_id}",
-                    json={
-                        "id": user_id,
-                        "username": uname,
-                        "email": f"{uname}@companies.prodavan.local",
-                        "enabled": True,
-                        "emailVerified": True,
-                        "firstName": first_name,
-                        "lastName": "Org",
-                        "requiredActions": [],
-                    },
-                    headers=headers,
-                )
-                reset = await client.put(
-                    f"{users_url}/{user_id}/reset-password",
-                    json={"type": "password", "value": password, "temporary": False},
-                    headers=headers,
-                )
-                if reset.status_code >= 400:
-                    raise AppError(
-                        code="KEYCLOAK_ADMIN",
-                        title="Keycloak password reset failed",
-                        status=502,
-                        detail=f"reset-password returned {reset.status_code}",
-                    )
-            await self._map_realm_roles(client, headers=headers, user_id=user_id, roles=role_payload)
-            return CompanyPrincipalResult(
-                keycloak_user_id=user_id,
-                username=uname,
-                realm_roles=roles,
-            )
-
-    async def _create_or_reuse_user(
-        self,
-        client: httpx.AsyncClient,
-        *,
-        headers: dict[str, str],
-        users_url: str,
-        payload: dict[str, object],
-        lookup: dict[str, str],
-        return_reused: bool = False,
-    ) -> str | tuple[str, bool]:
-        create = await client.post(users_url, json=payload, headers=headers)
-        username = str(payload.get("username") or "")
-        if create.status_code == 409:
-            user_id = await self._lookup_user_id(client, headers=headers, users_url=users_url, params=lookup)
-            if user_id is None:
-                raise AppError(
-                    code="INVITE_EXISTS",
-                    title="User already exists",
-                    status=409,
-                    detail=f"Keycloak user {username} already exists but could not be resolved",
-                )
-            return (user_id, True) if return_reused else user_id
-        if create.status_code not in (201, 204):
-            raise AppError(
-                code="KEYCLOAK_ADMIN",
-                title="Keycloak user create failed",
-                status=502,
-                detail=f"create user returned {create.status_code}",
-            )
-
-        user_id = self._extract_user_id(create)
-        if user_id is None:
-            user_id = await self._lookup_user_id(client, headers=headers, users_url=users_url, params=lookup)
-        if user_id is None:
-            raise AppError(
-                code="KEYCLOAK_ADMIN",
-                title="Keycloak user create failed",
-                status=502,
-                detail="could not resolve created user id",
-            )
-        return (user_id, False) if return_reused else user_id
-
     async def _lookup_user_id(
         self,
         client: httpx.AsyncClient,
@@ -288,58 +85,6 @@ class HttpKeycloakAdminClient:
         if lookup.status_code >= 400 or not lookup.json():
             return None
         return str(lookup.json()[0]["id"])
-
-    async def _resolve_realm_roles(
-        self,
-        client: httpx.AsyncClient,
-        *,
-        headers: dict[str, str],
-        role_names: list[str],
-        fail_fast: bool = True,
-    ) -> list[dict[str, object]]:
-        if not role_names:
-            return []
-        roles_url = f"{self._base}/admin/realms/{self._realm}/roles"
-        payload: list[dict[str, object]] = []
-        missing: list[str] = []
-        for name in role_names:
-            resp = await client.get(f"{roles_url}/{name}", headers=headers)
-            if resp.status_code >= 400:
-                missing.append(name)
-                continue
-            body = resp.json()
-            payload.append({"id": body["id"], "name": body["name"]})
-        if missing:
-            detail = f"realm roles missing: {', '.join(missing)}"
-            if fail_fast:
-                raise AppError(
-                    code="KEYCLOAK_ADMIN",
-                    title="Keycloak role missing",
-                    status=502,
-                    detail=detail,
-                )
-            logger.warning("%s", detail)
-        return payload
-
-    async def _map_realm_roles(
-        self,
-        client: httpx.AsyncClient,
-        *,
-        headers: dict[str, str],
-        user_id: str,
-        roles: list[dict[str, object]],
-    ) -> None:
-        if not roles:
-            return
-        map_url = f"{self._base}/admin/realms/{self._realm}/users/{user_id}/role-mappings/realm"
-        mapped = await client.post(map_url, json=roles, headers=headers)
-        if mapped.status_code >= 400:
-            raise AppError(
-                code="KEYCLOAK_ADMIN",
-                title="Keycloak role assign failed",
-                status=502,
-                detail=f"role-mappings returned {mapped.status_code}",
-            )
 
     async def disable_user(self, *, keycloak_user_id: str | None, email: str) -> None:
         async with httpx.AsyncClient(timeout=self._timeout) as client:
@@ -445,20 +190,6 @@ class HttpKeycloakAdminClient:
                 status=502,
                 detail=f"disable user returned {resp.status_code}",
             )
-
-    @staticmethod
-    def _extract_user_id(resp: httpx.Response) -> str | None:
-        location = resp.headers.get("Location") or resp.headers.get("location")
-        if location:
-            return location.rstrip("/").split("/")[-1]
-        if resp.status_code == 201 and resp.text:
-            try:
-                body = resp.json()
-                if isinstance(body, dict) and body.get("id"):
-                    return str(body["id"])
-            except Exception:
-                pass
-        return None
 
 
 # Back-compat alias

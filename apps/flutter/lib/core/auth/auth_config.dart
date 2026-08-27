@@ -1,8 +1,9 @@
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+import 'package:prodavan/core/api/prodavan_api.dart';
 
-/// Public auth discovery from GET /auth/config (L01).
+/// Public auth discovery from GET /auth/config (Auth Service).
 class AuthConfigClient {
   AuthConfigClient({required this.baseUrl});
 
@@ -14,7 +15,7 @@ class AuthConfigClient {
     final uri = Uri.parse('$_root/auth/config');
     final res = await http.get(uri);
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw Exception('auth/config ${res.statusCode}: ${res.body}');
+      throw ProdavanApiException(res.statusCode, res.body);
     }
     return jsonDecode(res.body) as Map<String, dynamic>;
   }

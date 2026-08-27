@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import (
+    ROLE_COMPANY,
     ROLE_COMPANY_ADMIN,
     ROLE_EMPLOYEE,
     Contour,
@@ -239,7 +240,7 @@ class IdentityCommandService:
         *,
         email: str,
         display_name: str | None,
-        keycloak_user_id: str,
+        keycloak_user_id: str | None = None,
     ) -> EmployeeRow:
         email_l = email.lower().strip()
         existing = await self._session.execute(
@@ -256,7 +257,7 @@ class IdentityCommandService:
             self._session.add(employee)
             await self._session.flush()
             return employee
-        if employee.keycloak_sub is None:
+        if keycloak_user_id is not None and employee.keycloak_sub is None:
             employee.keycloak_sub = keycloak_user_id
         if display_name and not employee.display_name:
             employee.display_name = display_name
@@ -293,7 +294,9 @@ class IdentityCommandService:
         description: str | None = None,
         contact_email: str | None = None,
     ) -> tuple[CompanyRow, EmployeeRow | None]:
-        """Create Company row, then KC principal username=company_id + password (email optional/unused for login)."""
+        """DB-only company create; Keycloak user via Auth Service Kafka ``auth.user.register``."""
+        from prodavan.application.auth.register import publish_register_command
+
         pwd = (password or "").strip()
         if len(pwd) < 8:
             raise AppError(
@@ -317,45 +320,59 @@ class IdentityCommandService:
             description=description.strip() if description and description.strip() else None,
             contact_email=contact,
             login_email=None,
+            keycloak_sub=None,
         )
         self._session.add(company)
         await self._session.flush()
 
-        principal = await self._provisioning.create_company_principal(
-            username=company.id,
-            password=pwd,
-            display_name=name.strip(),
-        )
-        company.keycloak_sub = principal.keycloak_user_id
-
         email_raw = (admin_email or "").strip()
-        if not email_raw:
-            await self._session.commit()
-            await self._session.refresh(company)
-            return company, None
+        employee: EmployeeRow | None = None
+        if email_raw:
+            if "@" not in email_raw:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail="email required",
+                )
+            email = email_raw.lower()
+            employee = await self._upsert_invited_employee(
+                email=email,
+                display_name=admin_display_name,
+                keycloak_user_id=None,
+            )
+            await self._ensure_membership(
+                company_id=company.id,
+                employee_id=employee.id,
+                role=MembershipRole.COMPANY_ADMIN,
+            )
 
-        if "@" not in email_raw:
-            raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="email required")
-
-        email = email_raw.lower()
-        invite = await self._provisioning.invite_employee(
-            email=email,
-            display_name=admin_display_name,
-            realm_roles=[ROLE_EMPLOYEE],
-        )
-        employee = await self._upsert_invited_employee(
-            email=email,
-            display_name=admin_display_name,
-            keycloak_user_id=invite.keycloak_user_id,
-        )
-        await self._ensure_membership(
-            company_id=company.id,
-            employee_id=employee.id,
-            role=MembershipRole.COMPANY_ADMIN,
-        )
         await self._session.commit()
         await self._session.refresh(company)
-        await self._session.refresh(employee)
+        if employee is not None:
+            await self._session.refresh(employee)
+
+        # Best-effort Auth registration after commit (no sync wait for remote Auth/Kafka).
+        # Buffer-only Fake path processes in-process so CI still binds keycloak_sub.
+        await publish_register_command(
+            client_ref=f"company:{company.id}",
+            username=company.id,
+            email=f"{company.id}@companies.prodavan.local",
+            password=pwd,
+            realm_roles=[ROLE_COMPANY],
+            display_name=name.strip(),
+        )
+        if employee is not None:
+            await publish_register_command(
+                client_ref=f"employee:{employee.id}",
+                username=employee.email,
+                email=employee.email,
+                password=None,
+                realm_roles=[ROLE_EMPLOYEE],
+                display_name=admin_display_name,
+            )
+            await self._session.refresh(employee)
+        await self._session.refresh(company)
         return company, employee
 
     async def invite_employee(
@@ -366,18 +383,25 @@ class IdentityCommandService:
         display_name: str | None,
         role: str = MembershipRole.MEMBER,
     ) -> EmployeeRow:
-        invite = await self._provisioning.invite_employee(
-            email=email.lower(),
-            display_name=display_name,
-            realm_roles=[ROLE_EMPLOYEE],
-        )
+        from prodavan.application.auth.register import publish_register_command
+
         employee = await self._upsert_invited_employee(
             email=email,
             display_name=display_name,
-            keycloak_user_id=invite.keycloak_user_id,
+            keycloak_user_id=None,
         )
         await self._ensure_membership(company_id=company_id, employee_id=employee.id, role=role)
         await self._session.commit()
+        await self._session.refresh(employee)
+
+        await publish_register_command(
+            client_ref=f"employee:{employee.id}",
+            username=employee.email,
+            email=employee.email,
+            password=None,
+            realm_roles=[ROLE_EMPLOYEE],
+            display_name=display_name,
+        )
         await self._session.refresh(employee)
         return employee
 

@@ -15,7 +15,7 @@ import 'package:prodavan/core/widgets/app_section_header.dart';
 import 'package:prodavan/features/settings/open_app_settings.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Unified username/password login via Keycloak ROPC (API token proxy).
+/// Unified username/password login via Prodavan Auth Service (never Keycloak).
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -28,7 +28,7 @@ class _LoginPageState extends State<LoginPage> {
   String _password = '';
   bool _loadingConfig = true;
   bool _connecting = false;
-  Map<String, dynamic>? _authConfig;
+  bool _passwordLogin = false;
 
   @override
   void initState() {
@@ -41,14 +41,18 @@ class _LoginPageState extends State<LoginPage> {
     try {
       final cfg = await AuthConfigClient(baseUrl: ApiBase.value).fetch();
       if (!mounted) return;
+      final mode = (cfg['auth_mode'] as String?)?.trim().toLowerCase();
+      final features = cfg['features'];
+      final enabled = mode == 'oidc' &&
+          (features is! Map || features['password_login'] != false);
       setState(() {
-        _authConfig = cfg;
+        _passwordLogin = enabled;
         _loadingConfig = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _authConfig = null;
+        _passwordLogin = false;
         _loadingConfig = false;
       });
       AppErrors.showSnack(context, e);
@@ -58,8 +62,9 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _submit() async {
     final username = _username.trim();
     final password = _password;
-    if (username.isEmpty || password.isEmpty || _connecting) return;
-    if (_authConfig?['oidc'] == null) return;
+    if (username.isEmpty || password.isEmpty || _connecting || !_passwordLogin) {
+      return;
+    }
 
     setState(() => _connecting = true);
     try {
@@ -82,7 +87,7 @@ class _LoginPageState extends State<LoginPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final canSubmit = !_connecting &&
-        _authConfig?['oidc'] != null &&
+        _passwordLogin &&
         _username.trim().isNotEmpty &&
         _password.isNotEmpty;
 
@@ -148,11 +153,10 @@ class _LoginPageState extends State<LoginPage> {
                               child: CircularProgressIndicator(strokeWidth: 2),
                             ),
                           )
-                        else
+                        else if (canSubmit)
                           AppNavPreference(
                             title: l10n.authSignIn,
                             icon: Icons.login_rounded,
-                            enabled: canSubmit,
                             onTap: _submit,
                           ),
                       ],

@@ -1,15 +1,15 @@
-"""Identity provisioning port — Keycloak Admin (invite / company principal / disable)."""
+"""Identity provisioning port — Keycloak Admin (disable / password; registration via Auth Kafka)."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from prodavan.domain.identity import ROLE_COMPANY, ROLE_EMPLOYEE
-
 
 @dataclass
 class InviteResult:
+    """Legacy DTO kept for import compatibility; registration no longer returns this sync."""
+
     keycloak_user_id: str
     email: str
     required_actions: list[str] = field(default_factory=lambda: ["UPDATE_PASSWORD", "VERIFY_EMAIL"])
@@ -18,7 +18,7 @@ class InviteResult:
 
 @dataclass
 class CompanyPrincipalResult:
-    """Company org user: username = company_id, password set by Admin (no email required)."""
+    """Legacy DTO kept for import compatibility; registration no longer returns this sync."""
 
     keycloak_user_id: str
     username: str
@@ -26,22 +26,6 @@ class CompanyPrincipalResult:
 
 
 class IdentityProvisioningPort(Protocol):
-    async def invite_employee(
-        self,
-        *,
-        email: str,
-        display_name: str | None,
-        realm_roles: list[str] | None = None,
-    ) -> InviteResult: ...
-
-    async def create_company_principal(
-        self,
-        *,
-        username: str,
-        password: str,
-        display_name: str | None,
-    ) -> CompanyPrincipalResult: ...
-
     async def disable_user(self, *, keycloak_user_id: str | None, email: str) -> None: ...
 
     async def disable_username(self, *, username: str) -> None: ...
@@ -50,58 +34,11 @@ class IdentityProvisioningPort(Protocol):
 
 
 class FakeIdentityProvisioning:
-    """In-memory provisioning for tests / AUTH without live KC Admin."""
+    """In-memory disable/password for tests / AUTH without live KC Admin."""
 
     def __init__(self) -> None:
-        self.invites: list[dict[str, object]] = []
-        self.company_principals: list[dict[str, object]] = []
         self.disabled: list[str] = []
-        self._n = 0
-        self._employee_by_email: dict[str, str] = {}
-        self._company_by_username: dict[str, str] = {}
-
-    async def invite_employee(
-        self,
-        *,
-        email: str,
-        display_name: str | None,
-        realm_roles: list[str] | None = None,
-    ) -> InviteResult:
-        normalized = email.lower().strip()
-        roles = list(realm_roles or [ROLE_EMPLOYEE])
-        self.invites.append({"email": normalized, "display_name": display_name, "realm_roles": roles})
-        existing = self._employee_by_email.get(normalized)
-        if existing is not None:
-            return InviteResult(keycloak_user_id=existing, email=normalized, realm_roles=roles)
-        self._n += 1
-        user_id = f"kc_fake_{self._n}"
-        self._employee_by_email[normalized] = user_id
-        return InviteResult(keycloak_user_id=user_id, email=normalized, realm_roles=roles)
-
-    async def create_company_principal(
-        self,
-        *,
-        username: str,
-        password: str,
-        display_name: str | None,
-    ) -> CompanyPrincipalResult:
-        uname = username.strip()
-        roles = [ROLE_COMPANY]
-        self.company_principals.append(
-            {
-                "username": uname,
-                "password": password,
-                "display_name": display_name,
-                "realm_roles": roles,
-            }
-        )
-        existing = self._company_by_username.get(uname)
-        if existing is not None:
-            return CompanyPrincipalResult(keycloak_user_id=existing, username=uname, realm_roles=roles)
-        self._n += 1
-        user_id = f"kc_co_fake_{self._n}"
-        self._company_by_username[uname] = user_id
-        return CompanyPrincipalResult(keycloak_user_id=user_id, username=uname, realm_roles=roles)
+        self.company_principals: list[dict[str, object]] = []
 
     async def disable_user(self, *, keycloak_user_id: str | None, email: str) -> None:
         self.disabled.append(keycloak_user_id or email)
@@ -120,7 +57,7 @@ _http: IdentityProvisioningPort | None = None
 
 
 def get_provisioning() -> IdentityProvisioningPort:
-    """Composition root for Keycloak Admin provisioning."""
+    """Composition root for Keycloak Admin provisioning (non-registration)."""
     global _fake, _http
     from prodavan.config.settings import settings
 
@@ -160,6 +97,9 @@ def reset_provisioning() -> None:
     global _fake, _http
     _fake = None
     _http = None
+    from prodavan.application.auth.user_admin import reset_user_admin
+
+    reset_user_admin()
 
 
 # Back-compat aliases
@@ -180,6 +120,4 @@ __all__ = [
     "FakeKeycloakInviteClient",
     "get_invite_client",
     "reset_invite_client",
-    "ROLE_COMPANY",
-    "ROLE_EMPLOYEE",
 ]

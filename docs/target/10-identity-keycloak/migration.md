@@ -5,41 +5,40 @@
 | Место | Поведение |
 |-------|-----------|
 | `AUTH_MODE=test` | HS256 mint in pytest fixtures only (no HTTP login) |
-| `AUTH_MODE=oidc` | JWKS Keycloak (`JwtValidator`); Flutter PKCE |
+| `AUTH_MODE=oidc` | JWKS Keycloak; **Auth Service** BFF (`/auth/login|refresh|logout|broker`) |
 | Пароли людей / Company | Только в Keycloak (Prodavan не хранит password hash для login) |
 | Provisioning | `IdentityProvisioningPort` → Fake или `HttpKeycloakAdminClient` |
-| Company create | username=`company_id` + password; `companies.keycloak_sub` |
-| Employee invite | email + required actions; `employees.keycloak_sub` сразу после invite |
-| Flutter | OIDC AppAuth / desktop PKCE; опциональный `kc_idp_hint` |
-| Legacy `POST /auth/login` | Удалён / не канон |
+| Flutter | Только Prodavan Auth API — **не** Keycloak hostPort / issuer |
+| Legacy `POST /auth/login` (до BFF) / `POST /auth/oidc/token` | Удалены / заменены typed Auth Service |
+| `POST /auth/test/login` | Removed |
 
-Realm scaffold: [`infra/keycloak/`](../../../infra/keycloak/). Brokers: [identity-brokers.md](identity-brokers.md).
+Realm scaffold: [`infra/keycloak/`](../../../infra/keycloak/). Brokers: [identity-brokers.md](identity-brokers.md). Architecture: [architecture.md](architecture.md).
 
-## Target после live cutover
+## Target
 
 | Место | Поведение |
 |-------|-----------|
-| Login UI | Redirect / AppAuth → **Keycloak** (соц = broker + hint) |
-| API | Только OIDC JWKS; `AUTH_MODE=oidc` на shared env |
+| Login UI | `POST /auth/login` (+ broker start URL later) |
+| API | Auth Service → Keycloak in-cluster; JwtValidator JWKS |
 | Users | Invite / company principal через Admin API; authz из DB |
-| Refresh | Keycloak refresh token |
+| Refresh / logout | `POST /auth/refresh`, `POST /auth/logout` |
+| Kafka | `auth.*` events (best-effort) |
 
 ## Этапы
 
-1. **Deploy Keycloak** (dev): STS + `prodavan-keycloak-init` (Admin API bootstrap; not partial `--import-realm`), audience on clients, `admin`/`admin`.
-2. **API**: cluster `AUTH_MODE=oidc`; CI keeps `AUTH_MODE=test` mint fixtures only (no HTTP test-login).
-3. **Flutter OIDC**: ROPC login page; route by `/me` contours; соцкнопки — UI later + `kc_idp_hint`.
-4. **IdP brokers** (VK/Yandex): secrets вне git; Account Linking в KC.
-5. **Cluster cutover**: gap **P-KC-01** closing (`AUTH_MODE=oidc` + hostPort issuer `:8089`).
-6. **Admin bootstrap**: platform admin через realm role `platform.admin` (user `admin`/`admin`).
+1. **Deploy Keycloak** (dev): STS + init Job, audience, `admin`/`admin`.
+2. **API**: `AUTH_MODE=oidc`; Auth Service; CI `AUTH_MODE=test` mint only.
+3. **Flutter**: password login via Auth Service; route by `/me`; соцкнопки UI later.
+4. **IdP brokers** (VK/Yandex): secrets вне git; start/callback уже в Auth Service.
+5. **Cluster**: `KEYCLOAK_URL` in-cluster; issuer URL только для JWT `iss` (не для FE).
 
 ## Settings
 
 ```text
 AUTH_MODE=oidc
-KEYCLOAK_URL=
+KEYCLOAK_URL=http://prodavan-keycloak:8080
+KEYCLOAK_ISSUER_URL=http://127.0.0.1:8089/realms/prodavan
 KEYCLOAK_REALM=prodavan
-KEYCLOAK_AUDIENCE=prodavan-api
 KEYCLOAK_INVITE_MODE=admin
 KEYCLOAK_ADMIN_CLIENT_ID=prodavan-services
 KEYCLOAK_ADMIN_CLIENT_SECRET=
@@ -47,11 +46,4 @@ OIDC_FLUTTER_CLIENT_ID=prodavan-flutter
 OIDC_JWKS_URL=…/realms/prodavan/protocol/openid-connect/certs
 ```
 
-`AUTH_TEST_SECRET` / HS256 — только `AUTH_MODE=test`.
-
-## Вне scope
-
-- Живой cutover Keycloak в k3s (infra PR).
-- Реальные credentials VK/Yandex в prod realm.
-- Полный Account Linking UI + sync `identity_links` из KC Admin API.
-- Telegram bot user ↔ Keycloak.
+`AUTH_TEST_SECRET` / HS256 — только `AUTH_MODE=test` (+ HMAC broker state secret reuse).

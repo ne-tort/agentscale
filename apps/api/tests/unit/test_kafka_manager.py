@@ -176,4 +176,4 @@ async def test_kafka_ensure_topics_creates_missing(monkeypatch: pytest.MonkeyPat
     monkeypatch.setitem(sys.modules, "aiokafka.admin", admin_mod)
 
     await mgr._ensure_topics()
-    assert created == ["trig"]
+    assert created == ["trig", "prodavan.auth.commands", "prodavan.auth.events"]

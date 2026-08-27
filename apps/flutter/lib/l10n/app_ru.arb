@@ -265,6 +265,15 @@
   "adminAlertTagHighUsage": "высокий usage",
   "adminAlertTagSubExpiring": "подписка",
   "adminAlertTagSubExpired": "истекла",
+  "adminAlertTagIdentityUnbound": "Identity unbound",
+  "adminAlertTagEmployeesUnbound": "сотрудники без KC · {count}",
+  "@adminAlertTagEmployeesUnbound": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "commonPhone": "Телефон",
   "adminKeyMetadata": "Метаданные ключа",
   "adminLifecycle": "Жизненный цикл",
@@ -311,6 +320,15 @@
   "@adminMetricsSubscriptionExpiring": {
     "placeholders": {
       "ends": {
+        "type": "String"
+      }
+    }
+  },
+  "adminMetricsIdentityUnbound": "Identity unbound — ожидание Keycloak principal компании",
+  "adminMetricsEmployeesUnbound": "Сотрудников без Keycloak: {count}",
+  "@adminMetricsEmployeesUnbound": {
+    "placeholders": {
+      "count": {
         "type": "String"
       }
     }

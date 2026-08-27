@@ -1,8 +1,7 @@
 """Back-compat re-exports — prefer ``provisioning`` module."""
 
+from prodavan.domain.identity import ROLE_COMPANY, ROLE_EMPLOYEE
 from prodavan.infrastructure.keycloak.provisioning import (  # noqa: F401
-    ROLE_COMPANY,
-    ROLE_EMPLOYEE,
     CompanyPrincipalResult,
     FakeIdentityProvisioning,
     FakeKeycloakInviteClient,

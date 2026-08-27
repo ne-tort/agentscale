@@ -35,6 +35,24 @@
 
 ---
 
+## Kafka (C-EVENT-BUS)
+
+| Variable | dev | staging | prod | Secret | Description |
+|----------|-----|---------|------|--------|-------------|
+| `KAFKA_ENABLED` | true | true | true | | Dual-write + consumers |
+| `KAFKA_BOOTSTRAP_SERVERS` | prodavan-kafka:9092 | ✓ | ✓ | | |
+| `KAFKA_TOPIC_PLATFORM_EVENTS` | prodavan.platform.events | same | same | | Lifecycle / platform |
+| `KAFKA_TOPIC_PROJECT_TRIGGERS` | prodavan.project.triggers | same | same | | Trigger kick/dispatch |
+| `KAFKA_TOPIC_AUTH_COMMANDS` | prodavan.auth.commands | same | same | | Auth Service register |
+| `KAFKA_TOPIC_AUTH_EVENTS` | prodavan.auth.events | same | same | | registered / failed |
+| `KAFKA_CONSUMER_ENABLED` | true | true | true | | |
+| `KAFKA_CONSUMER_GROUP` | prodavan-api-triggers | same | same | | Project triggers |
+| `KAFKA_AUTH_COMMANDS_GROUP` | prodavan-auth-commands | same | same | | Auth register handler |
+| `KAFKA_AUTH_EVENTS_GROUP` | prodavan-auth-events | same | same | | Identity bind enqueue |
+| `KAFKA_REQUIRED` | true | true | true | | Fail ready if broker down |
+
+---
+
 ## Object storage
 
 | Variable | dev | staging | prod | Secret | Description |

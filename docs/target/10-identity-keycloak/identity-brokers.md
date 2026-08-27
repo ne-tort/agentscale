@@ -5,23 +5,24 @@
 | Тема | Канон |
 |------|--------|
 | Соцлогин | Только **Keycloak Identity Broker** |
-| Prodavan API / Flutter | **Не** хранят VK/Yandex client secrets, **не** делают свой OAuth |
-| Flutter client | Один OIDC-клиент `prodavan-flutter`; соцкнопки = `kc_idp_hint` |
+| Prodavan API / Flutter | **Не** хранят VK/Yandex client secrets, **не** делают свой OAuth к IdP |
+| Старт / callback | **Auth Service** `GET /auth/broker/{idp}/start` + `/auth/broker/callback` |
+| Flutter | Открывает URL Auth Service; **не** ходит в Keycloak authorize/token |
 | Для кого | Люди: **Employee** / **Platform Admin** |
-| Company | **Без** broker — `company_id` + password |
+| Company | **Без** broker — `company_id` + password через `POST /auth/login` |
 
 ## Поток
 
 ```text
-Flutter (optional kc_idp_hint=vk|yandex)
-  → Keycloak authorize
+Flutter → GET /auth/broker/vk|yandex/start
+  → Auth Service 302 → Keycloak authorize (kc_idp_hint)
   → Broker → VK | Yandex
-  → KC user (same realm)
-  → access_token (sub)
+  → KC callback → Auth Service /auth/broker/callback
+  → code exchange (in-cluster) → redirect app with tokens
   → API JWKS → Employee.keycloak_sub (authz из DB)
 ```
 
-Broker **прозрачен** для API: один `employees.keycloak_sub` на человека, независимо от локального пароля или соцпровайдера.
+Broker **прозрачен** для authz: один `employees.keycloak_sub` на человека.
 
 ## Aliases
 
@@ -34,9 +35,9 @@ Realm scaffold: пустой `identityProviders` + checklist в [`infra/keycloak
 
 ## Flutter
 
-- Кнопка «Войти» → authorize без hint (KC login form).
-- Будущие соцкнопки → тот же `signIn`, параметр `kcIdpHint: 'vk' | 'yandex'`.
-- Реализация: [`oidc_auth_service.dart`](../../../apps/flutter/lib/core/auth/oidc_auth_service.dart).
+- Password «Вход» → `POST /auth/login` ([`auth_api_client.dart`](../../../apps/flutter/lib/core/auth/auth_api_client.dart)).
+- Соцкнопки (UI later) → `AuthApiClient.brokerStartUrl(...)` / open browser.
+- Запрещено: `kc_idp_hint` напрямую на Keycloak из Flutter.
 
 ## Account linking и конфликты email
 
@@ -46,11 +47,10 @@ Realm scaffold: пустой `identityProviders` + checklist в [`infra/keycloak
 
 ## Audit в app DB (опционально)
 
-Таблица `identity_links` (`employee_id`, `provider`, `provider_subject`) — UX/support, **не** authz.  
-Заполнение — later (event/admin sync из KC). Authz только `employees.keycloak_sub`.
+Таблица `identity_links` (`employee_id`, `provider`, `provider_subject`) — UX/support, **не** authz.
 
 ## Запреты
 
-- App-level OAuth к VK/Yandex из API или Flutter.
+- App-level OAuth к VK/Yandex из Flutter (или прямые KC authorize/token/revoke).
 - Broker для Company org principal.
 - Коммит IdP secrets в git / realm JSON.

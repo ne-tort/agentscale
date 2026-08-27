@@ -356,6 +356,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminAlertTagSubExpired => 'expired';
 
   @override
+  String get adminAlertTagIdentityUnbound => 'Identity unbound';
+
+  @override
+  String adminAlertTagEmployeesUnbound(int count) {
+    return 'employees unbound · $count';
+  }
+
+  @override
   String get commonPhone => 'Phone';
 
   @override
@@ -419,6 +427,15 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String adminMetricsSubscriptionExpiring(String ends) {
     return 'Subscription expiring · $ends';
+  }
+
+  @override
+  String get adminMetricsIdentityUnbound =>
+      'Identity unbound — company Keycloak principal pending';
+
+  @override
+  String adminMetricsEmployeesUnbound(String count) {
+    return '$count employee(s) without Keycloak binding';
   }
 
   @override

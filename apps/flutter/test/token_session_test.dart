@@ -1,6 +1,4 @@
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:prodavan/core/auth/oidc_auth_service.dart';
 import 'package:prodavan/core/auth/session_store.dart';
 import 'package:prodavan/core/auth/token_session.dart';
 
@@ -27,8 +25,8 @@ class _MemoryStore extends SessionStore {
     _session = StoredSession(
       baseUrl: baseUrl,
       bearerToken: bearerToken,
-      refreshToken: refreshToken ??
-          (keepRefreshIfNull ? _session?.refreshToken : null),
+      refreshToken:
+          refreshToken ?? (keepRefreshIfNull ? _session?.refreshToken : null),
       idToken: idToken ?? (keepIdTokenIfNull ? _session?.idToken : null),
       expiresAt: expiresAt,
       companyId: companyId,
@@ -40,7 +38,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test('requireAccessToken returns current token when not near expiry', () async {
-    final session = TokenSession(store: _MemoryStore(), oidc: const OidcAuthService());
+    final session = TokenSession(store: _MemoryStore());
     await session.applyTokens(
       baseUrl: 'http://127.0.0.1:8000/api/v1',
       accessToken: 'access-1',
@@ -52,7 +50,7 @@ void main() {
 
   test('setCompanyId keeps refresh token', () async {
     final store = _MemoryStore();
-    final session = TokenSession(store: store, oidc: const OidcAuthService());
+    final session = TokenSession(store: store);
     await session.applyTokens(
       baseUrl: 'http://127.0.0.1:8000/api/v1',
       accessToken: 'access-1',

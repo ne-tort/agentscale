@@ -53,9 +53,13 @@ def build_lifespan_manager() -> LifespanManager:
             client_id=settings.kafka_client_id,
             topic_platform_events=settings.kafka_topic_platform_events,
             topic_project_triggers=settings.kafka_topic_project_triggers,
+            topic_auth_commands=settings.kafka_topic_auth_commands,
+            topic_auth_events=settings.kafka_topic_auth_events,
             required=settings.kafka_required,
             consumer_enabled=settings.kafka_consumer_enabled,
             consumer_group=settings.kafka_consumer_group,
+            auth_commands_group=settings.kafka_auth_commands_group,
+            auth_events_group=settings.kafka_auth_events_group,
             drain_debounce_sec=settings.kafka_drain_debounce_sec,
             consumer_mode=settings.kafka_consumer_mode,
         )

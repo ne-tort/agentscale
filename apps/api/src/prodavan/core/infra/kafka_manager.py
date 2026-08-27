@@ -38,9 +38,13 @@ class KafkaManager(LifespanResource):
 
     PG outbox remains claim/drain SoT until full consumer cutover (documented hole).
 
-    Consumer modes:
+    Consumer modes (project triggers):
     - ``kick`` (default): debounce → ``prodavan.jobs.trigger_drain``
     - ``dispatch``: per message → ``prodavan.jobs.dispatch_trigger(event_id)``
+
+    Auth topics (when consumer enabled):
+    - ``auth.commands`` → Auth Service register handler → publish ``auth.events``
+    - ``auth.events`` → enqueue ``apply_auth_user_registered``
     """
 
     def __init__(
@@ -51,10 +55,14 @@ class KafkaManager(LifespanResource):
         client_id: str = "prodavan-api",
         topic_platform_events: str = "prodavan.platform.events",
         topic_project_triggers: str = "prodavan.project.triggers",
+        topic_auth_commands: str = "prodavan.auth.commands",
+        topic_auth_events: str = "prodavan.auth.events",
         required: bool = False,
         buffer_size: int = 200,
         consumer_enabled: bool = False,
         consumer_group: str = "prodavan-api-triggers",
+        auth_commands_group: str = "prodavan-auth-commands",
+        auth_events_group: str = "prodavan-auth-events",
         drain_debounce_sec: float = 1.0,
         consumer_mode: str = "kick",
     ) -> None:
@@ -63,19 +71,30 @@ class KafkaManager(LifespanResource):
         self._client_id = client_id
         self._topic_platform = topic_platform_events
         self._topic_triggers = topic_project_triggers
+        self._topic_auth_commands = topic_auth_commands
+        self._topic_auth_events = topic_auth_events
         self._required = required
         self._consumer_enabled = consumer_enabled
         self._consumer_group = consumer_group
+        self._auth_commands_group = auth_commands_group
+        self._auth_events_group = auth_events_group
         self._drain_debounce_sec = max(0.1, float(drain_debounce_sec))
         mode = (consumer_mode or "kick").strip().lower()
         self._consumer_mode: ConsumerMode = "dispatch" if mode == "dispatch" else "kick"
         self._producer: Any = None
         self._consumer: Any = None
+        self._auth_commands_consumer: Any = None
+        self._auth_events_consumer: Any = None
         self._consume_task: asyncio.Task[None] | None = None
+        self._auth_commands_task: asyncio.Task[None] | None = None
+        self._auth_events_task: asyncio.Task[None] | None = None
         self._stop: asyncio.Event | None = None
         self._buffer: deque[dict[str, Any]] = deque(maxlen=max(1, buffer_size))
         self._drain_kicks: int = 0
         self._dispatch_enqueues: int = 0
+        self._auth_register_handled: int = 0
+        self._auth_bind_enqueues: int = 0
+        self._local_auth_depth: int = 0
 
     @property
     def name(self) -> str:
@@ -110,6 +129,10 @@ class KafkaManager(LifespanResource):
             return self._topic_platform
         if bus == "project_trigger":
             return self._topic_triggers
+        if bus == "auth_command":
+            return self._topic_auth_commands
+        if bus == "auth_event":
+            return self._topic_auth_events
         raise ValueError(f"unknown bus: {bus}")
 
     def recent_envelopes(self) -> list[dict[str, Any]]:
@@ -128,6 +151,7 @@ class KafkaManager(LifespanResource):
                 envelope.event_type,
                 envelope.event_id,
             )
+            await self._local_auth_dispatch(envelope)
             return True
         topic = self.topic_for(envelope.bus)
         key = (envelope.project_id or envelope.company_id or envelope.event_id).encode("utf-8")
@@ -140,6 +164,47 @@ class KafkaManager(LifespanResource):
             if self._required:
                 raise
             return False
+
+    async def _local_auth_dispatch(self, envelope: EventEnvelope) -> None:
+        """CI / no-broker: process auth commands/events in-process (Fake register path)."""
+        if self._local_auth_depth > 8:
+            logger.error("kafka: local auth dispatch depth exceeded")
+            return
+        self._local_auth_depth += 1
+        try:
+            if envelope.bus == "auth_command":
+                from prodavan.application.auth.register import handle_auth_command_envelope
+
+                result = await handle_auth_command_envelope(envelope)
+                self._auth_register_handled += 1
+                if result is not None:
+                    await self.publish(result)
+                return
+            if envelope.bus == "auth_event":
+                from prodavan.application.auth.register import AUTH_USER_REGISTERED
+                from prodavan.application.identity.auth_bind import apply_auth_user_registered_payload
+                from prodavan.core.jobs.enqueue import enqueue_apply_auth_user_registered
+
+                if envelope.event_type != AUTH_USER_REGISTERED:
+                    return
+                # Prefer Celery when available; otherwise bind inline (tests / no worker).
+                enq = enqueue_apply_auth_user_registered(envelope.payload or {})
+                if enq.get("enqueued"):
+                    self._auth_bind_enqueues += 1
+                    return
+                from prodavan.infrastructure.persistence.database import get_session_factory
+
+                factory = get_session_factory()
+                async with factory() as session:
+                    await apply_auth_user_registered_payload(session, envelope.payload or {})
+        except Exception:
+            logger.exception(
+                "kafka: local auth dispatch failed bus=%s type=%s",
+                envelope.bus,
+                envelope.event_type,
+            )
+        finally:
+            self._local_auth_depth -= 1
 
     async def _kick_drain(self) -> None:
         """Enqueue Celery drain; coalesce across API replicas via Redis lock when available."""
@@ -167,6 +232,16 @@ class KafkaManager(LifespanResource):
         logger.info(
             "kafka consumer: dispatch_trigger id=%s enqueued=%s",
             trigger_id,
+            result.get("enqueued"),
+        )
+
+    def _enqueue_auth_bind(self, payload: dict[str, Any]) -> None:
+        from prodavan.core.jobs.enqueue import enqueue_apply_auth_user_registered
+
+        result = enqueue_apply_auth_user_registered(payload)
+        self._auth_bind_enqueues += 1
+        logger.info(
+            "kafka consumer: apply_auth_user_registered enqueued=%s",
             result.get("enqueued"),
         )
 
@@ -241,9 +316,97 @@ class KafkaManager(LifespanResource):
                 self._dispatch_enqueues,
             )
 
+    async def _consume_auth_commands(self, stop: asyncio.Event) -> None:
+        assert self._auth_commands_consumer is not None
+        from prodavan.application.auth.register import handle_auth_command_envelope
+        from prodavan.core.events.envelope import EventEnvelope
+
+        try:
+            while not stop.is_set():
+                try:
+                    batch = await self._auth_commands_consumer.getmany(timeout_ms=500, max_records=20)
+                except Exception:
+                    if stop.is_set():
+                        break
+                    logger.exception("kafka: auth commands getmany failed")
+                    await asyncio.sleep(1.0)
+                    continue
+                if not batch:
+                    continue
+                for _tp, messages in batch.items():
+                    for msg in messages:
+                        try:
+                            data = json.loads(msg.value.decode("utf-8"))
+                            envelope = EventEnvelope(
+                                bus=data.get("bus") or "auth_command",
+                                event_id=str(data.get("event_id") or ""),
+                                event_type=str(data.get("event_type") or ""),
+                                occurred_at=str(data.get("occurred_at") or EventEnvelope.now_iso()),
+                                company_id=data.get("company_id"),
+                                project_id=data.get("project_id"),
+                                cabinet_id=data.get("cabinet_id"),
+                                payload=dict(data.get("payload") or {}),
+                                schema_version=int(data.get("schema_version") or 1),
+                            )
+                        except Exception:
+                            logger.warning("kafka: skip bad auth command offset=%s", msg.offset)
+                            continue
+                        try:
+                            result = await handle_auth_command_envelope(envelope)
+                            self._auth_register_handled += 1
+                            if result is not None:
+                                await self.publish(result)
+                        except Exception:
+                            logger.exception("kafka: auth command handle failed id=%s", envelope.event_id)
+        finally:
+            logger.info(
+                "kafka: auth commands consumer stopped handled=%s",
+                self._auth_register_handled,
+            )
+
+    async def _consume_auth_events(self, stop: asyncio.Event) -> None:
+        assert self._auth_events_consumer is not None
+        from prodavan.application.auth.register import AUTH_USER_REGISTERED
+
+        try:
+            while not stop.is_set():
+                try:
+                    batch = await self._auth_events_consumer.getmany(timeout_ms=500, max_records=20)
+                except Exception:
+                    if stop.is_set():
+                        break
+                    logger.exception("kafka: auth events getmany failed")
+                    await asyncio.sleep(1.0)
+                    continue
+                if not batch:
+                    continue
+                for _tp, messages in batch.items():
+                    for msg in messages:
+                        try:
+                            data = json.loads(msg.value.decode("utf-8"))
+                        except Exception:
+                            logger.warning("kafka: skip bad auth event offset=%s", msg.offset)
+                            continue
+                        if data.get("bus") != "auth_event":
+                            continue
+                        if data.get("event_type") != AUTH_USER_REGISTERED:
+                            continue
+                        payload = dict(data.get("payload") or {})
+                        self._enqueue_auth_bind(payload)
+        finally:
+            logger.info(
+                "kafka: auth events consumer stopped enqueues=%s",
+                self._auth_bind_enqueues,
+            )
+
     async def _ensure_topics(self) -> None:
-        """Best-effort create platform + project_trigger topics (parity with MinIO ensure_bucket)."""
-        topics = [self._topic_platform, self._topic_triggers]
+        """Best-effort create platform + project_trigger + auth topics."""
+        topics = [
+            self._topic_platform,
+            self._topic_triggers,
+            self._topic_auth_commands,
+            self._topic_auth_events,
+        ]
         try:
             from aiokafka.admin import AIOKafkaAdminClient, NewTopic
 
@@ -307,10 +470,12 @@ class KafkaManager(LifespanResource):
                 await self._producer.start()
                 await self._ensure_topics()
                 logger.info(
-                    "kafka: producer started servers=%s topics=%s,%s (attempt %s/%s)",
+                    "kafka: producer started servers=%s topics=%s,%s,%s,%s (attempt %s/%s)",
                     self._bootstrap,
                     self._topic_platform,
                     self._topic_triggers,
+                    self._topic_auth_commands,
+                    self._topic_auth_events,
                     attempt,
                     attempts,
                 )
@@ -341,6 +506,7 @@ class KafkaManager(LifespanResource):
         try:
             from aiokafka import AIOKafkaConsumer
 
+            self._stop = asyncio.Event()
             self._consumer = AIOKafkaConsumer(
                 self._topic_triggers,
                 bootstrap_servers=self._bootstrap,
@@ -350,10 +516,37 @@ class KafkaManager(LifespanResource):
                 auto_offset_reset="latest",
             )
             await self._consumer.start()
-            self._stop = asyncio.Event()
             self._consume_task = asyncio.create_task(
                 self._consume_loop(self._stop),
                 name="prodavan-kafka-trigger-consumer",
+            )
+
+            self._auth_commands_consumer = AIOKafkaConsumer(
+                self._topic_auth_commands,
+                bootstrap_servers=self._bootstrap,
+                client_id=f"{self._client_id}-auth-cmd",
+                group_id=self._auth_commands_group,
+                enable_auto_commit=True,
+                auto_offset_reset="latest",
+            )
+            await self._auth_commands_consumer.start()
+            self._auth_commands_task = asyncio.create_task(
+                self._consume_auth_commands(self._stop),
+                name="prodavan-kafka-auth-commands",
+            )
+
+            self._auth_events_consumer = AIOKafkaConsumer(
+                self._topic_auth_events,
+                bootstrap_servers=self._bootstrap,
+                client_id=f"{self._client_id}-auth-evt",
+                group_id=self._auth_events_group,
+                enable_auto_commit=True,
+                auto_offset_reset="latest",
+            )
+            await self._auth_events_consumer.start()
+            self._auth_events_task = asyncio.create_task(
+                self._consume_auth_events(self._stop),
+                name="prodavan-kafka-auth-events",
             )
         except Exception:
             logger.exception("kafka: consumer startup failed (producer still up)")
@@ -362,19 +555,23 @@ class KafkaManager(LifespanResource):
     async def shutdown(self) -> None:
         if self._stop is not None:
             self._stop.set()
-        if self._consume_task is not None:
-            try:
-                await asyncio.wait_for(self._consume_task, timeout=5.0)
-            except (TimeoutError, asyncio.CancelledError):
-                self._consume_task.cancel()
-            self._consume_task = None
+        for task_attr in ("_consume_task", "_auth_commands_task", "_auth_events_task"):
+            task = getattr(self, task_attr)
+            if task is not None:
+                try:
+                    await asyncio.wait_for(task, timeout=5.0)
+                except (TimeoutError, asyncio.CancelledError):
+                    task.cancel()
+                setattr(self, task_attr, None)
         self._stop = None
-        if self._consumer is not None:
-            try:
-                await self._consumer.stop()
-            except Exception:
-                logger.exception("kafka: consumer stop failed")
-            self._consumer = None
+        for cons_attr in ("_consumer", "_auth_commands_consumer", "_auth_events_consumer"):
+            cons = getattr(self, cons_attr)
+            if cons is not None:
+                try:
+                    await cons.stop()
+                except Exception:
+                    logger.exception("kafka: consumer stop failed (%s)", cons_attr)
+                setattr(self, cons_attr, None)
         if self._producer is not None:
             try:
                 await self._producer.stop()

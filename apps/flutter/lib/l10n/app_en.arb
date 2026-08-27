@@ -263,6 +263,15 @@
   "adminAlertTagHighUsage": "high usage",
   "adminAlertTagSubExpiring": "subscription",
   "adminAlertTagSubExpired": "expired",
+  "adminAlertTagIdentityUnbound": "Identity unbound",
+  "adminAlertTagEmployeesUnbound": "employees unbound · {count}",
+  "@adminAlertTagEmployeesUnbound": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
   "commonPhone": "Phone",
   "adminKeyMetadata": "Key metadata",
   "adminLifecycle": "Lifecycle",
@@ -309,6 +318,15 @@
   "@adminMetricsSubscriptionExpiring": {
     "placeholders": {
       "ends": {
+        "type": "String"
+      }
+    }
+  },
+  "adminMetricsIdentityUnbound": "Identity unbound — company Keycloak principal pending",
+  "adminMetricsEmployeesUnbound": "{count} employee(s) without Keycloak binding",
+  "@adminMetricsEmployeesUnbound": {
+    "placeholders": {
+      "count": {
         "type": "String"
       }
     }

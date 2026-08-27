@@ -176,3 +176,20 @@ def register_tasks(app) -> None:
             scan_limit,
         )
         return run_async(_run())
+
+    @app.task(name=job_names.APPLY_AUTH_USER_REGISTERED, bind=False)
+    def apply_auth_user_registered(payload: dict[str, Any]) -> dict[str, Any]:
+        from prodavan.application.identity.auth_bind import apply_auth_user_registered_payload
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        async def _run() -> dict[str, Any]:
+            factory = get_session_factory()
+            async with factory() as session:
+                return await apply_auth_user_registered_payload(session, payload or {})
+
+        logger.info(
+            "celery task %s client_ref=%s",
+            job_names.APPLY_AUTH_USER_REGISTERED,
+            (payload or {}).get("client_ref"),
+        )
+        return run_async(_run())

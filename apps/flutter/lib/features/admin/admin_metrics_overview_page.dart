@@ -12,7 +12,15 @@ import 'package:prodavan/core/widgets/stat_tile.dart';
 import 'package:prodavan/features/admin/company/admin_company_detail_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-enum _AlertKind { noKeys, keyExpiring, highUsage, subscriptionExpiring, subscriptionExpired }
+enum _AlertKind {
+  noKeys,
+  keyExpiring,
+  highUsage,
+  subscriptionExpiring,
+  subscriptionExpired,
+  identityUnbound,
+  employeesUnbound,
+}
 
 class _OverviewAlert {
   const _OverviewAlert({
@@ -129,13 +137,34 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
             tag: l10n.adminAlertTagSubExpired,
           ),
         );
-      } else if (c['subscription_expiring'] == true) {
+      } else if (c['subscription_expiring_soon'] == true) {
         alerts.add(
           _OverviewAlert(
             kind: _AlertKind.subscriptionExpiring,
             companyId: id,
             companyName: name,
             tag: l10n.adminAlertTagSubExpiring,
+          ),
+        );
+      }
+      if (c['keycloak_unbound'] == true) {
+        alerts.add(
+          _OverviewAlert(
+            kind: _AlertKind.identityUnbound,
+            companyId: id,
+            companyName: name,
+            tag: l10n.adminAlertTagIdentityUnbound,
+          ),
+        );
+      }
+      final unboundEmployees = _asInt(c['employees_keycloak_unbound']);
+      if (unboundEmployees > 0) {
+        alerts.add(
+          _OverviewAlert(
+            kind: _AlertKind.employeesUnbound,
+            companyId: id,
+            companyName: name,
+            tag: l10n.adminAlertTagEmployeesUnbound(unboundEmployees),
           ),
         );
       }

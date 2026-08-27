@@ -169,3 +169,15 @@ def enqueue_gc_orphan_blobs(
         "limit": int(limit),
         "scan_limit": int(scan_limit),
     }
+
+
+def enqueue_apply_auth_user_registered(payload: dict[str, Any]) -> dict[str, Any]:
+    """Enqueue Identity bind of keycloak_sub from auth.user.registered."""
+    from prodavan.core.infra.worker_manager import get_worker_manager
+
+    mgr = get_worker_manager()
+    if mgr is None or not mgr.enabled:
+        return {"enqueued": False, "reason": "celery_disabled"}
+    mgr.send_task(job_names.APPLY_AUTH_USER_REGISTERED, args=[payload])
+    return {"enqueued": True, "task": job_names.APPLY_AUTH_USER_REGISTERED}
+

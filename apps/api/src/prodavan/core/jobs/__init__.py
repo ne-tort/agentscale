@@ -2,6 +2,7 @@
 
 from prodavan.core.jobs import names
 from prodavan.core.jobs.enqueue import (
+    enqueue_apply_auth_user_registered,
     enqueue_dispatch_trigger,
     enqueue_gc_orphan_blobs,
     enqueue_gc_orphan_cabinet_schemas,
@@ -13,6 +14,7 @@ from prodavan.core.jobs.enqueue import (
 )
 
 __all__ = [
+    "enqueue_apply_auth_user_registered",
     "enqueue_dispatch_trigger",
     "enqueue_gc_orphan_blobs",
     "enqueue_gc_orphan_cabinet_schemas",

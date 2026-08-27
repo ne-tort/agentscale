@@ -692,6 +692,18 @@ abstract class AppLocalizations {
   /// **'expired'**
   String get adminAlertTagSubExpired;
 
+  /// No description provided for @adminAlertTagIdentityUnbound.
+  ///
+  /// In en, this message translates to:
+  /// **'Identity unbound'**
+  String get adminAlertTagIdentityUnbound;
+
+  /// No description provided for @adminAlertTagEmployeesUnbound.
+  ///
+  /// In en, this message translates to:
+  /// **'employees unbound · {count}'**
+  String adminAlertTagEmployeesUnbound(int count);
+
   /// No description provided for @commonPhone.
   ///
   /// In en, this message translates to:
@@ -805,6 +817,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Subscription expiring · {ends}'**
   String adminMetricsSubscriptionExpiring(String ends);
+
+  /// No description provided for @adminMetricsIdentityUnbound.
+  ///
+  /// In en, this message translates to:
+  /// **'Identity unbound — company Keycloak principal pending'**
+  String get adminMetricsIdentityUnbound;
+
+  /// No description provided for @adminMetricsEmployeesUnbound.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} employee(s) without Keycloak binding'**
+  String adminMetricsEmployeesUnbound(String count);
 
   /// No description provided for @adminModelAllowlist.
   ///

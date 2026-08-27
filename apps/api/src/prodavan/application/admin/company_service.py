@@ -413,6 +413,17 @@ class AdminCompanyService:
             now=datetime.now(UTC),
             expiring_days=settings.admin_metrics_subscription_expiring_days,
         )
+        unbound_emp_q = await self._session.execute(
+            select(func.count(func.distinct(MembershipRow.employee_id)))
+            .select_from(MembershipRow)
+            .join(EmployeeRow, EmployeeRow.id == MembershipRow.employee_id)
+            .where(
+                MembershipRow.company_id == company_id,
+                EmployeeRow.keycloak_sub.is_(None),
+                EmployeeRow.status != EmployeeStatus.DISABLED,
+            )
+        )
+        employees_keycloak_unbound = int(unbound_emp_q.scalar_one() or 0)
         return {
             "employees_total": employees_total,
             "employees_active": employees_active,
@@ -432,6 +443,8 @@ class AdminCompanyService:
             "last_activity_at": last_activity.isoformat() if last_activity else None,
             "storage_bytes": storage_bytes,
             "high_agent_usage": high_usage,
+            "keycloak_unbound": company.keycloak_sub is None,
+            "employees_keycloak_unbound": employees_keycloak_unbound,
             **key_metrics,
             **sub,
         }

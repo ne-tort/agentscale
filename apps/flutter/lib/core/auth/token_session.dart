@@ -3,8 +3,8 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import 'package:prodavan/core/auth/auth_api_client.dart';
 import 'package:prodavan/core/auth/auth_config.dart';
-import 'package:prodavan/core/auth/oidc_auth_service.dart';
 import 'package:prodavan/core/auth/session_store.dart';
 import 'package:prodavan/core/config/api_base.dart';
 import 'package:prodavan/core/session/admin_context.dart';
@@ -50,25 +50,22 @@ class AuthSession {
   }
 }
 
-/// Single owner of JWT lifecycle: load, password/OIDC login, proactive refresh.
-///
-/// API clients call [requireAccessToken] (skew-aware). On 401 use [refresh]
-/// once via [AuthHttp].
+/// Single owner of JWT lifecycle via Prodavan Auth Service (never Keycloak).
 class TokenSession extends ChangeNotifier {
   TokenSession({
     SessionStore? store,
-    OidcAuthService? oidc,
+    AuthApiClient? auth,
   })  : _store = store ?? sessionStore,
-        _oidc = oidc ?? oidcAuthService;
+        _auth = auth ?? authApiClient;
 
   static const refreshSkew = Duration(seconds: 60);
 
   final SessionStore _store;
-  final OidcAuthService _oidc;
+  final AuthApiClient _auth;
 
   AuthSession? _session;
-  Map<String, dynamic>? _oidcConfig;
   String? _authMode;
+  bool _passwordLogin = false;
   Future<bool>? _refreshInflight;
 
   AuthSession? get session => _session;
@@ -76,6 +73,7 @@ class TokenSession extends ChangeNotifier {
   String get baseUrl => _session?.baseUrl ?? ApiBase.value;
   String? get accessTokenOrNull => _session?.accessToken;
   String? get companyId => _session?.companyId;
+  bool get passwordLoginEnabled => _passwordLogin;
 
   /// Restore from secure storage (cold start). Does not hit network.
   Future<AuthSession?> restore() async {
@@ -137,7 +135,6 @@ class TokenSession extends ChangeNotifier {
     return DateTime.now().isAfter(exp);
   }
 
-  /// Apply tokens from OIDC / password / test login.
   Future<void> applyTokens({
     required String baseUrl,
     required String accessToken,
@@ -174,16 +171,17 @@ class TokenSession extends ChangeNotifier {
     await _persist(next, keepRefreshIfNull: true, keepIdTokenIfNull: true);
   }
 
-  /// Resource-owner password grant (company_id or username + password).
   Future<AuthSession> loginWithPassword({
     required String baseUrl,
     required String username,
     required String password,
   }) async {
-    final oidc = await _ensureOidc(baseUrl);
-    final result = await _oidc.loginWithPassword(
+    await _ensureAuthMode(baseUrl);
+    if (!_passwordLogin) {
+      throw StateError('Password login is not configured on $baseUrl');
+    }
+    final result = await _auth.login(
       apiBaseUrl: baseUrl,
-      oidc: oidc,
       username: username,
       password: password,
     );
@@ -217,10 +215,8 @@ class TokenSession extends ChangeNotifier {
     if (refreshTok == null || refreshTok.isEmpty) return false;
 
     try {
-      final oidc = await _ensureOidc(current.baseUrl);
-      final result = await _oidc.refresh(
+      final result = await _auth.refresh(
         apiBaseUrl: current.baseUrl,
-        oidc: oidc,
         refreshToken: refreshTok,
       );
       if (result == null) return false;
@@ -238,10 +234,25 @@ class TokenSession extends ChangeNotifier {
     }
   }
 
+  Future<void> remoteLogout() async {
+    final current = _session;
+    if (current == null) return;
+    try {
+      await _auth.logout(
+        apiBaseUrl: current.baseUrl,
+        refreshToken: current.refreshToken,
+        accessToken: current.accessToken,
+        idToken: current.idToken,
+      );
+    } catch (_) {
+      // Local clear still proceeds.
+    }
+  }
+
   Future<void> clear() async {
     _session = null;
-    _oidcConfig = null;
     _authMode = null;
+    _passwordLogin = false;
     await _store.clear();
     workContext.clear();
     adminContext.clear();
@@ -249,18 +260,19 @@ class TokenSession extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<Map<String, dynamic>> _ensureOidc(String baseUrl) async {
-    if (_oidcConfig != null && _authMode == 'oidc') {
-      return _oidcConfig!;
-    }
+  Future<void> _ensureAuthMode(String baseUrl) async {
+    if (_authMode == 'oidc' && _passwordLogin) return;
     final cfg = await AuthConfigClient(baseUrl: baseUrl).fetch();
     _authMode = (cfg['auth_mode'] as String?)?.trim().toLowerCase();
-    final oidc = cfg['oidc'];
-    if (_authMode != 'oidc' || oidc is! Map<String, dynamic>) {
+    final features = cfg['features'];
+    if (features is Map) {
+      _passwordLogin = features['password_login'] == true;
+    } else {
+      _passwordLogin = _authMode == 'oidc';
+    }
+    if (_authMode != 'oidc') {
       throw StateError('OIDC auth is not configured on $baseUrl');
     }
-    _oidcConfig = oidc;
-    return oidc;
   }
 
   Future<void> _persist(

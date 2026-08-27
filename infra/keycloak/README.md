@@ -58,7 +58,7 @@ When enabling social login (humans only — Employee / Admin):
 1. Create IdP aliases **`vk`** and **`yandex`** (OpenID Connect / social plugins as available).
 2. Put `clientId` / `clientSecret` in the secret store / KC vault — never in git.
 3. Enable **First Broker Login** + **Account Linking** (email conflict → KC linking UI, not silent merge in Prodavan API).
-4. Flutter social buttons pass `kc_idp_hint=vk|yandex` on authorize; one OIDC client stays `prodavan-flutter`.
+4. Flutter social buttons open Auth Service `GET /auth/broker/{vk|yandex}/start` (API redirects to KC); client stays `prodavan-flutter`.
 
 **Company org principal** — login is `company_id` + password. Native Flutter uses Resource Owner Password (Direct Access Grants) via `TokenSession.loginWithPassword`; browser/IdP flows stay on PKCE.
 

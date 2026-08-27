@@ -1,4 +1,4 @@
-"""Integration tests — auth config + HS256 mint fixtures (no HTTP test login)."""
+"""Integration tests — auth config + Auth Service endpoints + HS256 mint fixtures."""
 
 from __future__ import annotations
 
@@ -31,20 +31,28 @@ def test_test_login_http_removed(client: TestClient) -> None:
     assert r.status_code == 404
 
 
-def test_auth_config_test_mode_hides_oidc(client: TestClient) -> None:
+def test_auth_config_test_mode_no_keycloak_urls(client: TestClient) -> None:
     r = client.get("/api/v1/auth/config")
     assert r.status_code == 200
     body = r.json()
     assert body["auth_mode"] == "test"
-    assert body["oidc"] is None
+    assert "oidc" not in body or body.get("oidc") is None
+    assert body["features"]["password_login"] is False
+    assert "issuer" not in body
+    assert "token_endpoint" not in body
 
 
-def test_oidc_token_proxy_requires_oidc_mode(client: TestClient) -> None:
+def test_oidc_token_proxy_removed(client: TestClient) -> None:
     r = client.post(
         "/api/v1/auth/oidc/token",
         content=b"grant_type=password&client_id=x&username=a&password=b",
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
+    assert r.status_code == 404
+
+
+def test_login_requires_oidc_mode(client: TestClient) -> None:
+    r = client.post("/api/v1/auth/login", json={"username": "a", "password": "b"})
     assert r.status_code == 503
     assert r.json()["code"] == "AUTH_MISCONFIGURED"
 
