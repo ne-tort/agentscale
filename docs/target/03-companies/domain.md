@@ -50,14 +50,18 @@ Company имеет **Keycloak орг-аккаунт** ([session](../10-identity-
 | `metrics.*` | Org aggregates |
 | `policy.narrow` | Только сужать Admin |
 
-### Cascade
+### Cascade / lifecycle
+
+См. [00-lifecycle.md](../00-lifecycle.md).
 
 | Событие | Эффект |
 |---------|--------|
-| Company soft-delete (Admin) | `deleted_at` + Kafka `company.deleted` → Auth KC delete → disable employees → wipe projects/pods → hard-delete cabinets (Celery). UI скрывает сразу. |
-| Cabinet delete | все Projects кабинета → wipe |
-| Company pause/delete project | как Admin cascade через Project → Port |
-| Employee disable | soft status + Auth KC disable; **без** auto wipe projects |
+| Company soft-delete (Admin) | `deleted_at` + Kafka `company.deleted` → Auth KC delete → soft_delete employees / projects / cabinets (**stop pods, no wipe**). UI скрывает сразу. Restore — individually, без cascade revive. |
+| Company purge | после soft; wipe children + DROP + KC GC |
+| Cabinet soft-delete | soft_delete projects; schema keep |
+| Cabinet purge | wipe projects + DROP schema |
+| Employee disable (pause) | visible + Auth disable; **без** wipe projects |
+| Employee soft-delete | hidden (`deleted_at`); **без** wipe projects |
 
 BC Companies (`application/companies`) — REST org CRUD; не вызывает Keycloak Admin напрямую (только Auth Kafka). См. [10-identity-keycloak/architecture.md](../10-identity-keycloak/architecture.md), [13-platform-infra/principles.md](../13-platform-infra/principles.md) §3a.
 

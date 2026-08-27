@@ -425,6 +425,7 @@ class AdminCompanyService:
                 MembershipRow.company_id == company_id,
                 EmployeeRow.keycloak_sub.is_(None),
                 EmployeeRow.status != EmployeeStatus.DISABLED,
+                EmployeeRow.deleted_at.is_(None),
             )
         )
         employees_keycloak_unbound = int(unbound_emp_q.scalar_one() or 0)
@@ -513,7 +514,9 @@ class AdminCompanyService:
         return out
 
     async def list_cascade_pending(self) -> list[dict]:
-        """Soft-deleted companies still holding projects or cabinets (wipe lag / failure)."""
+        """Soft-deleted companies still holding live (non-soft-deleted) children."""
+        from prodavan.domain.cabinets import CabinetStatus
+
         q = await self._session.execute(
             select(CompanyRow).where(CompanyRow.deleted_at.is_not(None)).order_by(CompanyRow.deleted_at.desc())
         )
@@ -521,7 +524,8 @@ class AdminCompanyService:
         for company in q.scalars().all():
             cab_q = await self._session.execute(
                 select(func.count()).select_from(CabinetInstanceRow).where(
-                    CabinetInstanceRow.company_id == company.id
+                    CabinetInstanceRow.company_id == company.id,
+                    CabinetInstanceRow.status != CabinetStatus.DELETED,
                 )
             )
             proj_q = await self._session.execute(
@@ -565,6 +569,7 @@ class AdminCompanyService:
             .where(
                 CabinetCompanyGrantRow.company_id == company_id,
                 CabinetCompanyGrantRow.status == "active",
+                CabinetInstanceRow.status != "deleted",
             )
             .order_by(CabinetInstanceRow.created_at.desc())
         )
@@ -596,7 +601,10 @@ class AdminCompanyService:
         q = await self._session.execute(
             select(EmployeeRow, MembershipRow.role)
             .join(MembershipRow, MembershipRow.employee_id == EmployeeRow.id)
-            .where(MembershipRow.company_id == company_id)
+            .where(
+                MembershipRow.company_id == company_id,
+                EmployeeRow.deleted_at.is_(None),
+            )
             .order_by(EmployeeRow.email)
         )
         return [

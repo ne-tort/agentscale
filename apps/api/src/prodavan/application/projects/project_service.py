@@ -371,6 +371,9 @@ class ProjectService:
         )
         await self._session.commit()
         await self._session.refresh(row)
+        from prodavan.application.projects.container_lifecycle import ensure_container_running
+
+        await ensure_container_running(container_ref=row.container_ref)
         # Best-effort: drain leave-queued triggers without requiring a separate worker tick.
         try:
             from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
@@ -393,8 +396,9 @@ class ProjectService:
         project_id: str,
         principal: Principal,
         employee: EmployeeRow | None,
-        purge_workspace: bool = True,
+        purge_workspace: bool = False,
     ) -> dict:
+        """Soft-delete project: stop runtime/Pod, hide from UI; blobs kept unless purge_workspace."""
         row = await self._access.require_access(
             project_id=project_id,
             principal=principal,
@@ -402,7 +406,6 @@ class ProjectService:
             write=True,
             allow_paused=True,
         )
-        # Align with pause / company-delete: stop agent compute before wipe.
         await stop_project_runtime(self._session, project_id=row.id)
         await pause_container(container_ref=row.container_ref)
         row.status = ProjectStatus.DELETED
@@ -412,26 +415,103 @@ class ProjectService:
             project_id=row.id,
             cabinet_id=row.cabinet_id,
             principal=principal,
-            payload={"purge_workspace": purge_workspace},
+            payload={"purge_workspace": purge_workspace, "soft": True},
         )
         await self._session.commit()
         wipe: dict = {"ok": True, "skipped": True}
         if purge_workspace:
-            try:
-                from prodavan.core.jobs.enqueue import enqueue_wipe_project_tree
-
-                wipe = WorkspaceLayoutWriter(workspace_key=row.workspace_key).remove_project_tree()
-                if not wipe.get("ok"):
-                    retry = enqueue_wipe_project_tree(row.workspace_key)
-                    wipe["retry_enqueued"] = bool(retry.get("enqueued"))
-                    wipe["retry"] = retry
-            except Exception:
-                logger.exception(
-                    "project delete: workspace wipe failed project_id=%s",
-                    project_id,
-                )
-                wipe = {"ok": False, "deleted": 0, "remaining": 0, "error": "wipe_failed"}
+            wipe = await self._wipe_workspace(row)
         await self._session.refresh(row)
         out = await self._project_public(row)
+        out["soft"] = True
         out["workspace_wipe"] = wipe
         return out
+
+    async def restore(
+        self,
+        *,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None = None,
+    ) -> dict:
+        """Restore soft-deleted project → paused (explicit resume starts Pod). No cascade."""
+        row = await self._access.require_access(
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+            allow_paused=True,
+            allow_deleted=True,
+        )
+        if row.status != ProjectStatus.DELETED:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="project is not soft-deleted",
+            )
+        row.status = ProjectStatus.PAUSED
+        await self._platform_events.emit(
+            event_type="project.restored",
+            company_id=row.company_id,
+            project_id=row.id,
+            cabinet_id=row.cabinet_id,
+            principal=principal,
+        )
+        await self._session.commit()
+        await self._session.refresh(row)
+        return await self._project_public(row)
+
+    async def purge(
+        self,
+        *,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None = None,
+    ) -> dict:
+        """Hard-purge: wipe MinIO after soft-delete. Row stays as deleted tombstone."""
+        row = await self._access.require_access(
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+            allow_paused=True,
+            allow_deleted=True,
+        )
+        if row.status != ProjectStatus.DELETED:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="soft-delete the project before purge",
+            )
+        await stop_project_runtime(self._session, project_id=row.id)
+        await pause_container(container_ref=row.container_ref)
+        wipe = await self._wipe_workspace(row)
+        await self._platform_events.emit(
+            event_type="project.purged",
+            company_id=row.company_id,
+            project_id=row.id,
+            cabinet_id=row.cabinet_id,
+            principal=principal,
+            payload={"workspace_wipe": wipe},
+        )
+        await self._session.commit()
+        out = await self._project_public(row)
+        out["purged"] = True
+        out["workspace_wipe"] = wipe
+        return out
+
+    async def _wipe_workspace(self, row: ProjectRow) -> dict:
+        try:
+            from prodavan.core.jobs.enqueue import enqueue_wipe_project_tree
+
+            wipe = WorkspaceLayoutWriter(workspace_key=row.workspace_key).remove_project_tree()
+            if not wipe.get("ok"):
+                retry = enqueue_wipe_project_tree(row.workspace_key)
+                wipe["retry_enqueued"] = bool(retry.get("enqueued"))
+                wipe["retry"] = retry
+            return wipe
+        except Exception:
+            logger.exception("project wipe failed project_id=%s", row.id)
+            return {"ok": False, "deleted": 0, "remaining": 0, "error": "wipe_failed"}

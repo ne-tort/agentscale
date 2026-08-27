@@ -1,4 +1,4 @@
-"""Async cascade after company soft-delete (Celery / buffer-only inline)."""
+"""Async cascade after company soft-delete — soft children only (no wipe)."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ import logging
 
 from sqlalchemy import select
 
-from prodavan.domain.identity import EmployeeStatus, Principal
+from prodavan.domain.cabinets import CabinetStatus
+from prodavan.domain.identity import Principal
+from prodavan.domain.lifecycle import employee_is_soft_deleted
 from prodavan.domain.projects import ProjectStatus
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow, MembershipRow
@@ -16,11 +18,11 @@ logger = logging.getLogger(__name__)
 
 
 async def cascade_company_deleted(company_id: str, *, actor_sub: str = "system") -> dict:
-    """Disable members, wipe projects/cabinets for a soft-deleted company.
+    """Soft-delete members / projects / cabinets for a soft-deleted company.
 
-    Company row stays with deleted_at set; Auth KC delete is published separately by REST.
+    No MinIO wipe and no DROP schema — that is hard-purge only.
+    Company row stays with deleted_at set; Auth KC delete is published by REST.
     """
-    from prodavan.application.cabinets.instance_service import CabinetInstanceService
     from prodavan.application.employees.service import EmployeesCommandService
     from prodavan.application.projects.pause_runtime import stop_company_runtime
     from prodavan.application.projects.project_service import ProjectService
@@ -44,45 +46,49 @@ async def cascade_company_deleted(company_id: str, *, actor_sub: str = "system")
         )
         employee_ids = list({eid for eid in emp_q.scalars().all()})
         employees = EmployeesCommandService(session)
-        employees_disabled: list[str] = []
+        employees_soft_deleted: list[str] = []
         for employee_id in employee_ids:
             emp = await session.get(EmployeeRow, employee_id)
-            if emp is None or emp.status == EmployeeStatus.DISABLED:
+            if emp is None or employee_is_soft_deleted(emp):
                 continue
-            await employees.disable_employee(
+            await employees.soft_delete(
                 employee_id=employee_id,
                 principal=principal,
-                publish_auth_delete=True,
+                publish_auth=True,
             )
-            employees_disabled.append(employee_id)
+            employees_soft_deleted.append(employee_id)
 
         proj_q = await session.execute(
-            select(ProjectRow.id, ProjectRow.status).where(
+            select(ProjectRow.id).where(
                 ProjectRow.company_id == company_id,
                 ProjectRow.status != ProjectStatus.DELETED,
             )
         )
         projects = ProjectService(session)
-        projects_deleted: list[str] = []
-        for project_id, status in proj_q.all():
-            if status == ProjectStatus.ACTIVE:
-                await projects.pause(project_id=project_id, principal=principal, employee=None)
+        projects_soft_deleted: list[str] = []
+        for project_id in proj_q.scalars().all():
             await projects.delete(
                 project_id=project_id,
                 principal=principal,
                 employee=None,
-                purge_workspace=True,
+                purge_workspace=False,
             )
-            projects_deleted.append(project_id)
+            projects_soft_deleted.append(project_id)
 
         cab_q = await session.execute(
-            select(CabinetInstanceRow.id).where(CabinetInstanceRow.company_id == company_id)
+            select(CabinetInstanceRow.id).where(
+                CabinetInstanceRow.company_id == company_id,
+                CabinetInstanceRow.status != CabinetStatus.DELETED,
+            )
         )
-        cabinets = CabinetInstanceService(session)
-        cabinets_deleted: list[str] = []
+        cabinets_soft_deleted: list[str] = []
         for cabinet_id in cab_q.scalars().all():
-            await cabinets.delete_with_cascade(cabinet_id=cabinet_id)
-            cabinets_deleted.append(cabinet_id)
+            # Projects already soft-deleted above; set cabinet tombstone only.
+            cab = await session.get(CabinetInstanceRow, cabinet_id)
+            if cab is None or cab.status == CabinetStatus.DELETED:
+                continue
+            cab.status = CabinetStatus.DELETED
+            cabinets_soft_deleted.append(cabinet_id)
 
         await session.commit()
 
@@ -95,9 +101,12 @@ async def cascade_company_deleted(company_id: str, *, actor_sub: str = "system")
             "company_id": company_id,
             "soft": True,
             "sessions_cancelled": sessions_cancelled,
-            "employees_disabled": employees_disabled,
-            "projects_deleted": projects_deleted,
-            "cabinets_deleted": cabinets_deleted,
+            "employees_disabled": employees_soft_deleted,
+            "employees_soft_deleted": employees_soft_deleted,
+            "projects_deleted": projects_soft_deleted,
+            "projects_soft_deleted": projects_soft_deleted,
+            "cabinets_deleted": cabinets_soft_deleted,
+            "cabinets_soft_deleted": cabinets_soft_deleted,
         }
         logger.info("cascade_company_deleted %s", result)
         return result

@@ -94,9 +94,14 @@ class CabinetAccessService:
         write: bool = False,
         registry_write: bool = False,
         allow_archived_write: bool = False,
+        allow_deleted: bool = False,
         company_id: str | None = None,
     ) -> CabinetInstanceRow:
+        from prodavan.domain.lifecycle import cabinet_is_soft_deleted
+
         inst = await self.get_instance(cabinet_id)
+        if cabinet_is_soft_deleted(inst) and not allow_deleted:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Cabinet not found")
         if principal.is_platform_admin:
             if inst.status == CabinetStatus.ARCHIVED and write and not allow_archived_write:
                 raise AppError(

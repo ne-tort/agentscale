@@ -161,6 +161,30 @@ async def delete_project(
     return await ProjectService(session).delete(project_id=project_id, principal=principal, employee=employee)
 
 
+@router.post("/projects/{project_id}/restore")
+async def restore_project(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await ProjectService(session).restore(
+        project_id=project_id, principal=principal, employee=employee
+    )
+
+
+@router.delete("/projects/{project_id}/purge")
+async def purge_project(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await ProjectService(session).purge(
+        project_id=project_id, principal=principal, employee=employee
+    )
+
+
 @router.post("/projects/{project_id}/triggers", status_code=202)
 async def post_trigger(
     project_id: str,

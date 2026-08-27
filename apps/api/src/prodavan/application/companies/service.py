@@ -145,3 +145,121 @@ class CompaniesCommandService:
             cascade = await cascade_company_deleted(company.id, actor_sub=principal.sub)
             out.update(cascade)
         return out
+
+    async def restore(self, company_id: str, *, principal: Principal) -> dict:
+        """Restore soft-deleted company → paused. Children stay soft-deleted."""
+        from prodavan.application.auth.register import publish_register_command
+        from prodavan.application.projects.platform_event_service import PlatformEventService
+        from prodavan.domain.identity import ROLE_COMPANY
+
+        company = await self._session.get(CompanyRow, company_id)
+        if company is None or company.deleted_at is None:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="company is not soft-deleted",
+            )
+        company.deleted_at = None
+        company.status = "paused"
+        await PlatformEventService(self._session).emit(
+            event_type="company.restored",
+            company_id=company.id,
+            principal=principal,
+            payload={"company_id": company.id, "status": "paused"},
+        )
+        await self._session.commit()
+        await self._session.refresh(company)
+        if company.keycloak_sub is None:
+            await publish_register_command(
+                client_ref=f"company:{company.id}",
+                username=company.id,
+                email=f"{company.id}@companies.prodavan.local",
+                password=None,
+                realm_roles=[ROLE_COMPANY],
+                display_name=company.name,
+            )
+        return {
+            "id": company.id,
+            "name": company.name,
+            "restored": True,
+            "status": company.status,
+            "soft": False,
+        }
+
+    async def purge(self, company_id: str, *, principal: Principal) -> dict:
+        """Hard-purge company after soft-delete: require children already soft/purged, then wipe."""
+        from sqlalchemy import select
+
+        from prodavan.application.cabinets.instance_service import CabinetInstanceService
+        from prodavan.application.projects.platform_event_service import PlatformEventService
+        from prodavan.application.projects.project_service import ProjectService
+        from prodavan.domain.projects import ProjectStatus
+        from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
+        from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+        company = await self._session.get(CompanyRow, company_id)
+        if company is None or company.deleted_at is None:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="soft-delete the company before purge",
+            )
+
+        live_proj = await self._session.execute(
+            select(ProjectRow.id).where(
+                ProjectRow.company_id == company_id,
+                ProjectRow.status != ProjectStatus.DELETED,
+            )
+        )
+        if live_proj.scalars().first() is not None:
+            raise AppError(
+                code="CASCADE_INCOMPLETE",
+                title="Cascade incomplete",
+                status=409,
+                detail="live projects remain; wait for soft-cascade or soft-delete them",
+            )
+
+        projects = ProjectService(self._session)
+        deleted_proj = await self._session.execute(
+            select(ProjectRow.id).where(
+                ProjectRow.company_id == company_id,
+                ProjectRow.status == ProjectStatus.DELETED,
+            )
+        )
+        projects_purged: list[str] = []
+        for project_id in deleted_proj.scalars().all():
+            await projects.purge(project_id=project_id, principal=principal, employee=None)
+            projects_purged.append(project_id)
+
+        cabinets = CabinetInstanceService(self._session)
+        cab_q = await self._session.execute(
+            select(CabinetInstanceRow.id).where(
+                CabinetInstanceRow.company_id == company_id,
+            )
+        )
+        cabinets_purged: list[str] = []
+        for cabinet_id in cab_q.scalars().all():
+            await cabinets.delete_with_cascade(cabinet_id=cabinet_id)
+            cabinets_purged.append(cabinet_id)
+
+        await PlatformEventService(self._session).emit(
+            event_type="company.purged",
+            company_id=company.id,
+            principal=principal,
+            payload={
+                "company_id": company.id,
+                "projects_purged": projects_purged,
+                "cabinets_purged": cabinets_purged,
+            },
+        )
+        # Keep tombstone row for audit (deleted_at stays); mark status purged.
+        company.status = "purged"
+        await self._session.commit()
+        return {
+            "id": company.id,
+            "purged": True,
+            "projects_purged": projects_purged,
+            "cabinets_purged": cabinets_purged,
+        }

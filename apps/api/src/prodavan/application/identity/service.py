@@ -25,7 +25,10 @@ class EntitlementService:
     async def get_employee_by_sub(self, sub: str) -> EmployeeRow | None:
         q = await self._session.execute(
             select(EmployeeRow)
-            .where(EmployeeRow.keycloak_sub == sub)
+            .where(
+                EmployeeRow.keycloak_sub == sub,
+                EmployeeRow.deleted_at.is_(None),
+            )
             .options(selectinload(EmployeeRow.memberships))
         )
         return q.scalar_one_or_none()
@@ -35,6 +38,7 @@ class EntitlementService:
             select(CompanyRow).where(
                 CompanyRow.keycloak_sub == sub,
                 CompanyRow.deleted_at.is_(None),
+                CompanyRow.status != "purged",
             )
         )
         return q.scalar_one_or_none()
@@ -68,7 +72,10 @@ class EntitlementService:
             return None
         q = await self._session.execute(
             select(EmployeeRow)
-            .where(EmployeeRow.email == principal.email.lower())
+            .where(
+                EmployeeRow.email == principal.email.lower(),
+                EmployeeRow.deleted_at.is_(None),
+            )
             .options(selectinload(EmployeeRow.memberships))
             .order_by(EmployeeRow.created_at.desc())
         )

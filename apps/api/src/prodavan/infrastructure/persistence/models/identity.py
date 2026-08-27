@@ -31,6 +31,8 @@ class CompanyRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     # Soft-delete: UI hides when set; async cascade via company.deleted.
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    # Runtime pause (visible); soft-delete uses deleted_at.
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active", server_default="active")
 
     # DB ON DELETE CASCADE — do not ORM-NULL memberships.company_id (NOT NULL).
     memberships: Mapped[list[MembershipRow]] = relationship(
@@ -47,6 +49,8 @@ class EmployeeRow(Base):
     email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
     display_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="invited")
+    # Soft-delete tombstone (hidden); status=disabled remains the visible pause state.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     memberships: Mapped[list[MembershipRow]] = relationship(

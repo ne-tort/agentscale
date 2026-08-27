@@ -8,6 +8,7 @@ from enum import StrEnum
 class CabinetStatus(StrEnum):
     ACTIVE = "active"
     ARCHIVED = "archived"
+    DELETED = "deleted"
 
 
 class CabinetOwnerScope(StrEnum):

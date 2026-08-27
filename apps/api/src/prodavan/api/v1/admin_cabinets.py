@@ -92,5 +92,25 @@ async def patch_cabinet(
 
 
 @router.delete("/{cabinet_id}")
-async def delete_cabinet(cabinet_id: str, _: PlatformAdminDep, session: SessionDep) -> dict:
+async def delete_cabinet(
+    cabinet_id: str, admin: PlatformAdminDep, session: SessionDep
+) -> dict:
+    return await CabinetInstanceService(session).soft_delete(
+        cabinet_id=cabinet_id, principal=admin, employee=None
+    )
+
+
+@router.post("/{cabinet_id}/restore")
+async def restore_cabinet(
+    cabinet_id: str, admin: PlatformAdminDep, session: SessionDep
+) -> dict:
+    return await CabinetInstanceService(session).restore(
+        cabinet_id=cabinet_id, principal=admin, employee=None
+    )
+
+
+@router.delete("/{cabinet_id}/purge")
+async def purge_cabinet(
+    cabinet_id: str, admin: PlatformAdminDep, session: SessionDep
+) -> dict:
     return await CabinetInstanceService(session).delete_with_cascade(cabinet_id=cabinet_id)

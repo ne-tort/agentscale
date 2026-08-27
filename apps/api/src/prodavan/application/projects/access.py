@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.cabinets.access import CabinetAccessService
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
-from prodavan.domain.projects import ProjectStatus
+from prodavan.domain.lifecycle import project_is_paused, project_is_soft_deleted, raise_if_paused
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
 
@@ -31,9 +31,10 @@ class ProjectAccessService:
         employee: EmployeeRow | None,
         write: bool = False,
         allow_paused: bool = False,
+        allow_deleted: bool = False,
     ) -> ProjectRow:
         project = await self.get_project(project_id)
-        if project.status == ProjectStatus.DELETED:
+        if project_is_soft_deleted(project) and not allow_deleted:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Project not found")
         await self._cabinets.require_access(
             cabinet_id=project.cabinet_id,
@@ -41,11 +42,6 @@ class ProjectAccessService:
             employee=employee,
             write=write,
         )
-        if write and project.status == ProjectStatus.PAUSED and not allow_paused:
-            raise AppError(
-                code="PROJECT_PAUSED",
-                title="Project paused",
-                status=409,
-                detail="project is paused",
-            )
+        if write and project_is_paused(project) and not allow_paused:
+            raise_if_paused(code="PROJECT_PAUSED", detail="project is paused")
         return project

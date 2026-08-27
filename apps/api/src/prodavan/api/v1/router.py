@@ -12,6 +12,7 @@ from prodavan.api.v1 import (
     admin_object_store,
     admin_platform_events,
     admin_projects,
+    admin_recycle,
     admin_triggers,
     agent,
     ai_keys,
@@ -44,6 +45,7 @@ router.include_router(admin_platform_events.router)
 router.include_router(admin_projects.router)
 router.include_router(admin_containers.router)
 router.include_router(admin_cabinets.router)
+router.include_router(admin_recycle.router)
 router.include_router(admin_modules.router)
 router.include_router(admin_object_store.router)
 router.include_router(admin_catalogs.router)

@@ -25,9 +25,12 @@ Employee = человек (Keycloak `sub`) в Company.
 - Employee не видит Admin UI; не управляет чужими сотрудниками.
 - Доступ к кабинету только через **active assignment**.
 - Смена кабинета — selector page; `X-Cabinet-Id` на клиенте.
-- Disabled employee → 403; soft-delete не wipe projects/cabinets (канон).
-- Keycloak: `keycloak_sub` заполняется Celery после `auth.user.register`; disable/delete KC — только через Auth Kafka (`auth.user.disable` / `auth.user.delete`).
-- BC Employees (`application/employees`) — invite/disable REST; не вызывает Keycloak Admin sync.
+- **Pause** = `status=disabled`: виден в UI, 403 на agent/write; Auth disable. Не wipe projects/cabinets.
+- **Soft-delete** = `deleted_at` set (+ disabled): **скрыт** из list/counters; Auth delete/disable; не wipe projects.
+- **Restore** → clear `deleted_at`, остаётся paused (`disabled`) до явного re-enable.
+- Keycloak: `keycloak_sub` через Celery после `auth.user.register`; lifecycle KC — только Auth Kafka.
+- BC Employees (`application/employees`) — invite/disable/soft_delete/restore; не вызывает Keycloak Admin sync.
+- Lifecycle: [00-lifecycle.md](../00-lifecycle.md).
 
 ## Проекты
 

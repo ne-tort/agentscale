@@ -15,8 +15,11 @@ Admin / key disable / idle
 | **create** | insert, materialize workspace → MinIO | `ensure` + `start` (Pod + hydrate) |
 | **pause** | status=paused; cancel sessions | sync workspace → MinIO; **delete Pod**; status=`paused` |
 | **resume** | AI key gate; status=active | **new Pod** + hydrate from MinIO; status=`running` |
-| **delete** | soft-delete | wipe MinIO + delete Pod |
+| **soft_delete** | status=deleted; cancel sessions; **blobs keep** | **delete Pod**; no MinIO wipe |
+| **purge** | after soft_delete | wipe MinIO + ensure Pod gone |
 | **force-kill** | опционально paused/failed | grace=0 Pod delete |
+
+`inert` (paused **или** soft_deleted) ⇒ desired Pod = absent. См. [00-lifecycle.md](../00-lifecycle.md).
 
 ## Почему pause ≠ «замороженный Pod»
 

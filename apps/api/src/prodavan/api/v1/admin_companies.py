@@ -92,6 +92,28 @@ async def delete_company(
     return await AdminCompanyService(session).delete_company(company_id, principal=admin)
 
 
+@router.post("/{company_id}/restore")
+async def restore_company(
+    company_id: str,
+    admin: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    from prodavan.application.companies.service import CompaniesCommandService
+
+    return await CompaniesCommandService(session).restore(company_id, principal=admin)
+
+
+@router.delete("/{company_id}/purge")
+async def purge_company(
+    company_id: str,
+    admin: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    from prodavan.application.companies.service import CompaniesCommandService
+
+    return await CompaniesCommandService(session).purge(company_id, principal=admin)
+
+
 @router.patch("/{company_id}")
 async def patch_company(
     company_id: str,

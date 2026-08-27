@@ -383,6 +383,9 @@ def test_admin_delete_company_with_invited_admin_only(client: TestClient) -> Non
     again = client.delete(f"/api/v1/admin/companies/{company_id}", headers=admin_h)
     assert again.status_code == 404
 
+
+@requires_postgres
+def test_admin_delete_company_cascades_soft(client: TestClient) -> None:
     admin = _token(sub="padmin-del", email="padmin-del@example.com", platform_admin=True)
     admin_h = {"Authorization": f"Bearer {admin}"}
     created = client.post(
@@ -418,8 +421,8 @@ def test_admin_delete_company_with_invited_admin_only(client: TestClient) -> Non
     assert body["id"] == company_id
     assert body.get("soft") is True
     if not body.get("cascade_enqueued"):
-        assert project_id in body.get("projects_deleted", [])
-        assert cabinet_id in body.get("cabinets_deleted", [])
+        assert project_id in body.get("projects_soft_deleted", body.get("projects_deleted", []))
+        assert cabinet_id in body.get("cabinets_soft_deleted", body.get("cabinets_deleted", []))
 
     gone = client.get(f"/api/v1/admin/companies/{company_id}", headers=admin_h)
     assert gone.status_code == 404
@@ -427,3 +430,9 @@ def test_admin_delete_company_with_invited_admin_only(client: TestClient) -> Non
     if not body.get("cascade_enqueued"):
         proj_gone = client.get(f"/api/v1/projects/{project_id}", headers=boss_h)
         assert proj_gone.status_code == 404
+        cab_gone = client.get(f"/api/v1/cabinets/{cabinet_id}", headers=boss_h)
+        assert cab_gone.status_code == 404
+        recycle = client.get("/api/v1/admin/recycle", headers=admin_h)
+        assert recycle.status_code == 200
+        assert any(p["id"] == project_id for p in recycle.json()["projects"])
+        assert any(c["id"] == cabinet_id for c in recycle.json()["cabinets"])

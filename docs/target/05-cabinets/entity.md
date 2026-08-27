@@ -15,7 +15,7 @@ Meta-шаблоны (tables/columns/views/tabs) живут в **Module**; каб
 | `company_id` | legacy anchor (primary grant); nullable |
 | `owner_employee_id` | nullable; audit / employee create |
 | `schema_name` | PG schema (`cab_inst_…`) |
-| `status` | active / archived / … |
+| `status` | `active` / `archived` (pause, виден) / `deleted` (soft, скрыт) |
 | timestamps | |
 
 ### Grant tables
@@ -40,7 +40,14 @@ Meta-шаблоны (tables/columns/views/tabs) живут в **Module**; каб
 Module ──N:M──► CabinetInstance ──has──► Project ──1:1──► ProjectContainer
 ```
 
-**Delete Cabinet** → wipe projects + Pod/MinIO + DROP schema + delete row + grants.
+**Lifecycle** ([00-lifecycle.md](../00-lifecycle.md)):
+
+| Op | Эффект |
+|----|--------|
+| `archive` (pause) | виден; write gate; projects freeze/stop |
+| soft_delete (`DELETE`) | `status=deleted`; soft_delete projects (**no wipe**); schema **keep** |
+| `restore` | → archived (paused); без cascade revive projects |
+| `purge` | wipe soft-deleted projects + DROP schema + delete row |
 
 ## Не путать
 

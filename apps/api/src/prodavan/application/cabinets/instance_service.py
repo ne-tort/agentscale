@@ -157,7 +157,9 @@ class CabinetInstanceService:
 
     async def list_all_admin(self) -> list[dict]:
         q = await self._session.execute(
-            select(CabinetInstanceRow).order_by(CabinetInstanceRow.created_at.desc())
+            select(CabinetInstanceRow)
+            .where(CabinetInstanceRow.status != CabinetStatus.DELETED)
+            .order_by(CabinetInstanceRow.created_at.desc())
         )
         out: list[dict] = []
         for row in q.scalars().all():
@@ -183,6 +185,7 @@ class CabinetInstanceService:
             .where(
                 CabinetEmployeeAssignmentRow.employee_id == employee.id,
                 CabinetEmployeeAssignmentRow.status == "active",
+                CabinetInstanceRow.status != CabinetStatus.DELETED,
             )
             .order_by(CabinetInstanceRow.created_at.desc())
         )
@@ -269,8 +272,108 @@ class CabinetInstanceService:
         await self._session.refresh(inst)
         return await _public_row(self._session, inst, grants=self._grants)
 
+    async def soft_delete(
+        self,
+        *,
+        cabinet_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None = None,
+    ) -> dict:
+        """Soft-delete cabinet: hide + soft-delete projects (no wipe, schema keep)."""
+        from prodavan.application.projects.platform_event_service import PlatformEventService
+        from prodavan.application.projects.project_service import ProjectService
+        from prodavan.domain.projects import ProjectStatus
+        from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+        inst = await self._access.require_access(
+            cabinet_id=cabinet_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+            registry_write=True,
+            allow_archived_write=True,
+        )
+        if inst.status == CabinetStatus.DELETED:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Cabinet not found")
+
+        projects = ProjectService(self._session)
+        proj_q = await self._session.execute(
+            select(ProjectRow.id).where(
+                ProjectRow.cabinet_id == cabinet_id,
+                ProjectRow.status != ProjectStatus.DELETED,
+            )
+        )
+        projects_soft_deleted: list[str] = []
+        for project_id in proj_q.scalars().all():
+            await projects.delete(
+                project_id=project_id,
+                principal=principal,
+                employee=employee,
+                purge_workspace=False,
+            )
+            projects_soft_deleted.append(project_id)
+
+        inst.status = CabinetStatus.DELETED
+        company_id = inst.company_id or inst.owner_company_id
+        if company_id:
+            await PlatformEventService(self._session).emit(
+                event_type="cabinet.soft_deleted",
+                company_id=company_id,
+                cabinet_id=inst.id,
+                principal=principal,
+                payload={"cabinet_id": inst.id, "projects": projects_soft_deleted},
+            )
+        await self._session.commit()
+        return {
+            "id": cabinet_id,
+            "deleted": True,
+            "soft": True,
+            "projects_soft_deleted": projects_soft_deleted,
+        }
+
+    async def restore(
+        self,
+        *,
+        cabinet_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None = None,
+    ) -> dict:
+        """Restore soft-deleted cabinet → archived (paused). Projects stay deleted until restored."""
+        from prodavan.application.projects.platform_event_service import PlatformEventService
+
+        inst = await self._access.require_access(
+            cabinet_id=cabinet_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+            registry_write=True,
+            allow_archived_write=True,
+            allow_deleted=True,
+        )
+        if inst.status != CabinetStatus.DELETED:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="cabinet is not soft-deleted",
+            )
+        inst.status = CabinetStatus.ARCHIVED
+        company_id = inst.company_id or inst.owner_company_id
+        if company_id:
+            await PlatformEventService(self._session).emit(
+                event_type="cabinet.restored",
+                company_id=company_id,
+                cabinet_id=inst.id,
+                principal=principal,
+            )
+        await self._session.commit()
+        await self._session.refresh(inst)
+        out = await _public_row(self._session, inst, grants=self._grants)
+        out["restored"] = True
+        return out
+
     async def delete_with_cascade(self, *, cabinet_id: str) -> dict:
-        """Wipe projects + drop schema + delete row (Admin; no archive required)."""
+        """Hard-purge: wipe projects + drop schema + delete row (Admin recycle)."""
         from prodavan.application.projects.project_wipe import wipe_project_tree
         from prodavan.core.jobs.enqueue import enqueue_wipe_project_tree
         from prodavan.infrastructure.persistence.models.projects import ProjectRow
@@ -295,7 +398,7 @@ class CabinetInstanceService:
             await self._provisioner.drop_schema(self._session, schema_name=schema_name)
         except Exception:
             logger.exception(
-                "cabinet delete: drop_schema failed cabinet_id=%s schema=%s",
+                "cabinet purge: drop_schema failed cabinet_id=%s schema=%s",
                 cabinet_id,
                 schema_name,
             )
@@ -310,6 +413,7 @@ class CabinetInstanceService:
         await self._session.commit()
         return {
             "deleted": True,
+            "purged": True,
             "id": cabinet_id,
             "schema_name": schema_name,
             "schema_dropped": True,
@@ -324,7 +428,7 @@ class CabinetInstanceService:
         principal: Principal,
         employee: EmployeeRow | None,
     ) -> dict:
-        """Employee/admin hard-delete: archive required unless platform admin."""
+        """Purge after soft-delete (or archive for platform admin). Default employee path: soft_delete."""
         inst = await self._access.require_access(
             cabinet_id=cabinet_id,
             principal=principal,
@@ -332,14 +436,16 @@ class CabinetInstanceService:
             write=True,
             registry_write=True,
             allow_archived_write=True,
+            allow_deleted=True,
         )
-        if not principal.is_platform_admin and inst.status != CabinetStatus.ARCHIVED:
-            raise AppError(
-                code="CABINET_NOT_ARCHIVED",
-                title="Cabinet not archived",
-                status=409,
-                detail="archive the cabinet before hard-delete",
-            )
+        if inst.status != CabinetStatus.DELETED and not principal.is_platform_admin:
+            if inst.status != CabinetStatus.ARCHIVED:
+                raise AppError(
+                    code="CABINET_NOT_SOFT_DELETED",
+                    title="Cabinet not soft-deleted",
+                    status=409,
+                    detail="soft-delete the cabinet before purge",
+                )
         return await self.delete_with_cascade(cabinet_id=cabinet_id)
 
     async def assign_employee(

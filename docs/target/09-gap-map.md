@@ -15,16 +15,17 @@
 | **P-CO-03** | Company list/manage containers **своих** сотрудников | Только Admin `/admin/containers` | Нет company-scoped containers |
 | **P-CO-04** | Cabinets от Admin → Company **RO**; later local CRUD | **Admin CRUD + N:M company grants**; Company RO + employee assign | Company assign UI shipped; Verify Dev |
 | **P-ID-01** | **Company** имеет **Keycloak-креды** | `companies.keycloak_sub` via Auth Kafka `auth.user.register` + bind; soft-delete `deleted_at` + async cascade | Org principal async; zombies in admin metrics |
-| **P-CAS-02** | Company soft-delete → async cascade | Soft-delete + Celery `cascade_company_deleted` + Auth `auth.user.delete` | Sync orchestrator removed |
+| **P-CAS-02** | Company soft-delete → soft children (no wipe) | Soft-delete + Celery cascade; wipe only on purge | Align cascade to [00-lifecycle](00-lifecycle.md) |
+| **P-LC-01** | Unified pause / soft_delete / purge + restore | Partial (company deleted_at; project pause/delete wipe) | Recycle API; project soft without wipe |
 | **P-ID-02** | Admin / Company / Employee — три KC-сущности | Realm roles + `prodavan-keycloak-init` bootstrap; API resolution live | IdP brokers / SMTP invite polish |
 | **P-CAB-01** | Company **назначает** Employee ↔ Cabinet | **Grants + assignment API + Flutter** | Verify Dev E2E |
 | **P-CAB-02** | UI кабинета из module meta | Module template + `module_data_rows` API; employee UI = placeholder | Generic meta UI next |
 | **P-MOD-01** | **Module** catalog + cabinet bind + per-cabinet data | **Admin CRUD + meta + materialize + runtime data API + Flutter** | Physical DDL; meta editor UI |
 | **P-MOD-02** | Meta-table **syntax** spec + interpreters | **[meta-syntax](06-modules/meta-syntax/) documented** | Validator, UI renderer, materialize engine |
 | **P-MAT-01** | Pod hydrate из meta/MinIO | object-ws; нет Pod; file_ref слаб | Materialize/Pod debt |
-| **P-POD-01** | `ProjectContainer` = k8s Pod | `object-ws:…`; pause no-op | [14](14-project-containers/) |
+| **P-POD-01** | `ProjectContainer` = k8s Pod; inert → delete Pod | `object-ws:…`; pause stub `pod_stop` desired | [14](14-project-containers/) |
 | **P-MCP-01** | Агент в Pod ↔ `cabinet.*` | **Out of MVP cabinet entity** (removed typed MCP/packages); future contract | Изоляция + контракт |
-| **P-CAS-01** | Delete Cabinet → все Projects wipe | Admin `delete_with_cascade` wipe → DROP schema → delete row | Employee archive-then-delete remains |
+| **P-CAS-01** | Cabinet soft_delete → soft projects; purge → DROP | Admin hard `delete_with_cascade` | Soft default DELETE + purge |
 | **P-INF-01** | MinIO / Kafka / Celery | Local FS / in-process | [13](13-platform-infra/) |
 | **P-KC-01** | Live Keycloak cutover | **Auth Service BFF** + `AUTH_MODE=oidc`; Flutter never → KC | Brokers UI / SMTP invite polish |
 | **P-KC-02** | IdP broker live (VK/Yandex) | Auth Service start/callback ready; providers **not** live; secrets вне git | Enable IdP + Flutter social buttons |

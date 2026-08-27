@@ -115,6 +115,30 @@ async def delete_cabinet(
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
 ) -> dict:
+    return await CabinetInstanceService(session).soft_delete(
+        cabinet_id=cabinet_id, principal=principal, employee=employee
+    )
+
+
+@router.post("/{cabinet_id}/restore")
+async def restore_cabinet(
+    cabinet_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+) -> dict:
+    return await CabinetInstanceService(session).restore(
+        cabinet_id=cabinet_id, principal=principal, employee=employee
+    )
+
+
+@router.delete("/{cabinet_id}/purge")
+async def purge_cabinet(
+    cabinet_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+) -> dict:
     return await CabinetInstanceService(session).hard_delete(
         cabinet_id=cabinet_id, principal=principal, employee=employee
     )
