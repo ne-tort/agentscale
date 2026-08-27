@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/auth/sign_out.dart';
+import 'package:prodavan/core/auth/token_session.dart';
 import 'package:prodavan/core/settings/app_settings_controller.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_palette.dart';
@@ -27,7 +28,7 @@ class SettingsPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: appSettings,
+      listenable: Listenable.merge([appSettings, tokenSession]),
       builder: (context, _) {
         final l10n = AppLocalizations.of(context);
         final themeKey = switch (appSettings.themeMode) {
@@ -46,7 +47,8 @@ class SettingsPage extends StatelessWidget {
                 value: appSettings.locale.languageCode,
                 choices: _locales,
                 keyFor: (v) => v,
-                labelFor: (v) => v == 'ru' ? l10n.settingsLanguageRu : l10n.settingsLanguageEn,
+                labelFor: (v) =>
+                    v == 'ru' ? l10n.settingsLanguageRu : l10n.settingsLanguageEn,
                 iconFor: (v) => v == 'ru' ? Icons.translate : Icons.language,
                 onSave: (v) async => appSettings.setLocale(Locale(v)),
               ),
@@ -85,12 +87,13 @@ class SettingsPage extends StatelessWidget {
                 presentValue: (v) => _refreshLabel(l10n, v),
                 onSave: (v) async => appSettings.setAutoRefreshSeconds(v),
               ),
-              AppNavPreference(
-                title: l10n.authSignOut,
-                icon: Icons.logout_rounded,
-                accentColor: context.appColors.warning,
-                onTap: () => signOut(context),
-              ),
+              if (tokenSession.isAuthenticated)
+                AppNavPreference(
+                  title: l10n.authSignOut,
+                  icon: Icons.logout_rounded,
+                  accentColor: context.appColors.warning,
+                  onTap: () => signOut(context),
+                ),
             ],
           ),
         );

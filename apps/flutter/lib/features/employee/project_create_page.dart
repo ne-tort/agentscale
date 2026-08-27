@@ -7,7 +7,6 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
-import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/features/employee/project_workspace_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -22,33 +21,30 @@ class ProjectCreatePage extends StatefulWidget {
 }
 
 class _ProjectCreatePageState extends State<ProjectCreatePage> {
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      if (_nameCtrl.text.isEmpty) {
-        _nameCtrl.text = AppLocalizations.of(context).projectNewProject;
-      }
-    });
-  }
-
   static const _providers = <String?>[null, 'cursor', 'codex', 'claude_code'];
 
-  final _formKey = GlobalKey<FormState>();
-  final _nameCtrl = TextEditingController();
+  String _name = '';
   String? _agentProvider;
   bool _saving = false;
   Object? _error;
+  bool _seeded = false;
 
   @override
-  void dispose() {
-    _nameCtrl.dispose();
-    super.dispose();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_seeded) {
+      _seeded = true;
+      _name = AppLocalizations.of(context).projectNewProject;
+    }
   }
 
   Future<void> _create() async {
-    if (!_formKey.currentState!.validate()) return;
+    final l10n = AppLocalizations.of(context);
+    final name = _name.trim();
+    if (name.isEmpty) {
+      setState(() => _error = l10n.commonNameRequired);
+      return;
+    }
     setState(() {
       _saving = true;
       _error = null;
@@ -56,12 +52,12 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
     try {
       final project = await workContext.api.createProject(
         cabinetId: widget.cabinetId,
-        name: _nameCtrl.text.trim(),
+        name: name,
         agentProvider: _agentProvider,
       );
       if (!mounted) return;
       final projectId = project['id'] as String;
-      final projectName = project['name'] as String? ?? _nameCtrl.text.trim();
+      final projectName = project['name'] as String? ?? name;
       workContext.enterProject(projectId);
       Navigator.of(context).pushReplacement(
         MaterialPageRoute<void>(
@@ -95,40 +91,40 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
     return AppScaffold(
       title: Text(l10n.projectCreateProject),
       body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.lg),
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         children: [
-          if (_error != null) AppStatusBanner(severity: AppStatusSeverity.error, message: AppErrors.localize(context, _error!)),
-          Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                AppTextField(
-                  controller: _nameCtrl,
-                  label: l10n.projectProjectName,
-                  enabled: !_saving,
-                  validator: (v) {
-                    if (v == null || v.trim().isEmpty) return l10n.commonNameRequired;
-                    return null;
-                  },
-                ),
-                SizedBox(height: AppSpacing.md),
-                AppChoicePreference<String?>(
-                  title: l10n.projectPreferredAgentProvider,
-                  icon: Icons.smart_toy_outlined,
-                  value: _agentProvider,
-                  choices: _providers,
-                  keyFor: _keyFor,
-                  labelFor: _labelFor,
-                  enabled: !_saving,
-                  onSave: (v) async => setState(() => _agentProvider = v),
-                ),
-                AppAsyncButton(
-                  label: _saving ? l10n.commonCreating : l10n.projectCreateAndOpenChat,
-                  busy: _saving,
-                  onPressed: _saving ? null : _create,
-                ),
-              ],
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+              child: AppStatusBanner(
+                severity: AppStatusSeverity.error,
+                message: AppErrors.localize(context, _error!),
+              ),
+            ),
+          AppValuePreference<String>(
+            title: l10n.projectProjectName,
+            icon: Icons.folder_outlined,
+            value: _name,
+            enabled: !_saving,
+            presentValue: (v) => v.isEmpty ? l10n.commonNotSet : v,
+            onSave: (v) async => setState(() => _name = v.trim()),
+          ),
+          AppChoicePreference<String?>(
+            title: l10n.projectPreferredAgentProvider,
+            icon: Icons.smart_toy_outlined,
+            value: _agentProvider,
+            choices: _providers,
+            keyFor: _keyFor,
+            labelFor: _labelFor,
+            enabled: !_saving,
+            onSave: (v) async => setState(() => _agentProvider = v),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            child: AppAsyncButton(
+              label: _saving ? l10n.commonCreating : l10n.projectCreateAndOpenChat,
+              busy: _saving,
+              onPressed: _saving ? null : _create,
             ),
           ),
         ],

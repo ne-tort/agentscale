@@ -6,7 +6,6 @@ import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/employee/project_settings_page.dart';
@@ -881,15 +880,18 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                         tooltip: l10n.projectAttachFile,
                       ),
                       Expanded(
-                        child: AppTextField(
+                        child: TextField(
                           controller: _composer,
                           minLines: 1,
                           maxLines: 4,
                           enabled: !_loading && !_chatBlocked,
                           textInputAction: TextInputAction.send,
-                          onFieldSubmitted: (_) => _send(),
-                          hint: l10n.projectMessageHint,
-                          size: AppFieldSize.compact,
+                          onSubmitted: (_) => _send(),
+                          decoration: InputDecoration(
+                            hintText: l10n.projectMessageHint,
+                            border: const OutlineInputBorder(),
+                            isDense: true,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 8),

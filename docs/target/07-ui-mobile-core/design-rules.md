@@ -21,8 +21,8 @@
 | `showModalBottomSheet` | Модалка |
 | `PopupMenuButton` для выбора сущностей | Не page-selector |
 | `DropdownButton` для сущностей/enum с >2 значимыми опциями | Замена: `AppSelectorPage` / `AppChoicePreference` |
-| `AppTextField` / `AppPasswordField` на **settings/detail** (seamless) | Замена: [preferences.md](preferences.md); на create/submit-формах — как раз `AppTextField` / `AppPasswordField` + `AppButton` |
-| Сырой `TextField` / `FilledButton` / `IconButton` в feature | Только core: `AppTextField`, `AppPasswordField`, `AppButton`, `AppIconButton` |
+| Сырой `TextField` / `FilledButton` / `IconButton` в feature (кроме узких chrome-исключений вроде chat composer) | Только core: `AppValuePreference`, `AppButton`, `AppIconButton` |
+| Параллельные field-виджеты (`AppTextField` / `AppPasswordField`) | Секрет и текст = `AppValuePreference` (+ `obscureText`) |
 | Локальные ListTile / DataTable «на один экран» | Дублирование EntityCollection / `AppListItem` |
 | Свободные заголовки/подсказки «как пользоваться» | Нарушение laconic |
 | Feature-local кнопки в обход core | Нарушение reuse |

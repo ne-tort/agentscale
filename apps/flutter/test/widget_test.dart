@@ -31,7 +31,6 @@ void main() {
   testWidgets('app entry shows login form (default ru)', (tester) async {
     SharedPreferences.setMockInitialValues({});
     await tester.pumpWidget(const ProdavanApp());
-    // Wait for appSettings.load() + session restore → LoginPage.
     await tester.pumpAndSettle();
     expect(find.text('Вход'), findsWidgets);
     expect(find.text('Логин'), findsOneWidget);
