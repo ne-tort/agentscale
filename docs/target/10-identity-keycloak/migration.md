@@ -4,7 +4,7 @@
 
 | Место | Поведение |
 |-------|-----------|
-| `AUTH_MODE=test` | HS256 test JWT; `POST /auth/test/login` personas |
+| `AUTH_MODE=test` | HS256 mint in pytest fixtures only (no HTTP login) |
 | `AUTH_MODE=oidc` | JWKS Keycloak (`JwtValidator`); Flutter PKCE |
 | Пароли людей / Company | Только в Keycloak (Prodavan не хранит password hash для login) |
 | Provisioning | `IdentityProvisioningPort` → Fake или `HttpKeycloakAdminClient` |
@@ -26,12 +26,12 @@ Realm scaffold: [`infra/keycloak/`](../../../infra/keycloak/). Brokers: [identit
 
 ## Этапы
 
-1. **Deploy Keycloak** (dev): import `realm-prodavan.json`, service-account roles, audience on clients.
-2. **API already dual-capable**: `test` \| `oidc` via settings (не смешивать HS256 prod).
-3. **Flutter OIDC**: готово; соцкнопки — UI later + `kc_idp_hint`.
+1. **Deploy Keycloak** (dev): STS + `prodavan-keycloak-init` (Admin API bootstrap; not partial `--import-realm`), audience on clients, `admin`/`admin`.
+2. **API**: cluster `AUTH_MODE=oidc`; CI keeps `AUTH_MODE=test` mint fixtures only (no HTTP test-login).
+3. **Flutter OIDC**: ROPC login page; route by `/me` contours; соцкнопки — UI later + `kc_idp_hint`.
 4. **IdP brokers** (VK/Yandex): secrets вне git; Account Linking в KC.
-5. **Cluster cutover**: `AUTH_MODE=oidc` на k3s (отдельный infra PR) — gap **P-KC-01**.
-6. **Admin bootstrap**: platform admin через realm role `platform.admin`.
+5. **Cluster cutover**: gap **P-KC-01** closing (`AUTH_MODE=oidc` + hostPort issuer `:8089`).
+6. **Admin bootstrap**: platform admin через realm role `platform.admin` (user `admin`/`admin`).
 
 ## Settings
 

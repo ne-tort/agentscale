@@ -2,7 +2,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
-/// Public auth discovery from GET /auth/config (L01) + test login mint.
+/// Public auth discovery from GET /auth/config (L01).
 class AuthConfigClient {
   AuthConfigClient({required this.baseUrl});
 
@@ -15,20 +15,6 @@ class AuthConfigClient {
     final res = await http.get(uri);
     if (res.statusCode < 200 || res.statusCode >= 300) {
       throw Exception('auth/config ${res.statusCode}: ${res.body}');
-    }
-    return jsonDecode(res.body) as Map<String, dynamic>;
-  }
-
-  /// AUTH_MODE=test only — server mints HS256 JWT (and seeds demo employee).
-  Future<Map<String, dynamic>> testLogin({required String persona}) async {
-    final uri = Uri.parse('$_root/auth/test/login');
-    final res = await http.post(
-      uri,
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode({'persona': persona}),
-    );
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw Exception('auth/test/login ${res.statusCode}: ${res.body}');
     }
     return jsonDecode(res.body) as Map<String, dynamic>;
   }

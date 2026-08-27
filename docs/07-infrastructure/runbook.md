@@ -6,7 +6,7 @@
 
 Репозиторий: [ne-tort/prodavan](https://github.com/ne-tort/prodavan).  
 **UI:** http://127.0.0.1:8088/ (Traefik слушает `0.0.0.0:8088`, Ingress без фильтра `host`).  
-После bootstrap открывается **Sign in**. В кластере `AUTH_MODE=test` — кнопки **Demo Employee** / **Platform Admin** (API `POST /auth/test/login`, без paste JWT). Keycloak для локального smoke не нужен.
+После bootstrap — единая форма логин/пароль (Keycloak ROPC). Platform Admin: `admin` / `admin`. Issuer: `http://127.0.0.1:8089/realms/prodavan` (hostPort).
 
 ---
 
@@ -100,4 +100,18 @@ Self-hosted runners и kubeconfig для Verify — только [`infra/github-
 **Verify PVC retain:** `prodavan-ops validate` проверяет наличие PVC `prodavan-minio-data` в overlay render.
 
 API **не** вызывает `create_bucket` на startup — только `head_bucket` health.
+
+---
+
+## 6. Keycloak (identity)
+
+| Компонент | Значение |
+|-----------|----------|
+| Public issuer | `http://127.0.0.1:8089/realms/prodavan` (Keycloak hostPort 8089) |
+| In-cluster Admin | `http://prodavan-keycloak:8080` |
+| Init Job | `prodavan-keycloak-init` — Sync hook wave 8 (до API); SA roles + user `admin`/`admin` |
+| Platform Admin | username `admin`, password `admin`, realm role `platform.admin` |
+| API | `AUTH_MODE=oidc`, `KEYCLOAK_INVITE_MODE=admin`, JWKS via in-cluster URL |
+
+Flutter login: ROPC (`grant_type=password`) на client `prodavan-flutter`. One-click test personas удалены.
 

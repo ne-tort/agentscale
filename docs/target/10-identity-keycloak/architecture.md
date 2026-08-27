@@ -8,7 +8,7 @@
 | Протокол | **OIDC** (Authorization Code + PKCE для Flutter; client credentials — service-to-service) |
 | Валидация API | JWT → **JWKS** (RS256), не shared HS256 |
 | Пароли / MFA / reset | **Только в Keycloak** |
-| Dev bridge `POST /auth/test/login` | `AUTH_MODE=test` — personas `platform_admin` / `company_principal` / `demo_employee` |
+| Dev bridge `POST /auth/test/login` | **Removed** — use Keycloak ROPC / Flutter login |
 | Session / cabinets | [session.md](session.md) — headers + DB |
 
 Realm GitOps scaffold: [`infra/keycloak/`](../../../infra/keycloak/) (`realm-prodavan.json`).

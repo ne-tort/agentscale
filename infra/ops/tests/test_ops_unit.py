@@ -99,6 +99,7 @@ postgres:16.15
 redis:7.4.11-alpine
 minio/minio:RELEASE.2024-10-02T17-50-41Z
 redpanda:v24.2.4
+quay.io/keycloak/keycloak:26.0
 """
     verify_image_pins(manifest)
 
@@ -128,6 +129,7 @@ data:
     redis:7.4.11-alpine
     minio/minio:RELEASE.2024-10-02T17-50-41Z
     redpanda:v24.2.4
+    quay.io/keycloak/keycloak:26.0
 """
     with pytest.raises(RuntimeError, match="frozen version"):
         verify_image_pins(manifest)

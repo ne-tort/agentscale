@@ -62,17 +62,20 @@ When enabling social login (humans only — Employee / Admin):
 
 **Company org principal** — login is `company_id` + password. Native Flutter uses Resource Owner Password (Direct Access Grants) via `TokenSession.loginWithPassword`; browser/IdP flows stay on PKCE.
 
-## Import (dev)
+# Import (dev / k3s)
 
-1. Start Keycloak (`start-dev`).
-2. Admin → Create realm → partial import `realm-prodavan.json` (or Clients/Roles manually from file).
-3. Complete **service account checklist** above; set secret → API `KEYCLOAK_ADMIN_CLIENT_*`.
-4. API: `AUTH_MODE=oidc`, `KEYCLOAK_INVITE_MODE=admin`.
+GitOps: `infra/k3s/base/platform/keycloak.yaml`. Realm is **created by**
+`prodavan-keycloak-init` via Admin API (empty realm → built-in scopes → clients/roles/users).
+Do **not** use `--import-realm` with a partial JSON — it drops `roles`/`profile`/`email` scopes.
 
-Invite flow for **employees** uses email + required actions.  
-**Company** principals: username = `company_id`, password set at create (no email).
+`realm-prodavan.json` here is the **documentation** of intended clients/roles (keep in sync with
+the init Job). A copy may exist under `infra/k3s/base/platform/` for reference ConfigMap.
 
-## Compose snippet
+1. Argo sync → Keycloak STS (hostPort **8089**) + init Job (SA roles + `admin`/`admin` + `platform.admin`).
+2. Public issuer: `http://127.0.0.1:8089/realms/prodavan`.
+3. API: `AUTH_MODE=oidc`, `KEYCLOAK_INVITE_MODE=admin`, secrets as in runbook.
+
+## Compose snippet (optional laptop-only)
 
 ```yaml
 services:

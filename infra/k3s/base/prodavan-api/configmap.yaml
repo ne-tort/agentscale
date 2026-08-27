@@ -11,7 +11,15 @@ data:
   RUN_MIGRATIONS: "1"
   API_V1_PREFIX: /api/v1
   APP_ENV: dev
-  AUTH_MODE: test
+  AUTH_MODE: oidc
+  KEYCLOAK_URL: http://prodavan-keycloak:8080
+  KEYCLOAK_ISSUER_URL: http://127.0.0.1:8089/realms/prodavan
+  OIDC_JWKS_URL: http://prodavan-keycloak:8080/realms/prodavan/protocol/openid-connect/certs
+  KEYCLOAK_REALM: prodavan
+  KEYCLOAK_INVITE_MODE: admin
+  KEYCLOAK_ADMIN_CLIENT_ID: prodavan-services
+  OIDC_AUDIENCE: prodavan-api
+  OIDC_FLUTTER_CLIENT_ID: prodavan-flutter
   # P0 brokers (in-cluster)
   REDIS_URL: redis://prodavan-redis:6379/0
   REDIS_REQUIRED: "true"

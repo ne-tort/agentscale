@@ -28,12 +28,13 @@ Widget themed(Widget home, {Locale locale = const Locale('en')}) {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('app entry shows sign in (default ru)', (tester) async {
+  testWidgets('app entry shows login fields (default ru)', (tester) async {
     SharedPreferences.setMockInitialValues({});
     await tester.pumpWidget(const ProdavanApp());
     // Wait for appSettings.load() + session restore → LoginPage.
     await tester.pumpAndSettle();
-    expect(find.text('Вход'), findsOneWidget);
+    expect(find.byType(TextField), findsNWidgets(2));
+    expect(find.byIcon(Icons.arrow_forward_rounded), findsOneWidget);
   });
 
   testWidgets('entity collection list opens row', (tester) async {

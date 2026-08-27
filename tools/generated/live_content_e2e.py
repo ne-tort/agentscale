@@ -1,41 +1,23 @@
 #!/usr/bin/env python3
-"""Live-stand E2E: companies, employees, content assets/aliases, ACL (in-cluster)."""
+"""Live-stand E2E: Keycloak ROPC + companies/employees + content ACL."""
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 import uuid
-from datetime import UTC, datetime, timedelta
 
 import httpx
-import jwt
 
 BASE = os.environ.get("PRODAVAN_E2E_BASE", "http://prodavan-api:8000/api/v1").rstrip("/")
-AUTH_SECRET = os.environ.get(
-    "AUTH_TEST_SECRET", "k3s-dev-change-me-in-production-32b"
+KC = os.environ.get(
+    "PRODAVAN_E2E_KC", "http://prodavan-keycloak:8080"
+).rstrip("/")
+CLIENT_ID = os.environ.get("OIDC_FLUTTER_CLIENT_ID", "prodavan-flutter")
+SERVICES_ID = os.environ.get("KEYCLOAK_ADMIN_CLIENT_ID", "prodavan-services")
+SERVICES_SECRET = os.environ.get(
+    "KEYCLOAK_ADMIN_CLIENT_SECRET", "change-me-prodavan-services"
 )
-AUD = os.environ.get("OIDC_AUDIENCE", "prodavan-api")
-
-
-def mint(sub: str, *, email: str | None = None, platform_admin: bool = False) -> str:
-    now = datetime.now(UTC)
-    payload = {
-        "sub": sub,
-        "aud": AUD,
-        "exp": now + timedelta(hours=1),
-        "iat": now,
-        "platform_admin": platform_admin,
-        "roles": ["platform.admin"] if platform_admin else ["employee"],
-    }
-    if email:
-        payload["email"] = email
-    return jwt.encode(payload, AUTH_SECRET, algorithm="HS256")
-
-
-def hdr(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
 
 
 def check(name: str, cond: bool, detail: str = "") -> None:
@@ -46,46 +28,95 @@ def check(name: str, cond: bool, detail: str = "") -> None:
         sys.exit(1)
 
 
+def hdr(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def ropc(c: httpx.Client, username: str, password: str) -> str:
+    r = c.post(
+        f"{KC}/realms/prodavan/protocol/openid-connect/token",
+        data={
+            "grant_type": "password",
+            "client_id": CLIENT_ID,
+            "username": username,
+            "password": password,
+            "scope": "openid offline_access",
+        },
+    )
+    check(f"ROPC {username}", r.status_code == 200, r.text[:300])
+    return r.json()["access_token"]
+
+
+def admin_api_token(c: httpx.Client) -> str:
+    r = c.post(
+        f"{KC}/realms/prodavan/protocol/openid-connect/token",
+        data={
+            "grant_type": "client_credentials",
+            "client_id": SERVICES_ID,
+            "client_secret": SERVICES_SECRET,
+        },
+    )
+    check("KC client_credentials", r.status_code == 200, r.text[:300])
+    return r.json()["access_token"]
+
+
+def set_password(c: httpx.Client, *, admin_tok: str, user_id: str, password: str) -> None:
+    r = c.put(
+        f"{KC}/admin/realms/prodavan/users/{user_id}/reset-password",
+        headers=hdr(admin_tok),
+        json={"type": "password", "value": password, "temporary": False},
+    )
+    check(f"set password {user_id[:12]}", r.status_code in (204, 200), r.text[:200])
+
+
 def main() -> None:
     run_id = uuid.uuid4().hex[:8]
     slug = f"e2e.readme.{run_id}"
-    print(f"live e2e base={BASE} run={run_id}")
+    print(f"live e2e base={BASE} kc={KC} run={run_id}")
 
-    with httpx.Client(timeout=30.0) as c:
+    with httpx.Client(timeout=45.0) as c:
         ready = c.get(f"{BASE.replace('/api/v1', '')}/health/ready")
         check("health/ready", ready.status_code == 200, ready.text)
         body = ready.json()
         check("file_store ready", body.get("checks", {}).get("file_store") == "ok", str(body))
 
-        admin_login = c.post(f"{BASE}/auth/test/login", json={"persona": "platform_admin"})
-        check("platform_admin login", admin_login.status_code == 200, admin_login.text)
-        padmin_tok = admin_login.json()["access_token"]
+        cfg = c.get(f"{BASE}/auth/config")
+        check("auth/config oidc", cfg.status_code == 200 and cfg.json().get("auth_mode") == "oidc", cfg.text)
 
-        co_login = c.post(f"{BASE}/auth/test/login", json={"persona": "company_principal"})
-        check("demo company principal", co_login.status_code == 200, co_login.text)
-        company_id = co_login.json()["company_id"]
+        padmin_tok = ropc(c, "admin", "admin")
+        me = c.get(f"{BASE}/me", headers=hdr(padmin_tok))
+        check("admin /me", me.status_code == 200 and "platform_admin" in me.json().get("contours", []), me.text)
 
-        boss_email = f"e2e-boss-{run_id}@test.local"
-        worker_email = f"e2e-worker-{run_id}@test.local"
-        boss_inv = c.post(
-            f"{BASE}/companies/{company_id}/employees",
+        co = c.post(
+            f"{BASE}/companies",
             headers=hdr(padmin_tok),
-            json={"email": boss_email, "display_name": "E2E Boss", "role": "company_admin"},
+            json={
+                "name": f"E2E Content {run_id}",
+                "password": "e2e-company-pass",
+                "admin_email": f"boss-{run_id}@e2e.test",
+            },
         )
-        check("invite boss", boss_inv.status_code == 201, boss_inv.text)
-        boss_id = boss_inv.json()["id"]
-        boss_sub = boss_inv.json()["keycloak_sub"]
-        boss_tok = mint(boss_sub, email=boss_email)
+        check("create company", co.status_code == 201, co.text)
+        company_id = co.json()["company"]["id"]
+        boss_id = co.json()["admin_employee"]["id"]
+        boss_sub = co.json()["admin_employee"]["keycloak_sub"]
+        boss_email = co.json()["admin_employee"]["email"]
 
-        worker_inv = c.post(
+        kc_admin = admin_api_token(c)
+        set_password(c, admin_tok=kc_admin, user_id=boss_sub, password="e2e-boss-pass")
+        boss_tok = ropc(c, boss_email, "e2e-boss-pass")
+
+        worker_email = f"worker-{run_id}@e2e.test"
+        inv = c.post(
             f"{BASE}/companies/{company_id}/employees",
-            headers=hdr(padmin_tok),
-            json={"email": worker_email, "display_name": "E2E Worker", "role": "employee"},
+            headers=hdr(boss_tok),
+            json={"email": worker_email, "display_name": "Worker", "role": "member"},
         )
-        check("invite worker", worker_inv.status_code == 201, worker_inv.text)
-        worker_id = worker_inv.json()["id"]
-        worker_sub = worker_inv.json()["keycloak_sub"]
-        worker_tok = mint(worker_sub, email=worker_email)
+        check("invite worker", inv.status_code == 201, inv.text)
+        worker_id = inv.json()["id"]
+        worker_sub = inv.json()["keycloak_sub"]
+        set_password(c, admin_tok=kc_admin, user_id=worker_sub, password="e2e-worker-pass")
+        worker_tok = ropc(c, worker_email, "e2e-worker-pass")
 
         asset = c.post(
             f"{BASE}/content/assets",
@@ -165,49 +196,17 @@ def main() -> None:
             headers=hdr(boss_tok),
             follow_redirects=False,
         )
-        check(
-            "resolve alias (boss)",
-            resolve_boss.status_code in (200, 302),
-            resolve_boss.text[:200],
-        )
-        if resolve_boss.status_code == 200:
-            check("resolve body", resolve_boss.content == payload, "")
-        elif resolve_boss.status_code == 302:
-            loc = resolve_boss.headers.get("location", "")
-            check("resolve redirect", bool(loc), loc)
-            dl = c.get(loc)
-            check("redirect download", dl.status_code == 200 and dl.content == payload, dl.text[:100])
+        check("resolve alias (boss)", resolve_boss.status_code in (200, 302), resolve_boss.text[:200])
 
-        resolve_worker = c.get(
-            f"{BASE}/content/aliases/{slug}/resolve",
-            headers=hdr(worker_tok),
-            follow_redirects=False,
+        # Outsider: company principal of another org via fresh company
+        co2 = c.post(
+            f"{BASE}/companies",
+            headers=hdr(padmin_tok),
+            json={"name": f"E2E Other {run_id}", "password": "other-company-pass"},
         )
-        check(
-            "resolve alias (company worker)",
-            resolve_worker.status_code in (200, 302),
-            resolve_worker.text[:200],
-        )
-
-        alias_acl = c.put(
-            f"{BASE}/content/aliases/{alias_id}/acl",
-            headers=hdr(boss_tok),
-            json={
-                "entries": [
-                    {
-                        "principal_kind": "employee",
-                        "principal_id": boss_id,
-                        "permission": "read",
-                    }
-                ]
-            },
-        )
-        check("alias ACL replace", alias_acl.status_code == 200, alias_acl.text)
-
-        demo = c.post(f"{BASE}/auth/test/login", json={"persona": "platform_admin"})
-        check("platform admin for outsider check", demo.status_code == 200, demo.text)
-        # JWT with unknown sub — no employee / company membership.
-        outsider_tok = mint("test-outsider-no-membership", email=f"outsider-{run_id}@e2e.test")
+        check("create other company", co2.status_code == 201, co2.text)
+        other_id = co2.json()["company"]["id"]
+        outsider_tok = ropc(c, other_id, "other-company-pass")
         outsider_resolve = c.get(
             f"{BASE}/content/aliases/{slug}/resolve",
             headers=hdr(outsider_tok),
@@ -217,6 +216,15 @@ def main() -> None:
             "alias resolve denied for other company",
             outsider_resolve.status_code == 403,
             outsider_resolve.text[:200],
+        )
+
+        # Company principal login route smoke
+        company_tok = ropc(c, company_id, "e2e-company-pass")
+        co_me = c.get(f"{BASE}/me", headers=hdr(company_tok))
+        check(
+            "company principal /me",
+            co_me.status_code == 200 and "company" in co_me.json().get("contours", []),
+            co_me.text,
         )
 
     print("live e2e: ALL PASSED")

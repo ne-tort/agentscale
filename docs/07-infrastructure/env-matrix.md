@@ -23,10 +23,15 @@
 | `LOG_LEVEL` | debug | info | info | | Logging verbosity |
 | `DATABASE_URL` | ✓ | ✓ 🔒 | ✓ 🔒 | 🔒 | PostgreSQL async URL |
 | `REDIS_URL` | ✓ | ✓ | ✓ | ○ | Rate limit cache |
-| `JWT_SECRET` / `JWT_PRIVATE_KEY` | dev key | ✓ 🔒 | ✓ 🔒 | 🔒 | Token signing |
-| `JWT_ACCESS_TTL_MIN` | 60 | 30 | 15 | | Access token lifetime |
-| `JWT_REFRESH_TTL_DAYS` | 30 | 14 | 7 | | Refresh token |
-| `CORS_ORIGINS` | `*` | staging domain | prod domain | | Flutter origins |
+| `JWT_SECRET` / `JWT_PRIVATE_KEY` | dev key | ✓ 🔒 | ✓ 🔒 | 🔒 | Token signing (legacy; OIDC uses JWKS) |
+| `AUTH_MODE` | oidc | oidc | oidc | | `test` only for pytest |
+| `KEYCLOAK_URL` | in-cluster `/auth` | ✓ | ✓ | | Admin API base |
+| `KEYCLOAK_ISSUER_URL` | public `:8089/realms/prodavan` | ✓ | ✓ | | JWT `iss` + Flutter discovery |
+| `OIDC_JWKS_URL` | in-cluster certs | ✓ | ✓ | | API JWKS fetch (must be pod-reachable) |
+| `KEYCLOAK_INVITE_MODE` | admin | admin | admin | | `fake` only in unit tests |
+| `KEYCLOAK_ADMIN_CLIENT_ID` | prodavan-services | ✓ | ✓ | | Confidential client |
+| `KEYCLOAK_ADMIN_CLIENT_SECRET` | ✓ 🔒 | ✓ 🔒 | ✓ 🔒 | 🔒 | Match realm client secret |
+| `CORS_ORIGINS` | localhost/8088 | staging domain | prod domain | | Flutter origins |
 
 ---
 

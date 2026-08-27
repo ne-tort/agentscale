@@ -15,13 +15,15 @@ FIRST_PARTY_LATEST = {
     "ghcr.io/ne-tort/prodavan-web:latest",
 }
 FORBIDDEN_INFRA_LATEST = re.compile(
-    r"^(postgres:(16|latest)|redis:(7-alpine|7|latest)|minio/minio:latest|minio/mc:latest)$"
+    r"^(postgres:(16|latest)|redis:(7-alpine|7|latest)|minio/minio:latest|minio/mc:latest|"
+    r"quay.io/keycloak/keycloak:latest)$"
 )
 REQUIRED_SNIPPETS = (
     "postgres:16.15",
     "redis:7.4.11-alpine",
     "minio/minio:RELEASE.2024-10-02T17-50-41Z",
     "redpanda:v24.2.4",
+    "quay.io/keycloak/keycloak:26.0",
 )
 
 
@@ -231,6 +233,19 @@ def _require_minio_pvc(manifest: str) -> None:
     if "prodavan-minio-init" not in manifest:
         raise RuntimeError("overlay render must include prodavan-minio-init Job")
     _require_minio_init_hook(manifest)
+    _require_keycloak(manifest)
+
+
+def _require_keycloak(manifest: str) -> None:
+    """Keycloak STS + init Job required for AUTH_MODE=oidc cutover."""
+    if "prodavan-keycloak" not in manifest:
+        raise RuntimeError("overlay render must include prodavan-keycloak")
+    if "prodavan-keycloak-init" not in manifest:
+        raise RuntimeError("overlay render must include prodavan-keycloak-init Job")
+    if "AUTH_MODE: oidc" not in manifest and 'AUTH_MODE: "oidc"' not in manifest:
+        # ConfigMap data is unquoted in our overlays
+        if "AUTH_MODE: oidc" not in manifest:
+            raise RuntimeError("dev overlay must set AUTH_MODE: oidc")
 
 
 def _require_minio_init_hook(manifest: str) -> None:

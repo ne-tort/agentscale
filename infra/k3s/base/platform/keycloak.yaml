@@ -1,0 +1,310 @@
+# Keycloak — P-KC-01. Public issuer on hostPort 8089; Admin API in-cluster :8080.
+# Realm is bootstrapped by prodavan-keycloak-init (Admin API), NOT --import-realm:
+# partial realm JSON import drops built-in client scopes (roles/profile/email).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: prodavan-keycloak
+  labels:
+    app.kubernetes.io/name: prodavan-keycloak
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: keycloak
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+stringData:
+  admin-user: admin
+  admin-password: admin
+  services-client-secret: change-me-prodavan-services
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prodavan-keycloak-data
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/name: prodavan-keycloak
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: keycloak
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prodavan-keycloak
+  labels:
+    app.kubernetes.io/name: prodavan-keycloak
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: keycloak
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  selector:
+    app.kubernetes.io/name: prodavan-keycloak
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: prodavan-keycloak
+  labels:
+    app.kubernetes.io/name: prodavan-keycloak
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: keycloak
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  serviceName: prodavan-keycloak
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prodavan-keycloak
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prodavan-keycloak
+        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/component: keycloak
+    spec:
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:26.0
+          args:
+            - start-dev
+            - --http-port=8080
+          env:
+            - name: KEYCLOAK_ADMIN
+              valueFrom:
+                secretKeyRef:
+                  name: prodavan-keycloak
+                  key: admin-user
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: prodavan-keycloak
+                  key: admin-password
+            # Flutter ROPC / browser reach Keycloak on host :8089
+            - name: KC_HOSTNAME
+              value: "http://127.0.0.1:8089"
+            - name: KC_HOSTNAME_STRICT
+              value: "false"
+            - name: KC_HTTP_ENABLED
+              value: "true"
+          ports:
+            - name: http
+              containerPort: 8080
+              hostPort: 8089
+          volumeMounts:
+            - name: data
+              mountPath: /opt/keycloak/data
+          readinessProbe:
+            httpGet:
+              path: /realms/master
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 18
+          livenessProbe:
+            httpGet:
+              path: /realms/master
+              port: http
+            initialDelaySeconds: 90
+            periodSeconds: 30
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              memory: 1536Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: prodavan-keycloak-data
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: prodavan-keycloak-init
+  labels:
+    app.kubernetes.io/name: prodavan-keycloak-init
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: keycloak-init
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    argocd.argoproj.io/sync-wave: "8"
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 8
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prodavan-keycloak-init
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: kcadm
+          image: quay.io/keycloak/keycloak:26.0
+          env:
+            - name: KEYCLOAK_ADMIN
+              valueFrom:
+                secretKeyRef:
+                  name: prodavan-keycloak
+                  key: admin-user
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: prodavan-keycloak
+                  key: admin-password
+            - name: SERVICES_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: prodavan-keycloak
+                  key: services-client-secret
+          command:
+            - /bin/bash
+            - -c
+            - |
+              set -eu
+              KC="/opt/keycloak/bin/kcadm.sh"
+              SERVER="http://prodavan-keycloak:8080"
+              i=0
+              until "$KC" config credentials --server "$SERVER" --realm master \
+                  --user "$KEYCLOAK_ADMIN" --password "$KEYCLOAK_ADMIN_PASSWORD"; do
+                i=$((i+1))
+                if [ "$i" -gt 60 ]; then echo "keycloak not ready"; exit 1; fi
+                sleep 5
+              done
+
+              ensure_realm() {
+                NEED_RECREATE=0
+                if ! "$KC" get realms/prodavan >/dev/null 2>&1; then
+                  NEED_RECREATE=1
+                elif ! "$KC" get client-scopes -r prodavan --fields name --format csv --noquotes 2>/dev/null | grep -qx roles; then
+                  echo "keycloak-init: realm missing built-in scopes — recreating"
+                  NEED_RECREATE=1
+                fi
+                if [ "$NEED_RECREATE" = 1 ]; then
+                  "$KC" delete realms/prodavan 2>/dev/null || true
+                  "$KC" create realms -s realm=prodavan -s enabled=true \
+                    -s registrationAllowed=false -s loginWithEmailAllowed=true \
+                    -s resetPasswordAllowed=true -s accessTokenLifespan=3600
+                fi
+              }
+
+              scope_id() {
+                local want="$1" line sid sname
+                while IFS= read -r line; do
+                  sid=${line%%,*}
+                  sname=${line#*,}
+                  if [ "$sname" = "$want" ]; then
+                    echo "$sid"
+                    return 0
+                  fi
+                done < <("$KC" get client-scopes -r prodavan --fields id,name --format csv --noquotes 2>/dev/null || true)
+                return 0
+              }
+
+              attach_default_scope() {
+                client_id="$1"
+                scope_name="$2"
+                sid=$(scope_id "$scope_name")
+                [ -n "$sid" ] || return 0
+                "$KC" create "clients/${client_id}/default-client-scopes/${sid}" -r prodavan 2>/dev/null || true
+              }
+
+              ensure_realm
+
+              for ROLE in platform.admin company employee; do
+                "$KC" create roles -r prodavan -s name="$ROLE" 2>/dev/null || true
+              done
+
+              # Audience client scope + mapper
+              if [ -z "$(scope_id prodavan-audience)" ]; then
+                "$KC" create client-scopes -r prodavan \
+                  -s name=prodavan-audience -s protocol=openid-connect \
+                  -s 'attributes.include.in.token.scope=true' \
+                  -s 'attributes.display.on.consent.screen=false'
+                AUD_ID=$(scope_id prodavan-audience)
+                "$KC" create "client-scopes/${AUD_ID}/protocol-mappers/models" -r prodavan \
+                  -s name=aud-prodavan-api -s protocol=openid-connect \
+                  -s protocolMapper=oidc-audience-mapper \
+                  -s 'config."included.client.audience"=prodavan-api' \
+                  -s 'config."id.token.claim"=false' \
+                  -s 'config."access.token.claim"=true' || true
+              fi
+
+              ensure_client() {
+                cid="$1"
+                shift
+                existing=$("$KC" get clients -r prodavan -q "clientId=${cid}" --fields id --format csv --noquotes 2>/dev/null \
+                  | grep -E '^[0-9a-f-]{8,}' | head -1 || true)
+                if [ -z "$existing" ]; then
+                  "$KC" create clients -r prodavan -s "clientId=${cid}" "$@"
+                fi
+              }
+
+              ensure_client prodavan-flutter \
+                -s name="Prodavan Flutter" -s enabled=true -s publicClient=true \
+                -s directAccessGrantsEnabled=true -s standardFlowEnabled=true \
+                -s 'redirectUris=["http://127.0.0.1:*","http://localhost:*","prodavan://*"]' \
+                -s 'webOrigins=["+"]' -s fullScopeAllowed=true \
+                -s 'attributes.pkce.code.challenge.method=S256'
+
+              ensure_client prodavan-api \
+                -s name="Prodavan API audience" -s enabled=true -s publicClient=true \
+                -s standardFlowEnabled=false -s directAccessGrantsEnabled=false \
+                -s fullScopeAllowed=false
+
+              ensure_client prodavan-services \
+                -s name="Prodavan services" -s enabled=true -s publicClient=false \
+                -s "secret=${SERVICES_CLIENT_SECRET}" -s serviceAccountsEnabled=true \
+                -s standardFlowEnabled=false -s directAccessGrantsEnabled=false \
+                -s fullScopeAllowed=true
+
+              FLUTTER_ID=$("$KC" get clients -r prodavan -q clientId=prodavan-flutter --fields id --format csv --noquotes \
+                | grep -E '^[0-9a-f-]{8,}' | head -1)
+              for SCOPE in roles profile email web-origins acr prodavan-audience; do
+                attach_default_scope "$FLUTTER_ID" "$SCOPE"
+              done
+              OFF_ID=$(scope_id offline_access)
+              if [ -n "$OFF_ID" ]; then
+                "$KC" create "clients/${FLUTTER_ID}/optional-client-scopes/${OFF_ID}" -r prodavan 2>/dev/null || true
+              fi
+
+              # Platform admin user admin/admin
+              ADMIN_ID=$("$KC" get users -r prodavan -q username=admin --fields id --format csv --noquotes 2>/dev/null \
+                | grep -E '^[0-9a-f-]{8,}' | head -1 || true)
+              if [ -z "$ADMIN_ID" ]; then
+                "$KC" create users -r prodavan \
+                  -s username=admin -s enabled=true \
+                  -s email=admin@prodavan.local -s emailVerified=true \
+                  -s firstName=Platform -s lastName=Admin \
+                  -s 'requiredActions=[]' || true
+                ADMIN_ID=$("$KC" get users -r prodavan -q username=admin --fields id --format csv --noquotes 2>/dev/null \
+                  | grep -E '^[0-9a-f-]{8,}' | head -1 || true)
+              fi
+              if [ -n "$ADMIN_ID" ]; then
+                "$KC" update "users/$ADMIN_ID" -r prodavan \
+                  -s email=admin@prodavan.local -s emailVerified=true \
+                  -s firstName=Platform -s lastName=Admin \
+                  -s 'requiredActions=[]' || true
+              fi
+              "$KC" set-password -r prodavan --username admin --new-password admin --temporary=false
+              "$KC" add-roles -r prodavan --uusername admin --rolename platform.admin 2>/dev/null || true
+
+              for ROLE in manage-users view-users query-users view-realm; do
+                "$KC" add-roles -r prodavan --uusername "service-account-prodavan-services" \
+                  --cclientid realm-management --rolename "$ROLE" 2>/dev/null || true
+              done
+
+              echo "keycloak-init: realm + admin/admin + platform.admin ok"

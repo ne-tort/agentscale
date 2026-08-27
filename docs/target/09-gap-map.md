@@ -15,7 +15,7 @@
 | **P-CO-03** | Company list/manage containers **своих** сотрудников | Только Admin `/admin/containers` | Нет company-scoped containers |
 | **P-CO-04** | Cabinets от Admin → Company **RO**; later local CRUD | **Admin CRUD + N:M company grants**; Company RO + employee assign | Company assign UI shipped; Verify Dev |
 | **P-ID-01** | **Company** имеет **Keycloak-креды** | `companies.keycloak_sub` + role `company` + provisioning (**partial**); live realm cutover / Flutter OIDC — open | Org principal in API; see [session](10-identity-keycloak/session.md) |
-| **P-ID-02** | Admin / Company / Employee — три KC-сущности | Realm roles in `infra/keycloak/realm-prodavan.json`; API resolution live | Cluster Keycloak deploy still open |
+| **P-ID-02** | Admin / Company / Employee — три KC-сущности | Realm roles + `prodavan-keycloak-init` bootstrap; API resolution live | IdP brokers / SMTP invite polish |
 | **P-CAB-01** | Company **назначает** Employee ↔ Cabinet | **Grants + assignment API + Flutter** | Verify Dev E2E |
 | **P-CAB-02** | UI кабинета из module meta | Module template + `module_data_rows` API; employee UI = placeholder | Generic meta UI next |
 | **P-MOD-01** | **Module** catalog + cabinet bind + per-cabinet data | **Admin CRUD + meta + materialize + runtime data API + Flutter** | Physical DDL; meta editor UI |
@@ -25,7 +25,7 @@
 | **P-MCP-01** | Агент в Pod ↔ `cabinet.*` | **Out of MVP cabinet entity** (removed typed MCP/packages); future contract | Изоляция + контракт |
 | **P-CAS-01** | Delete Cabinet → все Projects wipe | Admin `delete_with_cascade` wipe → DROP schema → delete row | Employee archive-then-delete remains |
 | **P-INF-01** | MinIO / Kafka / Celery | Local FS / in-process | [13](13-platform-infra/) |
-| **P-KC-01** | Live Keycloak cutover | Часто `AUTH_MODE=test`; provisioning + realm scaffold + brokers docs ready | Cutover `AUTH_MODE=oidc` на shared env |
+| **P-KC-01** | Live Keycloak cutover | Closing: Keycloak STS + init Job, `AUTH_MODE=oidc`, Flutter ROPC, no HTTP test-login | Brokers / SMTP invite polish |
 | **P-KC-02** | IdP broker live (VK/Yandex) | Docs + realm placeholders; providers **not** live; secrets вне git | Enable IdP + Flutter social buttons |
 | **P-UNI-01** | Универсальная иерархия (Admin→Employee без Company; local cabinets) | Не моделировано | Future после P-CO-* |
 

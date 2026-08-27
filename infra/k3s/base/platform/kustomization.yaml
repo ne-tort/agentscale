@@ -5,6 +5,7 @@ resources:
   - minio.yaml
   - kafka.yaml
   - celery.yaml
+  - keycloak.yaml
   - pdb.yaml
 generatorOptions:
   disableNameSuffixHash: true
@@ -15,3 +16,6 @@ configMapGenerator:
   - name: prodavan-minio-api-policy
     files:
       - minio-api-policy.json
+  - name: prodavan-keycloak-realm
+    files:
+      - realm-prodavan.json
