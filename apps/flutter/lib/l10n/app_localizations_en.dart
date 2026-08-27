@@ -493,10 +493,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminModuleJsonConfigured => 'Configured';
 
   @override
-  String get adminModulePreview => 'Preview';
+  String get adminModulePreview => 'Seed data';
 
   @override
-  String get adminModulePreviewEmpty => 'Add module JSON to preview';
+  String get adminModulePreviewEmpty => 'Add module JSON to edit seed data';
 
   @override
   String get adminModuleJsonInvalid => 'Invalid JSON';
@@ -505,7 +505,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminMetaInvalid => 'Metadata';
 
   @override
-  String get adminModulePreviewMode => 'Preview';
+  String get adminModulePreviewMode => 'Seed data';
+
+  @override
+  String get adminModuleSeedHint =>
+      'Row edits are saved into the module seed_rows document';
+
+  @override
+  String get adminModuleSeedEmpty => 'No seed rows yet';
 
   @override
   String get adminSelectCabinetsForModule => 'Select cabinets for module';

@@ -77,6 +77,22 @@ abstract final class ModuleMetaValidator {
       }
     }
 
+    final rowIdRe = RegExp(r'^[a-zA-Z0-9_-]{1,64}$');
+    for (final item in manifest.seedRows) {
+      final tableSlug = item['table_slug'];
+      if (tableSlug is! String || !tableSlugs.contains(tableSlug)) {
+        return 'seed_rows references unknown table: $tableSlug';
+      }
+      final rowId = item['row_id'];
+      if (rowId is! String || !rowIdRe.hasMatch(rowId)) {
+        return 'invalid seed_rows row_id: $rowId';
+      }
+      final body = item['body'];
+      if (body != null && body is! Map) {
+        return 'seed_rows body must be an object for $rowId';
+      }
+    }
+
     return null;
   }
 }

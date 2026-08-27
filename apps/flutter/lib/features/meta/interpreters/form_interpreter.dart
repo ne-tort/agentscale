@@ -4,8 +4,7 @@ import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
-import 'package:prodavan/features/meta/preview/preview_data_store.dart';
-import 'package:prodavan/features/meta/preview/preview_stub.dart';
+import 'package:prodavan/features/meta/preview/seed_data_controller.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 class FormViewInterpreter extends StatefulWidget {
@@ -13,12 +12,16 @@ class FormViewInterpreter extends StatefulWidget {
     super.key,
     required this.manifest,
     required this.view,
-    this.rowIndex = 0,
+    required this.seeds,
+    this.rowId,
+    this.readOnly = false,
   });
 
   final ModuleMetaManifest manifest;
   final Map<String, dynamic> view;
-  final int rowIndex;
+  final SeedDataController seeds;
+  final String? rowId;
+  final bool readOnly;
 
   @override
   State<FormViewInterpreter> createState() => _FormViewInterpreterState();
@@ -26,18 +29,49 @@ class FormViewInterpreter extends StatefulWidget {
 
 class _FormViewInterpreterState extends State<FormViewInterpreter> {
   late Map<String, dynamic> _values;
+  String? _rowId;
 
   @override
   void initState() {
     super.initState();
-    _values = _initialValues();
+    _syncFromSeeds();
   }
 
-  Map<String, dynamic> _initialValues() {
+  @override
+  void didUpdateWidget(covariant FormViewInterpreter oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.rowId != widget.rowId) {
+      _syncFromSeeds();
+    }
+  }
+
+  void _syncFromSeeds() {
     final tableSlug = widget.view['table_slug'] as String? ?? '';
-    final rows = PreviewDataStore.rowsForTable(widget.manifest, tableSlug, count: 3);
-    if (rows.isEmpty) return {};
-    return Map<String, dynamic>.from(rows[widget.rowIndex.clamp(0, rows.length - 1)]);
+    _rowId = widget.rowId;
+    if (_rowId == null || widget.seeds.itemById(_rowId!) == null) {
+      final items = widget.seeds.itemsForTable(tableSlug);
+      _rowId = items.isNotEmpty ? items.first['row_id'] as String? : null;
+    }
+    if (_rowId != null) {
+      _values = widget.seeds.bodyFor(_rowId!);
+    } else {
+      _values = widget.seeds.defaultBodyForTable(tableSlug);
+    }
+  }
+
+  void _persist(String name, dynamic value) {
+    setState(() => _values[name] = value);
+    if (widget.readOnly) return;
+    final tableSlug = widget.view['table_slug'] as String? ?? '';
+    if (_rowId == null) {
+      _rowId = widget.seeds.createRow(tableSlug);
+      // createRow already applied defaults — merge current edits
+      final body = widget.seeds.bodyFor(_rowId!);
+      body.addAll(_values);
+      widget.seeds.upsertBody(_rowId!, body);
+    } else {
+      widget.seeds.patchField(_rowId!, name, value);
+    }
   }
 
   @override
@@ -61,6 +95,10 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
             .toList()
         : columns.map((c) => c['name'] as String).toList();
 
+    if (_rowId == null && fieldNames.isEmpty) {
+      return EmptyPlaceholder(title: l10n.adminModuleSeedEmpty);
+    }
+
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       children: [
@@ -80,9 +118,9 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         return AppSwitchPreference(
           title: label,
           value: value == true,
+          enabled: !widget.readOnly,
           onChanged: (v) async {
-            setState(() => _values[name] = v);
-            PreviewStub.run(context, label);
+            _persist(name, v);
           },
         );
       case 'enum':
@@ -94,18 +132,18 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
           choices: choices,
           keyFor: (v) => v,
           labelFor: (v) => _enumLabel(column, v),
+          enabled: !widget.readOnly,
           onSave: (v) async {
-            setState(() => _values[name] = v);
-            PreviewStub.run(context, label);
+            _persist(name, v);
           },
         );
       default:
         return AppValuePreference<String>(
           title: label,
           value: value?.toString() ?? '',
+          enabled: !widget.readOnly,
           onSave: (v) async {
-            setState(() => _values[name] = v);
-            PreviewStub.run(context, label);
+            _persist(name, v);
           },
         );
     }

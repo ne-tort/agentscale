@@ -4,6 +4,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import yaml
@@ -58,7 +59,7 @@ def render_overlay() -> str:
 
 
 def render_argocd_install() -> str:
-    """Render Argo CD install kustomize (remote upstream + patches)."""
+    """Render Argo CD install kustomize (vendored upstream + patches)."""
     path = repo_root() / "infra" / "argocd" / "install"
     last_err: Exception | None = None
     for attempt in range(1, 4):
@@ -68,9 +69,10 @@ def render_argocd_install() -> str:
             if shutil.which("kustomize"):
                 return _run(["kustomize", "build", str(path)])
             raise RuntimeError("need kubectl or kustomize on PATH for validate")
-        except Exception as exc:  # noqa: BLE001 — retry remote fetch flakes
+        except Exception as exc:  # noqa: BLE001 — retry local render flakes
             last_err = exc
             print(f"argocd/install render attempt {attempt}/3 failed: {exc}")
+            time.sleep(attempt)
     assert last_err is not None
     raise last_err
 

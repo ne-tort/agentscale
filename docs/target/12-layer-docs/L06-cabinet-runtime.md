@@ -7,7 +7,7 @@
 | Quality note | API Runtime: instance+meta+rows+MCP+bundle+packages; UI interpreters L05; sandbox start L07; L04 quotas soft stub |
 | Plan | [L06](../11-implementation-plan/L06-cabinet-runtime.md) |
 | Canon | [05-cabinets](../05-cabinets/) |
-| Last updated | 2026-08-24 — restored as-built encoding |
+| Last updated | 2026-08-27 — admin module preview = seed_rows editor |
 | Owners | — |
 
 ---
@@ -17,6 +17,8 @@
 CabinetInstance: schema-per-instance, meta+UI, cabinet.*, MCP packages, bundles. Ownership Employee+Company+Admin; peers isolated.
 
 **Не** container (L07); не AgentPort (L08); не static pack.
+
+**Module seed:** optional meta slug `seed_rows` edited in Flutter admin/company «Предзаполнение» (former stub preview). On MC bind → copy into `module_data_rows`. Template (`tables`/`columns`) stays separate from seed data.
 
 ## Что сделано
 

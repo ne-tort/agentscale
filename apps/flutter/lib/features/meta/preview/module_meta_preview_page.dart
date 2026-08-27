@@ -3,20 +3,25 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/meta/interpreters/hub_interpreter.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
+import 'package:prodavan/features/meta/preview/seed_data_controller.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
+/// Interactive seed_rows editor rendered via meta views (former stub preview).
 class ModuleMetaPreviewPage extends StatefulWidget {
   const ModuleMetaPreviewPage({
     super.key,
     required this.manifest,
     required this.moduleName,
+    this.readOnly = false,
   });
 
   final ModuleMetaManifest manifest;
   final String moduleName;
+  final bool readOnly;
 
   @override
   State<ModuleMetaPreviewPage> createState() => _ModuleMetaPreviewPageState();
@@ -24,12 +29,14 @@ class ModuleMetaPreviewPage extends StatefulWidget {
 
 class _ModuleMetaPreviewPageState extends State<ModuleMetaPreviewPage>
     with SingleTickerProviderStateMixin {
+  late final SeedDataController _seeds;
   TabController? _tabController;
   List<Map<String, dynamic>> _tabs = const [];
 
   @override
   void initState() {
     super.initState();
+    _seeds = SeedDataController(widget.manifest);
     _initTabs();
   }
 
@@ -43,10 +50,15 @@ class _ModuleMetaPreviewPageState extends State<ModuleMetaPreviewPage>
   @override
   void dispose() {
     _tabController?.dispose();
+    _seeds.dispose();
     super.dispose();
   }
 
-  void _openView(String viewSlug) {
+  void _popWithResult() {
+    Navigator.of(context).pop(_seeds.manifestWithSeed);
+  }
+
+  void _openView(String viewSlug, {String? rowId}) {
     final view = widget.manifest.viewBySlug(viewSlug);
     if (view == null) return;
     Navigator.of(context).push(
@@ -56,6 +68,9 @@ class _ModuleMetaPreviewPageState extends State<ModuleMetaPreviewPage>
           body: ViewInterpreterHost(
             manifest: widget.manifest,
             view: view,
+            seeds: _seeds,
+            rowId: rowId,
+            readOnly: widget.readOnly,
             onOpenView: _openView,
           ),
         ),
@@ -68,39 +83,51 @@ class _ModuleMetaPreviewPageState extends State<ModuleMetaPreviewPage>
     final l10n = AppLocalizations.of(context);
     final tokens = Theme.of(context).extension<AppColorTokens>()!;
 
-    if (_tabs.isEmpty) {
-      return AppScaffold(
-        title: _title(l10n, tokens),
-        body: EmptyPlaceholder(title: l10n.commonEmpty),
-      );
-    }
-
-    return AppScaffold(
-      title: _title(l10n, tokens),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Material(
-            color: Theme.of(context).colorScheme.surfaceContainerLow,
-            child: TabBar(
-              controller: _tabController,
-              isScrollable: true,
-              tabs: [
-                for (final tab in _tabs)
-                  Tab(text: tab['title'] as String? ?? '—'),
-              ],
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _popWithResult();
+      },
+      child: _tabs.isEmpty
+          ? AppScaffold(
+              title: _title(l10n, tokens),
+              body: EmptyPlaceholder(title: l10n.commonEmpty),
+            )
+          : AppScaffold(
+              title: _title(l10n, tokens),
+              body: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                    child: AppStatusBanner(
+                      severity: AppStatusSeverity.info,
+                      message: l10n.adminModuleSeedHint,
+                    ),
+                  ),
+                  Material(
+                    color: Theme.of(context).colorScheme.surfaceContainerLow,
+                    child: TabBar(
+                      controller: _tabController,
+                      isScrollable: true,
+                      tabs: [
+                        for (final tab in _tabs)
+                          Tab(text: tab['title'] as String? ?? '—'),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        for (final tab in _tabs) _tabBody(tab, l10n),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                for (final tab in _tabs) _tabBody(tab, l10n),
-              ],
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -141,6 +168,8 @@ class _ModuleMetaPreviewPageState extends State<ModuleMetaPreviewPage>
     return ViewInterpreterHost(
       manifest: widget.manifest,
       view: view,
+      seeds: _seeds,
+      readOnly: widget.readOnly,
       onOpenView: _openView,
     );
   }

@@ -163,6 +163,9 @@ class CabinetModuleService:
             cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
         )
         await self._require_installed(inst.schema_name, module_id=module_id)
+        body = await self._merge_column_defaults(
+            module_id=module_id, table_slug=table_slug, body=body
+        )
         row_id = f"row_{uuid.uuid4().hex[:12]}"
         created_by = employee.id if employee is not None else principal.sub
         qschema = qident(inst.schema_name)
@@ -272,6 +275,30 @@ class CabinetModuleService:
         if result.rowcount == 0:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
         await self._session.commit()
+
+    async def _merge_column_defaults(
+        self, *, module_id: str, table_slug: str, body: dict
+    ) -> dict:
+        """Fill missing keys from columns[].default in module meta (request wins)."""
+        try:
+            doc = await self._meta.get_document(module_id=module_id, slug="columns")
+        except AppError:
+            return body
+        raw = doc.get("body")
+        if not isinstance(raw, list):
+            return body
+        merged = dict(body)
+        for col in raw:
+            if not isinstance(col, dict):
+                continue
+            if col.get("table_slug") != table_slug:
+                continue
+            name = col.get("name")
+            if not isinstance(name, str) or not name or name in merged:
+                continue
+            if "default" in col:
+                merged[name] = col["default"]
+        return merged
 
     async def _require_module_binding(self, *, cabinet_id: str, module_id: str) -> None:
         q = await self._session.execute(

@@ -36,14 +36,15 @@ abstract final class CompanyModuleMetaRepository {
     final existingSet = existing.toSet();
     final slugMap = manifest.toSlugMap();
     for (final slug in ModuleMetaSlugs.all) {
-      final body = slugMap[slug] ?? const [];
-      if (body.isEmpty) {
+      final body = slugMap[slug];
+      if (ModuleMetaManifest.isSlugBodyEmpty(body)) {
         if (existingSet.contains(slug)) {
+          // Company API has no DELETE — overwrite with empty payload shape.
           await api.putModuleMetaDocument(
             companyId: companyId,
             moduleId: moduleId,
             slug: slug,
-            body: const [],
+            body: slug == ModuleMetaSlugs.seedRows ? const {'items': <dynamic>[]} : const [],
           );
         }
         continue;

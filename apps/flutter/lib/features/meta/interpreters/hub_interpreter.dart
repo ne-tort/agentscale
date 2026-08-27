@@ -7,6 +7,7 @@ import 'package:prodavan/features/meta/interpreters/collection_interpreter.dart'
 import 'package:prodavan/features/meta/interpreters/form_interpreter.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/preview/preview_stub.dart';
+import 'package:prodavan/features/meta/preview/seed_data_controller.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 class HubViewInterpreter extends StatelessWidget {
@@ -19,7 +20,7 @@ class HubViewInterpreter extends StatelessWidget {
 
   final ModuleMetaManifest manifest;
   final Map<String, dynamic> view;
-  final void Function(String viewSlug) onOpenView;
+  final void Function(String viewSlug, {String? rowId}) onOpenView;
 
   @override
   Widget build(BuildContext context) {
@@ -74,12 +75,18 @@ class ViewInterpreterHost extends StatelessWidget {
     super.key,
     required this.manifest,
     required this.view,
+    required this.seeds,
     required this.onOpenView,
+    this.rowId,
+    this.readOnly = false,
   });
 
   final ModuleMetaManifest manifest;
   final Map<String, dynamic> view;
-  final void Function(String viewSlug) onOpenView;
+  final SeedDataController seeds;
+  final void Function(String viewSlug, {String? rowId}) onOpenView;
+  final String? rowId;
+  final bool readOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -93,11 +100,19 @@ class ViewInterpreterHost extends StatelessWidget {
         return CollectionViewInterpreter(
           manifest: manifest,
           view: view,
+          seeds: seeds,
           onOpenForm: onOpenView,
+          readOnly: readOnly,
         );
       case 'form':
       case 'detail':
-        return FormViewInterpreter(manifest: manifest, view: view);
+        return FormViewInterpreter(
+          manifest: manifest,
+          view: view,
+          seeds: seeds,
+          rowId: rowId,
+          readOnly: readOnly,
+        );
       case 'hub':
         return HubViewInterpreter(
           manifest: manifest,

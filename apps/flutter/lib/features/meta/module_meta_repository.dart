@@ -23,8 +23,8 @@ abstract final class ModuleMetaRepository {
     final existingSet = existing.toSet();
     final slugMap = manifest.toSlugMap();
     for (final slug in ModuleMetaSlugs.all) {
-      final body = slugMap[slug] ?? const [];
-      if (body.isEmpty) {
+      final body = slugMap[slug];
+      if (ModuleMetaManifest.isSlugBodyEmpty(body)) {
         if (existingSet.contains(slug)) {
           await api.deleteModuleMetaDocument(moduleId: moduleId, slug: slug);
         }

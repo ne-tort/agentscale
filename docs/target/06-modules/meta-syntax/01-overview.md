@@ -18,7 +18,8 @@
 Admin/agent writes module_meta_documents (platform DB)
         │
         ├── bind module → cabinet
-        │       └── module_installations + empty module_data_rows
+        │       └── module_installations + module_data_rows
+        │               (empty, or prefilled from optional seed_rows meta)
         │
         ├── employee UI reads template + queries data rows
         │
@@ -56,6 +57,17 @@ Admin/agent writes module_meta_documents (platform DB)
 | `actions` | Кнопки/триггеры: copy file, export, invoke |
 | `materialize` | Agent docs, seeds, file_ref → Pod |
 | `mcp_tools` | Declarative wrappers без custom package |
+| `seed_rows` | Предзаполнить `module_data_rows` при MC bind (идемпотентно) |
+
+### Дефолты данных (без отдельного store)
+
+| Цель | Как |
+|------|-----|
+| Default поля при create_row | В `columns`: `"default": …` — см. [tables-and-columns](02-tables-and-columns.md) |
+| Стартовый набор строк в кабинете | Meta slug `seed_rows` → копируется в `module_data_rows` при bind |
+| JSON в workspace агента | `materialize` rules / actions на `project.created` (не строки БД) |
+
+**Не** класть runtime rows в `tables`/`columns` — шаблон остаётся shared; данные per cabinet.
 
 ## System vs dynamic tabs
 

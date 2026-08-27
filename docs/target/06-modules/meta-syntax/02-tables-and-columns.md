@@ -76,7 +76,25 @@ Schema-слой meta: **что хранится** и **как валидиров
 | `unique` | bool | Unique within table per cabinet |
 | `read_only` | bool | UI disabled; MCP may still write if policy allows |
 | `hidden` | bool | Not in default view columns |
-| `default` | any | Default on create_row |
+| `default` | any | Default on create_row (UI/API should merge missing keys from column default) |
+
+### Column defaults (практика)
+
+Чтобы поле всегда имело значение при создании строки — достаточно править meta JSON:
+
+```json
+{
+  "table_slug": "notes",
+  "name": "status",
+  "type": "enum",
+  "default": "draft",
+  "enum": { "values": ["draft", "done"] }
+}
+```
+
+Admin: `PUT /admin/modules/{id}/meta/documents/columns`.  
+Это **не** создаёт строки — только default при insert. Для готовых строк см. slug `seed_rows` в [overview](01-overview.md).
+
 | `enabled_when` | Condition | Conditional visibility — см. [scope-bindings](07-scope-bindings.md) |
 
 ## ColumnType allowlist

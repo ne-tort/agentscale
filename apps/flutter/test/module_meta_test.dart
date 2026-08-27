@@ -10,6 +10,7 @@ import 'package:prodavan/core/widgets/app_json_editor_field.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/module_meta_validator.dart';
 import 'package:prodavan/features/meta/preview/module_meta_preview_page.dart';
+import 'package:prodavan/features/meta/preview/seed_data_controller.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 Widget _ruApp(Widget home) {
@@ -201,17 +202,38 @@ void main() {
       final err = ModuleMetaValidator.validate(json);
       expect(err, contains('invalid table slug'));
     });
+
+    test('rejects seed_rows unknown table', () {
+      final json = Map<String, dynamic>.from(suppliersManifestJson());
+      json['seed_rows'] = {
+        'items': [
+          {'table_slug': 'missing', 'row_id': 'seed_1', 'body': {}},
+        ],
+      };
+      final err = ModuleMetaValidator.validate(json);
+      expect(err, contains('seed_rows'));
+    });
   });
 
   group('ModuleMetaManifest', () {
-    test('toSlugMap roundtrip', () {
-      final original = ModuleMetaManifest.fromJson(suppliersManifestJson());
+    test('toSlugMap roundtrip includes seed_rows', () {
+      final json = Map<String, dynamic>.from(suppliersManifestJson());
+      json['seed_rows'] = {
+        'items': [
+          {
+            'table_slug': 'suppliers',
+            'row_id': 'seed_alpha',
+            'body': {'name': 'Alpha', 'status': 'active'},
+          },
+        ],
+      };
+      final original = ModuleMetaManifest.fromJson(json);
+      expect(original.seedRows, hasLength(1));
       final slugMap = original.toSlugMap();
+      expect(slugMap[ModuleMetaSlugs.seedRows], isA<Map>());
       final restored = ModuleMetaManifest.fromSlugMap(slugMap);
+      expect(restored.seedRows.first['row_id'], 'seed_alpha');
       expect(restored.tables, original.tables);
-      expect(restored.columns, original.columns);
-      expect(restored.views, original.views);
-      expect(restored.tabs, original.tabs);
     });
 
     test('hasContent and isNonEmptyStubText', () {
@@ -235,8 +257,30 @@ void main() {
     });
   });
 
+  group('SeedDataController', () {
+    test('createRow applies column defaults', () {
+      final manifest = ModuleMetaManifest.fromJson(suppliersManifestJson());
+      final seeds = SeedDataController(manifest);
+      final id = seeds.createRow('suppliers');
+      expect(id, startsWith('seed_'));
+      final body = seeds.bodyFor(id);
+      expect(body['status'], 'active');
+      expect(seeds.manifestWithSeed.seedRows, hasLength(1));
+    });
+
+    test('delete and patch', () {
+      final manifest = ModuleMetaManifest.fromJson(suppliersManifestJson());
+      final seeds = SeedDataController(manifest);
+      final id = seeds.createRow('suppliers');
+      seeds.patchField(id, 'name', 'Acme');
+      expect(seeds.bodyFor(id)['name'], 'Acme');
+      seeds.deleteRow(id);
+      expect(seeds.itemsForTable('suppliers'), isEmpty);
+    });
+  });
+
   group('ModuleMetaPreviewPage', () {
-    testWidgets('shows tab title Поставщики', (tester) async {
+    testWidgets('shows empty seed state then create adds row', (tester) async {
       final manifest = ModuleMetaManifest.fromJson(suppliersManifestJson());
       await tester.pumpWidget(
         _ruApp(
@@ -248,24 +292,14 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('Поставщики'), findsWidgets);
-      expect(find.text('Sample 1'), findsWidgets);
-    });
+      expect(find.text('Нет предзаполненных строк'), findsOneWidget);
+      expect(find.text('Предзаполнение'), findsWidgets);
 
-    testWidgets('stub snack on toolbar add', (tester) async {
-      final manifest = ModuleMetaManifest.fromJson(suppliersManifestJson());
-      await tester.pumpWidget(
-        _ruApp(
-          ModuleMetaPreviewPage(
-            manifest: manifest,
-            moduleName: 'Suppliers Pack',
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
       await tester.tap(find.byIcon(Icons.add));
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 100));
-      expect(find.text('Добавить'), findsOneWidget);
+      await tester.pumpAndSettle();
+      // Form opens after create (row_tap open_form)
+      expect(find.text('Имя'), findsWidgets);
+      expect(find.text('Статус'), findsWidgets);
     });
 
     testWidgets('invalid view ref shows metadata placeholder', (tester) async {
@@ -371,7 +405,7 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(find.text('Предпросмотр'), findsOneWidget);
+      expect(find.text('Предзаполнение'), findsOneWidget);
       expect(find.byType(AppNavPreference), findsOneWidget);
     });
 

@@ -9,6 +9,7 @@ abstract final class ModuleMetaSlugs {
   static const actions = 'actions';
   static const materialize = 'materialize';
   static const mcpTools = 'mcp_tools';
+  static const seedRows = 'seed_rows';
 
   static const all = [
     tables,
@@ -18,6 +19,7 @@ abstract final class ModuleMetaSlugs {
     actions,
     materialize,
     mcpTools,
+    seedRows,
   ];
 
   static const required = [tables, columns, views, tabs];
@@ -33,6 +35,7 @@ class ModuleMetaManifest {
     this.actions = const [],
     this.materialize = const [],
     this.mcpTools = const [],
+    this.seedRows = const [],
   });
 
   final int syntaxVersion;
@@ -44,7 +47,34 @@ class ModuleMetaManifest {
   final List<Map<String, dynamic>> materialize;
   final List<Map<String, dynamic>> mcpTools;
 
+  /// Prefill rows (`seed_rows` items): `{table_slug, row_id, body}`.
+  final List<Map<String, dynamic>> seedRows;
+
   static ModuleMetaManifest empty() => ModuleMetaManifest();
+
+  ModuleMetaManifest copyWith({
+    int? syntaxVersion,
+    List<Map<String, dynamic>>? tables,
+    List<Map<String, dynamic>>? columns,
+    List<Map<String, dynamic>>? views,
+    List<Map<String, dynamic>>? tabs,
+    List<Map<String, dynamic>>? actions,
+    List<Map<String, dynamic>>? materialize,
+    List<Map<String, dynamic>>? mcpTools,
+    List<Map<String, dynamic>>? seedRows,
+  }) {
+    return ModuleMetaManifest(
+      syntaxVersion: syntaxVersion ?? this.syntaxVersion,
+      tables: tables ?? this.tables,
+      columns: columns ?? this.columns,
+      views: views ?? this.views,
+      tabs: tabs ?? this.tabs,
+      actions: actions ?? this.actions,
+      materialize: materialize ?? this.materialize,
+      mcpTools: mcpTools ?? this.mcpTools,
+      seedRows: seedRows ?? this.seedRows,
+    );
+  }
 
   static ModuleMetaManifest fromJson(Object? json) {
     if (json is! Map) {
@@ -59,6 +89,7 @@ class ModuleMetaManifest {
       actions: _listOfMaps(json['actions']),
       materialize: _listOfMaps(json['materialize']),
       mcpTools: _listOfMaps(json['mcp_tools']),
+      seedRows: parseSeedItems(json['seed_rows']),
     );
   }
 
@@ -71,6 +102,7 @@ class ModuleMetaManifest {
       actions: _listOfMaps(slugs[ModuleMetaSlugs.actions]),
       materialize: _listOfMaps(slugs[ModuleMetaSlugs.materialize]),
       mcpTools: _listOfMaps(slugs[ModuleMetaSlugs.mcpTools]),
+      seedRows: parseSeedItems(slugs[ModuleMetaSlugs.seedRows]),
     );
   }
 
@@ -83,9 +115,11 @@ class ModuleMetaManifest {
         if (actions.isNotEmpty) 'actions': actions,
         if (materialize.isNotEmpty) 'materialize': materialize,
         if (mcpTools.isNotEmpty) 'mcp_tools': mcpTools,
+        if (seedRows.isNotEmpty) 'seed_rows': {'items': seedRows},
       };
 
-  Map<String, List<Map<String, dynamic>>> toSlugMap() => {
+  /// Bodies for PUT meta/documents — list for schema slugs, object for seed_rows.
+  Map<String, dynamic> toSlugMap() => {
         ModuleMetaSlugs.tables: tables,
         ModuleMetaSlugs.columns: columns,
         ModuleMetaSlugs.views: views,
@@ -93,7 +127,11 @@ class ModuleMetaManifest {
         ModuleMetaSlugs.actions: actions,
         ModuleMetaSlugs.materialize: materialize,
         ModuleMetaSlugs.mcpTools: mcpTools,
+        ModuleMetaSlugs.seedRows: {'items': seedRows},
       };
+
+  /// Document body for slug `seed_rows`.
+  Map<String, dynamic> toSeedDocument() => {'items': seedRows};
 
   String toPrettyJson() {
     const encoder = JsonEncoder.withIndent('  ');
@@ -131,7 +169,8 @@ class ModuleMetaManifest {
       tabs.isNotEmpty ||
       actions.isNotEmpty ||
       materialize.isNotEmpty ||
-      mcpTools.isNotEmpty;
+      mcpTools.isNotEmpty ||
+      seedRows.isNotEmpty;
 
   /// Whether [text] parses to a manifest with real content (not empty stub).
   static bool isNonEmptyStubText(String text) {
@@ -141,6 +180,27 @@ class ModuleMetaManifest {
     } catch (_) {
       return false;
     }
+  }
+
+  /// Accept `{items:[…]}` or bare list of seed row defs.
+  static List<Map<String, dynamic>> parseSeedItems(Object? value) {
+    if (value is Map && value['items'] is List) {
+      return _listOfMaps(value['items']);
+    }
+    return _listOfMaps(value);
+  }
+
+  static bool isSlugBodyEmpty(Object? body) {
+    if (body == null) return true;
+    if (body is List) return body.isEmpty;
+    if (body is Map) {
+      if (body.containsKey('items')) {
+        final items = body['items'];
+        return items is! List || items.isEmpty;
+      }
+      return body.isEmpty;
+    }
+    return true;
   }
 
   static List<Map<String, dynamic>> _listOfMaps(Object? value) {

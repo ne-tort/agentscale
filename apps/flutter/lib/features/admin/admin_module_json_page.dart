@@ -93,7 +93,7 @@ class _AdminModuleJsonPageState extends State<AdminModuleJsonPage> {
     return ModuleMetaValidator.validate(parsed);
   }
 
-  void _openPreview() {
+  void _openPreview() async {
     final l10n = AppLocalizations.of(context);
     final text = _jsonController.text.trim();
     if (text.isEmpty) {
@@ -108,16 +108,23 @@ class _AdminModuleJsonPageState extends State<AdminModuleJsonPage> {
         return;
       }
       final manifest = ModuleMetaManifest.fromJson(decoded);
-      Navigator.of(context).push(
-        MaterialPageRoute<void>(
+      final updated = await Navigator.of(context).push<ModuleMetaManifest>(
+        MaterialPageRoute(
           builder: (_) => ModuleMetaPreviewPage(
             manifest: manifest,
             moduleName: widget.moduleName,
           ),
         ),
       );
+      if (!mounted || updated == null) return;
+      final pretty = updated.toPrettyJson();
+      _jsonController.text = pretty;
+      final canSave = ModuleMetaValidator.validate(updated.toJson()) == null;
+      _autosave.onTextChanged(pretty, canSave: canSave);
+      if (canSave) await _autosave.flushIfDirty();
+      setState(() {});
     } catch (e) {
-      AppErrors.showSnack(context, e);
+      if (mounted) AppErrors.showSnack(context, e);
     }
   }
 

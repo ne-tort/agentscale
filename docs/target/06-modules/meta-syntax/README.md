@@ -49,8 +49,11 @@ Shared template в platform DB — `module_meta_documents`:
 | `actions` | `ActionDefinition[]` (optional) |
 | `materialize` | `MaterializeRule[]` (optional) |
 | `mcp_tools` | `McpToolDefinition[]` (optional) |
+| `seed_rows` | стартовые `module_data_rows` при MC bind (optional) |
 
-Данные строк — **не** в meta: `cab_inst_*.module_data_rows` (per cabinet).
+Данные строк runtime — в `cab_inst_*.module_data_rows` (per cabinet). Опциональный `seed_rows` копирует **начальный** набор при bind; дальше данные живут только в кабинете.
+
+**Admin/Company UI:** экран «Предзаполнение» (бывший stub-preview) — CRUD по `seed_rows` через interpreters (collection/form); JSON-редактор round-trip включает `seed_rows`.
 
 ## Документы (читать по порядку)
 
@@ -66,6 +69,7 @@ Shared template в platform DB — `module_meta_documents`:
 | 8 | [mcp-tools](08-mcp-tools.md) | Declarative tools + packages |
 | 9 | [validation-rules](09-validation-rules.md) | JSON Schema правила, allowlists |
 | 10 | [ai-authoring-guide](10-ai-authoring-guide.md) | Инструкции для ИИ-автора |
+| 11 | [seed-rows](11-seed-rows.md) | Предзаполнение строк при MC bind |
 
 ## Примеры
 

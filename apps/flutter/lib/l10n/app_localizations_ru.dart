@@ -492,11 +492,11 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminModuleJsonConfigured => 'Настроено';
 
   @override
-  String get adminModulePreview => 'Предпросмотр';
+  String get adminModulePreview => 'Предзаполнение';
 
   @override
   String get adminModulePreviewEmpty =>
-      'Добавьте JSON модуля для предпросмотра';
+      'Добавьте JSON модуля для предзаполнения';
 
   @override
   String get adminModuleJsonInvalid => 'Неверный JSON';
@@ -505,7 +505,14 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminMetaInvalid => 'Метаданные';
 
   @override
-  String get adminModulePreviewMode => 'Предпросмотр';
+  String get adminModulePreviewMode => 'Предзаполнение';
+
+  @override
+  String get adminModuleSeedHint =>
+      'Правки строк сохраняются в seed_rows модуля';
+
+  @override
+  String get adminModuleSeedEmpty => 'Нет предзаполненных строк';
 
   @override
   String get adminSelectCabinetsForModule => 'Выберите кабинеты для модуля';

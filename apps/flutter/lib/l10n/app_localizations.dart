@@ -929,13 +929,13 @@ abstract class AppLocalizations {
   /// No description provided for @adminModulePreview.
   ///
   /// In en, this message translates to:
-  /// **'Preview'**
+  /// **'Seed data'**
   String get adminModulePreview;
 
   /// No description provided for @adminModulePreviewEmpty.
   ///
   /// In en, this message translates to:
-  /// **'Add module JSON to preview'**
+  /// **'Add module JSON to edit seed data'**
   String get adminModulePreviewEmpty;
 
   /// No description provided for @adminModuleJsonInvalid.
@@ -953,8 +953,20 @@ abstract class AppLocalizations {
   /// No description provided for @adminModulePreviewMode.
   ///
   /// In en, this message translates to:
-  /// **'Preview'**
+  /// **'Seed data'**
   String get adminModulePreviewMode;
+
+  /// No description provided for @adminModuleSeedHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Row edits are saved into the module seed_rows document'**
+  String get adminModuleSeedHint;
+
+  /// No description provided for @adminModuleSeedEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No seed rows yet'**
+  String get adminModuleSeedEmpty;
 
   /// No description provided for @adminSelectCabinetsForModule.
   ///

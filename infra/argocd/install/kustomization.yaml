@@ -3,8 +3,9 @@ kind: Kustomization
 namespace: argocd
 resources:
   - namespace.yaml
-  # Official Argo CD install (pinned). Apply once or via root Application.
-  - https://raw.githubusercontent.com/argoproj/argo-cd/v2.13.3/manifests/install.yaml
+  # Official Argo CD install (pinned v2.13.3), vendored for offline CI —
+  # remote raw.githubusercontent.com fetch flakes on self-hosted runners.
+  - upstream-install.yaml
 patches:
   - path: patch-repo-server-timeout.yaml
     target:
