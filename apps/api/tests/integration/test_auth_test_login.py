@@ -39,6 +39,16 @@ def test_auth_config_test_mode_hides_oidc(client: TestClient) -> None:
     assert body["oidc"] is None
 
 
+def test_oidc_token_proxy_requires_oidc_mode(client: TestClient) -> None:
+    r = client.post(
+        "/api/v1/auth/oidc/token",
+        content=b"grant_type=password&client_id=x&username=a&password=b",
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert r.status_code == 503
+    assert r.json()["code"] == "AUTH_MISCONFIGURED"
+
+
 def test_mint_platform_admin_token() -> None:
     token, expires_in = mint_test_access_token(sub=PLATFORM_ADMIN_SUB, platform_admin=True)
     assert expires_in >= 60

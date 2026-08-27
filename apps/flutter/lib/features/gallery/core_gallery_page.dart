@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
-import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_checkbox.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_icon_button.dart';
@@ -58,15 +57,12 @@ class CoreGalleryPage extends StatelessWidget {
                 selected: true,
                 onPressed: () {},
               ),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: AppButton(
-                  label: l10n.commonCreate,
-                  expanded: false,
-                  onPressed: () {},
-                ),
-              ),
             ],
+          ),
+          AppNavPreference(
+            title: l10n.commonCreate,
+            icon: Icons.add_rounded,
+            onTap: () {},
           ),
           const SizedBox(height: AppSpacing.lg),
           Text(l10n.galleryListItem, style: Theme.of(context).textTheme.titleMedium),
@@ -83,9 +79,10 @@ class CoreGalleryPage extends StatelessWidget {
           AppCheckbox(value: true, onChanged: null, label: l10n.galleryCheck),
           AppRadio<int>(value: 1, groupValue: 1, onChanged: null, label: l10n.galleryRadio),
           const SizedBox(height: AppSpacing.lg),
-          AppButton(
-            label: l10n.gallerySelector,
-            onPressed: () async {
+          AppNavPreference(
+            title: l10n.gallerySelector,
+            icon: Icons.list_alt_rounded,
+            onTap: () async {
               await Navigator.of(context).push<Set<String>>(
                 MaterialPageRoute(
                   builder: (_) => AppCatalogSelectPage(
@@ -101,11 +98,11 @@ class CoreGalleryPage extends StatelessWidget {
               );
             },
           ),
-          const SizedBox(height: AppSpacing.sm),
-          AppButton(
-            label: l10n.galleryDanger,
-            variant: AppButtonVariant.outlined,
-            onPressed: () {
+          AppNavPreference(
+            title: l10n.galleryDanger,
+            icon: Icons.delete_forever_rounded,
+            accentColor: Theme.of(context).colorScheme.error,
+            onTap: () {
               AppConfirmPage.push(
                 context,
                 title: l10n.commonDelete,

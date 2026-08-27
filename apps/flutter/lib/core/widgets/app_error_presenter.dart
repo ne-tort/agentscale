@@ -94,6 +94,8 @@ abstract final class AppErrors {
     String? title;
     String? detail;
     String? message;
+    String? oauthError;
+    String? oauthDescription;
     try {
       final decoded = jsonDecode(trimmed);
       if (decoded is Map) {
@@ -101,6 +103,8 @@ abstract final class AppErrors {
         title = decoded['title'] as String?;
         detail = decoded['detail'] as String?;
         message = decoded['message'] as String?;
+        oauthError = decoded['error'] as String?;
+        oauthDescription = decoded['error_description'] as String?;
       }
     } catch (_) {
       // Non-JSON body (proxy text, plain string).
@@ -110,21 +114,39 @@ abstract final class AppErrors {
     if (byCode != null) {
       return AppErrorPresentation(
         display: byCode,
-        diagnostic: _diagnostic(statusCode, code: code, detail: detail ?? message),
+        diagnostic: _diagnostic(
+          statusCode,
+          code: code ?? oauthError,
+          detail: detail ?? message ?? oauthDescription,
+        ),
       );
     }
 
-    final human = _firstHumanReadable([detail, message, title]);
+    final human = _firstHumanReadable([
+      oauthDescription,
+      detail,
+      message,
+      title,
+      oauthError,
+    ]);
     if (human != null && !_looksTechnical(human)) {
       return AppErrorPresentation(
         display: human,
-        diagnostic: _diagnostic(statusCode, code: code, detail: human),
+        diagnostic: _diagnostic(
+          statusCode,
+          code: code ?? oauthError,
+          detail: human,
+        ),
       );
     }
 
     return AppErrorPresentation(
       display: _statusMessage(l10n, statusCode),
-      diagnostic: _diagnostic(statusCode, code: code, detail: detail ?? message ?? title),
+      diagnostic: _diagnostic(
+        statusCode,
+        code: code ?? oauthError,
+        detail: detail ?? message ?? title ?? oauthDescription ?? trimmed,
+      ),
     );
   }
 
@@ -163,7 +185,8 @@ abstract final class AppErrors {
     if (code != null && code.isNotEmpty) parts.add(code);
     final d = (detail ?? '').trim();
     if (d.isNotEmpty && !_looksLikeHtml(d)) {
-      parts.add(d.length > 160 ? '${d.substring(0, 160)}…' : d);
+      // Clipboard gets the real payload (no HTML); keep readable length.
+      parts.add(d.length > 800 ? '${d.substring(0, 800)}…' : d);
     }
     return parts.join(' · ');
   }

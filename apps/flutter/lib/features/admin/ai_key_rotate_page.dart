@@ -5,7 +5,6 @@ import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Full-page secret rotation — same chrome as AI key detail secret field.
@@ -24,8 +23,6 @@ class AdminAiKeyRotatePage extends StatefulWidget {
 }
 
 class _AdminAiKeyRotatePageState extends State<AdminAiKeyRotatePage> {
-  Object? _error;
-
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -34,14 +31,6 @@ class _AdminAiKeyRotatePageState extends State<AdminAiKeyRotatePage> {
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         children: [
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-              child: AppStatusBanner(
-                severity: AppStatusSeverity.error,
-                message: AppErrors.localize(context, _error!),
-              ),
-            ),
           Padding(
             padding: const EdgeInsets.symmetric(
               horizontal: AppSpacing.md,
@@ -70,7 +59,8 @@ class _AdminAiKeyRotatePageState extends State<AdminAiKeyRotatePage> {
                 Navigator.of(context).pop(true);
               } catch (e) {
                 if (!context.mounted) return;
-                setState(() => _error = e);
+                AppErrors.showSnack(context, e);
+                rethrow;
               }
             },
           ),

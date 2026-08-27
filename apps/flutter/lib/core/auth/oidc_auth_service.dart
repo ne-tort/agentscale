@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_appauth/flutter_appauth.dart';
 import 'package:http/http.dart' as http;
+import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 /// PKCE OIDC sign-in for mobile (AppAuth) and desktop loopback (L01/L05).
@@ -64,17 +65,23 @@ class OidcAuthService {
     return _signInDesktopLoopback(oidc, kcIdpHint: kcIdpHint);
   }
 
+  /// Token URL via Prodavan API (in-cluster Keycloak). Never hit hostPort issuer from the app.
+  static String apiTokenEndpoint(String apiBaseUrl) {
+    final base = apiBaseUrl.replaceAll(RegExp(r'/+$'), '');
+    return '$base/auth/oidc/token';
+  }
+
   Future<OidcAuthResult?> refresh({
+    required String apiBaseUrl,
     required Map<String, dynamic> oidc,
     required String refreshToken,
   }) async {
-    final tokenEndpoint = oidc['token_endpoint'] as String?;
     final clientId = oidc['client_id'] as String?;
-    if (tokenEndpoint == null || clientId == null || refreshToken.isEmpty) {
+    if (clientId == null || refreshToken.isEmpty) {
       return null;
     }
     final res = await http.post(
-      Uri.parse(tokenEndpoint),
+      Uri.parse(apiTokenEndpoint(apiBaseUrl)),
       headers: {'Content-Type': 'application/x-www-form-urlencoded'},
       body: {
         'grant_type': 'refresh_token',
@@ -98,21 +105,20 @@ class OidcAuthService {
 
   /// First-party Resource Owner Password Credentials (company_id / username + password).
   ///
-  /// Requires Keycloak client `directAccessGrantsEnabled`. Prefer PKCE for browsers;
-  /// use this for native credential forms and automation.
+  /// Posts to API [apiTokenEndpoint] which proxies to in-cluster Keycloak.
   Future<OidcAuthResult> loginWithPassword({
+    required String apiBaseUrl,
     required Map<String, dynamic> oidc,
     required String username,
     required String password,
   }) async {
-    final tokenEndpoint = oidc['token_endpoint'] as String?;
     final clientId = oidc['client_id'] as String?;
     final user = username.trim();
-    if (tokenEndpoint == null || clientId == null || user.isEmpty) {
+    if (clientId == null || user.isEmpty) {
       throw StateError('Incomplete OIDC config for password login');
     }
     final res = await http.post(
-      Uri.parse(tokenEndpoint),
+      Uri.parse(apiTokenEndpoint(apiBaseUrl)),
       headers: {'Content-Type': 'application/x-www-form-urlencoded'},
       body: {
         'grant_type': 'password',
@@ -123,12 +129,12 @@ class OidcAuthService {
       },
     );
     if (res.statusCode < 200 || res.statusCode >= 300) {
-      throw StateError('Password login failed: ${res.statusCode}');
+      throw ProdavanApiException(res.statusCode, res.body);
     }
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     final access = body['access_token'] as String?;
     if (access == null || access.isEmpty) {
-      throw StateError('Token response missing access_token');
+      throw ProdavanApiException(res.statusCode, res.body);
     }
     return OidcAuthResult(
       accessToken: access,

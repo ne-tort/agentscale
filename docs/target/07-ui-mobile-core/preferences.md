@@ -61,9 +61,9 @@ AppChoicePreference<String>(
 ## Запреты
 
 - **Не** использовать `DropdownButton` / `DropdownButtonFormField` — только `AppChoicePreference` или `AppCatalogSelectPage`.
-- Create/submit и detail: preference kit (`AppValuePreference`, `AppChoicePreference`, …) + `AppButton` / `AppAsyncButton`.
-- **Не** заводить параллельные `AppTextField` / `AppPasswordField` / `AppForm` — ввод текста и секретов = `AppValuePreference` (в т.ч. `obscureText: true`).
-- Feature **не** создаёт локальные `IconButton`/`TextButton`/`FilledButton` — только core (`AppIconButton`, `AppButton`).
+- Create/submit и detail: preference kit (`AppValuePreference`, `AppChoicePreference`, `AppNavPreference`, …).
+- **Не** заводить параллельные `AppTextField` / `AppPasswordField` / `AppForm` / `AppButton` — ввод = `AppValuePreference`, действия = `AppNavPreference`.
+- Feature **не** создаёт локальные `IconButton`/`TextButton`/`FilledButton` — только core (`AppIconButton`, `AppNavPreference`).
 
 ## Связь
 

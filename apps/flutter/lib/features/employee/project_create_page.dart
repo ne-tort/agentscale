@@ -4,9 +4,7 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
-import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/employee/project_workspace_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -26,7 +24,6 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
   String _name = '';
   String? _agentProvider;
   bool _saving = false;
-  Object? _error;
   bool _seeded = false;
 
   @override
@@ -42,13 +39,10 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
     final l10n = AppLocalizations.of(context);
     final name = _name.trim();
     if (name.isEmpty) {
-      setState(() => _error = l10n.commonNameRequired);
+      AppErrors.showSnack(context, l10n.commonNameRequired);
       return;
     }
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
+    setState(() => _saving = true);
     try {
       final project = await workContext.api.createProject(
         cabinetId: widget.cabinetId,
@@ -70,10 +64,8 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
       );
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e;
-        _saving = false;
-      });
+      setState(() => _saving = false);
+      AppErrors.showSnack(context, e);
     }
   }
 
@@ -93,14 +85,6 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         children: [
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-              child: AppStatusBanner(
-                severity: AppStatusSeverity.error,
-                message: AppErrors.localize(context, _error!),
-              ),
-            ),
           AppValuePreference<String>(
             title: l10n.projectProjectName,
             icon: Icons.folder_outlined,
@@ -119,14 +103,17 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
             enabled: !_saving,
             onSave: (v) async => setState(() => _agentProvider = v),
           ),
-          Padding(
-            padding: const EdgeInsets.all(AppSpacing.md),
-            child: AppAsyncButton(
-              label: _saving ? l10n.commonCreating : l10n.projectCreateAndOpenChat,
-              busy: _saving,
-              onPressed: _saving ? null : _create,
+          if (_saving)
+            const Padding(
+              padding: EdgeInsets.all(AppSpacing.lg),
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+            )
+          else
+            AppNavPreference(
+              title: l10n.projectCreateAndOpenChat,
+              icon: Icons.chat_outlined,
+              onTap: _create,
             ),
-          ),
         ],
       ),
     );

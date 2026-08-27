@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 
+import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
-import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_icon_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
-import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/employee/cabinet_create_page.dart';
 import 'package:prodavan/features/employee/dynamic_cabinet_shell.dart';
 import 'package:prodavan/features/settings/open_app_settings.dart';
@@ -25,7 +24,6 @@ class CabinetListPage extends StatefulWidget {
 class _CabinetListPageState extends State<CabinetListPage> {
   late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
-  Object? _error;
   List<Map<String, dynamic>> _cabinets = const [];
 
   @override
@@ -46,10 +44,7 @@ class _CabinetListPageState extends State<CabinetListPage> {
 
   Future<void> _reload({bool silent = false}) async {
     if (!silent && mounted) {
-      setState(() {
-        _loading = true;
-        _error = null;
-      });
+      setState(() => _loading = true);
     }
     try {
       final items = await workContext.api.listCabinets();
@@ -58,15 +53,12 @@ class _CabinetListPageState extends State<CabinetListPage> {
       setState(() {
         _cabinets = items;
         _loading = false;
-        _error = null;
       });
     } catch (e) {
       if (!mounted) return;
       if (silent) return;
-      setState(() {
-        _error = e;
-        _loading = false;
-      });
+      setState(() => _loading = false);
+      AppErrors.showSnack(context, e);
     }
   }
 
@@ -104,45 +96,33 @@ class _CabinetListPageState extends State<CabinetListPage> {
           onPressed: () => openAppSettings(context),
         ),
       ],
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (_error != null)
-            AppStatusBanner(
-              severity: AppStatusSeverity.error,
-              message: AppErrors.localize(context, _error!),
-            ),
-          Expanded(
-            child: AppEntityCollection(
-              loading: _loading,
-              rows: rows,
-              primaryColumnLabel: l10n.commonName,
-              columns: [
-                AppEntityColumn(id: 'status', label: l10n.commonStatus, width: 96),
-              ],
-              onOpen: (row) {
-                workContext.enterCabinet(row.id);
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => DynamicCabinetShell(
-                      cabinetId: row.id,
-                      cabinetName: row.title,
-                    ),
-                  ),
-                );
-              },
-              empty: EmptyPlaceholder(
-                title: l10n.companyNoCabinets,
-                subtitle: l10n.cabinetCreateBaseCabinetHint,
-                action: AppButton(
-                  label: l10n.commonCreate,
-                  expanded: false,
-                  onPressed: _createCabinet,
-                ),
+      body: AppEntityCollection(
+        loading: _loading,
+        rows: rows,
+        primaryColumnLabel: l10n.commonName,
+        columns: [
+          AppEntityColumn(id: 'status', label: l10n.commonStatus, width: 96),
+        ],
+        onOpen: (row) {
+          workContext.enterCabinet(row.id);
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => DynamicCabinetShell(
+                cabinetId: row.id,
+                cabinetName: row.title,
               ),
             ),
+          );
+        },
+        empty: EmptyPlaceholder(
+          title: l10n.companyNoCabinets,
+          subtitle: l10n.cabinetCreateBaseCabinetHint,
+          action: AppNavPreference(
+            title: l10n.commonCreate,
+            icon: Icons.add_rounded,
+            onTap: _createCabinet,
           ),
-        ],
+        ),
       ),
     );
   }

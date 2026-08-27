@@ -8,7 +8,7 @@
 
 ```text
 atoms          AppIconButton, AppCheckbox, AppRadio, AppSpacing, AppColorTokens, AppHairlineDivider
-molecules      AppListItem, AppButton, AppPreferenceTile, AppNavPreference, AppStatusBanner
+molecules      AppListItem, AppPreferenceTile, AppNavPreference, AppStatusBanner
 organisms      AppEntityCollection, AppSelectorPage, AppScaffold, EmptyPlaceholder, preferences/*, AppConfirmPage, AppSnackBar
 screens        feature pages (только сборка organisms/molecules)
 ```

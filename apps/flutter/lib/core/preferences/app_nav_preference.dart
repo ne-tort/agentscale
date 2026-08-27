@@ -12,6 +12,7 @@ class AppNavPreference extends StatelessWidget {
     required this.onTap,
     this.subtitle,
     this.accentColor,
+    this.enabled = true,
   });
 
   final String title;
@@ -19,21 +20,25 @@ class AppNavPreference extends StatelessWidget {
   final VoidCallback onTap;
   final Widget? subtitle;
   final Color? accentColor;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
     return AppPreferenceTile(
       title: title,
       icon: icon,
+      enabled: enabled,
       leading: Icon(
         icon,
         size: 24,
-        color: accentColor ?? Theme.of(context).colorScheme.onSurfaceVariant,
+        color: enabled
+            ? (accentColor ?? Theme.of(context).colorScheme.onSurfaceVariant)
+            : Theme.of(context).disabledColor,
       ),
       subtitle: subtitle,
       accentColor: accentColor,
       trailing: const AppTrailingChevron(),
-      onTap: onTap,
+      onTap: enabled ? onTap : null,
     );
   }
 }

@@ -4,9 +4,7 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/session/company_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/preferences/preferences.dart';
-import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Full-page employee invite — no password field (L04 ux-contract).
@@ -16,25 +14,25 @@ class CompanyInviteEmployeePage extends StatefulWidget {
   final String companyId;
 
   @override
-  State<CompanyInviteEmployeePage> createState() => _CompanyInviteEmployeePageState();
+  State<CompanyInviteEmployeePage> createState() =>
+      _CompanyInviteEmployeePageState();
 }
 
 class _CompanyInviteEmployeePageState extends State<CompanyInviteEmployeePage> {
   String _email = '';
   String _displayName = '';
   bool _saving = false;
-  Object? _error;
 
   Future<void> _invite() async {
     final email = _email.trim();
     if (email.isEmpty || !email.contains('@')) {
-      setState(() => _error = AppLocalizations.of(context).companyValidEmailRequired);
+      AppErrors.showSnack(
+        context,
+        AppLocalizations.of(context).companyValidEmailRequired,
+      );
       return;
     }
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
+    setState(() => _saving = true);
     try {
       await companyContext.api.inviteEmployee(
         companyId: widget.companyId,
@@ -45,10 +43,8 @@ class _CompanyInviteEmployeePageState extends State<CompanyInviteEmployeePage> {
       Navigator.of(context).pop(true);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e;
-        _saving = false;
-      });
+      setState(() => _saving = false);
+      AppErrors.showSnack(context, e);
     }
   }
 
@@ -60,14 +56,6 @@ class _CompanyInviteEmployeePageState extends State<CompanyInviteEmployeePage> {
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         children: [
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-              child: AppStatusBanner(
-                severity: AppStatusSeverity.error,
-                message: AppErrors.localize(context, _error!),
-              ),
-            ),
           Padding(
             padding: const EdgeInsets.symmetric(
               horizontal: AppSpacing.md,
@@ -91,14 +79,17 @@ class _CompanyInviteEmployeePageState extends State<CompanyInviteEmployeePage> {
             presentValue: (v) => v.isEmpty ? l10n.commonNotSet : v,
             onSave: (v) async => setState(() => _displayName = v.trim()),
           ),
-          Padding(
-            padding: const EdgeInsets.all(AppSpacing.md),
-            child: AppAsyncButton(
-              label: _saving ? l10n.companyInviting : l10n.commonInvite,
-              busy: _saving,
-              onPressed: _saving ? null : _invite,
+          if (_saving)
+            const Padding(
+              padding: EdgeInsets.all(AppSpacing.lg),
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+            )
+          else
+            AppNavPreference(
+              title: l10n.commonInvite,
+              icon: Icons.person_add_alt_1_rounded,
+              onTap: _invite,
             ),
-          ),
         ],
       ),
     );

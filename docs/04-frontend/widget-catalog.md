@@ -66,7 +66,10 @@
 | Widget | Файл | Описание |
 |--------|------|----------|
 | `AppIconButton` | `app_icon_button.dart` | Icon-only, **no tooltip**, Semantics required |
-| `AppButton` | `app_button.dart` | Text button / filled / outlined |
+| ~~`AppButton`~~ | — | **removed** → `AppNavPreference` |
+| ~~`AppAsyncButton`~~ | — | **removed** → `AppNavPreference` + busy spinner |
+| `AppIconButton` | `app_icon_button.dart` | Toolbar / chrome |
+| `AppNavPreference` | preferences | Labeled actions (Вход, Сохранить, …) |
 | `DestructiveButton` | `destructive_button.dart` | Red outline, confirm required |
 | `AsyncActionButton` | `async_action_button.dart` | Loading state inline |
 

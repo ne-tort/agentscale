@@ -182,6 +182,7 @@ class TokenSession extends ChangeNotifier {
   }) async {
     final oidc = await _ensureOidc(baseUrl);
     final result = await _oidc.loginWithPassword(
+      apiBaseUrl: baseUrl,
       oidc: oidc,
       username: username,
       password: password,
@@ -218,6 +219,7 @@ class TokenSession extends ChangeNotifier {
     try {
       final oidc = await _ensureOidc(current.baseUrl);
       final result = await _oidc.refresh(
+        apiBaseUrl: current.baseUrl,
         oidc: oidc,
         refreshToken: refreshTok,
       );

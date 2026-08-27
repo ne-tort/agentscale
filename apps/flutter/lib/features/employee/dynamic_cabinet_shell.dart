@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/work_context.dart';
-import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/employee/project_list_page.dart';
@@ -45,10 +45,10 @@ class _DynamicCabinetShellState extends State<DynamicCabinetShell> {
       body: EmptyPlaceholder(
         title: widget.cabinetName,
         subtitle: l10n.cabinetOpenedPlaceholder,
-        action: AppButton(
-          label: l10n.commonProjects,
-          expanded: false,
-          onPressed: _openProjects,
+        action: AppNavPreference(
+          title: l10n.commonProjects,
+          icon: Icons.folder_outlined,
+          onTap: _openProjects,
         ),
       ),
     );

@@ -6,9 +6,7 @@ import 'package:prodavan/core/auth/token_session.dart';
 import 'package:prodavan/core/config/api_base.dart';
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/work_context.dart';
-import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
-import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_card.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_icon_button.dart';
@@ -17,9 +15,7 @@ import 'package:prodavan/core/widgets/app_section_header.dart';
 import 'package:prodavan/features/settings/open_app_settings.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Unified username/password login via Keycloak ROPC.
-///
-/// Fields/button = preference kit + [AppButton] (same chrome as AI key secret).
+/// Unified username/password login via Keycloak ROPC (API token proxy).
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -32,7 +28,6 @@ class _LoginPageState extends State<LoginPage> {
   String _password = '';
   bool _loadingConfig = true;
   bool _connecting = false;
-  Object? _error;
   Map<String, dynamic>? _authConfig;
 
   @override
@@ -42,10 +37,7 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _loadConfig() async {
-    setState(() {
-      _loadingConfig = true;
-      _error = null;
-    });
+    setState(() => _loadingConfig = true);
     try {
       final cfg = await AuthConfigClient(baseUrl: ApiBase.value).fetch();
       if (!mounted) return;
@@ -58,8 +50,8 @@ class _LoginPageState extends State<LoginPage> {
       setState(() {
         _authConfig = null;
         _loadingConfig = false;
-        _error = e;
       });
+      AppErrors.showSnack(context, e);
     }
   }
 
@@ -69,10 +61,7 @@ class _LoginPageState extends State<LoginPage> {
     if (username.isEmpty || password.isEmpty || _connecting) return;
     if (_authConfig?['oidc'] == null) return;
 
-    setState(() {
-      _connecting = true;
-      _error = null;
-    });
+    setState(() => _connecting = true);
     try {
       await tokenSession.loginWithPassword(
         baseUrl: ApiBase.value,
@@ -84,10 +73,8 @@ class _LoginPageState extends State<LoginPage> {
       await navigateAfterMe(context, me);
     } catch (e) {
       if (!mounted) return;
-      setState(() {
-        _error = e;
-        _connecting = false;
-      });
+      setState(() => _connecting = false);
+      AppErrors.showSnack(context, e);
     }
   }
 
@@ -130,19 +117,6 @@ class _LoginPageState extends State<LoginPage> {
                             ),
                           ),
                         ),
-                        if (_error != null)
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(
-                              AppSpacing.md,
-                              0,
-                              AppSpacing.md,
-                              AppSpacing.sm,
-                            ),
-                            child: Text(
-                              AppErrors.localize(context, _error!),
-                              style: TextStyle(color: context.appColors.danger),
-                            ),
-                          ),
                         AppValuePreference<String>(
                           title: l10n.authLogin,
                           icon: Icons.person_outline_rounded,
@@ -167,21 +141,20 @@ class _LoginPageState extends State<LoginPage> {
                             setState(() => _password = v);
                           },
                         ),
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(
-                            AppSpacing.md,
-                            AppSpacing.md,
-                            AppSpacing.md,
-                            AppSpacing.sm,
+                        if (_connecting)
+                          const Padding(
+                            padding: EdgeInsets.all(AppSpacing.lg),
+                            child: Center(
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                          )
+                        else
+                          AppNavPreference(
+                            title: l10n.authSignIn,
+                            icon: Icons.login_rounded,
+                            enabled: canSubmit,
+                            onTap: _submit,
                           ),
-                          child: AppAsyncButton(
-                            label: _connecting
-                                ? l10n.authSigningIn
-                                : l10n.authSignIn,
-                            busy: _connecting,
-                            onPressed: canSubmit ? _submit : null,
-                          ),
-                        ),
                       ],
                     ),
                   ),
