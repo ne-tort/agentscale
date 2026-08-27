@@ -956,6 +956,18 @@ abstract class AppLocalizations {
   /// **'Seed data'**
   String get adminModulePreviewMode;
 
+  /// No description provided for @adminModulePreviewShellNav.
+  ///
+  /// In en, this message translates to:
+  /// **'Shell nav (preview)'**
+  String get adminModulePreviewShellNav;
+
+  /// No description provided for @adminModulePreviewCabinetTabs.
+  ///
+  /// In en, this message translates to:
+  /// **'Cabinet tabs'**
+  String get adminModulePreviewCabinetTabs;
+
   /// No description provided for @adminModuleSeedEmpty.
   ///
   /// In en, this message translates to:

@@ -9,20 +9,13 @@ import 'package:prodavan/features/company/company_cabinets_page.dart';
 import 'package:prodavan/features/company/company_employees_page.dart';
 import 'package:prodavan/features/company/company_module_list_page.dart';
 import 'package:prodavan/features/company/company_project_containers_page.dart';
-import 'package:prodavan/features/meta/meta_icon.dart';
-import 'package:prodavan/features/meta/module_shell_nav_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Narrow-only hub: Employees / AI Keys / Containers / Cabinets / Modules + module shell nav.
+/// Narrow-only hub: Employees / AI Keys / Containers / Cabinets / Modules.
 class CompanyManagementPage extends StatelessWidget {
-  const CompanyManagementPage({
-    super.key,
-    required this.companyId,
-    this.extraShellNav = const [],
-  });
+  const CompanyManagementPage({super.key, required this.companyId});
 
   final String companyId;
-  final List<ShellNavEntry> extraShellNav;
 
   Future<void> _open(BuildContext context, Widget page) {
     return Navigator.of(context).push<void>(
@@ -59,12 +52,6 @@ class CompanyManagementPage extends StatelessWidget {
         label: l10n.navModules,
         page: CompanyModuleListPage(companyId: companyId),
       ),
-      for (final entry in extraShellNav)
-        (
-          icon: entry.icon,
-          label: entry.label,
-          page: ModuleShellNavPage(entry: entry, companyId: companyId),
-        ),
     ];
 
     return AppScaffold(

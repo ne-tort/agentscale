@@ -62,7 +62,7 @@ void main() {
     expect(find.text('Prodavan'), findsOneWidget);
   });
 
-  testWidgets('settings appears as a rail destination when included', (tester) async {
+  testWidgets('settings pinned near bottom of rail', (tester) async {
     await tester.binding.setSurfaceSize(const Size(800, 600));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -72,12 +72,16 @@ void main() {
         AppLayout(
           constrainBody: false,
           subpageOpen: false,
-          selectedIndex: 2,
+          selectedIndex: 0,
           onDestinationSelected: (_) {},
+          trailingDestination: const AppNavDestination(
+            icon: Icons.settings_outlined,
+            label: 'Settings',
+          ),
+          onTrailingSelected: () {},
           destinations: const [
             AppNavDestination(icon: Icons.dashboard_outlined, label: 'Overview'),
             AppNavDestination(icon: Icons.business_outlined, label: 'Companies'),
-            AppNavDestination(icon: Icons.settings_outlined, label: 'Settings'),
           ],
           body: const ColoredBox(color: Color(0xFF00AA00)),
         ),
@@ -85,9 +89,45 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Settings'), findsWidgets);
-    final rail = tester.widget<NavigationRail>(find.byType(NavigationRail));
-    expect(rail.selectedIndex, 2);
+    final railBox = tester.getRect(find.byType(NavigationRail));
+    final settingsIcon = tester.getRect(find.byIcon(Icons.settings_outlined));
+    expect(settingsIcon.bottom, greaterThan(railBox.center.dy));
+    expect(settingsIcon.bottom, lessThanOrEqualTo(railBox.bottom + 1));
+  });
+
+  testWidgets('settings appears as bottom nav item when trailing on narrow', (tester) async {
+    tester.view.physicalSize = const Size(390, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      wrap(
+        const Size(390, 800),
+        AppLayout(
+          constrainBody: false,
+          selectedIndex: 0,
+          onDestinationSelected: (_) {},
+          trailingDestination: const AppNavDestination(
+            icon: Icons.settings_outlined,
+            label: 'Settings',
+          ),
+          trailingSelected: false,
+          onTrailingSelected: () {},
+          destinations: const [
+            AppNavDestination(icon: Icons.dashboard_outlined, label: 'Overview'),
+          ],
+          body: const ColoredBox(color: Color(0xFF00AA00)),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final bar = tester.widget<NavigationBar>(find.byType(NavigationBar));
+    final labels = bar.destinations
+        .map((d) => (d as NavigationDestination).label)
+        .toList();
+    expect(labels, ['Overview', 'Settings']);
   });
 
   testWidgets('content survives medium → expanded resize', (tester) async {

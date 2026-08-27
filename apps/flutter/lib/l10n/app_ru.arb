@@ -375,6 +375,8 @@
   "adminModuleJsonInvalid": "Неверный JSON",
   "adminMetaInvalid": "Метаданные",
   "adminModulePreviewMode": "Предзаполнение",
+  "adminModulePreviewShellNav": "Навигация shell (предпросмотр)",
+  "adminModulePreviewCabinetTabs": "Вкладки кабинета",
   "adminModuleSeedEmpty": "Нет предзаполненных строк",
   "adminSelectCabinetsForModule": "Выберите кабинеты для модуля",
   "adminSelectModulesForCabinet": "Выберите модули для кабинета",

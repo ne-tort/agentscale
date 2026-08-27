@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/responsive/app_breakpoints.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/meta/interpreters/hub_interpreter.dart';
+import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/preview/seed_data_controller.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -16,11 +18,15 @@ class ModuleMetaPreviewPage extends StatefulWidget {
     required this.manifest,
     required this.moduleName,
     this.readOnly = false,
+    this.shellNavContour = ShellNavContour.admin,
   });
 
   final ModuleMetaManifest manifest;
   final String moduleName;
   final bool readOnly;
+
+  /// Which product-shell contour to preview (`nav.contour` on tabs).
+  final String shellNavContour;
 
   @override
   State<ModuleMetaPreviewPage> createState() => _ModuleMetaPreviewPageState();
@@ -31,6 +37,8 @@ class _ModuleMetaPreviewPageState extends State<ModuleMetaPreviewPage>
   late final SeedDataController _seeds;
   TabController? _tabController;
   List<Map<String, dynamic>> _tabs = const [];
+  int _shellNavIndex = 0;
+  bool _showShellNavPreview = false;
 
   @override
   void initState() {
@@ -45,6 +53,13 @@ class _ModuleMetaPreviewPageState extends State<ModuleMetaPreviewPage>
       _tabController = TabController(length: _tabs.length, vsync: this);
     }
   }
+
+  List<ShellNavEntry> get _shellNavEntries => mergeShellNavEntries(
+        contour: widget.shellNavContour,
+        modules: [
+          (id: 'preview', name: widget.moduleName, tabs: widget.manifest.tabs),
+        ],
+      );
 
   @override
   void dispose() {
@@ -81,6 +96,8 @@ class _ModuleMetaPreviewPageState extends State<ModuleMetaPreviewPage>
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final tokens = Theme.of(context).extension<AppColorTokens>()!;
+    final shellNav = _shellNavEntries;
+    final narrow = AppBreakpoints.isNarrow(context);
 
     return PopScope(
       canPop: false,
@@ -88,38 +105,134 @@ class _ModuleMetaPreviewPageState extends State<ModuleMetaPreviewPage>
         if (didPop) return;
         _popWithResult();
       },
-      child: _tabs.isEmpty
-          ? AppScaffold(
-              title: _title(l10n, tokens),
-              body: EmptyPlaceholder(title: l10n.commonEmpty),
-            )
-          : AppScaffold(
-              title: _title(l10n, tokens),
-              body: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: AppScaffold(
+        title: _title(l10n, tokens),
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (shellNav.isNotEmpty) _shellNavPreviewHeader(l10n, shellNav, narrow),
+            Expanded(
+              child: _showShellNavPreview && shellNav.isNotEmpty
+                  ? _shellNavBody(shellNav[_shellNavIndex.clamp(0, shellNav.length - 1)], l10n)
+                  : _cabinetTabBody(l10n),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _shellNavPreviewHeader(
+    AppLocalizations l10n,
+    List<ShellNavEntry> shellNav,
+    bool narrow,
+  ) {
+    return Material(
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.sm),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              l10n.adminModulePreviewShellNav,
+              style: Theme.of(context).textTheme.labelLarge,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            if (narrow)
+              Wrap(
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.sm,
                 children: [
-                  Material(
-                    color: Theme.of(context).colorScheme.surfaceContainerLow,
-                    child: TabBar(
-                      controller: _tabController,
-                      isScrollable: true,
-                      tabs: [
-                        for (final tab in _tabs)
-                          Tab(text: tab['title'] as String? ?? '—'),
-                      ],
+                  for (var i = 0; i < shellNav.length; i++)
+                    FilterChip(
+                      label: Text(shellNav[i].label),
+                      selected: _showShellNavPreview && _shellNavIndex == i,
+                      onSelected: (_) => setState(() {
+                        _showShellNavPreview = true;
+                        _shellNavIndex = i;
+                      }),
                     ),
+                  FilterChip(
+                    label: Text(l10n.adminModulePreviewCabinetTabs),
+                    selected: !_showShellNavPreview,
+                    onSelected: (_) => setState(() => _showShellNavPreview = false),
                   ),
-                  Expanded(
-                    child: TabBarView(
-                      controller: _tabController,
-                      children: [
-                        for (final tab in _tabs) _tabBody(tab, l10n),
-                      ],
+                ],
+              )
+            else
+              Wrap(
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.sm,
+                children: [
+                  for (var i = 0; i < shellNav.length; i++)
+                    FilterChip(
+                      avatar: Icon(shellNav[i].icon, size: 18),
+                      label: Text(shellNav[i].label),
+                      selected: _showShellNavPreview && _shellNavIndex == i,
+                      onSelected: (_) => setState(() {
+                        _showShellNavPreview = true;
+                        _shellNavIndex = i;
+                      }),
                     ),
+                  FilterChip(
+                    label: Text(l10n.adminModulePreviewCabinetTabs),
+                    selected: !_showShellNavPreview,
+                    onSelected: (_) => setState(() => _showShellNavPreview = false),
                   ),
                 ],
               ),
-            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _shellNavBody(ShellNavEntry entry, AppLocalizations l10n) {
+    final viewSlug = entry.viewSlug;
+    if (viewSlug.isEmpty) {
+      return EmptyPlaceholder(title: l10n.adminMetaInvalid);
+    }
+    final view = widget.manifest.viewBySlug(viewSlug);
+    if (view == null) {
+      return EmptyPlaceholder(title: l10n.adminMetaInvalid);
+    }
+    return ViewInterpreterHost(
+      manifest: widget.manifest,
+      view: view,
+      seeds: _seeds,
+      readOnly: widget.readOnly,
+      onOpenView: _openView,
+    );
+  }
+
+  Widget _cabinetTabBody(AppLocalizations l10n) {
+    if (_tabs.isEmpty) {
+      return EmptyPlaceholder(title: l10n.commonEmpty);
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Material(
+          color: Theme.of(context).colorScheme.surfaceContainerLow,
+          child: TabBar(
+            controller: _tabController,
+            isScrollable: true,
+            tabs: [
+              for (final tab in _tabs)
+                Tab(text: tab['title'] as String? ?? '—'),
+            ],
+          ),
+        ),
+        Expanded(
+          child: TabBarView(
+            controller: _tabController,
+            children: [
+              for (final tab in _tabs) _tabBody(tab, l10n),
+            ],
+          ),
+        ),
+      ],
     );
   }
 

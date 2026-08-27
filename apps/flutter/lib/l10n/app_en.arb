@@ -373,6 +373,8 @@
   "adminModuleJsonInvalid": "Invalid JSON",
   "adminMetaInvalid": "Metadata",
   "adminModulePreviewMode": "Seed data",
+  "adminModulePreviewShellNav": "Shell nav (preview)",
+  "adminModulePreviewCabinetTabs": "Cabinet tabs",
   "adminModuleSeedEmpty": "No seed rows yet",
   "adminSelectCabinetsForModule": "Select cabinets for module",
   "adminSelectModulesForCabinet": "Select modules for cabinet",

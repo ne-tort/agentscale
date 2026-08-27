@@ -26,11 +26,8 @@ class AppNavDestination {
 
 /// Product chrome: adaptive nav + content column (max-width outside the rail).
 ///
-/// - narrow: bottom [NavigationBar]
-/// - medium: **left** [NavigationRail] icon over label + logo leading
-/// - expanded: **left** extended rail (compact on subpages unless very wide)
-///
-/// All destinations (including Settings) are supplied by the shell — no overlay routes.
+/// - narrow: bottom [NavigationBar] (destinations may include Settings)
+/// - medium+: left [NavigationRail]; optional [trailingDestination] pinned at bottom
 class AppLayout extends StatelessWidget {
   const AppLayout({
     super.key,
@@ -43,16 +40,25 @@ class AppLayout extends StatelessWidget {
     this.constrainBody = true,
     this.onLogoTap,
     this.subpageOpen = false,
+    this.trailingDestination,
+    this.trailingSelected = false,
+    this.onTrailingSelected,
   });
 
   final Widget body;
   final List<AppNavDestination> destinations;
+  /// Selected index among [destinations] only (not trailing).
   final int selectedIndex;
   final ValueChanged<int> onDestinationSelected;
   final Widget? title;
   final List<Widget>? actions;
   final bool constrainBody;
   final VoidCallback? onLogoTap;
+
+  /// Pinned at bottom of left rail (desktop). Shell switches content via [onTrailingSelected].
+  final AppNavDestination? trailingDestination;
+  final bool trailingSelected;
+  final VoidCallback? onTrailingSelected;
 
   /// True when a nested shell route (detail, …) is open in the content pane.
   final bool subpageOpen;
@@ -155,21 +161,75 @@ class AppLayout extends StatelessWidget {
     );
   }
 
+  Widget _trailingControl(
+    BuildContext context, {
+    required AppNavDestination destination,
+    required bool extended,
+    required bool selected,
+  }) {
+    final colors = context.appColors;
+    final icon = Icon(
+      destination.icon,
+      color: selected ? colors.primary : colors.muted,
+      size: 24,
+    );
+    final label = Text(
+      destination.label,
+      style: TextStyle(
+        color: selected
+            ? colors.primary
+            : (extended ? colors.onSurface : colors.muted),
+        fontSize: extended ? 14 : 12,
+        fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      child: InkWell(
+        onTap: onTrailingSelected,
+        borderRadius: BorderRadius.circular(12),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+          child: _railIconLabel(extended: extended, icon: icon, label: label),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final narrow = AppBreakpoints.isNarrow(context);
     final expanded = AppBreakpoints.railExtended(context, subpageOpen: subpageOpen);
     final content = _contentColumn();
-    final selected = selectedIndex.clamp(0, destinations.isEmpty ? 0 : destinations.length - 1);
+    final mainSelected = destinations.isEmpty
+        ? 0
+        : selectedIndex.clamp(0, destinations.length - 1);
 
     if (narrow) {
+      final allDestinations = [
+        ...destinations,
+        if (trailingDestination != null) trailingDestination!,
+      ];
+      final selected = trailingSelected && trailingDestination != null
+          ? allDestinations.length - 1
+          : mainSelected.clamp(0, allDestinations.length - 1);
+
       return Scaffold(
         body: content,
         bottomNavigationBar: NavigationBar(
           selectedIndex: selected,
-          onDestinationSelected: onDestinationSelected,
+          onDestinationSelected: (i) {
+            if (trailingDestination != null && i == allDestinations.length - 1) {
+              onTrailingSelected?.call();
+              return;
+            }
+            onDestinationSelected(i);
+          },
           destinations: [
-            for (final d in destinations)
+            for (final d in allDestinations)
               NavigationDestination(
                 icon: Icon(d.icon),
                 selectedIcon: Icon(d.selectedIcon ?? d.icon),
@@ -181,18 +241,37 @@ class AppLayout extends StatelessWidget {
     }
 
     final rail = NavigationRail(
-      selectedIndex: selected,
+      selectedIndex: mainSelected,
       onDestinationSelected: onDestinationSelected,
       extended: expanded,
       minWidth: _kRailMinWidth,
       minExtendedWidth: _kExtendedRailWidth,
       labelType: expanded ? NavigationRailLabelType.none : NavigationRailLabelType.all,
+      trailingAtBottom: trailingDestination != null,
       leading: expanded
           ? SizedBox(
               width: _kExtendedRailWidth,
               child: _logo(context, extended: true),
             )
           : _logo(context, extended: false),
+      trailing: trailingDestination == null
+          ? null
+          : expanded
+              ? SizedBox(
+                  width: _kExtendedRailWidth,
+                  child: _trailingControl(
+                    context,
+                    destination: trailingDestination!,
+                    extended: true,
+                    selected: trailingSelected,
+                  ),
+                )
+              : _trailingControl(
+                  context,
+                  destination: trailingDestination!,
+                  extended: false,
+                  selected: trailingSelected,
+                ),
       destinations: [
         for (final d in destinations)
           NavigationRailDestination(

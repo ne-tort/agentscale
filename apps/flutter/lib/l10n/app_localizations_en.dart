@@ -508,6 +508,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminModulePreviewMode => 'Seed data';
 
   @override
+  String get adminModulePreviewShellNav => 'Shell nav (preview)';
+
+  @override
+  String get adminModulePreviewCabinetTabs => 'Cabinet tabs';
+
+  @override
   String get adminModuleSeedEmpty => 'No seed rows yet';
 
   @override

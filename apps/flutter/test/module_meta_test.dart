@@ -414,6 +414,35 @@ void main() {
       expect(find.text('Список'), findsOneWidget);
       expect(find.text('Настройки'), findsOneWidget);
     });
+
+    testWidgets('shell nav preview chips when nav.contour set', (tester) async {
+      final json = Map<String, dynamic>.from(suppliersManifestJson());
+      json['tabs'] = [
+        {
+          'id': 'tab_suppliers',
+          'title': 'Поставщики',
+          'order': 150,
+          'view_slug': 'suppliers_list',
+          'enabled': true,
+          'nav': {'contour': 'admin'},
+        },
+      ];
+      final manifest = ModuleMetaManifest.fromJson(json);
+      await tester.pumpWidget(
+        _ruApp(
+          ModuleMetaPreviewPage(
+            manifest: manifest,
+            moduleName: 'Suppliers Pack',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Поставщики'), findsWidgets);
+      expect(find.text('Навигация shell (предпросмотр)'), findsOneWidget);
+      await tester.tap(find.text('Поставщики').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Alpha'), findsNothing);
+    });
   });
 
   group('AppJsonEditorField', () {

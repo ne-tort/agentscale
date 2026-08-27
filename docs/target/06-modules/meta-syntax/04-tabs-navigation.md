@@ -44,7 +44,7 @@ Tabs = **то, что видит пользователь** в панели на
 
 ## Shell navigation (Admin / Company)
 
-Tabs may also appear in the **platform product shell** (not only CabinetShell):
+Tabs may declare product-shell placement for **preview** and future runtime (when module is bound/deployed):
 
 ```json
 {
@@ -58,21 +58,25 @@ Tabs may also appear in the **platform product shell** (not only CabinetShell):
 }
 ```
 
-| `nav.contour` | Where merged |
-|---------------|--------------|
-| `admin` | Platform Admin shell: left rail (desktop) or **Management** hub (mobile narrow) |
-| `company` | Company admin shell — same rules |
+| `nav.contour` | Meaning |
+|---------------|---------|
+| `admin` | Would appear in Platform Admin shell rail / mobile **Management** hub |
+| `company` | Would appear in Company admin shell — same rules |
 
-Without `nav` — tab stays in cabinet/preview only (default).
+Without `nav` — tab stays in cabinet/preview TabBar only (default).
 
-**Merge rules (product shell):**
+**Preview (seed editor):** `ModuleMetaPreviewPage` renders shell nav chips/rail mock for the **current module only** — not live Admin catalog merge.
 
-1. List active modules for contour (admin catalog / company module list).
+**Live Admin/Company shell:** does **not** scan all catalog modules. Runtime merge from bound/installations is follow-up (cabinet/project context).
+
+**Merge rules (when runtime applies):**
+
+1. Load modules in scope for contour.
 2. Read `tabs` slug; keep `enabled` tabs where `nav.contour` matches.
 3. Sort by `order`, then `title`; title collision → «{title} · {moduleName}».
 4. Append after platform-fixed nav items (Overview, Companies, …).
 
-Desktop: new rail destinations. Mobile: items in **Управление** hub — not bottom bar.
+Desktop: rail destinations. Mobile: items in **Управление** hub — not bottom bar.
 
 ## Shell composition
 

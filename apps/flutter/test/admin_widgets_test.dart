@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:prodavan/core/theme/app_theme.dart';
 import 'package:prodavan/features/admin/admin_shell.dart';
 import 'package:prodavan/features/admin/widgets/admin_metrics_alerts.dart';
-import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 Widget _enApp(Widget home) {
@@ -139,34 +138,5 @@ void main() {
     await tester.tap(find.text('Management'));
     await tester.pumpAndSettle();
     expect(find.text('Companies'), findsOneWidget);
-  });
-
-  testWidgets('admin shell shows injected module shell nav', (tester) async {
-    const shellNav = [
-      ShellNavEntry(
-        moduleId: 'mod_example_suppliers',
-        moduleName: 'Suppliers Pack',
-        tab: {
-          'view_slug': 'suppliers_list',
-          'icon': 'local_shipping_outlined',
-        },
-        label: 'Suppliers',
-      ),
-    ];
-
-    await tester.pumpWidget(_enApp(const AdminShell(shellNavEntries: shellNav)));
-    await tester.pumpAndSettle();
-    expect(find.text('Suppliers'), findsWidgets);
-
-    tester.view.physicalSize = const Size(390, 800);
-    tester.view.devicePixelRatio = 1.0;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-
-    await tester.pumpWidget(_enApp(const AdminShell(shellNavEntries: shellNav)));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Management'));
-    await tester.pumpAndSettle();
-    expect(find.text('Suppliers'), findsOneWidget);
   });
 }
