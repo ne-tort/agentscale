@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.cabinets.grant_service import CabinetGrantService
 from prodavan.application.identity.service import EntitlementService
+from prodavan.application.relations.query import RelationsQuery
 from prodavan.domain.cabinets import CabinetOwnerScope, CabinetStatus
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
@@ -17,6 +18,7 @@ class CabinetAccessService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._grants = CabinetGrantService(session)
+        self._relations = RelationsQuery(session)
         self._entitlements = EntitlementService(session)
 
     async def get_instance(self, cabinet_id: str) -> CabinetInstanceRow:
@@ -49,10 +51,14 @@ class CabinetAccessService:
         actor_company = await self._company_actor_company_id(
             principal=principal, employee=employee, company_id=company_id
         )
-        if actor_company and await self._grants.has_active_company_grant(inst.id, actor_company):
+        if actor_company and await self._relations.has_cabinet_company_grant(
+            cabinet_id=inst.id, company_id=actor_company
+        ):
             return True
         if employee is not None and inst.owner_company_id:
-            if await self._grants.has_active_company_grant(inst.id, inst.owner_company_id):
+            if await self._relations.has_cabinet_company_grant(
+                cabinet_id=inst.id, company_id=inst.owner_company_id
+            ):
                 try:
                     await self._entitlements.require_membership(employee.id, inst.owner_company_id)
                     return True
@@ -76,11 +82,15 @@ class CabinetAccessService:
             principal=principal, employee=employee, company_id=company_id
         )
         if actor_company and inst.owner_company_id == actor_company:
-            return await self._grants.has_active_company_grant(inst.id, actor_company)
+            return await self._relations.has_cabinet_company_grant(
+                cabinet_id=inst.id, company_id=actor_company
+            )
         if employee is not None and inst.owner_company_id:
             try:
                 await self._entitlements.require_company_admin(employee.id, inst.owner_company_id)
-                return await self._grants.has_active_company_grant(inst.id, inst.owner_company_id)
+                return await self._relations.has_cabinet_company_grant(
+                    cabinet_id=inst.id, company_id=inst.owner_company_id
+                )
             except AppError:
                 return False
         return False
@@ -124,7 +134,9 @@ class CabinetAccessService:
                 )
         elif write:
             allowed = False
-            if employee is not None and await self._grants.has_active_assignment(cabinet_id, employee.id):
+            if employee is not None and await self._relations.has_cabinet_assignment(
+                cabinet_id=cabinet_id, employee_id=employee.id
+            ):
                 allowed = True
             if await self._has_company_grant_access(
                 inst=inst, principal=principal, employee=employee, company_id=company_id
@@ -139,7 +151,9 @@ class CabinetAccessService:
                 )
         else:
             allowed = False
-            if employee is not None and await self._grants.has_active_assignment(cabinet_id, employee.id):
+            if employee is not None and await self._relations.has_cabinet_assignment(
+                cabinet_id=cabinet_id, employee_id=employee.id
+            ):
                 allowed = True
             if await self._has_company_grant_access(
                 inst=inst, principal=principal, employee=employee, company_id=company_id

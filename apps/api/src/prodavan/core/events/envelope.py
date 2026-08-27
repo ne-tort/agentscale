@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-BusName = Literal["platform", "project_trigger", "auth_command", "auth_event"]
+BusName = Literal["platform", "project_trigger", "auth_command", "auth_event", "relation_event"]
 
 
 @dataclass(slots=True)
@@ -103,5 +103,27 @@ def auth_event_envelope(
         event_id=event_id,
         event_type=event_type,
         occurred_at=occurred_at or EventEnvelope.now_iso(),
+        payload=payload or {},
+    )
+
+
+def relation_event_envelope(
+    *,
+    event_id: str,
+    event_type: str,
+    company_id: str | None = None,
+    project_id: str | None = None,
+    cabinet_id: str | None = None,
+    payload: dict[str, Any] | None = None,
+    occurred_at: str | None = None,
+) -> EventEnvelope:
+    return EventEnvelope(
+        bus="relation_event",
+        event_id=event_id,
+        event_type=event_type,
+        occurred_at=occurred_at or EventEnvelope.now_iso(),
+        company_id=company_id,
+        project_id=project_id,
+        cabinet_id=cabinet_id,
         payload=payload or {},
     )

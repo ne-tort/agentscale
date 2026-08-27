@@ -120,12 +120,14 @@ class Settings(BaseSettings):
     kafka_topic_project_triggers: str = "prodavan.project.triggers"
     kafka_topic_auth_commands: str = "prodavan.auth.commands"
     kafka_topic_auth_events: str = "prodavan.auth.events"
+    kafka_topic_relation_events: str = "prodavan.relation.events"
     kafka_required: bool = False
     # Optional consumer: kick Celery drain, or per-id dispatch (PG claim still SoT).
     kafka_consumer_enabled: bool = False
     kafka_consumer_group: str = "prodavan-api-triggers"
     kafka_auth_commands_group: str = "prodavan-auth-commands"
     kafka_auth_events_group: str = "prodavan-auth-events"
+    kafka_relation_events_group: str = "prodavan-relation-events"
     kafka_drain_debounce_sec: float = 1.0
     # kick = debounce → trigger_drain; dispatch = enqueue dispatch_trigger(event_id).
     kafka_consumer_mode: str = "kick"

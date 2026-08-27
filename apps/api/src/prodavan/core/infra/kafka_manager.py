@@ -57,12 +57,14 @@ class KafkaManager(LifespanResource):
         topic_project_triggers: str = "prodavan.project.triggers",
         topic_auth_commands: str = "prodavan.auth.commands",
         topic_auth_events: str = "prodavan.auth.events",
+        topic_relation_events: str = "prodavan.relation.events",
         required: bool = False,
         buffer_size: int = 200,
         consumer_enabled: bool = False,
         consumer_group: str = "prodavan-api-triggers",
         auth_commands_group: str = "prodavan-auth-commands",
         auth_events_group: str = "prodavan-auth-events",
+        relation_events_group: str = "prodavan-relation-events",
         drain_debounce_sec: float = 1.0,
         consumer_mode: str = "kick",
     ) -> None:
@@ -73,11 +75,13 @@ class KafkaManager(LifespanResource):
         self._topic_triggers = topic_project_triggers
         self._topic_auth_commands = topic_auth_commands
         self._topic_auth_events = topic_auth_events
+        self._topic_relation_events = topic_relation_events
         self._required = required
         self._consumer_enabled = consumer_enabled
         self._consumer_group = consumer_group
         self._auth_commands_group = auth_commands_group
         self._auth_events_group = auth_events_group
+        self._relation_events_group = relation_events_group
         self._drain_debounce_sec = max(0.1, float(drain_debounce_sec))
         mode = (consumer_mode or "kick").strip().lower()
         self._consumer_mode: ConsumerMode = "dispatch" if mode == "dispatch" else "kick"
@@ -85,17 +89,19 @@ class KafkaManager(LifespanResource):
         self._consumer: Any = None
         self._auth_commands_consumer: Any = None
         self._auth_events_consumer: Any = None
+        self._relation_events_consumer: Any = None
         self._consume_task: asyncio.Task[None] | None = None
         self._auth_commands_task: asyncio.Task[None] | None = None
         self._auth_events_task: asyncio.Task[None] | None = None
+        self._relation_events_task: asyncio.Task[None] | None = None
         self._stop: asyncio.Event | None = None
         self._buffer: deque[dict[str, Any]] = deque(maxlen=max(1, buffer_size))
         self._drain_kicks: int = 0
         self._dispatch_enqueues: int = 0
         self._auth_register_handled: int = 0
         self._auth_bind_enqueues: int = 0
+        self._relation_events_handled: int = 0
         self._local_auth_depth: int = 0
-
     @property
     def name(self) -> str:
         return "kafka"
@@ -106,10 +112,15 @@ class KafkaManager(LifespanResource):
 
     @property
     def consumer_running(self) -> bool:
-        """True when all enabled consumer loops are alive (triggers + auth)."""
+        """True when all enabled consumer loops are alive (triggers + auth + relation)."""
         if not self._consumer_enabled:
             return False
-        tasks = (self._consume_task, self._auth_commands_task, self._auth_events_task)
+        tasks = (
+            self._consume_task,
+            self._auth_commands_task,
+            self._auth_events_task,
+            self._relation_events_task,
+        )
         return all(t is not None and not t.done() for t in tasks)
 
     @property
@@ -137,6 +148,8 @@ class KafkaManager(LifespanResource):
             return self._topic_auth_commands
         if bus == "auth_event":
             return self._topic_auth_events
+        if bus == "relation_event":
+            return self._topic_relation_events
         raise ValueError(f"unknown bus: {bus}")
 
     def recent_envelopes(self) -> list[dict[str, Any]]:
@@ -201,6 +214,12 @@ class KafkaManager(LifespanResource):
                 factory = get_session_factory()
                 async with factory() as session:
                     await apply_auth_user_registered_payload(session, envelope.payload or {})
+                return
+            if envelope.bus == "relation_event":
+                from prodavan.application.relations.commands import handle_relation_event_envelope
+
+                await handle_relation_event_envelope(envelope)
+                self._relation_events_handled += 1
         except Exception:
             logger.exception(
                 "kafka: local auth dispatch failed bus=%s type=%s",
@@ -403,13 +422,67 @@ class KafkaManager(LifespanResource):
                 self._auth_bind_enqueues,
             )
 
+    async def _consume_relation_events(self, stop: asyncio.Event) -> None:
+        assert self._relation_events_consumer is not None
+        from prodavan.application.relations.commands import handle_relation_event_envelope
+        from prodavan.core.events.envelope import EventEnvelope
+
+        try:
+            while not stop.is_set():
+                try:
+                    batch = await self._relation_events_consumer.getmany(
+                        timeout_ms=500, max_records=20
+                    )
+                except Exception:
+                    if stop.is_set():
+                        break
+                    logger.exception("kafka: relation events getmany failed")
+                    await asyncio.sleep(1.0)
+                    continue
+                if not batch:
+                    continue
+                for _tp, messages in batch.items():
+                    for msg in messages:
+                        try:
+                            data = json.loads(msg.value.decode("utf-8"))
+                        except Exception:
+                            logger.warning("kafka: skip bad relation event offset=%s", msg.offset)
+                            continue
+                        if data.get("bus") != "relation_event":
+                            continue
+                        try:
+                            envelope = EventEnvelope(
+                                bus="relation_event",
+                                event_id=str(data.get("event_id") or ""),
+                                event_type=str(data.get("event_type") or ""),
+                                occurred_at=str(data.get("occurred_at") or EventEnvelope.now_iso()),
+                                company_id=data.get("company_id"),
+                                project_id=data.get("project_id"),
+                                cabinet_id=data.get("cabinet_id"),
+                                payload=dict(data.get("payload") or {}),
+                                schema_version=int(data.get("schema_version") or 1),
+                            )
+                            await handle_relation_event_envelope(envelope)
+                            self._relation_events_handled += 1
+                        except Exception:
+                            logger.exception(
+                                "kafka: relation event handle failed id=%s",
+                                data.get("event_id"),
+                            )
+        finally:
+            logger.info(
+                "kafka: relation events consumer stopped handled=%s",
+                self._relation_events_handled,
+            )
+
     async def _ensure_topics(self) -> None:
-        """Best-effort create platform + project_trigger + auth topics."""
+        """Best-effort create platform + project_trigger + auth + relation topics."""
         topics = [
             self._topic_platform,
             self._topic_triggers,
             self._topic_auth_commands,
             self._topic_auth_events,
+            self._topic_relation_events,
         ]
         try:
             from aiokafka.admin import AIOKafkaAdminClient, NewTopic
@@ -474,12 +547,13 @@ class KafkaManager(LifespanResource):
                 await self._producer.start()
                 await self._ensure_topics()
                 logger.info(
-                    "kafka: producer started servers=%s topics=%s,%s,%s,%s (attempt %s/%s)",
+                    "kafka: producer started servers=%s topics=%s,%s,%s,%s,%s (attempt %s/%s)",
                     self._bootstrap,
                     self._topic_platform,
                     self._topic_triggers,
                     self._topic_auth_commands,
                     self._topic_auth_events,
+                    self._topic_relation_events,
                     attempt,
                     attempts,
                 )
@@ -552,6 +626,20 @@ class KafkaManager(LifespanResource):
                 self._consume_auth_events(self._stop),
                 name="prodavan-kafka-auth-events",
             )
+
+            self._relation_events_consumer = AIOKafkaConsumer(
+                self._topic_relation_events,
+                bootstrap_servers=self._bootstrap,
+                client_id=f"{self._client_id}-rel-evt",
+                group_id=self._relation_events_group,
+                enable_auto_commit=True,
+                auto_offset_reset="latest",
+            )
+            await self._relation_events_consumer.start()
+            self._relation_events_task = asyncio.create_task(
+                self._consume_relation_events(self._stop),
+                name="prodavan-kafka-relation-events",
+            )
         except Exception:
             logger.exception("kafka: consumer startup failed (producer still up)")
             self._consumer = None
@@ -559,7 +647,12 @@ class KafkaManager(LifespanResource):
     async def shutdown(self) -> None:
         if self._stop is not None:
             self._stop.set()
-        for task_attr in ("_consume_task", "_auth_commands_task", "_auth_events_task"):
+        for task_attr in (
+            "_consume_task",
+            "_auth_commands_task",
+            "_auth_events_task",
+            "_relation_events_task",
+        ):
             task = getattr(self, task_attr)
             if task is not None:
                 try:
@@ -568,7 +661,12 @@ class KafkaManager(LifespanResource):
                     task.cancel()
                 setattr(self, task_attr, None)
         self._stop = None
-        for cons_attr in ("_consumer", "_auth_commands_consumer", "_auth_events_consumer"):
+        for cons_attr in (
+            "_consumer",
+            "_auth_commands_consumer",
+            "_auth_events_consumer",
+            "_relation_events_consumer",
+        ):
             cons = getattr(self, cons_attr)
             if cons is not None:
                 try:

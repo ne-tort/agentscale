@@ -872,6 +872,13 @@
   "errorUnauthorized": "Сессия истекла. Войдите снова.",
   "errorUnexpected": "Что-то пошло не так.",
   "errorValidation": "Проверьте введённые данные.",
+  "errorProjectPaused": "Проект на паузе. Возобновите, чтобы продолжить.",
+  "errorCabinetArchived": "Кабинет недоступен для изменений.",
+  "errorCompanySuspended": "Подписка компании приостановлена или истекла.",
+  "errorNoAiKey": "Нет доступного AI-ключа для запуска.",
+  "errorSessionClosed": "Сессия агента закрыта.",
+  "errorAgentBudget": "Исчерпан лимит токенов агента.",
+  "errorCascadeIncomplete": "Каскад удаления ещё не завершён. Подождите или повторите позже.",
   "companyCredentialsCreated": "Логин: {companyId} · пароль: {password}",
   "@companyCredentialsCreated": {
     "placeholders": {

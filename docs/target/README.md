@@ -11,7 +11,8 @@ Admin (KC) → Company (KC, **локальный Admin**: employees / containers
 ## Читать сначала
 
 1. **[Сущности и иерархия](00-entities.md)** ← карта продукта  
-   Lifecycle (pause / soft-delete / purge): [00-lifecycle.md](00-lifecycle.md)
+   Lifecycle (pause / soft-delete / purge): [00-lifecycle.md](00-lifecycle.md)  
+   Relations (связи): [00-relations.md](00-relations.md)
 2. [Принципы](00-principles.md) · [Глоссарий](00-glossary.md)  
 3. [Cabinets](05-cabinets/) · [Projects](06-projects-runtime/) · [**Containers / Pods**](14-project-containers/) · [**Content storage**](15-content-storage/)  
 4. [Identity](10-identity-keycloak/) · [Admin](01-platform-admin/) · [AI Keys](02-ai-provider-keys/)  

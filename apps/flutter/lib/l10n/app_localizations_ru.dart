@@ -1453,6 +1453,30 @@ class AppLocalizationsRu extends AppLocalizations {
   String get errorValidation => 'Проверьте введённые данные.';
 
   @override
+  String get errorProjectPaused =>
+      'Проект на паузе. Возобновите, чтобы продолжить.';
+
+  @override
+  String get errorCabinetArchived => 'Кабинет недоступен для изменений.';
+
+  @override
+  String get errorCompanySuspended =>
+      'Подписка компании приостановлена или истекла.';
+
+  @override
+  String get errorNoAiKey => 'Нет доступного AI-ключа для запуска.';
+
+  @override
+  String get errorSessionClosed => 'Сессия агента закрыта.';
+
+  @override
+  String get errorAgentBudget => 'Исчерпан лимит токенов агента.';
+
+  @override
+  String get errorCascadeIncomplete =>
+      'Каскад удаления ещё не завершён. Подождите или повторите позже.';
+
+  @override
   String companyCredentialsCreated(String companyId, String password) {
     return 'Логин: $companyId · пароль: $password';
   }

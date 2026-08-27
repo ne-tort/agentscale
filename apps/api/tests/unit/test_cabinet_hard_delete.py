@@ -13,7 +13,7 @@ from prodavan.domain.errors import AppError
 
 
 @pytest.mark.asyncio
-async def test_hard_delete_requires_archived_for_employee(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_hard_delete_requires_soft_deleted_for_employee(monkeypatch: pytest.MonkeyPatch) -> None:
     session = AsyncMock()
     svc = CabinetInstanceService(session)
     inst = SimpleNamespace(
@@ -32,5 +32,5 @@ async def test_hard_delete_requires_archived_for_employee(monkeypatch: pytest.Mo
             principal=SimpleNamespace(is_platform_admin=False),
             employee=SimpleNamespace(id="emp_1"),
         )
-    assert ei.value.code == "CABINET_NOT_ARCHIVED"
+    assert ei.value.code == "CABINET_NOT_SOFT_DELETED"
     assert ei.value.status == 409

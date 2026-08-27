@@ -127,8 +127,6 @@ class _LoginPageState extends State<LoginPage> {
                           icon: Icons.person_outline_rounded,
                           value: _username,
                           enabled: !_connecting,
-                          presentValue: (v) =>
-                              v.isEmpty ? l10n.commonNotSet : v,
                           onSave: (v) async {
                             setState(() => _username = v.trim());
                           },
@@ -139,8 +137,7 @@ class _LoginPageState extends State<LoginPage> {
                           value: _password,
                           obscureText: true,
                           enabled: !_connecting,
-                          presentValue: (v) =>
-                              v.isEmpty ? l10n.commonNotSet : '••••••••',
+                          presentValue: (v) => v.isEmpty ? '' : '••••••••',
                           formatInputValue: (v) => v,
                           onSave: (v) async {
                             setState(() => _password = v);

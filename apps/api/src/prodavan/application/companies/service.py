@@ -71,7 +71,9 @@ class CompaniesCommandService:
                 email=email_raw.lower(),
                 display_name=admin_display_name,
             )
-            await self._employees.ensure_membership(
+            from prodavan.application.relations.commands import RelationsCommand
+
+            await RelationsCommand(self._session).ensure_membership(
                 company_id=company.id,
                 employee_id=employee.id,
                 role=MembershipRole.COMPANY_ADMIN,

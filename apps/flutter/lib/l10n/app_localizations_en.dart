@@ -1450,6 +1450,29 @@ class AppLocalizationsEn extends AppLocalizations {
   String get errorValidation => 'Please check the entered data.';
 
   @override
+  String get errorProjectPaused => 'Project is paused. Resume to continue.';
+
+  @override
+  String get errorCabinetArchived => 'Cabinet is not available for changes.';
+
+  @override
+  String get errorCompanySuspended =>
+      'Company subscription is suspended or expired.';
+
+  @override
+  String get errorNoAiKey => 'No AI key available to run.';
+
+  @override
+  String get errorSessionClosed => 'Agent session is closed.';
+
+  @override
+  String get errorAgentBudget => 'Agent token budget exhausted.';
+
+  @override
+  String get errorCascadeIncomplete =>
+      'Delete cascade is still in progress. Wait or retry later.';
+
+  @override
   String companyCredentialsCreated(String companyId, String password) {
     return 'Login: $companyId · password: $password';
   }

@@ -5,6 +5,7 @@ from __future__ import annotations
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.application.relations.query import RelationsQuery
 from prodavan.domain.content.types import (
     AclPermission,
     AclPrincipalKind,
@@ -18,7 +19,7 @@ from prodavan.infrastructure.persistence.models.content import (
     ContentAliasRow,
     ContentAssetRow,
 )
-from prodavan.infrastructure.persistence.models.identity import EmployeeRow, MembershipRow
+from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
 
 class AccessPolicyService:
@@ -26,10 +27,7 @@ class AccessPolicyService:
         self._session = session
 
     async def _employee_company_ids(self, employee_id: str) -> set[str]:
-        q = await self._session.execute(
-            select(MembershipRow.company_id).where(MembershipRow.employee_id == employee_id)
-        )
-        return set(q.scalars().all())
+        return await RelationsQuery(self._session).company_ids_for_employee(employee_id)
 
     async def _principal_keys(
         self,

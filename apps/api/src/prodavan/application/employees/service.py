@@ -81,7 +81,11 @@ class EmployeesCommandService:
             display_name=display_name,
             keycloak_user_id=None,
         )
-        await self.ensure_membership(company_id=company_id, employee_id=employee.id, role=role)
+        from prodavan.application.relations.commands import RelationsCommand
+
+        await RelationsCommand(self._session).ensure_membership(
+            company_id=company_id, employee_id=employee.id, role=role
+        )
         await self._session.commit()
         await self._session.refresh(employee)
 

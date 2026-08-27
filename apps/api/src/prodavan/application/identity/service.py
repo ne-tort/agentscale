@@ -156,21 +156,24 @@ class EntitlementService:
         return emp
 
     async def require_membership(self, employee_id: str, company_id: str) -> MembershipRow:
-        q = await self._session.execute(
-            select(MembershipRow).where(
-                MembershipRow.employee_id == employee_id,
-                MembershipRow.company_id == company_id,
-            )
-        )
-        mem = q.scalar_one_or_none()
-        if mem is None:
+        from prodavan.application.relations.query import RelationsQuery
+
+        if not await RelationsQuery(self._session).has_membership(
+            employee_id=employee_id, company_id=company_id
+        ):
             raise AppError(
                 code="FORBIDDEN",
                 title="Forbidden",
                 status=403,
                 detail="Not a member of company",
             )
-        return mem
+        q = await self._session.execute(
+            select(MembershipRow).where(
+                MembershipRow.employee_id == employee_id,
+                MembershipRow.company_id == company_id,
+            )
+        )
+        return q.scalar_one()
 
     async def require_company_admin(self, employee_id: str, company_id: str) -> MembershipRow:
         mem = await self.require_membership(employee_id, company_id)

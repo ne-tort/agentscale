@@ -16,7 +16,7 @@ from prodavan.infrastructure.persistence.models.cabinets import (
     CabinetEmployeeAssignmentRow,
     CabinetInstanceRow,
 )
-from prodavan.infrastructure.persistence.models.identity import CompanyRow, EmployeeRow, MembershipRow
+from prodavan.infrastructure.persistence.models.identity import CompanyRow, EmployeeRow
 
 
 class CabinetGrantService:
@@ -175,13 +175,11 @@ class CabinetGrantService:
                 status=403,
                 detail="cabinet not granted to company",
             )
-        mem = await self._session.execute(
-            select(MembershipRow.id).where(
-                MembershipRow.company_id == company_id,
-                MembershipRow.employee_id == employee_id,
-            )
-        )
-        if mem.scalar_one_or_none() is None:
+        from prodavan.application.relations.query import RelationsQuery
+
+        if not await RelationsQuery(self._session).has_membership(
+            employee_id=employee_id, company_id=company_id
+        ):
             raise AppError(
                 code="VALIDATION_ERROR",
                 title="Validation Error",

@@ -113,7 +113,9 @@ class CabinetInstanceService:
         await self._session.flush()
         row.schema_name = schema_name_for_instance(row.id)
         await self._provisioner.provision(self._session, instance_id=row.id)
-        await self._grants.replace_company_grants(row.id, ids)
+        from prodavan.application.relations.commands import RelationsCommand
+
+        await RelationsCommand(self._session).replace_cabinet_company_grants(row.id, ids)
         await self._session.commit()
         await self._session.refresh(row)
         return await _public_row(self._session, row, grants=self._grants, company_name=company.name)
@@ -145,8 +147,11 @@ class CabinetInstanceService:
         await self._session.flush()
         row.schema_name = schema_name_for_instance(row.id)
         await self._provisioner.provision(self._session, instance_id=row.id)
-        await self._grants.replace_company_grants(row.id, [company_id])
-        await self._grants.assign_employee(
+        from prodavan.application.relations.commands import RelationsCommand
+
+        rel = RelationsCommand(self._session)
+        await rel.replace_cabinet_company_grants(row.id, [company_id])
+        await rel.assign_employee_to_cabinet(
             cabinet_id=row.id,
             employee_id=employee.id,
             company_id=company_id,
@@ -224,9 +229,17 @@ class CabinetInstanceService:
                 raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="name required")
             inst.name = name.strip()
         if company_ids is not None:
-            await self._grants.replace_company_grants(cabinet_id, company_ids)
+            from prodavan.application.relations.commands import RelationsCommand
+
+            await RelationsCommand(self._session).replace_cabinet_company_grants(
+                cabinet_id, company_ids
+            )
         elif company_id is not None:
-            await self._grants.replace_company_grants(cabinet_id, [company_id])
+            from prodavan.application.relations.commands import RelationsCommand
+
+            await RelationsCommand(self._session).replace_cabinet_company_grants(
+                cabinet_id, [company_id]
+            )
         await self._session.commit()
         await self._session.refresh(inst)
         return await _public_row(self._session, inst, grants=self._grants)
@@ -460,10 +473,12 @@ class CabinetInstanceService:
         await EntitlementService(self._session).require_company_actor(
             principal, company_id, employee=employee
         )
-        await self._grants.assign_employee(
+        from prodavan.application.relations.commands import RelationsCommand
+
+        await RelationsCommand(self._session).assign_employee_to_cabinet(
             cabinet_id=cabinet_id,
-            employee_id=employee_id,
             company_id=company_id,
+            employee_id=employee_id,
         )
         await self._session.commit()
         return {"cabinet_id": cabinet_id, "employee_id": employee_id, "status": "active"}
@@ -480,7 +495,13 @@ class CabinetInstanceService:
         await EntitlementService(self._session).require_company_actor(
             principal, company_id, employee=employee
         )
-        await self._grants.revoke_employee(cabinet_id=cabinet_id, employee_id=employee_id)
+        from prodavan.application.relations.commands import RelationsCommand
+
+        await RelationsCommand(self._session).revoke_employee_from_cabinet(
+            cabinet_id=cabinet_id,
+            employee_id=employee_id,
+            company_id=company_id,
+        )
         await self._session.commit()
         return {"cabinet_id": cabinet_id, "employee_id": employee_id, "status": "revoked"}
 

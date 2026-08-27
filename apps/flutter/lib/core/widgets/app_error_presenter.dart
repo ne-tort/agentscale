@@ -18,16 +18,18 @@ class AppErrorPresentation {
 }
 
 /// Centralized mapping of API / network / unexpected errors to user-facing copy.
+///
+/// Rule: [display] is always l10n (locale of UI). Raw API English goes only to
+/// [diagnostic] (clipboard). Never show problem+json title/detail as UI copy.
 abstract final class AppErrors {
   static AppErrorPresentation present(Object error, AppLocalizations l10n) {
     if (error is ProdavanApiException) {
       return _fromApi(error.statusCode, error.body, l10n);
     }
     if (error is FormatException) {
-      final msg = error.message.trim();
       return AppErrorPresentation(
-        display: msg.isNotEmpty ? msg : l10n.errorUnexpected,
-        diagnostic: 'FormatException: $msg',
+        display: l10n.errorUnexpected,
+        diagnostic: 'FormatException: ${error.message.trim()}',
       );
     }
     final asText = error.toString().trim();
@@ -44,24 +46,16 @@ abstract final class AppErrors {
         diagnostic: asText.length > 240 ? '${asText.substring(0, 240)}…' : asText,
       );
     }
-    // ProdavanApiException.toString() leaked into String? error fields.
     final embedded = _tryParseEmbeddedApiException(asText);
     if (embedded != null) {
       return _fromApi(embedded.$1, embedded.$2, l10n);
     }
-    if (asText.isEmpty) {
-      return AppErrorPresentation(
-        display: l10n.errorUnexpected,
-        diagnostic: error.runtimeType.toString(),
-      );
-    }
-    if (asText.length > 180) {
-      return AppErrorPresentation(
-        display: l10n.errorUnexpected,
-        diagnostic: '${asText.substring(0, 240)}…',
-      );
-    }
-    return AppErrorPresentation(display: asText, diagnostic: asText);
+    return AppErrorPresentation(
+      display: l10n.errorUnexpected,
+      diagnostic: asText.isEmpty
+          ? error.runtimeType.toString()
+          : (asText.length > 240 ? '${asText.substring(0, 240)}…' : asText),
+    );
   }
 
   static String localize(BuildContext context, Object error) =>
@@ -110,42 +104,13 @@ abstract final class AppErrors {
       // Non-JSON body (proxy text, plain string).
     }
 
-    final byCode = _messageForCode(l10n, code);
-    if (byCode != null) {
-      return AppErrorPresentation(
-        display: byCode,
-        diagnostic: _diagnostic(
-          statusCode,
-          code: code ?? oauthError,
-          detail: detail ?? message ?? oauthDescription,
-        ),
-      );
-    }
-
-    final human = _firstHumanReadable([
-      oauthDescription,
-      detail,
-      message,
-      title,
-      oauthError,
-    ]);
-    if (human != null && !_looksTechnical(human)) {
-      return AppErrorPresentation(
-        display: human,
-        diagnostic: _diagnostic(
-          statusCode,
-          code: code ?? oauthError,
-          detail: human,
-        ),
-      );
-    }
-
+    final display = _messageForCode(l10n, code) ?? _statusMessage(l10n, statusCode);
     return AppErrorPresentation(
-      display: _statusMessage(l10n, statusCode),
+      display: display,
       diagnostic: _diagnostic(
         statusCode,
         code: code ?? oauthError,
-        detail: detail ?? message ?? title ?? oauthDescription ?? trimmed,
+        detail: detail ?? message ?? oauthDescription ?? title ?? trimmed,
       ),
     );
   }
@@ -154,12 +119,27 @@ abstract final class AppErrors {
     if (code == null || code.isEmpty) return null;
     return switch (code) {
       'KEYCLOAK_ADMIN' || 'IDENTITY_PROVIDER' => l10n.errorIdentityProvider,
-      'UNAUTHORIZED' || 'NOT_AUTHENTICATED' => l10n.errorUnauthorized,
+      'UNAUTHORIZED' || 'NOT_AUTHENTICATED' || 'INVALID_CREDENTIALS' =>
+        l10n.errorUnauthorized,
       'FORBIDDEN' || 'NOT_AUTHORIZED' => l10n.errorForbidden,
       'NOT_FOUND' => l10n.errorNotFound,
-      'CONFLICT' => l10n.errorConflict,
+      'CONFLICT' || 'PROJECT_EXISTS' => l10n.errorConflict,
       'VALIDATION_ERROR' => l10n.errorValidation,
       'RATE_LIMITED' => l10n.errorRateLimited,
+      'PROJECT_PAUSED' || 'ENTITY_PAUSED' => l10n.errorProjectPaused,
+      'CABINET_ARCHIVED' || 'CABINET_NOT_ARCHIVED' || 'CABINET_NOT_SOFT_DELETED' =>
+        l10n.errorCabinetArchived,
+      'COMPANY_SUSPENDED' || 'SUBSCRIPTION_EXPIRED' => l10n.errorCompanySuspended,
+      'NO_AI_KEY' => l10n.errorNoAiKey,
+      'SESSION_CLOSED' => l10n.errorSessionClosed,
+      'AGENT_BUDGET' || 'AGENT_BUDGET_EXCEEDED' => l10n.errorAgentBudget,
+      'CASCADE_INCOMPLETE' => l10n.errorCascadeIncomplete,
+      'SCHEMA_DROP_FAILED' => l10n.errorServer,
+      'AUTH_MISCONFIGURED' => l10n.errorIdentityProvider,
+      'ATTACHMENT_TOO_LARGE' ||
+      'ATTACHMENT_FORBIDDEN' ||
+      'ATTACHMENT_TYPE' =>
+        l10n.errorValidation,
       _ => null,
     };
   }
@@ -185,18 +165,9 @@ abstract final class AppErrors {
     if (code != null && code.isNotEmpty) parts.add(code);
     final d = (detail ?? '').trim();
     if (d.isNotEmpty && !_looksLikeHtml(d)) {
-      // Clipboard gets the real payload (no HTML); keep readable length.
       parts.add(d.length > 800 ? '${d.substring(0, 800)}…' : d);
     }
     return parts.join(' · ');
-  }
-
-  static String? _firstHumanReadable(List<String?> candidates) {
-    for (final c in candidates) {
-      final t = (c ?? '').trim();
-      if (t.isNotEmpty && !_looksLikeHtml(t)) return t;
-    }
-    return null;
   }
 
   static bool _looksLikeHtml(String s) {
@@ -224,14 +195,6 @@ abstract final class AppErrors {
         lower.contains('connection reset') ||
         lower.contains('network is unreachable') ||
         lower.contains('timed out');
-  }
-
-  static bool _looksTechnical(String s) {
-    final lower = s.toLowerCase();
-    return lower.startsWith('prodavanapiexception') ||
-        lower.contains('traceback') ||
-        lower.contains('exception:') ||
-        _looksLikeHtml(s);
   }
 
   static (int, String)? _tryParseEmbeddedApiException(String text) {

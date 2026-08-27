@@ -62,6 +62,34 @@ void main() {
     expect(presented.diagnostic.contains('KEYCLOAK_ADMIN'), isTrue);
   });
 
+  testWidgets('unmapped code with English detail uses RU status fallback', (tester) async {
+    final l10n = await l10nFor(tester, const Locale('ru'));
+    final presented = AppErrors.present(
+      ProdavanApiException(
+        409,
+        '{"code":"SOME_UNKNOWN_CODE","title":"Conflict","detail":"project is paused for English UI leak"}',
+      ),
+      l10n,
+    );
+    expect(presented.display, l10n.errorConflict);
+    expect(presented.display.toLowerCase().contains('paused'), isFalse);
+    expect(presented.diagnostic.contains('SOME_UNKNOWN_CODE'), isTrue);
+    expect(presented.diagnostic.contains('project is paused'), isTrue);
+  });
+
+  testWidgets('PROJECT_PAUSED maps to localized copy without EN leak', (tester) async {
+    final l10n = await l10nFor(tester, const Locale('ru'));
+    final presented = AppErrors.present(
+      ProdavanApiException(
+        409,
+        '{"code":"PROJECT_PAUSED","title":"Project paused","detail":"project is paused"}',
+      ),
+      l10n,
+    );
+    expect(presented.display, l10n.errorProjectPaused);
+    expect(presented.display, isNot(contains('project is paused')));
+  });
+
   testWidgets('recovers from stringified ProdavanApiException', (tester) async {
     final l10n = await l10nFor(tester, const Locale('ru'));
     final presented = AppErrors.present(

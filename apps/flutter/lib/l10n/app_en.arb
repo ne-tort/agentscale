@@ -870,6 +870,13 @@
   "errorUnauthorized": "Session expired. Please sign in again.",
   "errorUnexpected": "Something went wrong.",
   "errorValidation": "Please check the entered data.",
+  "errorProjectPaused": "Project is paused. Resume to continue.",
+  "errorCabinetArchived": "Cabinet is not available for changes.",
+  "errorCompanySuspended": "Company subscription is suspended or expired.",
+  "errorNoAiKey": "No AI key available to run.",
+  "errorSessionClosed": "Agent session is closed.",
+  "errorAgentBudget": "Agent token budget exhausted.",
+  "errorCascadeIncomplete": "Delete cascade is still in progress. Wait or retry later.",
   "companyCredentialsCreated": "Login: {companyId} · password: {password}",
   "@companyCredentialsCreated": {
     "placeholders": {

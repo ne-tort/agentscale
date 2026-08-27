@@ -2672,6 +2672,48 @@ abstract class AppLocalizations {
   /// **'Please check the entered data.'**
   String get errorValidation;
 
+  /// No description provided for @errorProjectPaused.
+  ///
+  /// In en, this message translates to:
+  /// **'Project is paused. Resume to continue.'**
+  String get errorProjectPaused;
+
+  /// No description provided for @errorCabinetArchived.
+  ///
+  /// In en, this message translates to:
+  /// **'Cabinet is not available for changes.'**
+  String get errorCabinetArchived;
+
+  /// No description provided for @errorCompanySuspended.
+  ///
+  /// In en, this message translates to:
+  /// **'Company subscription is suspended or expired.'**
+  String get errorCompanySuspended;
+
+  /// No description provided for @errorNoAiKey.
+  ///
+  /// In en, this message translates to:
+  /// **'No AI key available to run.'**
+  String get errorNoAiKey;
+
+  /// No description provided for @errorSessionClosed.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent session is closed.'**
+  String get errorSessionClosed;
+
+  /// No description provided for @errorAgentBudget.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent token budget exhausted.'**
+  String get errorAgentBudget;
+
+  /// No description provided for @errorCascadeIncomplete.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete cascade is still in progress. Wait or retry later.'**
+  String get errorCascadeIncomplete;
+
   /// No description provided for @companyCredentialsCreated.
   ///
   /// In en, this message translates to:

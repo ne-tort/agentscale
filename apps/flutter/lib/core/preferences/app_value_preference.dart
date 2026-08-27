@@ -69,7 +69,6 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
   late TextEditingController _controller;
   late FocusNode _focusNode;
   bool _expanded = false;
-  bool _obscured = true;
   bool _saving = false;
   bool _startedBlank = false;
   bool _ignoreNextBlur = false;
@@ -181,9 +180,6 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isBlank = _editText(widget.value).isEmpty;
-    final subtitleText = widget.obscureText && !_expanded && !isBlank
-        ? '••••••••'
-        : _display(widget.value);
 
     if (_expanded) {
       return AppPreferenceTile(
@@ -194,7 +190,7 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
           controller: _controller,
           focusNode: _focusNode,
           autofocus: true,
-          obscureText: widget.obscureText && _obscured,
+          obscureText: widget.obscureText,
           maxLines: widget.maxLines,
           keyboardType: widget.digitsOnly
               ? TextInputType.number
@@ -213,19 +209,23 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
           onSave: _save,
           onCancel: _cancel,
           onGuardBlur: _guardBlur,
-          onToggleObscure: widget.obscureText
-              ? () => setState(() => _obscured = !_obscured)
-              : null,
-          obscured: _obscured,
         ),
       );
     }
+
+    // Blank value → no subtitle slot (not empty Text / "Not set").
+    final Widget? subtitle = isBlank
+        ? null
+        : Text(
+            widget.obscureText ? '••••••••' : _display(widget.value),
+            style: theme.textTheme.bodyMedium,
+          );
 
     return AppPreferenceTile(
       title: widget.title,
       icon: widget.icon,
       enabled: widget.enabled || widget.onTap != null,
-      subtitle: Text(subtitleText, style: theme.textTheme.bodyMedium),
+      subtitle: subtitle,
       trailing: widget.onTap != null
           ? Icon(Icons.copy_outlined, size: 20, color: theme.colorScheme.onSurfaceVariant)
           : const AppTrailingChevron(),
