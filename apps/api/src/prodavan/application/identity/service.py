@@ -8,9 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import (
-    ROLE_COMPANY,
     ROLE_COMPANY_ADMIN,
-    ROLE_EMPLOYEE,
     Contour,
     EmployeeStatus,
     MembershipRole,
@@ -33,7 +31,12 @@ class EntitlementService:
         return q.scalar_one_or_none()
 
     async def get_company_by_sub(self, sub: str) -> CompanyRow | None:
-        q = await self._session.execute(select(CompanyRow).where(CompanyRow.keycloak_sub == sub))
+        q = await self._session.execute(
+            select(CompanyRow).where(
+                CompanyRow.keycloak_sub == sub,
+                CompanyRow.deleted_at.is_(None),
+            )
+        )
         return q.scalar_one_or_none()
 
     async def ensure_company_principal(self, principal: Principal) -> CompanyRow | None:
@@ -46,7 +49,7 @@ class EntitlementService:
         # Soft-bind: KC username is company_id (no email login for companies).
         if principal.username:
             company = await self._session.get(CompanyRow, principal.username)
-            if company is not None and (
+            if company is not None and company.deleted_at is None and (
                 company.keycloak_sub is None or company.keycloak_sub == principal.sub
             ):
                 company.keycloak_sub = principal.sub
@@ -231,58 +234,11 @@ class EntitlementService:
 
 
 class IdentityCommandService:
+    """Back-compat facade → Companies / Employees BCs."""
+
     def __init__(self, session: AsyncSession, provisioning: IdentityProvisioningPort) -> None:
         self._session = session
         self._provisioning = provisioning
-
-    async def _upsert_invited_employee(
-        self,
-        *,
-        email: str,
-        display_name: str | None,
-        keycloak_user_id: str | None = None,
-    ) -> EmployeeRow:
-        email_l = email.lower().strip()
-        existing = await self._session.execute(
-            select(EmployeeRow).where(EmployeeRow.email == email_l).order_by(EmployeeRow.created_at.asc())
-        )
-        employee = existing.scalars().first()
-        if employee is None:
-            employee = EmployeeRow(
-                email=email_l,
-                display_name=display_name,
-                status=EmployeeStatus.INVITED,
-                keycloak_sub=keycloak_user_id,
-            )
-            self._session.add(employee)
-            await self._session.flush()
-            return employee
-        if keycloak_user_id is not None and employee.keycloak_sub is None:
-            employee.keycloak_sub = keycloak_user_id
-        if display_name and not employee.display_name:
-            employee.display_name = display_name
-        return employee
-
-    async def _ensure_membership(
-        self,
-        *,
-        company_id: str,
-        employee_id: str,
-        role: str,
-    ) -> None:
-        existing = await self._session.execute(
-            select(MembershipRow).where(
-                MembershipRow.company_id == company_id,
-                MembershipRow.employee_id == employee_id,
-            )
-        )
-        mem = existing.scalar_one_or_none()
-        if mem is None:
-            self._session.add(
-                MembershipRow(company_id=company_id, employee_id=employee_id, role=role)
-            )
-        elif mem.role != role and role == MembershipRole.COMPANY_ADMIN:
-            mem.role = role
 
     async def create_company_with_admin(
         self,
@@ -294,86 +250,16 @@ class IdentityCommandService:
         description: str | None = None,
         contact_email: str | None = None,
     ) -> tuple[CompanyRow, EmployeeRow | None]:
-        """DB-only company create; Keycloak user via Auth Service Kafka ``auth.user.register``."""
-        from prodavan.application.auth.register import publish_register_command
+        from prodavan.application.companies.service import CompaniesCommandService
 
-        pwd = (password or "").strip()
-        if len(pwd) < 8:
-            raise AppError(
-                code="VALIDATION_ERROR",
-                title="Validation Error",
-                status=422,
-                detail="password required (min 8 chars) for company Keycloak principal",
-            )
-
-        contact = (contact_email or "").strip().lower() or None
-        if contact is not None and "@" not in contact:
-            raise AppError(
-                code="VALIDATION_ERROR",
-                title="Validation Error",
-                status=422,
-                detail="contact_email must be an email when provided",
-            )
-
-        company = CompanyRow(
-            name=name.strip(),
-            description=description.strip() if description and description.strip() else None,
-            contact_email=contact,
-            login_email=None,
-            keycloak_sub=None,
+        return await CompaniesCommandService(self._session).create_company_with_admin(
+            name=name,
+            password=password,
+            admin_email=admin_email,
+            admin_display_name=admin_display_name,
+            description=description,
+            contact_email=contact_email,
         )
-        self._session.add(company)
-        await self._session.flush()
-
-        email_raw = (admin_email or "").strip()
-        employee: EmployeeRow | None = None
-        if email_raw:
-            if "@" not in email_raw:
-                raise AppError(
-                    code="VALIDATION_ERROR",
-                    title="Validation Error",
-                    status=422,
-                    detail="email required",
-                )
-            email = email_raw.lower()
-            employee = await self._upsert_invited_employee(
-                email=email,
-                display_name=admin_display_name,
-                keycloak_user_id=None,
-            )
-            await self._ensure_membership(
-                company_id=company.id,
-                employee_id=employee.id,
-                role=MembershipRole.COMPANY_ADMIN,
-            )
-
-        await self._session.commit()
-        await self._session.refresh(company)
-        if employee is not None:
-            await self._session.refresh(employee)
-
-        # Best-effort Auth registration after commit (no sync wait for remote Auth/Kafka).
-        # Buffer-only Fake path processes in-process so CI still binds keycloak_sub.
-        await publish_register_command(
-            client_ref=f"company:{company.id}",
-            username=company.id,
-            email=f"{company.id}@companies.prodavan.local",
-            password=pwd,
-            realm_roles=[ROLE_COMPANY],
-            display_name=name.strip(),
-        )
-        if employee is not None:
-            await publish_register_command(
-                client_ref=f"employee:{employee.id}",
-                username=employee.email,
-                email=employee.email,
-                password=None,
-                realm_roles=[ROLE_EMPLOYEE],
-                display_name=admin_display_name,
-            )
-            await self._session.refresh(employee)
-        await self._session.refresh(company)
-        return company, employee
 
     async def invite_employee(
         self,
@@ -383,50 +269,19 @@ class IdentityCommandService:
         display_name: str | None,
         role: str = MembershipRole.MEMBER,
     ) -> EmployeeRow:
-        from prodavan.application.auth.register import publish_register_command
+        from prodavan.application.employees.service import EmployeesCommandService
 
-        employee = await self._upsert_invited_employee(
+        return await EmployeesCommandService(self._session).invite_employee(
+            company_id=company_id,
             email=email,
             display_name=display_name,
-            keycloak_user_id=None,
+            role=role,
         )
-        await self._ensure_membership(company_id=company_id, employee_id=employee.id, role=role)
-        await self._session.commit()
-        await self._session.refresh(employee)
-
-        await publish_register_command(
-            client_ref=f"employee:{employee.id}",
-            username=employee.email,
-            email=employee.email,
-            password=None,
-            realm_roles=[ROLE_EMPLOYEE],
-            display_name=display_name,
-        )
-        await self._session.refresh(employee)
-        return employee
 
     async def disable_employee(self, *, employee_id: str, principal: Principal | None = None) -> EmployeeRow:
-        from prodavan.application.projects.platform_event_service import PlatformEventService
+        from prodavan.application.employees.service import EmployeesCommandService
 
-        q = await self._session.execute(
-            select(EmployeeRow)
-            .where(EmployeeRow.id == employee_id)
-            .options(selectinload(EmployeeRow.memberships))
+        return await EmployeesCommandService(self._session).disable_employee(
+            employee_id=employee_id,
+            principal=principal,
         )
-        emp = q.scalar_one_or_none()
-        if emp is None:
-            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Employee not found")
-        emp.status = EmployeeStatus.DISABLED
-        await self._provisioning.disable_user(keycloak_user_id=emp.keycloak_sub, email=emp.email)
-        actor = principal or Principal(sub="system")
-        events = PlatformEventService(self._session)
-        for membership in emp.memberships:
-            await events.emit(
-                event_type="employee.disabled",
-                company_id=membership.company_id,
-                principal=actor,
-                payload={"employee_id": emp.id, "email": emp.email},
-            )
-        await self._session.commit()
-        await self._session.refresh(emp)
-        return emp

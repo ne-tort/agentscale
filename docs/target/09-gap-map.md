@@ -14,7 +14,8 @@
 | **P-CO-02** | Company **CRUD своих** AI keys (SDK/API) + видит Admin-bound **RO** | API `/companies/{id}/ai-keys` + `owner_scope` (**partial**); Flutter tab — open | Backend link live; UI later |
 | **P-CO-03** | Company list/manage containers **своих** сотрудников | Только Admin `/admin/containers` | Нет company-scoped containers |
 | **P-CO-04** | Cabinets от Admin → Company **RO**; later local CRUD | **Admin CRUD + N:M company grants**; Company RO + employee assign | Company assign UI shipped; Verify Dev |
-| **P-ID-01** | **Company** имеет **Keycloak-креды** | `companies.keycloak_sub` via Auth Kafka `auth.user.register` + bind; soft-bind on login | Org principal async; zombies in admin metrics |
+| **P-ID-01** | **Company** имеет **Keycloak-креды** | `companies.keycloak_sub` via Auth Kafka `auth.user.register` + bind; soft-delete `deleted_at` + async cascade | Org principal async; zombies in admin metrics |
+| **P-CAS-02** | Company soft-delete → async cascade | Soft-delete + Celery `cascade_company_deleted` + Auth `auth.user.delete` | Sync orchestrator removed |
 | **P-ID-02** | Admin / Company / Employee — три KC-сущности | Realm roles + `prodavan-keycloak-init` bootstrap; API resolution live | IdP brokers / SMTP invite polish |
 | **P-CAB-01** | Company **назначает** Employee ↔ Cabinet | **Grants + assignment API + Flutter** | Verify Dev E2E |
 | **P-CAB-02** | UI кабинета из module meta | Module template + `module_data_rows` API; employee UI = placeholder | Generic meta UI next |

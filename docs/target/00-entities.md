@@ -96,10 +96,21 @@ Peers: Employee A не видит Cabinet/Project/Pod Employee B, если не�
 
 | Удалить | Эффект вниз |
 |---------|-------------|
-| **Company** | disable employees → wipe projects/pods → hard-delete cabinets → delete company |
-| **Cabinet** | **все Projects** этого кабинета (у всех сотрудников) → wipe Pod/MinIO → delete cabinet |
+| **Company** (soft-delete `deleted_at`) | REST сразу скрывает из UI → Kafka `company.deleted` → Auth `auth.user.delete` (KC) → Employees soft-disable → Projects wipe/pods → Cabinets hard-delete (Celery). Строка company остаётся с `deleted_at`. |
+| **Cabinet** | **все Projects** этого кабинета → wipe Pod/MinIO → delete cabinet |
 | **Project** | stop sessions → wipe Pod/MinIO → soft/hard delete project |
-| **Employee disable** | 403 на API; кабинеты/история не авто-wipe (политика отдельно) |
+| **Employee disable / soft-delete** | 403 на API; Auth `auth.user.disable|delete`; кабинеты/история **не** авто-wipe (канон) |
+
+### Async topology (REST / Kafka / Celery)
+
+| Роль | Кто |
+|------|-----|
+| REST | BC Companies / Employees — своя транзакция (CRUD, soft-delete), publish после commit |
+| Kafka | Контракт между BC (`company.deleted`, `employee.disabled`, Auth commands) |
+| Kafka consumer | In-process `KafkaManager` в API (не Celery) — маршрутизация |
+| Celery | Wipe MinIO, DROP schema, cascade heavy steps, bind `keycloak_sub` |
+
+`keycloak_sub IS NULL` (и сущность не soft-deleted) = зомби → admin alert. Отдельный флаг регистрации не нужен.
 
 Hard-delete Cabinet = полный wipe связанных проектов. Soft-archive — отдельный статус (проекты не обязаны жить вечно под archive; UX уточняется, но канон delete = wipe projects).
 

@@ -193,3 +193,14 @@ def register_tasks(app) -> None:
             (payload or {}).get("client_ref"),
         )
         return run_async(_run())
+
+    @app.task(name=job_names.CASCADE_COMPANY_DELETED, bind=False)
+    def cascade_company_deleted(company_id: str, actor_sub: str = "system") -> dict[str, Any]:
+        from prodavan.application.companies.cascade import cascade_company_deleted as cascade_fn
+
+        logger.info(
+            "celery task %s company_id=%s",
+            job_names.CASCADE_COMPANY_DELETED,
+            company_id,
+        )
+        return run_async(cascade_fn(company_id, actor_sub=actor_sub or "system"))

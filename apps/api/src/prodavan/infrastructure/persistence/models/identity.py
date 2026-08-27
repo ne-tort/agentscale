@@ -29,6 +29,8 @@ class CompanyRow(Base):
     subscription_ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     subscription_lifetime: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Soft-delete: UI hides when set; async cascade via company.deleted.
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
     # DB ON DELETE CASCADE — do not ORM-NULL memberships.company_id (NOT NULL).
     memberships: Mapped[list[MembershipRow]] = relationship(

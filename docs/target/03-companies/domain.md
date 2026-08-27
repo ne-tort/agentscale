@@ -54,9 +54,12 @@ Company имеет **Keycloak орг-аккаунт** ([session](../10-identity-
 
 | Событие | Эффект |
 |---------|--------|
-| Company delete (Admin) | disable employees → wipe projects/pods → cabinets → company + KC |
+| Company soft-delete (Admin) | `deleted_at` + Kafka `company.deleted` → Auth KC delete → disable employees → wipe projects/pods → hard-delete cabinets (Celery). UI скрывает сразу. |
 | Cabinet delete | все Projects кабинета → wipe |
 | Company pause/delete project | как Admin cascade через Project → Port |
+| Employee disable | soft status + Auth KC disable; **без** auto wipe projects |
+
+BC Companies (`application/companies`) — REST org CRUD; не вызывает Keycloak Admin напрямую (только Auth Kafka). См. [10-identity-keycloak/architecture.md](../10-identity-keycloak/architecture.md), [13-platform-infra/principles.md](../13-platform-infra/principles.md) §3a.
 
 ## Будущее: универсальная иерархия
 

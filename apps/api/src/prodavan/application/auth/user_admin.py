@@ -27,12 +27,30 @@ class UserAdminPort(Protocol):
         display_name: str | None,
     ) -> RegisterResult: ...
 
+    async def disable_user(
+        self,
+        *,
+        keycloak_user_id: str | None,
+        username: str | None,
+        email: str | None,
+    ) -> None: ...
+
+    async def delete_user(
+        self,
+        *,
+        keycloak_user_id: str | None,
+        username: str | None,
+        email: str | None,
+    ) -> None: ...
+
 
 class FakeUserAdmin:
     """In-memory user create for tests / AUTH without live KC Admin."""
 
     def __init__(self) -> None:
         self.registrations: list[dict[str, object]] = []
+        self.disabled: list[str] = []
+        self.deleted: list[str] = []
         self._n = 0
         self._by_username: dict[str, str] = {}
         self._by_email: dict[str, str] = {}
@@ -77,6 +95,31 @@ class FakeUserAdmin:
             email=email_l,
             realm_roles=roles,
         )
+
+    async def disable_user(
+        self,
+        *,
+        keycloak_user_id: str | None,
+        username: str | None,
+        email: str | None,
+    ) -> None:
+        self.disabled.append(keycloak_user_id or username or email or "")
+
+    async def delete_user(
+        self,
+        *,
+        keycloak_user_id: str | None,
+        username: str | None,
+        email: str | None,
+    ) -> None:
+        self.deleted.append(keycloak_user_id or username or email or "")
+        if keycloak_user_id:
+            for k, v in list(self._by_username.items()):
+                if v == keycloak_user_id:
+                    del self._by_username[k]
+            for k, v in list(self._by_email.items()):
+                if v == keycloak_user_id:
+                    del self._by_email[k]
 
 
 _fake: FakeUserAdmin | None = None

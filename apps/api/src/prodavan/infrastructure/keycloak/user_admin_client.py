@@ -197,6 +197,93 @@ class HttpUserAdminClient:
                 realm_roles=roles,
             )
 
+    async def _resolve_user_id(
+        self,
+        client: httpx.AsyncClient,
+        *,
+        headers: dict[str, str],
+        keycloak_user_id: str | None,
+        username: str | None,
+        email: str | None,
+    ) -> str | None:
+        if keycloak_user_id:
+            return keycloak_user_id
+        users_url = self._users_url()
+        if username:
+            found = await self._lookup_user_id(
+                client, headers=headers, users_url=users_url, params={"username": username, "exact": "true"}
+            )
+            if found:
+                return found
+        if email:
+            return await self._lookup_user_id(
+                client,
+                headers=headers,
+                users_url=users_url,
+                params={"email": email.lower(), "exact": "true"},
+            )
+        return None
+
+    async def disable_user(
+        self,
+        *,
+        keycloak_user_id: str | None,
+        username: str | None,
+        email: str | None,
+    ) -> None:
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            token = await self._admin_token(client)
+            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+            user_id = await self._resolve_user_id(
+                client,
+                headers=headers,
+                keycloak_user_id=keycloak_user_id,
+                username=username,
+                email=email,
+            )
+            if not user_id:
+                return
+            resp = await client.put(
+                f"{self._users_url()}/{user_id}",
+                json={"enabled": False},
+                headers=headers,
+            )
+            if resp.status_code >= 400:
+                raise AppError(
+                    code="KEYCLOAK_ADMIN",
+                    title="Keycloak disable failed",
+                    status=502,
+                    detail=f"disable user returned {resp.status_code}",
+                )
+
+    async def delete_user(
+        self,
+        *,
+        keycloak_user_id: str | None,
+        username: str | None,
+        email: str | None,
+    ) -> None:
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            token = await self._admin_token(client)
+            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+            user_id = await self._resolve_user_id(
+                client,
+                headers=headers,
+                keycloak_user_id=keycloak_user_id,
+                username=username,
+                email=email,
+            )
+            if not user_id:
+                return
+            resp = await client.delete(f"{self._users_url()}/{user_id}", headers=headers)
+            if resp.status_code >= 400 and resp.status_code != 404:
+                raise AppError(
+                    code="KEYCLOAK_ADMIN",
+                    title="Keycloak delete failed",
+                    status=502,
+                    detail=f"delete user returned {resp.status_code}",
+                )
+
     @staticmethod
     def _profile_names(
         *,

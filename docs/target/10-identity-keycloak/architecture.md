@@ -33,22 +33,24 @@ Flutter
 
 Kafka (best-effort, без PG outbox): lifecycle `auth.login`, `auth.first_login`, `auth.login_failed`, `auth.token_refreshed`, `auth.logout` — на `prodavan.platform.events`.
 
-**Регистрация пользователей — только Kafka Auth commands** (Auth Service domain-agnostic):
+**Регистрация / удаление пользователей — только Kafka Auth commands** (Auth Service domain-agnostic):
 
 ```text
-Identity (company/employee create)
-  → DB row keycloak_sub=NULL
-  → topic prodavan.auth.commands  event_type=auth.user.register
-       { request_id, client_ref, username, email, password?, realm_roles, display_name? }
-Auth Service consumer (group prodavan-auth-commands)
-  → Keycloak Admin create/reuse user (idempotent)
-  → topic prodavan.auth.events  auth.user.registered | auth.user.register_failed
-       { request_id, client_ref, sub?, … }  # client_ref echo, Auth не парсит
-Identity Celery apply_auth_user_registered
-  → set companies/employees.keycloak_sub by client_ref (company:<id> | employee:<id>)
+Companies / Employees BC
+  → DB row keycloak_sub=NULL (create) или soft-delete
+  → topic prodavan.auth.commands
+       auth.user.register | auth.user.disable | auth.user.delete
+Auth Service consumer
+  → Keycloak Admin create / disable / delete
+  → topic prodavan.auth.events
+       auth.user.registered | disabled | deleted | *_failed
+Celery / Identity bind
+  → set keycloak_sub on registered; metrics on failed
 ```
 
-Флаг «зарегистрирован в KC»: `keycloak_sub IS NOT NULL`. Зомби (unbound) → admin metrics `keycloak_unbound` / `employees_keycloak_unbound`.
+Company soft-delete → platform `company.deleted` → cascade Celery (employees → projects → cabinets) + Auth delete company principal.
+
+Флаг «зарегистрирован в KC»: `keycloak_sub IS NOT NULL`. Зомби (unbound, not soft-deleted) → admin metrics `keycloak_unbound` / `employees_keycloak_unbound`.
 
 CI / `KAFKA_ENABLED=false`: buffer-only in-process Fake path (publish → handler → event → bind) без live KC.
 

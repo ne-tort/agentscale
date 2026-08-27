@@ -149,11 +149,12 @@ async def register_user(command: RegisterUserCommand) -> EventEnvelope:
 async def handle_auth_command_envelope(envelope: EventEnvelope) -> EventEnvelope | None:
     if envelope.bus != "auth_command":
         return None
-    if envelope.event_type != AUTH_USER_REGISTER:
-        logger.debug("auth command ignored type=%s", envelope.event_type)
-        return None
-    command = parse_register_command(envelope.payload or {})
-    return await register_user(command)
+    if envelope.event_type == AUTH_USER_REGISTER:
+        command = parse_register_command(envelope.payload or {})
+        return await register_user(command)
+    from prodavan.application.auth.lifecycle import handle_auth_lifecycle_command
+
+    return await handle_auth_lifecycle_command(envelope)
 
 
 async def publish_register_command(

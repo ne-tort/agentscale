@@ -371,7 +371,10 @@ def test_admin_delete_company_with_invited_admin_only(client: TestClient) -> Non
     deleted = client.delete(f"/api/v1/admin/companies/{company_id}", headers=admin_h)
     assert deleted.status_code == 200, deleted.text
     assert deleted.json()["deleted"] is True
-    assert deleted.json()["employees_disabled"]
+    assert deleted.json().get("soft") is True
+    # Cascade runs inline when Celery disabled (CI); otherwise enqueued.
+    if not deleted.json().get("cascade_enqueued"):
+        assert deleted.json().get("employees_disabled")
     gone = client.get(f"/api/v1/admin/companies/{company_id}", headers=admin_h)
     assert gone.status_code == 404
 
@@ -411,11 +414,14 @@ def test_admin_delete_company_cascades(client: TestClient) -> None:
     body = deleted.json()
     assert body["deleted"] is True
     assert body["id"] == company_id
-    assert project_id in body["projects_deleted"]
-    assert cabinet_id in body["cabinets_deleted"]
+    assert body.get("soft") is True
+    if not body.get("cascade_enqueued"):
+        assert project_id in body.get("projects_deleted", [])
+        assert cabinet_id in body.get("cabinets_deleted", [])
 
     gone = client.get(f"/api/v1/admin/companies/{company_id}", headers=admin_h)
     assert gone.status_code == 404
 
-    proj_gone = client.get(f"/api/v1/projects/{project_id}", headers=boss_h)
-    assert proj_gone.status_code == 404
+    if not body.get("cascade_enqueued"):
+        proj_gone = client.get(f"/api/v1/projects/{project_id}", headers=boss_h)
+        assert proj_gone.status_code == 404
