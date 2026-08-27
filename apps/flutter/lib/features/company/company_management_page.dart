@@ -7,6 +7,7 @@ import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 import 'package:prodavan/features/company/company_ai_key_list_page.dart';
 import 'package:prodavan/features/company/company_cabinets_page.dart';
 import 'package:prodavan/features/company/company_employees_page.dart';
+import 'package:prodavan/features/company/company_module_list_page.dart';
 import 'package:prodavan/features/company/company_project_containers_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -45,6 +46,11 @@ class CompanyManagementPage extends StatelessWidget {
         icon: Icons.view_module_outlined,
         label: l10n.navCabinets,
         page: CompanyCabinetsPage(companyId: companyId),
+      ),
+      (
+        icon: Icons.extension_outlined,
+        label: l10n.navModules,
+        page: CompanyModuleListPage(companyId: companyId),
       ),
     ];
 

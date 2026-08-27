@@ -39,12 +39,15 @@ class AppValuePreference<T> extends StatefulWidget {
     this.inputToValue,
     this.keyboardType,
     this.maxLines = 1,
+    this.onTap,
   });
 
   final String title;
   final T value;
   final Future<void> Function(T value) onSave;
   final bool enabled;
+  /// When set, tap invokes this instead of inline edit (e.g. copy read-only ID).
+  final VoidCallback? onTap;
   final IconData? icon;
   final bool obscureText;
   final bool digitsOnly;
@@ -156,6 +159,14 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
     }
   }
 
+  void _handleTap() {
+    if (widget.onTap != null) {
+      widget.onTap!();
+      return;
+    }
+    _beginEdit();
+  }
+
   void _beginEdit() {
     if (!widget.enabled || _expanded) return;
     _controller.text = _editText(widget.value);
@@ -213,10 +224,12 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
     return AppPreferenceTile(
       title: widget.title,
       icon: widget.icon,
-      enabled: widget.enabled,
+      enabled: widget.enabled || widget.onTap != null,
       subtitle: Text(subtitleText, style: theme.textTheme.bodyMedium),
-      trailing: const AppTrailingChevron(),
-      onTap: _beginEdit,
+      trailing: widget.onTap != null
+          ? Icon(Icons.copy_outlined, size: 20, color: theme.colorScheme.onSurfaceVariant)
+          : const AppTrailingChevron(),
+      onTap: _handleTap,
     );
   }
 }

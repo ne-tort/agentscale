@@ -926,6 +926,12 @@ abstract class AppLocalizations {
   /// **'Select cabinets for module'**
   String get adminSelectCabinetsForModule;
 
+  /// No description provided for @adminSelectCompaniesForModule.
+  ///
+  /// In en, this message translates to:
+  /// **'Select companies for module'**
+  String get adminSelectCompaniesForModule;
+
   /// No description provided for @adminDeleteCabinetConfirm.
   ///
   /// In en, this message translates to:
@@ -2456,6 +2462,12 @@ abstract class AppLocalizations {
   /// **'Company ID'**
   String get companyLoginId;
 
+  /// No description provided for @companyIdCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Company ID copied'**
+  String get companyIdCopied;
+
   /// No description provided for @companyPassword.
   ///
   /// In en, this message translates to:
@@ -2503,6 +2515,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Platform-bound key — read only'**
   String get companyKeyReadOnlyBanner;
+
+  /// No description provided for @companyAddModule.
+  ///
+  /// In en, this message translates to:
+  /// **'Add module'**
+  String get companyAddModule;
+
+  /// No description provided for @companyNoModules.
+  ///
+  /// In en, this message translates to:
+  /// **'No modules'**
+  String get companyNoModules;
+
+  /// No description provided for @companyModulesEmptyHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Create a local module or wait for platform assignment'**
+  String get companyModulesEmptyHint;
+
+  /// No description provided for @companyModuleReadOnlyBanner.
+  ///
+  /// In en, this message translates to:
+  /// **'Platform-assigned module — read only; you can bind cabinets'**
+  String get companyModuleReadOnlyBanner;
 
   /// No description provided for @companyCreateRuntimeKeyHint.
   ///

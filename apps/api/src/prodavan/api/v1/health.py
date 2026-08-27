@@ -81,7 +81,7 @@ async def readiness(request: Request) -> dict[str, Any]:
         }
         required_resources: list[tuple[str, bool]] = [
             ("kafka", settings.kafka_required),
-            ("object_storage", settings.object_store_required),
+            ("file_store", settings.object_store_required),
             ("worker", settings.celery_required),
         ]
         for name, required in required_resources:

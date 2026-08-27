@@ -78,3 +78,26 @@ Day-2: merge в `main` + Argo. Не `kubectl apply -k infra/k3s/...` рукам�
 | Auto-merge | squash после Gate |
 
 Self-hosted runners и kubeconfig для Verify — только [`infra/github-runner/`](../../infra/github-runner/README.md) (не bootstrap UI).
+
+---
+
+## 5. MinIO (object store)
+
+| Компонент | Значение |
+|-----------|----------|
+| Bucket | `prodavan` (private, versioning off) |
+| Init Job | `prodavan-minio-init` — PostSync hook; создаёт bucket + IAM user `prodavan-api` |
+| API creds | `S3_ACCESS_KEY=prodavan-api` в `prodavan-api-secrets` |
+| Root creds | `prodavan-minio` Secret — только init / break-glass |
+| PVC | `prodavan-minio-data` (10Gi, RWO) — данные переживают pod reschedule |
+
+**Ротация API creds (dev/staging):**
+
+1. Сгенерировать новый пароль; обновить `prodavan-minio` Secret (`api-password`) и `prodavan-api-secrets` (`S3_SECRET_KEY`) в git (SealedSecret на shared).
+2. Argo sync → init Job пересоздаёт/обновляет user policy (idempotent).
+3. Rollout `prodavan-api`; smoke `/health/ready`.
+
+**Verify PVC retain:** `prodavan-ops validate` проверяет наличие PVC `prodavan-minio-data` в overlay render.
+
+API **не** вызывает `create_bucket` на startup — только `head_bucket` health.
+

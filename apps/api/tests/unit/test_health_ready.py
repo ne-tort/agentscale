@@ -48,7 +48,7 @@ def test_ready_fails_when_kafka_required(monkeypatch: pytest.MonkeyPatch, ready_
 
     class _Life:
         async def health_report(self) -> dict:
-            return {"kafka": False, "object_storage": True, "worker": None}
+            return {"kafka": False, "file_store": True, "worker": None}
 
     monkeypatch.setattr(health_mod, "get_lifespan_manager", lambda: _Life())
     # Attach lifespan via app.state for request path
@@ -70,7 +70,7 @@ def test_ready_ok_when_kafka_required_and_healthy(
 
     class _Life:
         async def health_report(self) -> dict:
-            return {"kafka": True, "object_storage": True, "worker": True}
+            return {"kafka": True, "file_store": True, "worker": True}
 
     ready_client.app.state.lifespan_manager = _Life()
     monkeypatch.setattr(health_mod, "get_lifespan_manager", lambda: _Life())
@@ -79,4 +79,4 @@ def test_ready_ok_when_kafka_required_and_healthy(
     assert resp.status_code == 200
     body = resp.json()
     assert body["checks"]["kafka"] == "ok"
-    assert body["checks"]["object_storage"] == "ok"
+    assert body["checks"]["file_store"] == "ok"

@@ -11,13 +11,13 @@ from typing import Any
 
 from prodavan.config.settings import settings
 from prodavan.core.infra.object_keys import workspace_object_key
-from prodavan.core.infra.object_storage_manager import ensure_object_storage
+from prodavan.infrastructure.files.manager import ensure_file_store
 
 
 class WorkspaceLayoutWriter:
     """Idempotent /workspace layout per container.md.
 
-    Text/config blobs go through ObjectStorageManager (local backend = same paths).
+    Text/config blobs go through FileStoreManager (local backend = same paths).
     Package sandbox trees remain local extract (agent cwd); zip copy also stored.
     """
 
@@ -36,7 +36,7 @@ class WorkspaceLayoutWriter:
 
     def _put_workspace_bytes(self, relative_path: str, data: bytes, *, content_type: str | None = None) -> None:
         key = workspace_object_key(workspace_key=self._workspace_key, relative_path=relative_path)
-        ensure_object_storage().put_bytes_sync(key, data, content_type=content_type)
+        ensure_file_store().put_bytes_sync(key, data, content_type=content_type)
 
     def ensure_dirs(self) -> None:
         for rel in ("prompts", "rules", "skills", "packages", "inbox", "out", "cabinet-seed"):
@@ -84,7 +84,7 @@ class WorkspaceLayoutWriter:
             relative_path=f"packages/{safe}.zip",
         )
         try:
-            raw = ensure_object_storage().get_bytes_sync(key)
+            raw = ensure_file_store().get_bytes_sync(key)
         except FileNotFoundError:
             return False
         if dest.exists():
@@ -116,12 +116,12 @@ class WorkspaceLayoutWriter:
         return names
 
     def store_inbox_attachment(self, *, filename: str, raw: bytes) -> Path:
-        """Write inbox blob via ObjectStorageManager (local backend → same path)."""
+        """Write inbox blob via FileStoreManager (local backend → same path)."""
         from prodavan.core.infra.object_keys import inbox_object_key
 
         safe = Path(filename).name
         key = inbox_object_key(workspace_key=self._workspace_key, filename=safe)
-        ensure_object_storage().put_bytes_sync(key, raw)
+        ensure_file_store().put_bytes_sync(key, raw)
         path = self._root / "inbox" / safe
         return path
 
@@ -130,14 +130,14 @@ class WorkspaceLayoutWriter:
 
         safe = Path(filename).name
         key = inbox_object_key(workspace_key=self._workspace_key, filename=safe)
-        return ensure_object_storage().delete_sync(key)
+        return ensure_file_store().delete_sync(key)
 
     def read_inbox_attachment(self, *, filename: str) -> bytes:
         from prodavan.core.infra.object_keys import inbox_object_key
 
         safe = Path(filename).name
         key = inbox_object_key(workspace_key=self._workspace_key, filename=safe)
-        return ensure_object_storage().get_bytes_sync(key)
+        return ensure_file_store().get_bytes_sync(key)
 
     def remove_project_tree(self) -> dict[str, Any]:
         """Stop MCP sandboxes, wipe object-store prefix (verified), then local FS tree."""
@@ -158,7 +158,7 @@ def workspace_tree_bytes(workspace_key: str) -> int:
 
     prefix = workspace_object_key(workspace_key=workspace_key, relative_path="")
     try:
-        return ensure_object_storage().prefix_size_sync(prefix)
+        return ensure_file_store().prefix_size_sync(prefix)
     except Exception:
         root = Path(settings.storage_root) / "projects" / workspace_key
         if not root.is_dir():

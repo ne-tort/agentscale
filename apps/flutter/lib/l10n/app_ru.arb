@@ -356,6 +356,7 @@
   "adminMetaInvalid": "Метаданные",
   "adminModulePreviewMode": "Предпросмотр",
   "adminSelectCabinetsForModule": "Выберите кабинеты для модуля",
+  "adminSelectCompaniesForModule": "Выберите компании для модуля",
   "adminDeleteCabinetConfirm": "Удалить кабинет «{name}»? Будут удалены все проекты и схема кабинета.",
   "@adminDeleteCabinetConfirm": {
     "placeholders": {
@@ -817,6 +818,7 @@
   "companyNoEmployees": "Нет сотрудников",
   "companyOrgMetrics": "Метрики организации",
   "companyLoginId": "ID компании",
+  "companyIdCopied": "ID компании скопирован",
   "companyPassword": "Пароль",
   "companyPasswordHint": "Минимум 8 символов",
   "companyPasswordChanged": "Пароль успешно изменен",
@@ -825,6 +827,10 @@
   "companyKeyPlatformBound": "От платформы",
   "companyKeySourceLocal": "Свой",
   "companyKeyReadOnlyBanner": "Ключ привязан платформой — только просмотр",
+  "companyAddModule": "Добавить модуль",
+  "companyNoModules": "Нет модулей",
+  "companyModulesEmptyHint": "Создайте свой модуль или дождитесь назначения от платформы",
+  "companyModuleReadOnlyBanner": "Модуль назначен платформой — только просмотр; можно привязать кабинеты",
   "companyCreateRuntimeKeyHint": "Добавьте свой ключ для проектов сотрудников",
   "errorConflict": "Конфликт данных. Обновите страницу и попробуйте снова.",
   "errorForbidden": "Недостаточно прав для этого действия.",

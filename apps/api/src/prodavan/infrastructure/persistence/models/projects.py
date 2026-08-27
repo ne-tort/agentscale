@@ -60,4 +60,7 @@ class ProjectAttachmentRow(Base):
     content_type: Mapped[str] = mapped_column(String(128), nullable=False, default="application/octet-stream")
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     storage_ref: Mapped[str] = mapped_column(Text, nullable=False)
+    content_asset_id: Mapped[str | None] = mapped_column(
+        ForeignKey("content_assets.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -19,6 +19,7 @@ from prodavan.domain.ai_keys import (
 )
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
+from prodavan.domain.ownership import company_view_flags
 from prodavan.infrastructure.persistence.models.ai_keys import AiProviderKeyRow, CompanyAiKeyBindingRow
 from prodavan.infrastructure.persistence.models.identity import CompanyRow
 from prodavan.infrastructure.secrets.file_store import new_key_id
@@ -311,15 +312,25 @@ class AiKeysService:
         for row in owned_q.scalars().all():
             seen.add(row.id)
             pub = self._to_public(row, company_ids=[company_id])
-            pub["source"] = "company"
-            pub["writable"] = True
+            pub.update(
+                company_view_flags(
+                    owner_scope=row.owner_scope,
+                    owner_company_id=row.owner_company_id,
+                    company_id=company_id,
+                )
+            )
             out.append(pub)
         for row in bound_q.scalars().all():
             if row.id in seen:
                 continue
             pub = self._to_public(row, company_ids=await self._company_ids(row.id))
-            pub["source"] = "platform_bound"
-            pub["writable"] = False
+            pub.update(
+                company_view_flags(
+                    owner_scope=row.owner_scope,
+                    owner_company_id=row.owner_company_id,
+                    company_id=company_id,
+                )
+            )
             out.append(pub)
         return out
 

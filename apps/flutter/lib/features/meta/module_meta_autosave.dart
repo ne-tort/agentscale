@@ -1,23 +1,19 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:prodavan/core/api/admin_api.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
-import 'package:prodavan/features/meta/module_meta_repository.dart';
 
-typedef ModuleMetaSaveCallback = Future<void> Function(String text);
+typedef ModuleMetaSaveHandler = Future<void> Function(ModuleMetaManifest manifest);
 
-/// Debounced autosave — flush on dispose, no timer leaks.
+/// Debounced manifest autosave — flush on dispose, no timer leaks.
 class ModuleMetaAutosave {
   ModuleMetaAutosave({
-    required this.moduleId,
-    required AdminApi api,
+    required ModuleMetaSaveHandler onSave,
     Duration interval = const Duration(seconds: 5),
-  })  : _api = api,
+  })  : _onSave = onSave,
         _interval = interval;
 
-  final String moduleId;
-  final AdminApi _api;
+  final ModuleMetaSaveHandler _onSave;
   final Duration _interval;
 
   Timer? _timer;
@@ -63,7 +59,7 @@ class ModuleMetaAutosave {
     try {
       final parsed = jsonDecode(_pendingText);
       final manifest = ModuleMetaManifest.fromJson(parsed);
-      await ModuleMetaRepository.save(_api, moduleId, manifest);
+      await _onSave(manifest);
       if (_disposed) return;
       _lastFingerprint = fingerprint;
       _dirty = false;

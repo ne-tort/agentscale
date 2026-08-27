@@ -44,8 +44,7 @@ class _AdminModuleJsonPageState extends State<AdminModuleJsonPage> {
   void initState() {
     super.initState();
     _autosave = ModuleMetaAutosave(
-      moduleId: widget.moduleId,
-      api: adminContext.api,
+      onSave: (manifest) => ModuleMetaRepository.save(adminContext.api, widget.moduleId, manifest),
     );
     _jsonController.addListener(_onJsonChanged);
     _load();

@@ -14,6 +14,7 @@ from prodavan.application.identity.service import EntitlementService
 from prodavan.domain.cabinets import CabinetOwnerScope, CabinetStatus, schema_name_for_instance
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
+from prodavan.domain.ownership import is_company_registry, registry_source
 from prodavan.infrastructure.cabinets.schema_provisioner import SchemaProvisioner
 from prodavan.infrastructure.persistence.models.cabinets import (
     CabinetEmployeeAssignmentRow,
@@ -34,8 +35,6 @@ async def _public_row(
     companies = await grants.list_companies(row.id)
     company_ids = [c["company_id"] for c in companies]
     assignments_count = await grants.assignment_count(row.id)
-    writable = row.owner_scope == CabinetOwnerScope.COMPANY
-    source = "company_local" if row.owner_scope == CabinetOwnerScope.COMPANY else "platform_assigned"
     out = {
         "id": row.id,
         "name": row.name,
@@ -47,9 +46,9 @@ async def _public_row(
         "company_ids": company_ids,
         "companies": companies,
         "assignments_count": assignments_count,
-        "writable": writable,
+        "writable": is_company_registry(row.owner_scope),
         "operable": True,
-        "source": source,
+        "source": registry_source(owner_scope=row.owner_scope),
         "base_template": row.base_template,
         "status": row.status,
         "created_at": row.created_at.isoformat() if row.created_at else None,

@@ -21,15 +21,22 @@ async def _public_row(
     cabinets = await bindings.list_cabinets(row.id)
     cabinet_ids = [c["cabinet_id"] for c in cabinets]
     project_ids = await bindings.list_project_ids(row.id)
+    company_ids = await bindings.list_company_ids(row.id)
+    companies = await bindings.list_companies(row.id)
     return {
         "id": row.id,
         "name": row.name,
         "status": row.status,
+        "owner_scope": row.owner_scope,
+        "owner_company_id": row.owner_company_id,
         "cabinet_ids": cabinet_ids,
         "cabinets": cabinets,
+        "company_ids": company_ids,
+        "companies": companies,
         "project_ids": project_ids,
         "cabinet_bindings_count": len(cabinet_ids),
         "project_bindings_count": len(project_ids),
+        "company_grants_count": len(company_ids),
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
@@ -65,7 +72,7 @@ class ModuleService:
         *,
         module_id: str,
         name: str | None = None,
-        cabinet_ids: list[str] | None = None,
+        company_ids: list[str] | None = None,
     ) -> dict:
         row = await self._get_row(module_id)
         if name is not None:
@@ -73,8 +80,8 @@ class ModuleService:
             if not trimmed:
                 raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="name required")
             row.name = trimmed
-        if cabinet_ids is not None:
-            await self._bindings.replace_cabinet_bindings(module_id, cabinet_ids)
+        if company_ids is not None:
+            await self._bindings.replace_company_grants(module_id, company_ids)
         await self._session.commit()
         await self._session.refresh(row)
         return await _public_row(self._session, row, bindings=self._bindings)

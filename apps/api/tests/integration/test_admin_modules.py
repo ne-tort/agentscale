@@ -41,7 +41,7 @@ def client() -> TestClient:
         yield client
 
 
-def _setup_two_cabinets(client: TestClient, admin: str) -> tuple[str, str, str]:
+def _setup_two_cabinets(client: TestClient, admin: str) -> tuple[str, str, str, str, str]:
     created = client.post(
         "/api/v1/companies",
         headers={"Authorization": f"Bearer {admin}"},
@@ -62,13 +62,29 @@ def _setup_two_cabinets(client: TestClient, admin: str) -> tuple[str, str, str]:
     )
     assert cab2.status_code == 200, cab2.text
     owner_tok = _token(sub="boss-mod", email="boss@modco.test")
-    return cab1.json()["id"], cab2.json()["id"], owner_tok
+    return company_id, cab1.json()["id"], cab2.json()["id"], owner_tok, admin
+
+
+def _company_bind_cabinets(
+    client: TestClient,
+    *,
+    company_id: str,
+    module_id: str,
+    cabinet_ids: list[str],
+    token: str,
+) -> None:
+    res = client.patch(
+        f"/api/v1/companies/{company_id}/modules/{module_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"cabinet_ids": cabinet_ids},
+    )
+    assert res.status_code == 200, res.text
 
 
 @requires_postgres
 def test_admin_module_crud_meta_and_bindings(client: TestClient) -> None:
     admin = _token(sub="padmin-mod", platform_admin=True)
-    cab1_id, cab2_id, owner_tok = _setup_two_cabinets(client, admin)
+    company_id, cab1_id, cab2_id, owner_tok, _admin = _setup_two_cabinets(client, admin)
 
     mod = client.post(
         "/api/v1/admin/modules",
@@ -80,13 +96,21 @@ def test_admin_module_crud_meta_and_bindings(client: TestClient) -> None:
     assert body["id"].startswith("mod_")
     module_id = body["id"]
 
-    patched = client.patch(
+    granted = client.patch(
         f"/api/v1/admin/modules/{module_id}",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"cabinet_ids": [cab1_id, cab2_id]},
+        json={"company_ids": [company_id]},
     )
-    assert patched.status_code == 200, patched.text
-    assert set(patched.json()["cabinet_ids"]) == {cab1_id, cab2_id}
+    assert granted.status_code == 200, granted.text
+    assert company_id in granted.json()["company_ids"]
+
+    _company_bind_cabinets(
+        client,
+        company_id=company_id,
+        module_id=module_id,
+        cabinet_ids=[cab1_id, cab2_id],
+        token=owner_tok,
+    )
 
     put = client.put(
         f"/api/v1/admin/modules/{module_id}/meta/documents/tables",
@@ -123,8 +147,8 @@ def test_admin_module_crud_meta_and_bindings(client: TestClient) -> None:
     assert denied.status_code == 422
 
     unbind_cab = client.patch(
-        f"/api/v1/admin/modules/{module_id}",
-        headers={"Authorization": f"Bearer {admin}"},
+        f"/api/v1/companies/{company_id}/modules/{module_id}",
+        headers={"Authorization": f"Bearer {owner_tok}"},
         json={"cabinet_ids": [cab2_id]},
     )
     assert unbind_cab.status_code == 200, unbind_cab.text
@@ -156,7 +180,7 @@ def test_admin_module_crud_meta_and_bindings(client: TestClient) -> None:
 @requires_postgres
 def test_module_shared_template_isolated_data_per_cabinet(client: TestClient) -> None:
     admin = _token(sub="padmin-mod-data", platform_admin=True)
-    cab1_id, cab2_id, owner_tok = _setup_two_cabinets(client, admin)
+    company_id, cab1_id, cab2_id, owner_tok, _admin = _setup_two_cabinets(client, admin)
 
     mod = client.post(
         "/api/v1/admin/modules",
@@ -172,12 +196,18 @@ def test_module_shared_template_isolated_data_per_cabinet(client: TestClient) ->
         json={"body": [{"slug": "suppliers", "label": "Suppliers", "storage_kind": "json_document"}]},
     )
 
-    patched = client.patch(
+    client.patch(
         f"/api/v1/admin/modules/{module_id}",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"cabinet_ids": [cab1_id, cab2_id]},
+        json={"company_ids": [company_id]},
     )
-    assert patched.status_code == 200, patched.text
+    _company_bind_cabinets(
+        client,
+        company_id=company_id,
+        module_id=module_id,
+        cabinet_ids=[cab1_id, cab2_id],
+        token=owner_tok,
+    )
 
     for cab_id, name in ((cab1_id, "Alpha"), (cab2_id, "Beta")):
         created = client.post(

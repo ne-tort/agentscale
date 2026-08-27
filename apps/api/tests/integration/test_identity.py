@@ -233,6 +233,7 @@ def test_company_principal_owns_ai_keys(client: TestClient) -> None:
     assert body["owner_scope"] == "company"
     assert body["owner_company_id"] == company_id
     assert body["writable"] is True
+    assert body["source"] == "company_local"
 
     listed = client.get(f"/api/v1/companies/{company_id}/ai-keys", headers=h)
     assert listed.status_code == 200

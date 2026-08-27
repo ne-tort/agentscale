@@ -132,13 +132,13 @@ class _AdminModuleListPageState extends State<AdminModuleListPage> {
     final rows = _modules
         .map(
           (m) {
-            final cabinetIds = m['cabinet_ids'];
-            final count = cabinetIds is List ? cabinetIds.length : 0;
+            final companyIds = m['company_ids'];
+            final count = companyIds is List ? companyIds.length : 0;
             return AppEntityRow(
               id: m['id'] as String,
               title: m['name'] as String? ?? m['id'] as String,
               cells: {
-                'cabinets': count > 0 ? '$count' : l10n.commonNotSet,
+                'companies': count > 0 ? '$count' : l10n.commonNotSet,
                 'status': m['status'] as String? ?? '',
               },
             );
@@ -163,7 +163,7 @@ class _AdminModuleListPageState extends State<AdminModuleListPage> {
               rows: rows,
               primaryColumnLabel: l10n.navModules,
               columns: [
-                AppEntityColumn(id: 'cabinets', label: l10n.commonCabinets),
+                AppEntityColumn(id: 'companies', label: l10n.navCompanies),
                 AppEntityColumn(
                   id: 'status',
                   label: l10n.commonStatus,

@@ -10,6 +10,8 @@ metadata:
 stringData:
   root-user: prodavan
   root-password: prodavan123
+  api-user: prodavan-api
+  api-password: prodavan-api-secret
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -141,8 +143,8 @@ metadata:
     app.kubernetes.io/part-of: prodavan
     app.kubernetes.io/component: minio-init
   annotations:
-    argocd.argoproj.io/hook: Sync
-    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: HookSucceeded
     argocd.argoproj.io/sync-wave: "5"
 spec:
   ttlSecondsAfterFinished: 600
@@ -168,6 +170,20 @@ spec:
                 secretKeyRef:
                   name: prodavan-minio
                   key: root-password
+            - name: MINIO_API_USER
+              valueFrom:
+                secretKeyRef:
+                  name: prodavan-minio
+                  key: api-user
+            - name: MINIO_API_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: prodavan-minio
+                  key: api-password
+          volumeMounts:
+            - name: api-policy
+              mountPath: /policy
+              readOnly: true
           command:
             - /bin/sh
             - -c
@@ -190,3 +206,13 @@ spec:
               mc anonymous set none local/prodavan || true
               # Local SoT uses overwrite semantics; versioning off keeps PVC lean.
               mc version suspend local/prodavan || true
+              mc admin policy create local prodavan-api-policy /policy/minio-api-policy.json 2>/dev/null || \
+                mc admin policy update local prodavan-api-policy /policy/minio-api-policy.json
+              if ! mc admin user info local "$MINIO_API_USER" >/dev/null 2>&1; then
+                mc admin user add local "$MINIO_API_USER" "$MINIO_API_PASSWORD"
+              fi
+              mc admin policy attach local prodavan-api-policy --user "$MINIO_API_USER" || true
+      volumes:
+        - name: api-policy
+          configMap:
+            name: prodavan-minio-api-policy

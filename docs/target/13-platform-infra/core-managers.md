@@ -12,7 +12,7 @@ apps/api/src/prodavan/core/
   infra/
     redis_manager.py
     kafka_manager.py
-    object_storage_manager.py   # MinIO / S3
+    object_storage_manager.py   # removed → infrastructure/files/manager.py (FileStoreManager)
     worker_manager.py           # Celery app facade
   registry.py           # optional shared register helpers
 ```
@@ -42,7 +42,7 @@ apps/api/src/prodavan/core/
 |---------|-------------|
 | `RedisManager` | pool/client, ping, settings |
 | `KafkaManager` | producer/consumer factory, topic config |
-| `ObjectStorageManager` | bucket ensure, put/get/delete, signed URL policy |
+| `FileStoreManager` | S3/local blob I/O, presign, prefix ops (`blobs/`, `projects/`, `cabinet_packages/`) |
 | `WorkerManager` | Celery app, task register facade для application |
 
 Application/domain **не** импортируют `aiokafka` / `redis` / `boto3` / `celery` напрямую — только через managers (или тонкие ports в `infrastructure/`, создаваемые managers).

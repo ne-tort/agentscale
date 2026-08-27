@@ -5,10 +5,10 @@ from __future__ import annotations
 from prodavan.config.settings import settings
 from prodavan.core.infra.database_resource import DatabaseEngineResource
 from prodavan.core.infra.kafka_manager import KafkaManager
-from prodavan.core.infra.object_storage_manager import ObjectStorageManager
 from prodavan.core.infra.redis_manager import RedisManager
 from prodavan.core.infra.trigger_worker_resource import TriggerWorkerResource
 from prodavan.core.lifespan.manager import LifespanManager
+from prodavan.infrastructure.files.manager import FileStoreManager
 
 _lifespan_manager: LifespanManager | None = None
 
@@ -18,7 +18,7 @@ def get_lifespan_manager() -> LifespanManager | None:
 
 
 def build_lifespan_manager() -> LifespanManager:
-    """Register infra: DB → Redis → object store → Kafka → Celery → transitional worker."""
+    """Register infra: DB → Redis → file store → Kafka → Celery → transitional worker."""
     global _lifespan_manager
     backend = (settings.object_store_backend or "local").strip().lower()
     if backend not in ("local", "s3"):
@@ -34,7 +34,7 @@ def build_lifespan_manager() -> LifespanManager:
         )
     )
     manager.register(
-        ObjectStorageManager(
+        FileStoreManager(
             backend=backend,  # type: ignore[arg-type]
             storage_root=settings.storage_root,
             s3_endpoint_url=settings.s3_endpoint_url,

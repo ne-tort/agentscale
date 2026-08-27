@@ -7,33 +7,33 @@ from prodavan.core.infra.kafka_manager import (
     get_kafka_manager_optional,
     set_kafka_manager,
 )
-from prodavan.core.infra.object_storage_manager import (
-    ObjectStorageManager,
-    ensure_object_storage,
-    get_object_storage,
-    get_object_storage_optional,
-    set_object_storage,
-)
 from prodavan.core.infra.redis_manager import RedisManager, get_redis_manager, set_redis_manager
 from prodavan.core.infra.trigger_worker_resource import TriggerWorkerResource
 from prodavan.core.infra.worker_manager import WorkerManager, get_celery_app, get_worker_manager
+from prodavan.infrastructure.files.manager import (
+    FileStoreManager,
+    ensure_file_store,
+    get_file_store,
+    get_file_store_optional,
+    set_file_store,
+)
 
 __all__ = [
     "DatabaseEngineResource",
+    "FileStoreManager",
     "KafkaManager",
-    "ObjectStorageManager",
     "RedisManager",
     "TriggerWorkerResource",
     "WorkerManager",
-    "ensure_object_storage",
+    "ensure_file_store",
     "get_celery_app",
+    "get_file_store",
+    "get_file_store_optional",
     "get_kafka_manager",
     "get_kafka_manager_optional",
-    "get_object_storage",
-    "get_object_storage_optional",
     "get_redis_manager",
     "get_worker_manager",
+    "set_file_store",
     "set_kafka_manager",
-    "set_object_storage",
     "set_redis_manager",
 ]

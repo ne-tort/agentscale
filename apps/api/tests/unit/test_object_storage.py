@@ -14,10 +14,7 @@ from prodavan.core.infra.object_keys import (
     parse_storage_ref,
     workspace_object_key,
 )
-from prodavan.core.infra.object_storage_manager import (
-    ObjectStorageManager,
-    set_object_storage,
-)
+from prodavan.infrastructure.files.manager import FileStoreManager, set_file_store
 from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
 
 
@@ -36,8 +33,8 @@ def test_parse_storage_ref_object_and_file() -> None:
 
 @pytest.mark.asyncio
 async def test_local_object_storage_roundtrip(tmp_path: Path) -> None:
-    set_object_storage(None)
-    mgr = ObjectStorageManager(backend="local", storage_root=tmp_path)
+    set_file_store(None)
+    mgr = FileStoreManager(backend="local", storage_root=tmp_path)
     await mgr.startup()
     key = "projects/w1/workspace/inbox/note.txt"
     await mgr.put_bytes(key, b"hello", content_type="text/plain")
@@ -52,8 +49,8 @@ async def test_local_object_storage_roundtrip(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_workspace_writer_agents_via_object_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    set_object_storage(None)
-    mgr = ObjectStorageManager(backend="local", storage_root=tmp_path)
+    set_file_store(None)
+    mgr = FileStoreManager(backend="local", storage_root=tmp_path)
     await mgr.startup()
     monkeypatch.setattr("prodavan.infrastructure.projects.workspace.settings.storage_root", tmp_path)
     writer = WorkspaceLayoutWriter(workspace_key="wk1")
@@ -75,8 +72,8 @@ async def test_ensure_package_tree_hydrates_from_object_store(
     import zipfile
     from io import BytesIO
 
-    set_object_storage(None)
-    mgr = ObjectStorageManager(backend="local", storage_root=tmp_path)
+    set_file_store(None)
+    mgr = FileStoreManager(backend="local", storage_root=tmp_path)
     await mgr.startup()
     monkeypatch.setattr("prodavan.infrastructure.projects.workspace.settings.storage_root", tmp_path)
     buf = BytesIO()

@@ -26,6 +26,23 @@
 
 **Ранбук:** [`docs/07-infrastructure/runbook.md`](docs/07-infrastructure/runbook.md).
 
+### Поставка через PR (обязательно)
+
+**После любых изменений в коде, тестах или продуктовых docs** — не останавливаться на локальном коммите.  
+Финальный шаг задачи: **commit → push → PR** (новый или обновление существующего на той же ветке).
+
+```text
+изменения → commit → push → PR → CI Gate → auto-merge → CI Images → Argo sync → Verify Dev
+```
+
+| Правило | Смысл |
+|---------|--------|
+| **Всегда PR** | Любой готовый diff — в PR, даже «мелкий» фикс или доработка по ревью |
+| **Не спрашивать «коммитить?»** | Если задача выполнена — сразу commit + push + PR |
+| **Не GitOps в обход** | Без `kubectl apply`, ручных migrate на shared env, local-only «готово» |
+| **CI красный — чинить в той же ветке** | Push в PR, дождаться green **Verify Dev** |
+| **Не в PR** | `tools/_*.sh`, секреты, `.env`, артефакты сборки |
+
 - Поставка: PR → **CI Gate** → Auto-merge → **CI Images** → Argo CD sync → **Verify Dev**.
 - Bootstrap кластера: **SSH + Terraform** (`infra/terraform/environments/local`) → UI **http://127.0.0.1:8088/**.
 - Императив только **`infra/ops`**: `validate` / `wait` / `rollout` / `smoke`.

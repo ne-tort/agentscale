@@ -11,6 +11,7 @@ import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/admin/ai_key_integration_type.dart';
+import 'package:prodavan/features/company/company_entity_source.dart';
 import 'package:prodavan/features/company/company_ai_key_detail_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -197,10 +198,8 @@ class _CompanyAiKeyListPageState extends State<CompanyAiKeyListPage> {
     }
   }
 
-  String _sourceLabel(AppLocalizations l10n, Map<String, dynamic> k) {
-    if (k['source'] == 'platform_bound') return l10n.companyKeyPlatformBound;
-    return l10n.companyKeySourceLocal;
-  }
+  String _sourceLabel(AppLocalizations l10n, Map<String, dynamic> k) =>
+      companyEntitySourceLabel(l10n, k['source'] as String?);
 
   @override
   Widget build(BuildContext context) {

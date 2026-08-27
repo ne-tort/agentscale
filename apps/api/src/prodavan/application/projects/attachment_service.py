@@ -11,9 +11,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.application.projects.access import ProjectAccessService
-from prodavan.core.infra.object_keys import inbox_object_key, object_ref, parse_storage_ref
-from prodavan.core.infra.object_storage_manager import ensure_object_storage
+from prodavan.config.settings import settings
+from prodavan.core.infra.object_keys import (
+    content_asset_ref,
+    inbox_object_key,
+    object_ref,
+    parse_content_asset_ref,
+    parse_storage_ref,
+)
 from prodavan.domain.admin import attachment_max_bytes
+from prodavan.domain.content.types import AssetLinkKind
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.domain.projects import (
@@ -21,6 +28,7 @@ from prodavan.domain.projects import (
     is_forbidden_attachment_content,
     sniff_attachment_content_type,
 )
+from prodavan.infrastructure.files.manager import ensure_file_store
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.projects import ProjectAttachmentRow
 
@@ -32,6 +40,7 @@ def _attachment_public(row: ProjectAttachmentRow) -> dict:
         "content_type": row.content_type,
         "size_bytes": row.size_bytes,
         "storage_ref": row.storage_ref,
+        "content_asset_id": row.content_asset_id,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }
 
@@ -144,20 +153,50 @@ class ProjectAttachmentService:
                 detail="executable or binary content not allowed for chat attachments",
             )
         guessed = sniff_attachment_content_type(raw, filename=safe_name, fallback=content_type)
-        key = inbox_object_key(workspace_key=project.workspace_key, filename=safe_name)
-        store = ensure_object_storage()
-        await store.put_bytes(key, raw, content_type=guessed)
-        storage_ref = object_ref(key)
+
+        content_asset_id: str | None = None
+        storage_ref: str
+
+        if settings.content_attachments_via_assets:
+            from prodavan.application.content.upload_service import UploadService
+
+            upload = UploadService(self._session)
+            asset_id, _ = await upload.upload_bytes_as_asset(
+                data=raw,
+                owner_company_id=project.company_id,
+                principal=principal,
+                employee=employee,
+                mime=guessed,
+                title=Path(safe_name).name,
+            )
+            content_asset_id = asset_id
+            storage_ref = content_asset_ref(asset_id)
+        else:
+            key = inbox_object_key(workspace_key=project.workspace_key, filename=safe_name)
+            store = ensure_file_store()
+            await store.put_bytes(key, raw, content_type=guessed)
+            storage_ref = object_ref(key)
+
         row = ProjectAttachmentRow(
             project_id=project_id,
             filename=Path(safe_name).name,
             content_type=guessed,
             size_bytes=len(raw),
             storage_ref=storage_ref,
+            content_asset_id=content_asset_id,
         )
         self._session.add(row)
         await self._session.commit()
         await self._session.refresh(row)
+
+        if settings.content_attachments_via_assets and content_asset_id:
+            await UploadService(self._session).link_asset(
+                asset_id=content_asset_id,
+                link_kind=AssetLinkKind.PROJECT_ATTACHMENT,
+                link_id=row.id,
+            )
+            await self._session.refresh(row)
+
         return _attachment_public(row)
 
     async def delete(
@@ -170,10 +209,7 @@ class ProjectAttachmentService:
     ) -> dict:
         project = await self._access.require_access(
             project_id=project_id,
-            principal=principal,
-            employee=employee,
-            write=True,
-            allow_paused=True,
+            principal=principal, employee=employee, write=True, allow_paused=True
         )
         row = await self._session.get(ProjectAttachmentRow, attachment_id)
         if row is None or row.project_id != project_id:
@@ -184,14 +220,25 @@ class ProjectAttachmentService:
                 detail="Attachment not found",
             )
         public = _attachment_public(row)
-        store = ensure_object_storage()
-        try:
-            key = parse_storage_ref(row.storage_ref)
-        except ValueError:
-            key = inbox_object_key(workspace_key=project.workspace_key, filename=row.filename)
-        await store.delete(key)
-        await self._session.delete(row)
-        await self._session.commit()
+        if row.content_asset_id:
+            from prodavan.application.content.asset_service import AssetService
+
+            await AssetService(self._session).delete(
+                asset_id=row.content_asset_id,
+                principal=principal,
+                employee=employee,
+            )
+            await self._session.delete(row)
+            await self._session.commit()
+        else:
+            store = ensure_file_store()
+            try:
+                key = parse_storage_ref(row.storage_ref)
+            except ValueError:
+                key = inbox_object_key(workspace_key=project.workspace_key, filename=row.filename)
+            await store.delete(key)
+            await self._session.delete(row)
+            await self._session.commit()
         return {"deleted": True, **public}
 
     async def read_content(
@@ -213,7 +260,18 @@ class ProjectAttachmentService:
                 status=404,
                 detail="Attachment not found",
             )
-        store = ensure_object_storage()
+        if row.content_asset_id or row.storage_ref.startswith("content://"):
+            from prodavan.application.content.download_service import DownloadService
+
+            asset_id = row.content_asset_id or parse_content_asset_ref(row.storage_ref)
+            raw, content_type = await DownloadService(self._session).read_asset_bytes(
+                asset_id=asset_id,
+                principal=principal,
+                employee=employee,
+            )
+            return raw, content_type, row.filename
+
+        store = ensure_file_store()
         try:
             key = parse_storage_ref(row.storage_ref)
         except ValueError:

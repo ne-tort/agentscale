@@ -28,5 +28,6 @@ void main() {
     expect(find.text('AI-ключи'), findsOneWidget);
     expect(find.text('Проекты'), findsOneWidget);
     expect(find.text('Кабинеты'), findsOneWidget);
+    expect(find.text('Модули'), findsOneWidget);
   });
 }

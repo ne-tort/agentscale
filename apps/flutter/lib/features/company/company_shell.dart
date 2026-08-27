@@ -8,6 +8,7 @@ import 'package:prodavan/features/company/company_ai_key_list_page.dart';
 import 'package:prodavan/features/company/company_cabinets_page.dart';
 import 'package:prodavan/features/company/company_employees_page.dart';
 import 'package:prodavan/features/company/company_management_page.dart';
+import 'package:prodavan/features/company/company_module_list_page.dart';
 import 'package:prodavan/features/company/company_overview_page.dart';
 import 'package:prodavan/features/company/company_project_containers_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -84,6 +85,7 @@ class _CompanyShellState extends State<CompanyShell> {
       AppNavDestination(icon: Icons.key_outlined, label: l10n.navAiKeys),
       AppNavDestination(icon: Icons.dns_outlined, label: l10n.navContainers),
       AppNavDestination(icon: Icons.view_module_outlined, label: l10n.navCabinets),
+      AppNavDestination(icon: Icons.extension_outlined, label: l10n.navModules),
     ];
 
     final pages = [
@@ -92,6 +94,7 @@ class _CompanyShellState extends State<CompanyShell> {
       CompanyAiKeyListPage(companyId: companyId, embedded: true),
       CompanyProjectContainersPage(companyId: companyId, embedded: true),
       CompanyCabinetsPage(companyId: companyId),
+      CompanyModuleListPage(companyId: companyId, embedded: true),
     ];
 
     return AppLayout(

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
@@ -93,6 +94,12 @@ class _CompanyOverviewPageState extends State<CompanyOverviewPage> {
     );
   }
 
+  Future<void> _copyCompanyId() async {
+    await Clipboard.setData(ClipboardData(text: widget.companyId));
+    if (!mounted) return;
+    AppSnackBar.info(context, AppLocalizations.of(context).companyIdCopied);
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -122,6 +129,7 @@ class _CompanyOverviewPageState extends State<CompanyOverviewPage> {
                   enabled: false,
                   presentValue: (v) => v,
                   onSave: (_) async {},
+                  onTap: _copyCompanyId,
                 ),
                 AppValuePreference<String>(
                   title: l10n.companyPassword,

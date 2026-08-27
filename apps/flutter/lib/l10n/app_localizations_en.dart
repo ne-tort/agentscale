@@ -488,6 +488,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminSelectCabinetsForModule => 'Select cabinets for module';
 
   @override
+  String get adminSelectCompaniesForModule => 'Select companies for module';
+
+  @override
   String adminDeleteCabinetConfirm(String name) {
     return 'Delete cabinet \"$name\"? All projects and the cabinet schema will be removed.';
   }
@@ -1330,6 +1333,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get companyLoginId => 'Company ID';
 
   @override
+  String get companyIdCopied => 'Company ID copied';
+
+  @override
   String get companyPassword => 'Password';
 
   @override
@@ -1352,6 +1358,20 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get companyKeyReadOnlyBanner => 'Platform-bound key — read only';
+
+  @override
+  String get companyAddModule => 'Add module';
+
+  @override
+  String get companyNoModules => 'No modules';
+
+  @override
+  String get companyModulesEmptyHint =>
+      'Create a local module or wait for platform assignment';
+
+  @override
+  String get companyModuleReadOnlyBanner =>
+      'Platform-assigned module — read only; you can bind cabinets';
 
   @override
   String get companyCreateRuntimeKeyHint =>

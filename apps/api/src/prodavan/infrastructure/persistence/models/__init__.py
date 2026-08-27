@@ -17,6 +17,14 @@ from prodavan.infrastructure.persistence.models.cabinets import (
     CabinetInstanceRow,
 )
 from prodavan.infrastructure.persistence.models.catalog import ReferenceCatalogEntryRow
+from prodavan.infrastructure.persistence.models.content import (
+    ContentAclEntryRow,
+    ContentAliasBindingRow,
+    ContentAliasRow,
+    ContentAssetLinkRow,
+    ContentAssetRow,
+    ContentBlobVersionRow,
+)
 from prodavan.infrastructure.persistence.models.identity import (
     CompanyRow,
     EmployeeRow,
@@ -25,6 +33,7 @@ from prodavan.infrastructure.persistence.models.identity import (
 )
 from prodavan.infrastructure.persistence.models.modules import (
     ModuleCabinetBindingRow,
+    ModuleCompanyGrantRow,
     ModuleMetaDocumentRow,
     ModuleProjectBindingRow,
     ModuleRow,
@@ -50,10 +59,17 @@ __all__ = [
     "CompanyAiKeyBindingRow",
     "CompanyCabinetQuotaRow",
     "CompanyRow",
+    "ContentAclEntryRow",
+    "ContentAliasBindingRow",
+    "ContentAliasRow",
+    "ContentAssetLinkRow",
+    "ContentAssetRow",
+    "ContentBlobVersionRow",
     "EmployeeRow",
     "IdentityLinkRow",
     "MembershipRow",
     "ModuleCabinetBindingRow",
+    "ModuleCompanyGrantRow",
     "ModuleMetaDocumentRow",
     "ModuleProjectBindingRow",
     "ModuleRow",

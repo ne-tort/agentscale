@@ -488,6 +488,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminSelectCabinetsForModule => 'Выберите кабинеты для модуля';
 
   @override
+  String get adminSelectCompaniesForModule => 'Выберите компании для модуля';
+
+  @override
   String adminDeleteCabinetConfirm(String name) {
     return 'Удалить кабинет «$name»? Будут удалены все проекты и схема кабинета.';
   }
@@ -1332,6 +1335,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get companyLoginId => 'ID компании';
 
   @override
+  String get companyIdCopied => 'ID компании скопирован';
+
+  @override
   String get companyPassword => 'Пароль';
 
   @override
@@ -1355,6 +1361,20 @@ class AppLocalizationsRu extends AppLocalizations {
   @override
   String get companyKeyReadOnlyBanner =>
       'Ключ привязан платформой — только просмотр';
+
+  @override
+  String get companyAddModule => 'Добавить модуль';
+
+  @override
+  String get companyNoModules => 'Нет модулей';
+
+  @override
+  String get companyModulesEmptyHint =>
+      'Создайте свой модуль или дождитесь назначения от платформы';
+
+  @override
+  String get companyModuleReadOnlyBanner =>
+      'Модуль назначен платформой — только просмотр; можно привязать кабинеты';
 
   @override
   String get companyCreateRuntimeKeyHint =>

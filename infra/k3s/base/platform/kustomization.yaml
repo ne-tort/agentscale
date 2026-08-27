@@ -12,3 +12,6 @@ configMapGenerator:
   - name: prodavan-kafka-config
     files:
       - redpanda.yaml
+  - name: prodavan-minio-api-policy
+    files:
+      - minio-api-policy.json

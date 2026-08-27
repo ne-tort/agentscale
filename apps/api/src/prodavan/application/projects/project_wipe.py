@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 def wipe_project_tree(workspace_key: str) -> dict[str, Any]:
     """Delete object-store prefix for one project; verify no leftovers."""
     from prodavan.core.infra.object_keys import project_tree_prefix
-    from prodavan.core.infra.object_storage_manager import ensure_object_storage
+    from prodavan.infrastructure.files.manager import ensure_file_store
 
     key = (workspace_key or "").strip()
     if not key:
@@ -20,7 +20,7 @@ def wipe_project_tree(workspace_key: str) -> dict[str, Any]:
         prefix = project_tree_prefix(key)
     except ValueError as exc:
         return {"ok": False, "deleted": 0, "remaining": 0, "reason": str(exc)}
-    result = ensure_object_storage().delete_prefix_verified_sync(prefix)
+    result = ensure_file_store().delete_prefix_verified_sync(prefix)
     result["workspace_key"] = key
     if not result.get("ok"):
         logger.warning(

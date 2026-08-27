@@ -276,6 +276,98 @@ class CompanyApi {
     _throwIfError(res);
   }
 
+  Future<List<Map<String, dynamic>>> listModules(String companyId) async {
+    final res = await AuthHttp.get(_uri('/companies/$companyId/modules'));
+    _throwIfError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = body['items'];
+    if (items is List) return items.cast<Map<String, dynamic>>();
+    return const [];
+  }
+
+  Future<Map<String, dynamic>> getModule({
+    required String companyId,
+    required String moduleId,
+  }) async {
+    final res = await AuthHttp.get(_uri('/companies/$companyId/modules/$moduleId'));
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> createModule({
+    required String companyId,
+    required String name,
+  }) async {
+    final res = await AuthHttp.post(
+      _uri('/companies/$companyId/modules'),
+      body: jsonEncode({'name': name}),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> updateModule({
+    required String companyId,
+    required String moduleId,
+    String? name,
+    List<String>? cabinetIds,
+  }) async {
+    final payload = <String, dynamic>{};
+    if (name != null) payload['name'] = name;
+    if (cabinetIds != null) payload['cabinet_ids'] = cabinetIds;
+    final res = await AuthHttp.patch(
+      _uri('/companies/$companyId/modules/$moduleId'),
+      body: jsonEncode(payload),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> deleteModule({
+    required String companyId,
+    required String moduleId,
+  }) async {
+    final res = await AuthHttp.delete(_uri('/companies/$companyId/modules/$moduleId'));
+    _throwIfError(res);
+  }
+
+  Future<List<String>> listModuleMetaSlugs({
+    required String companyId,
+    required String moduleId,
+  }) async {
+    final res = await AuthHttp.get(_uri('/companies/$companyId/modules/$moduleId/meta/documents'));
+    _throwIfError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = body['items'];
+    if (items is! List) return const [];
+    return items.map((e) => (e as Map)['slug'] as String).toList();
+  }
+
+  Future<Map<String, dynamic>> getModuleMetaDocument({
+    required String companyId,
+    required String moduleId,
+    required String slug,
+  }) async {
+    final res = await AuthHttp.get(
+      _uri('/companies/$companyId/modules/$moduleId/meta/documents/$slug'),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> putModuleMetaDocument({
+    required String companyId,
+    required String moduleId,
+    required String slug,
+    required Object body,
+  }) async {
+    final res = await AuthHttp.put(
+      _uri('/companies/$companyId/modules/$moduleId/meta/documents/$slug'),
+      body: jsonEncode({'body': body}),
+    );
+    _throwIfError(res);
+  }
+
   void _throwIfError(http.Response res) {
     if (res.statusCode >= 400) {
       throw ProdavanApiException(res.statusCode, res.body);

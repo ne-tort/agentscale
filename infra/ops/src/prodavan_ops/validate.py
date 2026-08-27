@@ -183,6 +183,7 @@ def validate_all() -> None:
     if "name: ghcr-pull" not in manifest:
         raise RuntimeError("dev overlay must reference imagePullSecrets ghcr-pull")
     _require_api_migrate_always(manifest)
+    _require_minio_pvc(manifest)
     print("ok")
 
     print("prodavan-ops validate OK")
@@ -211,3 +212,22 @@ def _require_api_migrate_always(manifest: str) -> None:
             )
         return
     raise RuntimeError("prodavan-api Deployment missing from overlays/dev render")
+
+
+def _require_minio_pvc(manifest: str) -> None:
+    """MinIO data PVC must be present for object store persistence."""
+    found_pvc = False
+    for doc in yaml.safe_load_all(manifest):
+        if not isinstance(doc, dict):
+            continue
+        if doc.get("kind") != "PersistentVolumeClaim":
+            continue
+        meta = doc.get("metadata") or {}
+        if meta.get("name") == "prodavan-minio-data":
+            found_pvc = True
+            break
+    if not found_pvc:
+        raise RuntimeError("overlay render must include PVC prodavan-minio-data")
+    if "prodavan-minio-init" not in manifest:
+        raise RuntimeError("overlay render must include prodavan-minio-init Job")
+

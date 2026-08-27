@@ -5,13 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from prodavan.application.admin.storage_metrics import company_blob_storage_bytes
-from prodavan.core.infra.object_storage_manager import ObjectStorageManager, set_object_storage
+from prodavan.infrastructure.files.manager import FileStoreManager, set_file_store
 
 
 def test_company_blob_storage_bytes_sums_projects_and_packages(tmp_path: Path) -> None:
-    mgr = ObjectStorageManager(backend="local", storage_root=tmp_path)
+    mgr = FileStoreManager(backend="local", storage_root=tmp_path)
     mgr._primary = mgr._local
-    set_object_storage(mgr)
+    set_file_store(mgr)
     try:
         mgr.put_bytes_sync("projects/ws1/workspace/inbox/a.txt", b"abc")
         mgr.put_bytes_sync("cabinet_packages/cab1/pkg-a-1.0.0.zip", b"1234567")
@@ -19,4 +19,4 @@ def test_company_blob_storage_bytes_sums_projects_and_packages(tmp_path: Path) -
         total = company_blob_storage_bytes(workspace_keys=["ws1"], cabinet_ids=["cab1", "cab2"])
         assert total == 3 + 7 + 2
     finally:
-        set_object_storage(None)
+        set_file_store(None)

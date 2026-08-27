@@ -34,12 +34,17 @@
 
 | Variable | dev | staging | prod | Secret | Description |
 |----------|-----|---------|------|--------|-------------|
-| `OBJECT_STORE_ENDPOINT` | localhost:9000 | 🔒 | 🔒 | | S3 endpoint |
-| `OBJECT_STORE_ACCESS_KEY` | minio | 🔒 | 🔒 | 🔒 | |
-| `OBJECT_STORE_SECRET_KEY` | minio123 | 🔒 | 🔒 | 🔒 | |
-| `OBJECT_STORE_BUCKET` | prodavan-dev | prodavan-staging | prodavan-prod | | |
-| `OBJECT_STORE_REGION` | us-east-1 | ru-central1 | ru-central1 | | |
-| `OBJECT_STORE_USE_SSL` | false | true | true | | |
+| `OBJECT_STORE_BACKEND` | local / s3 | s3 | s3 | | `local` = FS under `STORAGE_ROOT`; `s3` = MinIO |
+| `S3_ENDPOINT_URL` | http://prodavan-minio:9000 | 🔒 | 🔒 | | S3 endpoint (in-cluster) |
+| `S3_ACCESS_KEY` | prodavan-api | 🔒 | 🔒 | 🔒 | MinIO service user (not root) |
+| `S3_SECRET_KEY` | prodavan-api-secret | 🔒 | 🔒 | 🔒 | |
+| `S3_BUCKET` | prodavan | prodavan | prodavan | | Created by `prodavan-minio-init` Job |
+| `S3_REGION` | us-east-1 | us-east-1 | ru-central1 | | |
+| `OBJECT_STORE_MIRROR_LOCAL` | true | false | false | | Mirror S3 blobs locally for agent cwd |
+| `OBJECT_STORE_REQUIRED` | false | true | true | | Fail startup if S3 unreachable |
+| `CONTENT_ATTACHMENTS_VIA_ASSETS` | false | false | ○ | | Mirror attachments into `content_assets` |
+
+MinIO root creds (`prodavan-minio` Secret) — только init Job / ops; API использует IAM user `prodavan-api`.
 
 ---
 

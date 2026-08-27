@@ -494,7 +494,7 @@ class AdminCompanyService:
     async def list_org_cabinets(self, company_id: str) -> list[dict]:
         await self._require_company(company_id)
         from prodavan.application.cabinets.grant_service import CabinetGrantService
-        from prodavan.domain.cabinets import CabinetOwnerScope
+        from prodavan.domain.ownership import company_view_flags
         from prodavan.infrastructure.persistence.models.cabinets import (
             CabinetCompanyGrantRow,
             CabinetInstanceRow,
@@ -516,7 +516,11 @@ class AdminCompanyService:
         out: list[dict] = []
         for inst in q.scalars().unique().all():
             assignments_count = await grants.assignment_count(inst.id)
-            writable = inst.owner_scope == CabinetOwnerScope.COMPANY and inst.owner_company_id == company_id
+            flags = company_view_flags(
+                owner_scope=inst.owner_scope,
+                owner_company_id=inst.owner_company_id,
+                company_id=company_id,
+            )
             out.append(
                 {
                     "id": inst.id,
@@ -526,8 +530,7 @@ class AdminCompanyService:
                     "owner_company_id": inst.owner_company_id,
                     "owner_employee_id": inst.owner_employee_id,
                     "assignments_count": assignments_count,
-                    "writable": writable,
-                    "source": "company_local" if inst.owner_scope == CabinetOwnerScope.COMPANY else "platform_assigned",
+                    **flags,
                     "created_at": inst.created_at.isoformat() if inst.created_at else None,
                 }
             )

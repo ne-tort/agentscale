@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/preferences/app_nav_preference.dart';
 import 'package:prodavan/core/session/company_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_catalog_select_page.dart';
@@ -7,6 +8,8 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
+import 'package:prodavan/features/company/company_entity_source.dart';
+import 'package:prodavan/features/company/company_module_detail_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Company cabinet detail — read-only metadata + employee assignments.
@@ -35,6 +38,7 @@ class _CompanyCabinetDetailPageState extends State<CompanyCabinetDetailPage> {
   Object? _error;
   List<Map<String, dynamic>> _assignments = const [];
   List<Map<String, dynamic>> _employees = const [];
+  List<Map<String, dynamic>> _boundModules = const [];
 
   @override
   void initState() {
@@ -53,10 +57,15 @@ class _CompanyCabinetDetailPageState extends State<CompanyCabinetDetailPage> {
         cabinetId: widget.cabinetId,
       );
       final employees = await companyContext.api.listEmployees(widget.companyId);
+      final modules = await companyContext.api.listModules(widget.companyId);
+      final bound = modules
+          .where((m) => companyModuleBoundToCabinet(m, widget.cabinetId))
+          .toList();
       if (!mounted) return;
       setState(() {
         _assignments = assignments;
         _employees = employees;
+        _boundModules = bound;
         _loading = false;
       });
     } catch (e) {
@@ -156,6 +165,40 @@ class _CompanyCabinetDetailPageState extends State<CompanyCabinetDetailPage> {
                   title: Text(l10n.adminCabinetOwnerScope),
                   subtitle: Text(widget.ownerScope),
                 ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.md,
+                    AppSpacing.sm,
+                    AppSpacing.md,
+                    AppSpacing.xs,
+                  ),
+                  child: Text(
+                    l10n.navModules,
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                ),
+                if (_boundModules.isEmpty)
+                  ListTile(title: Text(l10n.companyNoModules))
+                else
+                  for (final m in _boundModules)
+                    AppNavPreference(
+                      title: m['name'] as String? ?? m['id'] as String,
+                      icon: Icons.extension_outlined,
+                      subtitle: Text(
+                        companyEntitySourceLabel(l10n, m['source'] as String?),
+                      ),
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => CompanyModuleDetailPage(
+                              companyId: widget.companyId,
+                              moduleId: m['id'] as String,
+                              moduleName: m['name'] as String? ?? m['id'] as String,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(
                     AppSpacing.md,

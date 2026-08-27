@@ -9,6 +9,7 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
+import 'package:prodavan/features/company/company_entity_source.dart';
 import 'package:prodavan/features/admin/ai_key_integration_type.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -35,7 +36,9 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
   Map<String, dynamic>? _key;
   String _displayName = '';
 
-  bool get _writable => _key?['writable'] == true;
+  bool get _writable => companyEntityWritable(_key ?? const {});
+
+  bool get _platformAssigned => companyEntityPlatformAssigned(_key?['source'] as String?);
 
   @override
   void initState() {
@@ -191,7 +194,7 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
     final nextRaw = _key?['next_renewal_at'] as String? ?? '';
     final nextDisplay = formatSubscriptionDate(nextRaw);
     final warning = context.appColors.warning;
-    final platformBound = _key?['source'] == 'platform_bound';
+    final platformBound = _platformAssigned;
 
     return AppScaffold(
       title: Text(_displayName),

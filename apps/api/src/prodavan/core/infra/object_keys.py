@@ -5,6 +5,21 @@ from __future__ import annotations
 from pathlib import Path
 
 
+def content_asset_ref(asset_id: str) -> str:
+    """Canonical ref for attachment rows backed by Content Service."""
+    return f"content://{asset_id.strip()}"
+
+
+def parse_content_asset_ref(ref: str) -> str:
+    raw = (ref or "").strip()
+    if not raw.startswith("content://"):
+        raise ValueError(f"not a content asset ref: {raw[:32]}")
+    asset_id = raw.removeprefix("content://").strip()
+    if not asset_id:
+        raise ValueError("empty content asset id")
+    return asset_id
+
+
 def object_ref(key: str) -> str:
     """Canonical product blob ref (backend-agnostic)."""
     return f"object://{key.lstrip('/')}"

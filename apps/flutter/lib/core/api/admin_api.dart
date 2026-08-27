@@ -495,11 +495,11 @@ class AdminApi {
   Future<Map<String, dynamic>> updateModule({
     required String moduleId,
     String? name,
-    List<String>? cabinetIds,
+    List<String>? companyIds,
   }) async {
     final payload = <String, dynamic>{};
     if (name != null) payload['name'] = name;
-    if (cabinetIds != null) payload['cabinet_ids'] = cabinetIds;
+    if (companyIds != null) payload['company_ids'] = companyIds;
     final res = await AuthHttp.patch(
       _uri('/admin/modules/$moduleId'),
       body: jsonEncode(payload),

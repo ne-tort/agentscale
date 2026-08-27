@@ -7,9 +7,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.modules.module_materialize_service import ModuleMaterializeService
 from prodavan.domain.errors import AppError
-from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
+from prodavan.infrastructure.persistence.models.cabinets import CabinetCompanyGrantRow, CabinetInstanceRow
+from prodavan.infrastructure.persistence.models.identity import CompanyRow
 from prodavan.infrastructure.persistence.models.modules import (
     ModuleCabinetBindingRow,
+    ModuleCompanyGrantRow,
     ModuleProjectBindingRow,
 )
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
@@ -157,3 +159,145 @@ class ModuleBindingService:
             select(ModuleProjectBindingRow.id).where(ModuleProjectBindingRow.module_id == module_id)
         )
         return len(list(q.scalars().all()))
+
+    async def list_company_ids(self, module_id: str) -> list[str]:
+        q = await self._session.execute(
+            select(ModuleCompanyGrantRow.company_id)
+            .where(
+                ModuleCompanyGrantRow.module_id == module_id,
+                ModuleCompanyGrantRow.status == "active",
+            )
+            .order_by(ModuleCompanyGrantRow.company_id)
+        )
+        return list(q.scalars().all())
+
+    async def list_companies(self, module_id: str) -> list[dict]:
+        q = await self._session.execute(
+            select(ModuleCompanyGrantRow, CompanyRow.name)
+            .join(CompanyRow, CompanyRow.id == ModuleCompanyGrantRow.company_id)
+            .where(
+                ModuleCompanyGrantRow.module_id == module_id,
+                ModuleCompanyGrantRow.status == "active",
+            )
+            .order_by(CompanyRow.name)
+        )
+        return [
+            {"company_id": grant.company_id, "company_name": name}
+            for grant, name in q.all()
+        ]
+
+    async def replace_company_grants(self, module_id: str, company_ids: list[str]) -> list[str]:
+        old_ids = set(await self.list_company_ids(module_id))
+        unique = list(dict.fromkeys(company_ids))
+        for cid in unique:
+            co = await self._session.get(CompanyRow, cid)
+            if co is None:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail=f"unknown company_id: {cid}",
+                )
+        removed_companies = old_ids - set(unique)
+        for cid in removed_companies:
+            await self.replace_cabinet_bindings_for_company(module_id, cid, [])
+
+        existing = await self._session.execute(
+            select(ModuleCompanyGrantRow).where(ModuleCompanyGrantRow.module_id == module_id)
+        )
+        for row in existing.scalars().all():
+            await self._session.delete(row)
+        await self._session.flush()
+        for cid in unique:
+            self._session.add(ModuleCompanyGrantRow(module_id=module_id, company_id=cid))
+        await self._session.flush()
+        return unique
+
+    async def org_cabinet_ids(self, company_id: str) -> set[str]:
+        granted = await self._session.execute(
+            select(CabinetInstanceRow.id)
+            .join(
+                CabinetCompanyGrantRow,
+                CabinetCompanyGrantRow.cabinet_id == CabinetInstanceRow.id,
+            )
+            .where(
+                CabinetCompanyGrantRow.company_id == company_id,
+                CabinetCompanyGrantRow.status == "active",
+            )
+        )
+        ids = set(granted.scalars().all())
+        owned = await self._session.execute(
+            select(CabinetInstanceRow.id).where(
+                CabinetInstanceRow.owner_scope == "company",
+                CabinetInstanceRow.owner_company_id == company_id,
+            )
+        )
+        ids.update(owned.scalars().all())
+        return ids
+
+    async def list_cabinet_ids_for_company(self, module_id: str, company_id: str) -> list[str]:
+        org_ids = await self.org_cabinet_ids(company_id)
+        if not org_ids:
+            return []
+        q = await self._session.execute(
+            select(ModuleCabinetBindingRow.cabinet_id)
+            .where(
+                ModuleCabinetBindingRow.module_id == module_id,
+                ModuleCabinetBindingRow.cabinet_id.in_(org_ids),
+            )
+            .order_by(ModuleCabinetBindingRow.cabinet_id)
+        )
+        return list(q.scalars().all())
+
+    async def replace_cabinet_bindings_for_company(
+        self, module_id: str, company_id: str, cabinet_ids: list[str]
+    ) -> list[str]:
+        org_ids = await self.org_cabinet_ids(company_id)
+        unique = list(dict.fromkeys(cabinet_ids))
+        for cid in unique:
+            if cid not in org_ids:
+                raise AppError(
+                    code="FORBIDDEN",
+                    title="Forbidden",
+                    status=403,
+                    detail=f"cabinet not in company scope: {cid}",
+                )
+
+        existing = await self._session.execute(
+            select(ModuleCabinetBindingRow).where(ModuleCabinetBindingRow.module_id == module_id)
+        )
+        existing_rows = list(existing.scalars().all())
+        old_in_org = {row.cabinet_id for row in existing_rows if row.cabinet_id in org_ids}
+        new_set = set(unique)
+        removed = old_in_org - new_set
+        added = new_set - old_in_org
+
+        for row in existing_rows:
+            if row.cabinet_id in removed:
+                await self._session.delete(row)
+        await self._session.flush()
+
+        if removed:
+            await self._revoke_projects_for_cabinets(module_id, removed)
+
+        for cid in added:
+            self._session.add(ModuleCabinetBindingRow(module_id=module_id, cabinet_id=cid))
+        await self._session.flush()
+
+        materialize = ModuleMaterializeService(self._session)
+        for cid in added:
+            await materialize.install(cabinet_id=cid, module_id=module_id)
+        for cid in removed:
+            await materialize.uninstall(cabinet_id=cid, module_id=module_id)
+
+        return unique
+
+    async def has_company_grant(self, module_id: str, company_id: str) -> bool:
+        q = await self._session.execute(
+            select(ModuleCompanyGrantRow.id).where(
+                ModuleCompanyGrantRow.module_id == module_id,
+                ModuleCompanyGrantRow.company_id == company_id,
+                ModuleCompanyGrantRow.status == "active",
+            )
+        )
+        return q.scalar_one_or_none() is not None

@@ -354,6 +354,7 @@
   "adminMetaInvalid": "Metadata",
   "adminModulePreviewMode": "Preview",
   "adminSelectCabinetsForModule": "Select cabinets for module",
+  "adminSelectCompaniesForModule": "Select companies for module",
   "adminDeleteCabinetConfirm": "Delete cabinet \"{name}\"? All projects and the cabinet schema will be removed.",
   "@adminDeleteCabinetConfirm": {
     "placeholders": {
@@ -815,6 +816,7 @@
   "companyNoEmployees": "No employees",
   "companyOrgMetrics": "Org metrics",
   "companyLoginId": "Company ID",
+  "companyIdCopied": "Company ID copied",
   "companyPassword": "Password",
   "companyPasswordHint": "Minimum 8 characters",
   "companyPasswordChanged": "Password changed successfully",
@@ -823,6 +825,10 @@
   "companyKeyPlatformBound": "From platform",
   "companyKeySourceLocal": "Local",
   "companyKeyReadOnlyBanner": "Platform-bound key — read only",
+  "companyAddModule": "Add module",
+  "companyNoModules": "No modules",
+  "companyModulesEmptyHint": "Create a local module or wait for platform assignment",
+  "companyModuleReadOnlyBanner": "Platform-assigned module — read only; you can bind cabinets",
   "companyCreateRuntimeKeyHint": "Add a company-owned key for your employees' projects",
   "errorConflict": "Data conflict. Refresh and try again.",
   "errorForbidden": "You do not have permission for this action.",

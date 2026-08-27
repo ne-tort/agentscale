@@ -24,7 +24,7 @@ class PatchAdminModuleBody(BaseModel):
     model_config = {"extra": "forbid"}
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
-    cabinet_ids: list[str] | None = None
+    company_ids: list[str] | None = None
 
 
 class MetaDocumentBody(BaseModel):
@@ -63,7 +63,7 @@ async def patch_module(
     return await ModuleService(session).update_admin(
         module_id=module_id,
         name=body.name,
-        cabinet_ids=body.cabinet_ids,
+        company_ids=body.company_ids,
     )
 
 

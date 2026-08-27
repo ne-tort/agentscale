@@ -128,6 +128,9 @@ class Settings(BaseSettings):
 
     # External webhook/telegram ingress rate limit (C-CACHE); 0 = disabled.
     ingress_rate_limit_per_minute: int = 120
+
+    # Content Service: mirror project attachments into content_assets (transitional).
+    content_attachments_via_assets: bool = False
     # Admin ops (drain/sweep/gc) and MCP call rate limits; 0 = disabled.
     admin_ops_rate_limit_per_minute: int = 60
     mcp_call_rate_limit_per_minute: int = 180

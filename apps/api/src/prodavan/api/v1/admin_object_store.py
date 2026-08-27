@@ -22,7 +22,7 @@ async def gc_orphan_blobs_endpoint(
     scan_limit: int = Query(default=500, ge=1, le=5000),
     enqueue: bool = Query(default=False),
 ) -> dict:
-    """Inventory or wipe orphan ``cabinet_packages/`` and ``projects/`` prefixes."""
+    """Inventory or wipe orphan ``cabinet_packages/``, ``projects/``, and ``blobs/`` keys."""
     await enforce_rate_limit(
         cache_key("rl", "admin", "gc-orphan-blobs"),
         limit=int(settings.admin_ops_rate_limit_per_minute or 0),

@@ -13,8 +13,9 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from prodavan.core.infra.object_storage_manager import ensure_object_storage
+from prodavan.infrastructure.files.manager import ensure_file_store
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
+from prodavan.infrastructure.persistence.models.content import ContentBlobVersionRow
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
 
 logger = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ async def list_orphan_blob_prefixes(
     scan_limit: int = 500,
 ) -> dict[str, list[str]]:
     """Return orphan package and project prefixes (not deleted)."""
-    store = ensure_object_storage()
+    store = ensure_file_store()
     live_cabinets = {
         str(x) for x in (await session.execute(select(CabinetInstanceRow.id))).scalars().all() if x
     }
@@ -69,6 +70,22 @@ async def list_orphan_blob_prefixes(
     }
 
 
+async def list_orphan_content_blob_keys(
+    session: AsyncSession,
+    *,
+    scan_limit: int = 5000,
+) -> list[str]:
+    """Return ``blobs/*`` keys with no row in ``content_blob_versions``."""
+    store = ensure_file_store()
+    q = await session.execute(select(ContentBlobVersionRow.storage_key))
+    live = {str(k) for k in q.scalars().all() if k}
+    orphans: list[str] = []
+    for key in store.list_prefix_sync("blobs/", limit=scan_limit):
+        if key not in live:
+            orphans.append(key)
+    return sorted(orphans)
+
+
 async def gc_orphan_blobs(
     session: AsyncSession,
     *,
@@ -76,16 +93,17 @@ async def gc_orphan_blobs(
     limit: int = 50,
     scan_limit: int = 500,
 ) -> dict[str, Any]:
-    """Wipe orphan package/project prefixes (or inventory when ``dry_run``)."""
+    """Wipe orphan package/project prefixes and orphan content blob keys."""
     inventory = await list_orphan_blob_prefixes(session, scan_limit=scan_limit)
+    content_orphans = await list_orphan_content_blob_keys(session, scan_limit=max(500, scan_limit * 10))
     packages = inventory["cabinet_packages"]
     projects = inventory["projects"]
-    # Interleave packages first, then projects, capped by limit.
-    planned = (packages + projects)[: max(0, int(limit))]
+    planned_prefixes = (packages + projects)[: max(0, int(limit))]
+    planned_content = content_orphans[: max(0, int(limit))]
     wiped: list[dict[str, Any]] = []
     if not dry_run:
-        store = ensure_object_storage()
-        for prefix in planned:
+        store = ensure_file_store()
+        for prefix in planned_prefixes:
             try:
                 result = store.delete_prefix_verified_sync(prefix)
                 wiped.append(result)
@@ -94,12 +112,21 @@ async def gc_orphan_blobs(
             except Exception:
                 logger.exception("orphan blob GC failed prefix=%s", prefix)
                 wiped.append({"ok": False, "prefix": prefix, "error": "wipe_failed"})
+        for key in planned_content:
+            try:
+                ok = store.delete_sync(key)
+                wiped.append({"ok": ok, "deleted": 1 if ok else 0, "key": key, "kind": "content_blob"})
+            except Exception:
+                logger.exception("orphan content blob GC failed key=%s", key)
+                wiped.append({"ok": False, "key": key, "kind": "content_blob", "error": "delete_failed"})
     return {
         "ok": True,
         "dry_run": dry_run,
-        "orphans_found": len(packages) + len(projects),
+        "orphans_found": len(packages) + len(projects) + len(content_orphans),
         "cabinet_packages": packages,
         "projects": projects,
-        "considered": planned,
+        "content_blobs": content_orphans,
+        "considered": planned_prefixes,
+        "considered_content_blobs": planned_content,
         "wiped": wiped,
     }
