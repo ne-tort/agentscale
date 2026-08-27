@@ -508,10 +508,6 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminModulePreviewMode => 'Предзаполнение';
 
   @override
-  String get adminModuleSeedHint =>
-      'Правки строк сохраняются в seed_rows модуля';
-
-  @override
   String get adminModuleSeedEmpty => 'Нет предзаполненных строк';
 
   @override

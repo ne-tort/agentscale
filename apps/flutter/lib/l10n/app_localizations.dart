@@ -956,12 +956,6 @@ abstract class AppLocalizations {
   /// **'Seed data'**
   String get adminModulePreviewMode;
 
-  /// No description provided for @adminModuleSeedHint.
-  ///
-  /// In en, this message translates to:
-  /// **'Row edits are saved into the module seed_rows document'**
-  String get adminModuleSeedHint;
-
   /// No description provided for @adminModuleSeedEmpty.
   ///
   /// In en, this message translates to:

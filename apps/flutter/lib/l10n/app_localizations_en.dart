@@ -508,10 +508,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminModulePreviewMode => 'Seed data';
 
   @override
-  String get adminModuleSeedHint =>
-      'Row edits are saved into the module seed_rows document';
-
-  @override
   String get adminModuleSeedEmpty => 'No seed rows yet';
 
   @override

@@ -40,6 +40,39 @@ Tabs = **то, что видит пользователь** в панели на
 | `scope` | See [scope-bindings](07-scope-bindings.md) |
 | `visibility` | `visible` \| `hidden` \| `disabled` |
 | `badge` | Optional count dot |
+| `nav` | Optional product-shell injection — see below |
+
+## Shell navigation (Admin / Company)
+
+Tabs may also appear in the **platform product shell** (not only CabinetShell):
+
+```json
+{
+  "id": "tab_suppliers",
+  "title": "Поставщики",
+  "order": 150,
+  "icon": "local_shipping_outlined",
+  "view_slug": "suppliers_list",
+  "enabled": true,
+  "nav": { "contour": "admin" }
+}
+```
+
+| `nav.contour` | Where merged |
+|---------------|--------------|
+| `admin` | Platform Admin shell: left rail (desktop) or **Management** hub (mobile narrow) |
+| `company` | Company admin shell — same rules |
+
+Without `nav` — tab stays in cabinet/preview only (default).
+
+**Merge rules (product shell):**
+
+1. List active modules for contour (admin catalog / company module list).
+2. Read `tabs` slug; keep `enabled` tabs where `nav.contour` matches.
+3. Sort by `order`, then `title`; title collision → «{title} · {moduleName}».
+4. Append after platform-fixed nav items (Overview, Companies, …).
+
+Desktop: new rail destinations. Mobile: items in **Управление** hub — not bottom bar.
 
 ## Shell composition
 

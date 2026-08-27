@@ -1,3 +1,4 @@
+import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 
 abstract final class ModuleMetaValidator {
@@ -74,6 +75,14 @@ abstract final class ModuleMetaValidator {
       final tableSlug = tab['table_slug'];
       if (tableSlug is String && !tableSlugs.contains(tableSlug)) {
         return 'tab references unknown table: $tableSlug';
+      }
+      final nav = tab['nav'];
+      if (nav != null) {
+        if (nav is! Map) return 'tab nav must be an object';
+        final contour = nav['contour'];
+        if (contour is! String || !ShellNavContour.all.contains(contour)) {
+          return 'invalid tab nav.contour: $contour';
+        }
       }
     }
 

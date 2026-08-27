@@ -1,5 +1,7 @@
 import 'dart:convert';
 
+import 'package:prodavan/features/meta/meta_icon.dart';
+
 /// Canonical slugs stored in module_meta_documents.
 abstract final class ModuleMetaSlugs {
   static const tables = 'tables';
@@ -147,14 +149,25 @@ class ModuleMetaManifest {
 
   List<Map<String, dynamic>> enabledTabs() {
     final list = tabs.where((t) => t['enabled'] != false).toList()
-      ..sort((a, b) {
-        final ao = a['order'] is int ? a['order'] as int : 999;
-        final bo = b['order'] is int ? b['order'] as int : 999;
-        final c = ao.compareTo(bo);
-        if (c != 0) return c;
-        return (a['title'] as String? ?? '').compareTo(b['title'] as String? ?? '');
-      });
+      ..sort(_tabSort);
     return list;
+  }
+
+  /// Tabs with `nav.contour` matching [contour] (admin / company product shell).
+  List<Map<String, dynamic>> enabledShellNavTabs(String contour) {
+    final list = tabs
+        .where((t) => t['enabled'] != false && shellNavContourOf(t) == contour)
+        .toList()
+      ..sort(_tabSort);
+    return list;
+  }
+
+  static int _tabSort(Map<String, dynamic> a, Map<String, dynamic> b) {
+    final ao = a['order'] is int ? a['order'] as int : 999;
+    final bo = b['order'] is int ? b['order'] as int : 999;
+    final c = ao.compareTo(bo);
+    if (c != 0) return c;
+    return (a['title'] as String? ?? '').compareTo(b['title'] as String? ?? '');
   }
 
   List<Map<String, dynamic>> columnsForTable(String tableSlug) {
@@ -201,6 +214,10 @@ class ModuleMetaManifest {
       return body.isEmpty;
     }
     return true;
+  }
+
+  static List<Map<String, dynamic>> parseMetaList(Object? value) {
+    return _listOfMaps(value);
   }
 
   static List<Map<String, dynamic>> _listOfMaps(Object? value) {

@@ -5,6 +5,7 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/meta/interpreters/collection_interpreter.dart';
 import 'package:prodavan/features/meta/interpreters/form_interpreter.dart';
+import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/preview/preview_stub.dart';
 import 'package:prodavan/features/meta/preview/seed_data_controller.dart';
@@ -40,7 +41,7 @@ class HubViewInterpreter extends StatelessWidget {
         for (final item in items.whereType<Map>())
           AppNavPreference(
             title: item['title'] as String? ?? '—',
-            icon: _icon(item['icon'] as String?) ?? Icons.chevron_right,
+            icon: metaIconFromName(item['icon'] as String?, fallback: Icons.chevron_right),
             onTap: () {
               final target = item['target'];
               if (target is Map && target['kind'] == 'view') {
@@ -55,17 +56,6 @@ class HubViewInterpreter extends StatelessWidget {
           ),
       ],
     );
-  }
-
-  IconData? _icon(String? name) {
-    switch (name) {
-      case 'list':
-        return Icons.list;
-      case 'settings':
-        return Icons.settings_outlined;
-      default:
-        return Icons.chevron_right;
-    }
   }
 }
 

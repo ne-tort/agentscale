@@ -22,7 +22,7 @@
 | **P-CAB-01** | Company **назначает** Employee ↔ Cabinet | **Grants + assignment API + Flutter** | Verify Dev E2E |
 | **P-CAB-02** | UI кабинета из module meta | Module template + `module_data_rows` API; employee UI = placeholder | Generic meta UI next |
 | **P-MOD-01** | **Module** catalog + cabinet bind + per-cabinet data | **Admin CRUD + meta + materialize + runtime data API + Flutter** | Physical DDL; meta editor UI |
-| **P-MOD-02** | Meta-table **syntax** spec + interpreters | **[meta-syntax](06-modules/meta-syntax/) documented** | Validator, UI renderer, materialize engine |
+| **P-MOD-02** | Meta-table **syntax** spec + interpreters | **[meta-syntax](06-modules/meta-syntax/) documented**; shell `nav.contour` in Admin/Company rail | Validator, cabinet UI renderer, materialize engine |
 | **P-MAT-01** | Pod hydrate из meta/MinIO | object-ws; нет Pod; file_ref слаб | Materialize/Pod debt |
 | **P-POD-01** | `ProjectContainer` = k8s Pod; inert → delete Pod | `object-ws:…`; pause stub `pod_stop` desired | [14](14-project-containers/) |
 | **P-MCP-01** | Агент в Pod ↔ `cabinet.*` | **Out of MVP cabinet entity** (removed typed MCP/packages); future contract | Изоляция + контракт |

@@ -81,7 +81,7 @@ Admin/agent writes module_meta_documents (platform DB)
 | `tables` | meta admin browser (DDL) |
 | `tools` | MCP tools registry |
 
-**Dynamic tabs** — из `tabs` slug module: title, order, `view_id`, optional `table_slug`.
+**Dynamic tabs** — из `tabs` slug module: title, order, `view_id`, optional `table_slug`, optional `nav.contour` для Admin/Company shell — см. [04-tabs-navigation](04-tabs-navigation.md#shell-navigation-admin--company).
 
 Module **не заменяет** system tabs — **добавляет** вкладки в shell.
 

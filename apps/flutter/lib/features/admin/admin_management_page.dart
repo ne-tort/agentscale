@@ -9,11 +9,15 @@ import 'package:prodavan/features/admin/admin_module_list_page.dart';
 import 'package:prodavan/features/admin/admin_project_containers_page.dart';
 import 'package:prodavan/features/admin/ai_key_list_page.dart';
 import 'package:prodavan/features/admin/company_list_page.dart';
+import 'package:prodavan/features/meta/meta_icon.dart';
+import 'package:prodavan/features/meta/module_shell_nav_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Narrow-only hub: Companies / AI Keys / Projects / Cabinets / Modules.
+/// Narrow-only hub: Companies / AI Keys / Projects / Cabinets / Modules + module shell nav.
 class AdminManagementPage extends StatelessWidget {
-  const AdminManagementPage({super.key});
+  const AdminManagementPage({super.key, this.extraShellNav = const []});
+
+  final List<ShellNavEntry> extraShellNav;
 
   Future<void> _open(BuildContext context, Widget page) {
     return Navigator.of(context).push<void>(
@@ -50,6 +54,12 @@ class AdminManagementPage extends StatelessWidget {
         label: l10n.navModules,
         page: const AdminModuleListPage(),
       ),
+      for (final entry in extraShellNav)
+        (
+          icon: entry.icon,
+          label: entry.label,
+          page: ModuleShellNavPage(entry: entry),
+        ),
     ];
 
     return AppScaffold(

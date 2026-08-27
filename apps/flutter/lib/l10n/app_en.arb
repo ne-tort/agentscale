@@ -373,7 +373,6 @@
   "adminModuleJsonInvalid": "Invalid JSON",
   "adminMetaInvalid": "Metadata",
   "adminModulePreviewMode": "Seed data",
-  "adminModuleSeedHint": "Row edits are saved into the module seed_rows document",
   "adminModuleSeedEmpty": "No seed rows yet",
   "adminSelectCabinetsForModule": "Select cabinets for module",
   "adminSelectModulesForCabinet": "Select modules for cabinet",

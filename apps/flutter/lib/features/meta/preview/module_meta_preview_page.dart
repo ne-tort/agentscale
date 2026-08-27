@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/meta/interpreters/hub_interpreter.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
@@ -99,13 +98,6 @@ class _ModuleMetaPreviewPageState extends State<ModuleMetaPreviewPage>
               body: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-                    child: AppStatusBanner(
-                      severity: AppStatusSeverity.info,
-                      message: l10n.adminModuleSeedHint,
-                    ),
-                  ),
                   Material(
                     color: Theme.of(context).colorScheme.surfaceContainerLow,
                     child: TabBar(

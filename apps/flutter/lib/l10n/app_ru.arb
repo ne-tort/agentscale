@@ -375,7 +375,6 @@
   "adminModuleJsonInvalid": "Неверный JSON",
   "adminMetaInvalid": "Метаданные",
   "adminModulePreviewMode": "Предзаполнение",
-  "adminModuleSeedHint": "Правки строк сохраняются в seed_rows модуля",
   "adminModuleSeedEmpty": "Нет предзаполненных строк",
   "adminSelectCabinetsForModule": "Выберите кабинеты для модуля",
   "adminSelectModulesForCabinet": "Выберите модули для кабинета",

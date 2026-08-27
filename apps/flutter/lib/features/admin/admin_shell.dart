@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/responsive/app_breakpoints.dart';
+import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/widgets/app_layout.dart';
 import 'package:prodavan/core/widgets/app_shell_branch.dart';
 import 'package:prodavan/features/admin/admin_cabinet_list_page.dart';
@@ -10,24 +12,64 @@ import 'package:prodavan/features/admin/admin_module_list_page.dart';
 import 'package:prodavan/features/admin/admin_project_containers_page.dart';
 import 'package:prodavan/features/admin/ai_key_list_page.dart';
 import 'package:prodavan/features/admin/company_list_page.dart';
+import 'package:prodavan/features/meta/meta_icon.dart';
+import 'package:prodavan/features/meta/module_shell_nav_page.dart';
+import 'package:prodavan/features/meta/shell_nav_loader.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Platform Admin shell — Overview + management sections (+ mobile Management hub).
 class AdminShell extends StatefulWidget {
-  const AdminShell({super.key});
+  const AdminShell({super.key, this.shellNavEntries});
+
+  /// Optional injected nav entries (tests). When null, loaded from API.
+  final List<ShellNavEntry>? shellNavEntries;
 
   @override
   State<AdminShell> createState() => _AdminShellState();
 }
 
 class _AdminShellState extends State<AdminShell> {
-  /// Wide/medium rail: 0 Overview … 5 Modules.
+  static const _fixedRailCount = 6;
+
   int _railIndex = 0;
-
-  /// Narrow bottom: 0 Overview, 1 Management hub.
   int _narrowIndex = 0;
-
   bool _subpageOpen = false;
+  List<ShellNavEntry> _shellNav = const [];
+  late final AppAutoRefreshBinder _autoRefresh;
+
+  @override
+  void initState() {
+    super.initState();
+    _shellNav = widget.shellNavEntries ?? const [];
+    _autoRefresh = AppAutoRefreshBinder(
+      onTick: () => _reloadShellNav(silent: true),
+      isActive: () => widget.shellNavEntries == null && appAutoRefreshIsActive(context),
+    )..attach();
+    if (widget.shellNavEntries == null) {
+      _reloadShellNav();
+    }
+  }
+
+  @override
+  void dispose() {
+    _autoRefresh.dispose();
+    super.dispose();
+  }
+
+  Future<void> _reloadShellNav({bool silent = false}) async {
+    if (widget.shellNavEntries != null) return;
+    try {
+      final entries = await ShellNavLoader.loadAdmin(adminContext.api);
+      if (!mounted) return;
+      final maxIndex = _fixedRailCount + entries.length - 1;
+      setState(() {
+        _shellNav = entries;
+        if (_railIndex > maxIndex) _railIndex = 0;
+      });
+    } catch (_) {
+      if (!silent && mounted) setState(() => _shellNav = const []);
+    }
+  }
 
   void _onSubpageOpenChanged(bool open) {
     if (_subpageOpen != open) setState(() => _subpageOpen = open);
@@ -74,7 +116,7 @@ class _AdminShellState extends State<AdminShell> {
             AppShellBranch(
               active: _narrowIndex == 1,
               onSubpageOpenChanged: _narrowIndex == 1 ? _onSubpageOpenChanged : null,
-              root: const AdminManagementPage(),
+              root: AdminManagementPage(extraShellNav: _shellNav),
             ),
           ],
         ),
@@ -88,9 +130,11 @@ class _AdminShellState extends State<AdminShell> {
       AppNavDestination(icon: Icons.dns_outlined, label: l10n.navContainers),
       AppNavDestination(icon: Icons.folder_outlined, label: l10n.navCabinets),
       AppNavDestination(icon: Icons.extension_outlined, label: l10n.navModules),
+      for (final entry in _shellNav)
+        AppNavDestination(icon: entry.icon, label: entry.label),
     ];
 
-    final pages = const [
+    final fixedPages = const [
       AdminMetricsOverviewPage(embedded: true),
       AdminCompanyListPage(embedded: true),
       AdminAiKeyListPage(embedded: true),
@@ -98,6 +142,13 @@ class _AdminShellState extends State<AdminShell> {
       AdminCabinetListPage(embedded: true),
       AdminModuleListPage(embedded: true),
     ];
+
+    final dynamicPages = [
+      for (final entry in _shellNav)
+        ModuleShellNavPage(entry: entry, embedded: true),
+    ];
+
+    final pages = [...fixedPages, ...dynamicPages];
 
     return AppLayout(
       constrainBody: false,

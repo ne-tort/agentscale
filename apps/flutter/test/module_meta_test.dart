@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:prodavan/core/preferences/app_nav_preference.dart';
 import 'package:prodavan/core/theme/app_theme.dart';
 import 'package:prodavan/core/widgets/app_json_editor_field.dart';
+import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/module_meta_validator.dart';
 import 'package:prodavan/features/meta/preview/module_meta_preview_page.dart';
@@ -213,6 +214,20 @@ void main() {
       final err = ModuleMetaValidator.validate(json);
       expect(err, contains('seed_rows'));
     });
+
+    test('rejects invalid nav.contour', () {
+      final json = Map<String, dynamic>.from(suppliersManifestJson());
+      json['tabs'] = [
+        {
+          'id': 'tab_bad',
+          'title': 'Bad',
+          'view_slug': 'suppliers_list',
+          'nav': {'contour': 'employee'},
+        },
+      ];
+      final err = ModuleMetaValidator.validate(json);
+      expect(err, contains('nav.contour'));
+    });
   });
 
   group('ModuleMetaManifest', () {
@@ -254,6 +269,75 @@ void main() {
         ),
         isTrue,
       );
+    });
+
+    test('enabledShellNavTabs filters by contour', () {
+      final json = Map<String, dynamic>.from(suppliersManifestJson());
+      json['tabs'] = [
+        {
+          'id': 'tab_cabinet',
+          'title': 'Cabinet only',
+          'order': 10,
+          'view_slug': 'suppliers_list',
+          'enabled': true,
+        },
+        {
+          'id': 'tab_admin',
+          'title': 'Admin nav',
+          'order': 150,
+          'view_slug': 'suppliers_list',
+          'enabled': true,
+          'nav': {'contour': 'admin'},
+        },
+        {
+          'id': 'tab_company',
+          'title': 'Company nav',
+          'order': 160,
+          'view_slug': 'suppliers_list',
+          'enabled': true,
+          'nav': {'contour': 'company'},
+        },
+      ];
+      final manifest = ModuleMetaManifest.fromJson(json);
+      expect(manifest.enabledTabs(), hasLength(3));
+      expect(manifest.enabledShellNavTabs('admin'), hasLength(1));
+      expect(manifest.enabledShellNavTabs('admin').first['title'], 'Admin nav');
+      expect(manifest.enabledShellNavTabs('company'), hasLength(1));
+    });
+
+    test('mergeShellNavEntries dedupes title collisions', () {
+      final entries = mergeShellNavEntries(
+        contour: ShellNavContour.admin,
+        modules: [
+          (
+            id: 'mod_a',
+            name: 'Mod A',
+            tabs: [
+              {
+                'title': 'Reports',
+                'order': 1,
+                'view_slug': 'suppliers_list',
+                'nav': {'contour': 'admin'},
+              },
+            ],
+          ),
+          (
+            id: 'mod_b',
+            name: 'Mod B',
+            tabs: [
+              {
+                'title': 'Reports',
+                'order': 2,
+                'view_slug': 'suppliers_list',
+                'nav': {'contour': 'admin'},
+              },
+            ],
+          ),
+        ],
+      );
+      expect(entries, hasLength(2));
+      expect(entries.map((e) => e.label), contains('Reports · Mod A'));
+      expect(entries.map((e) => e.label), contains('Reports · Mod B'));
     });
   });
 
