@@ -131,6 +131,14 @@ void main() {
     expect(find.text('Projects'), findsOneWidget);
     expect(find.text('Cabinets'), findsOneWidget);
     expect(find.text('Modules'), findsOneWidget);
+
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Language'), findsOneWidget);
+
+    await tester.tap(find.text('Management'));
+    await tester.pumpAndSettle();
+    expect(find.text('Companies'), findsOneWidget);
   });
 
   testWidgets('admin shell shows injected module shell nav', (tester) async {

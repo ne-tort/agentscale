@@ -15,6 +15,7 @@ import 'package:prodavan/features/company/company_project_containers_page.dart';
 import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/module_shell_nav_page.dart';
 import 'package:prodavan/features/meta/shell_nav_loader.dart';
+import 'package:prodavan/features/settings/settings_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Company admin shell — Admin-parity IA (P-CO-01).
@@ -63,7 +64,7 @@ class _CompanyShellState extends State<CompanyShell> {
     try {
       final entries = await ShellNavLoader.loadCompany(companyContext.api, companyId);
       if (!mounted) return;
-      final maxIndex = _fixedRailCount + entries.length - 1;
+      final maxIndex = _fixedRailCount + entries.length;
       setState(() {
         _shellNav = entries;
         if (_railIndex > maxIndex) _railIndex = 0;
@@ -107,6 +108,7 @@ class _CompanyShellState extends State<CompanyShell> {
         destinations: [
           AppNavDestination(icon: Icons.dashboard_outlined, label: l10n.navOverview),
           AppNavDestination(icon: Icons.apps_outlined, label: l10n.navManagement),
+          AppNavDestination(icon: Icons.settings_outlined, label: l10n.settings),
         ],
         body: IndexedStack(
           index: _narrowIndex,
@@ -121,6 +123,7 @@ class _CompanyShellState extends State<CompanyShell> {
               onSubpageOpenChanged: _narrowIndex == 1 ? _onSubpageOpenChanged : null,
               root: CompanyManagementPage(companyId: companyId, extraShellNav: _shellNav),
             ),
+            const SettingsPage(embedded: true),
           ],
         ),
       );
@@ -135,6 +138,7 @@ class _CompanyShellState extends State<CompanyShell> {
       AppNavDestination(icon: Icons.extension_outlined, label: l10n.navModules),
       for (final entry in _shellNav)
         AppNavDestination(icon: entry.icon, label: entry.label),
+      AppNavDestination(icon: Icons.settings_outlined, label: l10n.settings),
     ];
 
     final fixedPages = [
@@ -151,7 +155,11 @@ class _CompanyShellState extends State<CompanyShell> {
         ModuleShellNavPage(entry: entry, embedded: true, companyId: companyId),
     ];
 
-    final pages = [...fixedPages, ...dynamicPages];
+    final pages = [
+      ...fixedPages,
+      ...dynamicPages,
+      const SettingsPage(embedded: true),
+    ];
 
     return AppLayout(
       constrainBody: false,

@@ -15,6 +15,7 @@ import 'package:prodavan/features/admin/company_list_page.dart';
 import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/module_shell_nav_page.dart';
 import 'package:prodavan/features/meta/shell_nav_loader.dart';
+import 'package:prodavan/features/settings/settings_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Platform Admin shell — Overview + management sections (+ mobile Management hub).
@@ -61,7 +62,7 @@ class _AdminShellState extends State<AdminShell> {
     try {
       final entries = await ShellNavLoader.loadAdmin(adminContext.api);
       if (!mounted) return;
-      final maxIndex = _fixedRailCount + entries.length - 1;
+      final maxIndex = _fixedRailCount + entries.length;
       setState(() {
         _shellNav = entries;
         if (_railIndex > maxIndex) _railIndex = 0;
@@ -104,6 +105,7 @@ class _AdminShellState extends State<AdminShell> {
         destinations: [
           AppNavDestination(icon: Icons.dashboard_outlined, label: l10n.navOverview),
           AppNavDestination(icon: Icons.apps_outlined, label: l10n.navManagement),
+          AppNavDestination(icon: Icons.settings_outlined, label: l10n.settings),
         ],
         body: IndexedStack(
           index: _narrowIndex,
@@ -118,6 +120,7 @@ class _AdminShellState extends State<AdminShell> {
               onSubpageOpenChanged: _narrowIndex == 1 ? _onSubpageOpenChanged : null,
               root: AdminManagementPage(extraShellNav: _shellNav),
             ),
+            const SettingsPage(embedded: true),
           ],
         ),
       );
@@ -132,6 +135,7 @@ class _AdminShellState extends State<AdminShell> {
       AppNavDestination(icon: Icons.extension_outlined, label: l10n.navModules),
       for (final entry in _shellNav)
         AppNavDestination(icon: entry.icon, label: entry.label),
+      AppNavDestination(icon: Icons.settings_outlined, label: l10n.settings),
     ];
 
     final fixedPages = const [
@@ -148,7 +152,11 @@ class _AdminShellState extends State<AdminShell> {
         ModuleShellNavPage(entry: entry, embedded: true),
     ];
 
-    final pages = [...fixedPages, ...dynamicPages];
+    final pages = [
+      ...fixedPages,
+      ...dynamicPages,
+      const SettingsPage(embedded: true),
+    ];
 
     return AppLayout(
       constrainBody: false,

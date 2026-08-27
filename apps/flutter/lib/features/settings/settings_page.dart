@@ -11,9 +11,12 @@ import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Language + appearance + auto-refresh (page, not dialog).
+/// Language + appearance + auto-refresh.
 class SettingsPage extends StatelessWidget {
-  const SettingsPage({super.key});
+  const SettingsPage({super.key, this.embedded = false});
+
+  /// When true, render inside shell [IndexedStack] without app bar chrome.
+  final bool embedded;
 
   static const _locales = ['ru', 'en'];
   static const _themes = ['light', 'dark', 'ultraDark'];
@@ -36,66 +39,68 @@ class SettingsPage extends StatelessWidget {
           AppThemeMode.dark => 'dark',
           AppThemeMode.ultraDark => 'ultraDark',
         };
+        final body = ListView(
+          padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+          children: [
+            AppChoicePreference<String>(
+              title: l10n.settingsLanguage,
+              icon: Icons.translate,
+              value: appSettings.locale.languageCode,
+              choices: _locales,
+              keyFor: (v) => v,
+              labelFor: (v) =>
+                  v == 'ru' ? l10n.settingsLanguageRu : l10n.settingsLanguageEn,
+              iconFor: (v) => v == 'ru' ? Icons.translate : Icons.language,
+              onSave: (v) async => appSettings.setLocale(Locale(v)),
+            ),
+            AppChoicePreference<String>(
+              title: l10n.settingsTheme,
+              icon: Icons.palette_outlined,
+              value: themeKey,
+              choices: _themes,
+              keyFor: (v) => v,
+              labelFor: (v) => switch (v) {
+                'dark' => l10n.settingsThemeDark,
+                'ultraDark' => l10n.settingsThemeUltraDark,
+                _ => l10n.settingsThemeLight,
+              },
+              iconFor: (v) => switch (v) {
+                'dark' => Icons.dark_mode_outlined,
+                'ultraDark' => Icons.contrast,
+                _ => Icons.light_mode_outlined,
+              },
+              onSave: (v) async {
+                final mode = switch (v) {
+                  'dark' => AppThemeMode.dark,
+                  'ultraDark' => AppThemeMode.ultraDark,
+                  _ => AppThemeMode.light,
+                };
+                await appSettings.setThemeMode(mode);
+              },
+            ),
+            AppChoicePreference<int>(
+              title: l10n.settingsRefresh,
+              icon: Icons.update_rounded,
+              value: appSettings.autoRefreshSeconds,
+              choices: kAppAutoRefreshChoicesSeconds,
+              keyFor: (v) => '$v',
+              labelFor: (v) => _refreshLabel(l10n, v),
+              presentValue: (v) => _refreshLabel(l10n, v),
+              onSave: (v) async => appSettings.setAutoRefreshSeconds(v),
+            ),
+            if (tokenSession.isAuthenticated)
+              AppNavPreference(
+                title: l10n.authSignOut,
+                icon: Icons.logout_rounded,
+                accentColor: context.appColors.warning,
+                onTap: () => signOut(context),
+              ),
+          ],
+        );
+        if (embedded) return body;
         return AppScaffold(
           title: Text(l10n.settings),
-          body: ListView(
-            padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-            children: [
-              AppChoicePreference<String>(
-                title: l10n.settingsLanguage,
-                icon: Icons.translate,
-                value: appSettings.locale.languageCode,
-                choices: _locales,
-                keyFor: (v) => v,
-                labelFor: (v) =>
-                    v == 'ru' ? l10n.settingsLanguageRu : l10n.settingsLanguageEn,
-                iconFor: (v) => v == 'ru' ? Icons.translate : Icons.language,
-                onSave: (v) async => appSettings.setLocale(Locale(v)),
-              ),
-              AppChoicePreference<String>(
-                title: l10n.settingsTheme,
-                icon: Icons.palette_outlined,
-                value: themeKey,
-                choices: _themes,
-                keyFor: (v) => v,
-                labelFor: (v) => switch (v) {
-                  'dark' => l10n.settingsThemeDark,
-                  'ultraDark' => l10n.settingsThemeUltraDark,
-                  _ => l10n.settingsThemeLight,
-                },
-                iconFor: (v) => switch (v) {
-                  'dark' => Icons.dark_mode_outlined,
-                  'ultraDark' => Icons.contrast,
-                  _ => Icons.light_mode_outlined,
-                },
-                onSave: (v) async {
-                  final mode = switch (v) {
-                    'dark' => AppThemeMode.dark,
-                    'ultraDark' => AppThemeMode.ultraDark,
-                    _ => AppThemeMode.light,
-                  };
-                  await appSettings.setThemeMode(mode);
-                },
-              ),
-              AppChoicePreference<int>(
-                title: l10n.settingsRefresh,
-                icon: Icons.update_rounded,
-                value: appSettings.autoRefreshSeconds,
-                choices: kAppAutoRefreshChoicesSeconds,
-                keyFor: (v) => '$v',
-                labelFor: (v) => _refreshLabel(l10n, v),
-                presentValue: (v) => _refreshLabel(l10n, v),
-                onSave: (v) async => appSettings.setAutoRefreshSeconds(v),
-              ),
-              if (tokenSession.isAuthenticated)
-                AppNavPreference(
-                  title: l10n.authSignOut,
-                  icon: Icons.logout_rounded,
-                  accentColor: context.appColors.warning,
-                  onTap: () => signOut(context),
-                ),
-            ],
-          ),
+          body: body,
         );
       },
     );
