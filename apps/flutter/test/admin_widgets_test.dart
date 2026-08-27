@@ -44,6 +44,15 @@ void main() {
     expect(msgs, contains(l10n.adminMetricsSubscriptionExpired));
   });
 
+  test('messagesFor ignores identity unbound on company banners', () {
+    final msgs = AdminMetricsAlerts.messagesFor({
+      'keycloak_unbound': true,
+      'employees_keycloak_unbound': 3,
+      'subscription_lifetime': true,
+    }, l10n);
+    expect(msgs, isEmpty);
+  });
+
   test('messagesFor ignores expired when lifetime', () {
     final msgs = AdminMetricsAlerts.messagesFor({
       'subscription_lifetime': true,

@@ -10,8 +10,19 @@ from typing import Any
 def run_async[T](coro: Coroutine[Any, Any, T]) -> T:
     """Run a coroutine from a sync Celery task.
 
-    Creates a fresh event loop so tasks are safe outside the FastAPI loop.
+    Creates a fresh event loop and disposes the shared async engine so
+    connections are never bound to a previous loop (prefork workers).
     """
+
+    async def _with_fresh_engine() -> T:
+        from prodavan.infrastructure.persistence import database as db
+
+        await db.dispose_engine()
+        try:
+            return await coro
+        finally:
+            await db.dispose_engine()
+
     try:
         loop = asyncio.get_running_loop()
     except RuntimeError:
@@ -21,5 +32,5 @@ def run_async[T](coro: Coroutine[Any, Any, T]) -> T:
         import concurrent.futures
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-            return pool.submit(asyncio.run, coro).result()
-    return asyncio.run(coro)
+            return pool.submit(asyncio.run, _with_fresh_engine()).result()
+    return asyncio.run(_with_fresh_engine())

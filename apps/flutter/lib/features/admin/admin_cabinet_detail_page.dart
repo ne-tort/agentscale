@@ -8,7 +8,7 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Admin cabinet detail — name, multi-company grants, owner_scope badge.
+/// Admin cabinet detail — name, module bindings, company grants.
 class AdminCabinetDetailPage extends StatefulWidget {
   const AdminCabinetDetailPage({
     super.key,
@@ -27,9 +27,10 @@ class _AdminCabinetDetailPageState extends State<AdminCabinetDetailPage> {
   bool _loading = true;
   Object? _error;
   String _name = '';
-  String _ownerScope = 'platform';
   Set<String> _companyIds = {};
+  Set<String> _moduleIds = {};
   List<Map<String, dynamic>> _companies = const [];
+  List<Map<String, dynamic>> _modules = const [];
 
   @override
   void initState() {
@@ -46,15 +47,20 @@ class _AdminCabinetDetailPageState extends State<AdminCabinetDetailPage> {
     try {
       final cab = await adminContext.api.getCabinet(widget.cabinetId);
       final companies = await adminContext.api.listCompanies();
+      final modules = await adminContext.api.listModules();
       if (!mounted) return;
-      final ids = cab['company_ids'];
+      final companyIds = cab['company_ids'];
+      final moduleIds = cab['module_ids'];
       setState(() {
         _name = cab['name'] as String? ?? widget.cabinetName;
-        _ownerScope = cab['owner_scope'] as String? ?? 'platform';
-        _companyIds = ids is List
-            ? ids.map((e) => e.toString()).toSet()
+        _companyIds = companyIds is List
+            ? companyIds.map((e) => e.toString()).toSet()
+            : <String>{};
+        _moduleIds = moduleIds is List
+            ? moduleIds.map((e) => e.toString()).toSet()
             : <String>{};
         _companies = companies;
+        _modules = modules;
         _loading = false;
       });
     } catch (e) {
@@ -84,8 +90,28 @@ class _AdminCabinetDetailPageState extends State<AdminCabinetDetailPage> {
     }
   }
 
+  Future<void> _saveModules(Set<String> moduleIds) async {
+    if (moduleIds == _moduleIds) return;
+    try {
+      final updated = await adminContext.api.updateCabinet(
+        cabinetId: widget.cabinetId,
+        moduleIds: moduleIds.toList(),
+      );
+      if (!mounted) return;
+      final ids = updated['module_ids'];
+      setState(() {
+        _moduleIds = ids is List
+            ? ids.map((e) => e.toString()).toSet()
+            : moduleIds;
+      });
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+      rethrow;
+    }
+  }
+
   Future<void> _saveCompanies(Set<String> companyIds) async {
-    if (companyIds.isEmpty || companyIds == _companyIds) return;
+    if (companyIds == _companyIds) return;
     try {
       final updated = await adminContext.api.updateCabinet(
         cabinetId: widget.cabinetId,
@@ -113,10 +139,22 @@ class _AdminCabinetDetailPageState extends State<AdminCabinetDetailPage> {
     return id;
   }
 
-  String _companiesSubtitle(Set<String> ids, AppLocalizations l10n) {
-    if (ids.isEmpty) return l10n.commonNotSet;
-    if (ids.length == 1) return _companyLabel(ids.first);
-    return l10n.adminCabinetCompaniesCount(ids.length);
+  String _moduleLabel(String id) {
+    for (final m in _modules) {
+      if (m['id'] == id) {
+        return m['name'] as String? ?? id;
+      }
+    }
+    return id;
+  }
+
+  String _bindingsSubtitle(
+    Set<String> ids,
+    String Function(String) label,
+  ) {
+    if (ids.isEmpty) return '0';
+    if (ids.length == 1) return label(ids.first);
+    return '${ids.length}';
   }
 
   @override
@@ -128,6 +166,13 @@ class _AdminCabinetDetailPageState extends State<AdminCabinetDetailPage> {
         .toList();
     for (final id in _companyIds) {
       if (!companyChoices.contains(id)) companyChoices.insert(0, id);
+    }
+    final moduleChoices = _modules
+        .map((m) => m['id'] as String)
+        .where((id) => id.isNotEmpty)
+        .toList();
+    for (final id in _moduleIds) {
+      if (!moduleChoices.contains(id)) moduleChoices.insert(0, id);
     }
 
     return AppScaffold(
@@ -142,11 +187,6 @@ class _AdminCabinetDetailPageState extends State<AdminCabinetDetailPage> {
                     severity: AppStatusSeverity.error,
                     message: AppErrors.localize(context, _error!),
                   ),
-                ListTile(
-                  leading: const Icon(Icons.shield_outlined),
-                  title: Text(l10n.adminCabinetOwnerScope),
-                  subtitle: Text(_ownerScope),
-                ),
                 AppValuePreference<String>(
                   title: l10n.commonName,
                   icon: Icons.label_outline_rounded,
@@ -154,18 +194,30 @@ class _AdminCabinetDetailPageState extends State<AdminCabinetDetailPage> {
                   validateInput: (v) => v.trim().isNotEmpty,
                   onSave: _saveName,
                 ),
-                if (companyChoices.isNotEmpty)
-                  AppMultiChoicePreference<String>(
-                    title: l10n.commonCompanies,
-                    icon: Icons.business_outlined,
-                    values: _companyIds,
-                    choices: companyChoices,
-                    keyFor: (v) => v,
-                    labelFor: _companyLabel,
-                    presentValues: (ids) => _companiesSubtitle(ids, l10n),
-                    pickerTitle: l10n.adminSelectCompanyForCabinet,
-                    onSave: _saveCompanies,
-                  ),
+                AppMultiChoicePreference<String>(
+                  title: l10n.navModules,
+                  icon: Icons.extension_outlined,
+                  values: _moduleIds,
+                  choices: moduleChoices,
+                  keyFor: (v) => v,
+                  labelFor: _moduleLabel,
+                  presentValues: (ids) =>
+                      _bindingsSubtitle(ids, _moduleLabel),
+                  pickerTitle: l10n.adminSelectModulesForCabinet,
+                  onSave: _saveModules,
+                ),
+                AppMultiChoicePreference<String>(
+                  title: l10n.commonCompanies,
+                  icon: Icons.business_outlined,
+                  values: _companyIds,
+                  choices: companyChoices,
+                  keyFor: (v) => v,
+                  labelFor: _companyLabel,
+                  presentValues: (ids) =>
+                      _bindingsSubtitle(ids, _companyLabel),
+                  pickerTitle: l10n.adminSelectCompanyForCabinet,
+                  onSave: _saveCompanies,
+                ),
               ],
             ),
     );

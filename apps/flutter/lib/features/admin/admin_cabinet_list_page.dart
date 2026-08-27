@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/admin_context.dart';
-import 'package:prodavan/core/widgets/app_catalog_select_page.dart';
 import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
@@ -67,42 +66,8 @@ class _AdminCabinetListPageState extends State<AdminCabinetListPage> {
   }
 
   Future<void> _createCabinet(String name) async {
-    final l10n = AppLocalizations.of(context);
-    List<Map<String, dynamic>> companies;
     try {
-      companies = await adminContext.api.listCompanies();
-    } catch (e) {
-      if (mounted) AppErrors.showSnack(context, e);
-      return;
-    }
-    if (!mounted) return;
-    if (companies.isEmpty) {
-      AppSnackBar.info(context, l10n.adminNoCompanies);
-      return;
-    }
-
-    final picked = await Navigator.of(context).push<Set<String>>(
-      MaterialPageRoute(
-        builder: (_) => AppCatalogSelectPage(
-          title: l10n.adminSelectCompanyForCabinet,
-          multiSelect: true,
-          items: [
-            for (final c in companies)
-              AppCatalogSelectItem(
-                id: c['id'] as String,
-                title: c['name'] as String? ?? c['id'] as String,
-              ),
-          ],
-        ),
-      ),
-    );
-    if (picked == null || picked.isEmpty || !mounted) return;
-
-    try {
-      final body = await adminContext.api.createCabinet(
-        name: name,
-        companyIds: picked.toList(),
-      );
+      final body = await adminContext.api.createCabinet(name: name);
       if (!mounted) return;
       await _reload();
       if (!mounted) return;
@@ -161,21 +126,29 @@ class _AdminCabinetListPageState extends State<AdminCabinetListPage> {
     }
   }
 
+  int _countIds(dynamic value) {
+    if (value is List) return value.length;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse('$value') ?? 0;
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final rows = _cabinets
         .map(
           (c) {
-            final companyIds = c['company_ids'];
-            final count = companyIds is List ? companyIds.length : 0;
+            final modules = _countIds(
+              c['module_bindings_count'] ?? c['module_ids'],
+            );
+            final companies = _countIds(c['company_ids']);
             return AppEntityRow(
               id: c['id'] as String,
               title: c['name'] as String? ?? c['id'] as String,
               cells: {
-                'companies': count > 0 ? '$count' : l10n.commonNotSet,
-                'scope': c['owner_scope'] as String? ?? '—',
-                'status': c['status'] as String? ?? '',
+                'modules': '$modules',
+                'companies': '$companies',
               },
             );
           },
@@ -197,15 +170,11 @@ class _AdminCabinetListPageState extends State<AdminCabinetListPage> {
             child: AppEntityCollection(
               loading: _loading,
               rows: rows,
+              mode: AppEntityCollectionMode.table,
               primaryColumnLabel: l10n.commonCabinets,
               columns: [
+                AppEntityColumn(id: 'modules', label: l10n.navModules),
                 AppEntityColumn(id: 'companies', label: l10n.commonCompanies),
-                AppEntityColumn(id: 'scope', label: l10n.adminCabinetOwnerScope, width: 100),
-                AppEntityColumn(
-                  id: 'status',
-                  label: l10n.commonStatus,
-                  width: 100,
-                ),
               ],
               onOpen: _openCabinet,
               onCopy: _copyCabinet,

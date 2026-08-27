@@ -49,6 +49,18 @@
 - **Запрещены** `.sh` под `infra/`, docker-compose как кластер, k3d в git, recover/deploy shell.
 - Кластер: **k3s** + Argo (`infra/argocd` → `infra/k3s/overlays/dev`).
 
+### Dev-кластер в WSL (kubectl)
+
+Локальный k3s живёт в дистрибутиве **`kali-linux`**, не в Ubuntu / docker-desktop.
+
+```bash
+wsl -d kali-linux
+export KUBECONFIG=~/.kube/prodavan-dev.yaml
+kubectl get pods -A
+```
+
+Альтернатива: `/etc/rancher/k3s/k3s.yaml` (после `sudo`). UI с Windows: **http://127.0.0.1:8088/** · Keycloak hostPort **:8089**. Подробности: [`docs/07-infrastructure/wsl-dev.md`](docs/07-infrastructure/wsl-dev.md), [`runbook.md`](docs/07-infrastructure/runbook.md).
+
 ## База данных и миграции (Alembic)
 
 Канон: [`docs/07-infrastructure/alembic.md`](docs/07-infrastructure/alembic.md).

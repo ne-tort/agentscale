@@ -68,6 +68,15 @@ class RelationsQuery:
         )
         return q.scalar_one_or_none() is not None
 
+    async def company_ids_for_cabinet(self, cabinet_id: str) -> list[str]:
+        q = await self._session.execute(
+            select(CabinetCompanyGrantRow.company_id).where(
+                CabinetCompanyGrantRow.cabinet_id == cabinet_id,
+                CabinetCompanyGrantRow.status == CabinetGrantStatus.ACTIVE,
+            )
+        )
+        return list(q.scalars().all())
+
     async def has_ai_key_binding(self, *, key_id: str, company_id: str) -> bool:
         q = await self._session.execute(
             select(CompanyAiKeyBindingRow.id).where(

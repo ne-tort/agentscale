@@ -265,8 +265,8 @@
   "adminAlertTagHighUsage": "высокий usage",
   "adminAlertTagSubExpiring": "подписка",
   "adminAlertTagSubExpired": "истекла",
-  "adminAlertTagIdentityUnbound": "Identity unbound",
-  "adminAlertTagEmployeesUnbound": "сотрудники без KC · {count}",
+  "adminAlertTagIdentityUnbound": "IDENTITY_UNBOUND",
+  "adminAlertTagEmployeesUnbound": "EMPLOYEES_UNBOUND · {count}",
   "@adminAlertTagEmployeesUnbound": {
     "placeholders": {
       "count": {
@@ -274,7 +274,7 @@
       }
     }
   },
-  "adminAlertTagCascadeIncomplete": "каскад удаления незавершён",
+  "adminAlertTagCascadeIncomplete": "CASCADE_INCOMPLETE",
   "commonPhone": "Телефон",
   "adminKeyMetadata": "Метаданные ключа",
   "adminLifecycle": "Жизненный цикл",
@@ -325,8 +325,8 @@
       }
     }
   },
-  "adminMetricsIdentityUnbound": "Identity unbound — ожидание Keycloak principal компании",
-  "adminMetricsEmployeesUnbound": "Сотрудников без Keycloak: {count}",
+  "adminMetricsIdentityUnbound": "Ожидание сервиса аутентификации",
+  "adminMetricsEmployeesUnbound": "Ожидание сервиса аутентификации · сотрудников: {count}",
   "@adminMetricsEmployeesUnbound": {
     "placeholders": {
       "count": {
@@ -371,10 +371,12 @@
   "adminModuleJson": "JSON",
   "adminModuleJsonConfigured": "Настроено",
   "adminModulePreview": "Предпросмотр",
+  "adminModulePreviewEmpty": "Добавьте JSON модуля для предпросмотра",
   "adminModuleJsonInvalid": "Неверный JSON",
   "adminMetaInvalid": "Метаданные",
   "adminModulePreviewMode": "Предпросмотр",
   "adminSelectCabinetsForModule": "Выберите кабинеты для модуля",
+  "adminSelectModulesForCabinet": "Выберите модули для кабинета",
   "adminSelectCompaniesForModule": "Выберите компании для модуля",
   "adminDeleteCabinetConfirm": "Удалить кабинет «{name}»? Будут удалены все проекты и схема кабинета.",
   "@adminDeleteCabinetConfirm": {

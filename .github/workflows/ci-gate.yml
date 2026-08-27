@@ -31,20 +31,43 @@ jobs:
       - name: Ensure kustomize on PATH
         run: |
           set -euo pipefail
+          ver="v5.4.3"
           echo "==> looking for kustomize"
           if command -v kustomize >/dev/null 2>&1; then
             kustomize version
             exit 0
           fi
-          dest="${{ runner.temp }}/kustomize-bin"
-          mkdir -p "$dest"
-          echo "==> downloading kustomize v5.4.3"
-          curl -fsSL --connect-timeout 15 --max-time 120 \
-            "https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz" \
-            -o "${{ runner.temp }}/kustomize.tgz"
-          tar xz -C "$dest" -f "${{ runner.temp }}/kustomize.tgz"
-          echo "$dest" >> "${GITHUB_PATH}"
-          "$dest/kustomize" version
+          # Persistent runner cache (same volume as poetry) — avoids GitHub release
+          # CDN timeouts that flake the gate when PATH has no kustomize.
+          cache="/cache/kustomize/${ver}"
+          if [ -x "${cache}/kustomize" ]; then
+            echo "==> kustomize cache HIT: ${cache}"
+            echo "${cache}" >> "${GITHUB_PATH}"
+            "${cache}/kustomize" version
+            exit 0
+          fi
+          mkdir -p "${cache}"
+          tgz="${{ runner.temp }}/kustomize.tgz"
+          url="https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2F${ver}/kustomize_${ver}_linux_amd64.tar.gz"
+          echo "==> downloading kustomize ${ver} (retries)"
+          ok=0
+          for attempt in 1 2 3 4 5; do
+            echo "==> attempt ${attempt}/5"
+            if curl -fsSL --connect-timeout 30 --max-time 180 \
+              --retry 3 --retry-delay 5 --retry-all-errors \
+              "${url}" -o "${tgz}"; then
+              ok=1
+              break
+            fi
+            sleep $((attempt * 5))
+          done
+          if [ "${ok}" -ne 1 ]; then
+            echo "::error::failed to download kustomize ${ver} after retries"
+            exit 1
+          fi
+          tar xz -C "${cache}" -f "${tgz}"
+          echo "${cache}" >> "${GITHUB_PATH}"
+          "${cache}/kustomize" version
 
       - name: Poetry (persistent /cache)
         run: |

@@ -10,7 +10,7 @@ import 'package:prodavan/features/admin/admin_module_json_page.dart';
 import 'package:prodavan/features/meta/module_meta_repository.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Admin module detail — name and company grants (Company binds cabinets).
+/// Admin module detail — name, cabinet bindings, company grants.
 class AdminModuleDetailPage extends StatefulWidget {
   const AdminModuleDetailPage({
     super.key,
@@ -30,7 +30,9 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
   Object? _error;
   String _name = '';
   Set<String> _companyIds = {};
+  Set<String> _cabinetIds = {};
   List<Map<String, dynamic>> _companies = const [];
+  List<Map<String, dynamic>> _cabinets = const [];
   bool _jsonConfigured = false;
 
   @override
@@ -47,15 +49,21 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
     try {
       final mod = await adminContext.api.getModule(widget.moduleId);
       final companies = await adminContext.api.listCompanies();
+      final cabinets = await adminContext.api.listCabinets();
       final manifest = await ModuleMetaRepository.load(adminContext.api, widget.moduleId);
       if (!mounted) return;
-      final ids = mod['company_ids'];
+      final companyIds = mod['company_ids'];
+      final cabinetIds = mod['cabinet_ids'];
       setState(() {
         _name = mod['name'] as String? ?? widget.moduleName;
-        _companyIds = ids is List
-            ? ids.map((e) => e.toString()).toSet()
+        _companyIds = companyIds is List
+            ? companyIds.map((e) => e.toString()).toSet()
+            : <String>{};
+        _cabinetIds = cabinetIds is List
+            ? cabinetIds.map((e) => e.toString()).toSet()
             : <String>{};
         _companies = companies;
+        _cabinets = cabinets;
         _jsonConfigured = manifest.hasContent;
         _loading = false;
       });
@@ -79,6 +87,26 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
       if (!mounted) return;
       setState(() {
         _name = updated['name'] as String? ?? trimmed;
+      });
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+      rethrow;
+    }
+  }
+
+  Future<void> _saveCabinets(Set<String> cabinetIds) async {
+    if (cabinetIds == _cabinetIds) return;
+    try {
+      final updated = await adminContext.api.updateModule(
+        moduleId: widget.moduleId,
+        cabinetIds: cabinetIds.toList(),
+      );
+      if (!mounted) return;
+      final ids = updated['cabinet_ids'];
+      setState(() {
+        _cabinetIds = ids is List
+            ? ids.map((e) => e.toString()).toSet()
+            : cabinetIds;
       });
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
@@ -126,10 +154,17 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
     return id;
   }
 
-  String _companiesSubtitle(Set<String> ids, AppLocalizations l10n) {
-    if (ids.isEmpty) return l10n.commonNotSet;
-    if (ids.length == 1) return _companyLabel(ids.first);
-    return l10n.adminBindingsCount(ids.length);
+  String _cabinetLabel(String id) {
+    for (final c in _cabinets) {
+      if (c['id'] == id) return c['name'] as String? ?? id;
+    }
+    return id;
+  }
+
+  String _bindingsSubtitle(Set<String> ids, String Function(String) label) {
+    if (ids.isEmpty) return '0';
+    if (ids.length == 1) return label(ids.first);
+    return '${ids.length}';
   }
 
   @override
@@ -141,6 +176,13 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
         .toList();
     for (final id in _companyIds) {
       if (!companyChoices.contains(id)) companyChoices.insert(0, id);
+    }
+    final cabinetChoices = _cabinets
+        .map((c) => c['id'] as String)
+        .where((id) => id.isNotEmpty)
+        .toList();
+    for (final id in _cabinetIds) {
+      if (!cabinetChoices.contains(id)) cabinetChoices.insert(0, id);
     }
 
     return AppScaffold(
@@ -162,18 +204,30 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
                   validateInput: (v) => v.trim().isNotEmpty,
                   onSave: _saveName,
                 ),
-                if (companyChoices.isNotEmpty)
-                  AppMultiChoicePreference<String>(
-                    title: l10n.navCompanies,
-                    icon: Icons.business_outlined,
-                    values: _companyIds,
-                    choices: companyChoices,
-                    keyFor: (v) => v,
-                    labelFor: _companyLabel,
-                    presentValues: (ids) => _companiesSubtitle(ids, l10n),
-                    pickerTitle: l10n.adminSelectCompaniesForModule,
-                    onSave: _saveCompanies,
-                  ),
+                AppMultiChoicePreference<String>(
+                  title: l10n.commonCabinets,
+                  icon: Icons.inventory_2_outlined,
+                  values: _cabinetIds,
+                  choices: cabinetChoices,
+                  keyFor: (v) => v,
+                  labelFor: _cabinetLabel,
+                  presentValues: (ids) =>
+                      _bindingsSubtitle(ids, _cabinetLabel),
+                  pickerTitle: l10n.adminSelectCabinetsForModule,
+                  onSave: _saveCabinets,
+                ),
+                AppMultiChoicePreference<String>(
+                  title: l10n.navCompanies,
+                  icon: Icons.business_outlined,
+                  values: _companyIds,
+                  choices: companyChoices,
+                  keyFor: (v) => v,
+                  labelFor: _companyLabel,
+                  presentValues: (ids) =>
+                      _bindingsSubtitle(ids, _companyLabel),
+                  pickerTitle: l10n.adminSelectCompaniesForModule,
+                  onSave: _saveCompanies,
+                ),
                 AppNavPreference(
                   title: l10n.adminModuleJson,
                   icon: Icons.data_object_outlined,

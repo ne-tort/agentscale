@@ -632,7 +632,11 @@ class AdminCompanyService:
         }
 
     async def set_company_password(self, company_id: str, *, password: str) -> dict:
-        """Set/rotate Keycloak password for company org principal (username = company_id)."""
+        """Set/rotate Auth password for company org principal (username = company_id).
+
+        If identity is still unbound, re-publish ``auth.user.register`` so Auth creates/reuses
+        the IdP user and Identity binds ``keycloak_sub`` via Kafka events.
+        """
         pwd = (password or "").strip()
         if len(pwd) < 8:
             raise AppError(
@@ -642,6 +646,26 @@ class AdminCompanyService:
                 detail="password required (min 8 chars)",
             )
         company = await self._require_company(company_id)
+        if company.keycloak_sub is None:
+            from prodavan.application.auth.register import publish_register_command
+            from prodavan.domain.identity import ROLE_COMPANY
+
+            await publish_register_command(
+                client_ref=f"company:{company.id}",
+                username=company.id,
+                email=f"{company.id}@companies.prodavan.local",
+                password=pwd,
+                realm_roles=[ROLE_COMPANY],
+                display_name=company.name,
+            )
+            await self._session.refresh(company)
+            return {
+                "id": company.id,
+                "username": company.id,
+                "password_set": company.keycloak_sub is not None,
+                "identity_pending": company.keycloak_sub is None,
+            }
+
         from prodavan.infrastructure.keycloak.provisioning import get_provisioning
 
         await get_provisioning().set_company_password(username=company.id, password=pwd)

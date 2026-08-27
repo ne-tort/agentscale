@@ -17,7 +17,7 @@
 | **P-ID-01** | **Company** имеет **Keycloak-креды** | `companies.keycloak_sub` via Auth Kafka `auth.user.register` + bind; soft-delete `deleted_at` + async cascade | Org principal async; zombies in admin metrics |
 | **P-CAS-02** | Company soft-delete → soft children (no wipe) | Soft-delete + Celery cascade; wipe only on purge | Align cascade to [00-lifecycle](00-lifecycle.md) |
 | **P-LC-01** | Unified pause / soft_delete / purge + restore | Partial (company deleted_at; project pause/delete wipe) | Recycle API; project soft without wipe |
-| **P-REL-01** | Central Relations BC: query + Kafka grant/revoke | Per-BC grant tables; ACL reads scatter; no relation topics | Facade → events → consolidate |
+| **P-REL-01** | Central Relations BC: query + Kafka grant/revoke | Facade `RelationsQuery`/`RelationsCommand` + `prodavan.relation.events`; ACL reads migrated; physical consolidate later | Soft-status unify; AI/module writes via RelationsCommand |
 | **P-ID-02** | Admin / Company / Employee — три KC-сущности | Realm roles + `prodavan-keycloak-init` bootstrap; API resolution live | IdP brokers / SMTP invite polish |
 | **P-CAB-01** | Company **назначает** Employee ↔ Cabinet | **Grants + assignment API + Flutter** | Verify Dev E2E |
 | **P-CAB-02** | UI кабинета из module meta | Module template + `module_data_rows` API; employee UI = placeholder | Generic meta UI next |

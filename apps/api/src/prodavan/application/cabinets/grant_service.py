@@ -60,13 +60,6 @@ class CabinetGrantService:
         mode: str = CabinetGrantMode.ASSIGNED_RO,
     ) -> list[str]:
         unique = list(dict.fromkeys(company_ids))
-        if not unique:
-            raise AppError(
-                code="VALIDATION_ERROR",
-                title="Validation Error",
-                status=422,
-                detail="at least one company_id required",
-            )
         for cid in unique:
             co = await self._session.get(CompanyRow, cid)
             if co is None:
@@ -93,7 +86,7 @@ class CabinetGrantService:
             )
         inst = await self._session.get(CabinetInstanceRow, cabinet_id)
         if inst is not None:
-            inst.company_id = unique[0]
+            inst.company_id = unique[0] if unique else None
         await self._session.flush()
         return unique
 

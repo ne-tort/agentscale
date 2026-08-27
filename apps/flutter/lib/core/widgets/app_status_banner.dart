@@ -43,14 +43,15 @@ class AppStatusBanner extends StatelessWidget {
     final tokens = context.appColors;
     final (fg, bg, icon) = _palette(tokens);
     final borderRadius = BorderRadius.circular(12);
+    final useOutlined = _useOutlined;
 
     return Padding(
       padding: margin,
       child: Material(
-        color: outlined ? Colors.transparent : bg,
+        color: useOutlined ? Colors.transparent : bg,
         shape: RoundedRectangleBorder(
           borderRadius: borderRadius,
-          side: outlined ? BorderSide(color: fg, width: 1.2) : BorderSide.none,
+          side: useOutlined ? BorderSide(color: fg, width: 1.2) : BorderSide.none,
         ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -127,5 +128,13 @@ class AppStatusBanner extends StatelessWidget {
           Icons.report_rounded,
         ),
     };
+  }
+
+  bool get _useOutlined {
+    if (outlined) return true;
+    // Default: warning/info/success are outlined (transparent + border).
+    return severity == AppStatusSeverity.warning ||
+        severity == AppStatusSeverity.info ||
+        severity == AppStatusSeverity.success;
   }
 }

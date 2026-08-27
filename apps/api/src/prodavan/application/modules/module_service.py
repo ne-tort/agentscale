@@ -73,6 +73,7 @@ class ModuleService:
         module_id: str,
         name: str | None = None,
         company_ids: list[str] | None = None,
+        cabinet_ids: list[str] | None = None,
     ) -> dict:
         row = await self._get_row(module_id)
         if name is not None:
@@ -82,6 +83,8 @@ class ModuleService:
             row.name = trimmed
         if company_ids is not None:
             await self._bindings.replace_company_grants(module_id, company_ids)
+        if cabinet_ids is not None:
+            await self._bindings.replace_cabinet_bindings(module_id, cabinet_ids)
         await self._session.commit()
         await self._session.refresh(row)
         return await _public_row(self._session, row, bindings=self._bindings)

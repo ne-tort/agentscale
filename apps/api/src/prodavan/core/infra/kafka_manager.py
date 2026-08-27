@@ -199,21 +199,12 @@ class KafkaManager(LifespanResource):
                 return
             if envelope.bus == "auth_event":
                 from prodavan.application.auth.register import AUTH_USER_REGISTERED
-                from prodavan.application.identity.auth_bind import apply_auth_user_registered_payload
-                from prodavan.core.jobs.enqueue import enqueue_apply_auth_user_registered
 
                 if envelope.event_type != AUTH_USER_REGISTERED:
                     return
-                # Prefer Celery when available; otherwise bind inline (tests / no worker).
-                enq = enqueue_apply_auth_user_registered(envelope.payload or {})
-                if enq.get("enqueued"):
-                    self._auth_bind_enqueues += 1
-                    return
-                from prodavan.infrastructure.persistence.database import get_session_factory
-
-                factory = get_session_factory()
-                async with factory() as session:
-                    await apply_auth_user_registered_payload(session, envelope.payload or {})
+                # Bind in-process (Identity SoT). Celery optional fan-out is unreliable
+                # across prefork event loops — never gate identity bind on the queue.
+                await self._apply_auth_bind(envelope.payload or {})
                 return
             if envelope.bus == "relation_event":
                 from prodavan.application.relations.commands import handle_relation_event_envelope
@@ -228,6 +219,21 @@ class KafkaManager(LifespanResource):
             )
         finally:
             self._local_auth_depth -= 1
+
+    async def _apply_auth_bind(self, payload: dict[str, Any]) -> None:
+        from prodavan.application.identity.auth_bind import apply_auth_user_registered_payload
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        factory = get_session_factory()
+        async with factory() as session:
+            result = await apply_auth_user_registered_payload(session, payload)
+        self._auth_bind_enqueues += 1
+        logger.info(
+            "kafka: auth bind applied ok=%s bound=%s client_ref=%s",
+            result.get("ok"),
+            result.get("bound"),
+            payload.get("client_ref"),
+        )
 
     async def _kick_drain(self) -> None:
         """Enqueue Celery drain; coalesce across API replicas via Redis lock when available."""
@@ -255,16 +261,6 @@ class KafkaManager(LifespanResource):
         logger.info(
             "kafka consumer: dispatch_trigger id=%s enqueued=%s",
             trigger_id,
-            result.get("enqueued"),
-        )
-
-    def _enqueue_auth_bind(self, payload: dict[str, Any]) -> None:
-        from prodavan.core.jobs.enqueue import enqueue_apply_auth_user_registered
-
-        result = enqueue_apply_auth_user_registered(payload)
-        self._auth_bind_enqueues += 1
-        logger.info(
-            "kafka consumer: apply_auth_user_registered enqueued=%s",
             result.get("enqueued"),
         )
 
@@ -415,10 +411,16 @@ class KafkaManager(LifespanResource):
                         if data.get("event_type") != AUTH_USER_REGISTERED:
                             continue
                         payload = dict(data.get("payload") or {})
-                        self._enqueue_auth_bind(payload)
+                        try:
+                            await self._apply_auth_bind(payload)
+                        except Exception:
+                            logger.exception(
+                                "kafka: auth bind failed client_ref=%s",
+                                payload.get("client_ref"),
+                            )
         finally:
             logger.info(
-                "kafka: auth events consumer stopped enqueues=%s",
+                "kafka: auth events consumer stopped binds=%s",
                 self._auth_bind_enqueues,
             )
 
@@ -605,7 +607,7 @@ class KafkaManager(LifespanResource):
                 client_id=f"{self._client_id}-auth-cmd",
                 group_id=self._auth_commands_group,
                 enable_auto_commit=True,
-                auto_offset_reset="latest",
+                auto_offset_reset="earliest",
             )
             await self._auth_commands_consumer.start()
             self._auth_commands_task = asyncio.create_task(
@@ -619,7 +621,7 @@ class KafkaManager(LifespanResource):
                 client_id=f"{self._client_id}-auth-evt",
                 group_id=self._auth_events_group,
                 enable_auto_commit=True,
-                auto_offset_reset="latest",
+                auto_offset_reset="earliest",
             )
             await self._auth_events_consumer.start()
             self._auth_events_task = asyncio.create_task(
@@ -633,7 +635,7 @@ class KafkaManager(LifespanResource):
                 client_id=f"{self._client_id}-rel-evt",
                 group_id=self._relation_events_group,
                 enable_auto_commit=True,
-                auto_offset_reset="latest",
+                auto_offset_reset="earliest",
             )
             await self._relation_events_consumer.start()
             self._relation_events_task = asyncio.create_task(

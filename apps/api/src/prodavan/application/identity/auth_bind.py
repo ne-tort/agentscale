@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.infrastructure.persistence.models.identity import CompanyRow, EmployeeRow
@@ -72,3 +73,13 @@ async def apply_auth_user_registered_payload(session: AsyncSession, payload: dic
     row.keycloak_sub = sub
     await session.commit()
     return {"ok": True, "bound": True, "kind": "employee", "id": entity_id, "keycloak_sub": sub}
+
+
+async def list_unbound_companies(session: AsyncSession, *, limit: int = 50) -> list[CompanyRow]:
+    q = await session.execute(
+        select(CompanyRow)
+        .where(CompanyRow.keycloak_sub.is_(None), CompanyRow.deleted_at.is_(None))
+        .order_by(CompanyRow.created_at.desc())
+        .limit(max(1, min(limit, 200)))
+    )
+    return list(q.scalars().all())

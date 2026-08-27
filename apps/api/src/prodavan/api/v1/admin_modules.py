@@ -25,6 +25,7 @@ class PatchAdminModuleBody(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
     company_ids: list[str] | None = None
+    cabinet_ids: list[str] | None = None
 
 
 class MetaDocumentBody(BaseModel):
@@ -64,6 +65,7 @@ async def patch_module(
         module_id=module_id,
         name=body.name,
         company_ids=body.company_ids,
+        cabinet_ids=body.cabinet_ids,
     )
 
 

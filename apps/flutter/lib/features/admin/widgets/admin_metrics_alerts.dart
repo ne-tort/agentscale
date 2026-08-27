@@ -52,16 +52,7 @@ class AdminMetricsAlerts extends StatelessWidget {
         ),
       ));
     }
-    if (metrics['keycloak_unbound'] == true) {
-      out.add((AppStatusSeverity.warning, l10n.adminMetricsIdentityUnbound));
-    }
-    final unboundEmployees = asInt(metrics['employees_keycloak_unbound']);
-    if (unboundEmployees > 0) {
-      out.add((
-        AppStatusSeverity.warning,
-        l10n.adminMetricsEmployeesUnbound('$unboundEmployees'),
-      ));
-    }
+    // IDENTITY_UNBOUND / employees unbound → Admin overview alerts only (not here).
     return out;
   }
 

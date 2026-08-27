@@ -29,6 +29,7 @@ class PatchAdminCabinetBody(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     company_id: str | None = Field(default=None, min_length=3, max_length=40)
     company_ids: list[str] | None = None
+    module_ids: list[str] | None = None
 
 
 @router.get("")
@@ -88,6 +89,7 @@ async def patch_cabinet(
         name=body.name,
         company_id=body.company_id,
         company_ids=body.company_ids,
+        module_ids=body.module_ids,
     )
 
 

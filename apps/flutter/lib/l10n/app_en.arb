@@ -263,8 +263,8 @@
   "adminAlertTagHighUsage": "high usage",
   "adminAlertTagSubExpiring": "subscription",
   "adminAlertTagSubExpired": "expired",
-  "adminAlertTagIdentityUnbound": "Identity unbound",
-  "adminAlertTagEmployeesUnbound": "employees unbound · {count}",
+  "adminAlertTagIdentityUnbound": "IDENTITY_UNBOUND",
+  "adminAlertTagEmployeesUnbound": "EMPLOYEES_UNBOUND · {count}",
   "@adminAlertTagEmployeesUnbound": {
     "placeholders": {
       "count": {
@@ -272,7 +272,7 @@
       }
     }
   },
-  "adminAlertTagCascadeIncomplete": "delete cascade pending",
+  "adminAlertTagCascadeIncomplete": "CASCADE_INCOMPLETE",
   "commonPhone": "Phone",
   "adminKeyMetadata": "Key metadata",
   "adminLifecycle": "Lifecycle",
@@ -323,8 +323,8 @@
       }
     }
   },
-  "adminMetricsIdentityUnbound": "Identity unbound — company Keycloak principal pending",
-  "adminMetricsEmployeesUnbound": "{count} employee(s) without Keycloak binding",
+  "adminMetricsIdentityUnbound": "Waiting for authentication service",
+  "adminMetricsEmployeesUnbound": "Waiting for authentication service · {count} employee(s)",
   "@adminMetricsEmployeesUnbound": {
     "placeholders": {
       "count": {
@@ -369,10 +369,12 @@
   "adminModuleJson": "JSON",
   "adminModuleJsonConfigured": "Configured",
   "adminModulePreview": "Preview",
+  "adminModulePreviewEmpty": "Add module JSON to preview",
   "adminModuleJsonInvalid": "Invalid JSON",
   "adminMetaInvalid": "Metadata",
   "adminModulePreviewMode": "Preview",
   "adminSelectCabinetsForModule": "Select cabinets for module",
+  "adminSelectModulesForCabinet": "Select modules for cabinet",
   "adminSelectCompaniesForModule": "Select companies for module",
   "adminDeleteCabinetConfirm": "Delete cabinet \"{name}\"? All projects and the cabinet schema will be removed.",
   "@adminDeleteCabinetConfirm": {

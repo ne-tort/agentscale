@@ -35,6 +35,9 @@ async def _public_row(
     companies = await grants.list_companies(row.id)
     company_ids = [c["company_id"] for c in companies]
     assignments_count = await grants.assignment_count(row.id)
+    from prodavan.application.modules.module_binding_service import ModuleBindingService
+
+    module_ids = await ModuleBindingService(session).list_module_ids_for_cabinet(row.id)
     out = {
         "id": row.id,
         "name": row.name,
@@ -45,6 +48,8 @@ async def _public_row(
         "owner_company_id": row.owner_company_id,
         "company_ids": company_ids,
         "companies": companies,
+        "module_ids": module_ids,
+        "module_bindings_count": len(module_ids),
         "assignments_count": assignments_count,
         "writable": is_company_registry(row.owner_scope),
         "operable": True,
@@ -80,24 +85,21 @@ class CabinetInstanceService:
         company_id: str | None = None,
         company_ids: list[str] | None = None,
     ) -> dict:
-        """Platform Admin creates a platform-owned cabinet with company grants."""
+        """Platform Admin creates a platform-owned cabinet; company grants optional."""
         if not name.strip():
             raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="name required")
         ids = list(company_ids or [])
         if company_id and company_id not in ids:
             ids.insert(0, company_id)
-        if not ids:
-            raise AppError(
-                code="VALIDATION_ERROR",
-                title="Validation Error",
-                status=422,
-                detail="company_ids required",
-            )
-        primary = ids[0]
-        company = await self._session.get(CompanyRow, primary)
-        if company is None:
-            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="company not found")
-        await CompanyQuotaService(self._session).assert_can_create_cabinet(primary)
+        primary: str | None = None
+        company_name: str | None = None
+        if ids:
+            primary = ids[0]
+            company = await self._session.get(CompanyRow, primary)
+            if company is None:
+                raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="company not found")
+            company_name = company.name
+            await CompanyQuotaService(self._session).assert_can_create_cabinet(primary)
 
         row = CabinetInstanceRow(
             name=name.strip(),
@@ -118,7 +120,7 @@ class CabinetInstanceService:
         await RelationsCommand(self._session).replace_cabinet_company_grants(row.id, ids)
         await self._session.commit()
         await self._session.refresh(row)
-        return await _public_row(self._session, row, grants=self._grants, company_name=company.name)
+        return await _public_row(self._session, row, grants=self._grants, company_name=company_name)
 
     async def create_from_base(
         self,
@@ -222,6 +224,7 @@ class CabinetInstanceService:
         name: str | None = None,
         company_id: str | None = None,
         company_ids: list[str] | None = None,
+        module_ids: list[str] | None = None,
     ) -> dict:
         inst = await self._access.get_instance(cabinet_id)
         if name is not None:
@@ -239,6 +242,12 @@ class CabinetInstanceService:
 
             await RelationsCommand(self._session).replace_cabinet_company_grants(
                 cabinet_id, [company_id]
+            )
+        if module_ids is not None:
+            from prodavan.application.modules.module_binding_service import ModuleBindingService
+
+            await ModuleBindingService(self._session).replace_module_bindings_for_cabinet(
+                cabinet_id, module_ids
             )
         await self._session.commit()
         await self._session.refresh(inst)

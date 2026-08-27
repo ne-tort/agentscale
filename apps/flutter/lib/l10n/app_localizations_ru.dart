@@ -356,15 +356,15 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminAlertTagSubExpired => 'истекла';
 
   @override
-  String get adminAlertTagIdentityUnbound => 'Identity unbound';
+  String get adminAlertTagIdentityUnbound => 'IDENTITY_UNBOUND';
 
   @override
   String adminAlertTagEmployeesUnbound(int count) {
-    return 'сотрудники без KC · $count';
+    return 'EMPLOYEES_UNBOUND · $count';
   }
 
   @override
-  String get adminAlertTagCascadeIncomplete => 'каскад удаления незавершён';
+  String get adminAlertTagCascadeIncomplete => 'CASCADE_INCOMPLETE';
 
   @override
   String get commonPhone => 'Телефон';
@@ -433,12 +433,11 @@ class AppLocalizationsRu extends AppLocalizations {
   }
 
   @override
-  String get adminMetricsIdentityUnbound =>
-      'Identity unbound — ожидание Keycloak principal компании';
+  String get adminMetricsIdentityUnbound => 'Ожидание сервиса аутентификации';
 
   @override
   String adminMetricsEmployeesUnbound(String count) {
-    return 'Сотрудников без Keycloak: $count';
+    return 'Ожидание сервиса аутентификации · сотрудников: $count';
   }
 
   @override
@@ -496,6 +495,10 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminModulePreview => 'Предпросмотр';
 
   @override
+  String get adminModulePreviewEmpty =>
+      'Добавьте JSON модуля для предпросмотра';
+
+  @override
   String get adminModuleJsonInvalid => 'Неверный JSON';
 
   @override
@@ -506,6 +509,9 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get adminSelectCabinetsForModule => 'Выберите кабинеты для модуля';
+
+  @override
+  String get adminSelectModulesForCabinet => 'Выберите модули для кабинета';
 
   @override
   String get adminSelectCompaniesForModule => 'Выберите компании для модуля';

@@ -356,15 +356,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminAlertTagSubExpired => 'expired';
 
   @override
-  String get adminAlertTagIdentityUnbound => 'Identity unbound';
+  String get adminAlertTagIdentityUnbound => 'IDENTITY_UNBOUND';
 
   @override
   String adminAlertTagEmployeesUnbound(int count) {
-    return 'employees unbound · $count';
+    return 'EMPLOYEES_UNBOUND · $count';
   }
 
   @override
-  String get adminAlertTagCascadeIncomplete => 'delete cascade pending';
+  String get adminAlertTagCascadeIncomplete => 'CASCADE_INCOMPLETE';
 
   @override
   String get commonPhone => 'Phone';
@@ -434,11 +434,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get adminMetricsIdentityUnbound =>
-      'Identity unbound — company Keycloak principal pending';
+      'Waiting for authentication service';
 
   @override
   String adminMetricsEmployeesUnbound(String count) {
-    return '$count employee(s) without Keycloak binding';
+    return 'Waiting for authentication service · $count employee(s)';
   }
 
   @override
@@ -496,6 +496,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminModulePreview => 'Preview';
 
   @override
+  String get adminModulePreviewEmpty => 'Add module JSON to preview';
+
+  @override
   String get adminModuleJsonInvalid => 'Invalid JSON';
 
   @override
@@ -506,6 +509,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get adminSelectCabinetsForModule => 'Select cabinets for module';
+
+  @override
+  String get adminSelectModulesForCabinet => 'Select modules for cabinet';
 
   @override
   String get adminSelectCompaniesForModule => 'Select companies for module';

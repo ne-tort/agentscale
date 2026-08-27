@@ -695,19 +695,19 @@ abstract class AppLocalizations {
   /// No description provided for @adminAlertTagIdentityUnbound.
   ///
   /// In en, this message translates to:
-  /// **'Identity unbound'**
+  /// **'IDENTITY_UNBOUND'**
   String get adminAlertTagIdentityUnbound;
 
   /// No description provided for @adminAlertTagEmployeesUnbound.
   ///
   /// In en, this message translates to:
-  /// **'employees unbound · {count}'**
+  /// **'EMPLOYEES_UNBOUND · {count}'**
   String adminAlertTagEmployeesUnbound(int count);
 
   /// No description provided for @adminAlertTagCascadeIncomplete.
   ///
   /// In en, this message translates to:
-  /// **'delete cascade pending'**
+  /// **'CASCADE_INCOMPLETE'**
   String get adminAlertTagCascadeIncomplete;
 
   /// No description provided for @commonPhone.
@@ -827,13 +827,13 @@ abstract class AppLocalizations {
   /// No description provided for @adminMetricsIdentityUnbound.
   ///
   /// In en, this message translates to:
-  /// **'Identity unbound — company Keycloak principal pending'**
+  /// **'Waiting for authentication service'**
   String get adminMetricsIdentityUnbound;
 
   /// No description provided for @adminMetricsEmployeesUnbound.
   ///
   /// In en, this message translates to:
-  /// **'{count} employee(s) without Keycloak binding'**
+  /// **'Waiting for authentication service · {count} employee(s)'**
   String adminMetricsEmployeesUnbound(String count);
 
   /// No description provided for @adminModelAllowlist.
@@ -932,6 +932,12 @@ abstract class AppLocalizations {
   /// **'Preview'**
   String get adminModulePreview;
 
+  /// No description provided for @adminModulePreviewEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'Add module JSON to preview'**
+  String get adminModulePreviewEmpty;
+
   /// No description provided for @adminModuleJsonInvalid.
   ///
   /// In en, this message translates to:
@@ -955,6 +961,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Select cabinets for module'**
   String get adminSelectCabinetsForModule;
+
+  /// No description provided for @adminSelectModulesForCabinet.
+  ///
+  /// In en, this message translates to:
+  /// **'Select modules for cabinet'**
+  String get adminSelectModulesForCabinet;
 
   /// No description provided for @adminSelectCompaniesForModule.
   ///

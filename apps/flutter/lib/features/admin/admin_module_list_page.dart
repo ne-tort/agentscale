@@ -126,20 +126,31 @@ class _AdminModuleListPageState extends State<AdminModuleListPage> {
     }
   }
 
+  int _countIds(dynamic value) {
+    if (value is List) return value.length;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse('$value') ?? 0;
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final rows = _modules
         .map(
           (m) {
-            final companyIds = m['company_ids'];
-            final count = companyIds is List ? companyIds.length : 0;
+            final cabinets = _countIds(
+              m['cabinet_bindings_count'] ?? m['cabinet_ids'],
+            );
+            final companies = _countIds(
+              m['company_grants_count'] ?? m['company_ids'],
+            );
             return AppEntityRow(
               id: m['id'] as String,
               title: m['name'] as String? ?? m['id'] as String,
               cells: {
-                'companies': count > 0 ? '$count' : l10n.commonNotSet,
-                'status': m['status'] as String? ?? '',
+                'cabinets': '$cabinets',
+                'companies': '$companies',
               },
             );
           },
@@ -161,14 +172,11 @@ class _AdminModuleListPageState extends State<AdminModuleListPage> {
             child: AppEntityCollection(
               loading: _loading,
               rows: rows,
+              mode: AppEntityCollectionMode.table,
               primaryColumnLabel: l10n.navModules,
               columns: [
+                AppEntityColumn(id: 'cabinets', label: l10n.commonCabinets),
                 AppEntityColumn(id: 'companies', label: l10n.navCompanies),
-                AppEntityColumn(
-                  id: 'status',
-                  label: l10n.commonStatus,
-                  width: 100,
-                ),
               ],
               onOpen: _openModule,
               onCopy: _copyModule,

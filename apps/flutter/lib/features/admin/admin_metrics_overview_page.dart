@@ -29,12 +29,14 @@ class _OverviewAlert {
     required this.companyId,
     required this.companyName,
     required this.tag,
+    this.detail,
   });
 
   final _AlertKind kind;
   final String companyId;
   final String companyName;
   final String tag;
+  final String? detail;
 }
 
 /// Platform-wide metrics overview — «Сводка» tab (L04 / metrics.md).
@@ -158,6 +160,7 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
             companyId: id,
             companyName: name,
             tag: l10n.adminAlertTagIdentityUnbound,
+            detail: l10n.adminMetricsIdentityUnbound,
           ),
         );
       }
@@ -169,6 +172,7 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
             companyId: id,
             companyName: name,
             tag: l10n.adminAlertTagEmployeesUnbound(unboundEmployees),
+            detail: l10n.adminMetricsEmployeesUnbound('$unboundEmployees'),
           ),
         );
       }
@@ -182,6 +186,7 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
           companyId: id,
           companyName: name,
           tag: l10n.adminAlertTagCascadeIncomplete,
+          detail: l10n.adminAlertTagCascadeIncomplete,
         ),
       );
     }
@@ -279,6 +284,7 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
                           AppEntityRow(
                             id: '${a.companyId}:${a.kind.name}',
                             title: a.companyName,
+                            subtitle: a.detail,
                             cells: {'tag': a.tag},
                           ),
                       ],

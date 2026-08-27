@@ -8,6 +8,7 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_json_editor_field.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/meta/company_module_meta_repository.dart';
 import 'package:prodavan/features/meta/module_meta_autosave.dart';
@@ -104,15 +105,21 @@ class _CompanyModuleJsonPageState extends State<CompanyModuleJsonPage> {
 
   String? _validateManifest(Object? parsed) => ModuleMetaValidator.validate(parsed);
 
-  bool get _showPreview {
-    final field = _jsonFieldKey.currentState;
-    if (field == null || !field.isValidJson) return false;
-    return ModuleMetaManifest.isNonEmptyStubText(_jsonController.text);
-  }
-
   void _openPreview() {
+    final l10n = AppLocalizations.of(context);
+    final text = _jsonController.text.trim();
+    if (text.isEmpty) {
+      AppSnackBar.warning(context, l10n.adminModulePreviewEmpty);
+      return;
+    }
     try {
-      final manifest = ModuleMetaManifest.fromJson(jsonDecode(_jsonController.text));
+      final decoded = jsonDecode(text);
+      final domainError = _validateManifest(decoded);
+      if (domainError != null) {
+        AppSnackBar.warning(context, domainError);
+        return;
+      }
+      final manifest = ModuleMetaManifest.fromJson(decoded);
       Navigator.of(context).push(
         MaterialPageRoute<void>(
           builder: (_) => ModuleMetaPreviewPage(
@@ -174,12 +181,11 @@ class _CompanyModuleJsonPageState extends State<CompanyModuleJsonPage> {
                       message: domainError,
                     ),
                   ),
-                if (_showPreview)
-                  AppNavPreference(
-                    title: l10n.adminModulePreview,
-                    icon: Icons.visibility_outlined,
-                    onTap: _openPreview,
-                  ),
+                AppNavPreference(
+                  title: l10n.adminModulePreview,
+                  icon: Icons.visibility_outlined,
+                  onTap: _openPreview,
+                ),
               ],
             ),
     );

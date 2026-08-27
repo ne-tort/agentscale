@@ -29,6 +29,14 @@ class ModuleBindingService:
         )
         return list(q.scalars().all())
 
+    async def list_module_ids_for_cabinet(self, cabinet_id: str) -> list[str]:
+        q = await self._session.execute(
+            select(ModuleCabinetBindingRow.module_id)
+            .where(ModuleCabinetBindingRow.cabinet_id == cabinet_id)
+            .order_by(ModuleCabinetBindingRow.module_id)
+        )
+        return list(q.scalars().all())
+
     async def list_cabinets(self, module_id: str) -> list[dict]:
         q = await self._session.execute(
             select(ModuleCabinetBindingRow, CabinetInstanceRow.name)
@@ -94,6 +102,54 @@ class ModuleBindingService:
             await materialize.install(cabinet_id=cid, module_id=module_id)
         for cid in removed:
             await materialize.uninstall(cabinet_id=cid, module_id=module_id)
+
+        return unique
+
+    async def replace_module_bindings_for_cabinet(
+        self, cabinet_id: str, module_ids: list[str]
+    ) -> list[str]:
+        """Replace all module bindings on a cabinet (admin bidirectional UI)."""
+        from prodavan.infrastructure.persistence.models.modules import ModuleRow
+
+        unique = list(dict.fromkeys(module_ids))
+        cab = await self._session.get(CabinetInstanceRow, cabinet_id)
+        if cab is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="cabinet not found")
+        for mid in unique:
+            mod = await self._session.get(ModuleRow, mid)
+            if mod is None:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail=f"unknown module_id: {mid}",
+                )
+
+        existing = await self._session.execute(
+            select(ModuleCabinetBindingRow).where(ModuleCabinetBindingRow.cabinet_id == cabinet_id)
+        )
+        existing_rows = list(existing.scalars().all())
+        old_ids = {row.module_id for row in existing_rows}
+        new_set = set(unique)
+        removed = old_ids - new_set
+        added = new_set - old_ids
+
+        for row in existing_rows:
+            if row.module_id in removed:
+                await self._session.delete(row)
+        await self._session.flush()
+
+        for mid in unique:
+            if mid in added:
+                self._session.add(ModuleCabinetBindingRow(module_id=mid, cabinet_id=cabinet_id))
+        await self._session.flush()
+
+        materialize = ModuleMaterializeService(self._session)
+        for mid in added:
+            await materialize.install(cabinet_id=cabinet_id, module_id=mid)
+        for mid in removed:
+            await self._revoke_projects_for_cabinets(mid, {cabinet_id})
+            await materialize.uninstall(cabinet_id=cabinet_id, module_id=mid)
 
         return unique
 
