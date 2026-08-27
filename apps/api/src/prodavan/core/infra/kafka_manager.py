@@ -106,7 +106,11 @@ class KafkaManager(LifespanResource):
 
     @property
     def consumer_running(self) -> bool:
-        return self._consume_task is not None and not self._consume_task.done()
+        """True when all enabled consumer loops are alive (triggers + auth)."""
+        if not self._consumer_enabled:
+            return False
+        tasks = (self._consume_task, self._auth_commands_task, self._auth_events_task)
+        return all(t is not None and not t.done() for t in tasks)
 
     @property
     def consumer_mode(self) -> ConsumerMode:

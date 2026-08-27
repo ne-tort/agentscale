@@ -43,7 +43,7 @@ async def test_register_user_company_emits_registered(_reset_admin: FakeUserAdmi
     )
     assert event.event_type == AUTH_USER_REGISTERED
     assert event.payload["client_ref"] == "company:co_1"
-    assert event.payload["sub"].startswith("kc_co_fake_")
+    assert event.payload["sub"].startswith("kc_fake_")
     assert event.payload["username"] == "co_1"
     assert len(_reset_admin.registrations) == 1
 

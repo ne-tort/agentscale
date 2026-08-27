@@ -30,10 +30,36 @@
 
 - Все фоновые / отложенные / периодические jobs платформы — через **Celery** (единый паттерн), не через ad-hoc asyncio loops в процессе API.
 - Broker/result backend: **Redis** (см. §4).
-- Примеры миграции: trigger drain, idle-pause sweep, rematerialize batches, длинные package handlers.
+- Примеры миграции: trigger drain, idle-pause sweep, rematerialize batches, длинные package handlers, Identity bind после `auth.user.registered`.
 - In-process worker в API lifespan — **переходный костыль**, не канон.
+- **Deploy:** отдельные Deployments `prodavan-celery-worker` + `prodavan-celery-beat` (тот же API image, другой entrypoint). API процесс только **enqueue**, не исполняет jobs.
 
 Детали: [stack.md](stack.md), [migration-from-current.md](migration-from-current.md).
+
+---
+
+## 3a. Async topology — один bus, один job-runner (не десятки listeners)
+
+Канон runtime (пока монолит API + Celery):
+
+```text
+1× API Deployment
+  = HTTP (Auth BFF, Identity, …)
+  + Kafka producer
+  + N in-process consumer loops (KafkaManager lifespan)  ← маршрутизация команд/событий
+1× Celery worker + 1× beat
+  = исполнение jobs (drain, bind, rematerialize, …)
+```
+
+| Делать | Не делать |
+|--------|-----------|
+| Новый межмодульный async контракт → **новый event_type / topic** + handler в существующем KafkaManager / Celery task | Новый Deployment «listener-X» на каждый use-case |
+| Тяжёлая/долгоживущая работа → **Celery task** | Дублировать consumer groups без плана cutover |
+| Логическая изоляция BC в пакетах (`application/auth`, `application/identity`) | Auth импортирует Identity models / парсит `client_ref` |
+
+Вынос BC в отдельный сервис — **осознанный cutover** (свой образ, свои consumer groups, health, outbox/retry), не «ещё один маленький listener». Топики/схемы при этом **не меняются**.
+
+Buffer-only (`KAFKA_ENABLED=false`) — только CI/dev Fake path; не prod-канон.
 
 ---
 

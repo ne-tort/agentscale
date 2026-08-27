@@ -199,6 +199,9 @@ spec:
               rpk topic create prodavan.platform.events -p 1 -r 1 -X brokers=$BROKERS || true
               rpk topic create prodavan.project.triggers -p 1 -r 1 -X brokers=$BROKERS || true
               rpk topic create prodavan.ops.health -p 1 -r 1 -X brokers=$BROKERS || true
+              # Auth Service registration bus (auto_create disabled below — must exist before API publish).
+              rpk topic create prodavan.auth.commands -p 1 -r 1 -X brokers=$BROKERS || true
+              rpk topic create prodavan.auth.events -p 1 -r 1 -X brokers=$BROKERS || true
               rpk cluster config set write_caching_default false -X brokers=$BROKERS -X admin.hosts=$ADMIN
               rpk cluster config set auto_create_topics_enabled false -X brokers=$BROKERS -X admin.hosts=$ADMIN
               rpk cluster config set default_topic_replications 1 -X brokers=$BROKERS -X admin.hosts=$ADMIN
@@ -208,7 +211,8 @@ spec:
               rpk cluster config set log_retention_ms 604800000 -X brokers=$BROKERS -X admin.hosts=$ADMIN
               rpk cluster config set log_segment_ms 86400000 -X brokers=$BROKERS -X admin.hosts=$ADMIN
               # RF=1 → min.isr must be 1 or acks=all producers stall (API enable_idempotence).
-              for t in prodavan.platform.events prodavan.project.triggers prodavan.ops.health; do
+              for t in prodavan.platform.events prodavan.project.triggers prodavan.ops.health \
+                       prodavan.auth.commands prodavan.auth.events; do
                 rpk topic alter-config "$t" \
                   --set cleanup.policy=delete \
                   --set min.insync.replicas=1 \

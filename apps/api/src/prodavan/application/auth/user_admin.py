@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from prodavan.domain.identity import ROLE_COMPANY, ROLE_EMPLOYEE
+from prodavan.domain.identity import ROLE_EMPLOYEE
 
 
 @dataclass(slots=True)
@@ -67,10 +67,8 @@ class FakeUserAdmin:
                 realm_roles=roles,
             )
         self._n += 1
-        if ROLE_COMPANY in roles:
-            user_id = f"kc_co_fake_{self._n}"
-        else:
-            user_id = f"kc_fake_{self._n}"
+        # Opaque fake sub — no domain semantics (company vs employee) in Auth.
+        user_id = f"kc_fake_{self._n}"
         self._by_username[uname] = user_id
         self._by_email[email_l] = user_id
         return RegisterResult(

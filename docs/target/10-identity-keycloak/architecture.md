@@ -52,6 +52,8 @@ Identity Celery apply_auth_user_registered
 
 CI / `KAFKA_ENABLED=false`: buffer-only in-process Fake path (publish → handler → event → bind) без live KC.
 
+**Runtime isolation (сейчас):** Auth Service = **логический слой** в процессе API (`application/auth`), не отдельный Deployment. Kafka consumers Auth — asyncio loops в `KafkaManager` (тот же API pod). Bind `keycloak_sub` — Celery task на `prodavan-celery-worker`. Политика не плодить listener-сервисы: [13-platform-infra/principles.md](../13-platform-infra/principles.md) §3a.
+
 Provisioning (disable / set company password): `IdentityProvisioningPort` →
 `HttpKeycloakAdminClient` или Fake — **не** registration. Create/invite sync paths **удалены**.
 

@@ -197,4 +197,4 @@ async def test_fake_user_admin_idempotent() -> None:
         realm_roles=[ROLE_COMPANY],
         display_name="Co",
     )
-    assert c.keycloak_user_id.startswith("kc_co_fake_")
+    assert c.keycloak_user_id.startswith("kc_fake_")

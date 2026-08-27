@@ -27,9 +27,11 @@ flowchart LR
   API --> MinIO
   Celery --> Redis
   Celery --> PG
-  Celery --> Kafka
   Celery --> MinIO
+  API -.->|enqueue jobs| Celery
 ```
+
+Kafka consumers живут в **API lifespan** (маршрутизация команд/событий → enqueue Celery или Auth handler). Celery **не** поднимает свой Kafka consumer — только исполняет tasks. Политика «не плодить listener Deployments»: [principles.md](principles.md) §3a.
 
 ## Почему MinIO (не «просто диск» / не lock-in S3 vendor)
 

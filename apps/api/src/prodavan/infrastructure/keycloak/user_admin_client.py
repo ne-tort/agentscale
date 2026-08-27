@@ -103,10 +103,11 @@ class HttpUserAdminClient:
                 client, headers=headers, role_names=roles, fail_fast=True
             )
             users_url = self._users_url()
+            first_name, last_name = self._profile_names(
+                username=uname, email=email_l, display_name=display_name
+            )
 
             if password:
-                first_name = (display_name or "Company").strip()[:100] or "Company"
-                last_name = "Org"
                 payload: dict[str, object] = {
                     "username": uname,
                     "email": email_l,
@@ -156,17 +157,6 @@ class HttpUserAdminClient:
                             detail=f"reset-password returned {reset.status_code}",
                         )
             else:
-                first_name = "Employee"
-                last_name = "User"
-                if display_name:
-                    parts = display_name.strip().split(None, 1)
-                    first_name = parts[0][:100] or first_name
-                    if len(parts) > 1:
-                        last_name = parts[1][:100] or last_name
-                else:
-                    local = email_l.split("@", 1)[0].strip()
-                    if local:
-                        first_name = local[:100]
                 payload = {
                     "username": uname,
                     "email": email_l,
@@ -206,6 +196,23 @@ class HttpUserAdminClient:
                 email=email_l,
                 realm_roles=roles,
             )
+
+    @staticmethod
+    def _profile_names(
+        *,
+        username: str,
+        email: str,
+        display_name: str | None,
+    ) -> tuple[str, str]:
+        """ROPC-ready first/last — domain-agnostic (no company/employee labels)."""
+        if display_name and display_name.strip():
+            parts = display_name.strip().split(None, 1)
+            first = parts[0][:100]
+            last = parts[1][:100] if len(parts) > 1 else "User"
+            return first or "User", last or "User"
+        local = (email.split("@", 1)[0] if "@" in email else username).strip()
+        first = (local or username or "User")[:100]
+        return first or "User", "User"
 
     async def _create_or_reuse_user(
         self,
