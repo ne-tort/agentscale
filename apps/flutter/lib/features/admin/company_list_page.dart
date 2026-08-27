@@ -1,6 +1,7 @@
+import 'package:flutter/material.dart';
 import 'dart:math';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/admin_context.dart';
@@ -8,6 +9,7 @@ import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_inline_add_field.dart';
+import 'package:prodavan/core/widgets/app_online_indicator.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
@@ -76,12 +78,13 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
     final companyId = company['id'] as String?;
     final companyName = company['name'] as String? ?? name;
     if (companyId == null) return;
+    final login = company['username'] as String? ?? companyId;
+    await Clipboard.setData(ClipboardData(text: '$login\t$password'));
+    if (!mounted) return;
     final l10n = AppLocalizations.of(context);
     AppSnackBar.info(
       context,
-      l10n.companyCredentialsCreated(companyId, password),
-      copyOnTap: true,
-      duration: const Duration(seconds: 12),
+      l10n.credentialsInClipboard,
     );
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -151,6 +154,9 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
           'employees': _cell(c['employees_total'], l10n),
           'cabinets': cabinetsCell,
         },
+        cellWidgets: {
+          'online': AppOnlineIndicator(online: c['online'] == true),
+        },
       );
     }).toList();
 
@@ -172,6 +178,12 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
               primaryColumnLabel: l10n.commonCompany,
               columns: [
                 AppEntityColumn(id: 'description', label: l10n.commonDescription),
+                AppEntityColumn(
+                  id: 'online',
+                  label: l10n.commonOnline,
+                  width: 72,
+                  align: AppEntityColumnAlign.end,
+                ),
                 AppEntityColumn(
                   id: 'employees',
                   label: l10n.commonEmployees,

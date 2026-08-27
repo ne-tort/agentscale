@@ -127,7 +127,6 @@ class _CompanyEmployeeCabinetsPageState extends State<CompanyEmployeeCabinetsPag
                   for (final cab in _cabinets)
                     SwitchListTile(
                       title: Text(cab['name'] as String? ?? cab['id'] as String),
-                      subtitle: Text(cab['owner_scope'] as String? ?? '—'),
                       value: _assigned.contains(cab['id'] as String),
                       onChanged: (v) => _toggle(cab['id'] as String, v),
                     ),

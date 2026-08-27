@@ -13,10 +13,17 @@ import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Language + appearance + auto-refresh.
 class SettingsPage extends StatelessWidget {
-  const SettingsPage({super.key, this.embedded = false});
+  const SettingsPage({
+    super.key,
+    this.embedded = false,
+    this.leadingChildren = const [],
+  });
 
   /// When true, render inside shell [IndexedStack] without app bar chrome.
   final bool embedded;
+
+  /// Widgets inserted before language/theme (e.g. company credentials).
+  final List<Widget> leadingChildren;
 
   static const _locales = ['ru', 'en'];
   static const _themes = ['light', 'dark', 'ultraDark'];
@@ -42,6 +49,7 @@ class SettingsPage extends StatelessWidget {
         final body = ListView(
           padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
           children: [
+            ...leadingChildren,
             AppChoicePreference<String>(
               title: l10n.settingsLanguage,
               icon: Icons.translate,

@@ -1,5 +1,5 @@
 """Module domain."""
 
-from prodavan.domain.modules.types import ModuleStatus
+from prodavan.domain.modules.types import ModuleCompanyGrantScope, ModuleStatus
 
-__all__ = ["ModuleStatus"]
+__all__ = ["ModuleCompanyGrantScope", "ModuleStatus"]

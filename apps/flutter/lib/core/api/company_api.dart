@@ -103,17 +103,50 @@ class CompanyApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
-  Future<Map<String, dynamic>> inviteEmployee({
+  Future<Map<String, dynamic>> createEmployee({
     required String companyId,
-    required String email,
+    required String login,
+    required String password,
+    String? contactEmail,
     String? displayName,
     String role = 'member',
   }) async {
-    final res = await AuthHttp.post(_uri('/companies/$companyId/employees'), body: jsonEncode({
-        'email': email,
+    final res = await AuthHttp.post(
+      _uri('/companies/$companyId/employees'),
+      body: jsonEncode({
+        'login': login,
+        'password': password,
+        if (contactEmail != null && contactEmail.isNotEmpty)
+          'contact_email': contactEmail,
         if (displayName != null && displayName.isNotEmpty) 'display_name': displayName,
         'role': role,
       }),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> setEmployeePassword({
+    required String companyId,
+    required String employeeId,
+    required String password,
+  }) async {
+    final res = await AuthHttp.put(
+      _uri('/companies/$companyId/employees/$employeeId/password'),
+      body: jsonEncode({'password': password}),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> updateEmployeeContactEmail({
+    required String companyId,
+    required String employeeId,
+    String? contactEmail,
+  }) async {
+    final res = await AuthHttp.patch(
+      _uri('/companies/$companyId/employees/$employeeId/contact-email'),
+      body: jsonEncode({'contact_email': contactEmail}),
     );
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;

@@ -284,6 +284,52 @@ class HttpUserAdminClient:
                     detail=f"delete user returned {resp.status_code}",
                 )
 
+    async def rename_user(
+        self,
+        *,
+        keycloak_user_id: str | None,
+        old_username: str | None,
+        new_username: str,
+        email: str | None,
+    ) -> None:
+        uname = new_username.strip()
+        if not uname:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="new username required",
+            )
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            token = await self._admin_token(client)
+            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+            user_id = await self._resolve_user_id(
+                client,
+                headers=headers,
+                keycloak_user_id=keycloak_user_id,
+                username=old_username,
+                email=email,
+            )
+            if not user_id:
+                raise AppError(
+                    code="NOT_FOUND",
+                    title="Not Found",
+                    status=404,
+                    detail="Keycloak user not found for rename",
+                )
+            resp = await client.put(
+                f"{self._users_url()}/{user_id}",
+                json={"username": uname},
+                headers=headers,
+            )
+            if resp.status_code >= 400:
+                raise AppError(
+                    code="KEYCLOAK_ADMIN",
+                    title="Keycloak rename failed",
+                    status=502,
+                    detail=f"rename user returned {resp.status_code}",
+                )
+
     @staticmethod
     def _profile_names(
         *,

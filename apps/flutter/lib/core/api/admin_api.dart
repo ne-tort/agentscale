@@ -95,20 +95,56 @@ class AdminApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
-  Future<Map<String, dynamic>> inviteEmployee({
+  Future<Map<String, dynamic>> setCompanyLogin({
     required String companyId,
-    required String email,
+    required String login,
+  }) async {
+    final res = await AuthHttp.put(
+      _uri('/admin/companies/$companyId/login'),
+      body: jsonEncode({'login': login}),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> createEmployee({
+    required String companyId,
+    required String login,
+    required String password,
+    String? contactEmail,
     String? displayName,
     String role = 'member',
   }) async {
-    final res = await AuthHttp.post(_uri('/companies/$companyId/employees'), body: jsonEncode({
-        'email': email,
+    final res = await AuthHttp.post(
+      _uri('/companies/$companyId/employees'),
+      body: jsonEncode({
+        'login': login,
+        'password': password,
+        if (contactEmail != null && contactEmail.isNotEmpty)
+          'contact_email': contactEmail,
         if (displayName != null && displayName.isNotEmpty) 'display_name': displayName,
         'role': role,
       }),
     );
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  @Deprecated('Use createEmployee')
+  Future<Map<String, dynamic>> inviteEmployee({
+    required String companyId,
+    required String email,
+    String? displayName,
+    String role = 'member',
+  }) async {
+    final login = email.contains('@') ? email.split('@').first : email;
+    return createEmployee(
+      companyId: companyId,
+      login: login,
+      password: 'TempPass99!',
+      displayName: displayName,
+      role: role,
+    );
   }
 
   Future<Map<String, dynamic>> setCompanySubscription({

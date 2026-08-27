@@ -80,6 +80,8 @@ class Settings(BaseSettings):
     # L04 admin metrics alerts (0 = disabled)
     admin_metrics_token_alert_threshold: int = 50_000
     admin_metrics_subscription_expiring_days: int = 30
+    # Redis presence TTL for auth.login / token_refreshed (seconds).
+    metrics_presence_ttl_sec: int = 900
 
     # L07 local-ws MCP package processes (opt-in; no bubblewrap/k8s yet)
     mcp_sandbox_spawn: bool = False
@@ -128,6 +130,7 @@ class Settings(BaseSettings):
     kafka_auth_commands_group: str = "prodavan-auth-commands"
     kafka_auth_events_group: str = "prodavan-auth-events"
     kafka_relation_events_group: str = "prodavan-relation-events"
+    kafka_metrics_presence_group: str = "prodavan-metrics-presence"
     kafka_drain_debounce_sec: float = 1.0
     # kick = debounce → trigger_drain; dispatch = enqueue dispatch_trigger(event_id).
     kafka_consumer_mode: str = "kick"

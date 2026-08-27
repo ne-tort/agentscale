@@ -8,7 +8,8 @@ EntityCollection + laconic UI. Не Notion-only metrics page.
 | Tab | Экран | Как у Admin |
 |-----|-------|-------------|
 | Сводка | `CompanyOverviewPage` | Alerts + usage (сотрудники, ключи, контейнеры, подписка) |
-| Сотрудники | `CompanyEmployeesPage` → detail | Как Admin→Companies: invite, enable/disable, assign cabinets |
+| Сотрудники | `CompanyEmployeesPage` → `CompanyEmployeeDetailPage` | Inline login + password create; таблица: login, email, проекты, кабинеты, онлайн |
+| Настройки | `CompanySettingsBody` | ID (copy) + пароль первыми; затем language/theme |
 | Контейнеры | `CompanyContainersPage` → detail | Как Admin→Containers: list/pause/resume/delete **своих** сотрудников |
 | Ключи ИИ | `CompanyAiKeyListPage` → detail | Как Admin→Keys: CRUD **local**; Admin-bound — badge RO, без edit |
 | Кабинеты | `CompanyCabinetsPage` | Admin-assigned: list/detail **RO** (MVP). Future: local CRUD |

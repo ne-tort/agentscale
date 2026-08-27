@@ -9,7 +9,7 @@ from prodavan.application.modules.module_binding_service import ModuleBindingSer
 from prodavan.application.modules.module_materialize_service import ModuleMaterializeService
 from prodavan.application.modules.module_meta_service import ModuleMetaDocumentService
 from prodavan.domain.errors import AppError
-from prodavan.domain.modules import ModuleStatus
+from prodavan.domain.modules import ModuleCompanyGrantScope, ModuleStatus
 from prodavan.domain.ownership import OwnerScope, company_view_flags
 from prodavan.infrastructure.persistence.models.modules import ModuleCompanyGrantRow, ModuleRow
 
@@ -57,6 +57,7 @@ class CompanyModuleService:
             .where(
                 or_(
                     ModuleCompanyGrantRow.id.isnot(None),
+                    ModuleRow.company_grant_scope == ModuleCompanyGrantScope.ALL,
                     (ModuleRow.owner_scope == OwnerScope.COMPANY) & (ModuleRow.owner_company_id == company_id),
                 )
             )
@@ -149,6 +150,8 @@ class CompanyModuleService:
         if row is None:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="module not found")
         if row.owner_scope == OwnerScope.COMPANY and row.owner_company_id == company_id:
+            return row
+        if row.company_grant_scope == ModuleCompanyGrantScope.ALL:
             return row
         if await self._bindings.has_company_grant(module_id, company_id):
             return row

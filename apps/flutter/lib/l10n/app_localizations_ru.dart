@@ -10,7 +10,10 @@ class AppLocalizationsRu extends AppLocalizations {
   AppLocalizationsRu([String locale = 'ru']) : super(locale);
 
   @override
-  String get adminActiveEmployees => 'Сотрудники онлайн';
+  String get adminActiveEmployees => 'Активные сотрудники';
+
+  @override
+  String get adminEmployeesOnline => 'Сотрудники онлайн';
 
   @override
   String get adminAdminEmail => 'Email администратора';
@@ -1225,6 +1228,12 @@ class AppLocalizationsRu extends AppLocalizations {
   String get commonOff => 'Выкл.';
 
   @override
+  String get commonOnline => 'Онлайн';
+
+  @override
+  String get commonOffline => 'Оффлайн';
+
+  @override
   String get commonUnlimited => 'Бессрочно';
 
   @override
@@ -1386,6 +1395,12 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get companyLoginId => 'ID компании';
+
+  @override
+  String get companyLogin => 'Логин';
+
+  @override
+  String get credentialsInClipboard => 'Логин и пароль в буфере обмена';
 
   @override
   String get companyIdCopied => 'ID компании скопирован';

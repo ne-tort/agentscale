@@ -8,12 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.modules.module_materialize_service import ModuleMaterializeService
 from prodavan.domain.cabinets.types import CabinetCompanyGrantScope
 from prodavan.domain.errors import AppError
+from prodavan.domain.modules import ModuleCompanyGrantScope
 from prodavan.infrastructure.persistence.models.cabinets import CabinetCompanyGrantRow, CabinetInstanceRow
 from prodavan.infrastructure.persistence.models.identity import CompanyRow
 from prodavan.infrastructure.persistence.models.modules import (
     ModuleCabinetBindingRow,
     ModuleCompanyGrantRow,
     ModuleProjectBindingRow,
+    ModuleRow,
 )
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
 
@@ -357,6 +359,9 @@ class ModuleBindingService:
         return unique
 
     async def has_company_grant(self, module_id: str, company_id: str) -> bool:
+        row = await self._session.get(ModuleRow, module_id)
+        if row is not None and row.company_grant_scope == ModuleCompanyGrantScope.ALL:
+            return True
         q = await self._session.execute(
             select(ModuleCompanyGrantRow.id).where(
                 ModuleCompanyGrantRow.module_id == module_id,

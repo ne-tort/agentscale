@@ -14,8 +14,10 @@ from prodavan.application.platform.bootstrap_config import (
 )
 from prodavan.domain.cabinets import CabinetOwnerScope, CabinetStatus, schema_name_for_instance
 from prodavan.domain.cabinets.types import CabinetCompanyGrantScope
+from prodavan.domain.modules import ModuleCompanyGrantScope
 from prodavan.infrastructure.cabinets.schema_provisioner import SchemaProvisioner
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
+from prodavan.infrastructure.persistence.models.modules import ModuleRow
 from prodavan.infrastructure.persistence.models.platform import PlatformBootstrapRow
 
 logger = logging.getLogger(__name__)
@@ -34,6 +36,7 @@ class PlatformBootstrapService:
             return {"status": "already_bootstrapped", "cabinet_id": CAB_BASIC_ID}
 
         cab = await self._ensure_basic_cabinet()
+        await self._ensure_product_module_scopes()
         module_ids = await self._bindings.list_module_ids_for_cabinet(cab.id)
         merged = list(dict.fromkeys([*module_ids, *DEFAULT_BASIC_MODULE_IDS]))
         await self._bindings.replace_module_bindings_for_cabinet(cab.id, merged)
@@ -71,6 +74,15 @@ class PlatformBootstrapService:
         await self._provisioner.provision(self._session, instance_id=row.id)
         await self._session.flush()
         return row
+
+    async def _ensure_product_module_scopes(self) -> None:
+        for module_id in DEFAULT_BASIC_MODULE_IDS:
+            row = await self._session.get(ModuleRow, module_id)
+            if row is None:
+                continue
+            if row.company_grant_scope != ModuleCompanyGrantScope.ALL:
+                row.company_grant_scope = ModuleCompanyGrantScope.ALL
+        await self._session.flush()
 
     async def apply_default_modules_for_cabinet(self, cabinet_id: str, *, base_template: str) -> None:
         """Auto-bind product modules when cabinet uses basic/base template."""

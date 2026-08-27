@@ -8,7 +8,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.quota_service import CompanyQuotaService
-from prodavan.application.ai_keys.service import AiKeysService
+from prodavan.application.metrics.aggregator import CompanyMetricsAggregator
+from prodavan.application.metrics.read_service import MetricsReadService
 from prodavan.config.settings import settings
 from prodavan.domain.admin import (
     CompanyAgentRuntimePolicy,
@@ -17,16 +18,21 @@ from prodavan.domain.admin import (
     subscription_read_model,
 )
 from prodavan.domain.cabinets import CabinetStatus
-from prodavan.domain.cabinets.types import CabinetCompanyGrantScope
+from prodavan.domain.cabinets.types import CabinetAssignmentStatus, CabinetCompanyGrantScope, CabinetGrantStatus
+from prodavan.domain.companies.login import company_effective_login, validate_login_username
+from prodavan.domain.employees.login import employee_effective_login
 from prodavan.domain.errors import AppError
-from prodavan.domain.identity import EmployeeStatus, Principal
+from prodavan.domain.identity import Principal
 from prodavan.domain.projects import ProjectStatus
 from prodavan.infrastructure.persistence.models.admin import (
     CompanyAgentRuntimePolicyRow,
     CompanyCabinetQuotaRow,
 )
-from prodavan.infrastructure.persistence.models.agent import AgentEventRow, AgentSessionRow, AgentUsageRow
-from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
+from prodavan.infrastructure.persistence.models.cabinets import (
+    CabinetCompanyGrantRow,
+    CabinetEmployeeAssignmentRow,
+    CabinetInstanceRow,
+)
 from prodavan.infrastructure.persistence.models.identity import CompanyRow, EmployeeRow, MembershipRow
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
 
@@ -107,12 +113,16 @@ class AdminCompanyService:
             .where(CompanyRow.deleted_at.is_(None))
             .order_by(CompanyRow.created_at.desc())
         )
+        companies = list(q.scalars().all())
+        login_keys = [company_effective_login(c) for c in companies]
+        online_map = await MetricsReadService().batch_company_online(login_keys)
         out: list[dict] = []
-        for company in q.scalars().all():
+        for company in companies:
             quota = await self._quotas.get_quota(company.id)
             active_cabinets = await self._quotas.count_active_cabinets(company.id)
             running_cabinets = await self._count_running_cabinets(company.id)
             employees_total = await self._count_employees(company.id)
+            login_key = company_effective_login(company)
             out.append(
                 {
                     "id": company.id,
@@ -126,6 +136,7 @@ class AdminCompanyService:
                     "running_cabinets": running_cabinets,
                     "cabinets_quota": quota.max_cabinets,
                     "employees_total": employees_total,
+                    "online": online_map.get(login_key, False),
                 }
             )
         return out
@@ -208,7 +219,8 @@ class AdminCompanyService:
             "description": company.description,
             "contact_email": company.contact_email,
             "phone": company.phone,
-            "username": company.id,
+            "username": company_effective_login(company),
+            "login_username": company.login_username,
             "password_set": company.keycloak_sub is not None,
             "keycloak_sub": company.keycloak_sub,
             "created_at": company.created_at.isoformat() if company.created_at else None,
@@ -305,155 +317,12 @@ class AdminCompanyService:
         await invalidate_company_runtime_cache(company_id)
         return _policy_public(row.to_domain())
 
-    async def _last_activity_at(self, company_id: str) -> datetime | None:
-        sess_q = await self._session.execute(
-            select(func.max(AgentSessionRow.updated_at))
-            .join(ProjectRow, ProjectRow.id == AgentSessionRow.project_id)
-            .where(ProjectRow.company_id == company_id)
-        )
-        proj_q = await self._session.execute(
-            select(func.max(ProjectRow.updated_at)).where(
-                ProjectRow.company_id == company_id,
-                ProjectRow.status != ProjectStatus.DELETED,
-            )
-        )
-        evt_q = await self._session.execute(
-            select(func.max(AgentEventRow.created_at))
-            .join(AgentSessionRow, AgentSessionRow.id == AgentEventRow.session_id)
-            .join(ProjectRow, ProjectRow.id == AgentSessionRow.project_id)
-            .where(ProjectRow.company_id == company_id)
-        )
-        candidates = [sess_q.scalar_one(), proj_q.scalar_one(), evt_q.scalar_one()]
-        times = [t for t in candidates if t is not None]
-        return max(times) if times else None
-
-    async def _storage_bytes(self, company_id: str) -> int:
-        from prodavan.application.admin.storage_metrics import company_blob_storage_bytes
-
-        keys_q = await self._session.execute(
-            select(ProjectRow.workspace_key).where(
-                ProjectRow.company_id == company_id,
-                ProjectRow.status != ProjectStatus.DELETED,
-            )
-        )
-        cabinet_q = await self._session.execute(
-            select(CabinetInstanceRow.id).where(
-                CabinetInstanceRow.company_id == company_id,
-                CabinetInstanceRow.status == CabinetStatus.ACTIVE,
-            )
-        )
-        return company_blob_storage_bytes(
-            workspace_keys=list(keys_q.scalars().all()),
-            cabinet_ids=list(cabinet_q.scalars().all()),
-        )
-
     async def get_metrics(self, company_id: str) -> dict:
-        company = await self._require_company(company_id)
-        emp_q = await self._session.execute(
-            select(func.count(func.distinct(MembershipRow.employee_id))).where(
-                MembershipRow.company_id == company_id
-            )
-        )
-        emp_active_q = await self._session.execute(
-            select(func.count(func.distinct(MembershipRow.employee_id)))
-            .select_from(MembershipRow)
-            .join(EmployeeRow, EmployeeRow.id == MembershipRow.employee_id)
-            .where(
-                MembershipRow.company_id == company_id,
-                EmployeeRow.status != EmployeeStatus.DISABLED,
-            )
-        )
-        cab_q = await self._session.execute(
-            select(func.count())
-            .select_from(CabinetInstanceRow)
-            .where(
-                CabinetInstanceRow.company_id == company_id,
-                CabinetInstanceRow.status == CabinetStatus.ACTIVE,
-            )
-        )
-        proj_q = await self._session.execute(
-            select(func.count())
-            .select_from(ProjectRow)
-            .where(ProjectRow.company_id == company_id, ProjectRow.status != ProjectStatus.DELETED)
-        )
-        usage_q = await self._session.execute(
-            select(
-                func.coalesce(func.sum(AgentUsageRow.input_tokens), 0),
-                func.coalesce(func.sum(AgentUsageRow.output_tokens), 0),
-            )
-            .select_from(AgentUsageRow)
-            .join(AgentSessionRow, AgentSessionRow.id == AgentUsageRow.session_id)
-            .join(ProjectRow, ProjectRow.id == AgentSessionRow.project_id)
-            .where(ProjectRow.company_id == company_id)
-        )
-        usage_row = usage_q.one()
-        input_tok = int(usage_row[0] or 0)
-        output_tok = int(usage_row[1] or 0)
-        msg_q = await self._session.execute(
-            select(func.count())
-            .select_from(AgentEventRow)
-            .join(AgentSessionRow, AgentSessionRow.id == AgentEventRow.session_id)
-            .join(ProjectRow, ProjectRow.id == AgentSessionRow.project_id)
-            .where(
-                ProjectRow.company_id == company_id,
-                AgentEventRow.event_type == "text_delta",
-            )
-        )
-        quota = await self._quotas.get_quota(company_id)
-        active_cabinets = int(cab_q.scalar_one() or 0)
-        running_cabinets = await self._count_running_cabinets(company_id)
-        employees_total = int(emp_q.scalar_one() or 0)
-        employees_active = int(emp_active_q.scalar_one() or 0)
-        projects_total = int(proj_q.scalar_one() or 0)
-        agent_messages = int(msg_q.scalar_one() or 0)
-        key_metrics = await AiKeysService(self._session).company_key_metrics(company_id)
-        last_activity = await self._last_activity_at(company_id)
-        storage_bytes = await self._storage_bytes(company_id)
-        tokens_used = input_tok + output_tok
-        threshold = settings.admin_metrics_token_alert_threshold
-        high_usage = threshold > 0 and tokens_used >= threshold
-        sub = subscription_read_model(
-            ends_at=company.subscription_ends_at,
-            lifetime=company.subscription_lifetime,
-            now=datetime.now(UTC),
-            expiring_days=settings.admin_metrics_subscription_expiring_days,
-        )
-        unbound_emp_q = await self._session.execute(
-            select(func.count(func.distinct(MembershipRow.employee_id)))
-            .select_from(MembershipRow)
-            .join(EmployeeRow, EmployeeRow.id == MembershipRow.employee_id)
-            .where(
-                MembershipRow.company_id == company_id,
-                EmployeeRow.keycloak_sub.is_(None),
-                EmployeeRow.status != EmployeeStatus.DISABLED,
-                EmployeeRow.deleted_at.is_(None),
-            )
-        )
-        employees_keycloak_unbound = int(unbound_emp_q.scalar_one() or 0)
-        return {
-            "employees_total": employees_total,
-            "employees_active": employees_active,
-            "employees": employees_total,
-            "active_cabinets": active_cabinets,
-            "cabinets_active": active_cabinets,
-            "running_cabinets": running_cabinets,
-            "cabinets_quota": quota.max_cabinets,
-            "cabinets_quota_used_pct": round(100 * active_cabinets / quota.max_cabinets, 1)
-            if quota.max_cabinets
-            else 0,
-            "projects_total": projects_total,
-            "agent_tokens_used": tokens_used,
-            "agent_input_tokens": input_tok,
-            "agent_output_tokens": output_tok,
-            "agent_messages": agent_messages,
-            "last_activity_at": last_activity.isoformat() if last_activity else None,
-            "storage_bytes": storage_bytes,
-            "high_agent_usage": high_usage,
-            "keycloak_unbound": company.keycloak_sub is None,
-            "employees_keycloak_unbound": employees_keycloak_unbound,
-            **key_metrics,
-            **sub,
-        }
+        aggregator = CompanyMetricsAggregator(self._session)
+        metrics = await aggregator.aggregate(company_id)
+        employee_ids = await aggregator.membership_employee_ids(company_id)
+        metrics["employees_online"] = await MetricsReadService().employees_online(employee_ids)
+        return metrics
 
     async def set_subscription(
         self,
@@ -554,6 +423,7 @@ class AdminCompanyService:
     async def list_org_cabinets(self, company_id: str) -> list[dict]:
         await self._require_company(company_id)
         from prodavan.application.cabinets.grant_service import CabinetGrantService
+        from prodavan.application.modules.module_binding_service import ModuleBindingService
         from prodavan.domain.ownership import company_view_flags
         from prodavan.infrastructure.persistence.models.cabinets import (
             CabinetCompanyGrantRow,
@@ -561,6 +431,7 @@ class AdminCompanyService:
         )
 
         grants = CabinetGrantService(self._session)
+        bindings = ModuleBindingService(self._session)
         q = await self._session.execute(
             select(CabinetInstanceRow)
             .outerjoin(
@@ -581,6 +452,7 @@ class AdminCompanyService:
         out: list[dict] = []
         for inst in q.scalars().unique().all():
             assignments_count = await grants.assignment_count(inst.id)
+            module_ids = await bindings.list_module_ids_for_cabinet(inst.id)
             flags = company_view_flags(
                 owner_scope=inst.owner_scope,
                 owner_company_id=inst.owner_company_id,
@@ -595,11 +467,28 @@ class AdminCompanyService:
                     "owner_company_id": inst.owner_company_id,
                     "owner_employee_id": inst.owner_employee_id,
                     "assignments_count": assignments_count,
+                    "module_bindings_count": len(module_ids),
                     **flags,
                     "created_at": inst.created_at.isoformat() if inst.created_at else None,
                 }
             )
         return out
+
+    async def _require_company_employee(self, company_id: str, employee_id: str) -> EmployeeRow:
+        await self._require_company(company_id)
+        q = await self._session.execute(
+            select(EmployeeRow)
+            .join(MembershipRow, MembershipRow.employee_id == EmployeeRow.id)
+            .where(
+                MembershipRow.company_id == company_id,
+                EmployeeRow.id == employee_id,
+                EmployeeRow.deleted_at.is_(None),
+            )
+        )
+        emp = q.scalar_one_or_none()
+        if emp is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Employee not found")
+        return emp
 
     async def list_company_employees(self, company_id: str) -> list[dict]:
         await self._require_company(company_id)
@@ -610,18 +499,87 @@ class AdminCompanyService:
                 MembershipRow.company_id == company_id,
                 EmployeeRow.deleted_at.is_(None),
             )
-            .order_by(EmployeeRow.email)
+            .order_by(EmployeeRow.login)
         )
+        rows = q.all()
+        if not rows:
+            return []
+
+        emp_ids = [emp.id for emp, _ in rows]
+
+        proj_q = await self._session.execute(
+            select(ProjectRow.owner_employee_id, func.count())
+            .where(
+                ProjectRow.company_id == company_id,
+                ProjectRow.owner_employee_id.in_(emp_ids),
+                ProjectRow.status != ProjectStatus.DELETED,
+            )
+            .group_by(ProjectRow.owner_employee_id)
+        )
+        projects_by_emp = dict(proj_q.all())
+
+        cab_q = await self._session.execute(
+            select(
+                CabinetEmployeeAssignmentRow.employee_id,
+                func.count(func.distinct(CabinetEmployeeAssignmentRow.cabinet_id)),
+            )
+            .join(
+                CabinetCompanyGrantRow,
+                CabinetCompanyGrantRow.cabinet_id == CabinetEmployeeAssignmentRow.cabinet_id,
+            )
+            .where(
+                CabinetCompanyGrantRow.company_id == company_id,
+                CabinetEmployeeAssignmentRow.employee_id.in_(emp_ids),
+                CabinetEmployeeAssignmentRow.status == CabinetAssignmentStatus.ACTIVE,
+                CabinetCompanyGrantRow.status == CabinetGrantStatus.ACTIVE,
+            )
+            .group_by(CabinetEmployeeAssignmentRow.employee_id)
+        )
+        cabinets_by_emp = dict(cab_q.all())
+        online_map = await MetricsReadService().batch_employee_online(emp_ids)
+
         return [
             {
                 "id": emp.id,
+                "login": emp.login,
                 "email": emp.email,
+                "contact_email": emp.contact_email,
                 "display_name": emp.display_name,
                 "status": emp.status,
                 "role": role,
+                "projects_count": projects_by_emp.get(emp.id, 0),
+                "cabinets_count": cabinets_by_emp.get(emp.id, 0),
+                "online": online_map.get(emp.id, False),
             }
-            for emp, role in q.all()
+            for emp, role in rows
         ]
+
+    async def set_employee_password(
+        self, company_id: str, employee_id: str, *, password: str
+    ) -> dict:
+        await self._require_company_employee(company_id, employee_id)
+        from prodavan.application.employees.service import EmployeesCommandService
+
+        emp = await EmployeesCommandService(self._session).set_password(
+            employee_id=employee_id, password=password
+        )
+        return {
+            "id": emp.id,
+            "login": employee_effective_login(emp),
+            "password_set": True,
+            "identity_pending": emp.keycloak_sub is None,
+        }
+
+    async def update_employee_contact_email(
+        self, company_id: str, employee_id: str, *, contact_email: str | None
+    ) -> dict:
+        await self._require_company_employee(company_id, employee_id)
+        from prodavan.application.employees.service import EmployeesCommandService
+
+        emp = await EmployeesCommandService(self._session).update_contact_email(
+            employee_id=employee_id, contact_email=contact_email
+        )
+        return {"id": emp.id, "contact_email": emp.contact_email}
 
     async def get_company_summary(self, company_id: str) -> dict:
         """Read-only org metrics for company.admin contour (L04)."""
@@ -630,7 +588,7 @@ class AdminCompanyService:
         quota = await self._quotas.get_quota(company_id)
         return {
             "company_id": company_id,
-            "username": company.id,
+            "username": company_effective_login(company),
             "password_set": company.keycloak_sub is not None,
             "metrics": metrics,
             "cabinet_quota": _quota_public(quota),
@@ -651,14 +609,15 @@ class AdminCompanyService:
                 detail="password required (min 8 chars)",
             )
         company = await self._require_company(company_id)
+        login = company_effective_login(company)
         if company.keycloak_sub is None:
             from prodavan.application.auth.register import publish_register_command
             from prodavan.domain.identity import ROLE_COMPANY
 
             await publish_register_command(
                 client_ref=f"company:{company.id}",
-                username=company.id,
-                email=f"{company.id}@companies.prodavan.local",
+                username=login,
+                email=f"{login}@companies.prodavan.local",
                 password=pwd,
                 realm_roles=[ROLE_COMPANY],
                 display_name=company.name,
@@ -666,18 +625,72 @@ class AdminCompanyService:
             await self._session.refresh(company)
             return {
                 "id": company.id,
-                "username": company.id,
+                "username": company_effective_login(company),
+                "login_username": company.login_username,
                 "password_set": company.keycloak_sub is not None,
                 "identity_pending": company.keycloak_sub is None,
             }
 
         from prodavan.infrastructure.keycloak.provisioning import get_provisioning
 
-        await get_provisioning().set_company_password(username=company.id, password=pwd)
+        await get_provisioning().set_company_password(username=login, password=pwd)
         return {
             "id": company.id,
-            "username": company.id,
+            "username": company_effective_login(company),
+            "login_username": company.login_username,
             "password_set": True,
+        }
+
+    async def set_company_login(self, company_id: str, *, login: str) -> dict:
+        """Set editable org login (Keycloak username). Internal company id is unchanged."""
+        company = await self._require_company(company_id)
+        new_login = validate_login_username(login)
+        current = company_effective_login(company)
+        if new_login == current:
+            return {
+                "id": company.id,
+                "username": current,
+                "login_username": company.login_username,
+            }
+
+        if new_login == company.id:
+            company.login_username = None
+        else:
+            taken = await self._session.execute(
+                select(CompanyRow.id).where(
+                    CompanyRow.id != company_id,
+                    (CompanyRow.login_username == new_login) | (CompanyRow.id == new_login),
+                )
+            )
+            if taken.scalar_one_or_none() is not None:
+                raise AppError(
+                    code="CONFLICT",
+                    title="Conflict",
+                    status=409,
+                    detail="login already in use",
+                )
+            company.login_username = new_login
+
+        old_login = current
+        await self._session.commit()
+        await self._session.refresh(company)
+        effective = company_effective_login(company)
+
+        if company.keycloak_sub is not None and old_login != effective:
+            from prodavan.application.auth.lifecycle import publish_rename_command
+
+            await publish_rename_command(
+                client_ref=f"company:{company.id}",
+                sub=company.keycloak_sub,
+                old_username=old_login,
+                new_username=effective,
+                email=f"{effective}@companies.prodavan.local",
+            )
+
+        return {
+            "id": company.id,
+            "username": effective,
+            "login_username": company.login_username,
         }
 
     async def delete_company(self, company_id: str, *, principal: Principal) -> dict:

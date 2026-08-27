@@ -10,8 +10,8 @@ import 'package:prodavan/features/company/company_employees_page.dart';
 import 'package:prodavan/features/company/company_management_page.dart';
 import 'package:prodavan/features/company/company_module_list_page.dart';
 import 'package:prodavan/features/company/company_overview_page.dart';
+import 'package:prodavan/features/company/company_settings_body.dart';
 import 'package:prodavan/features/company/company_project_containers_page.dart';
-import 'package:prodavan/features/settings/settings_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Company admin shell — Admin-parity IA (P-CO-01).
@@ -94,7 +94,7 @@ class _CompanyShellState extends State<CompanyShell> {
               onSubpageOpenChanged: _narrowIndex == 1 ? _onSubpageOpenChanged : null,
               root: CompanyManagementPage(companyId: companyId),
             ),
-            const SettingsPage(embedded: true),
+            CompanySettingsBody(companyId: companyId),
           ],
         ),
       );
@@ -107,7 +107,7 @@ class _CompanyShellState extends State<CompanyShell> {
       CompanyProjectContainersPage(companyId: companyId, embedded: true),
       CompanyCabinetsPage(companyId: companyId),
       CompanyModuleListPage(companyId: companyId, embedded: true),
-      const SettingsPage(embedded: true),
+      CompanySettingsBody(companyId: companyId),
     ];
 
     return AppLayout(
@@ -136,7 +136,7 @@ class _CompanyShellState extends State<CompanyShell> {
               onSubpageOpenChanged: _contentIndex == i ? _onSubpageOpenChanged : null,
               root: mainPages[i],
             ),
-          const SettingsPage(embedded: true),
+          CompanySettingsBody(companyId: companyId),
         ],
       ),
     );

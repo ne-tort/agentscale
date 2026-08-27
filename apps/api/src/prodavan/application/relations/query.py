@@ -10,6 +10,7 @@ from prodavan.domain.cabinets.types import (
     CabinetCompanyGrantScope,
     CabinetGrantStatus,
 )
+from prodavan.domain.modules import ModuleCompanyGrantScope
 from prodavan.infrastructure.persistence.models.ai_keys import CompanyAiKeyBindingRow
 from prodavan.infrastructure.persistence.models.cabinets import (
     CabinetCompanyGrantRow,
@@ -20,6 +21,7 @@ from prodavan.infrastructure.persistence.models.identity import MembershipRow
 from prodavan.infrastructure.persistence.models.modules import (
     ModuleCabinetBindingRow,
     ModuleCompanyGrantRow,
+    ModuleRow,
 )
 
 
@@ -95,6 +97,9 @@ class RelationsQuery:
         return q.scalar_one_or_none() is not None
 
     async def has_module_company_grant(self, *, module_id: str, company_id: str) -> bool:
+        row = await self._session.get(ModuleRow, module_id)
+        if row is not None and row.company_grant_scope == ModuleCompanyGrantScope.ALL:
+            return True
         q = await self._session.execute(
             select(ModuleCompanyGrantRow.id).where(
                 ModuleCompanyGrantRow.module_id == module_id,

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.auth.register import publish_register_command
 from prodavan.application.employees.service import EmployeesCommandService
+from prodavan.domain.companies.login import company_effective_login
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import ROLE_COMPANY, ROLE_EMPLOYEE, MembershipRole, Principal
 from prodavan.infrastructure.persistence.models.identity import CompanyRow, EmployeeRow
@@ -84,18 +85,21 @@ class CompaniesCommandService:
         if employee is not None:
             await self._session.refresh(employee)
 
+        login = company_effective_login(company)
         await publish_register_command(
             client_ref=f"company:{company.id}",
-            username=company.id,
-            email=f"{company.id}@companies.prodavan.local",
+            username=login,
+            email=f"{login}@companies.prodavan.local",
             password=pwd,
             realm_roles=[ROLE_COMPANY],
             display_name=name.strip(),
         )
         if employee is not None:
+            from prodavan.domain.employees.login import employee_effective_login
+
             await publish_register_command(
                 client_ref=f"employee:{employee.id}",
-                username=employee.email,
+                username=employee_effective_login(employee),
                 email=employee.email,
                 password=None,
                 realm_roles=[ROLE_EMPLOYEE],
@@ -130,8 +134,8 @@ class CompaniesCommandService:
         await publish_delete_command(
             client_ref=f"company:{company.id}",
             sub=sub,
-            username=company.id,
-            email=f"{company.id}@companies.prodavan.local",
+            username=company_effective_login(company),
+            email=f"{company_effective_login(company)}@companies.prodavan.local",
         )
         enq = enqueue_cascade_company_deleted(company.id, actor_sub=principal.sub)
         out: dict = {
@@ -173,10 +177,11 @@ class CompaniesCommandService:
         await self._session.commit()
         await self._session.refresh(company)
         if company.keycloak_sub is None:
+            login = company_effective_login(company)
             await publish_register_command(
                 client_ref=f"company:{company.id}",
-                username=company.id,
-                email=f"{company.id}@companies.prodavan.local",
+                username=login,
+                email=f"{login}@companies.prodavan.local",
                 password=None,
                 realm_roles=[ROLE_COMPANY],
                 display_name=company.name,

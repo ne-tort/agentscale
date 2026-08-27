@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.api.deps import (
@@ -61,19 +61,14 @@ class CreateCompanyBody(BaseModel):
     admin_display_name: str | None = None
 
 
-class InviteEmployeeBody(BaseModel):
+class CreateEmployeeBody(BaseModel):
     model_config = {"extra": "forbid"}
 
-    email: str = Field(min_length=3, max_length=320)
+    login: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=8, max_length=200)
+    contact_email: str | None = Field(default=None, max_length=320)
     display_name: str | None = None
     role: str = MembershipRole.MEMBER
-
-    @model_validator(mode="before")
-    @classmethod
-    def _reject_password(cls, data: object) -> object:
-        if isinstance(data, dict) and "password" in data:
-            raise ValueError("password is not accepted; invite via Keycloak")
-        return data
 
 
 @router.get("/me")
@@ -155,22 +150,31 @@ async def create_company(
 
 
 @router.post("/companies/{company_id}/employees", status_code=201)
-async def invite_employee(
+async def create_employee(
     company_id: str,
-    body: InviteEmployeeBody,
+    body: CreateEmployeeBody,
     principal: PrincipalDep,
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
 ) -> dict:
     svc = EntitlementService(session)
     await svc.require_company_actor(principal, company_id, employee=employee)
-    emp = await IdentityCommandService(session, get_provisioning()).invite_employee(
+    emp = await IdentityCommandService(session, get_provisioning()).create_employee(
         company_id=company_id,
-        email=body.email,
+        login=body.login,
+        password=body.password,
+        contact_email=body.contact_email,
         display_name=body.display_name,
         role=body.role,
     )
-    return {"id": emp.id, "email": emp.email, "status": emp.status, "keycloak_sub": emp.keycloak_sub}
+    return {
+        "id": emp.id,
+        "login": emp.login,
+        "email": emp.email,
+        "contact_email": emp.contact_email,
+        "status": emp.status,
+        "keycloak_sub": emp.keycloak_sub,
+    }
 
 
 @router.post("/employees/{employee_id}/disable")

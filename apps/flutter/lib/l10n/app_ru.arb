@@ -1,6 +1,7 @@
 {
   "@@locale": "ru",
-  "adminActiveEmployees": "Сотрудники онлайн",
+  "adminActiveEmployees": "Активные сотрудники",
+  "adminEmployeesOnline": "Сотрудники онлайн",
   "adminAdminEmail": "Email администратора",
   "adminAgentMessages": "AI-Запросы",
   "adminAgentPolicySaved": "Политика агента сохранена",
@@ -782,6 +783,8 @@
   "commonMbUnit": "Мб",
   "commonNotSet": "Не задан",
   "commonOff": "Выкл.",
+  "commonOnline": "Онлайн",
+  "commonOffline": "Оффлайн",
   "commonUnlimited": "Бессрочно",
   "adminBindingsCount": "{count} компаний",
   "@adminBindingsCount": {
@@ -848,6 +851,8 @@
   "companyNoEmployees": "Нет сотрудников",
   "companyOrgMetrics": "Метрики организации",
   "companyLoginId": "ID компании",
+  "companyLogin": "Логин",
+  "credentialsInClipboard": "Логин и пароль в буфере обмена",
   "companyIdCopied": "ID компании скопирован",
   "companyPassword": "Пароль",
   "companyPasswordHint": "Минимум 8 символов",

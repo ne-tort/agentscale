@@ -10,7 +10,10 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
-  String get adminActiveEmployees => 'Employees online';
+  String get adminActiveEmployees => 'Active employees';
+
+  @override
+  String get adminEmployeesOnline => 'Employees online';
 
   @override
   String get adminAdminEmail => 'Admin email';
@@ -1223,6 +1226,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get commonOff => 'Off';
 
   @override
+  String get commonOnline => 'Online';
+
+  @override
+  String get commonOffline => 'Offline';
+
+  @override
   String get commonUnlimited => 'Unlimited';
 
   @override
@@ -1384,6 +1393,12 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get companyLoginId => 'Company ID';
+
+  @override
+  String get companyLogin => 'Login';
+
+  @override
+  String get credentialsInClipboard => 'Login and password copied to clipboard';
 
   @override
   String get companyIdCopied => 'Company ID copied';

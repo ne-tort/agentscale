@@ -43,6 +43,15 @@ class UserAdminPort(Protocol):
         email: str | None,
     ) -> None: ...
 
+    async def rename_user(
+        self,
+        *,
+        keycloak_user_id: str | None,
+        old_username: str | None,
+        new_username: str,
+        email: str | None,
+    ) -> None: ...
+
 
 class FakeUserAdmin:
     """In-memory user create for tests / AUTH without live KC Admin."""
@@ -120,6 +129,27 @@ class FakeUserAdmin:
             for k, v in list(self._by_email.items()):
                 if v == keycloak_user_id:
                     del self._by_email[k]
+
+    async def rename_user(
+        self,
+        *,
+        keycloak_user_id: str | None,
+        old_username: str | None,
+        new_username: str,
+        email: str | None,
+    ) -> None:
+        uname = new_username.strip()
+        old = (old_username or "").strip()
+        sub = keycloak_user_id
+        if sub is None and old:
+            sub = self._by_username.get(old)
+        if sub is None:
+            return
+        if old and old in self._by_username:
+            del self._by_username[old]
+        self._by_username[uname] = sub
+        if email:
+            self._by_email[email.lower().strip()] = sub
 
 
 _fake: FakeUserAdmin | None = None

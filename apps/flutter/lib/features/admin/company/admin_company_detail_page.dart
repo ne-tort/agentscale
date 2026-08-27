@@ -5,8 +5,8 @@ import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/company_metrics_wrap.dart';
+import 'package:prodavan/features/admin/company/admin_company_access_page.dart';
 import 'package:prodavan/features/admin/company/admin_company_agent_policy_page.dart';
 import 'package:prodavan/features/admin/company/admin_company_detail_controller.dart';
 import 'package:prodavan/features/admin/company/admin_company_events_page.dart';
@@ -107,34 +107,15 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                         ),
                       ),
                       const SizedBox(height: AppSpacing.sm),
-                      AppValuePreference<String>(
-                        title: l10n.companyLoginId,
-                        icon: Icons.badge_outlined,
-                        value: widget.companyId,
-                        enabled: false,
-                        presentValue: (v) => v,
-                        onSave: (_) async {},
+                      AppNavPreference(
+                        title: l10n.settings,
+                        icon: Icons.settings_outlined,
+                        subtitle: Text(ctrl.loginUsername),
+                        onTap: () => pushCompanySubPage(
+                          context,
+                          const AdminCompanyAccessPage(),
+                        ),
                       ),
-                      AppValuePreference<String>(
-                        title: l10n.companyPassword,
-                        icon: Icons.key_outlined,
-                        value: '',
-                        obscureText: true,
-                        hintText: l10n.companyPasswordHint,
-                        invalidMessage: l10n.companyPasswordHint,
-                        presentValue: (_) =>
-                            ctrl.passwordSet ? '••••••••' : l10n.commonNotSet,
-                        formatInputValue: (_) => '',
-                        validateInput: (raw) => raw.trim().length >= 8,
-                        onSave: (v) async {
-                          final trimmed = v.trim();
-                          if (trimmed.length < 8) return;
-                          await ctrl.savePassword(trimmed);
-                          if (!context.mounted) return;
-                          AppSnackBar.success(context, l10n.companyPasswordChanged);
-                        },
-                      ),
-                      const SizedBox(height: AppSpacing.md),
                       AppNavPreference(
                         title: l10n.adminCompanyGeneral,
                         icon: Icons.business_outlined,

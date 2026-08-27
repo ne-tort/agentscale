@@ -101,8 +101,14 @@ abstract class AppLocalizations {
   /// No description provided for @adminActiveEmployees.
   ///
   /// In en, this message translates to:
-  /// **'Employees online'**
+  /// **'Active employees'**
   String get adminActiveEmployees;
+
+  /// No description provided for @adminEmployeesOnline.
+  ///
+  /// In en, this message translates to:
+  /// **'Employees online'**
+  String get adminEmployeesOnline;
 
   /// No description provided for @adminAdminEmail.
   ///
@@ -2246,6 +2252,18 @@ abstract class AppLocalizations {
   /// **'Off'**
   String get commonOff;
 
+  /// No description provided for @commonOnline.
+  ///
+  /// In en, this message translates to:
+  /// **'Online'**
+  String get commonOnline;
+
+  /// No description provided for @commonOffline.
+  ///
+  /// In en, this message translates to:
+  /// **'Offline'**
+  String get commonOffline;
+
   /// No description provided for @commonUnlimited.
   ///
   /// In en, this message translates to:
@@ -2557,6 +2575,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Company ID'**
   String get companyLoginId;
+
+  /// No description provided for @companyLogin.
+  ///
+  /// In en, this message translates to:
+  /// **'Login'**
+  String get companyLogin;
+
+  /// No description provided for @credentialsInClipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Login and password copied to clipboard'**
+  String get credentialsInClipboard;
 
   /// No description provided for @companyIdCopied.
   ///

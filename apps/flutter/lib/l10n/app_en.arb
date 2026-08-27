@@ -1,6 +1,7 @@
 {
   "@@locale": "en",
-  "adminActiveEmployees": "Employees online",
+  "adminActiveEmployees": "Active employees",
+  "adminEmployeesOnline": "Employees online",
   "adminAdminEmail": "Admin email",
   "adminAgentMessages": "AI requests",
   "adminAgentPolicySaved": "Agent policy saved",
@@ -780,6 +781,8 @@
   "commonMbUnit": "MB",
   "commonNotSet": "Not set",
   "commonOff": "Off",
+  "commonOnline": "Online",
+  "commonOffline": "Offline",
   "commonUnlimited": "Unlimited",
   "adminBindingsCount": "{count} companies",
   "@adminBindingsCount": {
@@ -846,6 +849,8 @@
   "companyNoEmployees": "No employees",
   "companyOrgMetrics": "Org metrics",
   "companyLoginId": "Company ID",
+  "companyLogin": "Login",
+  "credentialsInClipboard": "Login and password copied to clipboard",
   "companyIdCopied": "Company ID copied",
   "companyPassword": "Password",
   "companyPasswordHint": "Minimum 8 characters",

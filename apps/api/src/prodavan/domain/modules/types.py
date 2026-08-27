@@ -2,6 +2,13 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
+
+
+class ModuleCompanyGrantScope(StrEnum):
+    SELECTED = "selected"
+    ALL = "all"
+
 
 class ModuleStatus:
     ACTIVE = "active"

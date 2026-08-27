@@ -66,10 +66,28 @@ class CompanyPasswordBody(BaseModel):
     password: str = Field(min_length=8, max_length=200)
 
 
+class CompanyLoginBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    login: str = Field(min_length=3, max_length=64)
+
+
 class AssignCabinetEmployeeBody(BaseModel):
     model_config = {"extra": "forbid"}
 
     employee_id: str = Field(min_length=3, max_length=40)
+
+
+class EmployeePasswordBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    password: str = Field(min_length=8, max_length=200)
+
+
+class EmployeeContactEmailBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    contact_email: str | None = Field(default=None, max_length=320)
 
 
 @router.get("")
@@ -240,6 +258,16 @@ async def set_company_password_admin(
     )
 
 
+@router.put("/{company_id}/login")
+async def set_company_login_admin(
+    company_id: str,
+    body: CompanyLoginBody,
+    _: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    return await AdminCompanyService(session).set_company_login(company_id, login=body.login)
+
+
 company_router = APIRouter(prefix="/companies", tags=["companies"])
 
 
@@ -329,6 +357,36 @@ async def list_company_employees(
     await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
     items = await AdminCompanyService(session).list_company_employees(company_id)
     return {"items": items}
+
+
+@company_router.put("/{company_id}/employees/{employee_id}/password")
+async def set_employee_password(
+    company_id: str,
+    employee_id: str,
+    body: EmployeePasswordBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    return await AdminCompanyService(session).set_employee_password(
+        company_id, employee_id, password=body.password
+    )
+
+
+@company_router.patch("/{company_id}/employees/{employee_id}/contact-email")
+async def update_employee_contact_email(
+    company_id: str,
+    employee_id: str,
+    body: EmployeeContactEmailBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    return await AdminCompanyService(session).update_employee_contact_email(
+        company_id, employee_id, contact_email=body.contact_email
+    )
 
 
 @company_router.get("/{company_id}/summary")

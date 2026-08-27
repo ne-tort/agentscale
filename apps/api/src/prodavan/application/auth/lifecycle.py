@@ -15,10 +15,13 @@ logger = logging.getLogger(__name__)
 
 AUTH_USER_DISABLE = "auth.user.disable"
 AUTH_USER_DELETE = "auth.user.delete"
+AUTH_USER_RENAME = "auth.user.rename"
 AUTH_USER_DISABLED = "auth.user.disabled"
 AUTH_USER_DELETED = "auth.user.deleted"
+AUTH_USER_RENAMED = "auth.user.renamed"
 AUTH_USER_DISABLE_FAILED = "auth.user.disable_failed"
 AUTH_USER_DELETE_FAILED = "auth.user.delete_failed"
+AUTH_USER_RENAME_FAILED = "auth.user.rename_failed"
 
 
 @dataclass(slots=True, frozen=True)
@@ -28,7 +31,18 @@ class LifecycleUserCommand:
     sub: str | None
     username: str | None
     email: str | None
-    action: str  # disable | delete
+    action: str  # disable | delete | rename
+    new_username: str | None = None
+
+
+@dataclass(slots=True, frozen=True)
+class RenameUserCommand:
+    request_id: str
+    client_ref: str
+    sub: str | None
+    old_username: str | None
+    new_username: str
+    email: str | None
 
 
 def parse_lifecycle_command(payload: dict[str, Any], *, action: str) -> LifecycleUserCommand:
@@ -103,6 +117,106 @@ async def publish_delete_command(
             username=username,
             email=email,
         )
+    )
+
+
+async def publish_rename_command(
+    *,
+    client_ref: str,
+    sub: str | None = None,
+    old_username: str | None = None,
+    new_username: str,
+    email: str | None = None,
+) -> bool:
+    from prodavan.core.events.bus import publish_envelope
+
+    rid = str(uuid.uuid4())
+    return await publish_envelope(
+        auth_command_envelope(
+            event_id=rid,
+            event_type=AUTH_USER_RENAME,
+            payload={
+                "request_id": rid,
+                "client_ref": client_ref,
+                "sub": sub,
+                "old_username": old_username,
+                "new_username": new_username,
+                "email": email,
+            },
+        )
+    )
+
+
+def parse_rename_command(payload: dict[str, Any]) -> RenameUserCommand:
+    sub = payload.get("sub")
+    return RenameUserCommand(
+        request_id=str(payload.get("request_id") or "").strip() or str(uuid.uuid4()),
+        client_ref=str(payload.get("client_ref") or "").strip(),
+        sub=str(sub).strip() if sub else None,
+        old_username=(str(payload["old_username"]).strip() if payload.get("old_username") else None),
+        new_username=str(payload.get("new_username") or "").strip(),
+        email=(str(payload["email"]).strip().lower() if payload.get("email") else None),
+    )
+
+
+async def apply_rename(command: RenameUserCommand) -> EventEnvelope:
+    if not command.client_ref or not command.new_username:
+        return auth_event_envelope(
+            event_id=str(uuid.uuid4()),
+            event_type=AUTH_USER_RENAME_FAILED,
+            payload={
+                "request_id": command.request_id,
+                "client_ref": command.client_ref,
+                "error": "client_ref and new_username required",
+            },
+        )
+    try:
+        await get_user_admin().rename_user(
+            keycloak_user_id=command.sub,
+            old_username=command.old_username,
+            new_username=command.new_username,
+            email=command.email,
+        )
+    except AppError as exc:
+        logger.warning(
+            "auth rename failed client_ref=%s code=%s",
+            command.client_ref,
+            exc.code,
+        )
+        return auth_event_envelope(
+            event_id=str(uuid.uuid4()),
+            event_type=AUTH_USER_RENAME_FAILED,
+            payload={
+                "request_id": command.request_id,
+                "client_ref": command.client_ref,
+                "sub": command.sub,
+                "error": exc.detail or exc.code,
+                "error_code": exc.code,
+            },
+        )
+    except Exception as exc:
+        logger.exception("auth rename unexpected client_ref=%s", command.client_ref)
+        return auth_event_envelope(
+            event_id=str(uuid.uuid4()),
+            event_type=AUTH_USER_RENAME_FAILED,
+            payload={
+                "request_id": command.request_id,
+                "client_ref": command.client_ref,
+                "sub": command.sub,
+                "error": str(exc),
+            },
+        )
+    return auth_event_envelope(
+        event_id=str(uuid.uuid4()),
+        event_type=AUTH_USER_RENAMED,
+        payload={
+            "request_id": command.request_id,
+            "client_ref": command.client_ref,
+            "sub": command.sub,
+            "old_username": command.old_username,
+            "new_username": command.new_username,
+            "email": command.email,
+        },
     )
 
 
@@ -188,4 +302,6 @@ async def handle_auth_lifecycle_command(envelope: EventEnvelope) -> EventEnvelop
         return await apply_lifecycle(
             parse_lifecycle_command(envelope.payload or {}, action="delete")
         )
+    if envelope.event_type == AUTH_USER_RENAME:
+        return await apply_rename(parse_rename_command(envelope.payload or {}))
     return None

@@ -36,6 +36,7 @@ class AppEntityRow {
     required this.title,
     this.subtitle,
     this.cells = const {},
+    this.cellWidgets = const {},
     this.leading,
     this.trailing,
     this.titleColor,
@@ -45,6 +46,7 @@ class AppEntityRow {
   final String title;
   final String? subtitle;
   final Map<String, String> cells;
+  final Map<String, Widget> cellWidgets;
   final Widget? leading;
   final Widget? trailing;
   /// Optional primary-title color (e.g. warning for suspended AI keys).
@@ -356,10 +358,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                                   child: _mutateTrailing(context, row),
                                 ),
                               )
-                            : _dataCell(
-                                row.cells[widget.columns[i].id] ?? '',
-                                widget.columns[i],
-                              ),
+                            : _dataCell(row, widget.columns[i]),
                     ],
                   ],
                 ),
@@ -384,14 +383,16 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
     );
   }
 
-  DataCell _dataCell(String text, AppEntityColumn column) {
+  DataCell _dataCell(AppEntityRow row, AppEntityColumn column) {
     final alignment = _alignment(column.align);
-    final child = Text(
-      text,
-      overflow: TextOverflow.ellipsis,
-      maxLines: 1,
-      textAlign: _textAlign(column.align),
-    );
+    final widgetCell = row.cellWidgets[column.id];
+    final child = widgetCell ??
+        Text(
+          row.cells[column.id] ?? '',
+          overflow: TextOverflow.ellipsis,
+          maxLines: 1,
+          textAlign: _textAlign(column.align),
+        );
     if (column.width != null) {
       return DataCell(
         SizedBox(

@@ -1,4 +1,4 @@
-"""Employees BC — invite / pause (disable) / soft-delete (Auth via Kafka only)."""
+"""Employees BC — create / pause (disable) / soft-delete (Auth via Kafka only)."""
 
 from __future__ import annotations
 
@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from prodavan.application.auth.register import publish_register_command
+from prodavan.domain.companies.login import validate_login_username
+from prodavan.domain.employees.login import employee_effective_login, employee_kc_email
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import ROLE_EMPLOYEE, EmployeeStatus, MembershipRole, Principal
 from prodavan.domain.lifecycle import employee_is_soft_deleted, soft_deleted_at_now
@@ -16,6 +18,30 @@ from prodavan.infrastructure.persistence.models.identity import EmployeeRow, Mem
 class EmployeesCommandService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def _login_taken(self, login: str, *, exclude_id: str | None = None) -> bool:
+        q = select(EmployeeRow.id).where(
+            EmployeeRow.login == login,
+            EmployeeRow.deleted_at.is_(None),
+        )
+        if exclude_id is not None:
+            q = q.where(EmployeeRow.id != exclude_id)
+        row = await self._session.execute(q)
+        return row.scalar_one_or_none() is not None
+
+    async def _assign_login(self, employee: EmployeeRow, *, candidate: str | None = None) -> None:
+        raw = (candidate or "").strip()
+        if len(raw) >= 3:
+            try:
+                login = validate_login_username(raw)
+            except AppError:
+                login = None
+        else:
+            login = None
+        if login is None or await self._login_taken(login, exclude_id=employee.id):
+            employee.login = employee.id
+        else:
+            employee.login = login
 
     async def upsert_invited(
         self,
@@ -32,14 +58,17 @@ class EmployeesCommandService:
         )
         employee = existing.scalars().first()
         if employee is None:
+            local = email_l.split("@", 1)[0] if "@" in email_l else email_l
             employee = EmployeeRow(
                 email=email_l,
+                login=local[:64] or "pending",
                 display_name=display_name,
                 status=EmployeeStatus.INVITED,
                 keycloak_sub=keycloak_user_id,
             )
             self._session.add(employee)
             await self._session.flush()
+            await self._assign_login(employee, candidate=local)
             return employee
         if keycloak_user_id is not None and employee.keycloak_sub is None:
             employee.keycloak_sub = keycloak_user_id
@@ -68,19 +97,53 @@ class EmployeesCommandService:
         elif mem.role != role and role == MembershipRole.COMPANY_ADMIN:
             mem.role = role
 
-    async def invite_employee(
+    async def create_employee(
         self,
         *,
         company_id: str,
-        email: str,
-        display_name: str | None,
+        login: str,
+        password: str,
+        contact_email: str | None = None,
+        display_name: str | None = None,
         role: str = MembershipRole.MEMBER,
     ) -> EmployeeRow:
-        employee = await self.upsert_invited(
-            email=email,
+        login_val = validate_login_username(login)
+        pwd = (password or "").strip()
+        if len(pwd) < 8:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="password required (min 8 chars)",
+            )
+        contact = (contact_email or "").strip().lower() or None
+        if contact is not None and "@" not in contact:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="contact_email must be an email when provided",
+            )
+        if await self._login_taken(login_val):
+            raise AppError(
+                code="CONFLICT",
+                title="Conflict",
+                status=409,
+                detail="login already in use",
+            )
+
+        kc_email = employee_kc_email(login_val)
+        employee = EmployeeRow(
+            login=login_val,
+            email=kc_email,
+            contact_email=contact,
             display_name=display_name,
-            keycloak_user_id=None,
+            status=EmployeeStatus.INVITED,
+            keycloak_sub=None,
         )
+        self._session.add(employee)
+        await self._session.flush()
+
         from prodavan.application.relations.commands import RelationsCommand
 
         await RelationsCommand(self._session).ensure_membership(
@@ -91,14 +154,74 @@ class EmployeesCommandService:
 
         await publish_register_command(
             client_ref=f"employee:{employee.id}",
-            username=employee.email,
-            email=employee.email,
-            password=None,
+            username=login_val,
+            email=kc_email,
+            password=pwd,
             realm_roles=[ROLE_EMPLOYEE],
             display_name=display_name,
         )
         await self._session.refresh(employee)
         return employee
+
+    async def set_password(self, *, employee_id: str, password: str) -> EmployeeRow:
+        pwd = (password or "").strip()
+        if len(pwd) < 8:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="password required (min 8 chars)",
+            )
+        q = await self._session.execute(
+            select(EmployeeRow).where(EmployeeRow.id == employee_id)
+        )
+        emp = q.scalar_one_or_none()
+        if emp is None or employee_is_soft_deleted(emp):
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Employee not found")
+
+        login = employee_effective_login(emp)
+        kc_email = emp.email
+        if emp.keycloak_sub is None:
+            await publish_register_command(
+                client_ref=f"employee:{emp.id}",
+                username=login,
+                email=kc_email,
+                password=pwd,
+                realm_roles=[ROLE_EMPLOYEE],
+                display_name=emp.display_name,
+            )
+            await self._session.refresh(emp)
+            return emp
+
+        from prodavan.infrastructure.keycloak.provisioning import get_provisioning
+
+        await get_provisioning().set_company_password(username=login, password=pwd)
+        return emp
+
+    async def update_contact_email(
+        self,
+        *,
+        employee_id: str,
+        contact_email: str | None,
+    ) -> EmployeeRow:
+        contact = (contact_email or "").strip().lower() or None
+        if contact is not None and "@" not in contact:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="contact_email must be an email when provided",
+            )
+        q = await self._session.execute(
+            select(EmployeeRow).where(EmployeeRow.id == employee_id)
+        )
+        emp = q.scalar_one_or_none()
+        if emp is None or employee_is_soft_deleted(emp):
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Employee not found")
+        emp.contact_email = contact
+        await self._session.commit()
+        await self._session.refresh(emp)
+        return emp
 
     async def disable_employee(
         self,
@@ -127,12 +250,13 @@ class EmployeesCommandService:
         emp.status = EmployeeStatus.DISABLED
         actor = principal or Principal(sub="system")
         events = PlatformEventService(self._session)
+        login = employee_effective_login(emp)
         for membership in emp.memberships:
             await events.emit(
                 event_type="employee.disabled",
                 company_id=membership.company_id,
                 principal=actor,
-                payload={"employee_id": emp.id, "email": emp.email, "paused": True},
+                payload={"employee_id": emp.id, "login": login, "email": emp.email, "paused": True},
             )
         await self._session.commit()
         await self._session.refresh(emp)
@@ -141,7 +265,7 @@ class EmployeesCommandService:
             await publish_disable_command(
                 client_ref=f"employee:{emp.id}",
                 sub=emp.keycloak_sub,
-                username=emp.email,
+                username=login,
                 email=emp.email,
             )
         return emp
@@ -170,12 +294,13 @@ class EmployeesCommandService:
         emp.deleted_at = soft_deleted_at_now()
         actor = principal or Principal(sub="system")
         events = PlatformEventService(self._session)
+        login = employee_effective_login(emp)
         for membership in emp.memberships:
             await events.emit(
                 event_type="employee.soft_deleted",
                 company_id=membership.company_id,
                 principal=actor,
-                payload={"employee_id": emp.id, "email": emp.email},
+                payload={"employee_id": emp.id, "login": login, "email": emp.email},
             )
         await self._session.commit()
         await self._session.refresh(emp)
@@ -185,14 +310,14 @@ class EmployeesCommandService:
                 await publish_delete_command(
                     client_ref=f"employee:{emp.id}",
                     sub=emp.keycloak_sub,
-                    username=emp.email,
+                    username=login,
                     email=emp.email,
                 )
             else:
                 await publish_disable_command(
                     client_ref=f"employee:{emp.id}",
                     sub=None,
-                    username=emp.email,
+                    username=login,
                     email=emp.email,
                 )
         return emp
@@ -223,12 +348,13 @@ class EmployeesCommandService:
         emp.status = EmployeeStatus.DISABLED
         actor = principal or Principal(sub="system")
         events = PlatformEventService(self._session)
+        login = employee_effective_login(emp)
         for membership in emp.memberships:
             await events.emit(
                 event_type="employee.restored",
                 company_id=membership.company_id,
                 principal=actor,
-                payload={"employee_id": emp.id, "email": emp.email},
+                payload={"employee_id": emp.id, "login": login, "email": emp.email},
             )
         await self._session.commit()
         await self._session.refresh(emp)

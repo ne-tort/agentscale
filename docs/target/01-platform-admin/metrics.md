@@ -2,11 +2,22 @@
 
 Кросс-компанийный мониторинг на вкладке «Сводка» и на `AdminCompanyDetailPage`.
 
+## Presence (online)
+
+Auth Service публикует `auth.login`, `auth.token_refreshed`, `auth.logout` в platform Kafka bus.
+Metrics consumer (`application/metrics/`) обновляет Redis:
+
+- `presence:employee:{id}` — сотрудник онлайн (TTL `metrics_presence_ttl_sec`, default 900)
+- `presence:company:{login}` — org principal компании онлайн
+
+Read path: `MetricsReadService` batch MGET при list/metrics. Без Redis — `online: false`.
+
 ## Метрики уровня компании (карточка / detail)
 
 | Метрика | Описание |
 |---------|----------|
 | `employees_total` / `employees_active` | Сотрудники всего / не отключённые |
+| `employees_online` | Сотрудники с активной Redis-presence (login/refresh в TTL) |
 | `subscription_ends_at` / `subscription_lifetime` | Срок подписки на Prodavan |
 | `cabinets_active` | Число CabinetInstance в компании |
 | `running_cabinets` | ACTIVE кабинеты с ≥1 ACTIVE (не paused) проектом |
@@ -33,4 +44,6 @@ GET /api/v1/admin/metrics/companies
 GET /api/v1/admin/companies/{id}/metrics
 ```
 
-Ответы агрегируются из platform DB + telemetry (без чтения содержимого файлов проектов).
+Ответы агрегируются из platform DB + Redis presence + telemetry (без чтения содержимого файлов проектов).
+
+List endpoints обогащаются полем `online: bool` (компания или сотрудник).

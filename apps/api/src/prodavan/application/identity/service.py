@@ -50,9 +50,18 @@ class EntitlementService:
         company = await self.get_company_by_sub(principal.sub)
         if company is not None:
             return company
-        # Soft-bind: KC username is company_id (no email login for companies).
+        # Soft-bind: KC username is effective login (company id or login_username).
         if principal.username:
-            company = await self._session.get(CompanyRow, principal.username)
+            uname = principal.username.strip()
+            company = await self._session.get(CompanyRow, uname)
+            if company is None:
+                q = await self._session.execute(
+                    select(CompanyRow).where(
+                        CompanyRow.login_username == uname,
+                        CompanyRow.deleted_at.is_(None),
+                    )
+                )
+                company = q.scalar_one_or_none()
             if company is not None and company.deleted_at is None and (
                 company.keycloak_sub is None or company.keycloak_sub == principal.sub
             ):
@@ -271,19 +280,23 @@ class IdentityCommandService:
             contact_email=contact_email,
         )
 
-    async def invite_employee(
+    async def create_employee(
         self,
         *,
         company_id: str,
-        email: str,
-        display_name: str | None,
+        login: str,
+        password: str,
+        contact_email: str | None = None,
+        display_name: str | None = None,
         role: str = MembershipRole.MEMBER,
     ) -> EmployeeRow:
         from prodavan.application.employees.service import EmployeesCommandService
 
-        return await EmployeesCommandService(self._session).invite_employee(
+        return await EmployeesCommandService(self._session).create_employee(
             company_id=company_id,
-            email=email,
+            login=login,
+            password=password,
+            contact_email=contact_email,
             display_name=display_name,
             role=role,
         )

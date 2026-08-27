@@ -39,6 +39,12 @@ class ModuleRow(Base):
         ForeignKey("companies.id", ondelete="SET NULL"),
         nullable=True,
     )
+    company_grant_scope: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="selected",
+        server_default="selected",
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

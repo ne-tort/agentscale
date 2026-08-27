@@ -1,19 +1,22 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
-import 'package:prodavan/core/widgets/app_error_presenter.dart';
+import 'package:flutter/services.dart';
 
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/company_context.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
-import 'package:prodavan/core/widgets/app_icon_button.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
+import 'package:prodavan/core/widgets/app_inline_add_field.dart';
+import 'package:prodavan/core/widgets/app_online_indicator.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_confirm_page.dart';
-import 'package:prodavan/core/widgets/empty_placeholder.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
-import 'package:prodavan/features/company/company_invite_employee_page.dart';
-import 'package:prodavan/features/company/company_employee_cabinets_page.dart';
+import 'package:prodavan/core/widgets/empty_placeholder.dart';
+import 'package:prodavan/features/company/company_employee_detail_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Company employees — invite + disable (L04). No static cabinet grants.
+/// Company employees — inline create + table (Admin Companies parity).
 class CompanyEmployeesPage extends StatefulWidget {
   const CompanyEmployeesPage({super.key, required this.companyId});
 
@@ -71,33 +74,55 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
     }
   }
 
-  Future<void> _invite() async {
-    final invited = await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(
-        builder: (_) => CompanyInviteEmployeePage(companyId: widget.companyId),
-      ),
-    );
-    if (invited == true) await _reload();
+  static String _generatePassword() {
+    const chars = 'abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    final rand = Random.secure();
+    return List.generate(16, (_) => chars[rand.nextInt(chars.length)]).join();
   }
 
-  Future<void> _disable(Map<String, dynamic> emp) async {
-    final l10n = AppLocalizations.of(context);
-    if (emp['status'] == 'disabled') return;
-    final ok = await AppConfirmPage.push(
-      context,
-      title: l10n.companyDisableEmployee,
-      message: l10n.companyDisableEmployeeConfirm('${emp['email']}'),
-      confirmLabel: l10n.commonDisable,
-      severity: AppStatusSeverity.warning,
+  Future<void> _createEmployee(String login) async {
+    final password = _generatePassword();
+    final body = await companyContext.api.createEmployee(
+      companyId: widget.companyId,
+      login: login.trim(),
+      password: password,
     );
-    if (!ok) return;
-    try {
-      await companyContext.api.disableEmployee(emp['id'] as String);
-      await _reload();
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _error = e);
-    }
+    if (!mounted) return;
+    await _reload();
+    if (!mounted) return;
+    final empId = body['id'] as String?;
+    final empLogin = body['login'] as String? ?? login.trim();
+    if (empId == null) return;
+    await Clipboard.setData(ClipboardData(text: '$empLogin\t$password'));
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context);
+    AppSnackBar.info(context, l10n.credentialsInClipboard);
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => CompanyEmployeeDetailPage(
+          companyId: widget.companyId,
+          employeeId: empId,
+          employeeLogin: empLogin,
+        ),
+      ),
+    );
+    if (mounted) await _reload();
+  }
+
+  void _openEmployee(AppEntityRow row) {
+    final emp = _employees.firstWhere((e) => e['id'] == row.id);
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute<void>(
+            builder: (_) => CompanyEmployeeDetailPage(
+              companyId: widget.companyId,
+              employeeId: row.id,
+              employeeLogin: emp['login'] as String? ?? row.title,
+              contactEmail: emp['contact_email'] as String?,
+            ),
+          ),
+        )
+        .then((_) => _reload());
   }
 
   @override
@@ -107,31 +132,20 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
         .map(
           (e) => AppEntityRow(
             id: e['id'] as String,
-            title: e['email'] as String? ?? e['id'] as String,
-            subtitle: '${e['role']} · ${e['status']}',
+            title: e['login'] as String? ?? e['id'] as String,
             cells: {
-              'role': e['role'] as String? ?? '—',
-              'status': e['status'] as String? ?? '—',
+              'email': e['contact_email'] as String? ?? '—',
+              'projects': '${e['projects_count'] ?? 0}',
+              'cabinets': '${e['cabinets_count'] ?? 0}',
             },
-            trailing: e['status'] == 'disabled'
-                ? null
-                : IconButton(
-                    icon: const Icon(Icons.block),
-                    tooltip: l10n.commonDisable,
-                    onPressed: () => _disable(e),
-                  ),
+            cellWidgets: {
+              'online': AppOnlineIndicator(online: e['online'] == true),
+            },
           ),
         )
         .toList();
 
     return AppScaffold(
-      actions: [
-        AppIconButton(
-          icon: Icons.person_add,
-          tooltip: l10n.commonInvite,
-          onPressed: _invite,
-        ),
-      ],
       body: Column(
         children: [
           if (_error != null)
@@ -139,34 +153,41 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
               severity: AppStatusSeverity.error,
               message: AppErrors.localize(context, _error!),
             ),
+          AppInlineAddField(
+            title: l10n.companyLogin,
+            hintText: l10n.companyLogin,
+            validator: (v) => v.trim().length >= 3,
+            invalidMessage: l10n.companyPasswordHint,
+            onSave: _createEmployee,
+          ),
           Expanded(
             child: AppEntityCollection(
               loading: _loading,
               rows: rows,
-              primaryColumnLabel: l10n.commonEmail,
+              primaryColumnLabel: l10n.companyLogin,
               columns: [
+                AppEntityColumn(
+                  id: 'online',
+                  label: l10n.commonOnline,
+                  width: 72,
+                  align: AppEntityColumnAlign.end,
+                ),
                 AppEntityColumn(id: 'email', label: l10n.commonEmail),
-                AppEntityColumn(id: 'role', label: l10n.companyRole),
-                AppEntityColumn(id: 'status', label: l10n.commonStatus),
+                AppEntityColumn(
+                  id: 'projects',
+                  label: l10n.commonProjects,
+                  width: 96,
+                  align: AppEntityColumnAlign.end,
+                ),
+                AppEntityColumn(
+                  id: 'cabinets',
+                  label: l10n.commonCabinets,
+                  width: 96,
+                  align: AppEntityColumnAlign.end,
+                ),
               ],
-              onOpen: (row) {
-                Navigator.of(context)
-                    .push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => CompanyEmployeeCabinetsPage(
-                          companyId: widget.companyId,
-                          employeeId: row.id,
-                          employeeEmail: row.title,
-                        ),
-                      ),
-                    )
-                    .then((_) => _reload());
-              },
-              empty: EmptyPlaceholder(
-                title: l10n.companyNoEmployees,
-                subtitle: l10n.companyInviteViaKeycloakNoPassword,
-                action: TextButton(onPressed: _invite, child: Text(l10n.commonInvite)),
-              ),
+              onOpen: _openEmployee,
+              empty: EmptyPlaceholder(title: l10n.companyNoEmployees),
             ),
           ),
         ],

@@ -35,6 +35,7 @@ class CompanyMetricsWrap extends StatelessWidget {
       runSpacing: AppSpacing.sm,
       children: [
         StatTile(label: l10n.commonEmployees, value: _metric('employees_total')),
+        StatTile(label: l10n.adminEmployeesOnline, value: _metric('employees_online')),
         StatTile(label: l10n.adminActiveEmployees, value: _metric('employees_active')),
         StatTile(
           label: l10n.commonCabinets,
