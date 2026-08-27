@@ -61,9 +61,9 @@ AppChoicePreference<String>(
 ## Запреты
 
 - **Не** использовать `DropdownButton` / `DropdownButtonFormField` — только `AppChoicePreference` или `AppCatalogSelectPage`.
-- **Не** использовать удалённые `AppTextField`, `AppPasswordField`, `AppForm`.
-- Create/submit-формы: `Form` + `TextFormField` + явная кнопка Create/Save.
-- Dev session: `TextField` + `InputDecoration` (без `FormState`).
+- Create/submit-формы: `AppTextField` / `AppPasswordField` + `AppButton` / `AppAsyncButton` (не сырой `TextField` / `FilledButton` в feature).
+- Detail/settings: preference kit (`AppValuePreference` и др.) — seamless save, без page Save.
+- Feature **не** создаёт локальные `IconButton`/`TextButton`/`FilledButton` — только core (`AppIconButton`, `AppButton`).
 
 ## Связь
 

@@ -4,12 +4,15 @@ import 'package:prodavan/core/auth/auth_config.dart';
 import 'package:prodavan/core/auth/post_login_navigation.dart';
 import 'package:prodavan/core/auth/token_session.dart';
 import 'package:prodavan/core/config/api_base.dart';
-import 'package:prodavan/core/preferences/app_value_preference.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
+import 'package:prodavan/core/widgets/app_icon_button.dart';
+import 'package:prodavan/core/widgets/app_password_field.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/features/settings/open_app_settings.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -26,7 +29,6 @@ class _LoginPageState extends State<LoginPage> {
   final _passCtrl = TextEditingController();
   final _userFocus = FocusNode();
   final _passFocus = FocusNode();
-  bool _obscured = true;
   bool _loadingConfig = true;
   bool _connecting = false;
   Object? _error;
@@ -99,12 +101,13 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final scheme = Theme.of(context).colorScheme;
+    final canSubmit = !_connecting && _authConfig?['oidc'] != null;
     return AppScaffold(
+      title: Text(l10n.authSignIn),
       expandBody: true,
       actions: [
-        IconButton(
-          icon: const Icon(Icons.settings_outlined),
+        AppIconButton(
+          icon: Icons.settings_outlined,
           tooltip: l10n.settings,
           onPressed: () => openAppSettings(context),
         ),
@@ -127,78 +130,29 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         SizedBox(height: AppSpacing.md),
                       ],
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          border: Border(
-                            bottom: BorderSide(color: scheme.outlineVariant),
-                          ),
-                        ),
-                        child: TextField(
-                          controller: _userCtrl,
-                          focusNode: _userFocus,
-                          enabled: !_connecting,
-                          autofillHints: const [AutofillHints.username],
-                          textInputAction: TextInputAction.next,
-                          onSubmitted: (_) => _passFocus.requestFocus(),
-                          decoration: kBorderlessInputDecoration.copyWith(
-                            contentPadding: const EdgeInsets.symmetric(vertical: 14),
-                          ),
-                          style: Theme.of(context).textTheme.titleMedium,
-                        ),
+                      AppTextField(
+                        controller: _userCtrl,
+                        focusNode: _userFocus,
+                        label: l10n.authLogin,
+                        enabled: !_connecting,
+                        autofillHints: const [AutofillHints.username],
+                        textInputAction: TextInputAction.next,
+                        onFieldSubmitted: (_) => _passFocus.requestFocus(),
                       ),
-                      SizedBox(height: AppSpacing.sm),
-                      DecoratedBox(
-                        decoration: BoxDecoration(
-                          border: Border(
-                            bottom: BorderSide(color: scheme.outlineVariant),
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: TextField(
-                                controller: _passCtrl,
-                                focusNode: _passFocus,
-                                enabled: !_connecting,
-                                obscureText: _obscured,
-                                autofillHints: const [AutofillHints.password],
-                                textInputAction: TextInputAction.go,
-                                onSubmitted: (_) => _submit(),
-                                decoration: kBorderlessInputDecoration.copyWith(
-                                  contentPadding:
-                                      const EdgeInsets.symmetric(vertical: 14),
-                                ),
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                            ),
-                            IconButton(
-                              icon: Icon(
-                                _obscured
-                                    ? Icons.visibility_outlined
-                                    : Icons.visibility_off_outlined,
-                              ),
-                              onPressed: _connecting
-                                  ? null
-                                  : () => setState(() => _obscured = !_obscured),
-                            ),
-                          ],
-                        ),
+                      SizedBox(height: AppSpacing.md),
+                      AppPasswordField(
+                        controller: _passCtrl,
+                        focusNode: _passFocus,
+                        label: l10n.authPassword,
+                        enabled: !_connecting,
+                        textInputAction: TextInputAction.go,
+                        onFieldSubmitted: (_) => _submit(),
                       ),
                       SizedBox(height: AppSpacing.lg),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: FilledButton(
-                          onPressed: _connecting || _authConfig?['oidc'] == null
-                              ? null
-                              : _submit,
-                          child: _connecting
-                              ? const SizedBox(
-                                  width: 22,
-                                  height: 22,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
-                                )
-                              : const Icon(Icons.arrow_forward_rounded),
-                        ),
+                      AppAsyncButton(
+                        label: _connecting ? l10n.authSigningIn : l10n.authSignIn,
+                        busy: _connecting,
+                        onPressed: canSubmit ? _submit : null,
                       ),
                     ],
                   ),

@@ -7,6 +7,7 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
+import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/features/employee/project_workspace_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -102,16 +103,16 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                TextFormField(
+                AppTextField(
                   controller: _nameCtrl,
-                  decoration: InputDecoration(labelText: l10n.projectProjectName),
+                  label: l10n.projectProjectName,
                   enabled: !_saving,
                   validator: (v) {
                     if (v == null || v.trim().isEmpty) return l10n.commonNameRequired;
                     return null;
                   },
                 ),
-                const SizedBox(height: AppSpacing.md),
+                SizedBox(height: AppSpacing.md),
                 AppChoicePreference<String?>(
                   title: l10n.projectPreferredAgentProvider,
                   icon: Icons.smart_toy_outlined,
@@ -122,8 +123,9 @@ class _ProjectCreatePageState extends State<ProjectCreatePage> {
                   enabled: !_saving,
                   onSave: (v) async => setState(() => _agentProvider = v),
                 ),
-                AppButton(
+                AppAsyncButton(
                   label: _saving ? l10n.commonCreating : l10n.projectCreateAndOpenChat,
+                  busy: _saving,
                   onPressed: _saving ? null : _create,
                 ),
               ],

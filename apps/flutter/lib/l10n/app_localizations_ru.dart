@@ -758,6 +758,18 @@ class AppLocalizationsRu extends AppLocalizations {
   String get authSignIn => 'Вход';
 
   @override
+  String get authLogin => 'Логин';
+
+  @override
+  String get authPassword => 'Пароль';
+
+  @override
+  String get authShowPassword => 'Показать пароль';
+
+  @override
+  String get authHidePassword => 'Скрыть пароль';
+
+  @override
   String get authSignInWithKeycloak => 'Войти через Keycloak';
 
   @override

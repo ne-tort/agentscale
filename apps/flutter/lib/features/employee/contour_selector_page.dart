@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/auth/token_session.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/widgets/app_icon_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/employee/cabinet_list_page.dart';
@@ -31,9 +32,9 @@ class ContourSelectorPage extends StatelessWidget {
     return AppScaffold(
       title: Text(l10n.commonSelectCompany),
       actions: [
-        IconButton(
+        AppIconButton(
           tooltip: l10n.settings,
-          icon: const Icon(Icons.settings_outlined),
+          icon: Icons.settings_outlined,
           onPressed: () => openAppSettings(context),
         ),
       ],

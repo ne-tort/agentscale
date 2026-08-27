@@ -5,6 +5,7 @@ import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
+import 'package:prodavan/core/widgets/app_icon_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
@@ -92,10 +93,14 @@ class _CabinetListPageState extends State<CabinetListPage> {
     return AppScaffold(
       title: Text(l10n.commonCabinets),
       actions: [
-        IconButton(onPressed: _createCabinet, icon: const Icon(Icons.add)),
-        IconButton(
+        AppIconButton(
+          tooltip: l10n.commonAdd,
+          icon: Icons.add,
+          onPressed: _createCabinet,
+        ),
+        AppIconButton(
           tooltip: l10n.settings,
-          icon: const Icon(Icons.settings_outlined),
+          icon: Icons.settings_outlined,
           onPressed: () => openAppSettings(context),
         ),
       ],

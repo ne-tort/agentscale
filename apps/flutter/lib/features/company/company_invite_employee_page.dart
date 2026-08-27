@@ -6,6 +6,7 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
+import 'package:prodavan/core/widgets/app_text_field.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Full-page employee invite — no password field (L04 ux-contract).
@@ -73,24 +74,27 @@ class _CompanyInviteEmployeePageState extends State<CompanyInviteEmployeePage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  TextFormField(
+                  AppTextField(
                     controller: _emailCtrl,
-                    decoration: InputDecoration(labelText: l10n.commonEmail),
+                    label: l10n.commonEmail,
                     keyboardType: TextInputType.emailAddress,
                     validator: (v) {
                       final email = v?.trim() ?? '';
-                      if (email.isEmpty || !email.contains('@')) return l10n.companyValidEmailRequired;
+                      if (email.isEmpty || !email.contains('@')) {
+                        return l10n.companyValidEmailRequired;
+                      }
                       return null;
                     },
                   ),
-                  const SizedBox(height: AppSpacing.md),
-                  TextFormField(
+                  SizedBox(height: AppSpacing.md),
+                  AppTextField(
                     controller: _nameCtrl,
-                    decoration: InputDecoration(labelText: l10n.commonDisplayNameOptional),
+                    label: l10n.commonDisplayNameOptional,
                   ),
-                  const SizedBox(height: AppSpacing.md),
-                  AppButton(
+                  SizedBox(height: AppSpacing.md),
+                  AppAsyncButton(
                     label: _saving ? l10n.companyInviting : l10n.commonInvite,
+                    busy: _saving,
                     onPressed: _saving ? null : _invite,
                   ),
                 ],
