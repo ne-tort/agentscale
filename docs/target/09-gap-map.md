@@ -24,10 +24,14 @@
 | **P-MOD-01** | **Module** catalog + cabinet bind + per-cabinet data | **Admin CRUD + meta + materialize + runtime data API + Flutter** | Physical DDL; meta editor UI |
 | **P-MOD-02** | Meta-table **syntax** spec + interpreters | **[meta-syntax](06-modules/meta-syntax/) documented**; shell `nav.contour` preview in seed editor | Live catalog shell merge; cabinet UI renderer; materialize engine |
 | **P-MAT-01** | Pod hydrate из meta/MinIO | object-ws; нет Pod; file_ref слаб | Materialize/Pod debt |
-| **P-POD-01** | `ProjectRuntimeUnit` → k8s Pod; inert → delete Pod | `object-ws:…` stub adapter; pause via ContainerRuntimePort | [14](14-project-containers/) |
+| **P-POD-01** | `ProjectPod` → k8s Pod; inert → delete Pod | `object-ws:…` stub adapter; pause via ContainerRuntimePort | [14](14-project-containers/) · [P1 Phase 3](11-implementation-plan/P1-pod-service.md) |
+| **P-POD-02** | `pod_service` BC isolated | runtime in `project_service` (`ProjectRuntimeManager`) | [pod-service](14-project-containers/pod-service.md) · P1 Phase 1 |
+| **P-POD-03** | 1:1 ProjectPod | 0..N `project_runtime_units` | P1 Phase 1–2 |
+| **P-POD-04** | `pod.*` lifecycle events | only `project.*` (+ runtime_unit.*) | P1 Phase 2 |
+| **P-POD-05** | Relations pod↔project bind | FK only | P1 Phase 2 |
 | **P-PRJ-01** | Изолированный BC `project_service`; чужие BC только Command/Query | **Facade live**; residual direct ORM in legacy paths | Lint/import guard later |
 | **P-PRJ-02** | `visibility_mode` + project↔employee assignment | **Schema + API + RelationsCommand live** | Flutter filter UI |
-| **P-PRJ-03** | 0..N runtime units per project | **Table + ProjectRuntimeManager + API live** | Real Pod adapter (P-POD-01) |
+| **P-PRJ-03** | 1:1 ProjectPod (lazy create) | **Table + ProjectRuntimeManager + runtime-units API live** | [P1](11-implementation-plan/P1-pod-service.md) Phase 4 deprecate |
 | **P-MCP-01** | Агент в Pod ↔ `cabinet.*` | **Out of MVP cabinet entity** (removed typed MCP/packages); future contract | Изоляция + контракт |
 | **P-CAS-01** | Cabinet soft_delete → soft projects; purge → DROP | Admin hard `delete_with_cascade` | Soft default DELETE + purge |
 | **P-INF-01** | MinIO / Kafka / Celery | Local FS / in-process | [13](13-platform-infra/) |

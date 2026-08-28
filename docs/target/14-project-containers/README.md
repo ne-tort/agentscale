@@ -14,13 +14,16 @@
 
 | Файл | Содержание |
 |------|------------|
-| [domain.md](domain.md) | Сущность, статусы, Port |
+| [pod-service.md](pod-service.md) | BC `pod_service`: границы, API, events, Relations |
+| [domain.md](domain.md) | Сущность, статусы, Port (transitional → 1:1) |
 | [lifecycle.md](lifecycle.md) | create / pause / resume / delete |
 | [isolation.md](isolation.md) | NetworkPolicy, SA, peer |
 | [k8s-contract.md](k8s-contract.md) | labels, resources, zombies |
 | [errors-ops.md](errors-ops.md) | stuck / force-kill / audit |
 | [admin-ui.md](admin-ui.md) | Admin «Контейнеры» |
 | [adr.md](adr.md) | Решения (Pod, pause=delete Pod, MinIO SoT) |
+
+**План реализации:** [P1-pod-service](../11-implementation-plan/P1-pod-service.md) (Phase 1–4, PR-разрез, DoD).
 
 ## Non-goals
 

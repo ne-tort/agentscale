@@ -46,13 +46,14 @@ create → materialize (metadata + workspace stub; runtime unit optional)
 
 | Facade | Назначение |
 |--------|------------|
-| `ProjectCommand` | writes: CRUD, lifecycle, visibility, runtime units |
+| `ProjectCommand` | writes: CRUD, lifecycle, visibility, assignments |
 | `ProjectQuery` | reads + visibility filter |
 | `ProjectAccessPolicy` | ACL |
 | `ProjectLifecycleEmitter` | `project.*` platform events |
-| `ProjectRuntimeManager` | units + `ContainerRuntimePort` |
+| → `PodCommand` | runtime: делегирует в [`pod_service`](../14-project-containers/pod-service.md) (`sync_desired`) |
 
-Другие BC вызывают только facades — не `ProjectRow` / SQL напрямую.
+Другие BC вызывают только facades — не `ProjectRow` / SQL напрямую.  
+Runtime orchestration (k8s Pod) — **не** в project_service после [P1](../11-implementation-plan/P1-pod-service.md) Phase 1.
 
 ## API (логический)
 

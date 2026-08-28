@@ -7,7 +7,8 @@
 
 | Слой | Статус | Quality | As-built | Доказательство (PR / suite) | Блокеры |
 |------|--------|---------|----------|----------------------------|---------|
-| [P0 platform-infra](P0-platform-infra.md) | doing | n/a | [13](../13-platform-infra/) + [L00](../12-layer-docs/L00-platform-skeleton.md) | k3s platform brokers (Redis/MinIO/Redpanda/Celery); Redpanda PVC without unsafe fsync bypass | Kafka sole-path; project Pod isolator; Redpanda HA; Helm/TLS/KC |
+| [P0 platform-infra](P0-platform-infra.md) | doing | n/a | [13](../13-platform-infra/) + [L00](../12-layer-docs/L00-platform-skeleton.md) | k3s platform brokers (Redis/MinIO/Redpanda/Celery); Redpanda PVC without unsafe fsync bypass | Kafka sole-path; Redpanda HA; Helm/TLS/KC |
+| [P1 pod_service](P1-pod-service.md) | todo | n/a | [14](../14-project-containers/pod-service.md) | project_service BC merged (#98/#99) | Phase 1 skeleton PR |
 | [L00](L00-platform-skeleton.md) | done | 8 | [12](../12-layer-docs/L00-platform-skeleton.md) | L00 skeleton commit | |
 | [L01](L01-identity.md) | partial | 7 | [12](../12-layer-docs/L01-identity.md) | identity + JWT tests | live KC Admin/realm |
 | [L02](L02-ui-core.md) | done | 8 | [12](../12-layer-docs/L02-ui-core.md) | L02 UI core commit | |

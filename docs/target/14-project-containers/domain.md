@@ -1,5 +1,8 @@
 # ProjectRuntimeUnit — domain
 
+> **Transitional.** As-built: 0..N `ProjectRuntimeUnit` per Project.  
+> **Канон (target):** 1:1 `ProjectPod` в [`pod_service`](pod-service.md) — см. [P1 plan](../11-implementation-plan/P1-pod-service.md).
+
 ## Сущность
 
 `ProjectRuntimeUnit` — учётная запись **изолированного runtime** (0..N на Project). Заменяет канонический 1:1 `ProjectContainer`.
