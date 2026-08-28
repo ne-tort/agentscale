@@ -45,6 +45,7 @@ def test_live_containers_lifecycle(live_client, live_api_prefix: str) -> None:
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
+    company_login = co.json()["credentials"]["username"]
 
     key = live_client.post(
         f"{live_api_prefix}/admin/ai-keys",
@@ -63,7 +64,7 @@ def test_live_containers_lifecycle(live_client, live_api_prefix: str) -> None:
     owner_tok = login_via_api(
         live_client,
         live_api_prefix,
-        username=owner_email,
+        username=company_login,
         password="test-company-pass",
     )
     owner_h = auth_header(owner_tok)

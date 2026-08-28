@@ -215,6 +215,14 @@ jobs:
           echo "${{ runner.temp }}/ops-venv/bin" >> "${GITHUB_PATH}"
           "${{ runner.temp }}/ops-venv/bin/python" -m pip install -U pip poetry
 
+      - name: Sync PR e2e tests into cluster
+        run: |
+          set -euo pipefail
+          kubectl delete configmap prodavan-e2e-tests -n prodavan --ignore-not-found
+          kubectl create configmap prodavan-e2e-tests \
+            --from-file=apps/api/tests/e2e \
+            -n prodavan
+
       - name: Run k8s e2e Job (L3a)
         working-directory: infra/ops
         run: |
@@ -224,7 +232,9 @@ jobs:
       - name: Cleanup k8s e2e
         if: always()
         working-directory: infra/ops
-        run: poetry run prodavan-ops e2e cleanup || true
+        run: |
+          poetry run prodavan-ops e2e cleanup || true
+          kubectl delete configmap prodavan-e2e-tests -n prodavan --ignore-not-found || true
 
   live:
     needs: gate

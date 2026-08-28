@@ -21,7 +21,6 @@ from prodavan.application.ai_keys.service import AiKeysService
 from prodavan.config.settings import settings
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.auth.jwt import reset_jwt_validator
-from prodavan.infrastructure.persistence.database import get_session_factory
 from prodavan.infrastructure.secrets.file_store import FileSecretStore
 from prodavan.main import create_app
 from tests.conftest import DATABASE_URL, requires_postgres
@@ -60,18 +59,21 @@ def test_list_requires_admin(client: TestClient) -> None:
     assert r.status_code == 401
 
 
-def _run_async(coro_factory) -> None:
-    from concurrent.futures import ThreadPoolExecutor
+def _run_ai_keys(coro_fn, tmp_path: Path) -> None:
+    """Run AiKeysService coroutine on a dedicated engine (not TestClient's loop)."""
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-    def _runner() -> None:
-        loop = asyncio.new_event_loop()
+    async def _go() -> None:
+        engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
+        factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         try:
-            loop.run_until_complete(coro_factory())
+            async with factory() as session:
+                svc = AiKeysService(session, FileSecretStore(tmp_path))
+                await coro_fn(svc)
         finally:
-            loop.close()
+            await engine.dispose()
 
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        pool.submit(_runner).result(timeout=30)
+    asyncio.run(_go())
 
 
 def _create_company_sync(name: str) -> str:
@@ -141,16 +143,12 @@ def test_crud_and_resolve_bans_cli_subscription(
     assert len(created_events) >= 1
     assert "secret" not in str(created_events[0]["detail"])
 
-    async def _resolve_ok() -> None:
-        factory = get_session_factory()
-        async with factory() as session:
-            cred = await AiKeysService(session, FileSecretStore(tmp_path)).resolve_credentials(
-                company_id=company_id, preferred_provider="cursor"
-            )
-            assert cred.api_kind == "cursor_sdk"
-            assert cred.secret == "cursor-secret-aaa"
+    async def _resolve_ok(svc: AiKeysService) -> None:
+        cred = await svc.resolve_credentials(company_id=company_id, preferred_provider="cursor")
+        assert cred.api_kind == "cursor_sdk"
+        assert cred.secret == "cursor-secret-aaa"
 
-    _run_async(_resolve_ok)
+    _run_ai_keys(_resolve_ok, tmp_path)
 
     cli_co = _create_company_sync("CLI Co")
     cli_key = client.post(
@@ -166,17 +164,13 @@ def test_crud_and_resolve_bans_cli_subscription(
     )
     assert cli_key.status_code == 201
 
-    async def _resolve_cli() -> None:
-        factory = get_session_factory()
-        async with factory() as session:
-            with pytest.raises(AppError) as ei:
-                await AiKeysService(session, FileSecretStore(tmp_path)).resolve_credentials(
-                    company_id=cli_co
-                )
-            assert ei.value.code == "NO_AI_KEY"
-            assert "cli_subscription" in (ei.value.detail or "")
+    async def _resolve_cli(svc: AiKeysService) -> None:
+        with pytest.raises(AppError) as ei:
+            await svc.resolve_credentials(company_id=cli_co)
+        assert ei.value.code == "NO_AI_KEY"
+        assert "cli_subscription" in (ei.value.detail or "")
 
-    _run_async(_resolve_cli)
+    _run_ai_keys(_resolve_cli, tmp_path)
 
     deleted = client.delete(f"/api/v1/admin/ai-keys/{key_id}", headers=auth_headers)
     assert deleted.status_code == 204
@@ -212,16 +206,12 @@ def test_resolve_lazy_disables_past_renewal(
     assert create.status_code == 201, create.text
     key_id = create.json()["id"]
 
-    async def _resolve_fails() -> None:
-        factory = get_session_factory()
-        async with factory() as session:
-            with pytest.raises(AppError) as ei:
-                await AiKeysService(session, FileSecretStore(tmp_path)).resolve_credentials(
-                    company_id=company_id
-                )
-            assert ei.value.code == "NO_AI_KEY"
+    async def _resolve_fails(svc: AiKeysService) -> None:
+        with pytest.raises(AppError) as ei:
+            await svc.resolve_credentials(company_id=company_id)
+        assert ei.value.code == "NO_AI_KEY"
 
-    _run_async(_resolve_fails)
+    _run_ai_keys(_resolve_fails, tmp_path)
 
     audit_exp = client.get(
         f"/api/v1/admin/ai-keys/audit-events?key_id={key_id}",
@@ -251,15 +241,11 @@ def test_resolve_lazy_disables_past_renewal(
     assert resumed.status_code == 200, resumed.text
     assert resumed.json()["status"] == "active"
 
-    async def _resolve_ok() -> None:
-        factory = get_session_factory()
-        async with factory() as session:
-            cred = await AiKeysService(session, FileSecretStore(tmp_path)).resolve_credentials(
-                company_id=company_id
-            )
-            assert cred.secret == "sk-expired"
+    async def _resolve_ok_after_renew(svc: AiKeysService) -> None:
+        cred = await svc.resolve_credentials(company_id=company_id)
+        assert cred.secret == "sk-expired"
 
-    _run_async(_resolve_ok)
+    _run_ai_keys(_resolve_ok_after_renew, tmp_path)
 
 
 @requires_postgres
@@ -281,28 +267,27 @@ def test_platform_fallback_uses_unbound_pool_key(
     )
     assert platform.status_code == 201, platform.text
 
-    async def _resolve_with_fallback() -> None:
-        factory = get_session_factory()
-        async with factory() as session:
-            cred = await AiKeysService(session, FileSecretStore(tmp_path)).resolve_credentials(
+    async def _resolve_with_fallback(svc: AiKeysService) -> None:
+        cred = await svc.resolve_credentials(
+            company_id=company_id,
+            preferred_provider="cursor",
+            platform_fallback=True,
+        )
+        assert cred.secret == "platform-cursor-secret"
+
+    _run_ai_keys(_resolve_with_fallback, tmp_path)
+
+    async def _resolve_without_fallback_fails(svc: AiKeysService) -> None:
+        with pytest.raises(AppError) as ei:
+            await svc.resolve_credentials(
                 company_id=company_id,
                 preferred_provider="cursor",
-                platform_fallback=True,
+                platform_fallback=False,
             )
-            assert cred.secret == "platform-cursor-secret"
+        assert ei.value.code == "NO_AI_KEY"
 
-    _run_async(_resolve_with_fallback)
+    _run_ai_keys(_resolve_without_fallback_fails, tmp_path)
 
-    async def _resolve_without_fallback_fails() -> None:
-        factory = get_session_factory()
-        async with factory() as session:
-            with pytest.raises(AppError) as ei:
-                await AiKeysService(session, FileSecretStore(tmp_path)).resolve_credentials(
-                    company_id=company_id,
-                    preferred_provider="cursor",
-                    platform_fallback=False,
-                )
-            assert ei.value.code == "NO_AI_KEY"
 
 @requires_postgres
 def test_create_name_only_then_rotate_stays_disabled(

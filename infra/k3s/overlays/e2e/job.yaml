@@ -53,6 +53,10 @@ spec:
           envFrom:
             - configMapRef:
                 name: prodavan-e2e-config
+          volumeMounts:
+            - name: e2e-tests
+              mountPath: /app/tests/e2e
+              readOnly: true
           resources:
             requests:
               cpu: 200m
@@ -60,3 +64,8 @@ spec:
             limits:
               cpu: "2"
               memory: 2Gi
+      volumes:
+        - name: e2e-tests
+          configMap:
+            name: prodavan-e2e-tests
+            optional: true
