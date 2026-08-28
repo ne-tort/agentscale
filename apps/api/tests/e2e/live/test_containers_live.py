@@ -54,7 +54,7 @@ def test_live_containers_lifecycle(live_client, live_api_prefix: str) -> None:
             "password": EMPLOYEE_PASSWORD,
             "contact_email": owner_email,
             "display_name": "Owner",
-            "role": "company_admin",
+            "role": "company.admin",
         },
     )
     assert owner_inv.status_code in (200, 201), owner_inv.text

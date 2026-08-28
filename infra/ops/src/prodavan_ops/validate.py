@@ -194,6 +194,12 @@ def validate_all() -> None:
         raise RuntimeError("overlays/e2e render must include prodavan-e2e-runner Job")
     if "POD_RUNTIME_MODE: k8s" not in e2e_manifest:
         raise RuntimeError("overlays/e2e must set POD_RUNTIME_MODE: k8s on runner ConfigMap")
+    if "name: prodavan-e2e-sandbox-pods\n  namespace: prodavan-sandboxes" not in e2e_manifest.replace(
+        "\r\n", "\n"
+    ):
+        raise RuntimeError(
+            "overlays/e2e sandbox Role must stay in prodavan-sandboxes (use namespace-transformer unsetOnly)"
+        )
     print(f"ok kustomize ({e2e_lines} lines)")
 
     print("==> kustomize argocd/install")

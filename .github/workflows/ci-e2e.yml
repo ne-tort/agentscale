@@ -233,8 +233,11 @@ jobs:
           poetry run prodavan-ops smoke --addr host.docker.internal --port 8088
 
   k8s:
-    needs: [gate, dev-preflight]
-    if: needs.gate.outputs.run_k8s == 'true'
+    needs: [gate, dev-preflight, integration]
+    if: >-
+      always() && needs.gate.outputs.run_k8s == 'true'
+      && needs.dev-preflight.result == 'success'
+      && (needs.integration.result == 'success' || needs.integration.result == 'skipped')
     timeout-minutes: 25
     concurrency:
       group: prodavan-e2e-k8s-cluster
@@ -326,8 +329,11 @@ jobs:
           kubectl delete configmap prodavan-e2e-conftest -n prodavan --ignore-not-found --request-timeout=10s || true
 
   live:
-    needs: [gate, dev-preflight]
-    if: needs.gate.outputs.run_live == 'true'
+    needs: [gate, dev-preflight, integration]
+    if: >-
+      always() && needs.gate.outputs.run_live == 'true'
+      && needs.dev-preflight.result == 'success'
+      && (needs.integration.result == 'success' || needs.integration.result == 'skipped')
     runs-on: [self-hosted, linux, docker]
     defaults:
       run:

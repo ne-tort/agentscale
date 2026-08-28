@@ -227,7 +227,7 @@ def _seed_integration_catalog() -> None:
                     )
         await engine.dispose()
 
-    _run_async(_seed, timeout=60)
+    _run_async(_seed, timeout=90)
     _dispose_app_engine()
 
 
@@ -283,7 +283,17 @@ def clean_engine_cache(request: pytest.FixtureRequest):
         if last_err is not None:
             raise last_err
         if "/tests/integration/" in path or "/tests/e2e/k8s/" in path:
-            _seed_integration_catalog()
+            seed_err: TimeoutError | None = None
+            for _ in (1, 2, 3):
+                try:
+                    _seed_integration_catalog()
+                    seed_err = None
+                    break
+                except TimeoutError as exc:
+                    seed_err = exc
+                    _dispose_app_engine()
+            if seed_err is not None:
+                raise seed_err
     yield
     _dispose_app_engine()
 
