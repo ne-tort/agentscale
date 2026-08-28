@@ -45,7 +45,7 @@ def k8s_client(monkeypatch: pytest.MonkeyPatch, tmp_path):
     monkeypatch.setenv("KEYCLOAK_INVITE_MODE", "fake")
     monkeypatch.setenv("POD_RUNTIME_MODE", "k8s")
     monkeypatch.setenv("POD_SANDBOX_NAMESPACE", K8S_SANDBOX_NAMESPACE)
-    monkeypatch.setenv("POD_SANDBOX_MINIO_SECRET", "prodavan-minio-hydrate")
+    monkeypatch.delenv("POD_SANDBOX_MINIO_SECRET", raising=False)
     monkeypatch.setenv("POD_K8S_REQUIRED", "true")
     monkeypatch.setenv("SECRETS_DIR", str(tmp_path))
 

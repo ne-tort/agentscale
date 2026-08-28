@@ -194,6 +194,8 @@ def validate_all() -> None:
         raise RuntimeError("overlays/e2e render must include prodavan-e2e-runner Job")
     if "POD_RUNTIME_MODE: k8s" not in e2e_manifest:
         raise RuntimeError("overlays/e2e must set POD_RUNTIME_MODE: k8s on runner ConfigMap")
+    if "POD_SANDBOX_MINIO_SECRET" in e2e_manifest:
+        raise RuntimeError("overlays/e2e must use stub hydrate (omit POD_SANDBOX_MINIO_SECRET)")
     if "name: prodavan-e2e-sandbox-pods\n  namespace: prodavan-sandboxes" not in e2e_manifest.replace(
         "\r\n", "\n"
     ):
