@@ -1,4 +1,4 @@
-"""In-process BC: project aggregate, lifecycle, runtime units."""
+"""In-process BC: project aggregate, lifecycle, pod delegation."""
 
 from prodavan.application.project_service.access import ProjectAccessPolicy
 from prodavan.application.project_service.command import ProjectCommand

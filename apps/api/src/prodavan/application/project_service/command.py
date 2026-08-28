@@ -1,4 +1,4 @@
-"""Project writes — CRUD, lifecycle, visibility, runtime units."""
+"""Project writes — CRUD, lifecycle, visibility, pod delegation."""
 
 from __future__ import annotations
 
@@ -63,7 +63,6 @@ class ProjectCommand:
         employee: EmployeeRow,
         principal: Principal,
         agent_provider: str | None = None,
-        with_runtime_unit: bool = False,
     ) -> dict:
         if not name.strip():
             raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="name required")
@@ -123,8 +122,6 @@ class ProjectCommand:
             cabinet_name=inst.name,
             project_name=row.name,
         )
-        if with_runtime_unit:
-            await self._pods.provision_for_project(row.id, principal=principal, start=False)
         await self._triggers.enqueue(project_id=project_id, kind="project.prepare", payload={"source": "create"})
         await self._events.emit(
             event_type="project.created",

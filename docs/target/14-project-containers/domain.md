@@ -1,46 +1,42 @@
-# ProjectRuntimeUnit — domain
+# ProjectPod — domain
 
-> **Transitional.** As-built: 0..N `ProjectRuntimeUnit` per Project.  
-> **Канон (target):** 1:1 `ProjectPod` в [`pod_service`](pod-service.md) — см. [P1 plan](../11-implementation-plan/P1-pod-service.md).
+> **As-built (P1):** 1:1 `ProjectPod` per Project in [`pod_service`](pod-service.md).  
+> Legacy `ProjectRuntimeUnit` (0..N) удалён из кода и схемы — см. миграции `2026082818` / `2026082819`.
 
 ## Сущность
 
-`ProjectRuntimeUnit` — учётная запись **изолированного runtime** (0..N на Project). Заменяет канонический 1:1 `ProjectContainer`.
+`ProjectPod` — учётная запись **изолированного runtime** (ровно один live pod на active/paused Project).
 
 | Поле | Смысл |
 |------|--------|
-| `id` | `pru_*` |
-| `project_id` | FK → Project |
-| `kind` | `primary` \| `sandbox` \| `worker` |
-| `status` | `pending` \| `running` \| `paused` \| `failed` \| `terminating` \| `deleted` |
-| `runtime_ref` | nullable opaque: pod name/uid (когда Pod есть) |
+| `id` | `pod_*` |
+| `project_id` | FK → Project, UNIQUE для live row |
+| `workspace_key` | denorm для hydrate |
+| `status` | `pending` \| `provisioning` \| `running` \| `pausing` \| `paused` \| `failed` \| `terminating` \| `terminated` |
+| `desired_state` | `absent` \| `running` |
+| `runtime_ref` | opaque ref (`object-ws:{key}` stub; k8s Pod name позже) |
 | `last_error` | последняя ошибка оркестратора |
+| `hydrate_generation` | bump on rematerialize |
 
-Project хранит `primary_runtime_unit_id` + legacy `container_ref` (transitional).
+Project хранит legacy `container_ref` (transitional mirror of `runtime_ref`).
 
-Проект **можно создать без runtime unit** — только metadata + workspace stub. Attach/detach — отдельные команды.
+Pod создаётся **lazy** — при первом agent/trigger или при resume после pause.
 
 ## Статусы ↔ Project
 
-| Project.status | Runtime units (желаемое) |
-|----------------|--------------------------|
-| `active` | units могут быть `running` |
-| `paused` | все units → pause (**нет** Pod; blobs в MinIO) |
-| `completed` | read-only; units paused |
-| `deleted` | units terminated; blobs keep до purge |
+| Project.status | Pod (желаемое) |
+|----------------|----------------|
+| `active` | `desired_state=running` (lazy или после resume) |
+| `paused` | `desired_state=absent`, Pod paused |
+| `completed` | `desired_state=absent` |
+| `deleted` | Pod terminated |
 
-## Port `ContainerRuntimePort`
+## События
 
-Единственный контракт наружу (`ProjectRuntimeManager` → adapter):
+`pod.provisioned`, `pod.started`, `pod.hydrated`, `pod.paused`, `pod.resumed`, `pod.terminated`, `pod.failed`, `pod.reconciled` — platform bus.
 
-| Method | Эффект |
-|--------|--------|
-| `ensure_running` | start Pod / object-ws |
-| `pause` | остановить compute |
-| `terminate` | удалить Pod |
+Первый lazy start: `pod.started` → `pod.hydrated` → `project.started`. Resume: `pod.resumed` → `project.resumed`.
 
-Запрещено: AiKeys → Port; UI → kubectl; размазывать client по `ProjectCommand`.
+## API
 
-## As-built
-
-Stub adapter: `object-ws:{workspace_key}` — см. gap **P-POD-01**.
+Employee UI — только через Project lifecycle (`pause`/`resume`/`delete`). Admin — `GET /admin/containers`, force-kill, reconcile.

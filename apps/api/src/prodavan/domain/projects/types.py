@@ -21,21 +21,6 @@ class ProjectVisibilityMode(StrEnum):
     RESTRICTED = "restricted"
 
 
-class ProjectRuntimeUnitKind(StrEnum):
-    PRIMARY = "primary"
-    SANDBOX = "sandbox"
-    WORKER = "worker"
-
-
-class ProjectRuntimeUnitStatus(StrEnum):
-    PENDING = "pending"
-    RUNNING = "running"
-    PAUSED = "paused"
-    FAILED = "failed"
-    TERMINATING = "terminating"
-    DELETED = "deleted"
-
-
 class TriggerStatus(StrEnum):
     QUEUED = "queued"
     DONE = "done"
@@ -205,10 +190,6 @@ def is_forbidden_attachment_content(raw: bytes) -> bool:
 
 def new_project_id() -> str:
     return f"proj_{uuid.uuid4().hex[:16]}"
-
-
-def new_runtime_unit_id() -> str:
-    return f"pru_{uuid.uuid4().hex[:16]}"
 
 
 def slugify_name(name: str) -> str:

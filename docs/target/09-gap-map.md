@@ -24,7 +24,7 @@
 | **P-MOD-01** | **Module** catalog + cabinet bind + per-cabinet data | **Admin CRUD + meta + materialize + runtime data API + Flutter** | Physical DDL; meta editor UI |
 | **P-MOD-02** | Meta-table **syntax** spec + interpreters | **[meta-syntax](06-modules/meta-syntax/) documented**; shell `nav.contour` preview in seed editor | Live catalog shell merge; cabinet UI renderer; materialize engine |
 | **P-MAT-01** | Pod hydrate из meta/MinIO | object-ws; нет Pod; file_ref слаб | Materialize/Pod debt |
-| **P-POD-01** | `ProjectPod` → k8s Pod; inert → delete Pod | `pod_service` + stub/k8s adapter; GitOps sandbox ns; reconcile worker | [14](14-project-containers/) · Phase 3 stub fallback |
+| **P-POD-01** | `ProjectPod` → k8s Pod; inert → delete Pod | **Stub complete:** lazy start, hydrate stub, reconcile, events; k8s adapter placeholder | Real k8s Pod + MinIO hydrate |
 | **P-POD-02** | `pod_service` BC isolated | **`application/pod_service/`**; `ProjectCommand` → `PodCommand.sync_desired` | done · [pod-service](14-project-containers/pod-service.md) |
 | **P-POD-03** | 1:1 ProjectPod | **`project_pods`** table + backfill; legacy `project_runtime_units` dropped | done |
 | **P-POD-04** | `pod.*` lifecycle events | **`PodLifecycleEmitter`** + whitelist | done |

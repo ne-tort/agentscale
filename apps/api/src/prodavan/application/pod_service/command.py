@@ -7,11 +7,13 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from prodavan.application.pod_service.adapters.k8s_pod_runtime import K8sPodRuntimeAdapter
+from prodavan.application.pod_service.adapters.stub_hydrate import StubHydrateAdapter
 from prodavan.application.pod_service.adapters.stub_pod_runtime import StubPodRuntimeAdapter
 from prodavan.application.pod_service.lifecycle_emitter import PodLifecycleEmitter
+from prodavan.application.pod_service.ports.hydrate import HydratePort
 from prodavan.application.pod_service.ports.pod_runtime import PodRuntimePort
 from prodavan.application.pod_service.query import PodQuery
+from prodavan.application.project_service.lifecycle_emitter import ProjectLifecycleEmitter
 from prodavan.application.relations.commands import RelationsCommand
 from prodavan.config.settings import settings
 from prodavan.domain.errors import AppError
@@ -33,7 +35,7 @@ _TERMINATE_REASONS = frozenset({"delete", "purge", "terminate", "detach", "force
 
 def _runtime_adapter() -> PodRuntimePort:
     if settings.pod_runtime_mode == "k8s":
-        return K8sPodRuntimeAdapter()
+        logger.info("pod_runtime_mode=k8s requested; stub adapter used until real k8s ships")
     return StubPodRuntimeAdapter()
 
 
@@ -44,10 +46,13 @@ class PodCommand:
         *,
         runtime: PodRuntimePort | None = None,
         events: PodLifecycleEmitter | None = None,
+        hydrate: HydratePort | None = None,
     ) -> None:
         self._session = session
         self._runtime = runtime or _runtime_adapter()
         self._events = events or PodLifecycleEmitter(session)
+        self._hydrate = hydrate or StubHydrateAdapter()
+        self._project_events = ProjectLifecycleEmitter(session)
         self._relations = RelationsCommand(session)
 
     async def sync_desired(
@@ -83,7 +88,7 @@ class PodCommand:
 
         try:
             if desired == PodDesiredState.RUNNING:
-                await self._apply_running(project, pod)
+                await self._apply_running(project, pod, principal=principal)
                 event_type = "pod.resumed" if reason == "resume" else "pod.started"
                 await self._events.emit(
                     event_type=event_type,
@@ -94,6 +99,15 @@ class PodCommand:
                     pod_id=pod.id,
                     payload=payload,
                 )
+                if reason == "lazy.start":
+                    await self._project_events.emit(
+                        event_type="project.started",
+                        company_id=project.company_id,
+                        project_id=project.id,
+                        cabinet_id=project.cabinet_id,
+                        principal=principal,
+                        payload={"source": "lazy.start"},
+                    )
             elif terminate:
                 await self._apply_terminate(project, pod)
                 await self._events.emit(
@@ -334,13 +348,26 @@ class PodCommand:
         )
         return pod
 
-    async def _apply_running(self, project: ProjectRow, pod: ProjectPodRow) -> None:
+    async def _apply_running(
+        self, project: ProjectRow, pod: ProjectPodRow, *, principal: Principal
+    ) -> None:
         ref = pod.runtime_ref or runtime_ref_for(project.workspace_key)
         pod.runtime_ref = ref
         pod.status = PodStatus.PROVISIONING
         await self._runtime.ensure_running(runtime_ref=ref)
+        ws_key = pod.workspace_key or project.workspace_key
+        await self._hydrate.hydrate(workspace_key=ws_key, runtime_ref=ref)
         pod.status = PodStatus.RUNNING
         project.container_ref = ref
+        await self._events.emit(
+            event_type="pod.hydrated",
+            company_id=project.company_id,
+            project_id=project.id,
+            cabinet_id=project.cabinet_id,
+            principal=principal,
+            pod_id=pod.id,
+            payload={"generation": pod.hydrate_generation},
+        )
 
     async def _apply_absent(self, project: ProjectRow, pod: ProjectPodRow) -> None:
         ref = pod.runtime_ref or project.container_ref

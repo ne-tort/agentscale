@@ -65,27 +65,3 @@ async def test_runtime_summary_shape() -> None:
         "last_error": None,
     }
 
-
-@pytest.mark.asyncio
-async def test_list_as_runtime_units_one_to_one() -> None:
-    session = AsyncMock()
-    pod = ProjectPodRow(
-        id="pod_live123",
-        project_id="prj_test1234567890",
-        workspace_key="wk_demo",
-        status=PodStatus.RUNNING,
-        desired_state=PodDesiredState.RUNNING,
-        runtime_ref="object-ws:wk_demo",
-        hydrate_generation=0,
-        created_at=datetime.now(UTC),
-        updated_at=datetime.now(UTC),
-    )
-    execute_result = MagicMock()
-    execute_result.scalar_one_or_none.return_value = pod
-    session.execute = AsyncMock(return_value=execute_result)
-
-    units = await PodQuery(session).list_as_runtime_units("prj_test1234567890")
-
-    assert len(units) == 1
-    assert units[0]["id"] == "pod_live123"
-    assert units[0]["kind"] == "primary"

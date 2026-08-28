@@ -1,9 +1,10 @@
-"""K8s PodRuntimePort — real Pod adapter (P-POD-01)."""
+"""K8s PodRuntimePort placeholder — real cluster wiring is a follow-up PR."""
 
 from __future__ import annotations
 
 import logging
 
+from prodavan.application.pod_service.adapters.stub_hydrate import StubHydrateAdapter
 from prodavan.application.pod_service.adapters.stub_pod_runtime import StubPodRuntimeAdapter
 from prodavan.application.pod_service.ports.hydrate import HydratePort
 from prodavan.application.pod_service.ports.pod_runtime import PodRuntimePort
@@ -11,13 +12,8 @@ from prodavan.application.pod_service.ports.pod_runtime import PodRuntimePort
 logger = logging.getLogger(__name__)
 
 
-class StubHydrateAdapter:
-    async def hydrate(self, *, workspace_key: str, runtime_ref: str) -> None:
-        logger.debug("hydrate stub workspace_key=%s runtime_ref=%s", workspace_key, runtime_ref)
-
-
 class K8sPodRuntimeAdapter:
-    """Real k8s adapter; falls back to stub when client unavailable."""
+    """Placeholder: delegates to stub until kubectl/client integration lands."""
 
     def __init__(
         self,

@@ -44,12 +44,14 @@ async def test_sync_desired_running_creates_and_starts_pod() -> None:
     session.execute = AsyncMock(return_value=execute_result)
 
     runtime = AsyncMock()
+    hydrate = AsyncMock()
     events = AsyncMock(spec=PodLifecycleEmitter)
     relations = AsyncMock()
     relations.bind_pod_to_project = AsyncMock()
 
-    cmd = PodCommand(session, runtime=runtime, events=events)
+    cmd = PodCommand(session, runtime=runtime, events=events, hydrate=hydrate)
     cmd._relations = relations
+    cmd._project_events = AsyncMock()
 
     await cmd.sync_desired(
         project.id,
@@ -59,8 +61,11 @@ async def test_sync_desired_running_creates_and_starts_pod() -> None:
     )
 
     runtime.ensure_running.assert_awaited_once()
-    events.emit.assert_awaited()
-    assert events.emit.await_args.kwargs["event_type"] == "pod.started"
+    hydrate.hydrate.assert_awaited_once()
+    assert events.emit.await_count >= 2
+    event_types = [c.kwargs["event_type"] for c in events.emit.await_args_list]
+    assert "pod.started" in event_types
+    assert "pod.hydrated" in event_types
 
 
 @pytest.mark.asyncio
@@ -247,3 +252,35 @@ async def test_sync_desired_resume_emits_pod_resumed() -> None:
     )
 
     assert events.emit.await_args.kwargs["event_type"] == "pod.resumed"
+
+
+@pytest.mark.asyncio
+async def test_lazy_start_emits_project_started() -> None:
+    session = AsyncMock()
+    project = _project()
+    session.get = AsyncMock(return_value=project)
+
+    live_result = MagicMock()
+    live_result.scalar_one_or_none.return_value = None
+    session.execute = AsyncMock(return_value=live_result)
+
+    runtime = AsyncMock()
+    hydrate = AsyncMock()
+    events = AsyncMock(spec=PodLifecycleEmitter)
+    relations = AsyncMock()
+    relations.bind_pod_to_project = AsyncMock()
+    project_events = AsyncMock()
+
+    cmd = PodCommand(session, runtime=runtime, events=events, hydrate=hydrate)
+    cmd._relations = relations
+    cmd._project_events = project_events
+
+    await cmd.sync_desired(
+        project.id,
+        PodDesiredState.RUNNING,
+        principal=_principal(),
+        reason="lazy.start",
+    )
+
+    project_events.emit.assert_awaited_once()
+    assert project_events.emit.await_args.kwargs["event_type"] == "project.started"

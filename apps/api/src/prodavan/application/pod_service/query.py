@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from prodavan.domain.pods import POD_TERMINAL_STATUSES, PodStatus
+from prodavan.domain.pods import POD_TERMINAL_STATUSES
 from prodavan.infrastructure.persistence.models.projects import ProjectPodRow
 
 
@@ -44,23 +44,6 @@ class PodQuery:
         )
         return [self._public(row) for row in q.scalars().all()]
 
-    async def list_as_runtime_units(self, project_id: str) -> list[dict]:
-        pod = await self.get_for_project(project_id)
-        if pod is None:
-            return []
-        return [
-            {
-                "id": pod["id"],
-                "project_id": project_id,
-                "kind": "primary",
-                "status": _pod_status_to_unit_status(pod["status"]),
-                "runtime_ref": pod["runtime_ref"],
-                "last_error": pod["last_error"],
-                "created_at": pod["created_at"],
-                "updated_at": pod["updated_at"],
-            }
-        ]
-
     @staticmethod
     def _public(row: ProjectPodRow) -> dict:
         return {
@@ -76,16 +59,3 @@ class PodQuery:
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         }
 
-
-def _pod_status_to_unit_status(pod_status: str) -> str:
-    if pod_status == PodStatus.RUNNING:
-        return "running"
-    if pod_status in {PodStatus.PAUSED, PodStatus.PAUSING}:
-        return "paused"
-    if pod_status == PodStatus.PENDING:
-        return "pending"
-    if pod_status == PodStatus.FAILED:
-        return "failed"
-    if pod_status == PodStatus.TERMINATING:
-        return "terminating"
-    return "pending"

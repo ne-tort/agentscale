@@ -192,6 +192,15 @@ def test_trigger_dispatch_lazy_starts_pod(client: TestClient) -> None:
     events = _platform_events(client, admin_h=admin_h, project_id=project_id, event_type="pod.started")
     assert len(events) >= 1
 
+    started = _platform_events(
+        client, admin_h=admin_h, project_id=project_id, event_type="project.started"
+    )
+    assert len(started) >= 1
+
+    hydrated = _platform_events(
+        client, admin_h=admin_h, project_id=project_id, event_type="pod.hydrated"
+    )
+    assert len(hydrated) >= 1
 
 @requires_postgres
 def test_delete_emits_pod_terminated(client: TestClient) -> None:
