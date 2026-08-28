@@ -225,6 +225,7 @@ def test_boot_heal_templates_present() -> None:
     dropin = (mod / "prodavan-boot-heal.conf.tpl").read_text(encoding="utf-8")
     assert "docker.socket" in preflight
     assert "traefik" in post
+    assert "%%{http_code}" in post
     assert "ExecStartPost" in dropin
     assert "TimeoutStopSec=30" in dropin
 

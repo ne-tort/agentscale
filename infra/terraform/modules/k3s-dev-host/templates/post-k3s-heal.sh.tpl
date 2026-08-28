@@ -33,7 +33,7 @@ delete_stuck
 $KCTL -n kube-system delete pod -l app.kubernetes.io/name=traefik --wait=false 2>/dev/null || true
 
 for _ in $(seq 1 72); do
-  code=$(curl -sS -m 3 -o /dev/null -w '%{http_code}' -H 'Host: localhost' "http://127.0.0.1:$${HTTP_PORT}/health/live" 2>/dev/null || echo 000)
+  code=$(curl -sS -m 3 -o /dev/null -w '%%{http_code}' -H 'Host: localhost' "http://127.0.0.1:$${HTTP_PORT}/health/live" 2>/dev/null || echo 000)
   if [ "$code" = "200" ]; then
     echo "post-k3s-heal smoke OK"
     exit 0
