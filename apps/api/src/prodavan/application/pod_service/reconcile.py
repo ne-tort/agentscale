@@ -7,8 +7,8 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from prodavan.application.pod_service.adapters.stub_pod_runtime import StubPodRuntimeAdapter
 from prodavan.application.pod_service.command import PodCommand
+from prodavan.application.pod_service.factory import build_pod_runtime
 from prodavan.application.pod_service.lifecycle_emitter import PodLifecycleEmitter
 from prodavan.application.pod_service.ports.pod_runtime import PodRuntimePort
 from prodavan.application.pod_service.query import PodQuery
@@ -30,7 +30,7 @@ class PodReconcileService:
         runtime: PodRuntimePort | None = None,
     ) -> None:
         self._session = session
-        self._runtime = runtime or StubPodRuntimeAdapter()
+        self._runtime = runtime or build_pod_runtime()
         self._pods = PodCommand(session, runtime=self._runtime, events=PodLifecycleEmitter(session))
 
     async def run(self) -> dict:
@@ -87,5 +87,42 @@ class PodReconcileService:
             )
             fixed += 1
 
+        zombies = await self._reap_zombies()
+        fixed += zombies
+
         await self._session.commit()
-        return {"fixed": fixed}
+        return {"fixed": fixed, "zombies_deleted": zombies}
+
+    async def _reap_zombies(self) -> int:
+        """Delete k8s Pods managed by pod-service without a live PG row."""
+        try:
+            managed = await self._runtime.list_managed_pods()
+        except Exception:
+            logger.exception("pod reconcile: list_managed_pods failed")
+            return 0
+        if not managed:
+            return 0
+
+        live_q = await self._session.execute(
+            select(ProjectPodRow.runtime_ref, ProjectPodRow.id, ProjectPodRow.status).where(
+                ProjectPodRow.status.notin_((PodStatus.TERMINATED,))
+            )
+        )
+        live_rows = live_q.all()
+        live_refs = {row.runtime_ref for row in live_rows if row.runtime_ref}
+        live_ids = {row.id for row in live_rows}
+
+        deleted = 0
+        for item in managed:
+            ref = item.get("runtime_ref") or item.get("name")
+            pod_id = item.get("pod_id")
+            if not ref:
+                continue
+            if ref in live_refs:
+                continue
+            if pod_id and pod_id in live_ids:
+                continue
+            logger.info("pod reconcile: delete zombie runtime_ref=%s pod_id=%s", ref, pod_id)
+            await self._runtime.terminate(runtime_ref=str(ref))
+            deleted += 1
+        return deleted

@@ -7,8 +7,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from prodavan.application.pod_service.adapters.stub_hydrate import StubHydrateAdapter
-from prodavan.application.pod_service.adapters.stub_pod_runtime import StubPodRuntimeAdapter
+from prodavan.application.pod_service.factory import build_hydrate, build_pod_runtime
 from prodavan.application.pod_service.lifecycle_emitter import PodLifecycleEmitter
 from prodavan.application.pod_service.ports.hydrate import HydratePort
 from prodavan.application.pod_service.ports.pod_runtime import PodRuntimePort
@@ -21,6 +20,7 @@ from prodavan.domain.identity import Principal
 from prodavan.domain.pods import (
     POD_TERMINAL_STATUSES,
     PodDesiredState,
+    PodRuntimeContext,
     PodStatus,
     new_pod_id,
     runtime_ref_for,
@@ -33,12 +33,6 @@ logger = logging.getLogger(__name__)
 _TERMINATE_REASONS = frozenset({"delete", "purge", "terminate", "detach", "force_kill"})
 
 
-def _runtime_adapter() -> PodRuntimePort:
-    if settings.pod_runtime_mode == "k8s":
-        logger.info("pod_runtime_mode=k8s requested; stub adapter used until real k8s ships")
-    return StubPodRuntimeAdapter()
-
-
 class PodCommand:
     def __init__(
         self,
@@ -49,9 +43,9 @@ class PodCommand:
         hydrate: HydratePort | None = None,
     ) -> None:
         self._session = session
-        self._runtime = runtime or _runtime_adapter()
+        self._runtime = runtime or build_pod_runtime()
         self._events = events or PodLifecycleEmitter(session)
-        self._hydrate = hydrate or StubHydrateAdapter()
+        self._hydrate = hydrate or build_hydrate()
         self._project_events = ProjectLifecycleEmitter(session)
         self._relations = RelationsCommand(session)
 
@@ -278,11 +272,7 @@ class PodCommand:
         if pod is None:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Pod not found")
         if pod.runtime_ref:
-            runtime = self._runtime
-            if hasattr(runtime, "force_kill"):
-                await runtime.force_kill(runtime_ref=pod.runtime_ref)  # type: ignore[attr-defined]
-            else:
-                await runtime.terminate(runtime_ref=pod.runtime_ref)
+            await self._runtime.force_kill(runtime_ref=pod.runtime_ref)
         pod.status = PodStatus.TERMINATED
         pod.desired_state = PodDesiredState.ABSENT
         if pod.project_id:
@@ -329,7 +319,8 @@ class PodCommand:
         return await self._create_row(project, desired=desired)
 
     async def _create_row(self, project: ProjectRow, *, desired: PodDesiredState) -> ProjectPodRow:
-        runtime_ref = runtime_ref_for(project.workspace_key)
+        mode = (settings.pod_runtime_mode or "stub").strip().lower()
+        runtime_ref = runtime_ref_for(project.workspace_key, mode=mode)
         pod = ProjectPodRow(
             id=new_pod_id(),
             project_id=project.id,
@@ -351,10 +342,12 @@ class PodCommand:
     async def _apply_running(
         self, project: ProjectRow, pod: ProjectPodRow, *, principal: Principal
     ) -> None:
-        ref = pod.runtime_ref or runtime_ref_for(project.workspace_key)
+        mode = (settings.pod_runtime_mode or "stub").strip().lower()
+        ref = pod.runtime_ref or runtime_ref_for(project.workspace_key, mode=mode)
         pod.runtime_ref = ref
         pod.status = PodStatus.PROVISIONING
-        await self._runtime.ensure_running(runtime_ref=ref)
+        ctx = self._runtime_context(project, pod)
+        await self._runtime.ensure_running(runtime_ref=ref, context=ctx)
         ws_key = pod.workspace_key or project.workspace_key
         await self._hydrate.hydrate(workspace_key=ws_key, runtime_ref=ref)
         pod.status = PodStatus.RUNNING
@@ -383,6 +376,16 @@ class PodCommand:
             await self._runtime.terminate(runtime_ref=ref)
         pod.status = PodStatus.TERMINATED
         pod.desired_state = PodDesiredState.ABSENT
+
+    @staticmethod
+    def _runtime_context(project: ProjectRow, pod: ProjectPodRow) -> PodRuntimeContext:
+        return PodRuntimeContext(
+            pod_id=pod.id,
+            project_id=project.id,
+            company_id=project.company_id,
+            workspace_key=pod.workspace_key or project.workspace_key,
+            hydrate_generation=pod.hydrate_generation,
+        )
 
     @staticmethod
     def _status_matches_desired(pod: ProjectPodRow, desired: PodDesiredState) -> bool:

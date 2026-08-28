@@ -46,3 +46,11 @@ data:
   SANDBOX_K8S_NAMESPACE: prodavan
   SANDBOX_K8S_PVC: prodavan-api-storage
   SANDBOX_K8S_JOB_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
+  # pod_service (P2): stub until Verify Dev enables k8s + sandboxes RBAC synced
+  POD_RUNTIME_MODE: "stub"
+  POD_SANDBOX_NAMESPACE: prodavan-sandboxes
+  POD_SANDBOX_SA: prodavan-project-pod
+  POD_SANDBOX_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
+  POD_SANDBOX_HYDRATE_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
+  POD_SANDBOX_MINIO_SECRET: prodavan-minio-hydrate
+  POD_RECONCILE_WORKER_ENABLED: "false"

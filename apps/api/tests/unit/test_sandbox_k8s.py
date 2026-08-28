@@ -32,14 +32,18 @@ def test_pvc_probe_job_mounts_api_pvc() -> None:
 
 
 def test_in_cluster_available_requires_token(tmp_path: Path) -> None:
-    api = InClusterJobApi(token_dir=tmp_path, host="10.0.0.1", port="443")
+    from prodavan.infrastructure.k8s.auth import InClusterAuth
+
+    api = InClusterJobApi(auth=InClusterAuth(token_dir=tmp_path, host="10.0.0.1", port="443"))
     assert api.available() is False
     (tmp_path / "token").write_text("tok", encoding="utf-8")
     assert api.available() is True
 
 
 def test_sandbox_status_reports_object_ws_create_path() -> None:
-    status = sandbox_k8s_status(api=InClusterJobApi(token_dir=Path("/nope"), host=None))
+    from prodavan.infrastructure.k8s.auth import InClusterAuth
+
+    status = sandbox_k8s_status(api=InClusterJobApi(auth=InClusterAuth(token_dir=Path("/nope"), host=None)))
     assert status["create_path"] == "object-ws"
     assert status["isolator"] == "not_wired"
     assert status["enabled"] is False

@@ -22,7 +22,7 @@ from prodavan.application.projects.trigger_service import ProjectTriggerService
 from prodavan.application.relations.commands import RelationsCommand
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
-from prodavan.domain.pods import PodDesiredState
+from prodavan.domain.pods import PodDesiredState, PodStatus
 from prodavan.domain.projects import (
     ProjectStatus,
     ProjectVisibilityMode,
@@ -32,7 +32,7 @@ from prodavan.domain.projects import (
     workspace_key_for,
 )
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
-from prodavan.infrastructure.persistence.models.projects import ProjectRow
+from prodavan.infrastructure.persistence.models.projects import ProjectPodRow, ProjectRow
 from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
 
 logger = logging.getLogger(__name__)
@@ -324,6 +324,24 @@ class ProjectCommand:
             cabinet_name=inst.name,
             project_name=row.name,
         )
+
+        pod_q = await self._session.execute(
+            select(ProjectPodRow).where(
+                ProjectPodRow.project_id == row.id,
+                ProjectPodRow.status.notin_((PodStatus.TERMINATED, PodStatus.FAILED)),
+            )
+        )
+        pod = pod_q.scalar_one_or_none()
+        if pod is not None:
+            pod.hydrate_generation += 1
+            if row.status == ProjectStatus.ACTIVE:
+                await self._pods.sync_desired(
+                    row.id,
+                    PodDesiredState.RUNNING,
+                    principal=principal,
+                    reason="rematerialize",
+                )
+
         return {
             "project_id": row.id,
             "workspace_root": mat.workspace_root,

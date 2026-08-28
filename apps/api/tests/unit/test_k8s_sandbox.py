@@ -1,0 +1,71 @@
+"""Unit tests for k8s sandbox infrastructure."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from prodavan.domain.pods import PodRuntimeContext, runtime_ref_for, sanitize_dns
+from prodavan.infrastructure.k8s.auth import InClusterAuth
+from prodavan.infrastructure.k8s.sandbox.client import K8sSandboxClient
+from prodavan.infrastructure.k8s.sandbox.pod_spec import build_pod_body
+
+
+def test_sanitize_dns_workspace_key() -> None:
+    assert sanitize_dns("wk_demo") == "wk-demo"
+    assert runtime_ref_for("wk_demo", mode="k8s") == "pod-wk-demo"
+    assert runtime_ref_for("wk_demo", mode="stub") == "object-ws:wk_demo"
+
+
+def test_build_pod_body_labels() -> None:
+    ctx = PodRuntimeContext(
+        pod_id="pod_abc",
+        project_id="prj_abc",
+        company_id="cmp_abc",
+        workspace_key="wk_demo",
+        hydrate_generation=2,
+    )
+    body = build_pod_body(
+        runtime_ref="pod-wk-demo",
+        namespace="prodavan-sandboxes",
+        context=ctx,
+        image="sandbox:latest",
+        hydrate_image="hydrate:latest",
+        service_account="prodavan-sandbox",
+        cpu_request="100m",
+        cpu_limit="1",
+        memory_request="256Mi",
+        memory_limit="1Gi",
+    )
+    labels = body["metadata"]["labels"]
+    assert labels["prodavan.io/managed-by"] == "pod-service"
+    assert labels["prodavan.io/pod-id"] == "pod_abc"
+    assert labels["prodavan.io/hydrate-generation"] == "2"
+    assert body["spec"]["initContainers"][0]["name"] == "hydrate"
+
+
+def test_in_cluster_auth_available(tmp_path: Path) -> None:
+    auth = InClusterAuth(token_dir=tmp_path, host="10.0.0.1")
+    assert auth.available() is False
+    (tmp_path / "token").write_text("tok", encoding="utf-8")
+    assert auth.available() is True
+
+
+@pytest.mark.asyncio
+async def test_k8s_client_get_pod_not_found() -> None:
+    auth = MagicMock(spec=InClusterAuth)
+    auth.api_base.return_value = "https://k8s.example"
+    auth.headers.return_value = {"Authorization": "Bearer x"}
+    auth.client_kwargs.return_value = {"verify": False, "timeout": 1.0}
+
+    client = K8sSandboxClient(namespace="prodavan-sandboxes", auth=auth)
+
+    mock_response = MagicMock()
+    mock_response.status_code = 404
+
+    with patch("prodavan.infrastructure.k8s.sandbox.client.httpx.AsyncClient") as ac:
+        ac.return_value.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
+        snap = await client.get_pod("pod-missing")
+    assert snap is None

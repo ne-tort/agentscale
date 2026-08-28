@@ -1,0 +1,11 @@
+# unsetOnly: keep prodavan-sandboxes namespace on resources that already declare it.
+# Omit metadata/name on Namespace kind — avoids renaming prodavan-sandboxes → prodavan.
+apiVersion: builtin
+kind: NamespaceTransformer
+metadata:
+  name: prodavan-namespace
+  namespace: prodavan
+unsetOnly: true
+fieldSpecs:
+  - path: metadata/namespace
+    create: true

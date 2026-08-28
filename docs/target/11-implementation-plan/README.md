@@ -30,7 +30,8 @@
 | [L07](L07-projects-runtime.md) | Projects, materialize, container | Средняя | [06](../06-projects-runtime/) |
 | [L08](L08-agent-providers.md) | AgentProviderPort + adapters | Высокая (fake cwd) | [08](../08-agent-providers/) |
 | [L09](L09-vertical-integration.md) | Vertical wire-up (triggers, chat, metrics) | Низкая | gap-map + L01…L08 |
-| [P1](P1-pod-service.md) | pod_service BC (Pod runtime, 1:1, k8s) | Высокая | [14](../14-project-containers/) после L07 skeleton |
+| [P1](P1-pod-service.md) | pod_service BC (Pod runtime, 1:1, stub) | Высокая | [14](../14-project-containers/) — **done** |
+| [P2](P2-k3s-runtime.md) | k3s real adapter (lifecycle, hydrate, metrics) | Высокая | [14/k3s-runtime](../14-project-containers/k3s-runtime/) после P1 |
 
 ## С чего начинаем (кратко)
 

@@ -15,6 +15,29 @@ from prodavan.core.jobs.locks import run_with_job_lock
 logger = logging.getLogger(__name__)
 
 
+def _register_worker_k8s_bootstrap(app) -> None:
+    """Start K8sManager in Celery worker processes when pod_runtime_mode=k8s."""
+    from celery.signals import worker_process_init
+
+    @worker_process_init.connect(weak=False)
+    def _bootstrap_k8s(**_kwargs) -> None:
+        from prodavan.config.settings import settings
+        from prodavan.core.infra.k8s_manager import get_k8s_manager, k8s_manager_from_settings
+
+        mode = (settings.pod_runtime_mode or "stub").strip().lower()
+        if mode != "k8s":
+            return
+        if get_k8s_manager() is not None:
+            return
+        mgr = k8s_manager_from_settings()
+
+        async def _start() -> None:
+            await mgr.startup()
+
+        run_async(_start())
+        logger.info("worker: K8sManager started namespace=%s", settings.pod_sandbox_namespace)
+
+
 def _get_app():
     from prodavan.core.infra.worker_manager import get_celery_app
 
@@ -23,6 +46,7 @@ def _get_app():
 
 def register_tasks(app) -> None:
     """Bind tasks to a Celery app (called from WorkerManager)."""
+    _register_worker_k8s_bootstrap(app)
 
     @app.task(name=job_names.TRIGGER_DRAIN, bind=False)
     def trigger_drain() -> dict[str, Any]:

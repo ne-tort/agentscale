@@ -1,5 +1,5 @@
+# Re-export dev sandboxes (validated via overlays/dev build).
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - ../../base/prodavan-sandbox/namespace.yaml
-  - ../../base/prodavan-sandbox/networkpolicy.yaml
+  - ../dev/sandboxes

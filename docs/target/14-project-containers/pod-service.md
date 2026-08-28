@@ -274,8 +274,13 @@ Alembic: rename/migrate table; backfill one primary unit → pod row.
 ### Phase 2 — Events + Relations
 `pod.*` whitelist, `PodLifecycleEmitter`, `RelationsCommand.bind/unbind_pod`, unit tests.
 
-### Phase 3 — Real k8s (P-POD-01)
-`k8s_pod_runtime` adapter, NetworkPolicy, hydrate job, reconcile worker, admin force-kill.
+### Phase 3 — Real k8s (P-POD-01) → **P2**
+
+Stub + reconcile done in P1. Real adapter — отдельный трек:
+
+- Канон: [k3s-runtime/](k3s-runtime/)
+- План: [P2-k3s-runtime.md](../11-implementation-plan/P2-k3s-runtime.md)
+- `K8sPodRuntimeAdapter`, hydrate initContainer/Job, `PodFilesPort`, `PodMetricsPort`, RBAC GitOps
 
 ### Phase 4 — Cleanup
 Drop `runtime-units` API, drop `container_ref` writes, gap map close.

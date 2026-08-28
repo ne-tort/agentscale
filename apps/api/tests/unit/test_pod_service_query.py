@@ -63,5 +63,6 @@ async def test_runtime_summary_shape() -> None:
         "desired_state": PodDesiredState.ABSENT,
         "runtime_ref": "object-ws:wk_demo",
         "last_error": None,
+        "hydrate_generation": 0,
     }
 

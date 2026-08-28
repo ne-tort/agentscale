@@ -5,6 +5,8 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.application.pod_service.factory import build_pod_metrics, build_pod_runtime
+from prodavan.config.settings import settings
 from prodavan.domain.pods import POD_TERMINAL_STATUSES
 from prodavan.infrastructure.persistence.models.projects import ProjectPodRow
 
@@ -24,16 +26,41 @@ class PodQuery:
         return self._public(row) if row else None
 
     async def runtime_summary(self, project_id: str) -> dict | None:
-        pod = await self.get_for_project(project_id)
-        if pod is None:
+        q = await self._session.execute(
+            select(ProjectPodRow).where(
+                ProjectPodRow.project_id == project_id,
+                ProjectPodRow.status.notin_(tuple(POD_TERMINAL_STATUSES)),
+            )
+        )
+        row = q.scalar_one_or_none()
+        if row is None:
             return None
-        return {
+        pod = self._public(row)
+        summary = {
             "pod_id": pod["id"],
             "status": pod["status"],
             "desired_state": pod["desired_state"],
             "runtime_ref": pod["runtime_ref"],
             "last_error": pod["last_error"],
+            "hydrate_generation": pod["hydrate_generation"],
         }
+        mode = (settings.pod_runtime_mode or "stub").strip().lower()
+        if mode == "k8s" and row.runtime_ref:
+            try:
+                runtime = build_pod_runtime()
+                k8s = await runtime.get_status(runtime_ref=row.runtime_ref)
+                summary["phase"] = k8s.get("phase")
+                summary["restarts"] = k8s.get("restarts")
+                summary["ready"] = k8s.get("ready")
+                summary["runtime_uid"] = k8s.get("uid")
+                metrics_port = build_pod_metrics()
+                if metrics_port is not None:
+                    metrics = await metrics_port.get_pod_metrics(runtime_ref=row.runtime_ref)
+                    if metrics:
+                        summary["metrics"] = metrics
+            except Exception:
+                summary["phase"] = "Unknown"
+        return summary
 
     async def list_orphans(self) -> list[dict]:
         q = await self._session.execute(
@@ -58,4 +85,3 @@ class PodQuery:
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
         }
-

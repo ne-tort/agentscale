@@ -1,0 +1,74 @@
+"""Init-container workspace hydrate entrypoint (runs inside sandbox Pod)."""
+
+from __future__ import annotations
+
+import logging
+import os
+import sys
+from pathlib import Path
+
+logger = logging.getLogger(__name__)
+
+
+def _sync_from_minio(*, workspace_key: str, target: Path) -> None:
+    import boto3
+    from botocore.client import Config
+
+    endpoint = os.environ.get("MINIO_ENDPOINT", "")
+    access_key = os.environ.get("MINIO_ACCESS_KEY", "")
+    secret_key = os.environ.get("MINIO_SECRET_KEY", "")
+    bucket = os.environ.get("MINIO_BUCKET", "prodavan")
+    if not endpoint or not access_key or not secret_key:
+        raise RuntimeError("MINIO_* env required for hydrate")
+
+    prefix = f"projects/{workspace_key}/"
+    client = boto3.client(
+        "s3",
+        endpoint_url=endpoint,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
+        config=Config(signature_version="s3v4"),
+        region_name=os.environ.get("MINIO_REGION", "us-east-1"),
+    )
+    target.mkdir(parents=True, exist_ok=True)
+    paginator = client.get_paginator("list_objects_v2")
+    found = 0
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for obj in page.get("Contents") or []:
+            key = obj["Key"]
+            if key.endswith("/"):
+                continue
+            rel = key[len(prefix) :]
+            if not rel or rel.startswith(".."):
+                continue
+            dest = target / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            client.download_file(bucket, key, str(dest))
+            found += 1
+    logger.info("hydrate complete workspace_key=%s objects=%s target=%s", workspace_key, found, target)
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO)
+    workspace_key = os.environ.get("WORKSPACE_KEY", "").strip()
+    target = Path(os.environ.get("HYDRATE_TARGET", "/workspace"))
+    if not workspace_key:
+        raise SystemExit("WORKSPACE_KEY is required")
+    target.mkdir(parents=True, exist_ok=True)
+    if os.environ.get("MINIO_ENDPOINT"):
+        _sync_from_minio(workspace_key=workspace_key, target=target)
+    else:
+        # Dev/stub: ensure empty workspace tree exists.
+        for sub in ("inbox", "runs"):
+            (target / sub).mkdir(parents=True, exist_ok=True)
+        logger.info("hydrate stub workspace_key=%s target=%s", workspace_key, target)
+    print(f"ok hydrate {workspace_key} -> {target}", flush=True)
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as exc:
+        logger.exception("hydrate failed")
+        print(f"hydrate error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc

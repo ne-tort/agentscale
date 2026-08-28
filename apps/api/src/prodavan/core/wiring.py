@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from prodavan.config.settings import settings
 from prodavan.core.infra.database_resource import DatabaseEngineResource
+from prodavan.core.infra.k8s_manager import k8s_manager_from_settings
 from prodavan.core.infra.kafka_manager import KafkaManager
 from prodavan.core.infra.metrics_presence_consumer_resource import MetricsPresenceConsumerResource
 from prodavan.core.infra.platform_bootstrap_resource import PlatformBootstrapResource
@@ -29,6 +30,7 @@ def build_lifespan_manager() -> LifespanManager:
 
     manager = LifespanManager()
     manager.register(DatabaseEngineResource())
+    manager.register(k8s_manager_from_settings())
     manager.register(
         RedisManager(
             url=settings.redis_url,

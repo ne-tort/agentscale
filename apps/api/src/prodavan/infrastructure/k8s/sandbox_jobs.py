@@ -1,19 +1,19 @@
 """Build and (optionally) create PVC-probe Jobs via the in-cluster Kubernetes API.
 
-Product create stays ``object-ws`` — this client is not on the project path.
+Product create stays ``object-ws`` when pod_runtime_mode=stub.
 Keep the Job spec in sync with ``infra/k3s/base/prodavan-sandbox/probe-job.yaml``.
 """
 
 from __future__ import annotations
 
-import os
-from pathlib import Path
 from typing import Any
 
 import httpx
 
+from prodavan.infrastructure.k8s.auth import InClusterAuth
+from prodavan.infrastructure.k8s.errors import classify_http_status
+
 SANDBOX_PROBE_JOB_NAME = "prodavan-sandbox-probe"
-SA_DIR = Path("/var/run/secrets/kubernetes.io/serviceaccount")
 PROBE_SNIPPET = (
     "import os, pathlib\n"
     "root = pathlib.Path('/data/storage')\n"
@@ -83,49 +83,24 @@ def pvc_probe_job_body(
 class InClusterJobApi:
     """POST Jobs using the pod ServiceAccount token (no kubernetes SDK)."""
 
-    def __init__(
-        self,
-        *,
-        token_dir: Path | None = None,
-        host: str | None = None,
-        port: str | None = None,
-    ) -> None:
-        self._token_dir = token_dir or SA_DIR
-        self._host = host if host is not None else os.environ.get("KUBERNETES_SERVICE_HOST")
-        self._port = port if port is not None else os.environ.get("KUBERNETES_SERVICE_PORT", "443")
+    def __init__(self, *, auth: InClusterAuth | None = None) -> None:
+        self._auth = auth or InClusterAuth()
 
     def available(self) -> bool:
-        return bool(self._host) and (self._token_dir / "token").is_file()
-
-    def _headers(self) -> dict[str, str]:
-        token = (self._token_dir / "token").read_text(encoding="utf-8").strip()
-        return {
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "Accept": "application/json",
-        }
-
-    def _client_kwargs(self) -> dict[str, Any]:
-        ca = self._token_dir / "ca.crt"
-        return {"verify": str(ca) if ca.is_file() else False, "timeout": 30.0}
+        return self._auth.available()
 
     async def create_job(self, namespace: str, body: dict[str, Any]) -> dict[str, Any]:
-        url = (
-            f"https://{self._host}:{self._port}"
-            f"/apis/batch/v1/namespaces/{namespace}/jobs"
-        )
-        async with httpx.AsyncClient(**self._client_kwargs()) as client:
-            response = await client.post(url, headers=self._headers(), json=body)
-            response.raise_for_status()
+        url = f"{self._auth.api_base()}/apis/batch/v1/namespaces/{namespace}/jobs"
+        async with httpx.AsyncClient(**self._auth.client_kwargs()) as client:
+            response = await client.post(url, headers=self._auth.headers(), json=body)
+            if response.status_code >= 400:
+                raise classify_http_status(response.status_code, response.text[:500])
             return response.json()
 
     async def delete_job(self, namespace: str, name: str) -> None:
-        url = (
-            f"https://{self._host}:{self._port}"
-            f"/apis/batch/v1/namespaces/{namespace}/jobs/{name}"
-        )
+        url = f"{self._auth.api_base()}/apis/batch/v1/namespaces/{namespace}/jobs/{name}"
         params = {"propagationPolicy": "Background"}
-        async with httpx.AsyncClient(**self._client_kwargs()) as client:
-            response = await client.delete(url, headers=self._headers(), params=params)
+        async with httpx.AsyncClient(**self._auth.client_kwargs()) as client:
+            response = await client.delete(url, headers=self._auth.headers(), params=params)
             if response.status_code not in (200, 202, 404):
-                response.raise_for_status()
+                raise classify_http_status(response.status_code, response.text[:500])

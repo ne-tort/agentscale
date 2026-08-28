@@ -4,10 +4,10 @@
 
 | | |
 |--|--|
-| Сущность | `ProjectContainer` (1:1 Project) |
-| Compute | Pod (не «логический object-ws») |
+| Сущность | `ProjectPod` / `project_pods` (1:1 Project) |
+| Compute | k3s Pod (не «логический object-ws») |
 | Файлы | MinIO `projects/{workspace_key}/` → hydrate в `/workspace` |
-| Writer k8s | только этот модуль (`ContainerRuntimePort`) |
+| Writer k8s | только BC `pod_service` (`PodRuntimePort`) |
 | Иерархия | [00-entities](../00-entities.md) |
 
 ## Документы
@@ -19,11 +19,12 @@
 | [lifecycle.md](lifecycle.md) | create / pause / resume / delete |
 | [isolation.md](isolation.md) | NetworkPolicy, SA, peer |
 | [k8s-contract.md](k8s-contract.md) | labels, resources, zombies |
+| **[k3s-runtime/](k3s-runtime/)** | **Изолированный k3s слой: ports, ops, files, metrics, patterns** |
 | [errors-ops.md](errors-ops.md) | stuck / force-kill / audit |
 | [admin-ui.md](admin-ui.md) | Admin «Контейнеры» |
 | [adr.md](adr.md) | Решения (Pod, pause=delete Pod, MinIO SoT) |
 
-**План реализации:** [P1-pod-service](../11-implementation-plan/P1-pod-service.md) (Phase 1–4, PR-разрез, DoD).
+**Планы:** [P1-pod-service](../11-implementation-plan/P1-pod-service.md) (done) · [P2-k3s-runtime](../11-implementation-plan/P2-k3s-runtime.md) (real adapter).
 
 ## Non-goals
 

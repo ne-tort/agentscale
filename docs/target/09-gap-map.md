@@ -24,11 +24,12 @@
 | **P-MOD-01** | **Module** catalog + cabinet bind + per-cabinet data | **Admin CRUD + meta + materialize + runtime data API + Flutter** | Physical DDL; meta editor UI |
 | **P-MOD-02** | Meta-table **syntax** spec + interpreters | **[meta-syntax](06-modules/meta-syntax/) documented**; shell `nav.contour` preview in seed editor | Live catalog shell merge; cabinet UI renderer; materialize engine |
 | **P-MAT-01** | Pod hydrate из meta/MinIO | object-ws; нет Pod; file_ref слаб | Materialize/Pod debt |
-| **P-POD-01** | `ProjectPod` → k8s Pod; inert → delete Pod | **Stub complete:** lazy start, hydrate stub, reconcile, events; k8s adapter placeholder | Real k8s Pod + MinIO hydrate |
+| **P-POD-01** | `ProjectPod` → k8s Pod; inert → delete Pod | **Code:** `K8sPodRuntimeAdapter`, hydrate initContainer, reconcile zombies; **GitOps:** sandboxes RBAC + overlay wired | Verify Dev e2e with `POD_RUNTIME_MODE=k8s`; integration test `POD_K8S_INTEGRATION=1` — [P2](11-implementation-plan/P2-k3s-runtime.md) Phase 5 |
 | **P-POD-02** | `pod_service` BC isolated | **`application/pod_service/`**; `ProjectCommand` → `PodCommand.sync_desired` | done · [pod-service](14-project-containers/pod-service.md) |
 | **P-POD-03** | 1:1 ProjectPod | **`project_pods`** table + backfill; legacy `project_runtime_units` dropped | done |
 | **P-POD-04** | `pod.*` lifecycle events | **`PodLifecycleEmitter`** + whitelist | done |
 | **P-POD-05** | Relations pod↔project bind | **`RelationsCommand.bind/unbind_pod`** | done |
+| **P-POD-06** | Удалить legacy `ProjectRuntimeManager` / `ContainerRuntimePort` / `container_lifecycle` indirection | **`pod_service` canonical**; dead code in `project_service/runtime_manager.py`, duplicate `stub_container_runtime` | Delete after import audit — [P1](11-implementation-plan/P1-pod-service.md) cleanup |
 | **P-PRJ-01** | Изолированный BC `project_service`; чужие BC только Command/Query | **Facade live**; residual direct ORM in legacy paths | Lint/import guard later |
 | **P-PRJ-02** | `visibility_mode` + project↔employee assignment | **Schema + API + RelationsCommand live** | Flutter filter UI |
 | **P-PRJ-03** | 1:1 ProjectPod (lazy create) | **`project_pods` + PodCommand**; runtime-units API removed | done |

@@ -31,7 +31,7 @@ spec:
         prometheus.io/port: "8000"
         prometheus.io/path: "/metrics"
     spec:
-      serviceAccountName: prodavan-sandbox
+      serviceAccountName: prodavan-api
       automountServiceAccountToken: true
       imagePullSecrets:
         - name: ghcr-pull
