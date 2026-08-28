@@ -139,7 +139,7 @@ def _dispose_app_engine() -> None:
     async def _dispose() -> None:
         await db.dispose_engine()
 
-    _run_async(_dispose, timeout=30)
+    _run_async(_dispose, timeout=45)
 
 
 def _wipe_public_tables() -> None:
@@ -166,7 +166,7 @@ def _wipe_public_tables() -> None:
                 await conn.execute(text(f"TRUNCATE {quoted} CASCADE"))
         await engine.dispose()
 
-    _run_async(_wipe, timeout=45)
+    _run_async(_wipe, timeout=60)
 
 
 def _seed_integration_catalog() -> None:
@@ -253,7 +253,7 @@ def clean_engine_cache(request: pytest.FixtureRequest):
     )
     if needs_wipe:
         last_err: TimeoutError | None = None
-        for _ in (1, 2):
+        for _ in (1, 2, 3, 4):
             try:
                 _wipe_public_tables()
                 last_err = None

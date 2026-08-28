@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import subprocess
 import time
 
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 
-from prodavan_ops.k8s import load_kube, wait_k3s_api_ready
+from prodavan_ops.k8s import kubectl, load_kube, wait_k3s_api_ready
 from prodavan_ops.paths import overlay_e2e
 
 E2E_NAMESPACE = "prodavan"
@@ -18,12 +17,7 @@ E2E_JOB = "prodavan-e2e-runner"
 def _apply_e2e_overlay() -> None:
     """Apply overlays/e2e (ephemeral Job only — dev API stays stub)."""
     path = overlay_e2e()
-    proc = subprocess.run(
-        ["kubectl", "apply", "-k", str(path)],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    proc = kubectl(["apply", "-k", str(path)], retries=5)
     if proc.returncode != 0:
         raise RuntimeError(
             f"kubectl apply -k {path} failed ({proc.returncode})\n"
@@ -33,59 +27,75 @@ def _apply_e2e_overlay() -> None:
 
 
 def _delete_job() -> None:
-    try:
-        load_kube()
-    except Exception as exc:
-        print(f"skip job delete: kube unavailable ({exc})")
-        return
-    batch = client.BatchV1Api()
-    try:
-        batch.delete_namespaced_job(
-            name=E2E_JOB,
-            namespace=E2E_NAMESPACE,
-            propagation_policy="Background",
-        )
-        print(f"deleted Job {E2E_NAMESPACE}/{E2E_JOB}")
-    except ApiException as exc:
-        if exc.status != 404:
-            print(f"skip job delete: {exc.status} {exc.reason}")
-            return
-    except Exception as exc:
-        print(f"skip job delete: {exc}")
+    proc = kubectl(
+        [
+            "delete",
+            "job",
+            E2E_JOB,
+            "-n",
+            E2E_NAMESPACE,
+            "--ignore-not-found",
+            "--wait=false",
+        ],
+        retries=5,
+    )
+    if proc.returncode == 0 and proc.stdout.strip():
+        print(proc.stdout.strip())
+    elif proc.returncode != 0:
+        print(f"skip job delete: {proc.stderr.strip() or proc.stdout.strip()}")
         return
     deadline = time.time() + 120
     while time.time() < deadline:
-        try:
-            batch.read_namespaced_job(name=E2E_JOB, namespace=E2E_NAMESPACE)
-            time.sleep(2)
-        except ApiException as exc:
-            if exc.status == 404:
+        check = kubectl(["get", "job", E2E_JOB, "-n", E2E_NAMESPACE], retries=3)
+        if check.returncode != 0:
+            if "NotFound" in (check.stderr or ""):
                 return
-            print(f"skip job wait: {exc.status} {exc.reason}")
+            print(f"skip job wait: {check.stderr.strip()}")
             return
-        except Exception as exc:
-            print(f"skip job wait: {exc}")
-            return
+        time.sleep(2)
+
+
+def _job_counts() -> tuple[int, int, int] | None:
+    proc = kubectl(
+        [
+            "get",
+            "job",
+            E2E_JOB,
+            "-n",
+            E2E_NAMESPACE,
+            "-o",
+            "jsonpath={.status.succeeded},{.status.failed},{.status.active}",
+        ],
+        retries=5,
+    )
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip()
+        if "NotFound" in err:
+            return None
+        print(f"kubectl get job transient error: {err.splitlines()[-1] if err else proc.returncode}")
+        return None
+    parts = (proc.stdout or "0,0,0").split(",")
+    while len(parts) < 3:
+        parts.append("0")
+
+    def _int(value: str) -> int:
+        value = (value or "").strip()
+        return int(value) if value.isdigit() else 0
+
+    return _int(parts[0]), _int(parts[1]), _int(parts[2])
 
 
 def _wait_job(timeout_sec: int = 900) -> None:
-    load_kube()
-    batch = client.BatchV1Api()
     deadline = time.time() + timeout_sec
     last = ""
     while time.time() < deadline:
-        try:
-            job = batch.read_namespaced_job(name=E2E_JOB, namespace=E2E_NAMESPACE)
-        except ApiException as exc:
-            if exc.status == 404:
-                last = "Job not found yet"
-                time.sleep(3)
-                continue
-            raise
-        status = job.status
-        succeeded = (status.succeeded or 0) if status else 0
-        failed = (status.failed or 0) if status else 0
-        active = (status.active or 0) if status else 0
+        counts = _job_counts()
+        if counts is None:
+            last = "Job not found yet"
+            print(f"e2e job: {last}")
+            time.sleep(3)
+            continue
+        succeeded, failed, active = counts
         last = f"active={active} succeeded={succeeded} failed={failed}"
         print(f"e2e job: {last}")
         if succeeded >= 1:
@@ -100,19 +110,23 @@ def _wait_job(timeout_sec: int = 900) -> None:
 
 
 def _print_job_logs() -> None:
-    load_kube()
-    core = client.CoreV1Api()
-    pods = core.list_namespaced_pod(
-        namespace=E2E_NAMESPACE,
-        label_selector=f"job-name={E2E_JOB}",
+    proc = kubectl(
+        [
+            "logs",
+            "-n",
+            E2E_NAMESPACE,
+            "-l",
+            f"job-name={E2E_JOB}",
+            "--all-containers=true",
+            "--tail=-1",
+        ],
+        retries=5,
     )
-    for pod in pods.items or []:
-        name = pod.metadata.name
-        try:
-            logs = core.read_namespaced_pod_log(name=name, namespace=E2E_NAMESPACE)
-            print(f"--- logs {name} ---\n{logs}")
-        except ApiException as exc:
-            print(f"--- logs {name} unavailable: {exc.status} ---")
+    if proc.returncode == 0 and proc.stdout.strip():
+        print(f"--- logs {E2E_JOB} ---\n{proc.stdout}")
+        return
+    err = proc.stderr.strip() or proc.stdout.strip() or f"exit {proc.returncode}"
+    print(f"--- logs {E2E_JOB} unavailable: {err} ---")
 
 
 def run_e2e(*, suite: str = "k8s", timeout_sec: int = 900) -> None:
@@ -134,12 +148,7 @@ def cleanup_e2e(*, unsync: bool = False) -> None:
     """Delete e2e Job and overlay resources."""
     _delete_job()
     path = overlay_e2e()
-    proc = subprocess.run(
-        ["kubectl", "delete", "-k", str(path), "--ignore-not-found"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    proc = kubectl(["delete", "-k", str(path), "--ignore-not-found"], retries=5)
     if proc.returncode != 0:
         print(proc.stderr.strip() or f"kubectl delete -k {path} failed ({proc.returncode})")
     if unsync:

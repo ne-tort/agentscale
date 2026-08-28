@@ -84,26 +84,12 @@ def load_kube() -> None:
 
 def wait_k3s_api_ready(*, timeout_sec: int = 300, poll_sec: float = 5.0) -> None:
     """Poll kubectl until cluster API responds (Docker runner → host.docker.internal)."""
-    path = resolve_kubeconfig_path()
     deadline = time.time() + timeout_sec
     attempt = 0
     last = ""
     while time.time() < deadline:
         attempt += 1
-        proc = subprocess.run(
-            [
-                "kubectl",
-                "--kubeconfig",
-                str(path),
-                "get",
-                "ns",
-                "prodavan",
-                "--request-timeout=10s",
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        proc = kubectl(["get", "ns", "prodavan", "--request-timeout=10s"], retries=1)
         if proc.returncode == 0:
             print(f"k3s API ready (attempt {attempt})")
             return
@@ -116,6 +102,43 @@ def wait_k3s_api_ready(*, timeout_sec: int = 300, poll_sec: float = 5.0) -> None
         "On Windows host run elevated: infra/github-runner/Sync-KubeForDocker.ps1 "
         "(portproxy 0.0.0.0:6443 + kubeconfig for Docker runners)."
     )
+
+
+def kubectl(args: list[str], *, retries: int = 3, retry_sleep: float = 2.0) -> subprocess.CompletedProcess[str]:
+    """Run kubectl with rewritten kubeconfig; retry transient API/ TLS blips."""
+    path = resolve_kubeconfig_path()
+    last: subprocess.CompletedProcess[str] | None = None
+    for attempt in range(1, retries + 1):
+        proc = subprocess.run(
+            ["kubectl", "--kubeconfig", str(path), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        last = proc
+        if proc.returncode == 0:
+            return proc
+        err = (proc.stderr or proc.stdout or "").strip()
+        tail = err.splitlines()[-1] if err else f"exit {proc.returncode}"
+        transient = any(
+            token in err
+            for token in (
+                "EOF",
+                "timeout",
+                "Timeout",
+                "deadline exceeded",
+                "connection reset",
+                "TLS",
+                "SSL",
+                "Unable to connect",
+            )
+        )
+        if not transient or attempt >= retries:
+            return proc
+        print(f"kubectl retry {attempt}/{retries} ({' '.join(args[:3])}): {tail}")
+        time.sleep(retry_sleep)
+    assert last is not None
+    return last
 
 
 def assert_kubeconfig_docker_ready() -> None:
