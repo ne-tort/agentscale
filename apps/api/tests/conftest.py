@@ -243,6 +243,23 @@ def pytest_collection_modifyitems(config, items) -> None:
             item.add_marker(pytest.mark.live)
 
 
+def _reset_auth_test_state() -> None:
+    """Reset process-global fake auth + kafka buffer (integration / k8s e2e isolation)."""
+    from prodavan.infrastructure.auth.jwt import reset_jwt_validator
+    from prodavan.infrastructure.keycloak.invite import reset_invite_client
+
+    reset_jwt_validator()
+    reset_invite_client()
+    try:
+        from prodavan.core.infra.kafka_manager import get_kafka_manager_optional
+
+        mgr = get_kafka_manager_optional()
+        if mgr is not None:
+            mgr.reset_local_test_state()
+    except Exception:
+        pass
+
+
 def _test_needs_postgres_wipe(request: pytest.FixtureRequest) -> bool:
     """TRUNCATE+seed only for tests that declare @requires_postgres (or k8s e2e)."""
     path = str(getattr(request, "fspath", "")).replace("\\", "/")
@@ -264,13 +281,20 @@ def clean_engine_cache(request: pytest.FixtureRequest):
     _dispose_app_engine()
     path = str(getattr(request, "fspath", "")).replace("\\", "/")
     uses_client = "async_client" in request.fixturenames
+    postgres_wipe = _test_needs_postgres_wipe(request)
     # Pure unit tests without AsyncClient do not touch Postgres — skip TRUNCATE
     # (CI shared PG under Docker Desktop load otherwise flakes with TimeoutError).
-    needs_wipe = _postgres_available() and (
-        _test_needs_postgres_wipe(request)
-        or (uses_client and "/tests/unit/" not in path and "/tests/integration/" not in path)
+    # Integration/k8s: always wipe when the test declares @requires_postgres — do not
+    # gate on runtime TCP probe (1s timeout flakes under Docker Desktop load and leaves
+    # stale keycloak_sub rows while FakeUserAdmin resets subs to kc_fake_1…).
+    needs_wipe = postgres_wipe or (
+        _postgres_available()
+        and uses_client
+        and "/tests/unit/" not in path
+        and "/tests/integration/" not in path
     )
     if needs_wipe:
+        _reset_auth_test_state()
         last_err: TimeoutError | None = None
         for _ in (1, 2, 3, 4):
             try:
@@ -296,6 +320,8 @@ def clean_engine_cache(request: pytest.FixtureRequest):
                 raise seed_err
     yield
     _dispose_app_engine()
+    if needs_wipe:
+        _reset_auth_test_state()
 
 
 @pytest_asyncio.fixture

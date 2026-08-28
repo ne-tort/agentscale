@@ -158,6 +158,11 @@ class KafkaManager(LifespanResource):
     def clear_buffer(self) -> None:
         self._buffer.clear()
 
+    def reset_local_test_state(self) -> None:
+        """Drop in-memory auth buffer between integration tests (no-broker path)."""
+        self._buffer.clear()
+        self._local_auth_depth = 0
+
     async def publish(self, envelope: EventEnvelope) -> bool:
         payload = envelope.to_dict()
         self._buffer.append(payload)
