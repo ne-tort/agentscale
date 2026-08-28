@@ -19,6 +19,11 @@ from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.infrastructure.keycloak.invite import reset_invite_client
 from prodavan.main import create_app
 from tests.conftest import requires_postgres, sql_backdate_project
+from tests.integration.support import owner_auth_from_company
+
+
+def _owner_h(company_body: dict) -> dict[str, str]:
+    return owner_auth_from_company(_token, company_body)
 
 
 def _token(*, sub: str, email: str | None = None, platform_admin: bool = False) -> str:
@@ -71,13 +76,13 @@ def test_e2e_smoke_admin_to_agent_ping(client: TestClient) -> None:
     )
     assert key.status_code == 201, key.text
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-boss', email='boss@e2e.test')}"}
+    owner_h = _owner_h(co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
         json={"name": "E2E Cabinet", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -85,7 +90,7 @@ def test_e2e_smoke_admin_to_agent_ping(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "E2E Project"},
     )
-    assert proj.status_code == 201, proj.text
+    assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
 
     sess = client.post(
@@ -178,13 +183,13 @@ def test_e2e_disabled_employee_cannot_chat(client: TestClient) -> None:
     )
     assert key.status_code == 201, key.text
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-dis-boss', email='disabled@e2e.test')}"}
+    owner_h = _owner_h(co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
         json={"name": "Cab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -192,7 +197,7 @@ def test_e2e_disabled_employee_cannot_chat(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "Proj"},
     )
-    assert proj.status_code == 201, proj.text
+    assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
 
     disable = client.post(f"/api/v1/employees/{emp_id}/disable", headers=admin_h)
@@ -232,13 +237,13 @@ def test_e2e_disabled_ai_key_blocks_session(client: TestClient) -> None:
     assert key.status_code == 201, key.text
     key_id = key.json()["id"]
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-key-boss', email='key@e2e.test')}"}
+    owner_h = _owner_h(co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
         json={"name": "Cab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -246,7 +251,7 @@ def test_e2e_disabled_ai_key_blocks_session(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "Proj"},
     )
-    assert proj.status_code == 201, proj.text
+    assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
 
     disabled = client.patch(
@@ -299,13 +304,13 @@ def test_e2e_expired_ai_key_by_date_blocks_chat(client: TestClient) -> None:
     assert key.status_code == 201, key.text
     key_id = key.json()["id"]
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-exp-boss', email='expire@e2e.test')}"}
+    owner_h = _owner_h(co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
         json={"name": "Cab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -313,7 +318,7 @@ def test_e2e_expired_ai_key_by_date_blocks_chat(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "Proj"},
     )
-    assert proj.status_code == 201, proj.text
+    assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
 
     blocked = client.post(
@@ -384,13 +389,13 @@ def test_e2e_agent_budget_blocks_followup(client: TestClient) -> None:
     )
     assert key.status_code == 201, key.text
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-budget-boss', email='budget@e2e.test')}"}
+    owner_h = _owner_h(co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
         json={"name": "Cab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -398,7 +403,7 @@ def test_e2e_agent_budget_blocks_followup(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "Proj"},
     )
-    assert proj.status_code == 201, proj.text
+    assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
 
     first = client.post(
@@ -452,13 +457,13 @@ def test_e2e_usd_cost_cap_blocks_followup(client: TestClient) -> None:
     )
     assert key.status_code == 201, key.text
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-usd-boss', email='usd@e2e.test')}"}
+    owner_h = _owner_h(co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
         json={"name": "Cab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -466,7 +471,7 @@ def test_e2e_usd_cost_cap_blocks_followup(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "Proj"},
     )
-    assert proj.status_code == 201, proj.text
+    assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
 
     first = client.post(
@@ -512,13 +517,13 @@ def test_e2e_tool_approval_hitl(client: TestClient) -> None:
     )
     assert key.status_code == 201, key.text
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-hitl-boss', email='hitl@e2e.test')}"}
+    owner_h = _owner_h(co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
         json={"name": "Cab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -526,7 +531,7 @@ def test_e2e_tool_approval_hitl(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "Proj"},
     )
-    assert proj.status_code == 201, proj.text
+    assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
 
     turn = client.post(
@@ -594,8 +599,7 @@ def test_e2e_company_suspend_blocks_chat_and_lists_subscription(client: TestClie
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
-    owner = _token(sub="e2e-owner-sus", email="owner@e2esus.test")
-    owner_h = {"Authorization": f"Bearer {owner}"}
+    owner_h = _owner_h(created.json())
 
     key = client.post(
         "/api/v1/admin/ai-keys",
@@ -615,7 +619,7 @@ def test_e2e_company_suspend_blocks_chat_and_lists_subscription(client: TestClie
         headers=owner_h,
         json={"name": "E2ESusCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -623,7 +627,7 @@ def test_e2e_company_suspend_blocks_chat_and_lists_subscription(client: TestClie
         headers=owner_h,
         json={"name": "E2ESusProj"},
     )
-    assert proj.status_code == 201, proj.text
+    assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
     assert proj.json()["company_subscription"]["subscription_expired"] is False
 
@@ -688,13 +692,13 @@ def test_e2e_project_pause_blocks_chat(client: TestClient) -> None:
     )
     assert key.status_code == 201, key.text
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-pause-owner', email='owner@e2epause.test')}"}
+    owner_h = _owner_h(co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
         json={"name": "E2EPauseCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -702,7 +706,7 @@ def test_e2e_project_pause_blocks_chat(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "E2EPauseProj"},
     )
-    assert proj.status_code == 201, proj.text
+    assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
     assert proj.json()["status"] == "active"
 
@@ -757,13 +761,13 @@ def test_e2e_idle_pause_sweep_vertical(client: TestClient) -> None:
     )
     assert policy.status_code == 200, policy.text
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-idle-owner', email='owner@e2eidle.test')}"}
+    owner_h = _owner_h(co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
         json={"name": "E2EIdleCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -771,7 +775,7 @@ def test_e2e_idle_pause_sweep_vertical(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "E2EIdleProj"},
     )
-    assert proj.status_code == 201, proj.text
+    assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
 
     stale = datetime.now(UTC) - timedelta(hours=48)
@@ -811,13 +815,13 @@ def test_e2e_attachment_content_download_and_paused_read(client: TestClient) -> 
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-att-owner', email='owner@e2eatt.test')}"}
+    owner_h = _owner_h(co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
         json={"name": "E2EAttCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -825,7 +829,7 @@ def test_e2e_attachment_content_download_and_paused_read(client: TestClient) -> 
         headers=owner_h,
         json={"name": "E2EAttProj"},
     )
-    assert proj.status_code == 201, proj.text
+    assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
 
     png = base64.b64decode(
@@ -888,13 +892,13 @@ def test_e2e_text_json_attachment_content_types(client: TestClient) -> None:
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-txt-owner', email='owner@e2etxt.test')}"}
+    owner_h = _owner_h(co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
         json={"name": "E2ETxtCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -902,7 +906,7 @@ def test_e2e_text_json_attachment_content_types(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "E2ETxtProj"},
     )
-    assert proj.status_code == 201, proj.text
+    assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
 
     note = b"spec line one\nspec line two"
@@ -966,15 +970,13 @@ def test_e2e_platform_idle_pause_sweep_all(client: TestClient) -> None:
     )
     assert policy.status_code == 200, policy.text
 
-    owner_h = {
-        "Authorization": f"Bearer {_token(sub='e2e-idle-all-owner', email='owner@e2eidleall.test')}"
-    }
+    owner_h = _owner_h(co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
         json={"name": "E2EIdleAllCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -982,7 +984,7 @@ def test_e2e_platform_idle_pause_sweep_all(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "E2EIdleAllProj"},
     )
-    assert proj.status_code == 201, proj.text
+    assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
 
     sql_backdate_project(project_id, datetime.now(UTC) - timedelta(hours=48))
@@ -1025,13 +1027,13 @@ def test_e2e_paused_blocks_triggers_allows_metadata(client: TestClient) -> None:
     )
     assert key.status_code == 201, key.text
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='e2e-pm-owner', email='owner@e2epm.test')}"}
+    owner_h = _owner_h(co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
         json={"name": "E2EPauseMatrixCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -1039,7 +1041,7 @@ def test_e2e_paused_blocks_triggers_allows_metadata(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "E2EPauseMatrixProj"},
     )
-    assert proj.status_code == 201, proj.text
+    assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
 
     client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)

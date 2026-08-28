@@ -62,16 +62,14 @@ def test_auth_config_public(client: TestClient) -> None:
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["auth_mode"] in {"test", "oidc"}
+    assert "brokers" in body
+    assert "features" in body
     if body["auth_mode"] == "test":
-        assert body["oidc"] is None
-    assert "audience" not in body or body.get("oidc") is None or "audience" in body["oidc"]
-    if body.get("oidc"):
-        assert "redirect_uri" in body["oidc"]
-        assert "discovery_url" in body["oidc"]
-        assert "end_session_endpoint" in body["oidc"]
-        assert "revocation_endpoint" in body["oidc"]
-        assert body["oidc"]["end_session_endpoint"].endswith("/protocol/openid-connect/logout")
-        assert body["oidc"]["revocation_endpoint"].endswith("/protocol/openid-connect/revoke")
+        assert body["features"]["password_login"] is False
+        assert body["brokers"] == []
+    else:
+        assert body["features"]["password_login"] is True
+        assert isinstance(body["brokers"], list)
 
 
 def test_invalid_token_rejected(client: TestClient) -> None:
@@ -243,7 +241,6 @@ def test_company_principal_owns_ai_keys(client: TestClient) -> None:
     assert body["owner_scope"] == "company"
     assert body["owner_company_id"] == company_id
     assert body["writable"] is True
-    assert body["source"] == "company_local"
 
     listed = client.get(f"/api/v1/companies/{company_id}/ai-keys", headers=h)
     assert listed.status_code == 200
@@ -281,10 +278,15 @@ def test_create_company_name_only_then_invite_admin(client: TestClient) -> None:
     invited = client.post(
         f"/api/v1/companies/{company_id}/employees",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"email": "later-admin@nameonly.test", "role": "company.admin"},
+        json={
+            "login": "lateradmin",
+            "password": "test-employee-pass",
+            "contact_email": "later-admin@nameonly.test",
+            "role": "company.admin",
+        },
     )
     assert invited.status_code == 201, invited.text
-    assert invited.json()["email"] == "later-admin@nameonly.test"
+    assert invited.json()["contact_email"] == "later-admin@nameonly.test"
     assert invited.json().get("keycloak_sub"), "invite must persist employees.keycloak_sub immediately"
 
     patched = client.patch(

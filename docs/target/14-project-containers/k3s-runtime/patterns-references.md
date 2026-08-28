@@ -106,11 +106,14 @@ Ref: kubernetes-client/python `stream` examples — https://github.com/kubernete
 
 ## Testing strategy (P2)
 
-| Level | Approach |
-|-------|----------|
-| Unit | Mock `PodRuntimePort`; test `PodCommand` state machine |
-| Integration | `kind` / k3s in CI job (optional gated) |
-| Contract | Label selector matches [k8s-contract.md](../k8s-contract.md) |
-| E2e | Extend `test_pod_service_e2e.py` with `POD_RUNTIME_MODE=k8s` skip if no cluster |
+| Level | Marker | Approach |
+|-------|--------|----------|
+| Unit | — | Mock `PodRuntimePort`; test `PodCommand` state machine |
+| Integration | `integration` | TestClient + Docker Postgres + `POD_RUNTIME_MODE=stub` (nightly) |
+| K8s runtime | `k8s` | In-cluster Job: TestClient + `POD_RUNTIME_MODE=k8s` → real Pods in `prodavan-sandboxes` |
+| Live API | `live` | HTTP pytest against dev Traefik `:8088` |
+| Contract | — | Label selector matches [k8s-contract.md](../k8s-contract.md) |
 
-Existing stub e2e stays default; k8s e2e behind env flag.
+Canonical runbook: [`docs/07-infrastructure/e2e.md`](../../../07-infrastructure/e2e.md).
+
+Stub integration stays default on dev API; k8s/live run via opt-in CI (`label: e2e`) or `prodavan-ops e2e run`.

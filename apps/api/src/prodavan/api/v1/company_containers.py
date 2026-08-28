@@ -48,7 +48,7 @@ async def pause_company_container(
 ) -> dict:
     await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
     return await AdminContainerReadService(session).pause_for_company(
-        company_id=company_id, project_id=project_id, principal=principal
+        company_id=company_id, project_id=project_id, principal=principal, employee=employee
     )
 
 
@@ -62,7 +62,7 @@ async def resume_company_container(
 ) -> dict:
     await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
     return await AdminContainerReadService(session).resume_for_company(
-        company_id=company_id, project_id=project_id, principal=principal
+        company_id=company_id, project_id=project_id, principal=principal, employee=employee
     )
 
 
@@ -76,5 +76,5 @@ async def delete_company_container(
 ) -> dict:
     await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
     return await AdminContainerReadService(session).delete_for_company(
-        company_id=company_id, project_id=project_id, principal=principal
+        company_id=company_id, project_id=project_id, principal=principal, employee=employee
     )

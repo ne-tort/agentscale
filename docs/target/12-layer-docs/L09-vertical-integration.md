@@ -29,7 +29,9 @@
 | Admin metrics list in smoke | done | GET /admin/metrics/companies |
 | SSE chat stream in smoke | done | POST /chat/stream + meta/tabs + bundle import |
 | `GET meta/tables/{slug}` in smoke | done | columns on table detail |
-| CI nightly workflow | done | `.github/workflows/ci-nightly.yml` |
+| CI nightly workflow | done | `.github/workflows/ci-nightly.yml` — `pytest -m integration` |
+| CI opt-in E2E (label `e2e`, `[e2e]` title) | done | `.github/workflows/ci-e2e.yml` — L2/L3a/L3b |
+| Unified pytest markers (`integration`, `k8s`, `live`) | done | `apps/api/pyproject.toml`, `docs/07-infrastructure/e2e.md` |
 | Starter bundle import E2E | done | equipment-procurement → line_items + tab |
 | USD cost cap E2E | done | max_cost_usd_month → AGENT_BUDGET |
 | HITL tool approval E2E | done | dangerous: → deny/approve |
@@ -55,6 +57,8 @@
 
 ```text
 apps/api/tests/integration/test_e2e_smoke.py
+apps/api/tests/e2e/k8s/test_pod_k8s_runtime.py
+apps/api/tests/e2e/live/test_containers_live.py
 apps/api/src/prodavan/api/v1/agent.py (chat + transcript)
 apps/flutter/lib/features/employee/project_workspace_page.dart
 apps/flutter/test/employee_widgets_test.dart
@@ -62,14 +66,18 @@ apps/api/src/prodavan/application/admin/company_service.py (metrics)
 apps/api/src/prodavan/api/v1/admin_metrics.py
 tools/release_gate_check.py
 docs/target/12-layer-docs/ops-cron-hooks.md
-.github/workflows/{ci-api,ci-nightly}.yml
+.github/workflows/{ci-api,ci-nightly,ci-e2e}.yml
+docs/07-infrastructure/e2e.md
 ```
 
 ## Gaps
 
 | Требование | Статус |
 |------------|--------|
-| CI nightly | live | `.github/workflows/ci-nightly.yml` |
+| CI nightly | live | `.github/workflows/ci-nightly.yml` — `-m integration` |
+| CI opt-in cluster e2e | live | `.github/workflows/ci-e2e.yml` — label `e2e` / `[e2e]` |
+| K8s pod e2e (in-cluster Job) | live | `tests/e2e/k8s/`, `infra/k3s/overlays/e2e/` |
+| Live API e2e | live | `tests/e2e/live/` |
 | Release gate checklist automation | live (subset) | `tools/release_gate_check.py` in ci-api |
 | Widget E2E | hole (subset) | `employee_widgets_test.dart` — banner + chip; no full shell navigation |
 | Idle pause policy | live (subset) | policy + company/platform admin sweep + opt-in worker; ops curl in `ops-cron-hooks.md` |

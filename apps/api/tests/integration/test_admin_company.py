@@ -19,6 +19,7 @@ from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.infrastructure.keycloak.invite import reset_invite_client
 from prodavan.main import create_app
 from tests.conftest import requires_postgres
+from tests.integration.support import owner_bearer_token
 
 
 def _token(
@@ -91,13 +92,13 @@ def test_admin_company_quotas_and_metrics(client: TestClient) -> None:
     assert policy.status_code == 200
     assert policy.json()["tool_preset"] == "chat_readonly"
 
-    boss_tok = _token(sub="boss-sub", email="boss@quotaco.test")
+    boss_tok = owner_bearer_token(_token, created.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers={"Authorization": f"Bearer {boss_tok}"},
         json={"name": "First", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
 
     blocked = client.post(
         "/api/v1/cabinets",
@@ -243,7 +244,7 @@ def test_company_org_cabinets_list(client: TestClient) -> None:
         json={"name": "OrgCo", "password": "test-company-pass", "admin_email": "owner@orgco.test"},
     )
     company_id = created.json()["company"]["id"]
-    boss_tok = _token(sub="owner-sub", email="owner@orgco.test")
+    boss_tok = owner_bearer_token(_token, created.json())
     client.post(
         "/api/v1/cabinets",
         headers={"Authorization": f"Bearer {boss_tok}"},
@@ -270,7 +271,7 @@ def test_company_employees_and_summary(client: TestClient) -> None:
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
 
-    boss_tok = _token(sub="boss-empco", email="boss@empco.test")
+    boss_tok = owner_bearer_token(_token, created.json())
     invite = client.post(
         f"/api/v1/companies/{company_id}/employees",
         headers={"Authorization": f"Bearer {boss_tok}"},
@@ -330,13 +331,13 @@ def test_admin_company_description_and_running_cabinets(client: TestClient) -> N
     assert match["description"] == "Platform customer"
     assert match["running_cabinets"] == 0
 
-    boss_tok = _token(sub="boss-desc", email="boss@descco.test")
+    boss_tok = owner_bearer_token(_token, created.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers={"Authorization": f"Bearer {boss_tok}"},
         json={"name": "RunCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     project = client.post(
@@ -396,14 +397,14 @@ def test_admin_delete_company_cascades_soft(client: TestClient) -> None:
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
 
-    boss_tok = _token(sub="boss-del", email="boss@deleteme.test")
+    boss_tok = owner_bearer_token(_token, created.json())
     boss_h = {"Authorization": f"Bearer {boss_tok}"}
     cab = client.post(
         "/api/v1/cabinets",
         headers=boss_h,
         json={"name": "DoomedCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(

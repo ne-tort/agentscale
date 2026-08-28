@@ -304,7 +304,11 @@ class CabinetInstanceService:
         return await _public_row(self._session, inst, grants=self._grants)
 
     async def get_admin(self, *, cabinet_id: str) -> dict:
+        from prodavan.domain.lifecycle import cabinet_is_soft_deleted
+
         inst = await self._access.get_instance(cabinet_id)
+        if cabinet_is_soft_deleted(inst):
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Cabinet not found")
         return await _public_row(self._session, inst, grants=self._grants)
 
     async def update_admin(

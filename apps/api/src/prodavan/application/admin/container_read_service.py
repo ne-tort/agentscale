@@ -166,19 +166,42 @@ class AdminContainerReadService:
         return await self._projects.delete(project_id=project_id, principal=principal, employee=None)
 
     async def pause_for_company(
-        self, *, company_id: str, project_id: str, principal: Principal
+        self,
+        *,
+        company_id: str,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None = None,
     ) -> dict:
         await self._require_company_container(company_id, project_id)
-        return await self.pause(project_id=project_id, principal=principal)
+        await self._projects.pause(
+            project_id=project_id, principal=principal, employee=employee
+        )
+        return await self.get_container(project_id)
 
     async def resume_for_company(
-        self, *, company_id: str, project_id: str, principal: Principal
+        self,
+        *,
+        company_id: str,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None = None,
     ) -> dict:
         await self._require_company_container(company_id, project_id)
-        return await self.resume(project_id=project_id, principal=principal)
+        await self._projects.resume(
+            project_id=project_id, principal=principal, employee=employee
+        )
+        return await self.get_container(project_id)
 
     async def delete_for_company(
-        self, *, company_id: str, project_id: str, principal: Principal
+        self,
+        *,
+        company_id: str,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None = None,
     ) -> dict:
         await self._require_company_container(company_id, project_id)
-        return await self.delete(project_id=project_id, principal=principal)
+        return await self._projects.delete(
+            project_id=project_id, principal=principal, employee=employee
+        )

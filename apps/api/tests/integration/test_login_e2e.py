@@ -123,15 +123,22 @@ def test_e2e_broker_login_same_sub_as_local(client: TestClient, provider: str) -
     invited = client.post(
         f"/api/v1/companies/{company_id}/employees",
         headers={"Authorization": f"Bearer {admin}"},
-        json={"email": email, "display_name": f"Broker {provider}", "role": "member"},
+        json={
+            "login": f"broker{provider}",
+            "password": "test-employee-pass",
+            "contact_email": email,
+            "display_name": f"Broker {provider}",
+            "role": "member",
+        },
     )
     assert invited.status_code == 201, invited.text
     emp_id = invited.json()["id"]
     emp_sub = invited.json()["keycloak_sub"]
     assert emp_sub
+    emp_email = invited.json()["email"]
 
     # Broker login mint: same claims shape as KC access token after IdP alias {provider}
-    tok = _token(sub=emp_sub, email=email, roles=["employee"])
+    tok = _token(sub=emp_sub, email=emp_email, roles=["employee"])
     me = client.get("/api/v1/me", headers={"Authorization": f"Bearer {tok}"})
     assert me.status_code == 200, me.text
     assert me.json()["employee"]["id"] == emp_id

@@ -1,0 +1,36 @@
+# Cross-namespace: e2e Job SA may manage project pods in prodavan-sandboxes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: prodavan-e2e-pod-service
+  namespace: prodavan-sandboxes
+  labels:
+    app.kubernetes.io/name: prodavan-e2e-runner
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: e2e
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: prodavan-pod-service
+subjects:
+  - kind: ServiceAccount
+    name: prodavan-e2e-runner
+    namespace: prodavan
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: prodavan-e2e-project-pod
+  namespace: prodavan-sandboxes
+  labels:
+    app.kubernetes.io/name: prodavan-e2e-runner
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: e2e
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: prodavan-project-pod
+subjects:
+  - kind: ServiceAccount
+    name: prodavan-e2e-runner
+    namespace: prodavan

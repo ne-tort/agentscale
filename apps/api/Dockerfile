@@ -28,6 +28,7 @@ RUN rm -rf ./src ./alembic \
   && rm -rf /tmp/api-full
 COPY apps/api/alembic.ini ./
 COPY apps/api/scripts/migrate.sh ./scripts/migrate.sh
+COPY apps/api/tests ./tests
 RUN chmod +x ./scripts/migrate.sh
 COPY packages/cabinet-packs /packages/cabinet-packs
 COPY packages/schemas /packages/schemas

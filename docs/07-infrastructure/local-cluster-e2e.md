@@ -9,4 +9,6 @@
 5. Seal/apply `ghcr-pull` — [`overlays/dev/SECRETS.md`](../../infra/k3s/overlays/dev/SECRETS.md)
 6. `cd infra/ops && poetry install && poetry run prodavan-ops wait && poetry run prodavan-ops smoke`
 
-Day-2: merge to `main` → Argo sync. Нет `recover_*.sh`, нет `kubectl apply` overlay руками, нет image import.
+Day-2: merge to `main` → Argo sync.
+
+**Pytest e2e (канон):** [`e2e.md`](e2e.md) — L2/L3a/L3b, CI opt-in. Legacy-скрипты (`tools/_live_containers_e2e.py`, `tools/generated/_e2e_*`) **удалены**.

@@ -1,0 +1,62 @@
+# Ephemeral pytest runner — synced only via Argo Application prodavan-e2e (manual).
+# Re-run: prodavan-ops e2e cleanup && prodavan-ops e2e run --suite k8s
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: prodavan-e2e-runner
+  namespace: prodavan
+  labels:
+    app.kubernetes.io/name: prodavan-e2e-runner
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: e2e
+spec:
+  ttlSecondsAfterFinished: 3600
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prodavan-e2e-runner
+        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/component: e2e
+    spec:
+      serviceAccountName: prodavan-e2e-runner
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: ghcr-pull
+      containers:
+        - name: runner
+          image: ghcr.io/ne-tort/prodavan-api:latest
+          imagePullPolicy: Always
+          workingDir: /app
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              pip install -q pytest pytest-asyncio httpx PyJWT ruff asyncpg
+              python - <<'PY'
+              import asyncio, asyncpg, os
+              url = os.environ.get("PG_ADMIN_URL", "postgresql://prodavan:prodavan@prodavan-postgres.prodavan.svc:5432/postgres")
+              async def main():
+                  conn = await asyncpg.connect(url)
+                  try:
+                      await conn.execute("CREATE DATABASE prodavan_e2e")
+                  except asyncpg.DuplicateDatabaseError:
+                      pass
+                  await conn.close()
+              asyncio.run(main())
+              PY
+              alembic upgrade head
+              pytest tests/e2e/k8s -m k8s -v --tb=short
+          env:
+            - name: PG_ADMIN_URL
+              value: postgresql://prodavan:prodavan@prodavan-postgres.prodavan.svc:5432/postgres
+          envFrom:
+            - configMapRef:
+                name: prodavan-e2e-config
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi

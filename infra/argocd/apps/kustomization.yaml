@@ -4,3 +4,4 @@ namespace: argocd
 resources:
   - 00-project.yaml
   - prodavan-dev.yaml
+  - prodavan-e2e.yaml

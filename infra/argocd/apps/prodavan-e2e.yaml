@@ -1,0 +1,29 @@
+# Manual-sync only — CI/workflow syncs this app to run ephemeral e2e Job.
+# Not part of prodavan-dev (POD_RUNTIME_MODE stays stub on prodavan-api).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: prodavan-e2e
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: prodavan
+  source:
+    repoURL: https://github.com/ne-tort/prodavan.git
+    targetRevision: main
+    path: infra/k3s/overlays/e2e
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: prodavan
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=false
+      - RespectIgnoreDifferences=true
+  ignoreDifferences:
+    - group: batch
+      kind: Job
+      jsonPointers:
+        - /status
+        - /spec/selector
+        - /spec/template/metadata/labels

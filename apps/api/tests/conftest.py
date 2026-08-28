@@ -1,8 +1,12 @@
-"""Pytest fixtures — stub."""
+"""Pytest fixtures — shared gates and DB helpers."""
 
 import asyncio
 import os
+import shutil
 import socket
+import subprocess
+import urllib.error
+import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from urllib.parse import urlparse
@@ -37,6 +41,57 @@ def _postgres_available() -> bool:
 requires_postgres = pytest.mark.skipif(
     not _postgres_available(),
     reason="PostgreSQL not available at DATABASE_URL",
+)
+
+E2E_BASE_URL = os.getenv("PRODAVAN_E2E_BASE_URL", "http://127.0.0.1:8088").rstrip("/")
+K8S_SANDBOX_NAMESPACE = os.getenv("POD_SANDBOX_NAMESPACE", "prodavan-sandboxes")
+
+
+def _live_api_available() -> bool:
+    url = f"{E2E_BASE_URL}/health/live"
+    try:
+        with urllib.request.urlopen(url, timeout=3.0) as resp:
+            return resp.status == 200
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return False
+
+
+def _k8s_available() -> bool:
+    sa_token = os.path.join("/var/run/secrets/kubernetes.io/serviceaccount", "token")
+    if os.path.isfile(sa_token):
+        return True
+    kubectl = shutil.which("kubectl")
+    if kubectl is None:
+        return False
+    try:
+        proc = subprocess.run(
+            [
+                kubectl,
+                "auth",
+                "can-i",
+                "list",
+                "pods",
+                "-n",
+                K8S_SANDBOX_NAMESPACE,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+        return proc.returncode == 0 and proc.stdout.strip().lower() == "yes"
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+requires_live_api = pytest.mark.skipif(
+    not _live_api_available(),
+    reason=f"Live API not reachable at {E2E_BASE_URL}/health/live",
+)
+
+requires_k8s = pytest.mark.skipif(
+    not _k8s_available(),
+    reason="Kubernetes sandboxes namespace not accessible (in-cluster SA or kubectl)",
 )
 
 
@@ -114,6 +169,61 @@ def _wipe_public_tables() -> None:
     _run_async(_wipe, timeout=45)
 
 
+def _seed_integration_catalog() -> None:
+    """Re-insert product modules + platform bootstrap after TRUNCATE (mirrors Alembic seed)."""
+    import json
+
+    from prodavan.application.platform.product_module_seeds import PRODUCT_MODULES
+
+    async def _seed() -> None:
+        engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
+        async with engine.begin() as conn:
+            for module_id, name, slugs in PRODUCT_MODULES:
+                await conn.execute(
+                    text(
+                        """
+                        INSERT INTO modules (id, name, status)
+                        VALUES (:id, :name, 'active')
+                        ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, status = 'active'
+                        """
+                    ),
+                    {"id": module_id, "name": name},
+                )
+                for slug, body in slugs.items():
+                    doc_id = f"mmd_{module_id.removeprefix('mod_')}_{slug}"
+                    await conn.execute(
+                        text(
+                            """
+                            INSERT INTO module_meta_documents (id, module_id, slug, body)
+                            VALUES (:id, :module_id, :slug, CAST(:body AS jsonb))
+                            ON CONFLICT (module_id, slug) DO UPDATE SET body = EXCLUDED.body
+                            """
+                        ),
+                        {
+                            "id": doc_id,
+                            "module_id": module_id,
+                            "slug": slug,
+                            "body": json.dumps(body),
+                        },
+                    )
+        await engine.dispose()
+
+    _run_async(_seed, timeout=60)
+    _dispose_app_engine()
+
+
+def pytest_collection_modifyitems(config, items) -> None:
+    """Apply layer markers from test path (conftest pytestmark is not inherited)."""
+    for item in items:
+        path = str(getattr(item, "fspath", "")).replace("\\", "/")
+        if "/tests/integration/" in path:
+            item.add_marker(pytest.mark.integration)
+        elif "/tests/e2e/k8s/" in path:
+            item.add_marker(pytest.mark.k8s)
+        elif "/tests/e2e/live/" in path:
+            item.add_marker(pytest.mark.live)
+
+
 @pytest.fixture(autouse=True)
 def clean_engine_cache(request: pytest.FixtureRequest):
     """Dispose pooled connections; wipe DB only when the test may use it."""
@@ -123,7 +233,10 @@ def clean_engine_cache(request: pytest.FixtureRequest):
     # Pure unit tests without AsyncClient do not touch Postgres — skip TRUNCATE
     # (CI shared PG under Docker Desktop load otherwise flakes with TimeoutError).
     needs_wipe = _postgres_available() and (
-        uses_client or "/tests/integration/" in path or "/tests/unit/" not in path
+        uses_client
+        or "/tests/integration/" in path
+        or "/tests/e2e/k8s/" in path
+        or "/tests/unit/" not in path
     )
     if needs_wipe:
         last_err: TimeoutError | None = None
@@ -137,6 +250,8 @@ def clean_engine_cache(request: pytest.FixtureRequest):
                 _dispose_app_engine()
         if last_err is not None:
             raise last_err
+        if "/tests/integration/" in path or "/tests/e2e/k8s/" in path:
+            _seed_integration_catalog()
     yield
     _dispose_app_engine()
 

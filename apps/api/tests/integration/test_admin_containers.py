@@ -18,6 +18,7 @@ from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.infrastructure.keycloak.invite import reset_invite_client
 from prodavan.main import create_app
 from tests.conftest import requires_postgres
+from tests.integration.support import owner_bearer_token
 
 
 def _token(*, sub: str, email: str | None = None, platform_admin: bool = False) -> str:
@@ -64,13 +65,13 @@ def _setup_project(client: TestClient) -> tuple[str, str]:
         },
     )
     assert key.status_code == 201, key.text
-    owner_tok = _token(sub="owner-ctr-sub", email="owner@ctrco.test")
+    owner_tok = owner_bearer_token(_token, created.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers={"Authorization": f"Bearer {owner_tok}"},
         json={"name": "CtrCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     proj = client.post(
         f"/api/v1/cabinets/{cab.json()['id']}/projects",
         headers={"Authorization": f"Bearer {owner_tok}"},

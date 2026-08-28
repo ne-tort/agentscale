@@ -12,6 +12,10 @@ def overlay_dev() -> Path:
     return repo_root() / "infra" / "k3s" / "overlays" / "dev"
 
 
+def overlay_e2e() -> Path:
+    return repo_root() / "infra" / "k3s" / "overlays" / "e2e"
+
+
 def default_kubeconfig() -> Path:
     """Host kubeconfig (not in git). Prefer ~/.kube/prodavan-dev.yaml."""
     home = Path.home() / ".kube" / "prodavan-dev.yaml"

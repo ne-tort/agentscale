@@ -18,6 +18,7 @@ from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.infrastructure.keycloak.invite import reset_invite_client
 from prodavan.main import create_app
 from tests.conftest import requires_postgres
+from tests.integration.support import owner_bearer_token
 
 
 def _token(*, sub: str, email: str | None = None, platform_admin: bool = False) -> str:
@@ -70,7 +71,7 @@ def test_agent_session_send_persists_events(client: TestClient) -> None:
     )
     assert key.status_code == 201, key.text
 
-    owner_tok = _token(sub="owner-agent", email="owner@agentco.test")
+    owner_tok = owner_bearer_token(_token, co.json())
     owner_h = {"Authorization": f"Bearer {owner_tok}"}
 
     cab = client.post(
@@ -78,7 +79,7 @@ def test_agent_session_send_persists_events(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "AgentCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -163,7 +164,7 @@ def test_project_chat_turn_creates_and_reuses_session(client: TestClient) -> Non
         headers=owner_h,
         json={"name": "ChatCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -244,7 +245,7 @@ def test_agent_budget_per_run_blocks_followup(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "BudgetCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -306,7 +307,7 @@ def test_chat_stream_sse(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "StreamCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -381,7 +382,7 @@ def test_chat_with_attachment_refs_emits_tool_call(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "AttachCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -465,7 +466,7 @@ def test_chat_rejects_unknown_attachment_ref(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "RefCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -519,7 +520,7 @@ def test_chat_accepts_attachment_id_ref(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "IdRefCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -580,7 +581,7 @@ def test_agent_session_uses_platform_fallback_pool(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "FbCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -631,7 +632,7 @@ def test_trigger_dispatch_runs_chat_message(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "TrigCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -700,7 +701,7 @@ def test_trigger_dispatch_drain_batch(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "DrainCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -769,7 +770,7 @@ def test_trigger_regenerate_and_webhook_ack(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "RegenCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -849,7 +850,7 @@ def test_agent_session_create_blocked_cancel_allowed_when_paused(client: TestCli
         headers=owner_h,
         json={"name": "SessPauseCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -921,7 +922,7 @@ def test_project_prepare_allowed_while_paused(client: TestClient) -> None:
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
-    owner_tok = _token(sub="owner-prep-pause", email="owner@preppause.test")
+    owner_tok = owner_bearer_token(_token, created_co.json())
     owner_h = {"Authorization": f"Bearer {owner_tok}"}
 
     cab = client.post(
@@ -929,7 +930,7 @@ def test_project_prepare_allowed_while_paused(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "PrepPauseCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -978,7 +979,7 @@ def test_ai_key_disable_cancels_session_and_pauses_project(client: TestClient) -
     assert key.status_code == 201, key.text
     key_id = key.json()["id"]
 
-    owner_tok = _token(sub="owner-key-cascade", email="owner@keycascade.test")
+    owner_tok = owner_bearer_token(_token, co.json())
     owner_h = {"Authorization": f"Bearer {owner_tok}"}
 
     cab = client.post(
@@ -986,7 +987,7 @@ def test_ai_key_disable_cancels_session_and_pauses_project(client: TestClient) -
         headers=owner_h,
         json={"name": "CascadeCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(

@@ -17,6 +17,7 @@ from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.infrastructure.keycloak.invite import reset_invite_client
 from prodavan.main import create_app
 from tests.conftest import requires_postgres
+from tests.integration.support import owner_bearer_token
 
 
 def _token(*, sub: str, email: str | None = None, platform_admin: bool = False) -> str:
@@ -49,7 +50,7 @@ def _setup_company_with_cabinets(client: TestClient, admin: str) -> tuple[str, s
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
-    boss_tok = _token(sub="boss-mod", email="boss@modco.test")
+    boss_tok = owner_bearer_token(_token, created.json())
     cab1 = client.post(
         "/api/v1/admin/cabinets",
         headers={"Authorization": f"Bearer {admin}"},

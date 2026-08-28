@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 
-from prodavan_ops.paths import overlay_dev, repo_root
+from prodavan_ops.paths import overlay_dev, overlay_e2e, repo_root
 
 FIRST_PARTY_LATEST = {
     "ghcr.io/ne-tort/prodavan-api:latest",
@@ -51,6 +51,16 @@ def _run(cmd: list[str], *, cwd: Path | None = None, env: dict | None = None) ->
 def render_overlay() -> str:
     """Render overlays/dev via kubectl or kustomize on PATH (host tools)."""
     path = overlay_dev()
+    if shutil.which("kubectl"):
+        return _run(["kubectl", "kustomize", str(path)])
+    if shutil.which("kustomize"):
+        return _run(["kustomize", "build", str(path)])
+    raise RuntimeError("need kubectl or kustomize on PATH for validate")
+
+
+def render_overlay_e2e() -> str:
+    """Render overlays/e2e (ephemeral pytest Job — manual Argo sync only)."""
+    path = overlay_e2e()
     if shutil.which("kubectl"):
         return _run(["kubectl", "kustomize", str(path)])
     if shutil.which("kustomize"):
@@ -167,6 +177,17 @@ def validate_all() -> None:
     manifest = render_overlay()
     lines = manifest.count("\n") + (1 if manifest and not manifest.endswith("\n") else 0)
     print(f"ok kustomize ({lines} lines)")
+
+    print("==> kustomize overlays/e2e")
+    e2e_manifest = render_overlay_e2e()
+    e2e_lines = e2e_manifest.count("\n") + (
+        1 if e2e_manifest and not e2e_manifest.endswith("\n") else 0
+    )
+    if "kind: Job" not in e2e_manifest or "prodavan-e2e-runner" not in e2e_manifest:
+        raise RuntimeError("overlays/e2e render must include prodavan-e2e-runner Job")
+    if "POD_RUNTIME_MODE: k8s" not in e2e_manifest:
+        raise RuntimeError("overlays/e2e must set POD_RUNTIME_MODE: k8s on runner ConfigMap")
+    print(f"ok kustomize ({e2e_lines} lines)")
 
     print("==> kustomize argocd/install")
     argo_manifest = render_argocd_install()

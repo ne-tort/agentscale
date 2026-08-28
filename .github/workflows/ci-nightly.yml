@@ -93,11 +93,11 @@ jobs:
           asyncio.run(main())
           PY
 
-      - name: Pytest integration
+      - name: Pytest integration (L2)
         env:
           DATABASE_URL: postgresql+asyncpg://prodavan_app:prodavan@${{ env.DB_HOST }}:55433/prodavan
           PG_ADMIN_URL: postgresql+asyncpg://prodavan:prodavan@${{ env.DB_HOST }}:55433/prodavan
-        run: pytest tests/integration/ -q
+        run: pytest tests/integration -m integration -q
 
       - name: Stop Postgres
         if: always()

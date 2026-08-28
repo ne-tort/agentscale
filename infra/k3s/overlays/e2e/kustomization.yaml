@@ -1,0 +1,13 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: prodavan
+resources:
+  - rbac.yaml
+  - configmap.yaml
+  - job.yaml
+  - rbac-sandboxes.yaml
+
+images:
+  - name: ghcr.io/ne-tort/prodavan-api
+    newName: ghcr.io/ne-tort/prodavan-api
+    newTag: latest

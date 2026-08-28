@@ -288,6 +288,8 @@ class PodCommand:
                     payload={"force": True},
                 )
         await self._session.flush()
+        await self._session.commit()
+        await self._session.refresh(pod)
         return PodQuery._public(pod)
 
     async def _get_live_row(self, project_id: str) -> ProjectPodRow | None:

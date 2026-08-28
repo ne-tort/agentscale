@@ -38,6 +38,11 @@ packages = ["src/prodavan"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+  "integration: off-cluster API tests (Docker Postgres, stub runtime)",
+  "k8s: real Pod lifecycle in prodavan-sandboxes (in-cluster Job or kubeconfig)",
+  "live: HTTP tests against deployed dev API",
+]
 
 [tool.ruff]
 line-length = 120

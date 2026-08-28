@@ -342,6 +342,8 @@ class ProjectCommand:
                     reason="rematerialize",
                 )
 
+        await self._session.commit()
+
         return {
             "project_id": row.id,
             "workspace_root": mat.workspace_root,

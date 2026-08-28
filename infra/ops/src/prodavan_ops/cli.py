@@ -3,6 +3,7 @@ from __future__ import annotations
 import typer
 
 from prodavan_ops import __version__
+from prodavan_ops.e2e import cleanup_e2e, run_e2e
 from prodavan_ops.k8s import assert_kubeconfig_docker_ready, rollout_restart, wait_argo_app
 from prodavan_ops.smoke import smoke
 from prodavan_ops.validate import validate_all
@@ -53,6 +54,29 @@ def smoke_cmd(
     host: str = typer.Option("localhost", "--host"),
 ) -> None:
     smoke(addr=addr, port=port, host_header=host)
+
+
+e2e_app = typer.Typer(help="Cluster e2e runner (prodavan-e2e Argo app + Job).")
+app.add_typer(e2e_app, name="e2e")
+
+
+@e2e_app.command("run")
+def e2e_run_cmd(
+    suite: str = typer.Option("k8s", "--suite", help="k8s | all"),
+    timeout: int = typer.Option(900, "--timeout"),
+) -> None:
+    """Sync prodavan-e2e, wait pytest Job, print logs on failure."""
+    assert_kubeconfig_docker_ready()
+    run_e2e(suite=suite, timeout_sec=timeout)
+
+
+@e2e_app.command("cleanup")
+def e2e_cleanup_cmd(
+    unsync: bool = typer.Option(False, "--unsync", help="Delete Argo Application prodavan-e2e"),
+) -> None:
+    """Remove e2e Job (and optionally the Argo app)."""
+    assert_kubeconfig_docker_ready()
+    cleanup_e2e(unsync=unsync)
 
 
 if __name__ == "__main__":

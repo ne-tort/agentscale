@@ -1,0 +1,263 @@
+name: CI E2E
+
+# Opt-in cluster + integration e2e (not part of CI Gate).
+# Triggers: PR label `e2e`, PR title `[e2e]`, or workflow_dispatch.
+
+on:
+  pull_request:
+    types: [labeled, synchronize, opened, reopened, edited]
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Test suite"
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - integration
+          - k8s
+          - live
+
+concurrency:
+  group: ci-e2e-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: [self-hosted, linux, docker]
+    outputs:
+      run_integration: ${{ steps.decide.outputs.run_integration }}
+      run_k8s: ${{ steps.decide.outputs.run_k8s }}
+      run_live: ${{ steps.decide.outputs.run_live }}
+    steps:
+      - id: decide
+        run: |
+          set -euo pipefail
+          suite="${{ github.event.inputs.suite || 'all' }}"
+          triggered=0
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            triggered=1
+          fi
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            title='${{ github.event.pull_request.title }}'
+            if echo "$title" | grep -qi '\[e2e\]'; then
+              triggered=1
+            fi
+            labels='${{ toJson(github.event.pull_request.labels.*.name) }}'
+            if echo "$labels" | grep -q 'e2e'; then
+              triggered=1
+            fi
+          fi
+          if [ "$triggered" -eq 0 ]; then
+            echo "No e2e trigger (label e2e or [e2e] in title or workflow_dispatch)"
+            echo "run_integration=false" >> "$GITHUB_OUTPUT"
+            echo "run_k8s=false" >> "$GITHUB_OUTPUT"
+            echo "run_live=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$suite" in
+            integration)
+              echo "run_integration=true" >> "$GITHUB_OUTPUT"
+              echo "run_k8s=false" >> "$GITHUB_OUTPUT"
+              echo "run_live=false" >> "$GITHUB_OUTPUT"
+              ;;
+            k8s)
+              echo "run_integration=false" >> "$GITHUB_OUTPUT"
+              echo "run_k8s=true" >> "$GITHUB_OUTPUT"
+              echo "run_live=false" >> "$GITHUB_OUTPUT"
+              ;;
+            live)
+              echo "run_integration=false" >> "$GITHUB_OUTPUT"
+              echo "run_k8s=false" >> "$GITHUB_OUTPUT"
+              echo "run_live=true" >> "$GITHUB_OUTPUT"
+              ;;
+            all)
+              echo "run_integration=true" >> "$GITHUB_OUTPUT"
+              echo "run_k8s=true" >> "$GITHUB_OUTPUT"
+              echo "run_live=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "unknown suite: $suite" >&2
+              exit 1
+              ;;
+          esac
+
+  integration:
+    needs: gate
+    if: needs.gate.outputs.run_integration == 'true'
+    runs-on: [self-hosted, linux, docker]
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve DB host
+        run: echo "DB_HOST=${PRODAVAN_CI_HOST:-127.0.0.1}" >> "${GITHUB_ENV}"
+
+      - name: Start Postgres
+        run: |
+          set -euo pipefail
+          docker rm -f prodavan-e2e-pg 2>/dev/null || true
+          docker run -d --name prodavan-e2e-pg \
+            -e POSTGRES_USER=prodavan \
+            -e POSTGRES_PASSWORD=prodavan \
+            -e POSTGRES_DB=prodavan \
+            -p 55434:5432 \
+            postgres:16.15
+          for i in $(seq 1 30); do
+            if docker exec prodavan-e2e-pg pg_isready -U prodavan -d prodavan; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Ensure app role + migrate
+        env:
+          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@${{ env.DB_HOST }}:55434/prodavan
+        run: |
+          python - <<'PY'
+          import asyncio, asyncpg, os
+          host = os.environ["DB_HOST"]
+          async def main():
+              conn = await asyncpg.connect(f"postgresql://prodavan:prodavan@{host}:55434/prodavan")
+              try:
+                  await conn.execute("CREATE ROLE prodavan_app LOGIN PASSWORD 'prodavan'")
+              except Exception:
+                  pass
+              await conn.execute("GRANT ALL ON SCHEMA public TO prodavan_app")
+              await conn.execute("GRANT ALL ON DATABASE prodavan TO prodavan_app")
+              await conn.close()
+          asyncio.run(main())
+          PY
+          alembic upgrade head
+          python - <<'PY'
+          import asyncio, asyncpg, os
+          host = os.environ["DB_HOST"]
+          async def main():
+              conn = await asyncpg.connect(f"postgresql://prodavan:prodavan@{host}:55434/prodavan")
+              await conn.execute("GRANT ALL ON ALL TABLES IN SCHEMA public TO prodavan_app")
+              await conn.execute("GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO prodavan_app")
+              await conn.close()
+          asyncio.run(main())
+          PY
+
+      - name: Pytest integration (L2)
+        env:
+          DATABASE_URL: postgresql+asyncpg://prodavan_app:prodavan@${{ env.DB_HOST }}:55434/prodavan
+        run: pytest tests/integration -m integration -q
+
+      - name: Stop Postgres
+        if: always()
+        run: docker rm -f prodavan-e2e-pg 2>/dev/null || true
+
+  k8s:
+    needs: gate
+    if: needs.gate.outputs.run_k8s == 'true'
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve kubeconfig
+        run: |
+          set -euo pipefail
+          if [ -n "${KUBECONFIG:-}" ] && [ -f "${KUBECONFIG}" ]; then exit 0; fi
+          for c in "${HOME}/.kube/prodavan-dev.yaml" "${HOME}/.kube/config"; do
+            if [ -f "$c" ]; then
+              echo "KUBECONFIG=$c" >> "${GITHUB_ENV}"
+              exit 0
+            fi
+          done
+          exit 1
+
+      - name: Python venv + prodavan-ops
+        run: |
+          python3 -m venv "${{ runner.temp }}/ops-venv"
+          echo "${{ runner.temp }}/ops-venv/bin" >> "${GITHUB_PATH}"
+          "${{ runner.temp }}/ops-venv/bin/python" -m pip install -U pip poetry
+
+      - name: Run k8s e2e Job (L3a)
+        working-directory: infra/ops
+        run: |
+          poetry install --no-interaction
+          poetry run prodavan-ops e2e run --suite k8s --timeout 900
+
+      - name: Cleanup k8s e2e
+        if: always()
+        working-directory: infra/ops
+        run: poetry run prodavan-ops e2e cleanup || true
+
+  live:
+    needs: gate
+    if: needs.gate.outputs.run_live == 'true'
+    runs-on: [self-hosted, linux, docker]
+    defaults:
+      run:
+        working-directory: apps/api
+    env:
+      PRODAVAN_E2E_BASE_URL: http://127.0.0.1:8088
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      - name: Pytest live (L3b)
+        run: |
+          ADDR="${PRODAVAN_CI_HOST:-127.0.0.1}"
+          export PRODAVAN_E2E_BASE_URL="http://${ADDR}:8088"
+          pytest tests/e2e/live -m live -q
+
+  done:
+    needs: [gate, integration, k8s, live]
+    if: always()
+    runs-on: [self-hosted, linux, docker]
+    steps:
+      - name: E2E summary
+        run: |
+          python3 - <<'PY'
+          import os, sys
+          if os.environ.get("RUN_INTEGRATION") == "false" and os.environ.get("RUN_K8S") == "false" and os.environ.get("RUN_LIVE") == "false":
+              print("CI E2E skipped (no trigger)")
+              sys.exit(0)
+          jobs = {
+              "integration": os.environ.get("INTEGRATION", "skipped"),
+              "k8s": os.environ.get("K8S", "skipped"),
+              "live": os.environ.get("LIVE", "skipped"),
+          }
+          print(jobs)
+          bad = []
+          expected = {
+              "integration": os.environ.get("RUN_INTEGRATION") == "true",
+              "k8s": os.environ.get("RUN_K8S") == "true",
+              "live": os.environ.get("RUN_LIVE") == "true",
+          }
+          for name, result in jobs.items():
+              if not expected.get(name):
+                  continue
+              if result != "success":
+                  bad.append(f"{name}={result}")
+          if bad:
+              sys.exit(f"CI E2E failed: {bad}")
+          print("CI E2E OK")
+          PY
+        env:
+          RUN_INTEGRATION: ${{ needs.gate.outputs.run_integration }}
+          RUN_K8S: ${{ needs.gate.outputs.run_k8s }}
+          RUN_LIVE: ${{ needs.gate.outputs.run_live }}
+          INTEGRATION: ${{ needs.integration.result }}
+          K8S: ${{ needs.k8s.result }}
+          LIVE: ${{ needs.live.result }}

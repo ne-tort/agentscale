@@ -8,6 +8,8 @@ poetry install
 poetry run prodavan-ops validate   # no .sh / no compose / no k3d; kustomize + image pins
 poetry run prodavan-ops wait       # Argo Application Synced+Healthy
 poetry run prodavan-ops smoke      # HTTP live/ready/auth/UI
+poetry run prodavan-ops e2e run    # k8s pod e2e Job (overlays/e2e)
+poetry run prodavan-ops e2e cleanup
 ```
 
 Secrets (`ghcr-pull`) — SealedSecret, see `infra/k3s/overlays/dev/SECRETS.md`.

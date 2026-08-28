@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prodavan-e2e-config
+  namespace: prodavan
+  labels:
+    app.kubernetes.io/name: prodavan-e2e-runner
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: e2e
+data:
+  DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@prodavan-postgres.prodavan.svc:5432/prodavan_e2e
+  AUTH_MODE: test
+  AUTH_TEST_SECRET: dev-only-test-secret-change-me
+  KEYCLOAK_INVITE_MODE: fake
+  POD_RUNTIME_MODE: k8s
+  POD_SANDBOX_NAMESPACE: prodavan-sandboxes
+  POD_SANDBOX_SA: prodavan-project-pod
+  POD_SANDBOX_MINIO_SECRET: prodavan-minio-hydrate
+  POD_K8S_REQUIRED: "true"
+  POD_SANDBOX_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
+  POD_SANDBOX_HYDRATE_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
+  REDIS_REQUIRED: "false"
+  KAFKA_REQUIRED: "false"
+  CELERY_ENABLED: "false"
+  OBJECT_STORE_REQUIRED: "false"
+  TRIGGER_WORKER_ENABLED: "false"
+  IDLE_PAUSE_WORKER_ENABLED: "false"
+  POD_RECONCILE_WORKER_ENABLED: "false"
+  STORAGE_ROOT: /tmp/e2e-storage
+  SECRETS_DIR: /tmp/e2e-secrets
+  PACKS_ROOT: /packages/cabinet-packs

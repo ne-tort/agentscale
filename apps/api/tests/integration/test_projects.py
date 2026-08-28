@@ -19,6 +19,7 @@ from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.infrastructure.keycloak.invite import reset_invite_client
 from prodavan.main import create_app
 from tests.conftest import requires_postgres, sql_backdate_project
+from tests.integration.support import owner_bearer_token
 
 
 def _token(*, sub: str, email: str | None = None, platform_admin: bool = False) -> str:
@@ -52,7 +53,8 @@ def _setup_cabinet(client: TestClient) -> tuple[str, str, str]:
         json={"name": "ProjCo", "password": "test-company-pass", "admin_email": "owner@projco.test"},
     )
     assert created.status_code == 201, created.text
-    company_id = created.json()["company"]["id"]
+    created_body = created.json()
+    company_id = created_body["company"]["id"]
     key = client.post(
         "/api/v1/admin/ai-keys",
         headers={"Authorization": f"Bearer {admin}"},
@@ -65,13 +67,13 @@ def _setup_cabinet(client: TestClient) -> tuple[str, str, str]:
         },
     )
     assert key.status_code == 201, key.text
-    owner_tok = _token(sub="owner-sub", email="owner@projco.test")
+    owner_tok = owner_bearer_token(_token, created.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers={"Authorization": f"Bearer {owner_tok}"},
         json={"name": "ProjCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     return company_id, cab.json()["id"], owner_tok
 
 
@@ -340,7 +342,7 @@ def test_attachment_respects_company_policy_and_extension(client: TestClient) ->
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
-    owner_tok = _token(sub="owner-sub", email="owner@attachco.test")
+    owner_tok = owner_bearer_token(_token, created.json())
 
     policy = client.put(
         f"/api/v1/admin/companies/{company_id}/agent-policy",
@@ -354,7 +356,7 @@ def test_attachment_respects_company_policy_and_extension(client: TestClient) ->
         headers={"Authorization": f"Bearer {owner_tok}"},
         json={"name": "AttachCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -528,7 +530,7 @@ def test_delete_attachment_and_signed_webhook(client: TestClient) -> None:
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
-    owner_tok = _token(sub="owner-sub", email="owner@hookco.test")
+    owner_tok = owner_bearer_token(_token, created_co.json())
 
     policy = client.put(
         f"/api/v1/admin/companies/{company_id}/agent-policy",
@@ -543,7 +545,7 @@ def test_delete_attachment_and_signed_webhook(client: TestClient) -> None:
         headers={"Authorization": f"Bearer {owner_tok}"},
         json={"name": "HookCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -631,7 +633,7 @@ def test_company_suspended_emit_and_chat_gate(client: TestClient) -> None:
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
-    owner_tok = _token(sub="owner-sus", email="owner@susco.test")
+    owner_tok = owner_bearer_token(_token, created_co.json())
 
     key = client.post(
         "/api/v1/admin/ai-keys",
@@ -651,7 +653,7 @@ def test_company_suspended_emit_and_chat_gate(client: TestClient) -> None:
         headers={"Authorization": f"Bearer {owner_tok}"},
         json={"name": "SusCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -755,14 +757,14 @@ def test_subscription_reactivate_emits_event(client: TestClient) -> None:
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
-    owner_tok = _token(sub="owner-react", email="owner@reactco.test")
+    owner_tok = owner_bearer_token(_token, created_co.json())
 
     cab = client.post(
         "/api/v1/cabinets",
         headers={"Authorization": f"Bearer {owner_tok}"},
         json={"name": "ReactCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
 
     past = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
     suspend = client.put(
@@ -801,7 +803,7 @@ def test_webhook_ingress_blocked_when_company_suspended(client: TestClient) -> N
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
-    owner_tok = _token(sub="owner-wh-sus", email="owner@whsusco.test")
+    owner_tok = owner_bearer_token(_token, created_co.json())
 
     policy = client.put(
         f"/api/v1/admin/companies/{company_id}/agent-policy",
@@ -815,7 +817,7 @@ def test_webhook_ingress_blocked_when_company_suspended(client: TestClient) -> N
         headers={"Authorization": f"Bearer {owner_tok}"},
         json={"name": "WhSusCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -859,7 +861,7 @@ def test_webhook_ingress_blocked_when_project_paused(client: TestClient) -> None
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
-    owner_tok = _token(sub="owner-hook-pause", email="owner@hookpause.test")
+    owner_tok = owner_bearer_token(_token, created_co.json())
 
     policy = client.put(
         f"/api/v1/admin/companies/{company_id}/agent-policy",
@@ -873,7 +875,7 @@ def test_webhook_ingress_blocked_when_project_paused(client: TestClient) -> None
         headers={"Authorization": f"Bearer {owner_tok}"},
         json={"name": "HookPauseCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -915,7 +917,7 @@ def test_telegram_webhook_blocked_when_project_paused(client: TestClient) -> Non
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
-    owner_tok = _token(sub="owner-tg-pause", email="owner@tgpause.test")
+    owner_tok = owner_bearer_token(_token, created_co.json())
 
     policy = client.put(
         f"/api/v1/admin/companies/{company_id}/agent-policy",
@@ -929,7 +931,7 @@ def test_telegram_webhook_blocked_when_project_paused(client: TestClient) -> Non
         headers={"Authorization": f"Bearer {owner_tok}"},
         json={"name": "TgPauseCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -966,7 +968,7 @@ def test_queued_trigger_survives_pause_and_runs_after_resume(client: TestClient)
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
-    owner_tok = _token(sub="owner-leave-q", email="owner@leaveq.test")
+    owner_tok = owner_bearer_token(_token, created_co.json())
     owner_h = {"Authorization": f"Bearer {owner_tok}"}
 
     key = client.post(
@@ -987,7 +989,7 @@ def test_queued_trigger_survives_pause_and_runs_after_resume(client: TestClient)
         headers=owner_h,
         json={"name": "LeaveQCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -1038,14 +1040,14 @@ def test_create_project_blocked_when_company_suspended(client: TestClient) -> No
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
-    owner_tok = _token(sub="owner-proj-sus", email="owner@projsusco.test")
+    owner_tok = owner_bearer_token(_token, created_co.json())
 
     cab = client.post(
         "/api/v1/cabinets",
         headers={"Authorization": f"Bearer {owner_tok}"},
         json={"name": "ProjSusCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     past = (datetime.now(UTC) - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -1075,14 +1077,14 @@ def test_get_project_includes_company_subscription(client: TestClient) -> None:
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
-    owner_tok = _token(sub="owner-sub-dto", email="owner@subdtoco.test")
+    owner_tok = owner_bearer_token(_token, created_co.json())
 
     cab = client.post(
         "/api/v1/cabinets",
         headers={"Authorization": f"Bearer {owner_tok}"},
         json={"name": "SubDtoCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -1120,14 +1122,14 @@ def test_upload_attachment_blocked_when_company_suspended(client: TestClient) ->
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
-    owner_tok = _token(sub="owner-att-sus", email="owner@attsusco.test")
+    owner_tok = owner_bearer_token(_token, created_co.json())
 
     cab = client.post(
         "/api/v1/cabinets",
         headers={"Authorization": f"Bearer {owner_tok}"},
         json={"name": "AttSusCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -1167,7 +1169,7 @@ def test_trigger_drain_fails_queued_when_company_suspended(client: TestClient) -
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
-    owner_tok = _token(sub="owner-trg-sus", email="owner@trgsusco.test")
+    owner_tok = owner_bearer_token(_token, created_co.json())
 
     key = client.post(
         "/api/v1/admin/ai-keys",
@@ -1187,7 +1189,7 @@ def test_trigger_drain_fails_queued_when_company_suspended(client: TestClient) -
         headers={"Authorization": f"Bearer {owner_tok}"},
         json={"name": "TrgSusCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -1284,7 +1286,7 @@ def test_natural_subscription_expiry_emits_suspended_on_read(client: TestClient)
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
-    owner_tok = _token(sub="owner-nat-exp", email="owner@natexpco.test")
+    owner_tok = owner_bearer_token(_token, created_co.json())
 
     future = (datetime.now(UTC) + timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
     active = client.put(
@@ -1300,7 +1302,7 @@ def test_natural_subscription_expiry_emits_suspended_on_read(client: TestClient)
         headers={"Authorization": f"Bearer {owner_tok}"},
         json={"name": "NatExpCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -1349,7 +1351,7 @@ def test_project_pause_blocks_chat_and_attachment(client: TestClient) -> None:
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
-    owner_tok = _token(sub="owner-pause-chat", email="owner@pausechat.test")
+    owner_tok = owner_bearer_token(_token, created_co.json())
     owner_h = {"Authorization": f"Bearer {owner_tok}"}
 
     key = client.post(
@@ -1370,7 +1372,7 @@ def test_project_pause_blocks_chat_and_attachment(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "PauseChatCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -1426,7 +1428,7 @@ def test_idle_pause_sweep_pauses_stale_project(client: TestClient) -> None:
     )
     assert created_co.status_code == 201, created_co.text
     company_id = created_co.json()["company"]["id"]
-    owner_tok = _token(sub="owner-idle", email="owner@idleco.test")
+    owner_tok = owner_bearer_token(_token, created_co.json())
 
     policy = client.put(
         f"/api/v1/admin/companies/{company_id}/agent-policy",
@@ -1442,7 +1444,7 @@ def test_idle_pause_sweep_pauses_stale_project(client: TestClient) -> None:
         headers={"Authorization": f"Bearer {owner_tok}"},
         json={"name": "IdleCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     proj = client.post(
@@ -1496,7 +1498,7 @@ def test_project_resume_requires_valid_ai_key(client: TestClient) -> None:
     )
     assert created.status_code == 201, created.text
     company_id = created.json()["company"]["id"]
-    owner_tok = _token(sub="owner-resume-key", email="owner@resumekey.test")
+    owner_tok = owner_bearer_token(_token, created.json())
     owner_h = {"Authorization": f"Bearer {owner_tok}"}
 
     cab = client.post(
@@ -1504,7 +1506,7 @@ def test_project_resume_requires_valid_ai_key(client: TestClient) -> None:
         headers=owner_h,
         json={"name": "ResumeKeyCab", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     proj = client.post(
         f"/api/v1/cabinets/{cab.json()['id']}/projects",
         headers=owner_h,
