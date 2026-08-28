@@ -114,10 +114,12 @@ data:
   SANDBOX_K8S_NAMESPACE: prodavan
   SANDBOX_K8S_PVC: prodavan-api-storage
   SANDBOX_K8S_JOB_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
-  POD_RUNTIME_MODE: "stub"
+  POD_RUNTIME_MODE: "k8s"
+  POD_K8S_REQUIRED: "true"
   POD_SANDBOX_NAMESPACE: prodavan-sandboxes
   POD_SANDBOX_SA: prodavan-project-pod
   POD_SANDBOX_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
   POD_SANDBOX_HYDRATE_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
-  POD_SANDBOX_MINIO_SECRET: prodavan-minio-hydrate
-  POD_RECONCILE_WORKER_ENABLED: "false"
+  # Empty — initContainer creates inbox/runs without MinIO (same as L3a e2e).
+  POD_SANDBOX_MINIO_SECRET: ""
+  POD_RECONCILE_WORKER_ENABLED: "true"

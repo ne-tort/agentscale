@@ -1,14 +1,13 @@
-# STUB — состояние кодовой базы
+# STUB — устарело
 
-`apps/api` и `apps/flutter` намеренно очищены до **болванки**.
+> **Deprecated.** Репозиторий не stub: рабочий API + Flutter + k3s.  
+> Продукт: [`docs/PRODUCT.md`](docs/PRODUCT.md) · As-built: [`docs/target/12-layer-docs/`](docs/target/12-layer-docs/)
 
 | Слой | Статус |
 |------|--------|
-| Infra (k3s, Terraform, Argo, CI images) | Рабочий, не трогать без нужды |
-| Product canon | Только [`docs/target/`](docs/target/) |
-| Legacy docs | [`docs/LEGACY.md`](docs/LEGACY.md) — справочно, не следовать |
-| API / Flutter / DB schema | Stub: health + empty UI + `stub_meta` |
+| Infra (k3s, Terraform, Argo, CI) | Рабочий |
+| API | FastAPI, pod-service, agent, identity, … |
+| Flutter | Частичный UI |
+| AI-канон `docs/target/01…15` | **Legacy** |
 
-Агентам: **не** копировать удалённую S4B/pipeline/password-JWT логику из истории коммитов.
-Новая реализация — по `docs/target/` + план [`11-implementation-plan/`](docs/target/11-implementation-plan/) + as-built [`12-layer-docs/`](docs/target/12-layer-docs/) + [AGENTS.md](AGENTS.md) + Alembic с чистого bootstrap (см. [alembic.md](docs/07-infrastructure/alembic.md)).
-Слой нельзя закрывать «минимальным прототипом» — см. DoD/veto в плане; карточку as-built обновлять в том же PR, что и код.
+Агентам: **не** копировать домен из git history и не расширять legacy-канон.

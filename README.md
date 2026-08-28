@@ -1,8 +1,10 @@
 # Prodavan
 
-> **STUB.** `apps/api` и `apps/flutter` — болванка. Канон: [`docs/target/`](docs/target/). См. [`STUB.md`](STUB.md).
+SaaS: **управление Pod'ами через UI**, внутри Pod — **AI-агенты с файлами** (не ChatGPT-обёртка).
 
-Коммерческая платформа: **Flutter Web** + **FastAPI** + **PostgreSQL** + **k3s** (GitOps).
+Продукт: [`docs/PRODUCT.md`](docs/PRODUCT.md) · Ops: [`docs/07-infrastructure/runbook.md`](docs/07-infrastructure/runbook.md)
+
+Коммерческая платформа: **Flutter** + **FastAPI** + **PostgreSQL** + **k3s** (GitOps).
 
 Изолирован от [Commerce](https://github.com/ne-tort/commerce): отдельный репозиторий, отдельный деплой.
 
@@ -12,6 +14,7 @@
 |------|------------|
 | Frontend | Flutter |
 | Backend | Python 3.12+, FastAPI, Alembic |
+| Runtime | k8s Pods (`prodavan-sandboxes`) + agent SDK |
 | DB | PostgreSQL (in-cluster dev) |
 | Infra | **k3s + Argo CD + kustomize** |
 
@@ -43,6 +46,7 @@ cd apps/flutter && flutter pub get && flutter run -d chrome
 
 ## Документация
 
-- **Канон продукта:** [docs/target/](docs/target/)
-- **Ops / GitOps:** [docs/07-infrastructure/runbook.md](docs/07-infrastructure/runbook.md)
-- **Stub:** [STUB.md](STUB.md) · [docs/LEGACY.md](docs/LEGACY.md)
+- **Продукт:** [docs/PRODUCT.md](docs/PRODUCT.md)
+- **As-built (код):** [docs/target/12-layer-docs/](docs/target/12-layer-docs/)
+- **Ops / GitOps:** [docs/07-infrastructure/](docs/07-infrastructure/)
+- **Legacy (в т.ч. AI-канон `target/`):** [docs/LEGACY.md](docs/LEGACY.md)

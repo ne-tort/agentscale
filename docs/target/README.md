@@ -1,9 +1,19 @@
-# Target architecture — канон
+# Target architecture — LEGACY
 
-Документация **целевой** архитектуры Prodavan. Legacy: [LEGACY](../LEGACY.md).  
-Агенту: [AGENTS.md](../../AGENTS.md). Код может отставать — канон важнее stub.
+> **LEGACY.** Этот каталог — AI-generated «канон», **не** источник правды по продукту.  
+> **Продукт:** [docs/PRODUCT.md](../PRODUCT.md) · **As-built код:** [12-layer-docs/](12-layer-docs/) · **Политика:** [LEGACY.md](../LEGACY.md)
 
-## Суть
+Не блокировать разработку gap map'ом. Не добавлять новые модули `01…15` без явной задачи.
+
+---
+
+<details>
+<summary>Архивное содержание (раскрыть только для справки)</summary>
+
+Документация **целевой** архитектуры Prodavan (устаревшая).  
+Агенту: [AGENTS.md](../../AGENTS.md). Код может отставать — **ориентир: PRODUCT.md + код**.
+
+## Суть (legacy)
 
 Admin (KC) → Company (KC, **локальный Admin**: employees / containers / own AI keys) → Employee → Cabinet → Project → Pod.  
 Фокус сущности: [03-companies](03-companies/). Gaps: [09-gap-map](09-gap-map.md).
@@ -40,3 +50,5 @@ Admin (KC) → Company (KC, **локальный Admin**: employees / containers
 | 13 | Platform infra | Kafka, MinIO, Celery, Redis |
 | 14 | Project Containers | **Isolated Pod** per Project |
 | 15 | Content storage | File Service + assets/aliases/ACL |
+
+</details>

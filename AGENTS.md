@@ -1,27 +1,22 @@
 # Prodavan Agent
 
-Работаешь в репозитории **`prodavan/`** (подмодуль Commerce) — облачная платформа автоматизации задач (SaaS).  
+Работаешь в репозитории **`prodavan/`** (подмодуль Commerce) — SaaS **управления Pod'ами через UI**; внутри Pod — **AI-агенты с файлами и инструментами**, не чат-обёртка.  
 **Не** Telegram Commerce-бот, **не** закупочный пайплайн из корня Commerce.
 
-Код `apps/*` сейчас stub: [`STUB.md`](STUB.md). Legacy (`docs/` вне target) — только справка: [`docs/LEGACY.md`](docs/LEGACY.md); не копировать домен из git history.
+Legacy AI-канон: [`docs/target/`](docs/target/) (кроме as-built) — см. [`docs/LEGACY.md`](docs/LEGACY.md). Ориентир: [`docs/PRODUCT.md`](docs/PRODUCT.md) + код + тесты.
 
 ## Документация (актуальная)
 
-Всё продуктовое и реализационное — **`docs/target/`**. Индекс: [`docs/target/README.md`](docs/target/README.md).
-
 | Что | Где | Когда читать |
-|-----|-----|----------------|
-| **Сущности / иерархия** | [`00-entities.md`](docs/target/00-entities.md) | Старт любой задачи |
-| Принципы / глоссарий | [`00-principles.md`](docs/target/00-principles.md), [`00-glossary.md`](docs/target/00-glossary.md) | Рядом с entities |
-| Канон BC | [`01`](docs/target/01-platform-admin/)…[`14`](docs/target/14-project-containers/) | Модуль по теме |
-| Containers = **Pod** | [`14-project-containers/`](docs/target/14-project-containers/) | Runtime изоляция Project |
-| Cabinets = оболочка+meta | [`05-cabinets/entity.md`](docs/target/05-cabinets/entity.md) | Кабинеты |
-| Platform infra | [`13-platform-infra/`](docs/target/13-platform-infra/) | До крупных backend-задач |
-| Gap (код ≠ канон) | [`09-gap-map.md`](docs/target/09-gap-map.md) | Перед крупными решениями |
-| As-built | [`12-layer-docs/`](docs/target/12-layer-docs/) | Что уже в коде |
+|-----|-----|--------------|
+| **Продукт** | [`docs/PRODUCT.md`](docs/PRODUCT.md) | Старт любой задачи |
+| As-built | [`docs/target/12-layer-docs/`](docs/target/12-layer-docs/) | Что уже в коде |
+| Infra / e2e | [`docs/07-infrastructure/`](docs/07-infrastructure/) | GitOps, k3s, CI |
+| Pod runtime | [`pod_service/`](apps/api/src/prodavan/application/pod_service/), [`tests/e2e/k8s/`](apps/api/tests/e2e/k8s/) | Real k8s lifecycle |
+| Agent + files | [`application/agent/`](apps/api/src/prodavan/application/agent/) | Агент в Pod |
+| ~~Канон BC~~ legacy | [`docs/target/01…15`](docs/target/) | Справка, не блокер |
 
-**Правило:** `docs/target/` = как **должно**; `12-layer-docs` / код = что есть. Не возводить object-ws без Pod в «канон контейнера».
-
+**Правило:** PRODUCT.md + код > gap map. E2E — backend API, не Flutter.
 ## Git / CI / кластер (GitOps)
 
 **Ранбук:** [`docs/07-infrastructure/runbook.md`](docs/07-infrastructure/runbook.md).
@@ -87,9 +82,7 @@ ORM-модель → autogenerate в PR → CI (upgrade + alembic check) → mer
 
 ## Суть продукта
 
-Admin (KC) → Company (KC) как **локальный Admin** (сотрудники, контейнеры, свои AI keys) → Employee → Project → Pod.  
-Канон: [`docs/target/00-entities.md`](docs/target/00-entities.md) · Company: [`03-companies/`](docs/target/03-companies/) · Gaps: [`09-gap-map.md`](docs/target/09-gap-map.md).
-
+**UI → API → k8s Pod → agent (файлы, tools, SDK).** Подробно: [`docs/PRODUCT.md`](docs/PRODUCT.md).
 ## Субагенты
 
 Всегда **Auto**: `model: "inherit"`.
@@ -97,5 +90,5 @@ Admin (KC) → Company (KC) как **локальный Admin** (сотрудн�
 ## Язык и границы
 
 - Ответы — на русском, если не сказано иное.
-- Новые продуктовые требования — только в `docs/target/`.
+- Новые продуктовые требования — только в `docs/PRODUCT.md` (as-built — `12-layer-docs`).
 - Infra не ломать без явной задачи; не добавлять bash.

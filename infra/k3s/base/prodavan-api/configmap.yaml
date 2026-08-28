@@ -46,7 +46,7 @@ data:
   SANDBOX_K8S_NAMESPACE: prodavan
   SANDBOX_K8S_PVC: prodavan-api-storage
   SANDBOX_K8S_JOB_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
-  # pod_service (P2): stub until Verify Dev enables k8s + sandboxes RBAC synced
+  # pod_service: dev overlay sets POD_RUNTIME_MODE=k8s (see overlays/dev/patch-dev.yaml)
   POD_RUNTIME_MODE: "stub"
   POD_SANDBOX_NAMESPACE: prodavan-sandboxes
   POD_SANDBOX_SA: prodavan-project-pod

@@ -19,7 +19,7 @@
 | **L3a K8s runtime** | `k8s` | `tests/e2e/k8s/` | in-cluster Job, `prodavan-sandboxes` | opt-in E2E |
 | **L3b Live API** | `live` | `tests/e2e/live/` | Traefik `:8088` | opt-in E2E |
 
-`prodavan-api` на dev **всегда** `POD_RUNTIME_MODE=stub`. K8s pod-тесты — in-process в ephemeral Job (`infra/k3s/overlays/e2e/`), без переключения боевого Deployment.
+`prodavan-api` на dev **`POD_RUNTIME_MODE=k8s`** (overlay `infra/k3s/overlays/dev/`). K8s pod-тесты — in-process в ephemeral Job (`infra/k3s/overlays/e2e/`), без переключения боевого Deployment отдельно.
 
 ### Ответственность слоёв
 

@@ -1,5 +1,7 @@
 # Gap map — target ↔ код
 
+> **LEGACY.** Продукт: [docs/PRODUCT.md](../PRODUCT.md). Этот файл — архив «AI канон ↔ код», не блокер решений.
+
 > Канон (как должно): **[00-entities.md](00-entities.md)**.  
 > Код / as-built: [12-layer-docs](12-layer-docs/), [STUB.md](../../STUB.md).  
 > Этот файл — **расхождения = проблемы**, не «канон подстроили под stub».
