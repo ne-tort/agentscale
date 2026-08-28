@@ -61,6 +61,27 @@ jobs:
           echo "No kubeconfig: set KUBECONFIG on the runner or place ~/.kube/prodavan-dev.yaml" >&2
           exit 1
 
+      - name: Ensure kubectl on PATH
+        run: |
+          set -euo pipefail
+          if command -v kubectl >/dev/null 2>&1; then
+            kubectl version --client
+            exit 0
+          fi
+          ver=v1.31.4
+          cache="/cache/kubectl/${ver}"
+          if [ -x "${cache}/kubectl" ]; then
+            echo "${cache}" >> "${GITHUB_PATH}"
+            "${cache}/kubectl" version --client
+            exit 0
+          fi
+          mkdir -p "${cache}"
+          tgz="${{ runner.temp }}/kubectl"
+          url="https://dl.k8s.io/release/${ver}/bin/linux/amd64/kubectl"
+          curl -fsSL -o "${tgz}" "${url}"
+          install -m 0755 "${tgz}" "${cache}/kubectl"
+          echo "${cache}" >> "${GITHUB_PATH}"
+
       - name: Python venv + Poetry
         run: |
           python3 -m venv "${{ runner.temp }}/ops-venv"

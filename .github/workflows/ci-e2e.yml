@@ -174,7 +174,7 @@ jobs:
     needs: gate
     if: needs.gate.outputs.run_k8s == 'true' || needs.gate.outputs.run_live == 'true'
     runs-on: [self-hosted, linux, docker]
-    timeout-minutes: 5
+    timeout-minutes: 10
     env:
       PRODAVAN_CI_HOST: host.docker.internal
     steps:
@@ -229,8 +229,18 @@ jobs:
           set -euo pipefail
           path="$(poetry run python -c "from prodavan_ops.k8s import resolve_kubeconfig_path; print(resolve_kubeconfig_path())")"
           echo "KUBECONFIG=${path}" >> "${GITHUB_ENV}"
-          poetry run python -c "from prodavan_ops.k8s import require_k8s_api; require_k8s_api(timeout_sec=120)"
-          poetry run prodavan-ops smoke --addr host.docker.internal --port 8088
+          for round in 1 2 3; do
+            echo "=== dev-preflight round ${round}/3 ==="
+            if poetry run python -c "from prodavan_ops.k8s import require_k8s_api; require_k8s_api(timeout_sec=90)" \
+              && poetry run prodavan-ops smoke --addr host.docker.internal --port 8088; then
+              exit 0
+            fi
+            if [ "${round}" -lt 3 ]; then
+              echo "dev-preflight failed; retry in 30s (k3s may be restarting on WSL host)..."
+              sleep 30
+            fi
+          done
+          exit 1
 
   k8s:
     needs: [gate, dev-preflight, integration]
