@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from prodavan.config.settings import settings
 from tests.conftest import requires_k8s, requires_postgres
-from tests.e2e.conftest import register_e2e_project
+from tests.e2e.conftest import assert_k8s_no_pods, assert_k8s_pod_running, register_e2e_project
 
 pytestmark = [pytest.mark.k8s, requires_postgres, requires_k8s]
 
@@ -108,13 +108,14 @@ def test_k8s_resume_creates_running_pod_with_phase(k8s_client: TestClient) -> No
     runtime = _ensure_pod_running(k8s_client, owner_h, project_id)
     assert runtime["desired_state"] == "running"
     assert runtime.get("runtime_ref")
+    assert_k8s_pod_running(project_id)
 
     admin_row = k8s_client.get(f"/api/v1/admin/containers/{project_id}", headers=admin_h)
     assert admin_row.status_code == 200, admin_row.text
     row = admin_row.json()
     assert row["runtime"]["status"] == "running"
     phase = row["runtime"].get("phase") or row.get("k8s_phase")
-    assert phase in {"Running", "running"}, row
+    assert phase == "Running", row
 
 
 def test_k8s_pause_stops_runtime(k8s_client: TestClient) -> None:
@@ -129,6 +130,7 @@ def test_k8s_pause_stops_runtime(k8s_client: TestClient) -> None:
     assert runtime is not None
     assert runtime["status"] == "paused"
     assert runtime["desired_state"] == "absent"
+    assert_k8s_no_pods(project_id)
 
 
 def test_k8s_pause_resume_recreates_pod(k8s_client: TestClient) -> None:
@@ -143,6 +145,7 @@ def test_k8s_pause_resume_recreates_pod(k8s_client: TestClient) -> None:
     runtime = after.json()["runtime"]
     assert runtime["status"] == "running"
     assert runtime["pod_id"] == first_id
+    assert_k8s_pod_running(project_id)
 
 
 def test_k8s_lazy_start_via_trigger_dispatch(k8s_client: TestClient) -> None:
@@ -169,6 +172,7 @@ def test_k8s_lazy_start_via_trigger_dispatch(k8s_client: TestClient) -> None:
     runtime = after.json().get("runtime")
     assert runtime is not None
     assert runtime["status"] == "running"
+    assert_k8s_pod_running(project_id)
 
     events = k8s_client.get(
         f"/api/v1/admin/platform-events?project_id={project_id}&event_type=pod.started",
@@ -210,6 +214,7 @@ def test_k8s_admin_force_kill_clears_runtime(k8s_client: TestClient) -> None:
 
     after = k8s_client.get(f"/api/v1/admin/containers/{project_id}", headers=admin_h)
     assert after.json().get("runtime") is None
+    assert_k8s_no_pods(project_id)
 
 
 def test_k8s_delete_project_terminates_pod(k8s_client: TestClient) -> None:
@@ -226,3 +231,4 @@ def test_k8s_delete_project_terminates_pod(k8s_client: TestClient) -> None:
     )
     assert events.status_code == 200
     assert len(events.json()["items"]) >= 1
+    assert_k8s_no_pods(project_id)

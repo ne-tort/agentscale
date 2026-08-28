@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -80,6 +81,51 @@ def _kubectl(args: list[str]) -> subprocess.CompletedProcess[str]:
         timeout=20,
         check=False,
     )
+
+
+def k8s_pods_for_project(project_id: str) -> list[tuple[str, str]]:
+    """Return [(pod_name, phase), ...] from prodavan-sandboxes for a project."""
+    proc = _kubectl(
+        [
+            "get",
+            "pods",
+            "-n",
+            K8S_SANDBOX_NAMESPACE,
+            "-l",
+            f"prodavan.io/project-id={project_id}",
+            "-o",
+            "json",
+        ]
+    )
+    if proc.returncode != 0:
+        raise AssertionError(
+            f"kubectl get pods for project {project_id} failed: {proc.stderr or proc.stdout}"
+        )
+    body = json.loads(proc.stdout or '{"items":[]}')
+    out: list[tuple[str, str]] = []
+    for item in body.get("items") or []:
+        meta = item.get("metadata") or {}
+        status = item.get("status") or {}
+        name = str(meta.get("name") or "")
+        phase = str(status.get("phase") or "Unknown")
+        if name:
+            out.append((name, phase))
+    return out
+
+
+def assert_k8s_pod_running(project_id: str) -> str:
+    """Assert exactly one Running pod exists in the cluster for project_id."""
+    pods = k8s_pods_for_project(project_id)
+    assert len(pods) == 1, f"expected 1 k8s pod, got {pods!r}"
+    name, phase = pods[0]
+    assert phase == "Running", f"pod {name} phase={phase!r}, want Running"
+    return name
+
+
+def assert_k8s_no_pods(project_id: str) -> None:
+    """Assert no sandbox pods remain for project_id (pause/delete)."""
+    pods = k8s_pods_for_project(project_id)
+    assert pods == [], f"expected no k8s pods, got {pods!r}"
 
 
 def _delete_sandbox_pods_for_projects(project_ids: list[str]) -> None:
