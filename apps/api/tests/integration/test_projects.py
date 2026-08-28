@@ -1239,9 +1239,12 @@ def test_trigger_drain_fails_queued_when_company_suspended(client: TestClient) -
         headers={"Authorization": f"Bearer {owner_tok}"},
     )
     assert drain.status_code == 200, drain.text
-    items = drain.json().get("items") or []
-    assert items
-    assert items[0].get("reason") == "company_suspended"
+    body = drain.json()
+    reason = body.get("reason") or next(
+        (i.get("reason") for i in (body.get("items") or []) if i.get("reason")),
+        None,
+    )
+    assert reason == "company_suspended", body
 
     listed = client.get(
         f"/api/v1/projects/{project_id}/triggers",

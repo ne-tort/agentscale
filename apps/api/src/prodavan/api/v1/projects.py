@@ -17,6 +17,7 @@ from prodavan.application.projects import (
 )
 from prodavan.application.projects.signed_ingress import enqueue_signed_trigger
 from prodavan.domain.errors import AppError
+from prodavan.domain.projects.types import PAUSE_EXEMPT_TRIGGER_KINDS
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
 router = APIRouter(tags=["projects"])
@@ -266,8 +267,9 @@ async def post_trigger(
     session: SessionDep,
     employee: EmployeeDep,
 ) -> dict:
+    allow_paused = body.kind in PAUSE_EXEMPT_TRIGGER_KINDS
     await ProjectAccessPolicy(session).require_access(
-        project_id=project_id, principal=principal, employee=employee, write=True
+        project_id=project_id, principal=principal, employee=employee, write=True, allow_paused=allow_paused
     )
     result = await ProjectTriggerService(session).enqueue(
         project_id=project_id, kind=body.kind, payload=body.payload

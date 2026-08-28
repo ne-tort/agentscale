@@ -35,6 +35,9 @@ def prepare_docker_kubeconfig(
         text,
         count=1,
     )
+    # kubectl 1.31+ rejects insecure-skip-tls-verify together with certificate-authority(-data).
+    text = re.sub(r"(?m)^\s*certificate-authority-data:\s*\S+\n", "", text)
+    text = re.sub(r"(?m)^\s*certificate-authority:\s*\S+\n", "", text)
     if re.search(r"insecure-skip-tls-verify:\s*", text):
         text = re.sub(
             r"insecure-skip-tls-verify:\s*\S+",

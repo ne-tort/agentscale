@@ -1009,7 +1009,7 @@ def test_e2e_paused_blocks_triggers_allows_metadata(client: TestClient) -> None:
     co = client.post(
         "/api/v1/companies",
         headers=admin_h,
-        json={"name": "E2EPauseMatrixCo", "password": "test-company-pass", "admin_email": "owner@e2epm.test"},
+        json={"name": "E2EPauseMatrixCo", "password": "test-company-pass", "admin_email": "owner-e2epm@prodavan.test"},
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]

@@ -30,7 +30,7 @@ def test_live_health_and_auth_config(live_client, live_api_prefix: str) -> None:
 def test_live_containers_lifecycle(live_client, live_api_prefix: str) -> None:
     """Vertical containers flow against deployed API (OIDC tokens via Keycloak)."""
     stamp = datetime.now().strftime("%H%M%S")
-    admin_tok = fetch_platform_admin_token()
+    admin_tok = fetch_platform_admin_token(live_client, live_api_prefix)
     admin_h = auth_header(admin_tok)
 
     co = live_client.post(

@@ -19,7 +19,6 @@ from prodavan.config.settings import settings
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.infrastructure.persistence.database import get_session_factory
-from prodavan.infrastructure.persistence.models.identity import CompanyRow
 from prodavan.infrastructure.secrets.file_store import FileSecretStore
 from prodavan.main import create_app
 from tests.conftest import requires_postgres
@@ -58,21 +57,21 @@ def test_list_requires_admin(client: TestClient) -> None:
     assert r.status_code == 401
 
 
-async def _create_company(name: str) -> str:
-    factory = get_session_factory()
-    async with factory() as session:
-        co = CompanyRow(name=name)
-        session.add(co)
-        await session.commit()
-        await session.refresh(co)
-        return co.id
+async def _create_company(client: TestClient, auth_headers: dict[str, str], name: str) -> str:
+    created = client.post(
+        "/api/v1/companies",
+        headers=auth_headers,
+        json={"name": name, "password": "test-company-pass"},
+    )
+    assert created.status_code == 201, created.text
+    return created.json()["company"]["id"]
 
 
 @requires_postgres
 def test_crud_and_resolve_bans_cli_subscription(
     client: TestClient, auth_headers: dict[str, str], tmp_path: Path
 ) -> None:
-    company_id = asyncio.run(_create_company("Keys Co"))
+    company_id = _create_company(client, auth_headers, "Keys Co")
 
     create = client.post(
         "/api/v1/admin/ai-keys",
@@ -116,7 +115,7 @@ def test_crud_and_resolve_bans_cli_subscription(
 
     asyncio.run(_resolve_ok())
 
-    cli_co = asyncio.run(_create_company("CLI Co"))
+    cli_co = _create_company(client, auth_headers, "CLI Co")
     cli_key = client.post(
         "/api/v1/admin/ai-keys",
         headers=auth_headers,
@@ -158,7 +157,7 @@ def test_crud_and_resolve_bans_cli_subscription(
 def test_resolve_lazy_disables_past_renewal(
     client: TestClient, auth_headers: dict[str, str], tmp_path: Path
 ) -> None:
-    company_id = asyncio.run(_create_company("Expire Co"))
+    company_id = _create_company(client, auth_headers, "Expire Co")
     past = (datetime.now(UTC) - timedelta(days=1)).isoformat()
 
     create = client.post(
@@ -230,7 +229,7 @@ def test_resolve_lazy_disables_past_renewal(
 def test_platform_fallback_uses_unbound_pool_key(
     client: TestClient, auth_headers: dict[str, str], tmp_path: Path
 ) -> None:
-    company_id = asyncio.run(_create_company("Fallback Co"))
+    company_id = _create_company(client, auth_headers, "Fallback Co")
 
     platform = client.post(
         "/api/v1/admin/ai-keys",

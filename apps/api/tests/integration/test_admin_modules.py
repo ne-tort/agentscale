@@ -42,6 +42,22 @@ def client() -> TestClient:
         yield client
 
 
+def _workspace_for_template(
+    client: TestClient, *, company_id: str, template_id: str, owner_tok: str
+) -> str:
+    org = client.get(
+        f"/api/v1/companies/{company_id}/cabinets",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert org.status_code == 200, org.text
+    workspace = next(
+        (i for i in org.json()["items"] if i.get("template_cabinet_id") == template_id),
+        None,
+    )
+    assert workspace is not None, org.json()["items"]
+    return workspace["id"]
+
+
 def _setup_two_cabinets(client: TestClient, admin: str) -> tuple[str, str, str, str, str]:
     created = client.post(
         "/api/v1/companies",
@@ -63,7 +79,15 @@ def _setup_two_cabinets(client: TestClient, admin: str) -> tuple[str, str, str, 
     )
     assert cab2.status_code == 200, cab2.text
     owner_tok = owner_bearer_token(_token, created.json())
-    return company_id, cab1.json()["id"], cab2.json()["id"], owner_tok, admin
+    cab1_template = cab1.json()["id"]
+    cab2_template = cab2.json()["id"]
+    cab1_ws = _workspace_for_template(
+        client, company_id=company_id, template_id=cab1_template, owner_tok=owner_tok
+    )
+    cab2_ws = _workspace_for_template(
+        client, company_id=company_id, template_id=cab2_template, owner_tok=owner_tok
+    )
+    return company_id, cab1_template, cab2_template, cab1_ws, cab2_ws, owner_tok, admin
 
 
 def _company_bind_cabinets(
@@ -85,7 +109,7 @@ def _company_bind_cabinets(
 @requires_postgres
 def test_admin_module_crud_meta_and_bindings(client: TestClient) -> None:
     admin = _token(sub="padmin-mod", platform_admin=True)
-    company_id, cab1_id, cab2_id, owner_tok, _admin = _setup_two_cabinets(client, admin)
+    company_id, cab1_id, cab2_id, cab1_ws, cab2_ws, owner_tok, _admin = _setup_two_cabinets(client, admin)
 
     mod = client.post(
         "/api/v1/admin/modules",
@@ -122,7 +146,7 @@ def test_admin_module_crud_meta_and_bindings(client: TestClient) -> None:
     assert put.json()["slug"] == "tables"
 
     proj = client.post(
-        f"/api/v1/cabinets/{cab1_id}/projects",
+        f"/api/v1/cabinets/{cab1_ws}/projects",
         headers={"Authorization": f"Bearer {owner_tok}"},
         json={"name": "Mod Project"},
     )
@@ -136,7 +160,7 @@ def test_admin_module_crud_meta_and_bindings(client: TestClient) -> None:
     assert bound.status_code == 200, bound.text
 
     proj2 = client.post(
-        f"/api/v1/cabinets/{cab2_id}/projects",
+        f"/api/v1/cabinets/{cab2_ws}/projects",
         headers={"Authorization": f"Bearer {owner_tok}"},
         json={"name": "Other Cab Project"},
     )
@@ -181,7 +205,7 @@ def test_admin_module_crud_meta_and_bindings(client: TestClient) -> None:
 @requires_postgres
 def test_module_shared_template_isolated_data_per_cabinet(client: TestClient) -> None:
     admin = _token(sub="padmin-mod-data", platform_admin=True)
-    company_id, cab1_id, cab2_id, owner_tok, _admin = _setup_two_cabinets(client, admin)
+    company_id, cab1_id, cab2_id, cab1_ws, cab2_ws, owner_tok, _admin = _setup_two_cabinets(client, admin)
 
     mod = client.post(
         "/api/v1/admin/modules",
@@ -210,7 +234,7 @@ def test_module_shared_template_isolated_data_per_cabinet(client: TestClient) ->
         token=owner_tok,
     )
 
-    for cab_id, name in ((cab1_id, "Alpha"), (cab2_id, "Beta")):
+    for cab_id, name in ((cab1_ws, "Alpha"), (cab2_ws, "Beta")):
         created = client.post(
             f"/api/v1/cabinets/{cab_id}/modules/{module_id}/data/suppliers",
             headers={"Authorization": f"Bearer {owner_tok}"},
@@ -220,11 +244,11 @@ def test_module_shared_template_isolated_data_per_cabinet(client: TestClient) ->
         assert created.json()["body"]["name"] == name
 
     cab1_rows = client.get(
-        f"/api/v1/cabinets/{cab1_id}/modules/{module_id}/data/suppliers",
+        f"/api/v1/cabinets/{cab1_ws}/modules/{module_id}/data/suppliers",
         headers={"Authorization": f"Bearer {owner_tok}"},
     )
     cab2_rows = client.get(
-        f"/api/v1/cabinets/{cab2_id}/modules/{module_id}/data/suppliers",
+        f"/api/v1/cabinets/{cab2_ws}/modules/{module_id}/data/suppliers",
         headers={"Authorization": f"Bearer {owner_tok}"},
     )
     assert cab1_rows.status_code == 200
@@ -233,14 +257,14 @@ def test_module_shared_template_isolated_data_per_cabinet(client: TestClient) ->
     assert cab2_rows.json()["items"][0]["body"]["name"] == "Beta"
 
     meta = client.get(
-        f"/api/v1/cabinets/{cab1_id}/modules/{module_id}/meta/documents/tables",
+        f"/api/v1/cabinets/{cab1_ws}/modules/{module_id}/meta/documents/tables",
         headers={"Authorization": f"Bearer {owner_tok}"},
     )
     assert meta.status_code == 200
     assert meta.json()["body"][0]["slug"] == "suppliers"
 
     modules = client.get(
-        f"/api/v1/cabinets/{cab1_id}/modules",
+        f"/api/v1/cabinets/{cab1_ws}/modules",
         headers={"Authorization": f"Bearer {owner_tok}"},
     )
     assert modules.status_code == 200

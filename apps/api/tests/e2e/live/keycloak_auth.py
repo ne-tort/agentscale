@@ -37,9 +37,15 @@ def fetch_password_token(*, username: str, password: str) -> str:
         return token
 
 
-def fetch_platform_admin_token() -> str:
+def fetch_platform_admin_token(client: httpx.Client | None = None, api_prefix: str | None = None) -> str:
+    """Prefer Prodavan Auth Service (reachable on :8088); fall back to direct Keycloak ROPC."""
     user = os.getenv("PRODAVAN_E2E_ADMIN_USER", "admin")
     pwd = os.getenv("PRODAVAN_E2E_ADMIN_PASSWORD", "admin")
+    if client is not None and api_prefix:
+        try:
+            return login_via_api(client, api_prefix, username=user, password=pwd)
+        except RuntimeError:
+            pass
     return fetch_password_token(username=user, password=pwd)
 
 

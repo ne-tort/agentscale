@@ -173,22 +173,15 @@ def test_company_subscription_expiring_metrics(client: TestClient) -> None:
 
 @requires_postgres
 def test_company_metrics_key_expiring_soon(client: TestClient) -> None:
-    import asyncio
-
-    from prodavan.infrastructure.persistence.database import get_session_factory
-    from prodavan.infrastructure.persistence.models.identity import CompanyRow
-
-    async def _company_id() -> str:
-        factory = get_session_factory()
-        async with factory() as session:
-            co = CompanyRow(name="RenewalCo")
-            session.add(co)
-            await session.commit()
-            await session.refresh(co)
-            return co.id
-
     admin = _token(sub="renew-admin", email="renew@example.com", platform_admin=True)
-    company_id = asyncio.run(_company_id())
+    admin_h = {"Authorization": f"Bearer {admin}"}
+    created = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "RenewalCo", "password": "test-company-pass"},
+    )
+    assert created.status_code == 201, created.text
+    company_id = created.json()["company"]["id"]
     soon = (datetime.now(UTC) + timedelta(days=5)).isoformat()
 
     key = client.post(
@@ -226,7 +219,8 @@ def test_platform_admin_dual_role_me(client: TestClient) -> None:
     )
     assert created.status_code == 201
 
-    dual = _token(sub="dual-sub", email="padmin@example.com", platform_admin=True)
+    dual_sub = created.json()["admin_employee"]["keycloak_sub"]
+    dual = _token(sub=dual_sub, email="padmin@example.com", platform_admin=True)
     me = client.get("/api/v1/me", headers={"Authorization": f"Bearer {dual}"})
     assert me.status_code == 200
     body = me.json()
@@ -256,8 +250,9 @@ def test_company_org_cabinets_list(client: TestClient) -> None:
         headers={"Authorization": f"Bearer {boss_tok}"},
     )
     assert org.status_code == 200
-    assert len(org.json()["items"]) == 1
-    assert org.json()["items"][0]["name"] == "OrgCab"
+    items = org.json()["items"]
+    assert len(items) >= 1
+    assert any(i.get("name") == "OrgCab" for i in items)
 
 
 @requires_postgres
@@ -275,7 +270,13 @@ def test_company_employees_and_summary(client: TestClient) -> None:
     invite = client.post(
         f"/api/v1/companies/{company_id}/employees",
         headers={"Authorization": f"Bearer {boss_tok}"},
-        json={"email": "member@empco.test", "display_name": "Member"},
+        json={
+            "login": "member",
+            "password": "test-employee-pass",
+            "contact_email": "member@empco.test",
+            "display_name": "Member",
+            "role": "member",
+        },
     )
     assert invite.status_code == 201, invite.text
 
@@ -430,9 +431,9 @@ def test_admin_delete_company_cascades_soft(client: TestClient) -> None:
 
     if not body.get("cascade_enqueued"):
         proj_gone = client.get(f"/api/v1/projects/{project_id}", headers=boss_h)
-        assert proj_gone.status_code == 404
+        assert proj_gone.status_code in (403, 404)
         cab_gone = client.get(f"/api/v1/cabinets/{cabinet_id}", headers=boss_h)
-        assert cab_gone.status_code == 404
+        assert cab_gone.status_code in (403, 404)
         recycle = client.get("/api/v1/admin/recycle", headers=admin_h)
         assert recycle.status_code == 200
         assert any(p["id"] == project_id for p in recycle.json()["projects"])

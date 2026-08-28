@@ -422,7 +422,7 @@ def test_chat_with_attachment_refs_emits_tool_call(client: TestClient) -> None:
     assert events.status_code == 200, events.text
     tool_calls = [e for e in events.json()["items"] if e.get("type") == "tool_call"]
     assert tool_calls
-    assert storage_ref in str(tool_calls[0].get("payload", {}))
+    assert storage_ref in str(tool_calls[0].get("data", {}))
 
     transcript = client.get(
         f"/api/v1/projects/{project_id}/chat/transcript?session_id={session_id}",
