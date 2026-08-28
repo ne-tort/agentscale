@@ -21,6 +21,8 @@ FIRST_PARTY_DEPLOYMENTS = (
     "prodavan-celery-beat",
 )
 
+_cached_kubeconfig: Path | None = None
+
 
 def prepare_docker_kubeconfig(
     src: Path,
@@ -60,20 +62,24 @@ def prepare_docker_kubeconfig(
 
 
 def resolve_kubeconfig_path() -> Path:
-    """Use KUBECONFIG; for Docker runners always rewrite to writable temp with skip-tls."""
+    """Use KUBECONFIG; for Docker runners rewrite once to temp with skip-tls."""
+    global _cached_kubeconfig
+    if _cached_kubeconfig is not None:
+        return _cached_kubeconfig
+
     kube = Path(os.environ.get("KUBECONFIG") or str(default_kubeconfig()))
     expect = os.environ.get("PRODAVAN_CI_HOST", "").strip()
     if expect != "host.docker.internal":
+        _cached_kubeconfig = kube
         return kube
     if not kube.is_file():
         raise RuntimeError(f"KUBECONFIG not found: {kube}")
     base = Path(os.environ.get("RUNNER_TEMP") or tempfile.gettempdir())
     dest = base / "prodavan-kube-docker.yaml"
-    # Always rewrite: mount may already say host.docker.internal but lack skip-tls
-    # after a Sync that only changed the server URL.
     prepare_docker_kubeconfig(kube, dest, server_host=expect)
     os.environ["KUBECONFIG"] = str(dest)
-    print(f"rewrote kubeconfig for Docker gateway -> {dest}", file=sys.stderr)
+    print(f"kubeconfig for Docker gateway -> {dest}", file=sys.stderr)
+    _cached_kubeconfig = dest
     return dest
 
 
@@ -82,29 +88,29 @@ def load_kube() -> None:
     config.load_kube_config(config_file=str(path))
 
 
-def wait_k3s_api_ready(*, timeout_sec: int = 300, poll_sec: float = 5.0) -> None:
-    """Poll kubectl until cluster API responds (Docker runner → host.docker.internal)."""
+def wait_k3s_api_ready(*, timeout_sec: int = 30, poll_sec: float = 2.0) -> None:
+    """Fail fast if k3s API is unreachable from the runner (no long CI waits)."""
     deadline = time.time() + timeout_sec
     attempt = 0
     last = ""
     while time.time() < deadline:
         attempt += 1
-        proc = kubectl(["get", "ns", "prodavan", "--request-timeout=10s"], retries=1)
+        proc = kubectl(["get", "ns", "prodavan", "--request-timeout=5s"], retries=1)
         if proc.returncode == 0:
-            print(f"k3s API ready (attempt {attempt})")
+            if attempt > 1:
+                print(f"k3s API ready (attempt {attempt})")
             return
         err = (proc.stderr or proc.stdout or "").strip().splitlines()
         last = err[-1] if err else "no response"
-        print(f"waiting for k3s API ({attempt}): {last}")
+        print(f"k3s API not ready ({attempt}): {last}")
         time.sleep(poll_sec)
     raise TimeoutError(
         f"k3s API not ready within {timeout_sec}s ({last}). "
-        "On Windows host run elevated: infra/github-runner/Sync-KubeForDocker.ps1 "
-        "(portproxy 0.0.0.0:6443 + kubeconfig for Docker runners)."
+        "On Windows host run elevated: infra/github-runner/Sync-KubeForDocker.ps1"
     )
 
 
-def kubectl(args: list[str], *, retries: int = 3, retry_sleep: float = 2.0) -> subprocess.CompletedProcess[str]:
+def kubectl(args: list[str], *, retries: int = 2, retry_sleep: float = 1.0) -> subprocess.CompletedProcess[str]:
     """Run kubectl with rewritten kubeconfig; retry transient API/ TLS blips."""
     path = resolve_kubeconfig_path()
     last: subprocess.CompletedProcess[str] | None = None

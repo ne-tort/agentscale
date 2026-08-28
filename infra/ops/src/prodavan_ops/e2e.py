@@ -7,7 +7,7 @@ import time
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 
-from prodavan_ops.k8s import kubectl, load_kube, wait_k3s_api_ready
+from prodavan_ops.k8s import kubectl, load_kube
 from prodavan_ops.paths import overlay_e2e
 
 E2E_NAMESPACE = "prodavan"
@@ -17,7 +17,7 @@ E2E_JOB = "prodavan-e2e-runner"
 def _apply_e2e_overlay() -> None:
     """Apply overlays/e2e (ephemeral Job only — dev API stays stub)."""
     path = overlay_e2e()
-    proc = kubectl(["apply", "-k", str(path)], retries=5)
+    proc = kubectl(["apply", "-k", str(path)], retries=2)
     if proc.returncode != 0:
         raise RuntimeError(
             f"kubectl apply -k {path} failed ({proc.returncode})\n"
@@ -37,22 +37,13 @@ def _delete_job() -> None:
             "--ignore-not-found",
             "--wait=false",
         ],
-        retries=5,
+        retries=2,
     )
     if proc.returncode == 0 and proc.stdout.strip():
         print(proc.stdout.strip())
     elif proc.returncode != 0:
         print(f"skip job delete: {proc.stderr.strip() or proc.stdout.strip()}")
         return
-    deadline = time.time() + 120
-    while time.time() < deadline:
-        check = kubectl(["get", "job", E2E_JOB, "-n", E2E_NAMESPACE], retries=3)
-        if check.returncode != 0:
-            if "NotFound" in (check.stderr or ""):
-                return
-            print(f"skip job wait: {check.stderr.strip()}")
-            return
-        time.sleep(2)
 
 
 def _job_counts() -> tuple[int, int, int] | None:
@@ -66,7 +57,7 @@ def _job_counts() -> tuple[int, int, int] | None:
             "-o",
             "jsonpath={.status.succeeded},{.status.failed},{.status.active}",
         ],
-        retries=5,
+        retries=2,
     )
     if proc.returncode != 0:
         err = (proc.stderr or proc.stdout or "").strip()
@@ -120,7 +111,7 @@ def _print_job_logs() -> None:
             "--all-containers=true",
             "--tail=-1",
         ],
-        retries=5,
+        retries=2,
     )
     if proc.returncode == 0 and proc.stdout.strip():
         print(f"--- logs {E2E_JOB} ---\n{proc.stdout}")
@@ -133,8 +124,6 @@ def run_e2e(*, suite: str = "k8s", timeout_sec: int = 900) -> None:
     """Run cluster e2e suite (currently k8s pod tests via in-cluster Job)."""
     if suite not in {"k8s", "all"}:
         raise ValueError(f"prodavan-ops e2e run supports suite k8s|all (got {suite!r})")
-    print("==> wait k3s API")
-    wait_k3s_api_ready(timeout_sec=600)
     print("==> e2e cleanup (prior Job)")
     cleanup_e2e()
     print("==> apply overlays/e2e")
@@ -148,7 +137,7 @@ def cleanup_e2e(*, unsync: bool = False) -> None:
     """Delete e2e Job and overlay resources."""
     _delete_job()
     path = overlay_e2e()
-    proc = kubectl(["delete", "-k", str(path), "--ignore-not-found"], retries=5)
+    proc = kubectl(["delete", "-k", str(path), "--ignore-not-found"], retries=2)
     if proc.returncode != 0:
         print(proc.stderr.strip() or f"kubectl delete -k {path} failed ({proc.returncode})")
     if unsync:

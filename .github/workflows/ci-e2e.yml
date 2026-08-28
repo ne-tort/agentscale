@@ -230,16 +230,19 @@ jobs:
         working-directory: infra/ops
         run: poetry install --no-interaction
 
-      - name: Wait for k3s API
+      - name: Prepare Docker kubeconfig
         working-directory: infra/ops
-        run: poetry run python -c "from prodavan_ops.k8s import wait_k3s_api_ready; wait_k3s_api_ready(timeout_sec=600)"
+        run: |
+          set -euo pipefail
+          path="$(poetry run python -c "from prodavan_ops.k8s import resolve_kubeconfig_path; print(resolve_kubeconfig_path())")"
+          echo "KUBECONFIG=${path}" >> "${GITHUB_ENV}"
+          kubectl get ns prodavan --request-timeout=10s
 
       - name: Sync PR e2e conftest into cluster
         working-directory: infra/ops
         run: |
           set -euo pipefail
-          export KUBECONFIG="$(poetry run python -c "from prodavan_ops.k8s import resolve_kubeconfig_path; print(resolve_kubeconfig_path())")"
-          kubectl delete configmap prodavan-e2e-conftest -n prodavan --ignore-not-found
+          kubectl delete configmap prodavan-e2e-conftest -n prodavan --ignore-not-found --request-timeout=10s
           kubectl create configmap prodavan-e2e-conftest \
             --from-file=conftest.py=../../apps/api/tests/e2e/conftest.py \
             -n prodavan
@@ -253,8 +256,7 @@ jobs:
         working-directory: infra/ops
         run: |
           poetry run prodavan-ops e2e cleanup || true
-          export KUBECONFIG="$(poetry run python -c "from prodavan_ops.k8s import resolve_kubeconfig_path; print(resolve_kubeconfig_path())")"
-          kubectl delete configmap prodavan-e2e-conftest -n prodavan --ignore-not-found || true
+          kubectl delete configmap prodavan-e2e-conftest -n prodavan --ignore-not-found --request-timeout=10s || true
 
   live:
     needs: gate
