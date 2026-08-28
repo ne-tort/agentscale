@@ -133,7 +133,7 @@ def test_admin_module_crud_meta_and_bindings(client: TestClient) -> None:
         client,
         company_id=company_id,
         module_id=module_id,
-        cabinet_ids=[cab1_id, cab2_id],
+        cabinet_ids=[cab1_ws, cab2_ws],
         token=owner_tok,
     )
 
@@ -230,7 +230,7 @@ def test_module_shared_template_isolated_data_per_cabinet(client: TestClient) ->
         client,
         company_id=company_id,
         module_id=module_id,
-        cabinet_ids=[cab1_id, cab2_id],
+        cabinet_ids=[cab1_ws, cab2_ws],
         token=owner_tok,
     )
 

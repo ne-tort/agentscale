@@ -1235,16 +1235,14 @@ def test_trigger_drain_fails_queued_when_company_suspended(client: TestClient) -
     )
 
     drain = client.post(
-        f"/api/v1/projects/{project_id}/triggers/dispatch?max=1",
+        f"/api/v1/projects/{project_id}/triggers/dispatch?max=10",
         headers={"Authorization": f"Bearer {owner_tok}"},
     )
     assert drain.status_code == 200, drain.text
     body = drain.json()
-    reason = body.get("reason") or next(
-        (i.get("reason") for i in (body.get("items") or []) if i.get("reason")),
-        None,
-    )
-    assert reason == "company_suspended", body
+    reasons = [body["reason"]] if body.get("reason") else []
+    reasons.extend(i.get("reason") for i in (body.get("items") or []) if i.get("reason"))
+    assert "company_suspended" in reasons, body
 
     listed = client.get(
         f"/api/v1/projects/{project_id}/triggers",

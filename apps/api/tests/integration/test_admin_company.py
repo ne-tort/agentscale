@@ -286,8 +286,9 @@ def test_company_employees_and_summary(client: TestClient) -> None:
     )
     assert employees.status_code == 200
     emails = {e["email"] for e in employees.json()["items"]}
+    contacts = {e.get("contact_email") for e in employees.json()["items"]}
     assert "boss@empco.test" in emails
-    assert "member@empco.test" in emails
+    assert "member@empco.test" in contacts
 
     summary = client.get(
         f"/api/v1/companies/{company_id}/summary",

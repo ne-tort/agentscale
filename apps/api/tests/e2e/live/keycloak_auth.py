@@ -49,19 +49,34 @@ def fetch_platform_admin_token(client: httpx.Client | None = None, api_prefix: s
     return fetch_password_token(username=user, password=pwd)
 
 
-def login_via_api(client: httpx.Client, api_prefix: str, *, username: str, password: str) -> str:
-    """Prodavan Auth Service login — same tokens Flutter uses against live API."""
-    resp = client.post(
-        f"{api_prefix}/auth/login",
-        json={"username": username, "password": password},
-    )
-    if resp.status_code != 200:
-        raise RuntimeError(f"API login failed ({resp.status_code}): {resp.text[:500]}")
-    body = resp.json()
-    token = body.get("access_token")
-    if not token:
-        raise RuntimeError(f"login response missing access_token: {body}")
-    return token
+def login_via_api(
+    client: httpx.Client,
+    api_prefix: str,
+    *,
+    username: str,
+    password: str,
+    retries: int = 30,
+    delay_sec: float = 1.0,
+) -> str:
+    """Prodavan Auth Service login — retries while Keycloak provisions new users."""
+    last_err: RuntimeError | None = None
+    for _ in range(retries):
+        resp = client.post(
+            f"{api_prefix}/auth/login",
+            json={"username": username, "password": password},
+        )
+        if resp.status_code == 200:
+            body = resp.json()
+            token = body.get("access_token")
+            if token:
+                return token
+            last_err = RuntimeError(f"login response missing access_token: {body}")
+        else:
+            last_err = RuntimeError(f"API login failed ({resp.status_code}): {resp.text[:500]}")
+        import time
+
+        time.sleep(delay_sec)
+    raise last_err or RuntimeError("API login failed")
 
 
 def auth_header(token: str) -> dict[str, str]:

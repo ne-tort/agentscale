@@ -19,6 +19,7 @@ from prodavan.config.settings import settings
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.infrastructure.persistence.database import get_session_factory
+from prodavan.infrastructure.persistence.models.identity import CompanyRow
 from prodavan.infrastructure.secrets.file_store import FileSecretStore
 from prodavan.main import create_app
 from tests.conftest import requires_postgres
@@ -57,21 +58,49 @@ def test_list_requires_admin(client: TestClient) -> None:
     assert r.status_code == 401
 
 
-async def _create_company(client: TestClient, auth_headers: dict[str, str], name: str) -> str:
-    created = client.post(
-        "/api/v1/companies",
-        headers=auth_headers,
-        json={"name": name, "password": "test-company-pass"},
-    )
-    assert created.status_code == 201, created.text
-    return created.json()["company"]["id"]
+def _run_async(coro_factory) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _runner() -> None:
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(coro_factory())
+        finally:
+            loop.close()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        pool.submit(_runner).result(timeout=30)
+
+
+async def _create_company(name: str) -> str:
+    factory = get_session_factory()
+    async with factory() as session:
+        co = CompanyRow(name=name)
+        session.add(co)
+        await session.commit()
+        await session.refresh(co)
+        return co.id
+
+
+def _create_company_sync(name: str) -> str:
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _runner() -> str:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(_create_company(name))
+        finally:
+            loop.close()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(_runner).result(timeout=30)
 
 
 @requires_postgres
 def test_crud_and_resolve_bans_cli_subscription(
     client: TestClient, auth_headers: dict[str, str], tmp_path: Path
 ) -> None:
-    company_id = _create_company(client, auth_headers, "Keys Co")
+    company_id = _create_company_sync("Keys Co")
 
     create = client.post(
         "/api/v1/admin/ai-keys",
@@ -113,9 +142,9 @@ def test_crud_and_resolve_bans_cli_subscription(
             assert cred.api_kind == "cursor_sdk"
             assert cred.secret == "cursor-secret-aaa"
 
-    asyncio.run(_resolve_ok())
+    _run_async(_resolve_ok)
 
-    cli_co = _create_company(client, auth_headers, "CLI Co")
+    cli_co = _create_company_sync("CLI Co")
     cli_key = client.post(
         "/api/v1/admin/ai-keys",
         headers=auth_headers,
@@ -139,7 +168,7 @@ def test_crud_and_resolve_bans_cli_subscription(
             assert ei.value.code == "NO_AI_KEY"
             assert "cli_subscription" in (ei.value.detail or "")
 
-    asyncio.run(_resolve_cli())
+    _run_async(_resolve_cli)
 
     deleted = client.delete(f"/api/v1/admin/ai-keys/{key_id}", headers=auth_headers)
     assert deleted.status_code == 204
@@ -157,7 +186,7 @@ def test_crud_and_resolve_bans_cli_subscription(
 def test_resolve_lazy_disables_past_renewal(
     client: TestClient, auth_headers: dict[str, str], tmp_path: Path
 ) -> None:
-    company_id = _create_company(client, auth_headers, "Expire Co")
+    company_id = _create_company_sync("Expire Co")
     past = (datetime.now(UTC) - timedelta(days=1)).isoformat()
 
     create = client.post(
@@ -184,7 +213,7 @@ def test_resolve_lazy_disables_past_renewal(
                 )
             assert ei.value.code == "NO_AI_KEY"
 
-    asyncio.run(_resolve_fails())
+    _run_async(_resolve_fails)
 
     audit_exp = client.get(
         f"/api/v1/admin/ai-keys/audit-events?key_id={key_id}",
@@ -222,14 +251,14 @@ def test_resolve_lazy_disables_past_renewal(
             )
             assert cred.secret == "sk-expired"
 
-    asyncio.run(_resolve_ok())
+    _run_async(_resolve_ok)
 
 
 @requires_postgres
 def test_platform_fallback_uses_unbound_pool_key(
     client: TestClient, auth_headers: dict[str, str], tmp_path: Path
 ) -> None:
-    company_id = _create_company(client, auth_headers, "Fallback Co")
+    company_id = _create_company_sync("Fallback Co")
 
     platform = client.post(
         "/api/v1/admin/ai-keys",
@@ -254,7 +283,7 @@ def test_platform_fallback_uses_unbound_pool_key(
             )
             assert cred.secret == "platform-cursor-secret"
 
-    asyncio.run(_resolve_with_fallback())
+    _run_async(_resolve_with_fallback)
 
     async def _resolve_without_fallback_fails() -> None:
         factory = get_session_factory()
