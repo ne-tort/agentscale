@@ -96,7 +96,7 @@ def test_live_containers_lifecycle(live_client, live_api_prefix: str) -> None:
         password=EMPLOYEE_PASSWORD,
     )
 
-    denied = live_client.get(f"{live_api_prefix}/cabinets/{cabinet_id}", headers=auth_header(peer_tok))
+    denied = live_client.get(f"{live_api_prefix}/admin/containers", headers=auth_header(peer_tok))
     assert denied.status_code == 403
 
     projects = []

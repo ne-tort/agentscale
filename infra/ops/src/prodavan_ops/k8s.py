@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -71,7 +72,7 @@ def resolve_kubeconfig_path() -> Path:
     # after a Sync that only changed the server URL.
     prepare_docker_kubeconfig(kube, dest, server_host=expect)
     os.environ["KUBECONFIG"] = str(dest)
-    print(f"rewrote kubeconfig for Docker gateway -> {dest}")
+    print(f"rewrote kubeconfig for Docker gateway -> {dest}", file=sys.stderr)
     return dest
 
 
