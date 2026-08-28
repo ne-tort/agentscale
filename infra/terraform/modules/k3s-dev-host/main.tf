@@ -77,10 +77,13 @@ resource "null_resource" "k3s_server" {
   triggers = {
     # k3s_version intentionally NOT in triggers: already-running path skips
     # reinstall; changing the var alone must not churn SSH provisioners.
-    rev       = "v6-win-kube-export"
+    rev       = "v7-wsl-boot-heal"
     http_port = tostring(var.http_port)
     cluster   = var.cluster_name
     traefik_tpl = filesha256("${path.module}/templates/traefik-port.yaml.tpl")
+    boot_heal = filesha256("${path.module}/templates/prodavan-boot-heal.conf.tpl")
+    preflight = filesha256("${path.module}/templates/k3s-preflight.sh.tpl")
+    post_heal = filesha256("${path.module}/templates/post-k3s-heal.sh.tpl")
     # SSH coords in triggers so provisioners may only use self.*
     ssh_host     = var.ssh_host
     ssh_port     = tostring(var.ssh_port)
@@ -104,8 +107,36 @@ resource "null_resource" "k3s_server" {
   }
 
   provisioner "file" {
-    content     = "[Service]\nTimeoutStopSec=8\n"
-    destination = "/tmp/prodavan-wsl-stop.conf"
+    content = templatefile("${path.module}/templates/prodavan-boot-heal.conf.tpl", {})
+    destination = "/tmp/prodavan-boot-heal.conf"
+    connection {
+      type        = "ssh"
+      host        = self.triggers.ssh_host
+      port        = tonumber(self.triggers.ssh_port)
+      user        = self.triggers.ssh_user
+      private_key = file(self.triggers.ssh_key_path)
+      timeout     = "10m"
+    }
+  }
+
+  provisioner "file" {
+    content     = file("${path.module}/templates/k3s-preflight.sh.tpl")
+    destination = "/tmp/prodavan-k3s-preflight.sh"
+    connection {
+      type        = "ssh"
+      host        = self.triggers.ssh_host
+      port        = tonumber(self.triggers.ssh_port)
+      user        = self.triggers.ssh_user
+      private_key = file(self.triggers.ssh_key_path)
+      timeout     = "10m"
+    }
+  }
+
+  provisioner "file" {
+    content = templatefile("${path.module}/templates/post-k3s-heal.sh.tpl", {
+      http_port = var.http_port
+    })
+    destination = "/tmp/prodavan-post-k3s-heal.sh"
     connection {
       type        = "ssh"
       host        = self.triggers.ssh_host
@@ -128,9 +159,13 @@ resource "null_resource" "k3s_server" {
     inline = [
       "bash -lc 'set -euo pipefail",
       "export PATH=\"$HOME/.local/bin:/usr/sbin:/usr/bin:$PATH\"",
-      "sudo -n mkdir -p /var/lib/rancher/k3s/server/manifests /etc/rancher/k3s /etc/systemd/system/k3s.service.d",
+      "sudo -n mkdir -p /var/lib/rancher/k3s/server/manifests /etc/rancher/k3s /etc/systemd/system/k3s.service.d /usr/local/lib/prodavan",
       "sudo -n cp /tmp/prodavan-traefik-port.yaml /var/lib/rancher/k3s/server/manifests/prodavan-traefik-port.yaml",
-      "sudo -n cp /tmp/prodavan-wsl-stop.conf /etc/systemd/system/k3s.service.d/prodavan-wsl-stop.conf",
+      "sudo -n cp /tmp/prodavan-boot-heal.conf /etc/systemd/system/k3s.service.d/prodavan-boot-heal.conf",
+      "tr -d '\\r' < /tmp/prodavan-k3s-preflight.sh | sudo -n tee /usr/local/lib/prodavan/k3s-preflight.sh >/dev/null",
+      "tr -d '\\r' < /tmp/prodavan-post-k3s-heal.sh | sudo -n tee /usr/local/lib/prodavan/post-k3s-heal.sh >/dev/null",
+      "sudo -n chmod 755 /usr/local/lib/prodavan/k3s-preflight.sh /usr/local/lib/prodavan/post-k3s-heal.sh",
+      "sudo -n rm -f /etc/systemd/system/k3s.service.d/prodavan-wsl-stop.conf",
       # Docker Engine inside WSL fights k3s CNI; runners use Docker Desktop on Windows.
       "if systemctl list-unit-files docker.service >/dev/null 2>&1; then sudo -n systemctl stop docker.socket docker 2>/dev/null || true; sudo -n systemctl disable --now docker.socket docker 2>/dev/null || true; sudo -n systemctl mask docker.socket docker 2>/dev/null || true; fi",
       # Broken/unauthenticated Tailscale netmon flaps routes around CNI veths on WSL.

@@ -4,6 +4,7 @@ resources:
   - ../../base
   - postgres.yaml
   - sandboxes
+  - cluster-heal-cronjob.yaml
 transformers:
   - namespace-transformer.yaml
 patches:

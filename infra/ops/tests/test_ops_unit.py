@@ -208,3 +208,23 @@ def test_first_party_latest_constants() -> None:
     assert "ghcr.io/ne-tort/prodavan-api:latest" in FIRST_PARTY_LATEST
     assert "ghcr.io/ne-tort/prodavan-web:latest" in FIRST_PARTY_LATEST
 
+
+def test_pod_stuck_detects_terminating_and_failed() -> None:
+    from prodavan_ops.heal import _pod_stuck
+
+    assert _pod_stuck({"metadata": {"deletionTimestamp": "2026-01-01T00:00:00Z"}, "status": {}})
+    assert _pod_stuck({"metadata": {}, "status": {"phase": "Unknown"}})
+    assert _pod_stuck({"metadata": {}, "status": {"phase": "Failed"}})
+    assert not _pod_stuck({"metadata": {}, "status": {"phase": "Running"}})
+
+
+def test_boot_heal_templates_present() -> None:
+    mod = Path(__file__).resolve().parents[2] / "terraform" / "modules" / "k3s-dev-host" / "templates"
+    preflight = (mod / "k3s-preflight.sh.tpl").read_text(encoding="utf-8")
+    post = (mod / "post-k3s-heal.sh.tpl").read_text(encoding="utf-8")
+    dropin = (mod / "prodavan-boot-heal.conf.tpl").read_text(encoding="utf-8")
+    assert "docker.socket" in preflight
+    assert "traefik" in post
+    assert "ExecStartPost" in dropin
+    assert "TimeoutStopSec=30" in dropin
+

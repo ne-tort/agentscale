@@ -39,7 +39,25 @@ poetry run prodavan-ops wait && poetry run prodavan-ops smoke
 
 UI: `http://localhost:8088/`.
 
-**Windows browser (Win10 + WSL2):** Traefik слушает `0.0.0.0:8088` в WSL. Ingress без `host` — любой Host (`localhost` / `127.0.0.1`). После reboot WSL подожди 2–3 мин. Если `http://localhost:8088/` не открывается (NAT без localhostForwarding), Admin PowerShell:
+**После reboot WSL (Win10):** k3s поднимается через systemd; drop-in `prodavan-boot-heal` (Terraform) маскирует Docker, чистит stuck pods, пересоздаёт Traefik и ждёт `:8088`. На Windows:
+
+```powershell
+# Держит WSL живым (иначе InitTerminate гасит k3s)
+powershell -File tools/win-wsl-keepalive.ps1
+# Проброс 127.0.0.1:8088 → WSL (если NAT не пробросил сам)
+powershell -ExecutionPolicy Bypass -File tools/win-wsl-portforward.ps1
+```
+
+В WSL вручную (если UI всё ещё мёртв):
+
+```bash
+export KUBECONFIG=~/.kube/prodavan-dev.yaml
+cd ~/git/prodavan/infra/ops && poetry run prodavan-ops heal
+```
+
+Первый apply после merge: `cd infra/terraform/environments/local && terraform apply` (ставит скрипты в `/usr/local/lib/prodavan/`).
+
+**Windows browser (Win10 + WSL2):** Traefik слушает `0.0.0.0:8088` в WSL. Ingress без `host` — любой Host (`localhost` / `127.0.0.1`). Если `http://localhost:8088/` не открывается (NAT без localhostForwarding), Admin PowerShell:
 
 ```powershell
 .\tools\win-wsl-portforward.ps1
@@ -74,7 +92,9 @@ Runner (outside k3s): [`infra/github-runner/README.md`](../../infra/github-runne
 
 | Issue | Fix |
 |-------|-----|
-| Windows: `localhost:8088` connection refused | Подожди 2–3 мин; `.\tools\win-wsl-portforward.ps1` (Admin); `systemctl status k3s` |
+| Windows: `localhost:8088` connection refused | `tools/win-wsl-keepalive.ps1`; подожди до 6 мин; Admin `.\tools\win-wsl-portforward.ps1`; WSL `prodavan-ops heal` |
+| k3s flaps / NodeNotReady after reboot | `terraform apply` (boot-heal drop-in); mask docker in WSL; `prodavan-ops heal` |
+| API pod Terminating, 502 | `prodavan-ops heal` (force-delete stuck); dev CronJob `prodavan-cluster-heal` |
 | kubectl connection refused | k3s running? `sudo systemctl status k3s` |
 | Argo OutOfSync | merge to `main`; check Application `prodavan-dev` |
 | ImagePullBackOff | SealedSecret `ghcr-pull` — [`SECRETS.md`](../../infra/k3s/overlays/dev/SECRETS.md) |

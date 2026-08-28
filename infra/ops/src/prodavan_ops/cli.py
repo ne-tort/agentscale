@@ -4,6 +4,7 @@ import typer
 
 from prodavan_ops import __version__
 from prodavan_ops.e2e import cleanup_e2e, run_e2e
+from prodavan_ops.heal import heal_cluster
 from prodavan_ops.k8s import assert_kubeconfig_docker_ready, rollout_restart, wait_argo_app
 from prodavan_ops.smoke import smoke
 from prodavan_ops.validate import validate_all
@@ -54,6 +55,23 @@ def smoke_cmd(
     host: str = typer.Option("localhost", "--host"),
 ) -> None:
     smoke(addr=addr, port=port, host_header=host)
+
+
+@app.command("heal")
+def heal_cmd(
+    wait_node: int = typer.Option(180, "--wait-node", help="Seconds to wait for node Ready"),
+    smoke_attempts: int = typer.Option(24, "--smoke-attempts"),
+    skip_traefik: bool = typer.Option(False, "--skip-traefik"),
+    skip_smoke: bool = typer.Option(False, "--skip-smoke"),
+) -> None:
+    """Post-reboot recovery: delete stuck pods, recycle Traefik, smoke :8088."""
+    assert_kubeconfig_docker_ready()
+    heal_cluster(
+        wait_node_sec=wait_node,
+        smoke_attempts=smoke_attempts,
+        skip_traefik=skip_traefik,
+        skip_smoke=skip_smoke,
+    )
 
 
 e2e_app = typer.Typer(help="Cluster e2e runner (prodavan-e2e Argo app + Job).")
