@@ -12,7 +12,26 @@ from prodavan_ops.paths import overlay_e2e
 
 E2E_NAMESPACE = "prodavan"
 E2E_JOB = "prodavan-e2e-runner"
+E2E_SANDBOXES_NS = "prodavan-sandboxes"
 _API_FAIL_STREAK = 0
+
+
+def _sandboxes_bootstrap_path():
+    return overlay_e2e() / "sandboxes-bootstrap.yaml"
+
+
+def _ensure_sandboxes_bootstrap() -> None:
+    """NS + project-pod SA/secret for k8s e2e (kept across e2e cleanup delete -k)."""
+    path = _sandboxes_bootstrap_path()
+    if not path.is_file():
+        raise RuntimeError(f"missing e2e sandboxes bootstrap: {path}")
+    proc = kubectl(["apply", "-f", str(path)], retries=2)
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"kubectl apply -f {path} failed ({proc.returncode})\n"
+            f"stdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
+        )
+    print(proc.stdout.strip() or f"applied {path}")
 
 
 def _apply_e2e_overlay() -> None:
@@ -141,6 +160,8 @@ def run_e2e(*, suite: str = "k8s", timeout_sec: int = 900) -> None:
         raise ValueError(f"prodavan-ops e2e run supports suite k8s|all (got {suite!r})")
     print("==> e2e cleanup (prior Job)")
     cleanup_e2e()
+    print(f"==> ensure {E2E_SANDBOXES_NS} bootstrap")
+    _ensure_sandboxes_bootstrap()
     print("==> apply overlays/e2e")
     _apply_e2e_overlay()
     print(f"==> wait Job {E2E_NAMESPACE}/{E2E_JOB}")

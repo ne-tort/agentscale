@@ -200,6 +200,9 @@ def validate_all() -> None:
         raise RuntimeError(
             "overlays/e2e sandbox Role must stay in prodavan-sandboxes (use namespace-transformer unsetOnly)"
         )
+    bootstrap = overlay_e2e() / "sandboxes-bootstrap.yaml"
+    if not bootstrap.is_file():
+        raise RuntimeError("overlays/e2e/sandboxes-bootstrap.yaml required for k8s e2e")
     print(f"ok kustomize ({e2e_lines} lines)")
 
     print("==> kustomize argocd/install")

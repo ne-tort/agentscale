@@ -1,0 +1,70 @@
+# Minimal prodavan-sandboxes bootstrap for ephemeral e2e Job (not part of kubectl delete -k).
+# Applied idempotently by prodavan-ops e2e run before overlays/e2e RBAC.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prodavan-sandboxes
+  labels:
+    app.kubernetes.io/name: prodavan-sandboxes
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: sandbox
+    prodavan.io/managed-by: pod-service
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: prodavan-minio-hydrate
+  namespace: prodavan-sandboxes
+  labels:
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: sandbox-hydrate
+type: Opaque
+stringData:
+  access-key: e2e
+  secret-key: e2e
+  endpoint: http://prodavan-minio.prodavan.svc:9000
+  bucket: prodavan
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prodavan-project-pod
+  namespace: prodavan-sandboxes
+  labels:
+    app.kubernetes.io/name: prodavan-project-pod
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: project-pod
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: prodavan-project-pod
+  namespace: prodavan-sandboxes
+  labels:
+    app.kubernetes.io/name: prodavan-project-pod
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: project-pod
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["prodavan-minio-hydrate"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: prodavan-project-pod
+  namespace: prodavan-sandboxes
+  labels:
+    app.kubernetes.io/name: prodavan-project-pod
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: project-pod
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: prodavan-project-pod
+subjects:
+  - kind: ServiceAccount
+    name: prodavan-project-pod
+    namespace: prodavan-sandboxes

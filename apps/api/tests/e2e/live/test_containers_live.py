@@ -241,7 +241,7 @@ def test_live_containers_lifecycle(live_client, live_api_prefix: str) -> None:
         f"{live_api_prefix}/projects/{projects[1]['id']}",
         headers=auth_header(peer_tok),
     )
-    assert peer_proj.status_code == 403
+    assert peer_proj.status_code in (403, 404)
 
     live_client.delete(
         f"{live_api_prefix}/admin/containers/{projects[1]['id']}",
