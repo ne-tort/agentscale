@@ -144,7 +144,14 @@ def test_project_create_materialize_lifecycle(client: TestClient) -> None:
     )
     assert deleted.status_code == 200
     assert deleted.json()["status"] == "deleted"
-    assert not ws_root.parent.parent.joinpath(body["workspace_key"]).exists() or not ws_root.exists()
+    assert ws_root.is_dir(), "soft delete retains workspace until purge"
+
+    purged = client.delete(
+        f"/api/v1/projects/{project_id}/purge",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert purged.status_code == 200, purged.text
+    assert not ws_root.exists()
 
 
 @requires_postgres
@@ -171,7 +178,7 @@ def test_rematerialize_allowed_when_paused(client: TestClient) -> None:
     )
     assert blocked_chat.status_code == 409
 
-    remat = client.post(f"/api/v1/projects/{project_id}/rematerialize", headers=owner_h)
+    remat = client.post(f"/api/v1/projects/{project_id}/materialize", headers=owner_h)
     assert remat.status_code == 200, remat.text
     assert remat.json()["project_id"] == project_id
     assert remat.json().get("workspace_root")

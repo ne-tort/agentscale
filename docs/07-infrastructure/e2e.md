@@ -60,9 +60,11 @@ pytest tests/integration/test_pod_service_e2e.py -m integration -q
 ```bash
 cd apps/api
 export PRODAVAN_E2E_BASE_URL=http://127.0.0.1:8088
-export PRODAVAN_E2E_JWT_SECRET=k3s-dev-change-me-in-production-32b  # dev cluster secret
+export PRODAVAN_E2E_KC_URL=http://127.0.0.1:8089
 pytest tests/e2e/live -m live -q
 ```
+
+**Auth в L3b:** реальные OIDC-токены Keycloak (не HS256 mint). Platform Admin — ROPC `admin`/`admin` через client `prodavan-flutter`. Owner/peer — `POST /companies/{id}/employees` с `login`/`password`, затем `POST /auth/login`. Хелпер: [`tests/e2e/live/keycloak_auth.py`](../../apps/api/tests/e2e/live/keycloak_auth.py).
 
 ### L3a — k8s pods (in-cluster Job)
 

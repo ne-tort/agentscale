@@ -97,6 +97,9 @@ jobs:
         env:
           DATABASE_URL: postgresql+asyncpg://prodavan_app:prodavan@${{ env.DB_HOST }}:55433/prodavan
           PG_ADMIN_URL: postgresql+asyncpg://prodavan:prodavan@${{ env.DB_HOST }}:55433/prodavan
+          AUTH_MODE: test
+          AUTH_TEST_SECRET: dev-only-test-secret-change-me
+          KEYCLOAK_INVITE_MODE: fake
         run: pytest tests/integration -m integration -q
 
       - name: Stop Postgres

@@ -154,6 +154,9 @@ jobs:
       - name: Pytest integration (L2)
         env:
           DATABASE_URL: postgresql+asyncpg://prodavan_app:prodavan@${{ env.DB_HOST }}:55434/prodavan
+          AUTH_MODE: test
+          AUTH_TEST_SECRET: dev-only-test-secret-change-me
+          KEYCLOAK_INVITE_MODE: fake
         run: pytest tests/integration -m integration -q
 
       - name: Stop Postgres
@@ -178,6 +181,33 @@ jobs:
             fi
           done
           exit 1
+
+      - name: Ensure kubectl on PATH
+        run: |
+          set -euo pipefail
+          if command -v kubectl >/dev/null 2>&1; then
+            kubectl version --client
+            exit 0
+          fi
+          ver=v1.31.4
+          cache="/cache/kubectl/${ver}"
+          if [ -x "${cache}/kubectl" ]; then
+            echo "${cache}" >> "${GITHUB_PATH}"
+            "${cache}/kubectl" version --client
+            exit 0
+          fi
+          mkdir -p "${cache}"
+          tgz="${{ runner.temp }}/kubectl"
+          url="https://dl.k8s.io/release/${ver}/bin/linux/amd64/kubectl"
+          for i in 1 2 3; do
+            if curl -fsSL --retry 3 --retry-delay 2 -o "${tgz}" "${url}"; then
+              break
+            fi
+            sleep 3
+          done
+          install -m 0755 "${tgz}" "${cache}/kubectl"
+          echo "${cache}" >> "${GITHUB_PATH}"
+          "${cache}/kubectl" version --client
 
       - name: Python venv + prodavan-ops
         run: |
@@ -205,8 +235,15 @@ jobs:
         working-directory: apps/api
     env:
       PRODAVAN_E2E_BASE_URL: http://127.0.0.1:8088
+      PRODAVAN_E2E_KC_URL: http://127.0.0.1:8089
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve live hosts
+        run: |
+          ADDR="${PRODAVAN_CI_HOST:-127.0.0.1}"
+          echo "PRODAVAN_E2E_BASE_URL=http://${ADDR}:8088" >> "${GITHUB_ENV}"
+          echo "PRODAVAN_E2E_KC_URL=http://${ADDR}:8089" >> "${GITHUB_ENV}"
 
       - uses: actions/setup-python@v5
         with:
@@ -216,10 +253,7 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Pytest live (L3b)
-        run: |
-          ADDR="${PRODAVAN_CI_HOST:-127.0.0.1}"
-          export PRODAVAN_E2E_BASE_URL="http://${ADDR}:8088"
-          pytest tests/e2e/live -m live -q
+        run: pytest tests/e2e/live -m live -q
 
   done:
     needs: [gate, integration, k8s, live]

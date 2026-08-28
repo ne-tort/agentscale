@@ -18,7 +18,7 @@ from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.infrastructure.keycloak.invite import reset_invite_client
 from prodavan.main import create_app
 from tests.conftest import requires_postgres
-from tests.integration.support import owner_bearer_token
+from tests.integration.support import owner_auth_from_company, owner_bearer_token
 
 
 def _token(*, sub: str, email: str | None = None, platform_admin: bool = False) -> str:
@@ -158,7 +158,7 @@ def test_project_chat_turn_creates_and_reuses_session(client: TestClient) -> Non
     )
     assert key.status_code == 201, key.text
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='chat-owner', email='chat@co.test')}"}
+    owner_h = owner_auth_from_company(_token, co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
@@ -239,7 +239,7 @@ def test_agent_budget_per_run_blocks_followup(client: TestClient) -> None:
     )
     assert key.status_code == 201, key.text
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='budget-boss', email='boss@budget.test')}"}
+    owner_h = owner_auth_from_company(_token, co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
@@ -301,7 +301,7 @@ def test_chat_stream_sse(client: TestClient) -> None:
     )
     assert key.status_code == 201, key.text
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='stream-owner', email='stream@agentco.test')}"}
+    owner_h = owner_auth_from_company(_token, co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
@@ -376,7 +376,7 @@ def test_chat_with_attachment_refs_emits_tool_call(client: TestClient) -> None:
     )
     assert key.status_code == 201, key.text
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='attach-owner', email='attach@agentco.test')}"}
+    owner_h = owner_auth_from_company(_token, co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
@@ -460,7 +460,7 @@ def test_chat_rejects_unknown_attachment_ref(client: TestClient) -> None:
     )
     assert key.status_code == 201, key.text
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='ref-owner', email='ref@agentco.test')}"}
+    owner_h = owner_auth_from_company(_token, co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
@@ -514,7 +514,7 @@ def test_chat_accepts_attachment_id_ref(client: TestClient) -> None:
     )
     assert key.status_code == 201, key.text
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='idref-owner', email='idref@agentco.test')}"}
+    owner_h = owner_auth_from_company(_token, co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
@@ -575,7 +575,7 @@ def test_agent_session_uses_platform_fallback_pool(client: TestClient) -> None:
     )
     assert pool.status_code == 201, pool.text
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='fb-owner', email='fb@agentco.test')}"}
+    owner_h = owner_auth_from_company(_token, co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
@@ -626,7 +626,7 @@ def test_trigger_dispatch_runs_chat_message(client: TestClient) -> None:
     )
     assert key.status_code == 201, key.text
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='trig-owner', email='trig@agentco.test')}"}
+    owner_h = owner_auth_from_company(_token, co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
@@ -695,7 +695,7 @@ def test_trigger_dispatch_drain_batch(client: TestClient) -> None:
     )
     assert key.status_code == 201, key.text
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='drain-owner', email='drain@agentco.test')}"}
+    owner_h = owner_auth_from_company(_token, co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
@@ -764,7 +764,7 @@ def test_trigger_regenerate_and_webhook_ack(client: TestClient) -> None:
     )
     assert key.status_code == 201, key.text
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='regen-owner', email='regen@agentco.test')}"}
+    owner_h = owner_auth_from_company(_token, co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
@@ -844,7 +844,7 @@ def test_agent_session_create_blocked_cancel_allowed_when_paused(client: TestCli
     )
     assert key.status_code == 201, key.text
 
-    owner_h = {"Authorization": f"Bearer {_token(sub='owner-sess-pause', email='owner@sesspause.test')}"}
+    owner_h = owner_auth_from_company(_token, co.json())
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,

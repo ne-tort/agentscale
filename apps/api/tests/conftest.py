@@ -224,6 +224,21 @@ def pytest_collection_modifyitems(config, items) -> None:
             item.add_marker(pytest.mark.live)
 
 
+def _test_needs_postgres_wipe(request: pytest.FixtureRequest) -> bool:
+    """TRUNCATE+seed only for tests that declare @requires_postgres (or k8s e2e)."""
+    path = str(getattr(request, "fspath", "")).replace("\\", "/")
+    if "/tests/e2e/k8s/" in path:
+        return True
+    if "/tests/integration/test_health.py" in path:
+        return False
+    if "/tests/integration/" not in path:
+        return False
+    for mark in request.node.iter_markers("skipif"):
+        if "PostgreSQL" in str(mark.kwargs.get("reason", "")):
+            return True
+    return False
+
+
 @pytest.fixture(autouse=True)
 def clean_engine_cache(request: pytest.FixtureRequest):
     """Dispose pooled connections; wipe DB only when the test may use it."""
@@ -233,10 +248,8 @@ def clean_engine_cache(request: pytest.FixtureRequest):
     # Pure unit tests without AsyncClient do not touch Postgres — skip TRUNCATE
     # (CI shared PG under Docker Desktop load otherwise flakes with TimeoutError).
     needs_wipe = _postgres_available() and (
-        uses_client
-        or "/tests/integration/" in path
-        or "/tests/e2e/k8s/" in path
-        or "/tests/unit/" not in path
+        _test_needs_postgres_wipe(request)
+        or (uses_client and "/tests/unit/" not in path and "/tests/integration/" not in path)
     )
     if needs_wipe:
         last_err: TimeoutError | None = None

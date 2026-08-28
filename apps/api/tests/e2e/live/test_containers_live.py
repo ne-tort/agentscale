@@ -2,41 +2,19 @@
 
 from __future__ import annotations
 
-import os
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 
-import jwt
 import pytest
 
 from tests.conftest import requires_live_api
+from tests.e2e.live.keycloak_auth import (
+    EMPLOYEE_PASSWORD,
+    auth_header,
+    fetch_platform_admin_token,
+    login_via_api,
+)
 
 pytestmark = [pytest.mark.live, requires_live_api]
-
-# Dev cluster AUTH_TEST_SECRET when AUTH_MODE=test; live API uses oidc — mint with cluster secret.
-LIVE_JWT_SECRET = os.getenv(
-    "PRODAVAN_E2E_JWT_SECRET",
-    "k3s-dev-change-me-in-production-32b",
-)
-LIVE_AUD = os.getenv("PRODAVAN_E2E_OIDC_AUDIENCE", "prodavan-api")
-
-
-def _mint(*, sub: str, email: str | None = None, platform_admin: bool = False) -> str:
-    now = datetime.now(UTC)
-    payload = {
-        "sub": sub,
-        "aud": LIVE_AUD,
-        "exp": now + timedelta(hours=2),
-        "iat": now,
-        "platform_admin": platform_admin,
-        "roles": ["platform.admin"] if platform_admin else [],
-    }
-    if email:
-        payload["email"] = email
-    return jwt.encode(payload, LIVE_JWT_SECRET, algorithm="HS256")
-
-
-def _auth(token: str) -> dict[str, str]:
-    return {"Authorization": f"Bearer {token}"}
 
 
 def test_live_health_and_auth_config(live_client, live_api_prefix: str) -> None:
@@ -50,23 +28,36 @@ def test_live_health_and_auth_config(live_client, live_api_prefix: str) -> None:
 
 
 def test_live_containers_lifecycle(live_client, live_api_prefix: str) -> None:
-    """Vertical containers flow against deployed API (migrated from tools/_live_containers_e2e.py)."""
+    """Vertical containers flow against deployed API (OIDC tokens via Keycloak)."""
     stamp = datetime.now().strftime("%H%M%S")
-    admin = _mint(sub=f"padmin-live-{stamp}", platform_admin=True)
-    admin_h = _auth(admin)
+    admin_tok = fetch_platform_admin_token()
+    admin_h = auth_header(admin_tok)
 
     co = live_client.post(
         f"{live_api_prefix}/companies",
         headers=admin_h,
         json={
             "name": f"LiveCtr {stamp}",
-            "admin_email": f"live-owner-{stamp}@e2e.local",
-            "admin_display_name": f"Live Owner {stamp}",
+            "password": "test-company-pass",
         },
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
-    email = f"live-owner-{stamp}@e2e.local"
+    owner_login = f"owner{stamp}"
+    owner_email = f"live-owner-{stamp}@e2e.local"
+
+    owner_inv = live_client.post(
+        f"{live_api_prefix}/companies/{company_id}/employees",
+        headers=admin_h,
+        json={
+            "login": owner_login,
+            "password": EMPLOYEE_PASSWORD,
+            "contact_email": owner_email,
+            "display_name": f"Live Owner {stamp}",
+            "role": "company_admin",
+        },
+    )
+    assert owner_inv.status_code in (200, 201), owner_inv.text
 
     key = live_client.post(
         f"{live_api_prefix}/admin/ai-keys",
@@ -82,8 +73,13 @@ def test_live_containers_lifecycle(live_client, live_api_prefix: str) -> None:
     assert key.status_code == 201, key.text
     key_id = key.json()["id"]
 
-    owner = _mint(sub=f"owner-live-{stamp}", email=email)
-    owner_h = _auth(owner)
+    owner_tok = login_via_api(
+        live_client,
+        live_api_prefix,
+        username=owner_login,
+        password=EMPLOYEE_PASSWORD,
+    )
+    owner_h = auth_header(owner_tok)
     cab = live_client.post(
         f"{live_api_prefix}/cabinets",
         headers=owner_h,
@@ -92,15 +88,27 @@ def test_live_containers_lifecycle(live_client, live_api_prefix: str) -> None:
     assert cab.status_code == 201, cab.text
     cabinet_id = cab.json()["id"]
 
+    peer_login = f"peer{stamp}"
     inv = live_client.post(
         f"{live_api_prefix}/companies/{company_id}/employees",
         headers=admin_h,
-        json={"email": f"peer-{stamp}@e2e.local", "display_name": "Peer", "role": "member"},
+        json={
+            "login": peer_login,
+            "password": EMPLOYEE_PASSWORD,
+            "contact_email": f"peer-{stamp}@e2e.local",
+            "display_name": "Peer",
+            "role": "member",
+        },
     )
     assert inv.status_code in (200, 201), inv.text
-    peer = _mint(sub=f"peer-live-{stamp}", email=f"peer-{stamp}@e2e.local")
+    peer_tok = login_via_api(
+        live_client,
+        live_api_prefix,
+        username=peer_login,
+        password=EMPLOYEE_PASSWORD,
+    )
 
-    denied = live_client.get(f"{live_api_prefix}/cabinets/{cabinet_id}", headers=_auth(peer))
+    denied = live_client.get(f"{live_api_prefix}/cabinets/{cabinet_id}", headers=auth_header(peer_tok))
     assert denied.status_code == 403
 
     projects = []
@@ -231,7 +239,7 @@ def test_live_containers_lifecycle(live_client, live_api_prefix: str) -> None:
 
     peer_proj = live_client.get(
         f"{live_api_prefix}/projects/{projects[1]['id']}",
-        headers=_auth(peer),
+        headers=auth_header(peer_tok),
     )
     assert peer_proj.status_code == 403
 

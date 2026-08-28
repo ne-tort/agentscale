@@ -53,15 +53,17 @@ def _insert_employee_row(*, email: str, display_name: str, status: str) -> None:
             database=(parsed.path or "/prodavan").lstrip("/") or "prodavan",
         )
         try:
+            login = f"dup_{uuid.uuid4().hex[:8]}"
             await conn.execute(
                 """
-                INSERT INTO employees (id, email, display_name, status, keycloak_sub)
-                VALUES ($1, $2, $3, $4, NULL)
+                INSERT INTO employees (id, email, display_name, status, keycloak_sub, login)
+                VALUES ($1, $2, $3, $4, NULL, $5)
                 """,
                 f"emp_{uuid.uuid4().hex[:16]}",
                 email,
                 display_name,
                 status,
+                login,
             )
         finally:
             await conn.close()
