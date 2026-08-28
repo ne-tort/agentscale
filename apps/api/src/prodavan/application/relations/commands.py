@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.cabinets.grant_service import CabinetGrantService
+from prodavan.application.project_service.grant_service import ProjectGrantService
 from prodavan.domain.relations import (
     RELATION_GRANTED,
     RELATION_REPLACED,
@@ -26,6 +27,7 @@ class RelationsCommand:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._grants = CabinetGrantService(session)
+        self._project_grants = ProjectGrantService(session)
 
     async def ensure_membership(
         self,
@@ -125,6 +127,90 @@ class RelationsCommand:
                 "mode": mode,
             },
             cabinet_id=cabinet_id,
+        )
+        return result
+
+    async def assign_employee_to_project(
+        self,
+        *,
+        project_id: str,
+        cabinet_id: str,
+        company_id: str,
+        employee_id: str,
+    ) -> None:
+        await self._project_grants.assign_employee(
+            project_id=project_id,
+            cabinet_id=cabinet_id,
+            employee_id=employee_id,
+        )
+        await self._publish(
+            event_type=RELATION_GRANTED,
+            payload={
+                "relation_kind": RelationKind.ASSIGNMENT,
+                "subject_kind": EntityKind.EMPLOYEE,
+                "subject_id": employee_id,
+                "object_kind": EntityKind.PROJECT,
+                "object_id": project_id,
+                "via_cabinet_id": cabinet_id,
+                "via_company_id": company_id,
+                "status": "active",
+            },
+            company_id=company_id,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+        )
+
+    async def revoke_employee_from_project(
+        self,
+        *,
+        project_id: str,
+        employee_id: str,
+        company_id: str | None = None,
+        cabinet_id: str | None = None,
+    ) -> None:
+        await self._project_grants.revoke_employee(project_id=project_id, employee_id=employee_id)
+        await self._publish(
+            event_type=RELATION_REVOKED,
+            payload={
+                "relation_kind": RelationKind.ASSIGNMENT,
+                "subject_kind": EntityKind.EMPLOYEE,
+                "subject_id": employee_id,
+                "object_kind": EntityKind.PROJECT,
+                "object_id": project_id,
+                "status": "revoked",
+            },
+            company_id=company_id,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+        )
+
+    async def replace_project_assignments(
+        self,
+        *,
+        project_id: str,
+        cabinet_id: str,
+        company_id: str,
+        employee_ids: list[str],
+    ) -> list[str]:
+        result = await self._project_grants.replace_assignments(
+            project_id=project_id,
+            cabinet_id=cabinet_id,
+            employee_ids=employee_ids,
+        )
+        await self._publish(
+            event_type=RELATION_REPLACED,
+            payload={
+                "relation_kind": RelationKind.ASSIGNMENT,
+                "subject_kind": EntityKind.EMPLOYEE,
+                "object_kind": EntityKind.PROJECT,
+                "object_id": project_id,
+                "employee_ids": result,
+                "via_cabinet_id": cabinet_id,
+                "via_company_id": company_id,
+            },
+            company_id=company_id,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
         )
         return result
 

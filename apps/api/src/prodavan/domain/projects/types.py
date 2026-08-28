@@ -12,6 +12,27 @@ from enum import StrEnum
 class ProjectStatus(StrEnum):
     ACTIVE = "active"
     PAUSED = "paused"
+    COMPLETED = "completed"
+    DELETED = "deleted"
+
+
+class ProjectVisibilityMode(StrEnum):
+    CABINET_SHARED = "cabinet_shared"
+    RESTRICTED = "restricted"
+
+
+class ProjectRuntimeUnitKind(StrEnum):
+    PRIMARY = "primary"
+    SANDBOX = "sandbox"
+    WORKER = "worker"
+
+
+class ProjectRuntimeUnitStatus(StrEnum):
+    PENDING = "pending"
+    RUNNING = "running"
+    PAUSED = "paused"
+    FAILED = "failed"
+    TERMINATING = "terminating"
     DELETED = "deleted"
 
 
@@ -42,22 +63,28 @@ PAUSE_EXEMPT_TRIGGER_KINDS = frozenset({"project.prepare"})
 PLATFORM_EVENT_TYPES = frozenset(
     {
         "project.created",
+        "project.started",
         "project.paused",
         "project.resumed",
+        "project.completed",
         "project.deleted",
+        "project.restored",
+        "project.purged",
+        "project.runtime_unit.attached",
+        "project.runtime_unit.detached",
+        "project.visibility.changed",
         "company.suspended",
         "company.reactivated",
         "company.deleted",
         "company.restored",
         "company.purged",
         "employee.disabled",
+        "employee.enabled",
         "employee.soft_deleted",
         "employee.restored",
         "cabinet.soft_deleted",
         "cabinet.restored",
         "cabinet.purged",
-        "project.restored",
-        "project.purged",
     }
 )
 
@@ -172,6 +199,10 @@ def is_forbidden_attachment_content(raw: bytes) -> bool:
 
 def new_project_id() -> str:
     return f"proj_{uuid.uuid4().hex[:16]}"
+
+
+def new_runtime_unit_id() -> str:
+    return f"pru_{uuid.uuid4().hex[:16]}"
 
 
 def slugify_name(name: str) -> str:

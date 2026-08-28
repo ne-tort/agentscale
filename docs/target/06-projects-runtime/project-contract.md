@@ -4,40 +4,55 @@
 
 Project = **work unit** внутри **CabinetInstance**: metadata + workspace + agent session + triggers + attachments.
 
-Owner tuple: `(company_id, cabinet_id, owner_employee_id)`.
+Иерархия: `cabinet_id` (FK, NOT NULL). `created_by_employee_id` (= `owner_employee_id` в ORM) — metadata создателя, не ownership.
 
 ## Сущность Platform `Project`
 
 | Поле | Описание |
 |------|----------|
 | `id` | `proj_*` |
-| `company_id` | |
+| `company_id` | org-контекст (quota/metrics) |
 | `cabinet_id` | Dynamic CabinetInstance |
 | `slug` / `name` | |
-| `owner_employee_id` | |
-| `status` | `active` \| `paused` \| `deleted` |
+| `created_by_employee_id` | metadata creator (`owner_employee_id` в API alias) |
+| `visibility_mode` | `cabinet_shared` (default) \| `restricted` |
+| `status` | `active` \| `paused` \| `completed` \| `deleted` |
 | `workspace_key` | FS / volume key |
-| `container_ref` | Runtime id |
+| `container_ref` | legacy opaque ref (→ `primary_runtime_unit`) |
+| `primary_runtime_unit_id` | nullable FK → `ProjectRuntimeUnit` |
 | `agent_provider` | Optional override |
 
 **Нет** `profile_id` code-module — тип кабинета = содержимое instance (meta + packages).
 
+## Access
+
+| Mode | Кто видит |
+|------|-----------|
+| `cabinet_shared` | employee с cabinet assignment |
+| `restricted` | cabinet assignment **и** project assignment (Relations) |
+
+Company admin / platform admin — все проекты в org scope.
+
 ## Lifecycle
 
 ```text
-create → materialize (prompts/skills/AGENTS + platform cabinet.* + enabled MCP packages)
-      → ensure container_ref
+create → materialize (metadata + workspace stub; runtime unit optional)
+      → attach runtime unit (0..N) → project.started
       → accept triggers / agent sessions
-      → pause | resume | archive
+      → pause | resume | complete | delete
 ```
 
-## Обязанности
+## BC `project_service` (in-process)
 
-| Сторона | Делает |
-|---------|--------|
-| Platform | Project CRUD; container; triggers; AI keys; attachments meta; agent routing |
-| Cabinet Runtime | Meta/data contracts; package sandbox; materialize inputs |
-| Agent (in project) | May call `cabinet.*` + deployed packages to extend cabinet |
+| Facade | Назначение |
+|--------|------------|
+| `ProjectCommand` | writes: CRUD, lifecycle, visibility, runtime units |
+| `ProjectQuery` | reads + visibility filter |
+| `ProjectAccessPolicy` | ACL |
+| `ProjectLifecycleEmitter` | `project.*` platform events |
+| `ProjectRuntimeManager` | units + `ContainerRuntimePort` |
+
+Другие BC вызывают только facades — не `ProjectRow` / SQL напрямую.
 
 ## API (логический)
 
@@ -45,8 +60,14 @@ create → materialize (prompts/skills/AGENTS + platform cabinet.* + enabled MCP
 POST   /api/v1/cabinets/{cabinet_id}/projects
 GET    /api/v1/cabinets/{cabinet_id}/projects
 GET    /api/v1/projects/{id}
+PUT    /api/v1/projects/{id}/visibility
+POST   /api/v1/projects/{id}/assignments
+DELETE /api/v1/projects/{id}/assignments/{employee_id}
+POST   /api/v1/projects/{id}/runtime-units
+GET    /api/v1/projects/{id}/runtime-units
 POST   /api/v1/projects/{id}/pause
 POST   /api/v1/projects/{id}/resume
+POST   /api/v1/projects/{id}/complete
 DELETE /api/v1/projects/{id}
 POST   /api/v1/projects/{id}/triggers
 POST   /api/v1/projects/{id}/attachments

@@ -7,22 +7,24 @@
 | Quality note | Project CRUD+lifecycle+materialize+local MCP spawn; k8s isolator — Job PVC probe + SA on API, spawn not on create |
 | Plan | [L07](../11-implementation-plan/L07-projects-runtime.md) |
 | Canon | [00-entities](../00-entities.md), [06](../06-projects-runtime/), [**14 Pods**](../14-project-containers/), [workspace-context](../08-agent-providers/workspace-context.md) |
-| Last updated | 2026-08-26 — canon: Container = Pod; code still object-ws (debt) |
+| Last updated | 2026-08-28 — `project_service` BC; visibility; runtime units 1:N |
 | Owners | — |
 
 ---
 
 ## Семантика
 
-Project = work unit. **Канон isolator** — [14](../14-project-containers/) (`ProjectContainer` = **Pod**).  
-**Код сейчас:** часто только `object-ws:{key}` без Pod — **долг**, не канон. PVC probe ≠ runtime. Materialize → MinIO; triggers; attachments.
+Project = work unit. **Канон isolator** — [14](../14-project-containers/) (`ProjectRuntimeUnit` 0..N, Pod optional).  
+**Код:** `application/project_service/` BC + stub `object-ws` adapter — **P-POD-01** debt.
 
 ## Что сделано
 
 | Сделано | Gaps |
 |---------|------|
 | ORM projects / project_triggers / project_attachments + migration | k8s pod scheduler |
-| CRUD: create/list/get/PATCH (name, agent_provider); pause/resume/delete | |
+| `project_service` BC: Command/Query/Access/LifecycleEmitter/RuntimeManager | |
+| `visibility_mode`, `project_employee_assignments`, `project_runtime_units` | |
+| CRUD + visibility + runtime units + complete status API | |
 | Pause → `stop_project_runtime` + `pause_container` (keep object-ws; pod stop hole) | |
 | Materialize: AGENTS from cabinet workspace-docs + packages/sandbox | bubblewrap; per-project k8s Pod; live MinIO mount |
 | `container_ref=object-ws:{workspace_key}` (parse accepts `local-ws:`; Alembic+admin backfill) | SANDBOX_K8S_JOBS spawn on create |
@@ -37,7 +39,7 @@ Project = work unit. **Канон isolator** — [14](../14-project-containers/)
 
 ## Как сделано
 
-1. `ProjectService` — cabinet ACL via L06; create → materialize → `project.prepare` trigger; PATCH name/agent_provider.
+1. `ProjectCommand` / `ProjectQuery` — cabinet ACL + visibility; create → materialize (runtime unit optional) → `project.prepare`.
 2. `ProjectMaterializeService` — idempotent FS under `storage/projects/{workspace_key}/workspace/`.
 3. `WorkspaceLayoutWriter` — container.md layout; extracts enabled package zips.
 4. HTTP: `/cabinets/{id}/projects`, `/projects/{id}/*` per project-contract; `POST /admin/triggers/drain`.
@@ -93,7 +95,8 @@ cwd/mcp.json → L08 AgentPort. Chat UI → triggers (L05/L09).
 ```text
 apps/api/src/prodavan/
   domain/projects/types.py
-  application/projects/{project_service,materialize,trigger_service,attachment_service,access,pause_runtime,idle_pause_service}.py
+  application/project_service/{command,query,access,lifecycle_emitter,runtime_manager,grant_service}.py
+  application/projects/{materialize,trigger_service,attachment_service,pause_runtime,idle_pause_service}.py
   # pause_runtime: stop_project_runtime + stop_company_runtime (L04 suspend)
   infrastructure/projects/workspace.py
   infrastructure/persistence/models/projects.py

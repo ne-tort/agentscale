@@ -24,8 +24,8 @@ async def cascade_company_deleted(company_id: str, *, actor_sub: str = "system")
     Company row stays with deleted_at set; Auth KC delete is published by REST.
     """
     from prodavan.application.employees.service import EmployeesCommandService
+    from prodavan.application.project_service.command import ProjectCommand
     from prodavan.application.projects.pause_runtime import stop_company_runtime
-    from prodavan.application.projects.project_service import ProjectService
     from prodavan.infrastructure.persistence.database import get_session_factory
     from prodavan.infrastructure.persistence.models.identity import CompanyRow
 
@@ -64,7 +64,7 @@ async def cascade_company_deleted(company_id: str, *, actor_sub: str = "system")
                 ProjectRow.status != ProjectStatus.DELETED,
             )
         )
-        projects = ProjectService(session)
+        projects = ProjectCommand(session)
         projects_soft_deleted: list[str] = []
         for project_id in proj_q.scalars().all():
             await projects.delete(
@@ -72,6 +72,7 @@ async def cascade_company_deleted(company_id: str, *, actor_sub: str = "system")
                 principal=principal,
                 employee=None,
                 purge_workspace=False,
+                skip_access=True,
             )
             projects_soft_deleted.append(project_id)
 

@@ -86,9 +86,9 @@ Admin ──creates──► Company ──creates──► Employee
 | Company → Employee | 1:N | invite / membership |
 | Company → Cabinet | 1:N | org ownership |
 | Company assigns Employee ↔ Cabinet | N:M | кто **может** работать в каком кабинете |
-| Employee → Project | 1:N | создатель / оператор проекта |
+| Employee → Project | 1:N | создатель / оператор (metadata); restricted visibility via assignment |
 | Cabinet → Project | 1:N | проект живёт **в** кабинете |
-| Project → ProjectContainer | 1:1 | isolator |
+| Project → ProjectRuntimeUnit | 1:N | 0..N isolators; Pod link optional |
 
 Peers: Employee A не видит Cabinet/Project/Pod Employee B, если нет явного assign на тот же cabinet (по умолчанию peer isolation).
 
@@ -101,7 +101,7 @@ Peers: Employee A не видит Cabinet/Project/Pod Employee B, если не�
 | **Company** | org pause → cascade pause projects | `deleted_at` → cascade soft children, **без wipe** | wipe/DROP/KC после soft |
 | **Employee** | `disabled` (= paused) | `deleted_at` | row + KC |
 | **Cabinet** | `archived` | `status=deleted` | DROP schema + purge projects |
-| **Project** | `paused` | `status=deleted`, blobs **keep** | wipe MinIO |
+| **Project** | `paused` \| `completed` | `status=deleted`, blobs **keep** | wipe MinIO |
 
 **Restore** только целевой сущности → live+paused; **без** cascade revive. Soft никогда не уничтожает данные.
 
@@ -135,8 +135,8 @@ Peers: Employee A не видит Cabinet/Project/Pod Employee B, если не�
 | **Employee** | Человек в компании | platform DB + Keycloak |
 | **CabinetInstance** | Оболочка рабочего пространства | реестр в DB; суть в **meta/data** |
 | **Module** | Переиспользуемый каталог meta (tables/columns/views) | platform DB; N:M cabinet + project |
-| **Project** | Единица работы агента | platform DB (`cabinet_id` + `owner_employee_id`) |
-| **ProjectContainer** | Изолированный **k8s Pod** + workspace | DB row + Pod + MinIO |
+| **Project** | Единица работы агента | platform DB (`cabinet_id` + `created_by_employee_id`); BC `project_service` |
+| **ProjectRuntimeUnit** | Изолированный runtime (Pod optional) | DB row + optional Pod + MinIO |
 | **AgentSession** | Сессия в Project | platform DB |
 
 ## Cabinet = оболочка + meta

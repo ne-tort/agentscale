@@ -23,6 +23,7 @@ from prodavan.infrastructure.persistence.models.modules import (
     ModuleCompanyGrantRow,
     ModuleRow,
 )
+from prodavan.infrastructure.persistence.models.projects import ProjectEmployeeAssignmentRow
 
 
 class RelationsQuery:
@@ -92,6 +93,16 @@ class RelationsQuery:
             select(CompanyAiKeyBindingRow.id).where(
                 CompanyAiKeyBindingRow.key_id == key_id,
                 CompanyAiKeyBindingRow.company_id == company_id,
+            )
+        )
+        return q.scalar_one_or_none() is not None
+
+    async def has_project_assignment(self, *, project_id: str, employee_id: str) -> bool:
+        q = await self._session.execute(
+            select(ProjectEmployeeAssignmentRow.id).where(
+                ProjectEmployeeAssignmentRow.project_id == project_id,
+                ProjectEmployeeAssignmentRow.employee_id == employee_id,
+                ProjectEmployeeAssignmentRow.status == "active",
             )
         )
         return q.scalar_one_or_none() is not None

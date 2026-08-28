@@ -440,8 +440,8 @@ class CabinetInstanceService:
         employee: EmployeeRow | None = None,
     ) -> dict:
         """Soft-delete cabinet: hide + soft-delete projects (no wipe, schema keep)."""
+        from prodavan.application.project_service.command import ProjectCommand
         from prodavan.application.projects.platform_event_service import PlatformEventService
-        from prodavan.application.projects.project_service import ProjectService
         from prodavan.domain.projects import ProjectStatus
         from prodavan.infrastructure.persistence.models.projects import ProjectRow
 
@@ -456,7 +456,7 @@ class CabinetInstanceService:
         if inst.status == CabinetStatus.DELETED:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Cabinet not found")
 
-        projects = ProjectService(self._session)
+        projects = ProjectCommand(self._session)
         proj_q = await self._session.execute(
             select(ProjectRow.id).where(
                 ProjectRow.cabinet_id == cabinet_id,
@@ -470,6 +470,7 @@ class CabinetInstanceService:
                 principal=principal,
                 employee=employee,
                 purge_workspace=False,
+                skip_access=True,
             )
             projects_soft_deleted.append(project_id)
 

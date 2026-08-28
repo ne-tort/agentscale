@@ -14,7 +14,7 @@ Relations = **единый контракт**: кто с кем связан, к
 |------|--------|---------|
 | `link` | простая ассоциация | future peers |
 | `membership` | субъект в org + role | Employee ↔ Company |
-| `assignment` | операторский доступ | Employee ↔ Cabinet |
+| `assignment` | операторский доступ | Employee ↔ Cabinet; Employee ↔ Project (restricted) |
 | `grant` | org entitlement | Company ↔ Cabinet / Module |
 | `binding` | привязка ресурса | AI key ↔ Company; Module ↔ Cabinet/Project |
 | `ownership` | владение (часто зеркало `owner_*` на entity) | company-owned key/cabinet |

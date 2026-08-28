@@ -24,7 +24,10 @@
 | **P-MOD-01** | **Module** catalog + cabinet bind + per-cabinet data | **Admin CRUD + meta + materialize + runtime data API + Flutter** | Physical DDL; meta editor UI |
 | **P-MOD-02** | Meta-table **syntax** spec + interpreters | **[meta-syntax](06-modules/meta-syntax/) documented**; shell `nav.contour` preview in seed editor | Live catalog shell merge; cabinet UI renderer; materialize engine |
 | **P-MAT-01** | Pod hydrate из meta/MinIO | object-ws; нет Pod; file_ref слаб | Materialize/Pod debt |
-| **P-POD-01** | `ProjectContainer` = k8s Pod; inert → delete Pod | `object-ws:…`; pause stub `pod_stop` desired | [14](14-project-containers/) |
+| **P-POD-01** | `ProjectRuntimeUnit` → k8s Pod; inert → delete Pod | `object-ws:…` stub adapter; pause via ContainerRuntimePort | [14](14-project-containers/) |
+| **P-PRJ-01** | Изолированный BC `project_service`; чужие BC только Command/Query | **Facade live**; residual direct ORM in legacy paths | Lint/import guard later |
+| **P-PRJ-02** | `visibility_mode` + project↔employee assignment | **Schema + API + RelationsCommand live** | Flutter filter UI |
+| **P-PRJ-03** | 0..N runtime units per project | **Table + ProjectRuntimeManager + API live** | Real Pod adapter (P-POD-01) |
 | **P-MCP-01** | Агент в Pod ↔ `cabinet.*` | **Out of MVP cabinet entity** (removed typed MCP/packages); future contract | Изоляция + контракт |
 | **P-CAS-01** | Cabinet soft_delete → soft projects; purge → DROP | Admin hard `delete_with_cascade` | Soft default DELETE + purge |
 | **P-INF-01** | MinIO / Kafka / Celery | Local FS / in-process | [13](13-platform-infra/) |

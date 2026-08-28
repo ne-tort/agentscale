@@ -1,47 +1,5 @@
-"""Project access — cabinet-scoped ACL (L07)."""
+"""Deprecated — use prodavan.application.project_service.access."""
 
-from __future__ import annotations
+from prodavan.application.project_service.access import ProjectAccessPolicy, ProjectAccessService
 
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from prodavan.application.cabinets.access import CabinetAccessService
-from prodavan.domain.errors import AppError
-from prodavan.domain.identity import Principal
-from prodavan.domain.lifecycle import project_is_paused, project_is_soft_deleted, raise_if_paused
-from prodavan.infrastructure.persistence.models.identity import EmployeeRow
-from prodavan.infrastructure.persistence.models.projects import ProjectRow
-
-
-class ProjectAccessService:
-    def __init__(self, session: AsyncSession) -> None:
-        self._session = session
-        self._cabinets = CabinetAccessService(session)
-
-    async def get_project(self, project_id: str) -> ProjectRow:
-        row = await self._session.get(ProjectRow, project_id)
-        if row is None:
-            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Project not found")
-        return row
-
-    async def require_access(
-        self,
-        *,
-        project_id: str,
-        principal: Principal,
-        employee: EmployeeRow | None,
-        write: bool = False,
-        allow_paused: bool = False,
-        allow_deleted: bool = False,
-    ) -> ProjectRow:
-        project = await self.get_project(project_id)
-        if project_is_soft_deleted(project) and not allow_deleted:
-            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Project not found")
-        await self._cabinets.require_access(
-            cabinet_id=project.cabinet_id,
-            principal=principal,
-            employee=employee,
-            write=write,
-        )
-        if write and project_is_paused(project) and not allow_paused:
-            raise_if_paused(code="PROJECT_PAUSED", detail="project is paused")
-        return project
+__all__ = ["ProjectAccessPolicy", "ProjectAccessService"]

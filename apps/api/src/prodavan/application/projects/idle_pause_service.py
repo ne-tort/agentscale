@@ -12,8 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.company_service import AdminCompanyService
-from prodavan.application.projects.pause_runtime import stop_project_runtime
-from prodavan.application.projects.platform_event_service import PlatformEventService
+from prodavan.application.project_service.command import ProjectCommand
 from prodavan.domain.identity import Principal
 from prodavan.domain.projects import ProjectStatus, project_is_idle
 from prodavan.infrastructure.persistence.models.agent import AgentEventRow, AgentSessionRow
@@ -25,7 +24,7 @@ class IdlePauseService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._companies = AdminCompanyService(session)
-        self._events = PlatformEventService(session)
+        self._projects = ProjectCommand(session)
 
     async def project_last_activity_at(self, project: ProjectRow) -> datetime | None:
         sess_q = await self._session.execute(
@@ -76,15 +75,11 @@ class IdlePauseService:
                 idle_pause_after_hours=hours,
             ):
                 continue
-            project.status = ProjectStatus.PAUSED
-            # Same side-effect as ProjectService.pause — stop in-flight agent runtime.
-            await stop_project_runtime(self._session, project_id=project.id)
-            await self._events.emit(
-                event_type="project.paused",
-                company_id=project.company_id,
+            await self._projects.pause(
                 project_id=project.id,
-                cabinet_id=project.cabinet_id,
                 principal=actor,
+                employee=None,
+                skip_access=True,
                 payload={
                     "reason": "idle_pause",
                     "idle_pause_after_hours": hours,
@@ -97,7 +92,6 @@ class IdlePauseService:
                     "last_activity_at": last.isoformat() if last else None,
                 }
             )
-        await self._session.commit()
         return {
             "company_id": company_id,
             "idle_pause_enabled": True,

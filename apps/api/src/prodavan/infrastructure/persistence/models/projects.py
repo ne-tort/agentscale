@@ -29,13 +29,51 @@ class ProjectRow(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     slug: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    visibility_mode: Mapped[str] = mapped_column(String(32), nullable=False, default="cabinet_shared")
     workspace_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     container_ref: Mapped[str] = mapped_column(String(128), nullable=False)
+    primary_runtime_unit_id: Mapped[str | None] = mapped_column(
+        ForeignKey(
+            "project_runtime_units.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_projects_primary_runtime_unit",
+        ),
+        nullable=True,
+    )
     agent_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class ProjectRuntimeUnitRow(Base):
+    __tablename__ = "project_runtime_units"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, default="primary")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    runtime_ref: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ProjectEmployeeAssignmentRow(Base):
+    __tablename__ = "project_employee_assignments"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: _id("pea"))
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    cabinet_id: Mapped[str] = mapped_column(
+        ForeignKey("cabinet_instances.id", ondelete="CASCADE"), nullable=False
+    )
+    employee_id: Mapped[str] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class ProjectTriggerRow(Base):
