@@ -23,9 +23,12 @@ from prodavan.domain.pods import (
     new_pod_id,
     runtime_ref_for,
 )
+from prodavan.domain.projects import ProjectStatus
 from prodavan.infrastructure.persistence.models.projects import ProjectPodRow, ProjectRow
 
 logger = logging.getLogger(__name__)
+
+_TERMINATE_REASONS = frozenset({"delete", "purge", "terminate", "detach", "force_kill"})
 
 
 def _runtime_adapter() -> PodRuntimePort:
@@ -62,23 +65,39 @@ class PodCommand:
         pod = await self._get_live_row(project_id)
         if pod is None and desired == PodDesiredState.ABSENT:
             if project.container_ref:
-                await self._runtime.pause(runtime_ref=project.container_ref)
+                if reason in _TERMINATE_REASONS:
+                    await self._runtime.terminate(runtime_ref=project.container_ref)
+                else:
+                    await self._runtime.pause(runtime_ref=project.container_ref)
             return
 
         if pod is None:
-            pod = await self._create_row(project, desired=desired)
+            pod = await self._ensure_live_row(project, desired=desired)
 
         if pod.desired_state == desired.value and self._status_matches_desired(pod, desired):
             return
 
         pod.desired_state = desired.value
         payload = {"reason": reason} if reason else None
+        terminate = desired == PodDesiredState.ABSENT and reason in _TERMINATE_REASONS
 
         try:
             if desired == PodDesiredState.RUNNING:
                 await self._apply_running(project, pod)
+                event_type = "pod.resumed" if reason == "resume" else "pod.started"
                 await self._events.emit(
-                    event_type="pod.started",
+                    event_type=event_type,
+                    company_id=project.company_id,
+                    project_id=project.id,
+                    cabinet_id=project.cabinet_id,
+                    principal=principal,
+                    pod_id=pod.id,
+                    payload=payload,
+                )
+            elif terminate:
+                await self._apply_terminate(project, pod)
+                await self._events.emit(
+                    event_type="pod.terminated",
                     company_id=project.company_id,
                     project_id=project.id,
                     cabinet_id=project.cabinet_id,
@@ -90,6 +109,16 @@ class PodCommand:
                 await self._apply_absent(project, pod)
                 await self._events.emit(
                     event_type="pod.paused",
+                    company_id=project.company_id,
+                    project_id=project.id,
+                    cabinet_id=project.cabinet_id,
+                    principal=principal,
+                    pod_id=pod.id,
+                    payload=payload,
+                )
+            if reason == "reconcile":
+                await self._events.emit(
+                    event_type="pod.reconciled",
                     company_id=project.company_id,
                     project_id=project.id,
                     cabinet_id=project.cabinet_id,
@@ -208,6 +237,28 @@ class PodCommand:
         await self._session.flush()
         return PodQuery._public(pod)
 
+    async def ensure_running_for_project(
+        self,
+        project_id: str,
+        *,
+        principal: Principal,
+    ) -> None:
+        """Lazy-start pod for an active project (first agent/trigger)."""
+        project = await self._session.get(ProjectRow, project_id)
+        if project is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Project not found")
+        if project.status != ProjectStatus.ACTIVE:
+            return
+        pod = await self._get_live_row(project_id)
+        if pod is None:
+            await self.provision_for_project(project_id, principal=principal, start=False)
+        await self.sync_desired(
+            project_id,
+            PodDesiredState.RUNNING,
+            principal=principal,
+            reason="lazy.start",
+        )
+
     async def force_kill(self, *, pod_id: str, principal: Principal) -> dict:
         pod = await self._session.get(ProjectPodRow, pod_id)
         if pod is None:
@@ -244,6 +295,25 @@ class PodCommand:
         )
         return q.scalar_one_or_none()
 
+    async def _get_failed_row(self, project_id: str) -> ProjectPodRow | None:
+        q = await self._session.execute(
+            select(ProjectPodRow).where(
+                ProjectPodRow.project_id == project_id,
+                ProjectPodRow.status == PodStatus.FAILED,
+            )
+        )
+        return q.scalar_one_or_none()
+
+    async def _ensure_live_row(self, project: ProjectRow, *, desired: PodDesiredState) -> ProjectPodRow:
+        failed = await self._get_failed_row(project.id)
+        if failed is not None:
+            failed.status = PodStatus.PENDING
+            failed.last_error = None
+            failed.desired_state = desired.value
+            await self._session.flush()
+            return failed
+        return await self._create_row(project, desired=desired)
+
     async def _create_row(self, project: ProjectRow, *, desired: PodDesiredState) -> ProjectPodRow:
         runtime_ref = runtime_ref_for(project.workspace_key)
         pod = ProjectPodRow(
@@ -279,8 +349,18 @@ class PodCommand:
             await self._runtime.pause(runtime_ref=ref)
         pod.status = PodStatus.PAUSED
 
+    async def _apply_terminate(self, project: ProjectRow, pod: ProjectPodRow) -> None:
+        ref = pod.runtime_ref or project.container_ref
+        pod.status = PodStatus.TERMINATING
+        if ref:
+            await self._runtime.terminate(runtime_ref=ref)
+        pod.status = PodStatus.TERMINATED
+        pod.desired_state = PodDesiredState.ABSENT
+
     @staticmethod
     def _status_matches_desired(pod: ProjectPodRow, desired: PodDesiredState) -> bool:
         if desired == PodDesiredState.RUNNING:
             return pod.status == PodStatus.RUNNING
+        if pod.status == PodStatus.TERMINATED:
+            return desired == PodDesiredState.ABSENT
         return pod.status in {PodStatus.PAUSED, PodStatus.PENDING, PodStatus.PAUSING}

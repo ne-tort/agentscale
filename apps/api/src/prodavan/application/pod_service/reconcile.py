@@ -11,6 +11,7 @@ from prodavan.application.pod_service.adapters.stub_pod_runtime import StubPodRu
 from prodavan.application.pod_service.command import PodCommand
 from prodavan.application.pod_service.lifecycle_emitter import PodLifecycleEmitter
 from prodavan.application.pod_service.ports.pod_runtime import PodRuntimePort
+from prodavan.application.pod_service.query import PodQuery
 from prodavan.domain.identity import Principal
 from prodavan.domain.pods import PodDesiredState, PodStatus
 from prodavan.domain.projects import ProjectStatus
@@ -51,7 +52,10 @@ class PodReconcileService:
                 if project.status == ProjectStatus.ACTIVE
                 else PodDesiredState.ABSENT
             )
-            if pod.desired_state != desired.value:
+            drift = pod.desired_state != desired.value or not PodCommand._status_matches_desired(
+                pod, desired
+            )
+            if drift:
                 await self._pods.sync_desired(
                     project.id,
                     desired,
@@ -59,5 +63,29 @@ class PodReconcileService:
                     reason="reconcile",
                 )
                 fixed += 1
+
+        active_q = await self._session.execute(
+            select(ProjectRow).where(ProjectRow.status == ProjectStatus.ACTIVE)
+        )
+        pod_query = PodQuery(self._session)
+        for project in active_q.scalars().all():
+            if await pod_query.get_for_project(project.id) is not None:
+                continue
+            had_pod = await self._session.execute(
+                select(ProjectPodRow.id)
+                .where(ProjectPodRow.project_id == project.id)
+                .limit(1)
+            )
+            if had_pod.scalar_one_or_none() is None:
+                continue
+            await self._pods.provision_for_project(project.id, principal=_SYSTEM, start=False)
+            await self._pods.sync_desired(
+                project.id,
+                PodDesiredState.RUNNING,
+                principal=_SYSTEM,
+                reason="reconcile",
+            )
+            fixed += 1
+
         await self._session.commit()
         return {"fixed": fixed}

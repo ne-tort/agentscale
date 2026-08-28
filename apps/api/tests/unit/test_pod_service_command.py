@@ -135,3 +135,115 @@ async def test_sync_desired_idempotent_when_already_running() -> None:
 
     runtime.ensure_running.assert_not_awaited()
     events.emit.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sync_desired_revives_failed_pod() -> None:
+    session = AsyncMock()
+    project = _project()
+    failed = ProjectPodRow(
+        id="pod_failed",
+        project_id=project.id,
+        workspace_key=project.workspace_key,
+        status=PodStatus.FAILED,
+        desired_state=PodDesiredState.ABSENT,
+        runtime_ref="object-ws:wk_demo",
+        last_error="boom",
+        hydrate_generation=0,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    session.get = AsyncMock(return_value=project)
+
+    live_result = MagicMock()
+    live_result.scalar_one_or_none.return_value = None
+    failed_result = MagicMock()
+    failed_result.scalar_one_or_none.return_value = failed
+    session.execute = AsyncMock(side_effect=[live_result, failed_result])
+
+    runtime = AsyncMock()
+    events = AsyncMock(spec=PodLifecycleEmitter)
+    cmd = PodCommand(session, runtime=runtime, events=events)
+
+    await cmd.sync_desired(
+        project.id,
+        PodDesiredState.RUNNING,
+        principal=_principal(),
+        reason="retry",
+    )
+
+    runtime.ensure_running.assert_awaited_once()
+    assert failed.status == PodStatus.RUNNING
+    assert failed.last_error is None
+
+
+@pytest.mark.asyncio
+async def test_sync_desired_delete_terminates_pod() -> None:
+    session = AsyncMock()
+    project = _project()
+    pod = ProjectPodRow(
+        id="pod_abc123",
+        project_id=project.id,
+        workspace_key=project.workspace_key,
+        status=PodStatus.RUNNING,
+        desired_state=PodDesiredState.RUNNING,
+        runtime_ref="object-ws:wk_demo",
+        hydrate_generation=0,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    session.get = AsyncMock(return_value=project)
+
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = pod
+    session.execute = AsyncMock(return_value=execute_result)
+
+    runtime = AsyncMock()
+    events = AsyncMock(spec=PodLifecycleEmitter)
+    cmd = PodCommand(session, runtime=runtime, events=events)
+
+    await cmd.sync_desired(
+        project.id,
+        PodDesiredState.ABSENT,
+        principal=_principal(),
+        reason="delete",
+    )
+
+    runtime.terminate.assert_awaited_once_with(runtime_ref="object-ws:wk_demo")
+    assert pod.status == PodStatus.TERMINATED
+    assert events.emit.await_args.kwargs["event_type"] == "pod.terminated"
+
+
+@pytest.mark.asyncio
+async def test_sync_desired_resume_emits_pod_resumed() -> None:
+    session = AsyncMock()
+    project = _project()
+    pod = ProjectPodRow(
+        id="pod_abc123",
+        project_id=project.id,
+        workspace_key=project.workspace_key,
+        status=PodStatus.PAUSED,
+        desired_state=PodDesiredState.ABSENT,
+        runtime_ref="object-ws:wk_demo",
+        hydrate_generation=0,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    session.get = AsyncMock(return_value=project)
+
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = pod
+    session.execute = AsyncMock(return_value=execute_result)
+
+    runtime = AsyncMock()
+    events = AsyncMock(spec=PodLifecycleEmitter)
+    cmd = PodCommand(session, runtime=runtime, events=events)
+
+    await cmd.sync_desired(
+        project.id,
+        PodDesiredState.RUNNING,
+        principal=_principal(),
+        reason="resume",
+    )
+
+    assert events.emit.await_args.kwargs["event_type"] == "pod.resumed"

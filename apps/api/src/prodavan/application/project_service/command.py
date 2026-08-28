@@ -358,8 +358,8 @@ class ProjectCommand:
             )
         if row.status == ProjectStatus.PAUSED:
             return await self._project_public(row)
-        row.status = ProjectStatus.PAUSED
         await self._stop_and_pause_runtime(row, principal=principal, reason="pause")
+        row.status = ProjectStatus.PAUSED
         emit_payload = dict(payload or {})
         await self._events.emit(
             event_type="project.paused",

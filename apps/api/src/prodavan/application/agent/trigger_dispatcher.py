@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.application.agent.session_service import AgentSessionService
+from prodavan.application.pod_service import PodCommand
 from prodavan.application.project_service import ProjectAccessPolicy
 from prodavan.application.projects.trigger_service import ProjectTriggerService
 from prodavan.domain.agent import PLATFORM_EVENT_USER_MESSAGE, AgentSessionStatus
@@ -31,6 +32,7 @@ class AgentTriggerDispatcher:
         self._projects = ProjectAccessPolicy(session)
         self._subscription = CompanySubscriptionGate(session)
         self._triggers = ProjectTriggerService(session)
+        self._pods = PodCommand(session)
 
     async def dispatch_next(
         self,
@@ -303,6 +305,9 @@ class AgentTriggerDispatcher:
         payload = trigger.payload or {}
 
         try:
+            if trigger.kind in {"chat.message", "telegram.message", "chat.regenerate"}:
+                await self._pods.ensure_running_for_project(project_id, principal=principal)
+
             if trigger.kind in {"chat.message", "telegram.message"}:
                 text = str(payload.get("text") or "")
                 refs = payload.get("attachment_refs") or []
