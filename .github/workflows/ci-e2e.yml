@@ -21,7 +21,7 @@ on:
 
 concurrency:
   group: ci-e2e-${{ github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   gate:
@@ -172,6 +172,9 @@ jobs:
   k8s:
     needs: gate
     if: needs.gate.outputs.run_k8s == 'true'
+    concurrency:
+      group: prodavan-e2e-k8s-cluster
+      cancel-in-progress: false
     runs-on: [self-hosted, linux, docker]
     env:
       PRODAVAN_CI_HOST: host.docker.internal
@@ -226,6 +229,10 @@ jobs:
       - name: Install prodavan-ops
         working-directory: infra/ops
         run: poetry install --no-interaction
+
+      - name: Wait for k3s API
+        working-directory: infra/ops
+        run: poetry run python -c "from prodavan_ops.k8s import wait_k3s_api_ready; wait_k3s_api_ready(timeout_sec=300)"
 
       - name: Sync PR e2e conftest into cluster
         working-directory: infra/ops

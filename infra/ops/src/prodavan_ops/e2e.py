@@ -8,7 +8,7 @@ import time
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 
-from prodavan_ops.k8s import load_kube
+from prodavan_ops.k8s import load_kube, wait_k3s_api_ready
 from prodavan_ops.paths import overlay_e2e
 
 E2E_NAMESPACE = "prodavan"
@@ -33,7 +33,11 @@ def _apply_e2e_overlay() -> None:
 
 
 def _delete_job() -> None:
-    load_kube()
+    try:
+        load_kube()
+    except Exception as exc:
+        print(f"skip job delete: kube unavailable ({exc})")
+        return
     batch = client.BatchV1Api()
     try:
         batch.delete_namespaced_job(
@@ -44,7 +48,11 @@ def _delete_job() -> None:
         print(f"deleted Job {E2E_NAMESPACE}/{E2E_JOB}")
     except ApiException as exc:
         if exc.status != 404:
-            raise
+            print(f"skip job delete: {exc.status} {exc.reason}")
+            return
+    except Exception as exc:
+        print(f"skip job delete: {exc}")
+        return
     deadline = time.time() + 120
     while time.time() < deadline:
         try:
@@ -53,7 +61,11 @@ def _delete_job() -> None:
         except ApiException as exc:
             if exc.status == 404:
                 return
-            raise
+            print(f"skip job wait: {exc.status} {exc.reason}")
+            return
+        except Exception as exc:
+            print(f"skip job wait: {exc}")
+            return
 
 
 def _wait_job(timeout_sec: int = 900) -> None:
@@ -107,6 +119,8 @@ def run_e2e(*, suite: str = "k8s", timeout_sec: int = 900) -> None:
     """Run cluster e2e suite (currently k8s pod tests via in-cluster Job)."""
     if suite not in {"k8s", "all"}:
         raise ValueError(f"prodavan-ops e2e run supports suite k8s|all (got {suite!r})")
+    print("==> wait k3s API")
+    wait_k3s_api_ready(timeout_sec=300)
     print("==> e2e cleanup (prior Job)")
     cleanup_e2e()
     print("==> apply overlays/e2e")
@@ -127,19 +141,25 @@ def cleanup_e2e(*, unsync: bool = False) -> None:
         check=False,
     )
     if proc.returncode != 0:
-        print(proc.stderr)
+        print(proc.stderr.strip() or f"kubectl delete -k {path} failed ({proc.returncode})")
     if unsync:
-        load_kube()
-        api = client.CustomObjectsApi()
         try:
-            api.delete_namespaced_custom_object(
-                group="argoproj.io",
-                version="v1alpha1",
-                namespace="argocd",
-                plural="applications",
-                name="prodavan-e2e",
-            )
-        except ApiException as exc:
-            if exc.status != 404:
-                raise
+            load_kube()
+        except Exception as exc:
+            print(f"skip argo unsync: kube unavailable ({exc})")
+        else:
+            api = client.CustomObjectsApi()
+            try:
+                api.delete_namespaced_custom_object(
+                    group="argoproj.io",
+                    version="v1alpha1",
+                    namespace="argocd",
+                    plural="applications",
+                    name="prodavan-e2e",
+                )
+            except ApiException as exc:
+                if exc.status != 404:
+                    print(f"skip argo unsync: {exc.status} {exc.reason}")
+            except Exception as exc:
+                print(f"skip argo unsync: {exc}")
     print("prodavan-ops e2e cleanup OK")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import time
@@ -79,6 +80,38 @@ def resolve_kubeconfig_path() -> Path:
 def load_kube() -> None:
     path = resolve_kubeconfig_path()
     config.load_kube_config(config_file=str(path))
+
+
+def wait_k3s_api_ready(*, timeout_sec: int = 300, poll_sec: float = 5.0) -> None:
+    """Poll kubectl until cluster API responds (Docker runner → host.docker.internal)."""
+    path = resolve_kubeconfig_path()
+    deadline = time.time() + timeout_sec
+    attempt = 0
+    last = ""
+    while time.time() < deadline:
+        attempt += 1
+        proc = subprocess.run(
+            [
+                "kubectl",
+                "--kubeconfig",
+                str(path),
+                "get",
+                "ns",
+                "prodavan",
+                "--request-timeout=10s",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode == 0:
+            print(f"k3s API ready (attempt {attempt})")
+            return
+        err = (proc.stderr or proc.stdout or "").strip().splitlines()
+        last = err[-1] if err else "no response"
+        print(f"waiting for k3s API ({attempt}): {last}")
+        time.sleep(poll_sec)
+    raise TimeoutError(f"k3s API not ready within {timeout_sec}s ({last})")
 
 
 def assert_kubeconfig_docker_ready() -> None:
