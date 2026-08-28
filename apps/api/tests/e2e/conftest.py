@@ -123,3 +123,20 @@ def live_json(resp: httpx.Response) -> Any:
     if not resp.content:
         return None
     return resp.json()
+
+
+def pytest_collection_modifyitems(session, config, items) -> None:
+    """Fail CI live e2e when dev API never becomes reachable (no silent skip)."""
+    if os.getenv("PRODAVAN_E2E_LIVE_REQUIRED") != "1":
+        return
+    live_items = [item for item in items if item.get_closest_marker("live")]
+    if not live_items:
+        return
+    from tests.conftest import _live_api_available, _live_e2e_base_url
+
+    if _live_api_available():
+        return
+    pytest.exit(
+        f"Live API unreachable at {_live_e2e_base_url()}/health/live",
+        returncode=1,
+    )

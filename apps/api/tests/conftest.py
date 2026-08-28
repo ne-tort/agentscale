@@ -47,13 +47,32 @@ E2E_BASE_URL = os.getenv("PRODAVAN_E2E_BASE_URL", "http://127.0.0.1:8088").rstri
 K8S_SANDBOX_NAMESPACE = os.getenv("POD_SANDBOX_NAMESPACE", "prodavan-sandboxes")
 
 
+def _live_e2e_base_url() -> str:
+    return os.getenv("PRODAVAN_E2E_BASE_URL", "http://127.0.0.1:8088").rstrip("/")
+
+
 def _live_api_available() -> bool:
-    url = f"{E2E_BASE_URL}/health/live"
-    try:
-        with urllib.request.urlopen(url, timeout=3.0) as resp:
-            return resp.status == 200
-    except (urllib.error.URLError, TimeoutError, OSError):
-        return False
+    url = f"{_live_e2e_base_url()}/health/live"
+    wait_sec = float(os.getenv("PRODAVAN_E2E_LIVE_WAIT_SEC", "0") or "0")
+    attempts = max(1, int(wait_sec / 2) + 1) if wait_sec > 0 else 1
+    delay = 2.0 if wait_sec > 0 else 0.0
+    import time
+
+    last_err: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(url, timeout=3.0) as resp:
+                if resp.status == 200:
+                    if attempt > 1:
+                        print(f"live API ready at {url} (attempt {attempt})")
+                    return True
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            last_err = exc
+        if attempt < attempts:
+            time.sleep(delay)
+    if last_err is not None and attempts > 1:
+        print(f"live API not ready at {url}: {last_err}")
+    return False
 
 
 def _k8s_available() -> bool:
@@ -86,7 +105,7 @@ def _k8s_available() -> bool:
 
 requires_live_api = pytest.mark.skipif(
     not _live_api_available(),
-    reason=f"Live API not reachable at {E2E_BASE_URL}/health/live",
+    reason=f"Live API not reachable at {_live_e2e_base_url()}/health/live",
 )
 
 requires_k8s = pytest.mark.skipif(

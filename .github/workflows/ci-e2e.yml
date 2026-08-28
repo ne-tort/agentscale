@@ -267,8 +267,6 @@ jobs:
     needs: gate
     if: needs.gate.outputs.run_live == 'true'
     runs-on: [self-hosted, linux, docker]
-    env:
-      PRODAVAN_CI_HOST: host.docker.internal
     defaults:
       run:
         working-directory: apps/api
@@ -276,26 +274,14 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Resolve live hosts
-        timeout-minutes: 1
         run: |
           set -euo pipefail
-          candidates=()
-          if [ -n "${PRODAVAN_CI_HOST:-}" ]; then
-            candidates+=("${PRODAVAN_CI_HOST}")
-          fi
-          candidates+=("127.0.0.1")
-          for addr in "${candidates[@]}"; do
-            base="http://${addr}:8088"
-            if curl -fsS --connect-timeout 3 --max-time 10 "${base}/health/live" >/dev/null; then
-              echo "live API ok at ${base}"
-              echo "PRODAVAN_E2E_BASE_URL=${base}" >> "${GITHUB_ENV}"
-              echo "PRODAVAN_E2E_KC_URL=http://${addr}:8089" >> "${GITHUB_ENV}"
-              exit 0
-            fi
-            echo "live API not reachable at ${base}"
-          done
-          echo "Live API unreachable (tried: ${candidates[*]})" >&2
-          exit 1
+          # Docker Desktop runners reach WSL Traefik via host.docker.internal (portproxy on Windows).
+          # Do not use 127.0.0.1 here — inside the job container it is the container itself.
+          addr="${PRODAVAN_CI_HOST:-host.docker.internal}"
+          echo "PRODAVAN_E2E_BASE_URL=http://${addr}:8088" >> "${GITHUB_ENV}"
+          echo "PRODAVAN_E2E_KC_URL=http://${addr}:8089" >> "${GITHUB_ENV}"
+          echo "live API: http://${addr}:8088  Keycloak: http://${addr}:8089"
 
       - uses: actions/setup-python@v5
         with:
@@ -305,6 +291,9 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Pytest live (L3b)
+        env:
+          PRODAVAN_E2E_LIVE_REQUIRED: "1"
+          PRODAVAN_E2E_LIVE_WAIT_SEC: "30"
         run: pytest tests/e2e/live -m live -q
 
   done:
