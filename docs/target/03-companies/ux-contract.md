@@ -24,7 +24,7 @@ Overview скрыт из rail/bottom nav; logo → overview (как Admin shell)
 | Строка | Происхождение | UI |
 |--------|---------------|-----|
 | Local | Company создала (`owner_scope=company`) | Full CRUD, rotate, renew — паритет Admin forms (SDK + API key) |
-| Linked | Admin bound platform key | Тот же list; **info-цвет строки + bold title**; поля detail read-only; без info-banner |
+| Linked | Admin bound platform key | Тот же list; **primary (dark blue) row + bold title**; поля detail read-only; без info-banner |
 
 Suspended/expired keys: **warning** row color (приоритет над info).
 
@@ -52,7 +52,7 @@ Toggle pause/resume на detail (confirm); список — warning row при `
 
 ## Platform-assigned entities (modules, keys, cabinets)
 
-Единый list styling: `rowColor: info`, `titleBold: true`.  
+Единый list styling: `rowColor: primary`, `titleBold: true`.  
 Без верхних info-бanner на detail/json. Lock / отсутствие delete в mutate mode.
 
 ## Density / feedback

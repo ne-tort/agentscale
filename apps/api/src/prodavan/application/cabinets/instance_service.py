@@ -206,18 +206,23 @@ class CabinetInstanceService:
         *,
         name: str,
         company_id: str,
-        employee: EmployeeRow,
+        principal: Principal,
+        employee: EmployeeRow | None = None,
         base_template: str = "base",
     ) -> dict:
         if not name.strip():
             raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="name required")
-        await EntitlementService(self._session).require_membership(employee.id, company_id)
+        await EntitlementService(self._session).require_company_actor(
+            principal, company_id, employee=employee
+        )
+        if employee is not None:
+            await EntitlementService(self._session).require_membership(employee.id, company_id)
         await CompanyQuotaService(self._session).assert_can_create_cabinet(company_id)
 
         row = CabinetInstanceRow(
             name=name.strip(),
             schema_name="pending",
-            owner_employee_id=employee.id,
+            owner_employee_id=employee.id if employee is not None else None,
             company_id=company_id,
             owner_scope=CabinetOwnerScope.COMPANY,
             owner_company_id=company_id,
@@ -232,11 +237,12 @@ class CabinetInstanceService:
 
         rel = RelationsCommand(self._session)
         await rel.replace_cabinet_company_grants(row.id, [company_id])
-        await rel.assign_employee_to_cabinet(
-            cabinet_id=row.id,
-            employee_id=employee.id,
-            company_id=company_id,
-        )
+        if employee is not None:
+            await rel.assign_employee_to_cabinet(
+                cabinet_id=row.id,
+                employee_id=employee.id,
+                company_id=company_id,
+            )
         from prodavan.application.platform.bootstrap_service import PlatformBootstrapService
 
         await PlatformBootstrapService(self._session).apply_default_modules_for_cabinet(

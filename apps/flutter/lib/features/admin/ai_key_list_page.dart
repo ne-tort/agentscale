@@ -262,7 +262,7 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
                 id: 'bindings',
                 label: l10n.navCompanies,
                 width: 100,
-                align: AppEntityColumnAlign.end,
+                align: AppEntityColumnAlign.center,
               ),
             ],
             onOpen: _openKey,

@@ -38,13 +38,13 @@ bool companyModuleBoundToCabinet(Map<String, dynamic> module, String cabinetId) 
   return ids.map((e) => e.toString()).contains(cabinetId);
 }
 
-/// List-row styling for platform-assigned entities (info color + bold title).
+/// List-row styling for platform-assigned entities (primary / dark blue + bold title).
 ({Color? rowColor, bool titleBold}) companyEntityRowStyle(
   BuildContext context,
   String? source,
 ) {
   if (companyEntityPlatformAssigned(source)) {
-    return (rowColor: context.appColors.info, titleBold: true);
+    return (rowColor: context.appColors.primary, titleBold: true);
   }
   return (rowColor: null, titleBold: false);
 }

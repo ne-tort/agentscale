@@ -186,6 +186,31 @@ def test_admin_cabinet_grants_company_visibility_and_assignment(client: TestClie
 
 
 @requires_postgres
+def test_org_cabinets_include_basic_workspace(client: TestClient) -> None:
+    """cab_basic (company_grant_scope=all) materializes workspace copy for every company."""
+    admin = _token(sub="padmin-basic", platform_admin=True)
+    created = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "BasicCabCo", "password": "test-company-pass", "admin_email": "boss@basiccab.test"},
+    )
+    assert created.status_code == 201, created.text
+    company_id = created.json()["company"]["id"]
+
+    boss_tok = _token(sub="boss-basic", email="boss@basiccab.test")
+    org = client.get(
+        f"/api/v1/companies/{company_id}/cabinets",
+        headers={"Authorization": f"Bearer {boss_tok}"},
+    )
+    assert org.status_code == 200, org.text
+    items = org.json()["items"]
+    basic = next((i for i in items if i.get("template_cabinet_id") == "cab_basic"), None)
+    assert basic is not None, items
+    assert basic["name"] == "Базовый"
+    assert basic["writable"] is False
+
+
+@requires_postgres
 def test_cabinet_max_projects_quota(client: TestClient) -> None:
     admin = _token(sub="padmin-maxproj", platform_admin=True)
     created = client.post(

@@ -50,7 +50,7 @@ async def create_cabinet(
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
 ) -> dict:
-    if employee is None:
+    if employee is None and not principal.is_company_principal:
         from prodavan.domain.errors import AppError
 
         raise AppError(
@@ -62,6 +62,7 @@ async def create_cabinet(
     return await CabinetInstanceService(session).create_from_base(
         name=body.name,
         company_id=body.company_id,
+        principal=principal,
         employee=employee,
         base_template=body.base_template,
     )
@@ -75,7 +76,7 @@ async def copy_cabinet(
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
 ) -> dict:
-    if employee is None:
+    if employee is None and not principal.is_company_principal:
         from prodavan.domain.errors import AppError
 
         raise AppError(

@@ -12,7 +12,12 @@ import 'package:prodavan/l10n/app_localizations.dart';
 
 enum AppEntityCollectionMode { list, table }
 
-enum AppEntityColumnAlign { start, end }
+enum AppEntityColumnAlign { start, center, end }
+
+/// Column alignment in [AppEntityCollection] table mode:
+/// - [start] — text labels (name, email, status)
+/// - [center] — short metrics and counts (default for numeric columns)
+/// - [end] — legacy; prefer [center] for metrics
 
 class AppEntityColumn {
   const AppEntityColumn({
@@ -151,13 +156,17 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
         : AppEntityCollectionMode.list;
   }
 
-  Alignment _alignment(AppEntityColumnAlign align) =>
-      align == AppEntityColumnAlign.end
-          ? Alignment.centerRight
-          : Alignment.centerLeft;
+  Alignment _alignment(AppEntityColumnAlign align) => switch (align) {
+        AppEntityColumnAlign.end => Alignment.centerRight,
+        AppEntityColumnAlign.center => Alignment.center,
+        AppEntityColumnAlign.start => Alignment.centerLeft,
+      };
 
-  TextAlign _textAlign(AppEntityColumnAlign align) =>
-      align == AppEntityColumnAlign.end ? TextAlign.right : TextAlign.left;
+  TextAlign _textAlign(AppEntityColumnAlign align) => switch (align) {
+        AppEntityColumnAlign.end => TextAlign.right,
+        AppEntityColumnAlign.center => TextAlign.center,
+        AppEntityColumnAlign.start => TextAlign.left,
+      };
 
   TextStyle? _titleStyle(AppEntityRow row, TextStyle? base) {
     final color = row.effectiveColor;

@@ -191,7 +191,12 @@ class _CompanyModuleListPageState extends State<CompanyModuleListPage> {
               rows: rows,
               primaryColumnLabel: l10n.commonName,
               columns: [
-                AppEntityColumn(id: 'cabinets', label: l10n.commonCabinets, width: 96),
+                AppEntityColumn(
+                  id: 'cabinets',
+                  label: l10n.commonCabinets,
+                  width: 96,
+                  align: AppEntityColumnAlign.center,
+                ),
               ],
               onOpen: _openModule,
               onCopy: _copyModule,

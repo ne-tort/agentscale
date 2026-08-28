@@ -427,6 +427,7 @@ class AdminCompanyService:
         from prodavan.application.cabinets.instance_service import CabinetInstanceService
         from prodavan.application.modules.module_binding_service import ModuleBindingService
         from prodavan.domain.cabinets import CabinetOwnerScope, CabinetStatus
+        from prodavan.domain.cabinets.types import CabinetCompanyGrantScope
         from prodavan.domain.ownership import CompanyViewFlags, EntitySource, company_view_flags
         from prodavan.infrastructure.persistence.models.cabinets import (
             CabinetCompanyGrantRow,
@@ -448,6 +449,18 @@ class AdminCompanyService:
             )
         )
         for template in grant_q.scalars().unique().all():
+            await cabinets_svc.provision_company_copy_from_template(
+                template_id=template.id, company_id=company_id
+            )
+
+        all_scope_q = await self._session.execute(
+            select(CabinetInstanceRow).where(
+                CabinetInstanceRow.owner_scope == CabinetOwnerScope.PLATFORM,
+                CabinetInstanceRow.company_grant_scope == CabinetCompanyGrantScope.ALL,
+                CabinetInstanceRow.status != CabinetStatus.DELETED,
+            )
+        )
+        for template in all_scope_q.scalars().all():
             await cabinets_svc.provision_company_copy_from_template(
                 template_id=template.id, company_id=company_id
             )
