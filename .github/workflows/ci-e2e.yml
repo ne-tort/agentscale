@@ -170,8 +170,70 @@ jobs:
         if: always()
         run: docker rm -f "${PG_CONTAINER:-prodavan-e2e-pg}" 2>/dev/null || true
 
-  k8s:
+  dev-preflight:
     needs: gate
+    if: needs.gate.outputs.run_k8s == 'true' || needs.gate.outputs.run_live == 'true'
+    runs-on: [self-hosted, linux, docker]
+    timeout-minutes: 5
+    env:
+      PRODAVAN_CI_HOST: host.docker.internal
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve kubeconfig
+        run: |
+          set -euo pipefail
+          if [ -n "${KUBECONFIG:-}" ] && [ -f "${KUBECONFIG}" ]; then exit 0; fi
+          for c in "${HOME}/.kube/prodavan-dev.yaml" "${HOME}/.kube/config"; do
+            if [ -f "$c" ]; then
+              echo "KUBECONFIG=$c" >> "${GITHUB_ENV}"
+              exit 0
+            fi
+          done
+          exit 1
+
+      - name: Ensure kubectl on PATH
+        run: |
+          set -euo pipefail
+          if command -v kubectl >/dev/null 2>&1; then
+            kubectl version --client
+            exit 0
+          fi
+          ver=v1.31.4
+          cache="/cache/kubectl/${ver}"
+          if [ -x "${cache}/kubectl" ]; then
+            echo "${cache}" >> "${GITHUB_PATH}"
+            "${cache}/kubectl" version --client
+            exit 0
+          fi
+          mkdir -p "${cache}"
+          tgz="${{ runner.temp }}/kubectl"
+          url="https://dl.k8s.io/release/${ver}/bin/linux/amd64/kubectl"
+          curl -fsSL -o "${tgz}" "${url}"
+          install -m 0755 "${tgz}" "${cache}/kubectl"
+          echo "${cache}" >> "${GITHUB_PATH}"
+
+      - name: Python venv + prodavan-ops
+        run: |
+          python3 -m venv "${{ runner.temp }}/ops-venv"
+          echo "${{ runner.temp }}/ops-venv/bin" >> "${GITHUB_PATH}"
+          "${{ runner.temp }}/ops-venv/bin/python" -m pip install -U pip poetry
+
+      - name: Install prodavan-ops
+        working-directory: infra/ops
+        run: poetry install --no-interaction
+
+      - name: Wait dev cluster (k3s API + HTTP smoke)
+        working-directory: infra/ops
+        run: |
+          set -euo pipefail
+          path="$(poetry run python -c "from prodavan_ops.k8s import resolve_kubeconfig_path; print(resolve_kubeconfig_path())")"
+          echo "KUBECONFIG=${path}" >> "${GITHUB_ENV}"
+          poetry run python -c "from prodavan_ops.k8s import require_k8s_api; require_k8s_api(timeout_sec=120)"
+          poetry run prodavan-ops smoke --addr host.docker.internal --port 8088
+
+  k8s:
+    needs: [gate, dev-preflight]
     if: needs.gate.outputs.run_k8s == 'true'
     timeout-minutes: 25
     concurrency:
@@ -239,7 +301,7 @@ jobs:
           set -euo pipefail
           path="$(poetry run python -c "from prodavan_ops.k8s import resolve_kubeconfig_path; print(resolve_kubeconfig_path())")"
           echo "KUBECONFIG=${path}" >> "${GITHUB_ENV}"
-          kubectl get ns prodavan --request-timeout=10s
+          poetry run python -c "from prodavan_ops.k8s import require_k8s_api; require_k8s_api(timeout_sec=15)"
 
       - name: Sync PR e2e conftest into cluster
         working-directory: infra/ops
@@ -264,7 +326,7 @@ jobs:
           kubectl delete configmap prodavan-e2e-conftest -n prodavan --ignore-not-found --request-timeout=10s || true
 
   live:
-    needs: gate
+    needs: [gate, dev-preflight]
     if: needs.gate.outputs.run_live == 'true'
     runs-on: [self-hosted, linux, docker]
     defaults:
@@ -293,7 +355,7 @@ jobs:
       - name: Pytest live (L3b)
         env:
           PRODAVAN_E2E_LIVE_REQUIRED: "1"
-          PRODAVAN_E2E_LIVE_WAIT_SEC: "30"
+          PRODAVAN_E2E_LIVE_WAIT_SEC: "15"
         run: pytest tests/e2e/live -m live -q
 
   done:
