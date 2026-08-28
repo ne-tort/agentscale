@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.cabinets.grant_service import CabinetGrantService
-from prodavan.application.project_service.grant_service import ProjectGrantService
+from prodavan.application.relations.project_grant_service import ProjectGrantService
 from prodavan.domain.relations import (
     RELATION_GRANTED,
     RELATION_REPLACED,

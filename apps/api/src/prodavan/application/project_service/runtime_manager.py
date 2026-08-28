@@ -129,10 +129,32 @@ class ProjectRuntimeManager:
                 ),
             )
         )
-        for unit in q.scalars().all():
+        units = list(q.scalars().all())
+        for unit in units:
             if unit.runtime_ref:
                 await self._runtime.pause(runtime_ref=unit.runtime_ref)
             unit.status = ProjectRuntimeUnitStatus.PAUSED
+        if not units and project.container_ref:
+            await self._runtime.pause(runtime_ref=project.container_ref)
+
+    async def ensure_running(self, project: ProjectRow) -> None:
+        q = await self._session.execute(
+            select(ProjectRuntimeUnitRow).where(
+                ProjectRuntimeUnitRow.project_id == project.id,
+                ProjectRuntimeUnitRow.status.in_(
+                    [ProjectRuntimeUnitStatus.RUNNING, ProjectRuntimeUnitStatus.PAUSED]
+                ),
+            )
+        )
+        units = list(q.scalars().all())
+        for unit in units:
+            if not unit.runtime_ref:
+                continue
+            await self._runtime.ensure_running(runtime_ref=unit.runtime_ref)
+            if unit.status != ProjectRuntimeUnitStatus.DELETED:
+                unit.status = ProjectRuntimeUnitStatus.RUNNING
+        if not units and project.container_ref:
+            await self._runtime.ensure_running(runtime_ref=project.container_ref)
 
     @staticmethod
     def _public(row: ProjectRuntimeUnitRow) -> dict:

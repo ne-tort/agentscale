@@ -53,5 +53,5 @@ async def delete_container(
     admin: PlatformAdminDep,
     session: SessionDep,
 ) -> dict:
-    """Cascade: soft-delete Project (+ wipe) via ProjectService."""
+    """Cascade: soft-delete Project (+ wipe) via ProjectCommand."""
     return await AdminContainerReadService(session).delete(project_id=project_id, principal=admin)

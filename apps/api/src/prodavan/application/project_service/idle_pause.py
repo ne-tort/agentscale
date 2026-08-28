@@ -1,8 +1,4 @@
-"""Idle pause sweep for active projects (L07/L09).
-
-Policy: company ``idle_pause_after_hours`` (None/0 = off, default).
-Sweep is admin-triggered (and optional worker hook) — not a k8s cron.
-"""
+"""Idle pause sweep — internal to project_service BC."""
 
 from __future__ import annotations
 
@@ -20,13 +16,13 @@ from prodavan.infrastructure.persistence.models.identity import CompanyRow
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
 
 
-class IdlePauseService:
+class ProjectIdlePauseService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._companies = AdminCompanyService(session)
-        self._projects = ProjectCommand(session)
+        self._commands = ProjectCommand(session)
 
-    async def project_last_activity_at(self, project: ProjectRow) -> datetime | None:
+    async def _last_activity_at(self, project: ProjectRow) -> datetime | None:
         sess_q = await self._session.execute(
             select(func.max(AgentSessionRow.updated_at)).where(AgentSessionRow.project_id == project.id)
         )
@@ -68,14 +64,14 @@ class IdlePauseService:
         checked = 0
         for project in q.scalars().all():
             checked += 1
-            last = await self.project_last_activity_at(project)
+            last = await self._last_activity_at(project)
             if not project_is_idle(
                 last_activity_at=last,
                 now=clock,
                 idle_pause_after_hours=hours,
             ):
                 continue
-            await self._projects.pause(
+            await self._commands.pause(
                 project_id=project.id,
                 principal=actor,
                 employee=None,
@@ -105,8 +101,8 @@ class IdlePauseService:
         q = await self._session.execute(select(CompanyRow.id))
         companies: list[dict] = []
         total = 0
-        for company_id in q.scalars().all():
-            result = await self.sweep_company(company_id, principal=principal)
+        for cid in q.scalars().all():
+            result = await self.sweep_company(cid, principal=principal)
             if result.get("idle_pause_enabled"):
                 companies.append(result)
                 total += int(result.get("count") or 0)

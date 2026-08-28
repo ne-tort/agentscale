@@ -440,10 +440,9 @@ class CabinetInstanceService:
         employee: EmployeeRow | None = None,
     ) -> dict:
         """Soft-delete cabinet: hide + soft-delete projects (no wipe, schema keep)."""
-        from prodavan.application.project_service.command import ProjectCommand
+        from prodavan.application.project_service import ProjectCommand, ProjectQuery
         from prodavan.application.projects.platform_event_service import PlatformEventService
         from prodavan.domain.projects import ProjectStatus
-        from prodavan.infrastructure.persistence.models.projects import ProjectRow
 
         inst = await self._access.require_access(
             cabinet_id=cabinet_id,
@@ -457,14 +456,11 @@ class CabinetInstanceService:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Cabinet not found")
 
         projects = ProjectCommand(self._session)
-        proj_q = await self._session.execute(
-            select(ProjectRow.id).where(
-                ProjectRow.cabinet_id == cabinet_id,
-                ProjectRow.status != ProjectStatus.DELETED,
-            )
-        )
+        query = ProjectQuery(self._session)
         projects_soft_deleted: list[str] = []
-        for project_id in proj_q.scalars().all():
+        for project_id in await query.list_ids(
+            cabinet_id=cabinet_id, exclude_status=ProjectStatus.DELETED
+        ):
             await projects.delete(
                 project_id=project_id,
                 principal=principal,
@@ -535,18 +531,15 @@ class CabinetInstanceService:
 
     async def delete_with_cascade(self, *, cabinet_id: str) -> dict:
         """Hard-purge: wipe projects + drop schema + delete row (Admin recycle)."""
+        from prodavan.application.project_service import ProjectQuery
         from prodavan.application.projects.project_wipe import wipe_project_tree
         from prodavan.core.jobs.enqueue import enqueue_wipe_project_tree
-        from prodavan.infrastructure.persistence.models.projects import ProjectRow
 
         inst = await self._access.get_instance(cabinet_id)
 
-        projects_q = await self._session.execute(
-            select(ProjectRow.id, ProjectRow.workspace_key).where(ProjectRow.cabinet_id == cabinet_id)
-        )
-        project_rows = list(projects_q.all())
         project_wipes: list[dict] = []
-        for _pid, workspace_key in project_rows:
+        for ref in await ProjectQuery(self._session).list_workspace_refs_for_cabinet(cabinet_id):
+            workspace_key = ref["workspace_key"]
             wipe = wipe_project_tree(workspace_key)
             if not wipe.get("ok"):
                 retry = enqueue_wipe_project_tree(workspace_key)
@@ -579,7 +572,7 @@ class CabinetInstanceService:
             "schema_name": schema_name,
             "schema_dropped": True,
             "project_wipes": project_wipes,
-            "projects_purged": len(project_rows),
+            "projects_purged": len(project_wipes),
         }
 
     async def hard_delete(

@@ -24,7 +24,7 @@ import logging
 from sqlalchemy import text
 
 from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
-from prodavan.application.projects.idle_pause_service import IdlePauseService
+from prodavan.application.project_service import ProjectIdlePauseService
 from prodavan.config.settings import settings
 from prodavan.infrastructure.persistence.database import get_session_factory
 
@@ -58,7 +58,7 @@ async def drain_once() -> dict:
                     max_per_project=settings.trigger_worker_batch_max,
                 )
             if settings.idle_pause_worker_enabled:
-                idle = await IdlePauseService(session).sweep_all()
+                idle = await ProjectIdlePauseService(session).sweep_all()
                 out["idle_pause"] = idle
             return out
         finally:

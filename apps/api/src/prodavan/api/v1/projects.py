@@ -10,12 +10,11 @@ from pydantic import BaseModel, Field
 
 from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
 from prodavan.application.admin.company_service import AdminCompanyService
+from prodavan.application.project_service import ProjectAccessPolicy, ProjectCommand, ProjectQuery
 from prodavan.application.projects import (
     ProjectAttachmentService,
-    ProjectService,
     ProjectTriggerService,
 )
-from prodavan.application.projects.access import ProjectAccessService
 from prodavan.application.projects.signed_ingress import enqueue_signed_trigger
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
@@ -85,7 +84,7 @@ async def create_project(
 ) -> dict:
     if employee is None:
         raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
-    return await ProjectService(session).create(
+    return await ProjectCommand(session).create(
         cabinet_id=cabinet_id,
         name=body.name,
         employee=employee,
@@ -101,7 +100,7 @@ async def list_projects(
     session: SessionDep,
     employee: EmployeeDep,
 ) -> dict:
-    items = await ProjectService(session).list_for_cabinet(
+    items = await ProjectQuery(session).list_for_cabinet(
         cabinet_id=cabinet_id, principal=principal, employee=employee
     )
     return {"items": items}
@@ -114,7 +113,7 @@ async def get_project(
     session: SessionDep,
     employee: EmployeeDep,
 ) -> dict:
-    return await ProjectService(session).get(project_id=project_id, principal=principal, employee=employee)
+    return await ProjectQuery(session).get(project_id=project_id, principal=principal, employee=employee)
 
 
 @router.patch("/projects/{project_id}")
@@ -128,7 +127,7 @@ async def patch_project(
     fields = body.model_dump(exclude_unset=True)
     if not fields:
         raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="no fields to update")
-    return await ProjectService(session).patch(
+    return await ProjectCommand(session).patch(
         project_id=project_id,
         principal=principal,
         employee=employee,
@@ -145,7 +144,7 @@ async def rematerialize_project(
     session: SessionDep,
     employee: EmployeeDep,
 ) -> dict:
-    return await ProjectService(session).rematerialize(
+    return await ProjectCommand(session).rematerialize(
         project_id=project_id, principal=principal, employee=employee
     )
 
@@ -157,7 +156,7 @@ async def pause_project(
     session: SessionDep,
     employee: EmployeeDep,
 ) -> dict:
-    return await ProjectService(session).pause(project_id=project_id, principal=principal, employee=employee)
+    return await ProjectCommand(session).pause(project_id=project_id, principal=principal, employee=employee)
 
 
 @router.post("/projects/{project_id}/resume")
@@ -167,7 +166,7 @@ async def resume_project(
     session: SessionDep,
     employee: EmployeeDep,
 ) -> dict:
-    return await ProjectService(session).resume(project_id=project_id, principal=principal, employee=employee)
+    return await ProjectCommand(session).resume(project_id=project_id, principal=principal, employee=employee)
 
 
 @router.post("/projects/{project_id}/complete")
@@ -177,7 +176,7 @@ async def complete_project(
     session: SessionDep,
     employee: EmployeeDep,
 ) -> dict:
-    from prodavan.application.project_service.command import ProjectCommand
+    from prodavan.application.project_service import ProjectCommand
 
     return await ProjectCommand(session).complete(
         project_id=project_id, principal=principal, employee=employee
@@ -192,8 +191,6 @@ async def set_project_visibility(
     session: SessionDep,
     employee: EmployeeDep,
 ) -> dict:
-    from prodavan.application.project_service.command import ProjectCommand
-
     return await ProjectCommand(session).set_visibility(
         project_id=project_id,
         visibility_mode=body.visibility_mode,
@@ -210,8 +207,6 @@ async def assign_project_employee(
     session: SessionDep,
     employee: EmployeeDep,
 ) -> dict:
-    from prodavan.application.project_service.command import ProjectCommand
-
     return await ProjectCommand(session).assign_employee(
         project_id=project_id,
         employee_id=body.employee_id,
@@ -228,8 +223,6 @@ async def revoke_project_employee(
     session: SessionDep,
     employee: EmployeeDep,
 ) -> dict:
-    from prodavan.application.project_service.command import ProjectCommand
-
     return await ProjectCommand(session).revoke_employee(
         project_id=project_id,
         employee_id=employee_id,
@@ -245,8 +238,6 @@ async def list_runtime_units(
     session: SessionDep,
     employee: EmployeeDep,
 ) -> dict:
-    from prodavan.application.project_service.command import ProjectCommand
-
     items = await ProjectCommand(session).list_runtime_units(
         project_id=project_id, principal=principal, employee=employee
     )
@@ -261,8 +252,6 @@ async def attach_runtime_unit(
     session: SessionDep,
     employee: EmployeeDep,
 ) -> dict:
-    from prodavan.application.project_service.command import ProjectCommand
-
     return await ProjectCommand(session).attach_runtime_unit(
         project_id=project_id,
         principal=principal,
@@ -280,8 +269,6 @@ async def detach_runtime_unit(
     session: SessionDep,
     employee: EmployeeDep,
 ) -> dict:
-    from prodavan.application.project_service.command import ProjectCommand
-
     return await ProjectCommand(session).detach_runtime_unit(
         project_id=project_id,
         unit_id=unit_id,
@@ -297,7 +284,7 @@ async def delete_project(
     session: SessionDep,
     employee: EmployeeDep,
 ) -> dict:
-    return await ProjectService(session).delete(project_id=project_id, principal=principal, employee=employee)
+    return await ProjectCommand(session).delete(project_id=project_id, principal=principal, employee=employee)
 
 
 @router.post("/projects/{project_id}/restore")
@@ -307,7 +294,7 @@ async def restore_project(
     session: SessionDep,
     employee: EmployeeDep,
 ) -> dict:
-    return await ProjectService(session).restore(
+    return await ProjectCommand(session).restore(
         project_id=project_id, principal=principal, employee=employee
     )
 
@@ -319,7 +306,7 @@ async def purge_project(
     session: SessionDep,
     employee: EmployeeDep,
 ) -> dict:
-    return await ProjectService(session).purge(
+    return await ProjectCommand(session).purge(
         project_id=project_id, principal=principal, employee=employee
     )
 
@@ -332,9 +319,7 @@ async def post_trigger(
     session: SessionDep,
     employee: EmployeeDep,
 ) -> dict:
-    from prodavan.application.projects.access import ProjectAccessService
-
-    await ProjectAccessService(session).require_access(
+    await ProjectAccessPolicy(session).require_access(
         project_id=project_id, principal=principal, employee=employee, write=True
     )
     result = await ProjectTriggerService(session).enqueue(
@@ -351,9 +336,7 @@ async def list_triggers(
     session: SessionDep,
     employee: EmployeeDep,
 ) -> dict:
-    from prodavan.application.projects.access import ProjectAccessService
-
-    await ProjectAccessService(session).require_access(
+    await ProjectAccessPolicy(session).require_access(
         project_id=project_id, principal=principal, employee=employee, write=False
     )
     items = await ProjectTriggerService(session).list_for_project(project_id=project_id)
@@ -438,7 +421,7 @@ async def ingress_signed_webhook(
 ) -> dict:
     """External webhook.http ingress — HMAC-SHA256 over raw body (company policy secret)."""
     await _enforce_ingress_rate_limit(project_id, channel="webhook")
-    project = await ProjectAccessService(session).get_project(project_id)
+    project = await ProjectAccessPolicy(session).get_project(project_id)
     companies = AdminCompanyService(session)
     webhook_secret, _ = await companies.get_ingress_hmac_secrets(project.company_id)
     return await enqueue_signed_trigger(
@@ -461,7 +444,7 @@ async def ingress_signed_telegram(
 ) -> dict:
     """Telegram bot transport ingress — HMAC-SHA256 (company telegram_hmac_secret)."""
     await _enforce_ingress_rate_limit(project_id, channel="telegram")
-    project = await ProjectAccessService(session).get_project(project_id)
+    project = await ProjectAccessPolicy(session).get_project(project_id)
     companies = AdminCompanyService(session)
     _, telegram_secret = await companies.get_ingress_hmac_secrets(project.company_id)
     return await enqueue_signed_trigger(

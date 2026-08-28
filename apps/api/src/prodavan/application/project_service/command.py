@@ -151,25 +151,9 @@ class ProjectCommand:
         }
         return out
 
-    async def list_for_cabinet(
-        self,
-        *,
-        cabinet_id: str,
-        principal: Principal,
-        employee: EmployeeRow | None,
-    ) -> list[dict]:
-        return await self._query.list_for_cabinet(
-            cabinet_id=cabinet_id, principal=principal, employee=employee
-        )
-
-    async def get(
-        self,
-        *,
-        project_id: str,
-        principal: Principal,
-        employee: EmployeeRow | None,
-    ) -> dict:
-        return await self._query.get(project_id=project_id, principal=principal, employee=employee)
+    async def _stop_and_pause_runtime(self, row: ProjectRow) -> None:
+        await stop_project_runtime(self._session, project_id=row.id)
+        await self._runtime.pause_all(row)
 
     async def patch(
         self,
@@ -342,14 +326,11 @@ class ProjectCommand:
         return await self._runtime.list_units(project_id)
 
     async def rematerialize_for_cabinet(self, *, cabinet_id: str) -> dict:
-        q = await self._session.execute(
-            select(ProjectRow).where(
-                ProjectRow.cabinet_id == cabinet_id,
-                ProjectRow.status != ProjectStatus.DELETED,
-            )
-        )
         projects: list[dict] = []
-        for row in q.scalars().all():
+        for project_id in await self._query.list_ids(
+            cabinet_id=cabinet_id, exclude_status=ProjectStatus.DELETED
+        ):
+            row = await self._access.get_project(project_id)
             mat = await self._materialize.materialize_project(
                 session=self._session,
                 project_id=row.id,
@@ -421,11 +402,7 @@ class ProjectCommand:
         if row.status == ProjectStatus.PAUSED:
             return await self._project_public(row)
         row.status = ProjectStatus.PAUSED
-        await stop_project_runtime(self._session, project_id=row.id)
-        await self._runtime.pause_all(row)
-        from prodavan.application.projects.container_lifecycle import pause_container
-
-        await pause_container(container_ref=row.container_ref)
+        await self._stop_and_pause_runtime(row)
         emit_payload = dict(payload or {})
         await self._events.emit(
             event_type="project.paused",
@@ -478,9 +455,7 @@ class ProjectCommand:
         )
         await self._session.commit()
         await self._session.refresh(row)
-        from prodavan.application.projects.container_lifecycle import ensure_container_running
-
-        await ensure_container_running(container_ref=row.container_ref)
+        await self._runtime.ensure_running(row)
         try:
             from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
             from prodavan.core.jobs.enqueue import enqueue_trigger_drain
@@ -512,11 +487,7 @@ class ProjectCommand:
         )
         if row.status == ProjectStatus.COMPLETED:
             return await self._project_public(row)
-        await stop_project_runtime(self._session, project_id=row.id)
-        await self._runtime.pause_all(row)
-        from prodavan.application.projects.container_lifecycle import pause_container
-
-        await pause_container(container_ref=row.container_ref)
+        await self._stop_and_pause_runtime(row)
         row.status = ProjectStatus.COMPLETED
         await self._events.emit(
             event_type="project.completed",
@@ -557,11 +528,7 @@ class ProjectCommand:
         principal: Principal,
         purge_workspace: bool,
     ) -> dict:
-        await stop_project_runtime(self._session, project_id=row.id)
-        await self._runtime.pause_all(row)
-        from prodavan.application.projects.container_lifecycle import pause_container
-
-        await pause_container(container_ref=row.container_ref)
+        await self._stop_and_pause_runtime(row)
         row.status = ProjectStatus.DELETED
         await self._events.emit(
             event_type="project.deleted",
@@ -637,11 +604,7 @@ class ProjectCommand:
                 status=422,
                 detail="soft-delete the project before purge",
             )
-        await stop_project_runtime(self._session, project_id=row.id)
-        await self._runtime.pause_all(row)
-        from prodavan.application.projects.container_lifecycle import pause_container
-
-        await pause_container(container_ref=row.container_ref)
+        await self._stop_and_pause_runtime(row)
         wipe = await self._wipe_workspace(row)
         await self._events.emit(
             event_type="project.purged",
@@ -670,7 +633,3 @@ class ProjectCommand:
         except Exception:
             logger.exception("project wipe failed project_id=%s", row.id)
             return {"ok": False, "deleted": 0, "remaining": 0, "error": "wipe_failed"}
-
-
-# Deprecated alias — use ProjectCommand in new code.
-ProjectService = ProjectCommand

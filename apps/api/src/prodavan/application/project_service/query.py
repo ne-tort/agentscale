@@ -71,3 +71,29 @@ class ProjectQuery:
                 continue
             items.append(project_public(row, limits=limits, company_subscription=subscription))
         return items
+
+    async def list_ids(
+        self,
+        *,
+        cabinet_id: str | None = None,
+        company_id: str | None = None,
+        status: str | None = None,
+        exclude_status: str | None = None,
+    ) -> list[str]:
+        stmt = select(ProjectRow.id)
+        if cabinet_id is not None:
+            stmt = stmt.where(ProjectRow.cabinet_id == cabinet_id)
+        if company_id is not None:
+            stmt = stmt.where(ProjectRow.company_id == company_id)
+        if status is not None:
+            stmt = stmt.where(ProjectRow.status == status)
+        if exclude_status is not None:
+            stmt = stmt.where(ProjectRow.status != exclude_status)
+        q = await self._session.execute(stmt)
+        return list(q.scalars().all())
+
+    async def list_workspace_refs_for_cabinet(self, cabinet_id: str) -> list[dict]:
+        q = await self._session.execute(
+            select(ProjectRow.id, ProjectRow.workspace_key).where(ProjectRow.cabinet_id == cabinet_id)
+        )
+        return [{"project_id": pid, "workspace_key": wk} for pid, wk in q.all()]

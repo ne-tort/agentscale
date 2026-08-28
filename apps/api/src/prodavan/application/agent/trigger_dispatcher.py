@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.application.agent.session_service import AgentSessionService
-from prodavan.application.projects.access import ProjectAccessService
+from prodavan.application.project_service import ProjectAccessPolicy
 from prodavan.application.projects.trigger_service import ProjectTriggerService
 from prodavan.domain.agent import PLATFORM_EVENT_USER_MESSAGE, AgentSessionStatus
 from prodavan.domain.identity import Principal
@@ -28,7 +28,7 @@ class AgentTriggerDispatcher:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._sessions = AgentSessionService(session)
-        self._projects = ProjectAccessService(session)
+        self._projects = ProjectAccessPolicy(session)
         self._subscription = CompanySubscriptionGate(session)
         self._triggers = ProjectTriggerService(session)
 

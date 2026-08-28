@@ -495,9 +495,8 @@ class AiKeysService:
         preferred_provider (or any provider if preferred_provider is unset).
         """
         from prodavan.application.agent.session_service import AgentSessionService
-        from prodavan.application.projects.project_service import ProjectService
+        from prodavan.application.project_service import ProjectCommand, ProjectQuery
         from prodavan.domain.projects import ProjectStatus
-        from prodavan.infrastructure.persistence.models.projects import ProjectRow
 
         actor = principal or Principal(sub="system:ai-key-cascade")
         sessions_cancelled = await AgentSessionService(self._session).cancel_active_for_key(
@@ -507,18 +506,20 @@ class AiKeysService:
 
         company_ids = await self._company_ids(key_id)
         projects_paused: list[str] = []
-        projects = ProjectService(self._session)
+        projects = ProjectCommand(self._session)
+        query = ProjectQuery(self._session)
         for company_id in company_ids:
             if not await self._company_lost_runtime_key(company_id, exclude_key_id=key_id):
                 continue
-            q = await self._session.execute(
-                select(ProjectRow.id).where(
-                    ProjectRow.company_id == company_id,
-                    ProjectRow.status == ProjectStatus.ACTIVE,
+            for project_id in await query.list_ids(
+                company_id=company_id, status=ProjectStatus.ACTIVE
+            ):
+                await projects.pause(
+                    project_id=project_id,
+                    principal=actor,
+                    employee=None,
+                    skip_access=True,
                 )
-            )
-            for project_id in q.scalars().all():
-                await projects.pause(project_id=project_id, principal=actor, employee=None)
                 projects_paused.append(project_id)
 
         # Ensure session cancels are durable even if no project was paused.

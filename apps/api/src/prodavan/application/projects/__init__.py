@@ -1,4 +1,8 @@
-"""Projects runtime application layer (L07)."""
+"""Projects runtime application layer (L07).
+
+Triggers, attachments, materialize — submodules of project runtime.
+Aggregate CRUD/lifecycle lives in ``application.project_service``.
+"""
 
 from __future__ import annotations
 
@@ -8,7 +12,6 @@ __all__ = [
     "MaterializeResult",
     "PlatformEventService",
     "ProjectAttachmentService",
-    "ProjectService",
     "ProjectTriggerService",
     "get_materialize_service",
 ]
@@ -18,7 +21,6 @@ _LAZY: dict[str, tuple[str, str]] = {
     "get_materialize_service": (".materialize", "get_materialize_service"),
     "PlatformEventService": (".platform_event_service", "PlatformEventService"),
     "ProjectAttachmentService": (".attachment_service", "ProjectAttachmentService"),
-    "ProjectService": (".project_service", "ProjectService"),
     "ProjectTriggerService": (".trigger_service", "ProjectTriggerService"),
 }
 

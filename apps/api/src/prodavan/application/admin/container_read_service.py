@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from prodavan.application.projects.project_service import ProjectService
+from prodavan.application.project_service import ProjectCommand
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.domain.projects import ProjectStatus
@@ -56,7 +56,7 @@ def _item(
 class AdminContainerReadService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
-        self._projects = ProjectService(session)
+        self._projects = ProjectCommand(session)
 
     def _base_stmt(self):
         return (

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
-from prodavan.application.projects.access import ProjectAccessService
+from prodavan.application.project_service import ProjectAccessPolicy
 from prodavan.config.settings import settings
 from prodavan.core.infra.object_keys import (
     content_asset_ref,
@@ -48,7 +48,7 @@ def _attachment_public(row: ProjectAttachmentRow) -> dict:
 class ProjectAttachmentService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
-        self._access = ProjectAccessService(session)
+        self._access = ProjectAccessPolicy(session)
         self._companies = AdminCompanyService(session)
         self._subscription = CompanySubscriptionGate(session)
 

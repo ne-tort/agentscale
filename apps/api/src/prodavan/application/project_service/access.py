@@ -107,6 +107,3 @@ class ProjectAccessPolicy:
             raise_if_paused(code="PROJECT_PAUSED", detail="project is paused or completed")
         return project
 
-
-# Backward-compatible alias for existing imports.
-ProjectAccessService = ProjectAccessPolicy

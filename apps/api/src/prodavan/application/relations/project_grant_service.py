@@ -1,4 +1,4 @@
-"""Project employee assignments (restricted visibility)."""
+"""Project↔employee assignment SoT — mutated only via RelationsCommand."""
 
 from __future__ import annotations
 
@@ -7,10 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
-from prodavan.infrastructure.persistence.models.projects import (
-    ProjectEmployeeAssignmentRow,
-    ProjectRow,
-)
+from prodavan.infrastructure.persistence.models.projects import ProjectEmployeeAssignmentRow
 
 
 class ProjectGrantService:
@@ -109,9 +106,3 @@ class ProjectGrantService:
             )
         await self._session.flush()
         return unique
-
-    async def ensure_project(self, project_id: str) -> ProjectRow:
-        row = await self._session.get(ProjectRow, project_id)
-        if row is None:
-            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Project not found")
-        return row

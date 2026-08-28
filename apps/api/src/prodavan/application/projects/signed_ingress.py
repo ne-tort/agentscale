@@ -6,7 +6,7 @@ import json
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from prodavan.application.projects.access import ProjectAccessService
+from prodavan.application.project_service import ProjectAccessPolicy
 from prodavan.application.projects.trigger_service import ProjectTriggerService
 from prodavan.domain.errors import AppError
 from prodavan.domain.projects import ProjectStatus, verify_webhook_signature
@@ -22,7 +22,7 @@ async def enqueue_signed_trigger(
     secret: str | None,
     secret_name: str,
 ) -> dict:
-    project = await ProjectAccessService(session).get_project(project_id)
+    project = await ProjectAccessPolicy(session).get_project(project_id)
     if project.status == ProjectStatus.DELETED:
         raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Project not found")
     if not secret:

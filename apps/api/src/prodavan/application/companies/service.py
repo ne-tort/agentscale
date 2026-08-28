@@ -199,11 +199,10 @@ class CompaniesCommandService:
         from sqlalchemy import select
 
         from prodavan.application.cabinets.instance_service import CabinetInstanceService
+        from prodavan.application.project_service import ProjectCommand, ProjectQuery
         from prodavan.application.projects.platform_event_service import PlatformEventService
-        from prodavan.application.projects.project_service import ProjectService
         from prodavan.domain.projects import ProjectStatus
         from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
-        from prodavan.infrastructure.persistence.models.projects import ProjectRow
 
         company = await self._session.get(CompanyRow, company_id)
         if company is None or company.deleted_at is None:
@@ -214,13 +213,10 @@ class CompaniesCommandService:
                 detail="soft-delete the company before purge",
             )
 
-        live_proj = await self._session.execute(
-            select(ProjectRow.id).where(
-                ProjectRow.company_id == company_id,
-                ProjectRow.status != ProjectStatus.DELETED,
-            )
-        )
-        if live_proj.scalars().first() is not None:
+        query = ProjectQuery(self._session)
+        if await query.list_ids(
+            company_id=company_id, exclude_status=ProjectStatus.DELETED
+        ):
             raise AppError(
                 code="CASCADE_INCOMPLETE",
                 title="Cascade incomplete",
@@ -228,15 +224,11 @@ class CompaniesCommandService:
                 detail="live projects remain; wait for soft-cascade or soft-delete them",
             )
 
-        projects = ProjectService(self._session)
-        deleted_proj = await self._session.execute(
-            select(ProjectRow.id).where(
-                ProjectRow.company_id == company_id,
-                ProjectRow.status == ProjectStatus.DELETED,
-            )
-        )
+        projects = ProjectCommand(self._session)
         projects_purged: list[str] = []
-        for project_id in deleted_proj.scalars().all():
+        for project_id in await query.list_ids(
+            company_id=company_id, status=ProjectStatus.DELETED
+        ):
             await projects.purge(project_id=project_id, principal=principal, employee=None)
             projects_purged.append(project_id)
 

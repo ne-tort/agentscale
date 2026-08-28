@@ -194,9 +194,9 @@ async def sweep_idle_pause_company(
     admin: PlatformAdminDep,
     session: SessionDep,
 ) -> dict:
-    from prodavan.application.projects.idle_pause_service import IdlePauseService
+    from prodavan.application.project_service import ProjectIdlePauseService
 
-    return await IdlePauseService(session).sweep_company(company_id, principal=admin)
+    return await ProjectIdlePauseService(session).sweep_company(company_id, principal=admin)
 
 
 @router.put("/{company_id}/subscription")

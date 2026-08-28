@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.cabinets.instance_service import CabinetInstanceService
 from prodavan.application.companies.service import CompaniesCommandService
 from prodavan.application.employees.service import EmployeesCommandService
-from prodavan.application.projects.project_service import ProjectService
+from prodavan.application.project_service import ProjectCommand
 from prodavan.domain.cabinets import CabinetStatus
 from prodavan.domain.identity import Principal
 from prodavan.domain.projects import ProjectStatus
@@ -95,7 +95,7 @@ class RecycleService:
                 cabinet_id=entity_id, principal=principal, employee=None
             )
         if entity == "projects":
-            return await ProjectService(self._session).restore(
+            return await ProjectCommand(self._session).restore(
                 project_id=entity_id, principal=principal, employee=None
             )
         from prodavan.domain.errors import AppError
@@ -113,7 +113,7 @@ class RecycleService:
         if entity == "cabinets":
             return await CabinetInstanceService(self._session).delete_with_cascade(cabinet_id=entity_id)
         if entity == "projects":
-            return await ProjectService(self._session).purge(
+            return await ProjectCommand(self._session).purge(
                 project_id=entity_id, principal=principal, employee=None
             )
         if entity == "employees":

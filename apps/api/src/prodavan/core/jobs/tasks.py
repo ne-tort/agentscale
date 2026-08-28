@@ -56,14 +56,14 @@ def register_tasks(app) -> None:
 
     @app.task(name=job_names.IDLE_PAUSE_SWEEP, bind=False)
     def idle_pause_sweep() -> dict[str, Any]:
-        from prodavan.application.projects.idle_pause_service import IdlePauseService
+        from prodavan.application.project_service import ProjectIdlePauseService
         from prodavan.config.settings import settings
         from prodavan.infrastructure.persistence.database import get_session_factory
 
         async def _sweep() -> dict[str, Any]:
             factory = get_session_factory()
             async with factory() as session:
-                return await IdlePauseService(session).sweep_all()
+                return await ProjectIdlePauseService(session).sweep_all()
 
         async def _run() -> dict[str, Any]:
             return await run_with_job_lock(

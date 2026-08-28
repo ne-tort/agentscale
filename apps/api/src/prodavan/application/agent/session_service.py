@@ -14,7 +14,7 @@ from prodavan.application.agent.adapter_registry import get_agent_adapter
 from prodavan.application.agent.budget_service import AgentBudgetService
 from prodavan.application.agent.policy_service import AgentPolicyService
 from prodavan.application.ai_keys.service import AiKeysService
-from prodavan.application.projects.access import ProjectAccessService
+from prodavan.application.project_service import ProjectAccessPolicy
 from prodavan.application.projects.attachment_service import ProjectAttachmentService
 from prodavan.domain.agent import (
     PLATFORM_EVENT_TOOL_APPROVAL_DECISION,
@@ -122,7 +122,7 @@ def _event_public(row: AgentEventRow) -> dict:
 class AgentSessionService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
-        self._projects = ProjectAccessService(session)
+        self._projects = ProjectAccessPolicy(session)
         self._policy = AgentPolicyService(session)
         self._keys = AiKeysService(session)
         self._budget = AgentBudgetService(session)

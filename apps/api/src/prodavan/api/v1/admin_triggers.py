@@ -7,7 +7,7 @@ from fastapi import APIRouter, Query
 from prodavan.api.deps import PlatformAdminDep, SessionDep
 from prodavan.api.rate_limit import enforce_rate_limit
 from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
-from prodavan.application.projects.idle_pause_service import IdlePauseService
+from prodavan.application.project_service import ProjectIdlePauseService
 from prodavan.config.settings import settings
 from prodavan.core.infra.cache import cache_key
 
@@ -44,4 +44,4 @@ async def sweep_idle_pause(
         limit=int(settings.admin_ops_rate_limit_per_minute or 0),
         detail="admin idle-pause sweep rate limit exceeded",
     )
-    return await IdlePauseService(session).sweep_all(principal=admin)
+    return await ProjectIdlePauseService(session).sweep_all(principal=admin)
