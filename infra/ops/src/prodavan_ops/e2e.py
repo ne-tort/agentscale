@@ -7,7 +7,7 @@ import time
 from kubernetes import client
 from kubernetes.client.rest import ApiException
 
-from prodavan_ops.k8s import kubectl, load_kube
+from prodavan_ops.k8s import kubectl, load_kube, require_k8s_api
 from prodavan_ops.paths import overlay_e2e
 
 E2E_NAMESPACE = "prodavan"
@@ -162,6 +162,7 @@ def cleanup_e2e(*, unsync: bool = False) -> None:
         print(proc.stderr.strip() or f"kubectl delete -k {path} failed ({proc.returncode})")
     if unsync:
         try:
+            require_k8s_api(timeout_sec=10)
             load_kube()
         except Exception as exc:
             print(f"skip argo unsync: kube unavailable ({exc})")

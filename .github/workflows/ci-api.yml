@@ -35,6 +35,7 @@ jobs:
 
       - name: Start Postgres
         id: pg
+        timeout-minutes: 2
         run: |
           set -euo pipefail
           # Docker Desktop runners: published ports land on Desktop VM → host.docker.internal
@@ -56,7 +57,7 @@ jobs:
           echo "DATABASE_URL=postgresql+asyncpg://prodavan_app:prodavan@${PG_HOST}:${PORT}/prodavan" >> "${GITHUB_ENV}"
           echo "PG_ADMIN_URL=postgresql+asyncpg://prodavan:prodavan@${PG_HOST}:${PORT}/prodavan" >> "${GITHUB_ENV}"
           echo "Postgres $NAME on ${PG_HOST}:${PORT}"
-          for i in $(seq 1 30); do
+          for i in $(seq 1 15); do
             if docker exec "$NAME" pg_isready -U prodavan -d prodavan; then
               exit 0
             fi

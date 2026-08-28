@@ -32,7 +32,8 @@ def live_api_prefix(live_base_url: str) -> str:
 
 @pytest.fixture()
 def live_client(live_base_url: str) -> httpx.Client:
-    with httpx.Client(base_url=live_base_url, timeout=60.0) as client:
+    timeout = httpx.Timeout(connect=5.0, read=30.0, write=30.0, pool=5.0)
+    with httpx.Client(base_url=live_base_url, timeout=timeout) as client:
         yield client
 
 
@@ -69,11 +70,14 @@ def _kubectl(args: list[str]) -> subprocess.CompletedProcess[str]:
     kubectl = shutil.which("kubectl")
     if kubectl is None:
         raise RuntimeError("kubectl not on PATH")
+    cmd = list(args)
+    if not any(a.startswith("--request-timeout") for a in cmd):
+        cmd.append("--request-timeout=10s")
     return subprocess.run(
-        [kubectl, *args],
+        [kubectl, *cmd],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=20,
         check=False,
     )
 

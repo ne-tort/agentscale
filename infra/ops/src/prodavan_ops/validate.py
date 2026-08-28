@@ -28,18 +28,25 @@ REQUIRED_SNIPPETS = (
 )
 
 
-def _run(cmd: list[str], *, cwd: Path | None = None, env: dict | None = None) -> str:
+def _run(cmd: list[str], *, cwd: Path | None = None, env: dict | None = None, timeout: float = 120.0) -> str:
     merged = os.environ.copy()
     if env:
         merged.update(env)
-    proc = subprocess.run(
-        cmd,
-        cwd=str(cwd) if cwd else None,
-        env=merged,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(cwd) if cwd else None,
+            env=merged,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(
+            f"command timed out after {timeout}s: {' '.join(cmd)}\n"
+            f"stdout:\n{exc.stdout or ''}\nstderr:\n{exc.stderr or ''}"
+        ) from exc
     if proc.returncode != 0:
         raise RuntimeError(
             f"command failed ({proc.returncode}): {' '.join(cmd)}\n"
@@ -75,9 +82,9 @@ def render_argocd_install() -> str:
     for attempt in range(1, 4):
         try:
             if shutil.which("kubectl"):
-                return _run(["kubectl", "kustomize", str(path)])
+                return _run(["kubectl", "kustomize", str(path)], timeout=180.0)
             if shutil.which("kustomize"):
-                return _run(["kustomize", "build", str(path)])
+                return _run(["kustomize", "build", str(path)], timeout=180.0)
             raise RuntimeError("need kubectl or kustomize on PATH for validate")
         except Exception as exc:  # noqa: BLE001 — retry local render flakes
             last_err = exc

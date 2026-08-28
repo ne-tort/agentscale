@@ -81,14 +81,17 @@ jobs:
 
       - name: Rollout first-party (after CI Images)
         if: github.event_name == 'workflow_run' || github.event_name == 'workflow_dispatch'
+        timeout-minutes: 20
         working-directory: infra/ops
         run: poetry run prodavan-ops rollout --timeout 900
 
       - name: Wait Argo Application
+        timeout-minutes: 20
         working-directory: infra/ops
         run: poetry run prodavan-ops wait --app prodavan-dev --timeout 900
 
       - name: Smoke HTTP
+        timeout-minutes: 2
         working-directory: infra/ops
         run: |
           set -euo pipefail

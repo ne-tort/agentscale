@@ -97,6 +97,7 @@ jobs:
         run: echo "DB_HOST=${PRODAVAN_CI_HOST:-127.0.0.1}" >> "${GITHUB_ENV}"
 
       - name: Start Postgres
+        timeout-minutes: 2
         run: |
           set -euo pipefail
           PG_PORT=$((55434 + (${GITHUB_RUN_NUMBER:-0} % 500)))
@@ -110,7 +111,7 @@ jobs:
             -e POSTGRES_DB=prodavan \
             -p "${PG_PORT}:5432" \
             postgres:16.15
-          for i in $(seq 1 30); do
+          for i in $(seq 1 15); do
             if docker exec "${PG_CONTAINER}" pg_isready -U prodavan -d prodavan; then
               exit 0
             fi
@@ -231,6 +232,7 @@ jobs:
         run: poetry install --no-interaction
 
       - name: Prepare Docker kubeconfig
+        timeout-minutes: 1
         working-directory: infra/ops
         run: |
           set -euo pipefail
@@ -248,6 +250,7 @@ jobs:
             -n prodavan
 
       - name: Run k8s e2e Job (L3a)
+        timeout-minutes: 20
         working-directory: infra/ops
         run: poetry run prodavan-ops e2e run --suite k8s --timeout 900
 
@@ -263,12 +266,11 @@ jobs:
     needs: gate
     if: needs.gate.outputs.run_live == 'true'
     runs-on: [self-hosted, linux, docker]
+    env:
+      PRODAVAN_CI_HOST: host.docker.internal
     defaults:
       run:
         working-directory: apps/api
-    env:
-      PRODAVAN_E2E_BASE_URL: http://127.0.0.1:8088
-      PRODAVAN_E2E_KC_URL: http://127.0.0.1:8089
     steps:
       - uses: actions/checkout@v4
 
@@ -277,6 +279,20 @@ jobs:
           ADDR="${PRODAVAN_CI_HOST:-127.0.0.1}"
           echo "PRODAVAN_E2E_BASE_URL=http://${ADDR}:8088" >> "${GITHUB_ENV}"
           echo "PRODAVAN_E2E_KC_URL=http://${ADDR}:8089" >> "${GITHUB_ENV}"
+
+      - name: Probe live API
+        timeout-minutes: 1
+        run: |
+          set -euo pipefail
+          BASE="${PRODAVAN_E2E_BASE_URL:-http://127.0.0.1:8088}"
+          for i in 1 2 3; do
+            if curl -fsS --connect-timeout 3 --max-time 10 "${BASE}/health/live"; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Live API unreachable at ${BASE}/health/live" >&2
+          exit 1
 
       - uses: actions/setup-python@v5
         with:
