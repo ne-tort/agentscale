@@ -1,0 +1,91 @@
+"""Unit tests for PodQuery."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
+
+from prodavan.application.pod_service.query import PodQuery
+from prodavan.domain.pods import PodDesiredState, PodStatus
+from prodavan.infrastructure.persistence.models.projects import ProjectPodRow
+
+
+@pytest.mark.asyncio
+async def test_get_for_project_returns_single_live_pod() -> None:
+    session = AsyncMock()
+    pod = ProjectPodRow(
+        id="pod_live123",
+        project_id="prj_test1234567890",
+        workspace_key="wk_demo",
+        status=PodStatus.RUNNING,
+        desired_state=PodDesiredState.RUNNING,
+        runtime_ref="object-ws:wk_demo",
+        hydrate_generation=0,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = pod
+    session.execute = AsyncMock(return_value=execute_result)
+
+    out = await PodQuery(session).get_for_project("prj_test1234567890")
+
+    assert out is not None
+    assert out["id"] == "pod_live123"
+    assert out["status"] == PodStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_runtime_summary_shape() -> None:
+    session = AsyncMock()
+    pod = ProjectPodRow(
+        id="pod_live123",
+        project_id="prj_test1234567890",
+        workspace_key="wk_demo",
+        status=PodStatus.PAUSED,
+        desired_state=PodDesiredState.ABSENT,
+        runtime_ref="object-ws:wk_demo",
+        hydrate_generation=0,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = pod
+    session.execute = AsyncMock(return_value=execute_result)
+
+    summary = await PodQuery(session).runtime_summary("prj_test1234567890")
+
+    assert summary == {
+        "pod_id": "pod_live123",
+        "status": PodStatus.PAUSED,
+        "desired_state": PodDesiredState.ABSENT,
+        "runtime_ref": "object-ws:wk_demo",
+        "last_error": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_list_as_runtime_units_one_to_one() -> None:
+    session = AsyncMock()
+    pod = ProjectPodRow(
+        id="pod_live123",
+        project_id="prj_test1234567890",
+        workspace_key="wk_demo",
+        status=PodStatus.RUNNING,
+        desired_state=PodDesiredState.RUNNING,
+        runtime_ref="object-ws:wk_demo",
+        hydrate_generation=0,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = pod
+    session.execute = AsyncMock(return_value=execute_result)
+
+    units = await PodQuery(session).list_as_runtime_units("prj_test1234567890")
+
+    assert len(units) == 1
+    assert units[0]["id"] == "pod_live123"
+    assert units[0]["kind"] == "primary"

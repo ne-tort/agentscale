@@ -56,13 +56,6 @@ class AssignmentBody(BaseModel):
     employee_id: str = Field(min_length=1, max_length=40)
 
 
-class RuntimeUnitBody(BaseModel):
-    model_config = {"extra": "forbid"}
-
-    kind: str = Field(default="primary", max_length=32)
-    start: bool = False
-
-
 class AttachmentBody(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -226,52 +219,6 @@ async def revoke_project_employee(
     return await ProjectCommand(session).revoke_employee(
         project_id=project_id,
         employee_id=employee_id,
-        principal=principal,
-        employee=employee,
-    )
-
-
-@router.get("/projects/{project_id}/runtime-units")
-async def list_runtime_units(
-    project_id: str,
-    principal: PrincipalDep,
-    session: SessionDep,
-    employee: EmployeeDep,
-) -> dict:
-    items = await ProjectCommand(session).list_runtime_units(
-        project_id=project_id, principal=principal, employee=employee
-    )
-    return {"items": items}
-
-
-@router.post("/projects/{project_id}/runtime-units", status_code=201)
-async def attach_runtime_unit(
-    project_id: str,
-    body: RuntimeUnitBody,
-    principal: PrincipalDep,
-    session: SessionDep,
-    employee: EmployeeDep,
-) -> dict:
-    return await ProjectCommand(session).attach_runtime_unit(
-        project_id=project_id,
-        principal=principal,
-        employee=employee,
-        kind=body.kind,
-        start=body.start,
-    )
-
-
-@router.delete("/projects/{project_id}/runtime-units/{unit_id}")
-async def detach_runtime_unit(
-    project_id: str,
-    unit_id: str,
-    principal: PrincipalDep,
-    session: SessionDep,
-    employee: EmployeeDep,
-) -> dict:
-    return await ProjectCommand(session).detach_runtime_unit(
-        project_id=project_id,
-        unit_id=unit_id,
         principal=principal,
         employee=employee,
     )

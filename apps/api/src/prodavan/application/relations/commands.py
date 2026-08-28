@@ -214,6 +214,48 @@ class RelationsCommand:
         )
         return result
 
+    async def bind_pod_to_project(
+        self,
+        *,
+        pod_id: str,
+        project_id: str,
+        company_id: str,
+    ) -> None:
+        await self._publish(
+            event_type=RELATION_GRANTED,
+            payload={
+                "relation_kind": RelationKind.BINDING,
+                "subject_kind": EntityKind.POD,
+                "subject_id": pod_id,
+                "object_kind": EntityKind.PROJECT,
+                "object_id": project_id,
+                "status": "active",
+            },
+            company_id=company_id,
+            project_id=project_id,
+        )
+
+    async def unbind_pod_from_project(
+        self,
+        *,
+        pod_id: str,
+        project_id: str,
+        company_id: str,
+    ) -> None:
+        await self._publish(
+            event_type=RELATION_REVOKED,
+            payload={
+                "relation_kind": RelationKind.BINDING,
+                "subject_kind": EntityKind.POD,
+                "subject_id": pod_id,
+                "object_kind": EntityKind.PROJECT,
+                "object_id": project_id,
+                "status": "revoked",
+            },
+            company_id=company_id,
+            project_id=project_id,
+        )
+
     async def _publish(
         self,
         *,

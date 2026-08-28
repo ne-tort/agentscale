@@ -24,6 +24,7 @@ class EntityKind(StrEnum):
     EMPLOYEE = "employee"
     CABINET = "cabinet"
     PROJECT = "project"
+    POD = "pod"
     AI_KEY = "ai_key"
     MODULE = "module"
 

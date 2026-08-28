@@ -48,6 +48,7 @@ def worker_manager_from_settings() -> WorkerManager:
         trigger_interval_sec=settings.trigger_worker_interval_sec,
         schedule_trigger_drain=settings.trigger_worker_enabled,
         schedule_idle_pause=settings.idle_pause_worker_enabled,
+        schedule_pod_reconcile=settings.pod_reconcile_worker_enabled,
         task_always_eager=settings.celery_task_always_eager,
     )
 
@@ -108,6 +109,7 @@ class WorkerManager(LifespanResource):
         trigger_interval_sec: float = 5.0,
         schedule_trigger_drain: bool = False,
         schedule_idle_pause: bool = False,
+        schedule_pod_reconcile: bool = False,
         task_always_eager: bool = False,
     ) -> None:
         self._enabled = enabled
@@ -116,6 +118,7 @@ class WorkerManager(LifespanResource):
         self._trigger_interval_sec = max(1.0, float(trigger_interval_sec))
         self._schedule_trigger_drain = schedule_trigger_drain
         self._schedule_idle_pause = schedule_idle_pause
+        self._schedule_pod_reconcile = schedule_pod_reconcile
         self._task_always_eager = task_always_eager
         self._app: Any = None
 
@@ -183,6 +186,11 @@ class WorkerManager(LifespanResource):
             beat["prodavan-idle-pause-sweep"] = {
                 "task": job_names.IDLE_PAUSE_SWEEP,
                 "schedule": interval,
+            }
+        if self._schedule_pod_reconcile:
+            beat["prodavan-pod-reconcile"] = {
+                "task": job_names.POD_RECONCILE,
+                "schedule": schedule(run_every=max(60.0, self._trigger_interval_sec * 6)),
             }
         app.conf.beat_schedule = beat
         job_tasks.register_tasks(app)

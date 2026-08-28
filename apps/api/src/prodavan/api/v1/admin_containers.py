@@ -6,6 +6,7 @@ from fastapi import APIRouter, Query
 
 from prodavan.api.deps import PlatformAdminDep, SessionDep
 from prodavan.application.admin.container_read_service import AdminContainerReadService
+from prodavan.application.pod_service import PodCommand, PodReconcileService
 
 router = APIRouter(prefix="/admin/containers", tags=["admin-containers"])
 
@@ -55,3 +56,21 @@ async def delete_container(
 ) -> dict:
     """Cascade: soft-delete Project (+ wipe) via ProjectCommand."""
     return await AdminContainerReadService(session).delete(project_id=project_id, principal=admin)
+
+
+@router.post("/pods/{pod_id}/force-kill")
+async def force_kill_pod(
+    pod_id: str,
+    admin: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    return await PodCommand(session).force_kill(pod_id=pod_id, principal=admin)
+
+
+@router.post("/reconcile")
+async def reconcile_pods(
+    admin: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    _ = admin
+    return await PodReconcileService(session).run()

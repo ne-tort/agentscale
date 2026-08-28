@@ -23,7 +23,10 @@ from prodavan.infrastructure.persistence.models.modules import (
     ModuleCompanyGrantRow,
     ModuleRow,
 )
-from prodavan.infrastructure.persistence.models.projects import ProjectEmployeeAssignmentRow
+from prodavan.infrastructure.persistence.models.projects import (
+    ProjectEmployeeAssignmentRow,
+    ProjectPodRow,
+)
 
 
 class RelationsQuery:
@@ -103,6 +106,15 @@ class RelationsQuery:
                 ProjectEmployeeAssignmentRow.project_id == project_id,
                 ProjectEmployeeAssignmentRow.employee_id == employee_id,
                 ProjectEmployeeAssignmentRow.status == "active",
+            )
+        )
+        return q.scalar_one_or_none() is not None
+
+    async def has_pod_binding(self, *, project_id: str) -> bool:
+        q = await self._session.execute(
+            select(ProjectPodRow.id).where(
+                ProjectPodRow.project_id == project_id,
+                ProjectPodRow.status.notin_(("terminated", "failed")),
             )
         )
         return q.scalar_one_or_none() is not None

@@ -5,6 +5,7 @@ from __future__ import annotations
 from sqlalchemy import case, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.application.pod_service.query import PodQuery
 from prodavan.application.project_service import ProjectCommand
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
@@ -28,6 +29,7 @@ def _item(
     cabinet_name: str | None,
     owner_email: str | None,
     owner_display_name: str | None,
+    runtime: dict | None = None,
 ) -> dict:
     return {
         "id": project.id,
@@ -46,10 +48,10 @@ def _item(
         "owner_display_name": owner_display_name,
         "created_at": project.created_at.isoformat() if project.created_at else None,
         "updated_at": project.updated_at.isoformat() if project.updated_at else None,
-        # P1 holes — filled in P3/P4
+        "runtime": runtime,
         "runtime_metrics": None,
-        "k8s_phase": None,
-        "last_error": None,
+        "k8s_phase": runtime.get("status") if runtime else None,
+        "last_error": runtime.get("last_error") if runtime else None,
     }
 
 
@@ -57,6 +59,10 @@ class AdminContainerReadService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._projects = ProjectCommand(session)
+        self._pods = PodQuery(session)
+
+    async def _runtime_for(self, project_id: str) -> dict | None:
+        return await self._pods.runtime_summary(project_id)
 
     def _base_stmt(self):
         return (
@@ -80,16 +86,19 @@ class AdminContainerReadService:
             .limit(limit)
         )
         rows = (await self._session.execute(stmt)).all()
-        items = [
-            _item(
-                project=project,
-                company_name=company_name,
-                cabinet_name=cabinet_name,
-                owner_email=owner_email,
-                owner_display_name=owner_display_name,
+        items = []
+        for project, company_name, cabinet_name, owner_email, owner_display_name in rows:
+            runtime = await self._runtime_for(project.id)
+            items.append(
+                _item(
+                    project=project,
+                    company_name=company_name,
+                    cabinet_name=cabinet_name,
+                    owner_email=owner_email,
+                    owner_display_name=owner_display_name,
+                    runtime=runtime,
+                )
             )
-            for project, company_name, cabinet_name, owner_email, owner_display_name in rows
-        ]
         return {"items": items}
 
     async def list_containers_for_company(self, company_id: str, *, limit: int = 200) -> dict:
@@ -100,16 +109,19 @@ class AdminContainerReadService:
             .limit(limit)
         )
         rows = (await self._session.execute(stmt)).all()
-        items = [
-            _item(
-                project=project,
-                company_name=company_name,
-                cabinet_name=cabinet_name,
-                owner_email=owner_email,
-                owner_display_name=owner_display_name,
+        items = []
+        for project, company_name, cabinet_name, owner_email, owner_display_name in rows:
+            runtime = await self._runtime_for(project.id)
+            items.append(
+                _item(
+                    project=project,
+                    company_name=company_name,
+                    cabinet_name=cabinet_name,
+                    owner_email=owner_email,
+                    owner_display_name=owner_display_name,
+                    runtime=runtime,
+                )
             )
-            for project, company_name, cabinet_name, owner_email, owner_display_name in rows
-        ]
         return {"items": items}
 
     async def get_container(self, project_id: str) -> dict:
@@ -118,12 +130,14 @@ class AdminContainerReadService:
         if row is None:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Container not found")
         project, company_name, cabinet_name, owner_email, owner_display_name = row
+        runtime = await self._runtime_for(project.id)
         return _item(
             project=project,
             company_name=company_name,
             cabinet_name=cabinet_name,
             owner_email=owner_email,
             owner_display_name=owner_display_name,
+            runtime=runtime,
         )
 
     async def get_container_for_company(self, company_id: str, project_id: str) -> dict:

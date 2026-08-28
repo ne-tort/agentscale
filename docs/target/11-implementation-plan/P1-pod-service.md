@@ -5,7 +5,7 @@
 | Priority | **P1** (после `project_service` BC; блокирует закрытие **P-POD-01..05**, **L07** Quality ≥ 8) |
 | Canon | [14-project-containers/](../14-project-containers/) · design: [pod-service.md](../14-project-containers/pod-service.md) |
 | Refactor | **Significant refactor allowed** в `project_service` runtime-слое; employee API — только совместимое deprecate |
-| Status | `todo` |
+| Status | `done` (Phases 0–4) |
 | Зависит от | `project_service` BC (merged), MinIO materialize (P0 subset), Relations facade |
 
 ## Цель

@@ -204,3 +204,24 @@ def register_tasks(app) -> None:
             company_id,
         )
         return run_async(cascade_fn(company_id, actor_sub=actor_sub or "system"))
+
+    @app.task(name=job_names.POD_RECONCILE, bind=False)
+    def pod_reconcile() -> dict[str, Any]:
+        from prodavan.application.pod_service import PodReconcileService
+        from prodavan.config.settings import settings
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        async def _run() -> dict[str, Any]:
+            async def _reconcile() -> dict[str, Any]:
+                factory = get_session_factory()
+                async with factory() as session:
+                    return await PodReconcileService(session).run()
+
+            return await run_with_job_lock(
+                "pod_reconcile",
+                ttl_sec=max(60, int(float(settings.trigger_worker_interval_sec or 5) * 4)),
+                fn=_reconcile,
+            )
+
+        logger.info("celery task %s", job_names.POD_RECONCILE)
+        return run_async(_run())

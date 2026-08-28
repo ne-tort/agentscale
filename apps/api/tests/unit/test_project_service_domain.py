@@ -1,10 +1,10 @@
 """Unit tests for project domain extensions."""
 
+from prodavan.domain.pods import new_pod_id
 from prodavan.domain.projects import (
     PLATFORM_EVENT_TYPES,
     ProjectStatus,
     ProjectVisibilityMode,
-    new_runtime_unit_id,
 )
 
 
@@ -17,17 +17,17 @@ def test_visibility_modes():
     assert ProjectVisibilityMode.RESTRICTED == "restricted"
 
 
-def test_runtime_unit_id_prefix():
-    assert new_runtime_unit_id().startswith("pru_")
+def test_pod_id_prefix():
+    assert new_pod_id().startswith("pod_")
 
 
 def test_platform_event_types_include_lifecycle_extensions():
     for event in (
         "project.started",
         "project.completed",
-        "project.runtime_unit.attached",
-        "project.runtime_unit.detached",
         "project.visibility.changed",
+        "pod.started",
+        "pod.paused",
         "employee.enabled",
     ):
         assert event in PLATFORM_EVENT_TYPES

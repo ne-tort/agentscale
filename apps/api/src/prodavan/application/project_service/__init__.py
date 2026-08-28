@@ -5,7 +5,6 @@ from prodavan.application.project_service.command import ProjectCommand
 from prodavan.application.project_service.idle_pause import ProjectIdlePauseService
 from prodavan.application.project_service.lifecycle_emitter import ProjectLifecycleEmitter
 from prodavan.application.project_service.query import ProjectQuery
-from prodavan.application.project_service.runtime_manager import ProjectRuntimeManager
 
 __all__ = [
     "ProjectAccessPolicy",
@@ -13,5 +12,4 @@ __all__ = [
     "ProjectIdlePauseService",
     "ProjectLifecycleEmitter",
     "ProjectQuery",
-    "ProjectRuntimeManager",
 ]

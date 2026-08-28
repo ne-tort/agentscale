@@ -42,7 +42,6 @@ def project_public(
         "visibility_mode": visibility,
         "workspace_key": row.workspace_key,
         "container_ref": row.container_ref,
-        "primary_runtime_unit_id": getattr(row, "primary_runtime_unit_id", None),
         "agent_provider": row.agent_provider,
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,

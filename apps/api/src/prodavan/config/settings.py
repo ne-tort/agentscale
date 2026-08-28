@@ -88,6 +88,9 @@ class Settings(BaseSettings):
     # I8: API may POST Jobs via in-cluster SA. Off by default — create path stays object-ws.
     sandbox_k8s_jobs: bool = False
     sandbox_k8s_namespace: str = "prodavan"
+    # pod_service runtime: stub (object-ws) | k8s (real Pod adapter when ready).
+    pod_runtime_mode: str = "stub"
+    pod_reconcile_worker_enabled: bool = False
     sandbox_k8s_pvc: str = "prodavan-api-storage"
     sandbox_k8s_job_image: str = "ghcr.io/ne-tort/prodavan-api:local"
     # L06/L07 invoke src/on_platform_event.py from package zip on platform_events (opt-in)

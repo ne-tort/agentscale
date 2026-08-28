@@ -11,17 +11,18 @@ from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.admin.quota_service import CompanyQuotaService
 from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.application.cabinets.access import CabinetAccessService
+from prodavan.application.pod_service import PodCommand
 from prodavan.application.project_service.access import ProjectAccessPolicy
 from prodavan.application.project_service.lifecycle_emitter import ProjectLifecycleEmitter
 from prodavan.application.project_service.public import normalize_agent_provider
 from prodavan.application.project_service.query import ProjectQuery
-from prodavan.application.project_service.runtime_manager import ProjectRuntimeManager
 from prodavan.application.projects.materialize import get_materialize_service
 from prodavan.application.projects.pause_runtime import stop_project_runtime
 from prodavan.application.projects.trigger_service import ProjectTriggerService
 from prodavan.application.relations.commands import RelationsCommand
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
+from prodavan.domain.pods import PodDesiredState
 from prodavan.domain.projects import (
     ProjectStatus,
     ProjectVisibilityMode,
@@ -48,7 +49,7 @@ class ProjectCommand:
         self._companies = AdminCompanyService(session)
         self._events = ProjectLifecycleEmitter(session)
         self._subscription = CompanySubscriptionGate(session)
-        self._runtime = ProjectRuntimeManager(session, events=self._events)
+        self._pods = PodCommand(session)
         self._relations = RelationsCommand(session)
 
     async def _project_public(self, row: ProjectRow) -> dict:
@@ -123,7 +124,7 @@ class ProjectCommand:
             project_name=row.name,
         )
         if with_runtime_unit:
-            await self._runtime.attach_unit(project=row, principal=principal, start=False)
+            await self._pods.provision_for_project(row.id, principal=principal, start=False)
         await self._triggers.enqueue(project_id=project_id, kind="project.prepare", payload={"source": "create"})
         await self._events.emit(
             event_type="project.created",
@@ -151,9 +152,16 @@ class ProjectCommand:
         }
         return out
 
-    async def _stop_and_pause_runtime(self, row: ProjectRow) -> None:
+    async def _stop_and_pause_runtime(
+        self, row: ProjectRow, *, principal: Principal, reason: str | None = None
+    ) -> None:
         await stop_project_runtime(self._session, project_id=row.id)
-        await self._runtime.pause_all(row)
+        await self._pods.sync_desired(
+            row.id,
+            PodDesiredState.ABSENT,
+            principal=principal,
+            reason=reason,
+        )
 
     async def patch(
         self,
@@ -274,57 +282,6 @@ class ProjectCommand:
         await self._session.commit()
         return {"project_id": project_id, "employee_id": employee_id, "revoked": True}
 
-    async def attach_runtime_unit(
-        self,
-        *,
-        project_id: str,
-        principal: Principal,
-        employee: EmployeeRow | None,
-        kind: str = "primary",
-        start: bool = False,
-    ) -> dict:
-        row = await self._access.require_access(
-            project_id=project_id,
-            principal=principal,
-            employee=employee,
-            write=True,
-            allow_paused=True,
-        )
-        unit = await self._runtime.attach_unit(project=row, principal=principal, kind=kind, start=start)
-        await self._session.commit()
-        return unit
-
-    async def detach_runtime_unit(
-        self,
-        *,
-        project_id: str,
-        unit_id: str,
-        principal: Principal,
-        employee: EmployeeRow | None,
-    ) -> dict:
-        row = await self._access.require_access(
-            project_id=project_id,
-            principal=principal,
-            employee=employee,
-            write=True,
-            allow_paused=True,
-        )
-        unit = await self._runtime.detach_unit(project=row, unit_id=unit_id, principal=principal)
-        await self._session.commit()
-        return unit
-
-    async def list_runtime_units(
-        self,
-        *,
-        project_id: str,
-        principal: Principal,
-        employee: EmployeeRow | None,
-    ) -> list[dict]:
-        await self._access.require_access(
-            project_id=project_id, principal=principal, employee=employee, write=False
-        )
-        return await self._runtime.list_units(project_id)
-
     async def rematerialize_for_cabinet(self, *, cabinet_id: str) -> dict:
         projects: list[dict] = []
         for project_id in await self._query.list_ids(
@@ -402,7 +359,7 @@ class ProjectCommand:
         if row.status == ProjectStatus.PAUSED:
             return await self._project_public(row)
         row.status = ProjectStatus.PAUSED
-        await self._stop_and_pause_runtime(row)
+        await self._stop_and_pause_runtime(row, principal=principal, reason="pause")
         emit_payload = dict(payload or {})
         await self._events.emit(
             event_type="project.paused",
@@ -446,6 +403,12 @@ class ProjectCommand:
             platform_fallback=company_policy.platform_fallback,
         )
         row.status = ProjectStatus.ACTIVE
+        await self._pods.sync_desired(
+            row.id,
+            PodDesiredState.RUNNING,
+            principal=principal,
+            reason="resume",
+        )
         await self._events.emit(
             event_type="project.resumed",
             company_id=row.company_id,
@@ -455,7 +418,6 @@ class ProjectCommand:
         )
         await self._session.commit()
         await self._session.refresh(row)
-        await self._runtime.ensure_running(row)
         try:
             from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
             from prodavan.core.jobs.enqueue import enqueue_trigger_drain
@@ -487,7 +449,7 @@ class ProjectCommand:
         )
         if row.status == ProjectStatus.COMPLETED:
             return await self._project_public(row)
-        await self._stop_and_pause_runtime(row)
+        await self._stop_and_pause_runtime(row, principal=principal, reason="complete")
         row.status = ProjectStatus.COMPLETED
         await self._events.emit(
             event_type="project.completed",
@@ -528,7 +490,7 @@ class ProjectCommand:
         principal: Principal,
         purge_workspace: bool,
     ) -> dict:
-        await self._stop_and_pause_runtime(row)
+        await self._stop_and_pause_runtime(row, principal=principal, reason="delete")
         row.status = ProjectStatus.DELETED
         await self._events.emit(
             event_type="project.deleted",
@@ -604,7 +566,7 @@ class ProjectCommand:
                 status=422,
                 detail="soft-delete the project before purge",
             )
-        await self._stop_and_pause_runtime(row)
+        await self._stop_and_pause_runtime(row, principal=principal, reason="purge")
         wipe = await self._wipe_workspace(row)
         await self._events.emit(
             event_type="project.purged",

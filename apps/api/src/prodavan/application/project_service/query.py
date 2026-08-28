@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.application.cabinets.access import CabinetAccessService
+from prodavan.application.pod_service.query import PodQuery
 from prodavan.application.project_service.access import ProjectAccessPolicy
 from prodavan.application.project_service.public import project_public
 from prodavan.domain.admin import attachment_max_bytes
@@ -29,10 +30,13 @@ class ProjectQuery:
         policy = await self._companies.get_agent_policy(company_id)
         return {"attachment_max_bytes": attachment_max_bytes(policy)}
 
-    async def _project_public(self, row: ProjectRow) -> dict:
+    async def _project_public(self, row: ProjectRow, *, include_runtime: bool = False) -> dict:
         limits = await self._attachment_limits(row.company_id)
         subscription = await self._subscription.subscription_state(row.company_id)
-        return project_public(row, limits=limits, company_subscription=subscription)
+        out = project_public(row, limits=limits, company_subscription=subscription)
+        if include_runtime:
+            out["runtime"] = await PodQuery(self._session).runtime_summary(row.id)
+        return out
 
     async def get(
         self,
@@ -44,7 +48,7 @@ class ProjectQuery:
         row = await self._access.require_access(
             project_id=project_id, principal=principal, employee=employee, write=False
         )
-        return await self._project_public(row)
+        return await self._project_public(row, include_runtime=True)
 
     async def list_for_cabinet(
         self,

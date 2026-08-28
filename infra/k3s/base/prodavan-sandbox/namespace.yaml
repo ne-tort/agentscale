@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: prodavan-sandboxes
+  labels:
+    app.kubernetes.io/name: prodavan-sandboxes
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: sandbox
