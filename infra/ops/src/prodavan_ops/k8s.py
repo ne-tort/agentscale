@@ -111,7 +111,11 @@ def wait_k3s_api_ready(*, timeout_sec: int = 300, poll_sec: float = 5.0) -> None
         last = err[-1] if err else "no response"
         print(f"waiting for k3s API ({attempt}): {last}")
         time.sleep(poll_sec)
-    raise TimeoutError(f"k3s API not ready within {timeout_sec}s ({last})")
+    raise TimeoutError(
+        f"k3s API not ready within {timeout_sec}s ({last}). "
+        "On Windows host run elevated: infra/github-runner/Sync-KubeForDocker.ps1 "
+        "(portproxy 0.0.0.0:6443 + kubeconfig for Docker runners)."
+    )
 
 
 def assert_kubeconfig_docker_ready() -> None:

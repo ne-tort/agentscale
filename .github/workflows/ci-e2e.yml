@@ -232,7 +232,7 @@ jobs:
 
       - name: Wait for k3s API
         working-directory: infra/ops
-        run: poetry run python -c "from prodavan_ops.k8s import wait_k3s_api_ready; wait_k3s_api_ready(timeout_sec=300)"
+        run: poetry run python -c "from prodavan_ops.k8s import wait_k3s_api_ready; wait_k3s_api_ready(timeout_sec=600)"
 
       - name: Sync PR e2e conftest into cluster
         working-directory: infra/ops

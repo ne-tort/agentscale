@@ -23,6 +23,9 @@ wsl.exe -u www -e bash -lc "cat /home/www/.kube/prodavan-dev.yaml" | Set-Content
 $out = New-Object System.Collections.Generic.List[string]
 $sawSkip = $false
 foreach ($line in Get-Content $dest) {
+    if ($line -match '^\s*certificate-authority-data:\s*' -or $line -match '^\s*certificate-authority:\s*') {
+        continue
+    }
     if ($line -match '^\s*server:\s*') {
         $out.Add(('    server: https://host.docker.internal:{0}' -f $portApi))
         continue
@@ -46,12 +49,18 @@ Write-Host "Wrote $dest (server host.docker.internal:$portApi, skip-tls-verify)"
 $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
     [Security.Principal.WindowsBuiltInRole]::Administrator)
 if ($isAdmin) {
+    foreach ($listen in @('127.0.0.1', '0.0.0.0')) {
+        foreach ($p in @($portApi, $portHttp, $portSsh)) {
+            netsh interface portproxy delete v4tov4 listenaddress=$listen listenport=$p 2>$null | Out-Null
+            netsh interface portproxy add v4tov4 listenaddress=$listen listenport=$p connectaddress=$wslIp connectport=$p | Out-Null
+        }
+    }
     foreach ($p in @($portApi, $portHttp, $portSsh)) {
-        netsh interface portproxy delete v4tov4 listenaddress=127.0.0.1 listenport=$p 2>$null | Out-Null
-        netsh interface portproxy add v4tov4 listenaddress=127.0.0.1 listenport=$p connectaddress=$wslIp connectport=$p | Out-Null
+        netsh advfirewall firewall delete rule name="Prodavan WSL $p" 2>$null | Out-Null
+        netsh advfirewall firewall add rule name="Prodavan WSL $p" dir=in action=allow protocol=TCP localport=$p | Out-Null
     }
     netsh interface portproxy show v4tov4
-    Write-Host "OK portproxy -> $wslIp"
+    Write-Host "OK portproxy -> $wslIp (127.0.0.1 + 0.0.0.0 for Docker host.docker.internal)"
 } else {
     Write-Host "WARN: not Admin — skipped portproxy (Terraform apply also attempts it; elevate Start-Runners once if :6443 unreachable)"
 }

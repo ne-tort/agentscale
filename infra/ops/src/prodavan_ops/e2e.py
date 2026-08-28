@@ -120,7 +120,7 @@ def run_e2e(*, suite: str = "k8s", timeout_sec: int = 900) -> None:
     if suite not in {"k8s", "all"}:
         raise ValueError(f"prodavan-ops e2e run supports suite k8s|all (got {suite!r})")
     print("==> wait k3s API")
-    wait_k3s_api_ready(timeout_sec=300)
+    wait_k3s_api_ready(timeout_sec=600)
     print("==> e2e cleanup (prior Job)")
     cleanup_e2e()
     print("==> apply overlays/e2e")
