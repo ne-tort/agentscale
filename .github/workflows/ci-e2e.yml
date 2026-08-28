@@ -99,15 +99,19 @@ jobs:
       - name: Start Postgres
         run: |
           set -euo pipefail
-          docker rm -f prodavan-e2e-pg 2>/dev/null || true
-          docker run -d --name prodavan-e2e-pg \
+          PG_PORT=$((55434 + (${GITHUB_RUN_NUMBER:-0} % 500)))
+          PG_CONTAINER="prodavan-e2e-pg-${GITHUB_RUN_ID:-local}"
+          echo "PG_PORT=${PG_PORT}" >> "${GITHUB_ENV}"
+          echo "PG_CONTAINER=${PG_CONTAINER}" >> "${GITHUB_ENV}"
+          docker rm -f "${PG_CONTAINER}" 2>/dev/null || true
+          docker run -d --name "${PG_CONTAINER}" \
             -e POSTGRES_USER=prodavan \
             -e POSTGRES_PASSWORD=prodavan \
             -e POSTGRES_DB=prodavan \
-            -p 55434:5432 \
+            -p "${PG_PORT}:5432" \
             postgres:16.15
           for i in $(seq 1 30); do
-            if docker exec prodavan-e2e-pg pg_isready -U prodavan -d prodavan; then
+            if docker exec "${PG_CONTAINER}" pg_isready -U prodavan -d prodavan; then
               exit 0
             fi
             sleep 2
@@ -123,13 +127,14 @@ jobs:
 
       - name: Ensure app role + migrate
         env:
-          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@${{ env.DB_HOST }}:55434/prodavan
+          DATABASE_URL: postgresql+asyncpg://prodavan:prodavan@${{ env.DB_HOST }}:${{ env.PG_PORT }}/prodavan
         run: |
           python - <<'PY'
           import asyncio, asyncpg, os
           host = os.environ["DB_HOST"]
+          port = os.environ["PG_PORT"]
           async def main():
-              conn = await asyncpg.connect(f"postgresql://prodavan:prodavan@{host}:55434/prodavan")
+              conn = await asyncpg.connect(f"postgresql://prodavan:prodavan@{host}:{port}/prodavan")
               try:
                   await conn.execute("CREATE ROLE prodavan_app LOGIN PASSWORD 'prodavan'")
               except Exception:
@@ -143,8 +148,9 @@ jobs:
           python - <<'PY'
           import asyncio, asyncpg, os
           host = os.environ["DB_HOST"]
+          port = os.environ["PG_PORT"]
           async def main():
-              conn = await asyncpg.connect(f"postgresql://prodavan:prodavan@{host}:55434/prodavan")
+              conn = await asyncpg.connect(f"postgresql://prodavan:prodavan@{host}:{port}/prodavan")
               await conn.execute("GRANT ALL ON ALL TABLES IN SCHEMA public TO prodavan_app")
               await conn.execute("GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO prodavan_app")
               await conn.close()
@@ -153,7 +159,7 @@ jobs:
 
       - name: Pytest integration (L2)
         env:
-          DATABASE_URL: postgresql+asyncpg://prodavan_app:prodavan@${{ env.DB_HOST }}:55434/prodavan
+          DATABASE_URL: postgresql+asyncpg://prodavan_app:prodavan@${{ env.DB_HOST }}:${{ env.PG_PORT }}/prodavan
           AUTH_MODE: test
           AUTH_TEST_SECRET: dev-only-test-secret-change-me
           KEYCLOAK_INVITE_MODE: fake
@@ -161,7 +167,7 @@ jobs:
 
       - name: Stop Postgres
         if: always()
-        run: docker rm -f prodavan-e2e-pg 2>/dev/null || true
+        run: docker rm -f "${PG_CONTAINER:-prodavan-e2e-pg}" 2>/dev/null || true
 
   k8s:
     needs: gate

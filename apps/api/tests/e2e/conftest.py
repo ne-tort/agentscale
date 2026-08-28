@@ -64,8 +64,6 @@ def k8s_client(monkeypatch: pytest.MonkeyPatch, tmp_path):
         build_pod_runtime(force_new=True)
         yield client
 
-    build_pod_runtime(force_new=True)
-
 
 def _kubectl(args: list[str]) -> subprocess.CompletedProcess[str]:
     kubectl = shutil.which("kubectl")

@@ -31,6 +31,7 @@ def test_live_containers_lifecycle(live_client, live_api_prefix: str) -> None:
     """Vertical containers flow against deployed API (OIDC tokens via Keycloak)."""
     stamp = datetime.now().strftime("%H%M%S")
     owner_email = f"live-owner-{stamp}@e2e.local"
+    owner_login = f"owner{stamp}"
     admin_tok = fetch_platform_admin_token(live_client, live_api_prefix)
     admin_h = auth_header(admin_tok)
 
@@ -40,12 +41,23 @@ def test_live_containers_lifecycle(live_client, live_api_prefix: str) -> None:
         json={
             "name": f"LiveCtr {stamp}",
             "password": "test-company-pass",
-            "admin_email": owner_email,
         },
     )
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
-    company_login = co.json()["credentials"]["username"]
+
+    owner_inv = live_client.post(
+        f"{live_api_prefix}/companies/{company_id}/employees",
+        headers=admin_h,
+        json={
+            "login": owner_login,
+            "password": EMPLOYEE_PASSWORD,
+            "contact_email": owner_email,
+            "display_name": "Owner",
+            "role": "company_admin",
+        },
+    )
+    assert owner_inv.status_code in (200, 201), owner_inv.text
 
     key = live_client.post(
         f"{live_api_prefix}/admin/ai-keys",
@@ -64,8 +76,8 @@ def test_live_containers_lifecycle(live_client, live_api_prefix: str) -> None:
     owner_tok = login_via_api(
         live_client,
         live_api_prefix,
-        username=company_login,
-        password="test-company-pass",
+        username=owner_login,
+        password=EMPLOYEE_PASSWORD,
     )
     owner_h = auth_header(owner_tok)
     cab = live_client.post(

@@ -1,26 +1,29 @@
-# Cross-namespace: e2e Job SA may manage project pods in prodavan-sandboxes.
+# Cross-namespace: e2e Job SA manages project pods in prodavan-sandboxes.
+# Self-contained Role (do not depend on dev overlay Role sync).
 apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
+kind: Role
 metadata:
-  name: prodavan-e2e-pod-service
+  name: prodavan-e2e-sandbox-pods
   namespace: prodavan-sandboxes
   labels:
     app.kubernetes.io/name: prodavan-e2e-runner
     app.kubernetes.io/part-of: prodavan
     app.kubernetes.io/component: e2e
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: prodavan-pod-service
-subjects:
-  - kind: ServiceAccount
-    name: prodavan-e2e-runner
-    namespace: prodavan
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["create", "get", "list", "watch", "delete", "patch"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: prodavan-e2e-project-pod
+  name: prodavan-e2e-sandbox-pods
   namespace: prodavan-sandboxes
   labels:
     app.kubernetes.io/name: prodavan-e2e-runner
@@ -29,7 +32,7 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: prodavan-project-pod
+  name: prodavan-e2e-sandbox-pods
 subjects:
   - kind: ServiceAccount
     name: prodavan-e2e-runner
