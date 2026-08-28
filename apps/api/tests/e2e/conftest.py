@@ -54,7 +54,6 @@ def k8s_client(monkeypatch: pytest.MonkeyPatch, tmp_path):
     from prodavan.infrastructure.keycloak.invite import reset_invite_client
     from prodavan.main import create_app
 
-    build_pod_runtime(force_new=True)
     monkeypatch.setattr(settings, "secrets_dir", tmp_path)
     reset_jwt_validator()
     reset_invite_client()
@@ -62,6 +61,7 @@ def k8s_client(monkeypatch: pytest.MonkeyPatch, tmp_path):
     from fastapi.testclient import TestClient
 
     with TestClient(create_app()) as client:
+        build_pod_runtime(force_new=True)
         yield client
 
     build_pod_runtime(force_new=True)

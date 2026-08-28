@@ -95,7 +95,52 @@ pytest -m "integration or k8s or live"
 | [`ci-gate.yml`](../../.github/workflows/ci-gate.yml) | каждый PR | L1 unit + kustomize validate (incl. `overlays/e2e`) |
 | [`ci-nightly.yml`](../../.github/workflows/ci-nightly.yml) | cron 02:00 UTC | L2 `pytest -m integration` |
 | [`ci-e2e.yml`](../../.github/workflows/ci-e2e.yml) | **opt-in** | L2 + L3a + L3b |
+| [`ci-images.yml`](../../.github/workflows/ci-images.yml) | post-merge / dispatch | GHCR `:latest` + SHA |
 | [`verify-dev.yml`](../../.github/workflows/verify-dev.yml) | post-merge | HTTP smoke (не pytest) |
+| [`auto-merge.yml`](../../.github/workflows/auto-merge.yml) | после **CI Gate** | squash-merge + dispatch Images |
+
+### Где бегут раннеры
+
+**Все** workflows (`ci-gate`, `ci-e2e`, `verify-dev`, `auto-merge`) — `runs-on: [self-hosted, linux, docker]`.
+
+Это **Docker Desktop runners на Windows-хосте**, не pods в k3s. Они **не должны** жить в кластере — так не грузим dev-сервер обычной сборкой.
+
+Доступ к кластеру с runner (сейчас):
+
+- `~/.kube/prodavan-dev.yaml` + rewrite на `host.docker.internal:6443` ([`prodavan_ops/k8s.py`](../../infra/ops/src/prodavan_ops/k8s.py))
+- HTTP smoke/live: `PRODAVAN_CI_HOST=host.docker.internal` → `:8088` / `:8089`
+
+**L3a k8s** — runner **снаружи** кластера: `kubectl apply` ephemeral Job, pytest **in-cluster** в Job pod (код из образа `ghcr.io/.../prodavan-api:latest` + pip install pytest). Runner только оркестрирует Job и читает логи.
+
+**L3b live** — pytest **на runner**, HTTP в **уже задеплоенный** dev (`:8088`). Код PR **не** деплоится перед этим шагом.
+
+### Порядок и что проверяет какой код
+
+```text
+PR opened
+  ├─ CI Gate (L1)          ← код из PR checkout, блокирует auto-merge
+  ├─ CI E2E (opt-in)       ← параллельно Gate, merge НЕ блокирует
+  │    ├─ L2 integration   ← код PR + ephemeral Postgres на runner
+  │    ├─ L3a k8s Job      ← pytest in-cluster; образ API = последний GHCR (main), не PR diff*
+  │    └─ L3b live         ← deployed dev stack (main/previous deploy), не PR diff
+  └─ auto-merge            ← только после green CI Gate (E2E не ждёт)
+
+merge → CI Images → Argo sync → Verify Dev (HTTP smoke на deployed dev)
+```
+
+\* L3a Job сейчас использует `:latest` образ; для проверки **diff PR** в k8s нужен либо push образа из PR, либо post-merge прогон. L2 integration закрывает бизнес-логику на коде PR.
+
+### Когда нужен post-merge E2E
+
+| Слой | Pre-merge (PR + label `e2e`) | Post-merge (после Verify Dev) |
+|------|------------------------------|-------------------------------|
+| L2 integration | ✅ код PR | nightly / dispatch |
+| L3a k8s | ⚠️ in-cluster, образ main | ✅ после Images — свежий код в Job |
+| L3b live | ⚠️ dev ещё без PR | ✅ **имеет смысл здесь** — проверяет задеплоенный diff |
+
+**L3b live на PR** — sanity «dev жив», не «PR безопасен для деплоя». Для регрессии **после** деплоя: `workflow_dispatch` ci-e2e suite `live` на main, или отдельный `workflow_run` после Verify Dev (TODO).
+
+**Отдельный merge для live-e2e не нужен** — merge один (после Gate). Live regression — **после** Images + Argo sync, не до merge.
 
 ### Opt-in E2E (`ci-e2e.yml`)
 

@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 
+import asyncpg
 import jwt
 import pytest
 from fastapi.testclient import TestClient
@@ -19,10 +22,9 @@ from prodavan.config.settings import settings
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.infrastructure.persistence.database import get_session_factory
-from prodavan.infrastructure.persistence.models.identity import CompanyRow
 from prodavan.infrastructure.secrets.file_store import FileSecretStore
 from prodavan.main import create_app
-from tests.conftest import requires_postgres
+from tests.conftest import DATABASE_URL, requires_postgres
 
 
 def _admin_token() -> str:
@@ -72,28 +74,34 @@ def _run_async(coro_factory) -> None:
         pool.submit(_runner).result(timeout=30)
 
 
-async def _create_company(name: str) -> str:
-    factory = get_session_factory()
-    async with factory() as session:
-        co = CompanyRow(name=name)
-        session.add(co)
-        await session.commit()
-        await session.refresh(co)
-        return co.id
-
-
 def _create_company_sync(name: str) -> str:
-    from concurrent.futures import ThreadPoolExecutor
+    """Insert company via dedicated asyncpg connection (avoid shared SQLAlchemy loop)."""
+    company_id = f"co_{uuid.uuid4().hex[:16]}"
+    dsn = DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)
+    parsed = urlparse(dsn)
 
-    def _runner() -> str:
-        loop = asyncio.new_event_loop()
+    async def _go() -> None:
+        conn = await asyncpg.connect(
+            host=parsed.hostname or "localhost",
+            port=parsed.port or 5432,
+            user=parsed.username,
+            password=parsed.password,
+            database=(parsed.path or "/prodavan").lstrip("/") or "prodavan",
+        )
         try:
-            return loop.run_until_complete(_create_company(name))
+            await conn.execute(
+                """
+                INSERT INTO companies (id, name, status, subscription_lifetime)
+                VALUES ($1, $2, 'active', false)
+                """,
+                company_id,
+                name,
+            )
         finally:
-            loop.close()
+            await conn.close()
 
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(_runner).result(timeout=30)
+    asyncio.run(_go())
+    return company_id
 
 
 @requires_postgres

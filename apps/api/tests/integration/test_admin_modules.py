@@ -133,7 +133,7 @@ def test_admin_module_crud_meta_and_bindings(client: TestClient) -> None:
         client,
         company_id=company_id,
         module_id=module_id,
-        cabinet_ids=[cab1_ws, cab2_ws],
+        cabinet_ids=[cab1_ws],
         token=owner_tok,
     )
 
@@ -171,10 +171,24 @@ def test_admin_module_crud_meta_and_bindings(client: TestClient) -> None:
     )
     assert denied.status_code == 422
 
+    _company_bind_cabinets(
+        client,
+        company_id=company_id,
+        module_id=module_id,
+        cabinet_ids=[cab1_ws, cab2_ws],
+        token=owner_tok,
+    )
+    bound2 = client.post(
+        f"/api/v1/admin/modules/{module_id}/projects/{proj2.json()['id']}",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert bound2.status_code == 200, bound2.text
+    project2_id = proj2.json()["id"]
+
     unbind_cab = client.patch(
         f"/api/v1/companies/{company_id}/modules/{module_id}",
         headers={"Authorization": f"Bearer {owner_tok}"},
-        json={"cabinet_ids": [cab2_id]},
+        json={"cabinet_ids": [cab1_ws]},
     )
     assert unbind_cab.status_code == 200, unbind_cab.text
     got = client.get(
@@ -182,7 +196,8 @@ def test_admin_module_crud_meta_and_bindings(client: TestClient) -> None:
         headers={"Authorization": f"Bearer {admin}"},
     )
     assert got.status_code == 200
-    assert project_id not in got.json()["project_ids"]
+    assert project_id in got.json()["project_ids"]
+    assert project2_id not in got.json()["project_ids"]
 
     deleted = client.delete(
         f"/api/v1/admin/modules/{module_id}",

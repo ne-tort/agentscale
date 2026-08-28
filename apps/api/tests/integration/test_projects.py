@@ -1249,7 +1249,7 @@ def test_trigger_drain_fails_queued_when_company_suspended(client: TestClient) -
         headers={"Authorization": f"Bearer {owner_tok}"},
     )
     assert listed.status_code == 200, listed.text
-    assert any(t.get("status") == "failed" for t in listed.json())
+    assert any(t.get("status") == "failed" for t in listed.json()["items"])
 
 
 def _sql_backdate_subscription(company_id: str, ends_at: datetime) -> None:
