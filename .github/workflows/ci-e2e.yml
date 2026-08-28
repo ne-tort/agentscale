@@ -221,14 +221,14 @@ jobs:
         working-directory: infra/ops
         run: poetry install --no-interaction
 
-      - name: Sync PR e2e tests into cluster
+      - name: Sync PR e2e conftest into cluster
         working-directory: infra/ops
         run: |
           set -euo pipefail
           export KUBECONFIG="$(poetry run python -c "from prodavan_ops.k8s import resolve_kubeconfig_path; print(resolve_kubeconfig_path())")"
-          kubectl delete configmap prodavan-e2e-tests -n prodavan --ignore-not-found
-          kubectl create configmap prodavan-e2e-tests \
-            --from-file=../../apps/api/tests/e2e \
+          kubectl delete configmap prodavan-e2e-conftest -n prodavan --ignore-not-found
+          kubectl create configmap prodavan-e2e-conftest \
+            --from-file=conftest.py=../../apps/api/tests/e2e/conftest.py \
             -n prodavan
 
       - name: Run k8s e2e Job (L3a)
@@ -241,7 +241,7 @@ jobs:
         run: |
           poetry run prodavan-ops e2e cleanup || true
           export KUBECONFIG="$(poetry run python -c "from prodavan_ops.k8s import resolve_kubeconfig_path; print(resolve_kubeconfig_path())")"
-          kubectl delete configmap prodavan-e2e-tests -n prodavan --ignore-not-found || true
+          kubectl delete configmap prodavan-e2e-conftest -n prodavan --ignore-not-found || true
 
   live:
     needs: gate
