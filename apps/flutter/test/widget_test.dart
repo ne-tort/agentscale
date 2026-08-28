@@ -58,6 +58,39 @@ void main() {
     expect(opened, '1');
   });
 
+  testWidgets('entity collection applies row color and bold title', (tester) async {
+    const warning = Color(0xFFFF9800);
+    await tester.pumpWidget(
+      themed(
+        Builder(
+          builder: (context) => AppScaffold(
+            title: const Text('T'),
+            body: AppEntityCollection(
+              mode: AppEntityCollectionMode.table,
+              rows: const [
+                AppEntityRow(
+                  id: '1',
+                  title: 'Bold row',
+                  rowColor: warning,
+                  titleBold: true,
+                  cells: {'x': 'cell'},
+                ),
+              ],
+              primaryColumnLabel: 'Name',
+              columns: [AppEntityColumn(id: 'x', label: 'X')],
+              onOpen: (_) {},
+            ),
+          ),
+        ),
+      ),
+    );
+    final title = tester.widget<Text>(find.text('Bold row'));
+    expect(title.style?.fontWeight, FontWeight.w600);
+    expect(title.style?.color, warning);
+    final cell = tester.widget<Text>(find.text('cell'));
+    expect(cell.style?.color, warning);
+  });
+
   testWidgets('catalog select page multi select', (tester) async {
     await tester.pumpWidget(
       themed(

@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.company_service import AdminCompanyService
+from prodavan.application.admin.quota_service import CompanyQuotaService
 from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.application.cabinets.access import CabinetAccessService
 from prodavan.application.projects.access import ProjectAccessService
@@ -61,6 +62,7 @@ def _public(
         "company_id": row.company_id,
         "cabinet_id": row.cabinet_id,
         "owner_employee_id": row.owner_employee_id,
+        "created_by_employee_id": row.owner_employee_id,
         "name": row.name,
         "slug": row.slug,
         "status": row.status,
@@ -114,7 +116,19 @@ class ProjectService:
             employee=employee,
             write=True,
         )
-        await self._subscription.require_active(inst.company_id)
+        cabinet_company_id = inst.company_id or inst.owner_company_id
+        if cabinet_company_id is None:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="cabinet has no company anchor",
+            )
+        await self._subscription.require_active(cabinet_company_id)
+        await CompanyQuotaService(self._session).assert_can_create_project_in_cabinet(
+            cabinet_id=cabinet_id,
+            max_projects=inst.max_projects,
+        )
         slug = slugify_name(name)
         existing = await self._session.execute(
             select(ProjectRow).where(ProjectRow.cabinet_id == cabinet_id, ProjectRow.slug == slug)
@@ -131,7 +145,7 @@ class ProjectService:
         ws_key = workspace_key_for(project_id)
         row = ProjectRow(
             id=project_id,
-            company_id=inst.company_id,
+            company_id=cabinet_company_id,
             cabinet_id=cabinet_id,
             owner_employee_id=employee.id,
             name=name.strip(),
@@ -158,7 +172,11 @@ class ProjectService:
             project_id=project_id,
             cabinet_id=cabinet_id,
             principal=principal,
-            payload={"name": row.name, "slug": row.slug},
+            payload={
+                "name": row.name,
+                "slug": row.slug,
+                "created_by_employee_id": employee.id,
+            },
         )
         await self._session.commit()
         await self._session.refresh(row)

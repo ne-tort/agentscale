@@ -95,13 +95,25 @@ class AdminApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
-  Future<Map<String, dynamic>> setCompanyLogin({
-    required String companyId,
-    required String login,
-  }) async {
+  Future<Map<String, dynamic>> getAdminProfile() async {
+    final res = await AuthHttp.get(_uri('/admin/profile'));
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> setAdminLogin({required String login}) async {
     final res = await AuthHttp.put(
-      _uri('/admin/companies/$companyId/login'),
+      _uri('/admin/profile/login'),
       body: jsonEncode({'login': login}),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> setAdminPassword({required String password}) async {
+    final res = await AuthHttp.put(
+      _uri('/admin/profile/password'),
+      body: jsonEncode({'password': password}),
     );
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
@@ -556,6 +568,22 @@ class AdminApi {
   Future<void> deleteModule(String moduleId) async {
     final res = await AuthHttp.delete(_uri('/admin/modules/$moduleId'));
     _throwIfError(res);
+  }
+
+  Future<Map<String, dynamic>> copyModule({
+    required String moduleId,
+    String? name,
+  }) async {
+    final payload = <String, dynamic>{};
+    if (name != null && name.trim().isNotEmpty) {
+      payload['name'] = name.trim();
+    }
+    final res = await AuthHttp.post(
+      _uri('/admin/modules/$moduleId/copy'),
+      body: jsonEncode(payload),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<List<String>> listModuleMetaSlugs(String moduleId) async {

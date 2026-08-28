@@ -204,6 +204,16 @@ def test_create_company_with_password_and_disable(client: TestClient) -> None:
     blocked = client.get("/api/v1/me", headers={"Authorization": f"Bearer {boss_tok}"})
     assert blocked.status_code == 403
 
+    enabled = client.post(
+        f"/api/v1/employees/{emp_id}/enable",
+        headers={"Authorization": f"Bearer {admin}"},
+    )
+    assert enabled.status_code == 200, enabled.text
+    assert enabled.json()["status"] == "active"
+
+    me_after = client.get("/api/v1/me", headers={"Authorization": f"Bearer {boss_tok}"})
+    assert me_after.status_code == 200
+
     # Company principal still works after employee disable
     org_me2 = client.get("/api/v1/me", headers={"Authorization": f"Bearer {org_tok}"})
     assert org_me2.status_code == 200

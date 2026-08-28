@@ -40,6 +40,8 @@ class AppEntityRow {
     this.leading,
     this.trailing,
     this.titleColor,
+    this.rowColor,
+    this.titleBold = false,
   });
 
   final String id;
@@ -49,8 +51,17 @@ class AppEntityRow {
   final Map<String, Widget> cellWidgets;
   final Widget? leading;
   final Widget? trailing;
-  /// Optional primary-title color (e.g. warning for suspended AI keys).
+
+  /// Optional primary-title color (legacy; prefer [rowColor]).
   final Color? titleColor;
+
+  /// Color for all cells in the row (title + columns).
+  final Color? rowColor;
+
+  /// Bold font on the primary (first) column.
+  final bool titleBold;
+
+  Color? get effectiveColor => rowColor ?? titleColor;
 }
 
 /// Unified entity collection — table on wide, list on narrow (canon 07).
@@ -71,6 +82,8 @@ class AppEntityCollection extends StatefulWidget {
     this.showHeader = true,
     this.onCopy,
     this.onDelete,
+    this.copyableOf,
+    this.deletableOf,
     this.enabledOf,
     this.onEnabledChanged,
   });
@@ -89,6 +102,12 @@ class AppEntityCollection extends StatefulWidget {
 
   final Future<void> Function(AppEntityRow row)? onCopy;
   final Future<void> Function(AppEntityRow row)? onDelete;
+
+  /// When set, long-press shows copy only for rows where this returns true.
+  final bool Function(AppEntityRow row)? copyableOf;
+
+  /// When set, long-press shows delete only for rows where this returns true.
+  final bool Function(AppEntityRow row)? deletableOf;
 
   /// When set with [onEnabledChanged], long-press shows a trailing switch.
   final bool Function(AppEntityRow row)? enabledOf;
@@ -110,6 +129,21 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
       widget.onDelete != null ||
       widget.onEnabledChanged != null;
 
+  bool _canCopy(AppEntityRow row) {
+    if (widget.onCopy == null) return false;
+    return widget.copyableOf?.call(row) ?? true;
+  }
+
+  bool _canDelete(AppEntityRow row) {
+    if (widget.onDelete == null) return false;
+    return widget.deletableOf?.call(row) ?? true;
+  }
+
+  bool _rowHasMutateActions(AppEntityRow row) =>
+      _canCopy(row) ||
+      _canDelete(row) ||
+      (widget.enabledOf != null && widget.onEnabledChanged != null);
+
   AppEntityCollectionMode _effectiveMode(BuildContext context) {
     if (widget.mode != null) return widget.mode!;
     return AppBreakpoints.isWide(context)
@@ -125,13 +159,26 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
   TextAlign _textAlign(AppEntityColumnAlign align) =>
       align == AppEntityColumnAlign.end ? TextAlign.right : TextAlign.left;
 
+  TextStyle? _titleStyle(AppEntityRow row, TextStyle? base) {
+    final color = row.effectiveColor;
+    final weight = row.titleBold ? FontWeight.w600 : null;
+    if (color == null && weight == null) return base;
+    return (base ?? const TextStyle()).copyWith(color: color, fontWeight: weight);
+  }
+
+  TextStyle? _cellTextStyle(AppEntityRow row, TextStyle? base) {
+    final color = row.effectiveColor;
+    if (color == null) return base;
+    return (base ?? const TextStyle()).copyWith(color: color);
+  }
+
   void _clearEdit() {
     if (_editFocusId == null) return;
     setState(() => _editFocusId = null);
   }
 
   void _enterEdit(AppEntityRow row) {
-    if (!_mutateEnabled) return;
+    if (!_mutateEnabled || !_rowHasMutateActions(row)) return;
     setState(() => _editFocusId = row.id);
   }
 
@@ -141,7 +188,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (widget.onCopy != null)
+        if (_canCopy(row))
           IconButton(
             tooltip: l10n.commonCopy,
             icon: Icon(Icons.copy_outlined, size: 20, color: onSurface),
@@ -156,7 +203,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
               if (mounted) _clearEdit();
             },
           ),
-        if (widget.onDelete != null)
+        if (_canDelete(row))
           IconButton(
             tooltip: l10n.commonDelete,
             icon: Icon(Icons.delete_outline, size: 20, color: onSurface),
@@ -212,12 +259,16 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
       return widget.empty ?? EmptyPlaceholder(title: l10n.commonEmpty);
     }
     if (mode == AppEntityCollectionMode.list) {
+      final bodyMedium = Theme.of(context).textTheme.bodyMedium;
       return ListView.builder(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         itemCount: widget.rows.length,
         itemBuilder: (context, i) {
           final row = widget.rows[i];
           final editing = _editFocusId == row.id;
+          final subtitleStyle = row.effectiveColor != null
+              ? bodyMedium?.copyWith(color: row.effectiveColor)
+              : bodyMedium;
           return Padding(
             padding: EdgeInsets.only(
               bottom: i == widget.rows.length - 1 ? 0 : AppSpacing.sm,
@@ -225,11 +276,10 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
             child: AppListItem(
               title: Text(
                 row.title,
-                style: row.titleColor != null
-                    ? TextStyle(color: row.titleColor)
-                    : null,
+                style: _titleStyle(row, bodyMedium),
               ),
-              subtitle: row.subtitle != null ? Text(row.subtitle!) : null,
+              subtitle:
+                  row.subtitle != null ? Text(row.subtitle!, style: subtitleStyle) : null,
               leading: row.leading,
               selected: editing,
               trailing: editing
@@ -242,8 +292,9 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                 }
                 widget.onOpen(row);
               },
-              onLongPress:
-                  _mutateEnabled ? () => _enterEdit(row) : null,
+              onLongPress: _mutateEnabled && _rowHasMutateActions(row)
+                  ? () => _enterEdit(row)
+                  : null,
             ),
           );
         },
@@ -254,6 +305,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
           color: colors.muted,
           fontWeight: FontWeight.w600,
         );
+    final bodyMedium = Theme.of(context).textTheme.bodyMedium;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -332,8 +384,9 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                     }
                     widget.onOpen(row);
                   },
-                  onLongPress:
-                      _mutateEnabled ? () => _enterEdit(row) : null,
+                  onLongPress: _mutateEnabled && _rowHasMutateActions(row)
+                      ? () => _enterEdit(row)
+                      : null,
                   cells: [
                     DataCell(
                       Align(
@@ -341,9 +394,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                         child: Text(
                           row.title,
                           overflow: TextOverflow.ellipsis,
-                          style: row.titleColor != null
-                              ? TextStyle(color: row.titleColor)
-                              : null,
+                          style: _titleStyle(row, bodyMedium),
                         ),
                       ),
                     ),
@@ -358,7 +409,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                                   child: _mutateTrailing(context, row),
                                 ),
                               )
-                            : _dataCell(row, widget.columns[i]),
+                            : _dataCell(context, row, widget.columns[i]),
                     ],
                   ],
                 ),
@@ -383,8 +434,13 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
     );
   }
 
-  DataCell _dataCell(AppEntityRow row, AppEntityColumn column) {
+  DataCell _dataCell(
+    BuildContext context,
+    AppEntityRow row,
+    AppEntityColumn column,
+  ) {
     final alignment = _alignment(column.align);
+    final bodyMedium = Theme.of(context).textTheme.bodyMedium;
     final widgetCell = row.cellWidgets[column.id];
     final child = widgetCell ??
         Text(
@@ -392,6 +448,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
           overflow: TextOverflow.ellipsis,
           maxLines: 1,
           textAlign: _textAlign(column.align),
+          style: _cellTextStyle(row, bodyMedium),
         );
     if (column.width != null) {
       return DataCell(

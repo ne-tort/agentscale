@@ -8,12 +8,12 @@ import 'package:prodavan/features/admin/admin_management_page.dart';
 import 'package:prodavan/features/admin/admin_metrics_overview_page.dart';
 import 'package:prodavan/features/admin/admin_module_list_page.dart';
 import 'package:prodavan/features/admin/admin_project_containers_page.dart';
+import 'package:prodavan/features/admin/admin_settings_body.dart';
 import 'package:prodavan/features/admin/ai_key_list_page.dart';
 import 'package:prodavan/features/admin/company_list_page.dart';
-import 'package:prodavan/features/settings/settings_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Platform Admin shell — Overview + management sections (+ mobile Management hub).
+/// Platform Admin shell — logo → overview; rail without Overview tab.
 class AdminShell extends StatefulWidget {
   const AdminShell({super.key});
 
@@ -22,22 +22,33 @@ class AdminShell extends StatefulWidget {
 }
 
 class _AdminShellState extends State<AdminShell> {
-  static const _mainCount = 6;
+  static const _overviewIndex = 0;
+  static const _sectionCount = 5;
   static const _settingsIndex = 6;
 
-  int _contentIndex = 0;
-  int _mainHighlight = 0;
-  int _narrowIndex = 0;
+  int _contentIndex = _overviewIndex;
+  int? _railSelected;
+  int _narrowStackIndex = 1;
   bool _subpageOpen = false;
 
   void _onSubpageOpenChanged(bool open) {
     if (_subpageOpen != open) setState(() => _subpageOpen = open);
   }
 
-  void _selectMainWide(int index) {
+  void _goOverview() {
     setState(() {
-      _mainHighlight = index;
-      _contentIndex = index;
+      _contentIndex = _overviewIndex;
+      _railSelected = null;
+      _narrowStackIndex = 0;
+      _subpageOpen = false;
+    });
+  }
+
+  void _selectRail(int index) {
+    setState(() {
+      _railSelected = index;
+      _contentIndex = index + 1;
+      _narrowStackIndex = 1;
       _subpageOpen = false;
     });
   }
@@ -45,13 +56,21 @@ class _AdminShellState extends State<AdminShell> {
   void _selectSettingsWide() {
     setState(() {
       _contentIndex = _settingsIndex;
+      _railSelected = null;
       _subpageOpen = false;
     });
   }
 
-  void _selectNarrow(int index) {
+  void _selectNarrowMain() {
     setState(() {
-      _narrowIndex = index;
+      _narrowStackIndex = 1;
+      _subpageOpen = false;
+    });
+  }
+
+  void _selectNarrowSettings() {
+    setState(() {
+      _narrowStackIndex = 2;
       _subpageOpen = false;
     });
   }
@@ -69,30 +88,29 @@ class _AdminShellState extends State<AdminShell> {
       return AppLayout(
         constrainBody: false,
         subpageOpen: _subpageOpen,
-        selectedIndex: _narrowIndex.clamp(0, 1),
+        selectedIndex: _narrowStackIndex == 1 ? 0 : null,
         trailingDestination: settingsDest,
-        trailingSelected: _narrowIndex == 2,
-        onTrailingSelected: () => _selectNarrow(2),
-        onDestinationSelected: _selectNarrow,
-        onLogoTap: () => _selectNarrow(0),
+        trailingSelected: _narrowStackIndex == 2,
+        onTrailingSelected: _selectNarrowSettings,
+        onDestinationSelected: (_) => _selectNarrowMain(),
+        onLogoTap: _goOverview,
         destinations: [
-          AppNavDestination(icon: Icons.dashboard_outlined, label: l10n.navOverview),
           AppNavDestination(icon: Icons.apps_outlined, label: l10n.navManagement),
         ],
         body: IndexedStack(
-          index: _narrowIndex,
+          index: _narrowStackIndex,
           children: [
             AppShellBranch(
-              active: _narrowIndex == 0,
-              onSubpageOpenChanged: _narrowIndex == 0 ? _onSubpageOpenChanged : null,
+              active: _narrowStackIndex == 0,
+              onSubpageOpenChanged: _narrowStackIndex == 0 ? _onSubpageOpenChanged : null,
               root: const AdminMetricsOverviewPage(embedded: true),
             ),
             AppShellBranch(
-              active: _narrowIndex == 1,
-              onSubpageOpenChanged: _narrowIndex == 1 ? _onSubpageOpenChanged : null,
+              active: _narrowStackIndex == 1,
+              onSubpageOpenChanged: _narrowStackIndex == 1 ? _onSubpageOpenChanged : null,
               root: const AdminManagementPage(),
             ),
-            const SettingsPage(embedded: true),
+            const AdminSettingsBody(),
           ],
         ),
       );
@@ -105,20 +123,18 @@ class _AdminShellState extends State<AdminShell> {
       AdminProjectContainersPage(embedded: true),
       AdminCabinetListPage(embedded: true),
       AdminModuleListPage(embedded: true),
-      SettingsPage(embedded: true),
     ];
 
     return AppLayout(
       constrainBody: false,
       subpageOpen: _subpageOpen,
-      selectedIndex: _mainHighlight,
+      selectedIndex: _railSelected,
       trailingDestination: settingsDest,
       trailingSelected: _contentIndex == _settingsIndex,
       onTrailingSelected: _selectSettingsWide,
-      onDestinationSelected: _selectMainWide,
-      onLogoTap: () => _selectMainWide(0),
+      onDestinationSelected: _selectRail,
+      onLogoTap: _goOverview,
       destinations: [
-        AppNavDestination(icon: Icons.dashboard_outlined, label: l10n.navOverview),
         AppNavDestination(icon: Icons.business_outlined, label: l10n.navCompanies),
         AppNavDestination(icon: Icons.key_outlined, label: l10n.navAiKeys),
         AppNavDestination(icon: Icons.dns_outlined, label: l10n.navContainers),
@@ -128,13 +144,13 @@ class _AdminShellState extends State<AdminShell> {
       body: IndexedStack(
         index: _contentIndex,
         children: [
-          for (var i = 0; i < _mainCount; i++)
+          for (var i = 0; i < _sectionCount + 1; i++)
             AppShellBranch(
               active: _contentIndex == i,
               onSubpageOpenChanged: _contentIndex == i ? _onSubpageOpenChanged : null,
               root: mainPages[i],
             ),
-          const SettingsPage(embedded: true),
+          const AdminSettingsBody(),
         ],
       ),
     );

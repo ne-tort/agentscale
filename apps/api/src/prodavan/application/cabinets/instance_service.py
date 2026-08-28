@@ -39,6 +39,9 @@ async def _public_row(
     from prodavan.application.modules.module_binding_service import ModuleBindingService
 
     module_ids = await ModuleBindingService(session).list_module_ids_for_cabinet(row.id)
+    from prodavan.application.admin.quota_service import CompanyQuotaService
+
+    projects_count = await CompanyQuotaService(session).count_active_projects_in_cabinet(row.id)
     out = {
         "id": row.id,
         "name": row.name,
@@ -47,6 +50,9 @@ async def _public_row(
         "company_id": row.company_id,
         "owner_scope": row.owner_scope,
         "owner_company_id": row.owner_company_id,
+        "template_cabinet_id": row.template_cabinet_id,
+        "max_projects": row.max_projects,
+        "projects_count": projects_count,
         "company_ids": company_ids,
         "companies": companies,
         "module_ids": module_ids,
@@ -93,21 +99,17 @@ class CabinetInstanceService:
         ids = list(company_ids or [])
         if company_id and company_id not in ids:
             ids.insert(0, company_id)
-        primary: str | None = None
-        company_name: str | None = None
         if ids:
-            primary = ids[0]
-            company = await self._session.get(CompanyRow, primary)
-            if company is None:
-                raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="company not found")
-            company_name = company.name
-            await CompanyQuotaService(self._session).assert_can_create_cabinet(primary)
+            for cid in ids:
+                co = await self._session.get(CompanyRow, cid)
+                if co is None:
+                    raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="company not found")
 
         row = CabinetInstanceRow(
             name=name.strip(),
             schema_name="pending",
             owner_employee_id=None,
-            company_id=primary,
+            company_id=None,
             owner_scope=CabinetOwnerScope.PLATFORM,
             owner_company_id=None,
             base_template="base",
@@ -119,7 +121,10 @@ class CabinetInstanceService:
         await self._provisioner.provision(self._session, instance_id=row.id)
         from prodavan.application.relations.commands import RelationsCommand
 
-        await RelationsCommand(self._session).replace_cabinet_company_grants(row.id, ids)
+        if ids:
+            await RelationsCommand(self._session).replace_cabinet_company_grants(row.id, ids)
+            for cid in ids:
+                await self.provision_company_copy_from_template(template_id=row.id, company_id=cid)
         from prodavan.application.platform.bootstrap_service import PlatformBootstrapService
 
         await PlatformBootstrapService(self._session).apply_default_modules_for_cabinet(
@@ -127,7 +132,74 @@ class CabinetInstanceService:
         )
         await self._session.commit()
         await self._session.refresh(row)
-        return await _public_row(self._session, row, grants=self._grants, company_name=company_name)
+        return await _public_row(self._session, row, grants=self._grants)
+
+    async def provision_company_copy_from_template(
+        self,
+        *,
+        template_id: str,
+        company_id: str,
+    ) -> CabinetInstanceRow:
+        """Materialize company-owned workspace from platform template (one copy per company)."""
+        from prodavan.application.modules.module_binding_service import ModuleBindingService
+        from prodavan.application.relations.commands import RelationsCommand
+
+        existing_q = await self._session.execute(
+            select(CabinetInstanceRow).where(
+                CabinetInstanceRow.template_cabinet_id == template_id,
+                CabinetInstanceRow.owner_company_id == company_id,
+                CabinetInstanceRow.status != CabinetStatus.DELETED,
+            )
+        )
+        existing = existing_q.scalar_one_or_none()
+        if existing is not None:
+            return existing
+
+        template = await self._access.get_instance(template_id)
+        if template.owner_scope != CabinetOwnerScope.PLATFORM:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="only platform cabinets are templates",
+            )
+
+        await CompanyQuotaService(self._session).assert_can_create_cabinet(company_id)
+
+        row = CabinetInstanceRow(
+            name=template.name,
+            schema_name="pending",
+            owner_employee_id=None,
+            company_id=company_id,
+            owner_scope=CabinetOwnerScope.COMPANY,
+            owner_company_id=company_id,
+            base_template=template.base_template,
+            template_cabinet_id=template_id,
+            max_projects=template.max_projects,
+            status=CabinetStatus.ACTIVE,
+        )
+        self._session.add(row)
+        await self._session.flush()
+        row.schema_name = schema_name_for_instance(row.id)
+        await self._provisioner.provision(self._session, instance_id=row.id)
+
+        rel = RelationsCommand(self._session)
+        await rel.replace_cabinet_company_grants(row.id, [company_id])
+
+        bindings = ModuleBindingService(self._session)
+        module_ids = await bindings.list_module_ids_for_cabinet(template_id)
+        if module_ids:
+            await bindings.replace_module_bindings_for_cabinet(row.id, module_ids)
+
+        from prodavan.application.platform.bootstrap_service import PlatformBootstrapService
+
+        if not module_ids:
+            await PlatformBootstrapService(self._session).apply_default_modules_for_cabinet(
+                row.id, base_template=row.base_template
+            )
+
+        await self._session.flush()
+        return row
 
     async def create_from_base(
         self,
@@ -238,6 +310,8 @@ class CabinetInstanceService:
         company_ids: list[str] | None = None,
         module_ids: list[str] | None = None,
         company_grant_scope: str | None = None,
+        max_projects: int | None = None,
+        clear_max_projects: bool = False,
     ) -> dict:
         inst = await self._access.get_instance(cabinet_id)
         if name is not None:
@@ -250,12 +324,21 @@ class CabinetInstanceService:
             await RelationsCommand(self._session).replace_cabinet_company_grants(
                 cabinet_id, company_ids
             )
+            if inst.owner_scope == CabinetOwnerScope.PLATFORM:
+                for cid in company_ids:
+                    await self.provision_company_copy_from_template(
+                        template_id=cabinet_id, company_id=cid
+                    )
         elif company_id is not None:
             from prodavan.application.relations.commands import RelationsCommand
 
             await RelationsCommand(self._session).replace_cabinet_company_grants(
                 cabinet_id, [company_id]
             )
+            if inst.owner_scope == CabinetOwnerScope.PLATFORM:
+                await self.provision_company_copy_from_template(
+                    template_id=cabinet_id, company_id=company_id
+                )
         if module_ids is not None:
             from prodavan.application.modules.module_binding_service import ModuleBindingService
 
@@ -275,6 +358,29 @@ class CabinetInstanceService:
                     detail="company_grant_scope must be selected or all",
                 )
             inst.company_grant_scope = scope
+        if clear_max_projects:
+            inst.max_projects = None
+        elif max_projects is not None:
+            if max_projects < 1:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail="max_projects must be >= 1",
+                )
+            inst.max_projects = max_projects
+        if inst.owner_scope == CabinetOwnerScope.PLATFORM and (
+            clear_max_projects or max_projects is not None
+        ):
+            copies_q = await self._session.execute(
+                select(CabinetInstanceRow).where(
+                    CabinetInstanceRow.template_cabinet_id == cabinet_id,
+                    CabinetInstanceRow.status != CabinetStatus.DELETED,
+                )
+            )
+            limit = None if clear_max_projects else inst.max_projects
+            for copy in copies_q.scalars().all():
+                copy.max_projects = limit
         await self._session.commit()
         await self._session.refresh(inst)
         return await _public_row(self._session, inst, grants=self._grants)
@@ -539,6 +645,89 @@ class CabinetInstanceService:
         )
         await self._session.commit()
         return {"cabinet_id": cabinet_id, "employee_id": employee_id, "status": "revoked"}
+
+    async def copy_cabinet(
+        self,
+        *,
+        cabinet_id: str,
+        company_id: str,
+        name: str | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        """Duplicate cabinet with module bindings + employee assignments (no projects)."""
+        from prodavan.application.modules.module_binding_service import ModuleBindingService
+        from prodavan.application.relations.commands import RelationsCommand
+
+        source = await self._access.require_access(
+            cabinet_id=cabinet_id,
+            principal=principal,
+            employee=employee,
+            write=False,
+        )
+        await EntitlementService(self._session).require_company_actor(
+            principal, company_id, employee=employee
+        )
+        if not await self._grants.has_active_company_grant(cabinet_id, company_id):
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="cabinet not found")
+
+        copy_name = (name or f"{source.name} (copy)").strip()
+        if not copy_name:
+            raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="name required")
+        await CompanyQuotaService(self._session).assert_can_create_cabinet(company_id)
+
+        row = CabinetInstanceRow(
+            name=copy_name,
+            schema_name="pending",
+            owner_employee_id=employee.id if employee is not None else source.owner_employee_id,
+            company_id=company_id,
+            owner_scope=CabinetOwnerScope.COMPANY,
+            owner_company_id=company_id,
+            base_template=source.base_template,
+            template_cabinet_id=source.template_cabinet_id or (
+                source.id if source.owner_scope == CabinetOwnerScope.PLATFORM else None
+            ),
+            max_projects=source.max_projects,
+            status=CabinetStatus.ACTIVE,
+        )
+        self._session.add(row)
+        await self._session.flush()
+        row.schema_name = schema_name_for_instance(row.id)
+        await self._provisioner.provision(self._session, instance_id=row.id)
+
+        rel = RelationsCommand(self._session)
+        await rel.replace_cabinet_company_grants(row.id, [company_id])
+
+        bindings = ModuleBindingService(self._session)
+        module_ids = await bindings.list_module_ids_for_cabinet(cabinet_id)
+        if module_ids:
+            await bindings.replace_module_bindings_for_cabinet(row.id, module_ids)
+
+        for assignment in await self._grants.list_assignments(cabinet_id):
+            emp_id = assignment["employee_id"]
+            try:
+                await self._grants.assign_employee(
+                    cabinet_id=row.id,
+                    employee_id=emp_id,
+                    company_id=company_id,
+                )
+            except AppError:
+                continue
+
+        owner_employee_id = employee.id if employee is not None else source.owner_employee_id
+        if owner_employee_id is not None:
+            try:
+                await rel.assign_employee_to_cabinet(
+                    cabinet_id=row.id,
+                    employee_id=owner_employee_id,
+                    company_id=company_id,
+                )
+            except AppError:
+                pass
+
+        await self._session.commit()
+        await self._session.refresh(row)
+        return await _public_row(self._session, row, grants=self._grants)
 
     async def list_assignments_for_company(
         self,

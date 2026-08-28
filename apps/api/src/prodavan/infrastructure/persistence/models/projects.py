@@ -22,7 +22,10 @@ class ProjectRow(Base):
     id: Mapped[str] = mapped_column(String(40), primary_key=True)
     company_id: Mapped[str] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     cabinet_id: Mapped[str] = mapped_column(ForeignKey("cabinet_instances.id", ondelete="CASCADE"), nullable=False)
-    owner_employee_id: Mapped[str] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    owner_employee_id: Mapped[str | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     slug: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")

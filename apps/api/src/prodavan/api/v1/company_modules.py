@@ -34,6 +34,12 @@ class MetaDocumentBody(BaseModel):
     body: Any
 
 
+class CopyModuleBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+
+
 @router.get("")
 async def list_company_modules(
     company_id: str,
@@ -98,6 +104,23 @@ async def delete_company_module(
 ) -> dict:
     await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
     return await CompanyModuleService(session).delete_local(company_id=company_id, module_id=module_id)
+
+
+@router.post("/{module_id}/copy", status_code=201)
+async def copy_company_module(
+    company_id: str,
+    module_id: str,
+    body: CopyModuleBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    return await CompanyModuleService(session).copy_module(
+        company_id=company_id,
+        source_module_id=module_id,
+        name=body.name,
+    )
 
 
 @router.get("/{module_id}/meta/documents")

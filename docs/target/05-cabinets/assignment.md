@@ -1,35 +1,36 @@
 # Cabinet assignment (канон)
 
-Два уровня grants (N:M). Кабинет = оболочка workspace.
-
+Кабинет = **общее рабочее пространство** для сотрудников компании.  
 Иерархия: [00-entities](../00-entities.md). Ownership: [00-ownership-matrix](../00-ownership-matrix.md).
 
 ## Модель
 
 ```text
-Admin ──grants (N:M)──► Cabinet ◄──grants (N:M)──► Company     (Company видит RO если platform-owned)
-Company ──assigns (N:M)──► Employee ↔ Cabinet              (операторский доступ)
-Employee ──operates──► Cabinet → Project → Pod
-
-Future:
-  Company ──creates/copies──► own local Cabinets (полный manage)
-  Admin ──assigns──► Cabinet/Employee напрямую (универсальная иерархия)
+Admin ──создаёт шаблон (platform cabinet)
+Admin ──grants (N:M)──► Company  →  provision workspace copy (per company)
+Company ──assigns (N:M)──► Employee ↔ workspace Cabinet
+Employee (в кабинете) ──видит все Projects кабинета──► Project → Pod
 ```
 
-| Правило | MVP | Future |
-|---------|-----|--------|
-| Admin → Company cabinet | N:M grants; Company **RO** meta if platform-owned | + revoke |
-| Company local cabinets | employee create → `owner_scope=company` | create / copy / CRUD своих |
-| Company → Employee grant | **да** (на cabinets с active company grant) | то же |
-| Employee operate / projects | только с active assignment | то же |
+| Правило | MVP |
+|---------|-----|
+| Admin → Company | grant на **шаблон**; платформа материализует **копию** workspace (`template_cabinet_id`) |
+| Company UI | список **workspace copies** (`owner_scope=company`); шаблон platform не показывается |
+| Admin-provisioned workspace | Company **RO** registry (`writable=false`, `source=platform_assigned`) |
+| Company local workspace | employee create → `owner_scope=company`, без `template_cabinet_id`, full manage |
+| Company → Employee grant | на workspace cabinet с active company grant |
+| Projects | только `cabinet_id`; creator = metadata (`created_by_employee_id` в API/events) |
 
 ## Grant Admin→Company (`cabinet_company_grants`)
 
+На **шаблоне**: список компаний, которым выдан workspace.  
+На **копии**: grant компании-владельца.
+
 | Поле | Смысл |
 |------|--------|
-| `cabinet_id` | кабинет |
+| `cabinet_id` | шаблон или workspace |
 | `company_id` | компания |
-| `mode` | `assigned_ro` (MVP) / later `owned_local` |
+| `mode` | `assigned_ro` (MVP) |
 | `status` | active / revoked |
 | timestamps | |
 
@@ -39,20 +40,24 @@ UNIQUE (`cabinet_id`, `company_id`). CASCADE от cabinet.
 
 | Поле | Смысл |
 |------|--------|
-| `cabinet_id` | кабинет |
+| `cabinet_id` | workspace |
 | `employee_id` | сотрудник |
-| `role` | `operator` (MVP) / later `viewer` |
+| `role` | `operator` (MVP) |
 | `status` | active / revoked |
 | timestamps | |
 
-UNIQUE (`cabinet_id`, `employee_id`). CASCADE от cabinet / employee.
+UNIQUE (`cabinet_id`, `employee_id`). CASCADE от cabinet; employee revoke не удаляет проекты.
 
 ## Cascade
 
-**Delete Cabinet** → все Projects → wipe Pods/MinIO → schema → все grants → cabinet.
+| Событие | Эффект |
+|---------|--------|
+| Delete Employee (soft) | проекты **остаются**; `created_by_employee_id` → NULL |
+| Delete Cabinet (soft) | soft_delete всех проектов кабинета; schema keep |
+| Purge Cabinet | wipe soft-deleted projects + DROP schema + delete row |
 
 ## Не канон
 
+- Один platform cabinet shared между компаниями для operate/projects.
+- Project ownership через `owner_employee_id` (ACL).
 - Static `profile_id` code-pack grants.
-- As-built «только owner_employee» без company/admin assign.
-- Single `company_id` FK as sole ACL (legacy; backfilled into grants).

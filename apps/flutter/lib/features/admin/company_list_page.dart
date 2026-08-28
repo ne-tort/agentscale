@@ -15,6 +15,7 @@ import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/admin/company/admin_company_detail_page.dart';
+import 'package:prodavan/features/company/company_entity_source.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Platform Admin company list (L04).
@@ -145,10 +146,14 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
           ? l10n.adminCompanyCabinetsRunning('$running', '$quota')
           : l10n.commonEmDash;
       final description = _cell(c['description'], l10n);
+      final paused = c['status'] == 'paused';
+      final warningStyle = companyEntityWarningRowStyle(context, warning: paused);
       return AppEntityRow(
         id: c['id'] as String,
         title: c['name'] as String? ?? c['id'] as String,
         subtitle: description != l10n.commonEmDash ? description : null,
+        rowColor: warningStyle.rowColor,
+        titleBold: warningStyle.titleBold,
         cells: {
           'description': description,
           'employees': _cell(c['employees_total'], l10n),

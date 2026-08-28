@@ -158,6 +158,46 @@ class CompanyApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> enableEmployee(String employeeId) async {
+    final res = await AuthHttp.post(_uri('/employees/$employeeId/enable'));
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> createCabinet({
+    required String companyId,
+    required String name,
+  }) async {
+    final res = await AuthHttp.post(
+      _uri('/cabinets'),
+      body: jsonEncode({'name': name, 'company_id': companyId}),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> copyCabinet({
+    required String companyId,
+    required String cabinetId,
+    String? name,
+  }) async {
+    final payload = <String, dynamic>{'company_id': companyId};
+    if (name != null && name.trim().isNotEmpty) {
+      payload['name'] = name.trim();
+    }
+    final res = await AuthHttp.post(
+      _uri('/cabinets/$cabinetId/copy'),
+      body: jsonEncode(payload),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> deleteCabinet(String cabinetId) async {
+    final res = await AuthHttp.delete(_uri('/cabinets/$cabinetId'));
+    _throwIfError(res);
+  }
+
   Future<List<Map<String, dynamic>>> listAiKeys(String companyId) async {
     final res = await AuthHttp.get(_uri('/companies/$companyId/ai-keys'));
     _throwIfError(res);
@@ -362,6 +402,23 @@ class CompanyApi {
   }) async {
     final res = await AuthHttp.delete(_uri('/companies/$companyId/modules/$moduleId'));
     _throwIfError(res);
+  }
+
+  Future<Map<String, dynamic>> copyModule({
+    required String companyId,
+    required String moduleId,
+    String? name,
+  }) async {
+    final payload = <String, dynamic>{};
+    if (name != null && name.trim().isNotEmpty) {
+      payload['name'] = name.trim();
+    }
+    final res = await AuthHttp.post(
+      _uri('/companies/$companyId/modules/$moduleId/copy'),
+      body: jsonEncode(payload),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
   Future<List<String>> listModuleMetaSlugs({

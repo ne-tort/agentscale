@@ -7,6 +7,7 @@ import pytest
 from prodavan.application.auth.lifecycle import (
     AUTH_USER_DELETED,
     AUTH_USER_DISABLED,
+    AUTH_USER_ENABLED,
     LifecycleUserCommand,
     apply_lifecycle,
     handle_auth_lifecycle_command,
@@ -62,6 +63,31 @@ async def test_delete_user_event(_fake_admin: FakeUserAdmin) -> None:
     )
     assert event.event_type == AUTH_USER_DELETED
     assert sub in _fake_admin.deleted
+
+
+@pytest.mark.asyncio
+async def test_enable_user_event(_fake_admin: FakeUserAdmin) -> None:
+    await _fake_admin.register_user(
+        username="u2@t.com",
+        email="u2@t.com",
+        password=None,
+        realm_roles=["employee"],
+        display_name=None,
+    )
+    sub = _fake_admin._by_email["u2@t.com"]
+    _fake_admin.disabled.append(sub)
+    event = await apply_lifecycle(
+        LifecycleUserCommand(
+            request_id="r3",
+            client_ref="employee:e3",
+            sub=sub,
+            username="u2@t.com",
+            email="u2@t.com",
+            action="enable",
+        )
+    )
+    assert event.event_type == AUTH_USER_ENABLED
+    assert sub not in _fake_admin.disabled
 
 
 @pytest.mark.asyncio

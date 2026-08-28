@@ -1357,6 +1357,28 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get companyAddEmployee => 'Add employee';
+
+  @override
+  String get companyAddCabinet => 'Add cabinet';
+
+  @override
+  String get companyPauseEmployee => 'Pause employee';
+
+  @override
+  String companyPauseEmployeeConfirm(String login) {
+    return 'Pause $login? They will lose access until re-enabled.';
+  }
+
+  @override
+  String get companyEnableEmployee => 'Enable employee';
+
+  @override
+  String companyEnableEmployeeConfirm(String login) {
+    return 'Enable $login? They will regain access.';
+  }
+
+  @override
   String get companyInviteEmployee => 'Invite employee';
 
   @override
@@ -1425,9 +1447,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get companyKeySourceLocal => 'Local';
 
   @override
-  String get companyKeyReadOnlyBanner => 'Platform-bound key — read only';
-
-  @override
   String get companyAddModule => 'Add module';
 
   @override
@@ -1436,10 +1455,6 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get companyModulesEmptyHint =>
       'Create a local module or wait for platform assignment';
-
-  @override
-  String get companyModuleReadOnlyBanner =>
-      'Platform-assigned module — read only; you can bind cabinets';
 
   @override
   String get companyCreateRuntimeKeyHint =>
@@ -1515,11 +1530,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get companyOwner => 'Owner';
-
-  @override
-  String companyReadOnlyOrgView(String title) {
-    return '$title — read-only org view';
-  }
 
   @override
   String get companyRole => 'Role';

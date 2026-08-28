@@ -35,6 +35,14 @@ class UserAdminPort(Protocol):
         email: str | None,
     ) -> None: ...
 
+    async def enable_user(
+        self,
+        *,
+        keycloak_user_id: str | None,
+        username: str | None,
+        email: str | None,
+    ) -> None: ...
+
     async def delete_user(
         self,
         *,
@@ -113,6 +121,17 @@ class FakeUserAdmin:
         email: str | None,
     ) -> None:
         self.disabled.append(keycloak_user_id or username or email or "")
+
+    async def enable_user(
+        self,
+        *,
+        keycloak_user_id: str | None,
+        username: str | None,
+        email: str | None,
+    ) -> None:
+        key = keycloak_user_id or username or email or ""
+        if key in self.disabled:
+            self.disabled.remove(key)
 
     async def delete_user(
         self,

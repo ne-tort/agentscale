@@ -38,8 +38,6 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
 
   bool get _writable => companyEntityWritable(_key ?? const {});
 
-  bool get _platformAssigned => companyEntityPlatformAssigned(_key?['source'] as String?);
-
   @override
   void initState() {
     super.initState();
@@ -194,24 +192,12 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
     final nextRaw = _key?['next_renewal_at'] as String? ?? '';
     final nextDisplay = formatSubscriptionDate(nextRaw);
     final warning = context.appColors.warning;
-    final platformBound = _platformAssigned;
 
     return AppScaffold(
       title: Text(_displayName),
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         children: [
-          if (platformBound)
-            Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.md,
-                vertical: AppSpacing.xs,
-              ),
-              child: AppStatusBanner(
-                severity: AppStatusSeverity.info,
-                message: l10n.companyKeyReadOnlyBanner,
-              ),
-            ),
           AppValuePreference<String>(
             title: l10n.commonName,
             icon: Icons.label_outline_rounded,

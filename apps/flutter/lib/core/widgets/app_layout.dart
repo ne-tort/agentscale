@@ -47,8 +47,8 @@ class AppLayout extends StatelessWidget {
 
   final Widget body;
   final List<AppNavDestination> destinations;
-  /// Selected index among [destinations] only (not trailing).
-  final int selectedIndex;
+  /// Selected index among [destinations] only (not trailing). Null = none (e.g. overview via logo).
+  final int? selectedIndex;
   final ValueChanged<int> onDestinationSelected;
   final Widget? title;
   final List<Widget>? actions;
@@ -204,9 +204,11 @@ class AppLayout extends StatelessWidget {
     final narrow = AppBreakpoints.isNarrow(context);
     final expanded = AppBreakpoints.railExtended(context, subpageOpen: subpageOpen);
     final content = _contentColumn();
-    final mainSelected = destinations.isEmpty
-        ? 0
-        : selectedIndex.clamp(0, destinations.length - 1);
+    final mainSelected = selectedIndex == null
+        ? null
+        : (destinations.isEmpty
+            ? 0
+            : selectedIndex!.clamp(0, destinations.length - 1));
 
     if (narrow) {
       final allDestinations = [
@@ -215,7 +217,7 @@ class AppLayout extends StatelessWidget {
       ];
       final selected = trailingSelected && trailingDestination != null
           ? allDestinations.length - 1
-          : mainSelected.clamp(0, allDestinations.length - 1);
+          : (mainSelected ?? 0).clamp(0, allDestinations.length - 1);
 
       return Scaffold(
         body: content,

@@ -1,19 +1,17 @@
-"""Company org login helpers."""
+"""Employee login validation (company org login is always company.id)."""
 
 from __future__ import annotations
 
 import re
 
 from prodavan.domain.errors import AppError
-from prodavan.infrastructure.persistence.models.identity import CompanyRow
 
 _LOGIN_USERNAME_RE = re.compile(r"^[a-zA-Z0-9._-]{3,64}$")
 
 
-def company_effective_login(company: CompanyRow) -> str:
-    """Public login username for Keycloak and UI."""
-    custom = (getattr(company, "login_username", None) or "").strip()
-    return custom if custom else company.id
+def company_effective_login(company) -> str:
+    """Public login username for Keycloak and UI — always company id."""
+    return company.id
 
 
 def validate_login_username(raw: str) -> str:

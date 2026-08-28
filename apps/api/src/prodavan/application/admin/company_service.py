@@ -18,8 +18,8 @@ from prodavan.domain.admin import (
     subscription_read_model,
 )
 from prodavan.domain.cabinets import CabinetStatus
-from prodavan.domain.cabinets.types import CabinetAssignmentStatus, CabinetCompanyGrantScope, CabinetGrantStatus
-from prodavan.domain.companies.login import company_effective_login, validate_login_username
+from prodavan.domain.cabinets.types import CabinetAssignmentStatus, CabinetGrantStatus
+from prodavan.domain.companies.login import company_effective_login
 from prodavan.domain.employees.login import employee_effective_login
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
@@ -137,6 +137,7 @@ class AdminCompanyService:
                     "cabinets_quota": quota.max_cabinets,
                     "employees_total": employees_total,
                     "online": online_map.get(login_key, False),
+                    "status": company.status,
                 }
             )
         return out
@@ -220,7 +221,6 @@ class AdminCompanyService:
             "contact_email": company.contact_email,
             "phone": company.phone,
             "username": company_effective_login(company),
-            "login_username": company.login_username,
             "password_set": company.keycloak_sub is not None,
             "keycloak_sub": company.keycloak_sub,
             "created_at": company.created_at.isoformat() if company.created_at else None,
@@ -422,42 +422,64 @@ class AdminCompanyService:
 
     async def list_org_cabinets(self, company_id: str) -> list[dict]:
         await self._require_company(company_id)
+        from prodavan.application.admin.quota_service import CompanyQuotaService
         from prodavan.application.cabinets.grant_service import CabinetGrantService
+        from prodavan.application.cabinets.instance_service import CabinetInstanceService
         from prodavan.application.modules.module_binding_service import ModuleBindingService
-        from prodavan.domain.ownership import company_view_flags
+        from prodavan.domain.cabinets import CabinetOwnerScope, CabinetStatus
+        from prodavan.domain.ownership import CompanyViewFlags, EntitySource, company_view_flags
         from prodavan.infrastructure.persistence.models.cabinets import (
             CabinetCompanyGrantRow,
             CabinetInstanceRow,
         )
 
-        grants = CabinetGrantService(self._session)
-        bindings = ModuleBindingService(self._session)
-        q = await self._session.execute(
+        cabinets_svc = CabinetInstanceService(self._session)
+        grant_q = await self._session.execute(
             select(CabinetInstanceRow)
-            .outerjoin(
+            .join(
                 CabinetCompanyGrantRow,
                 (CabinetCompanyGrantRow.cabinet_id == CabinetInstanceRow.id)
                 & (CabinetCompanyGrantRow.company_id == company_id)
                 & (CabinetCompanyGrantRow.status == "active"),
             )
             .where(
-                CabinetInstanceRow.status != "deleted",
-                (
-                    (CabinetInstanceRow.company_grant_scope == CabinetCompanyGrantScope.ALL)
-                    | (CabinetCompanyGrantRow.id.isnot(None))
-                ),
+                CabinetInstanceRow.owner_scope == CabinetOwnerScope.PLATFORM,
+                CabinetInstanceRow.status != CabinetStatus.DELETED,
+            )
+        )
+        for template in grant_q.scalars().unique().all():
+            await cabinets_svc.provision_company_copy_from_template(
+                template_id=template.id, company_id=company_id
+            )
+
+        grants = CabinetGrantService(self._session)
+        bindings = ModuleBindingService(self._session)
+        quotas = CompanyQuotaService(self._session)
+        q = await self._session.execute(
+            select(CabinetInstanceRow)
+            .where(
+                CabinetInstanceRow.owner_company_id == company_id,
+                CabinetInstanceRow.owner_scope == CabinetOwnerScope.COMPANY,
+                CabinetInstanceRow.status != CabinetStatus.DELETED,
             )
             .order_by(CabinetInstanceRow.created_at.desc())
         )
         out: list[dict] = []
-        for inst in q.scalars().unique().all():
+        for inst in q.scalars().all():
             assignments_count = await grants.assignment_count(inst.id)
             module_ids = await bindings.list_module_ids_for_cabinet(inst.id)
-            flags = company_view_flags(
-                owner_scope=inst.owner_scope,
-                owner_company_id=inst.owner_company_id,
-                company_id=company_id,
-            )
+            projects_count = await quotas.count_active_projects_in_cabinet(inst.id)
+            if inst.template_cabinet_id:
+                flags = CompanyViewFlags(
+                    writable=False,
+                    source=EntitySource.PLATFORM_ASSIGNED,
+                )
+            else:
+                flags = company_view_flags(
+                    owner_scope=inst.owner_scope,
+                    owner_company_id=inst.owner_company_id,
+                    company_id=company_id,
+                )
             out.append(
                 {
                     "id": inst.id,
@@ -466,6 +488,9 @@ class AdminCompanyService:
                     "owner_scope": inst.owner_scope,
                     "owner_company_id": inst.owner_company_id,
                     "owner_employee_id": inst.owner_employee_id,
+                    "template_cabinet_id": inst.template_cabinet_id,
+                    "max_projects": inst.max_projects,
+                    "projects_count": projects_count,
                     "assignments_count": assignments_count,
                     "module_bindings_count": len(module_ids),
                     **flags,
@@ -626,7 +651,6 @@ class AdminCompanyService:
             return {
                 "id": company.id,
                 "username": company_effective_login(company),
-                "login_username": company.login_username,
                 "password_set": company.keycloak_sub is not None,
                 "identity_pending": company.keycloak_sub is None,
             }
@@ -637,60 +661,7 @@ class AdminCompanyService:
         return {
             "id": company.id,
             "username": company_effective_login(company),
-            "login_username": company.login_username,
             "password_set": True,
-        }
-
-    async def set_company_login(self, company_id: str, *, login: str) -> dict:
-        """Set editable org login (Keycloak username). Internal company id is unchanged."""
-        company = await self._require_company(company_id)
-        new_login = validate_login_username(login)
-        current = company_effective_login(company)
-        if new_login == current:
-            return {
-                "id": company.id,
-                "username": current,
-                "login_username": company.login_username,
-            }
-
-        if new_login == company.id:
-            company.login_username = None
-        else:
-            taken = await self._session.execute(
-                select(CompanyRow.id).where(
-                    CompanyRow.id != company_id,
-                    (CompanyRow.login_username == new_login) | (CompanyRow.id == new_login),
-                )
-            )
-            if taken.scalar_one_or_none() is not None:
-                raise AppError(
-                    code="CONFLICT",
-                    title="Conflict",
-                    status=409,
-                    detail="login already in use",
-                )
-            company.login_username = new_login
-
-        old_login = current
-        await self._session.commit()
-        await self._session.refresh(company)
-        effective = company_effective_login(company)
-
-        if company.keycloak_sub is not None and old_login != effective:
-            from prodavan.application.auth.lifecycle import publish_rename_command
-
-            await publish_rename_command(
-                client_ref=f"company:{company.id}",
-                sub=company.keycloak_sub,
-                old_username=old_login,
-                new_username=effective,
-                email=f"{effective}@companies.prodavan.local",
-            )
-
-        return {
-            "id": company.id,
-            "username": effective,
-            "login_username": company.login_username,
         }
 
     async def delete_company(self, company_id: str, *, principal: Principal) -> dict:

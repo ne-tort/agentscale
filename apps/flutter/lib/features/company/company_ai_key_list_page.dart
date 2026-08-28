@@ -198,25 +198,24 @@ class _CompanyAiKeyListPageState extends State<CompanyAiKeyListPage> {
     }
   }
 
-  String _sourceLabel(AppLocalizations l10n, Map<String, dynamic> k) =>
-      companyEntitySourceLabel(l10n, k['source'] as String?);
-
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final warning = context.appColors.warning;
     final rows = _keys.map((k) {
       final typeLabel = _typeLabel(l10n, k);
-      final sourceLabel = _sourceLabel(l10n, k);
       final suspended = _isKeySuspended(k);
+      final platformStyle = companyEntityRowStyle(context, k['source'] as String?);
+      final warningStyle = suspended
+          ? (rowColor: warning, titleBold: true)
+          : (rowColor: platformStyle.rowColor, titleBold: platformStyle.titleBold);
       return AppEntityRow(
         id: k['id'] as String,
         title: k['name'] as String? ?? k['id'] as String,
-        titleColor: suspended ? warning : null,
-        subtitle: l10n.adminKeyListSubtitle(typeLabel, sourceLabel),
+        rowColor: warningStyle.rowColor,
+        titleBold: warningStyle.titleBold,
         cells: {
           'type': typeLabel,
-          'source': sourceLabel,
         },
       );
     }).toList();
@@ -239,12 +238,15 @@ class _CompanyAiKeyListPageState extends State<CompanyAiKeyListPage> {
               primaryColumnLabel: l10n.adminKey,
               columns: [
                 AppEntityColumn(id: 'type', label: l10n.adminIntegrationType),
-                AppEntityColumn(id: 'source', label: l10n.adminCabinetOwnerScope, width: 120),
               ],
               onOpen: _openKey,
               onDelete: (row) async {
                 final key = _keys.firstWhere((k) => k['id'] == row.id, orElse: () => const {});
                 if (_isWritable(key)) await _deleteKey(row);
+              },
+              deletableOf: (row) {
+                final key = _keys.firstWhere((k) => k['id'] == row.id, orElse: () => const {});
+                return _isWritable(key);
               },
               enabledOf: _keyEnabled,
               onEnabledChanged: (row, enabled) async {

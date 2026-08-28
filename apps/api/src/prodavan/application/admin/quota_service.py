@@ -31,12 +31,57 @@ class CompanyQuotaService:
         return quota
 
     async def count_active_cabinets(self, company_id: str) -> int:
+        from prodavan.domain.cabinets import CabinetOwnerScope
+
         q = await self._session.execute(
             select(func.count())
             .select_from(CabinetInstanceRow)
             .where(
-                CabinetInstanceRow.company_id == company_id,
+                CabinetInstanceRow.owner_company_id == company_id,
+                CabinetInstanceRow.owner_scope == CabinetOwnerScope.COMPANY,
                 CabinetInstanceRow.status == CabinetStatus.ACTIVE,
+            )
+        )
+        return int(q.scalar_one() or 0)
+
+    async def assert_can_create_project_in_cabinet(
+        self,
+        *,
+        cabinet_id: str,
+        max_projects: int | None,
+    ) -> None:
+        if max_projects is None:
+            return
+        from prodavan.domain.projects import ProjectStatus
+        from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+        q = await self._session.execute(
+            select(func.count())
+            .select_from(ProjectRow)
+            .where(
+                ProjectRow.cabinet_id == cabinet_id,
+                ProjectRow.status != ProjectStatus.DELETED,
+            )
+        )
+        active = int(q.scalar_one() or 0)
+        if active >= max_projects:
+            raise AppError(
+                code="PROJECT_QUOTA",
+                title="Project quota exceeded",
+                status=409,
+                detail=f"max {max_projects} active projects in cabinet",
+            )
+
+    async def count_active_projects_in_cabinet(self, cabinet_id: str) -> int:
+        from prodavan.domain.projects import ProjectStatus
+        from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+        q = await self._session.execute(
+            select(func.count())
+            .select_from(ProjectRow)
+            .where(
+                ProjectRow.cabinet_id == cabinet_id,
+                ProjectRow.status != ProjectStatus.DELETED,
             )
         )
         return int(q.scalar_one() or 0)

@@ -34,6 +34,12 @@ class MetaDocumentBody(BaseModel):
     body: Any
 
 
+class CopyAdminModuleBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+
+
 @router.get("")
 async def list_modules(_: PlatformAdminDep, session: SessionDep) -> dict:
     items = await ModuleService(session).list_all_admin()
@@ -72,6 +78,16 @@ async def patch_module(
 @router.delete("/{module_id}")
 async def delete_module(module_id: str, _: PlatformAdminDep, session: SessionDep) -> dict:
     return await ModuleService(session).delete_admin(module_id=module_id)
+
+
+@router.post("/{module_id}/copy", status_code=201)
+async def copy_module(
+    module_id: str,
+    body: CopyAdminModuleBody,
+    _: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    return await ModuleService(session).copy_admin(module_id=module_id, name=body.name)
 
 
 @router.get("/{module_id}/meta/documents")

@@ -12,7 +12,7 @@ import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/company/company_employee_cabinets_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Employee metadata — login, password, cabinets selector.
+/// Employee metadata — login, password, cabinets selector, pause/resume.
 class CompanyEmployeeDetailPage extends StatefulWidget {
   const CompanyEmployeeDetailPage({
     super.key,
@@ -20,12 +20,14 @@ class CompanyEmployeeDetailPage extends StatefulWidget {
     required this.employeeId,
     required this.employeeLogin,
     this.contactEmail,
+    this.status = 'active',
   });
 
   final String companyId;
   final String employeeId;
   final String employeeLogin;
   final String? contactEmail;
+  final String status;
 
   @override
   State<CompanyEmployeeDetailPage> createState() =>
@@ -34,13 +36,18 @@ class CompanyEmployeeDetailPage extends StatefulWidget {
 
 class _CompanyEmployeeDetailPageState extends State<CompanyEmployeeDetailPage> {
   late String _contactEmail;
+  late String _status;
   bool _passwordSet = true;
+  bool _busy = false;
 
   @override
   void initState() {
     super.initState();
     _contactEmail = widget.contactEmail ?? '';
+    _status = widget.status;
   }
+
+  bool get _isDisabled => _status == 'disabled';
 
   Future<void> _copyLogin() async {
     await Clipboard.setData(ClipboardData(text: widget.employeeLogin));
@@ -75,22 +82,54 @@ class _CompanyEmployeeDetailPageState extends State<CompanyEmployeeDetailPage> {
     setState(() => _contactEmail = trimmed);
   }
 
-  Future<void> _disable() async {
+  Future<void> _toggleStatus() async {
     final l10n = AppLocalizations.of(context);
+    if (_isDisabled) {
+      final ok = await AppConfirmPage.push(
+        context,
+        title: l10n.companyEnableEmployee,
+        message: l10n.companyEnableEmployeeConfirm(widget.employeeLogin),
+        confirmLabel: l10n.companyEnableEmployee,
+      );
+      if (!ok || !mounted) return;
+      setState(() => _busy = true);
+      try {
+        final body = await companyContext.api.enableEmployee(widget.employeeId);
+        if (!mounted) return;
+        setState(() {
+          _status = body['status'] as String? ?? 'active';
+          _busy = false;
+        });
+      } catch (e) {
+        if (mounted) {
+          setState(() => _busy = false);
+          AppErrors.showSnack(context, e);
+        }
+      }
+      return;
+    }
+
     final ok = await AppConfirmPage.push(
       context,
-      title: l10n.companyDisableEmployee,
-      message: l10n.companyDisableEmployeeConfirm(widget.employeeLogin),
-      confirmLabel: l10n.commonDisable,
+      title: l10n.companyPauseEmployee,
+      message: l10n.companyPauseEmployeeConfirm(widget.employeeLogin),
+      confirmLabel: l10n.companyPauseEmployee,
       severity: AppStatusSeverity.warning,
     );
     if (!ok || !mounted) return;
+    setState(() => _busy = true);
     try {
-      await companyContext.api.disableEmployee(widget.employeeId);
+      final body = await companyContext.api.disableEmployee(widget.employeeId);
       if (!mounted) return;
-      Navigator.of(context).pop();
+      setState(() {
+        _status = body['status'] as String? ?? 'disabled';
+        _busy = false;
+      });
     } catch (e) {
-      if (mounted) AppErrors.showSnack(context, e);
+      if (mounted) {
+        setState(() => _busy = false);
+        AppErrors.showSnack(context, e);
+      }
     }
   }
 
@@ -152,9 +191,10 @@ class _CompanyEmployeeDetailPageState extends State<CompanyEmployeeDetailPage> {
             onTap: _openCabinets,
           ),
           AppNavPreference(
-            title: l10n.companyDisableEmployee,
-            icon: Icons.block_outlined,
-            onTap: _disable,
+            title: _isDisabled ? l10n.companyEnableEmployee : l10n.companyPauseEmployee,
+            icon: _isDisabled ? Icons.play_circle_outline : Icons.pause_circle_outline,
+            enabled: !_busy,
+            onTap: _toggleStatus,
           ),
         ],
       ),

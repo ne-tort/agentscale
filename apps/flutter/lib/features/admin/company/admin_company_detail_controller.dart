@@ -40,7 +40,6 @@ class AdminCompanyDetailController extends ChangeNotifier {
   bool subscriptionLifetime = false;
   String subscriptionEnds = '';
   bool passwordSet = false;
-  String loginUsername = '';
 
   static const toolPresets = ['chat_readonly', 'workspace_dev', 'workspace_full'];
   static const providerChoices = ['', 'cursor', 'codex', 'claude_code'];
@@ -96,7 +95,6 @@ class AdminCompanyDetailController extends ChangeNotifier {
         nextSubscriptionEnds = '';
       }
       final nextPasswordSet = detail['password_set'] == true;
-      final nextLogin = detail['username'] as String? ?? companyId;
 
       final unchanged = silent &&
           !loading &&
@@ -121,7 +119,6 @@ class AdminCompanyDetailController extends ChangeNotifier {
           subscriptionLifetime == nextLifetime &&
           subscriptionEnds == nextSubscriptionEnds &&
           passwordSet == nextPasswordSet &&
-          loginUsername == nextLogin &&
           metrics == m &&
           platformEvents == events;
       if (unchanged) return;
@@ -149,7 +146,6 @@ class AdminCompanyDetailController extends ChangeNotifier {
       subscriptionLifetime = nextLifetime;
       subscriptionEnds = nextSubscriptionEnds;
       passwordSet = nextPasswordSet;
-      loginUsername = nextLogin;
       loading = false;
       if (!silent) error = null;
       notifyListeners();
@@ -169,17 +165,6 @@ class AdminCompanyDetailController extends ChangeNotifier {
       password: trimmed,
     );
     passwordSet = true;
-    notifyListeners();
-  }
-
-  Future<void> saveLogin(String value) async {
-    final trimmed = value.trim();
-    if (trimmed.length < 3) return;
-    final body = await adminContext.api.setCompanyLogin(
-      companyId: companyId,
-      login: trimmed,
-    );
-    loginUsername = body['username'] as String? ?? trimmed;
     notifyListeners();
   }
 

@@ -2504,6 +2504,42 @@ abstract class AppLocalizations {
   /// **'Disable {email}? They will lose access.'**
   String companyDisableEmployeeConfirm(String email);
 
+  /// No description provided for @companyAddEmployee.
+  ///
+  /// In en, this message translates to:
+  /// **'Add employee'**
+  String get companyAddEmployee;
+
+  /// No description provided for @companyAddCabinet.
+  ///
+  /// In en, this message translates to:
+  /// **'Add cabinet'**
+  String get companyAddCabinet;
+
+  /// No description provided for @companyPauseEmployee.
+  ///
+  /// In en, this message translates to:
+  /// **'Pause employee'**
+  String get companyPauseEmployee;
+
+  /// No description provided for @companyPauseEmployeeConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Pause {login}? They will lose access until re-enabled.'**
+  String companyPauseEmployeeConfirm(String login);
+
+  /// No description provided for @companyEnableEmployee.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable employee'**
+  String get companyEnableEmployee;
+
+  /// No description provided for @companyEnableEmployeeConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable {login}? They will regain access.'**
+  String companyEnableEmployeeConfirm(String login);
+
   /// No description provided for @companyInviteEmployee.
   ///
   /// In en, this message translates to:
@@ -2636,12 +2672,6 @@ abstract class AppLocalizations {
   /// **'Local'**
   String get companyKeySourceLocal;
 
-  /// No description provided for @companyKeyReadOnlyBanner.
-  ///
-  /// In en, this message translates to:
-  /// **'Platform-bound key — read only'**
-  String get companyKeyReadOnlyBanner;
-
   /// No description provided for @companyAddModule.
   ///
   /// In en, this message translates to:
@@ -2659,12 +2689,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Create a local module or wait for platform assignment'**
   String get companyModulesEmptyHint;
-
-  /// No description provided for @companyModuleReadOnlyBanner.
-  ///
-  /// In en, this message translates to:
-  /// **'Platform-assigned module — read only; you can bind cabinets'**
-  String get companyModuleReadOnlyBanner;
 
   /// No description provided for @companyCreateRuntimeKeyHint.
   ///
@@ -2797,12 +2821,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Owner'**
   String get companyOwner;
-
-  /// No description provided for @companyReadOnlyOrgView.
-  ///
-  /// In en, this message translates to:
-  /// **'{title} — read-only org view'**
-  String companyReadOnlyOrgView(String title);
 
   /// No description provided for @companyRole.
   ///

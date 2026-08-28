@@ -219,6 +219,48 @@ async def disable_employee(
     return {"id": emp.id, "status": emp.status, "paused": True}
 
 
+@router.post("/employees/{employee_id}/enable")
+async def enable_employee(
+    employee_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    actor: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
+
+    svc = EntitlementService(session)
+    if not principal.is_platform_admin:
+        q = await session.execute(
+            select(EmployeeRow)
+            .where(EmployeeRow.id == employee_id)
+            .options(selectinload(EmployeeRow.memberships))
+        )
+        target = q.scalar_one_or_none()
+        if target is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Employee not found")
+        if principal.is_company_principal:
+            company = await svc.ensure_company_principal(principal)
+            assert company is not None
+            target_companies = {m.company_id for m in target.memberships}
+            if company.id not in target_companies:
+                raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="forbidden")
+        else:
+            if actor is None:
+                raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="forbidden")
+            actor_companies = {
+                m.company_id for m in actor.memberships if m.role == MembershipRole.COMPANY_ADMIN
+            }
+            target_companies = {m.company_id for m in target.memberships}
+            if not actor_companies.intersection(target_companies):
+                raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="forbidden")
+    emp = await IdentityCommandService(session, get_provisioning()).enable_employee(
+        employee_id=employee_id,
+        principal=principal,
+    )
+    return {"id": emp.id, "status": emp.status, "paused": False}
+
+
 @router.delete("/employees/{employee_id}")
 async def soft_delete_employee(
     employee_id: str,

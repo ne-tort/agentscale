@@ -50,18 +50,10 @@ class EntitlementService:
         company = await self.get_company_by_sub(principal.sub)
         if company is not None:
             return company
-        # Soft-bind: KC username is effective login (company id or login_username).
+        # Soft-bind: KC username is company id.
         if principal.username:
             uname = principal.username.strip()
             company = await self._session.get(CompanyRow, uname)
-            if company is None:
-                q = await self._session.execute(
-                    select(CompanyRow).where(
-                        CompanyRow.login_username == uname,
-                        CompanyRow.deleted_at.is_(None),
-                    )
-                )
-                company = q.scalar_one_or_none()
             if company is not None and company.deleted_at is None and (
                 company.keycloak_sub is None or company.keycloak_sub == principal.sub
             ):
@@ -305,6 +297,14 @@ class IdentityCommandService:
         from prodavan.application.employees.service import EmployeesCommandService
 
         return await EmployeesCommandService(self._session).disable_employee(
+            employee_id=employee_id,
+            principal=principal,
+        )
+
+    async def enable_employee(self, *, employee_id: str, principal: Principal | None = None) -> EmployeeRow:
+        from prodavan.application.employees.service import EmployeesCommandService
+
+        return await EmployeesCommandService(self._session).enable_employee(
             employee_id=employee_id,
             principal=principal,
         )

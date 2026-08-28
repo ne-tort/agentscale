@@ -145,6 +145,36 @@ class CompanyModuleService:
             raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="module meta is read-only")
         return await self._meta.put_document(module_id=module_id, slug=slug, body=body)
 
+    async def copy_module(
+        self,
+        *,
+        company_id: str,
+        source_module_id: str,
+        name: str | None = None,
+    ) -> dict:
+        source = await self._require_visible(company_id, source_module_id)
+        base_name = (name or f"{source.name} (copy)").strip()
+        if not base_name:
+            raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="name required")
+        row = ModuleRow(
+            name=base_name,
+            status=ModuleStatus.ACTIVE,
+            owner_scope=OwnerScope.COMPANY,
+            owner_company_id=company_id,
+        )
+        self._session.add(row)
+        await self._session.flush()
+        docs = await self._meta.list_documents(module_id=source_module_id)
+        for doc in docs:
+            await self._meta.put_document(
+                module_id=row.id,
+                slug=doc["slug"],
+                body=doc["body"],
+            )
+        await self._session.commit()
+        await self._session.refresh(row)
+        return _company_public_row(row, company_id=company_id, cabinet_ids=[])
+
     async def _require_visible(self, company_id: str, module_id: str) -> ModuleRow:
         row = await self._session.get(ModuleRow, module_id)
         if row is None:

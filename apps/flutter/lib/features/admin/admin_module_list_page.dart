@@ -1,16 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
-import 'package:prodavan/core/refresh/app_auto_refresh.dart';
-import 'package:prodavan/core/session/admin_context.dart';
+import 'package:prodavan/core/refresh/app_auto_refresh.dart';import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_inline_add_field.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_snack_bar.dart';
-import 'package:prodavan/core/widgets/app_status_banner.dart';
-import 'package:prodavan/core/widgets/empty_placeholder.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/admin/admin_module_detail_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -102,10 +98,26 @@ class _AdminModuleListPageState extends State<AdminModuleListPage> {
   }
 
   Future<void> _copyModule(AppEntityRow row) async {
-    final l10n = AppLocalizations.of(context);
-    await Clipboard.setData(ClipboardData(text: row.id));
-    if (!mounted) return;
-    AppSnackBar.info(context, l10n.adminModuleCopied);
+    try {
+      final body = await adminContext.api.copyModule(moduleId: row.id);
+      if (!mounted) return;
+      await _reload();
+      if (!mounted) return;
+      final id = body['id'] as String?;
+      final moduleName = body['name'] as String? ?? row.title;
+      if (id == null) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => AdminModuleDetailPage(
+            moduleId: id,
+            moduleName: moduleName,
+          ),
+        ),
+      );
+      if (mounted) await _reload();
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    }
   }
 
   Future<void> _deleteModule(AppEntityRow row) async {
@@ -124,6 +136,14 @@ class _AdminModuleListPageState extends State<AdminModuleListPage> {
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     }
+  }
+
+  bool _isProductModule(Map<String, dynamic> m) =>
+      m['company_grant_scope'] == 'all';
+
+  bool _rowDeletable(AppEntityRow row) {
+    final mod = _modules.firstWhere((m) => m['id'] == row.id, orElse: () => const {});
+    return mod.isNotEmpty && !_isProductModule(mod);
   }
 
   int _countIds(dynamic value) {
@@ -181,6 +201,8 @@ class _AdminModuleListPageState extends State<AdminModuleListPage> {
               onOpen: _openModule,
               onCopy: _copyModule,
               onDelete: _deleteModule,
+              deletableOf: _rowDeletable,
+              copyableOf: (_) => true,
               empty: EmptyPlaceholder(
                 title: l10n.adminNoModules,
               ),

@@ -95,11 +95,11 @@ void main() {
   });
 
   testWidgets('admin shell navigation destinations', (tester) async {
-    // Wide surface → left NavigationRail (all sections).
+    // Wide surface → left NavigationRail (sections without Overview tab).
     await tester.pumpWidget(_enApp(const AdminShell()));
     await tester.pumpAndSettle();
     expect(find.byType(NavigationRail), findsOneWidget);
-    expect(find.text('Overview'), findsWidgets);
+    expect(find.text('Overview'), findsNothing);
     expect(find.text('Companies'), findsWidgets);
     expect(find.text('AI Keys'), findsWidgets);
     expect(find.text('Projects'), findsWidgets);
@@ -108,7 +108,7 @@ void main() {
     expect(find.text('Prodavan'), findsWidgets);
     expect(find.text('Management'), findsNothing);
 
-    // Phone-width surface → bottom bar: Overview, Management, Settings.
+    // Phone-width surface → bottom bar: Management + Settings (overview via logo only).
     tester.view.physicalSize = const Size(390, 800);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
@@ -120,16 +120,8 @@ void main() {
     final labels = bar.destinations
         .map((d) => (d as NavigationDestination).label)
         .toList();
-    expect(labels, ['Overview', 'Management', 'Settings']);
-    expect(find.text('Companies'), findsNothing);
-
-    await tester.tap(find.text('Management'));
-    await tester.pumpAndSettle();
+    expect(labels, ['Management', 'Settings']);
     expect(find.text('Companies'), findsOneWidget);
-    expect(find.text('AI Keys'), findsOneWidget);
-    expect(find.text('Projects'), findsOneWidget);
-    expect(find.text('Cabinets'), findsOneWidget);
-    expect(find.text('Modules'), findsOneWidget);
 
     await tester.tap(find.text('Settings'));
     await tester.pumpAndSettle();

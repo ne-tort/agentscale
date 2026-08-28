@@ -256,6 +256,38 @@ class HttpUserAdminClient:
                     detail=f"disable user returned {resp.status_code}",
                 )
 
+    async def enable_user(
+        self,
+        *,
+        keycloak_user_id: str | None,
+        username: str | None,
+        email: str | None,
+    ) -> None:
+        async with httpx.AsyncClient(timeout=self._timeout) as client:
+            token = await self._admin_token(client)
+            headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+            user_id = await self._resolve_user_id(
+                client,
+                headers=headers,
+                keycloak_user_id=keycloak_user_id,
+                username=username,
+                email=email,
+            )
+            if not user_id:
+                return
+            resp = await client.put(
+                f"{self._users_url()}/{user_id}",
+                json={"enabled": True},
+                headers=headers,
+            )
+            if resp.status_code >= 400:
+                raise AppError(
+                    code="KEYCLOAK_ADMIN",
+                    title="Keycloak enable failed",
+                    status=502,
+                    detail=f"enable user returned {resp.status_code}",
+                )
+
     async def delete_user(
         self,
         *,

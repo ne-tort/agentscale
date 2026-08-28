@@ -159,14 +159,6 @@ class _CompanyModuleJsonPageState extends State<CompanyModuleJsonPage> {
                     severity: AppStatusSeverity.error,
                     message: AppErrors.localize(context, _error!),
                   ),
-                if (!widget.writable)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-                    child: AppStatusBanner(
-                      severity: AppStatusSeverity.info,
-                      message: l10n.companyModuleReadOnlyBanner,
-                    ),
-                  ),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
                   child: AppJsonEditorField(

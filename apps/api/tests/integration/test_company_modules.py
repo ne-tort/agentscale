@@ -164,6 +164,17 @@ def test_company_module_grant_bind_and_local_crud(client: TestClient) -> None:
     )
     assert delete_platform.status_code == 403
 
+    copied = client.post(
+        f"/api/v1/companies/{company_id}/modules/{platform_module_id}/copy",
+        headers=h,
+        json={},
+    )
+    assert copied.status_code == 201, copied.text
+    copy_row = copied.json()
+    assert copy_row["writable"] is True
+    assert copy_row["source"] == "company_local"
+    assert copy_row["id"] != platform_module_id
+
 
 @requires_postgres
 def test_revoking_company_grant_clears_cabinet_bindings(client: TestClient) -> None:

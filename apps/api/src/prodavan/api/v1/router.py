@@ -11,6 +11,7 @@ from prodavan.api.v1 import (
     admin_modules,
     admin_object_store,
     admin_platform_events,
+    admin_profile,
     admin_projects,
     admin_recycle,
     admin_triggers,
@@ -38,6 +39,7 @@ router.include_router(company_containers.router)
 router.include_router(company_modules.router)
 router.include_router(content.router)
 router.include_router(admin_companies.router)
+router.include_router(admin_profile.router)
 router.include_router(admin_metrics.router)
 router.include_router(admin_companies.company_router)
 router.include_router(admin_triggers.router)

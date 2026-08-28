@@ -1,3 +1,6 @@
+import 'package:flutter/material.dart';
+
+import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Whether entity is platform-assigned (canonical or legacy API value).
@@ -33,4 +36,26 @@ bool companyModuleBoundToCabinet(Map<String, dynamic> module, String cabinetId) 
   final ids = module['cabinet_ids'];
   if (ids is! List) return false;
   return ids.map((e) => e.toString()).contains(cabinetId);
+}
+
+/// List-row styling for platform-assigned entities (info color + bold title).
+({Color? rowColor, bool titleBold}) companyEntityRowStyle(
+  BuildContext context,
+  String? source,
+) {
+  if (companyEntityPlatformAssigned(source)) {
+    return (rowColor: context.appColors.info, titleBold: true);
+  }
+  return (rowColor: null, titleBold: false);
+}
+
+/// Warning styling for paused/disabled rows (takes precedence over platform info).
+({Color? rowColor, bool titleBold}) companyEntityWarningRowStyle(
+  BuildContext context, {
+  required bool warning,
+}) {
+  if (warning) {
+    return (rowColor: context.appColors.warning, titleBold: true);
+  }
+  return (rowColor: null, titleBold: false);
 }

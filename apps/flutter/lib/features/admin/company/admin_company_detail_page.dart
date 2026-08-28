@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/company_metrics_wrap.dart';
-import 'package:prodavan/features/admin/company/admin_company_access_page.dart';
 import 'package:prodavan/features/admin/company/admin_company_agent_policy_page.dart';
 import 'package:prodavan/features/admin/company/admin_company_detail_controller.dart';
 import 'package:prodavan/features/admin/company/admin_company_events_page.dart';
@@ -65,6 +66,12 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
     super.dispose();
   }
 
+  Future<void> _copyCompanyId() async {
+    await Clipboard.setData(ClipboardData(text: _controller.companyId));
+    if (!mounted) return;
+    AppSnackBar.info(context, AppLocalizations.of(context).companyIdCopied);
+  }
+
   String _generalSubtitle(AppLocalizations l10n, AdminCompanyDetailController ctrl) {
     final desc = ctrl.description.trim();
     if (desc.isNotEmpty) return desc;
@@ -107,14 +114,31 @@ class _AdminCompanyDetailPageState extends State<AdminCompanyDetailPage> {
                         ),
                       ),
                       const SizedBox(height: AppSpacing.sm),
-                      AppNavPreference(
-                        title: l10n.settings,
-                        icon: Icons.settings_outlined,
-                        subtitle: Text(ctrl.loginUsername),
-                        onTap: () => pushCompanySubPage(
-                          context,
-                          const AdminCompanyAccessPage(),
-                        ),
+                      AppValuePreference<String>(
+                        title: l10n.companyLoginId,
+                        icon: Icons.badge_outlined,
+                        value: ctrl.companyId,
+                        enabled: false,
+                        presentValue: (v) => v,
+                        onSave: (_) async {},
+                        onTap: _copyCompanyId,
+                      ),
+                      AppValuePreference<String>(
+                        title: l10n.companyPassword,
+                        icon: Icons.key_outlined,
+                        value: '',
+                        obscureText: true,
+                        hintText: l10n.companyPasswordHint,
+                        invalidMessage: l10n.companyPasswordHint,
+                        presentValue: (_) =>
+                            ctrl.passwordSet ? '••••••••' : l10n.commonNotSet,
+                        formatInputValue: (_) => '',
+                        validateInput: (raw) => raw.trim().length >= 8,
+                        onSave: (v) async {
+                          await ctrl.savePassword(v.trim());
+                          if (!context.mounted) return;
+                          AppSnackBar.success(context, l10n.companyPasswordChanged);
+                        },
                       ),
                       AppNavPreference(
                         title: l10n.adminCompanyGeneral,

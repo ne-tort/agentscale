@@ -1359,6 +1359,28 @@ class AppLocalizationsRu extends AppLocalizations {
   }
 
   @override
+  String get companyAddEmployee => 'Добавить сотрудника';
+
+  @override
+  String get companyAddCabinet => 'Добавить кабинет';
+
+  @override
+  String get companyPauseEmployee => 'Приостановить сотрудника';
+
+  @override
+  String companyPauseEmployeeConfirm(String login) {
+    return 'Приостановить $login? Доступ будет закрыт до включения.';
+  }
+
+  @override
+  String get companyEnableEmployee => 'Включить сотрудника';
+
+  @override
+  String companyEnableEmployeeConfirm(String login) {
+    return 'Включить $login? Доступ будет восстановлен.';
+  }
+
+  @override
   String get companyInviteEmployee => 'Пригласить сотрудника';
 
   @override
@@ -1427,10 +1449,6 @@ class AppLocalizationsRu extends AppLocalizations {
   String get companyKeySourceLocal => 'Свой';
 
   @override
-  String get companyKeyReadOnlyBanner =>
-      'Ключ привязан платформой — только просмотр';
-
-  @override
   String get companyAddModule => 'Добавить модуль';
 
   @override
@@ -1439,10 +1457,6 @@ class AppLocalizationsRu extends AppLocalizations {
   @override
   String get companyModulesEmptyHint =>
       'Создайте свой модуль или дождитесь назначения от платформы';
-
-  @override
-  String get companyModuleReadOnlyBanner =>
-      'Модуль назначен платформой — только просмотр; можно привязать кабинеты';
 
   @override
   String get companyCreateRuntimeKeyHint =>
@@ -1519,11 +1533,6 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get companyOwner => 'Владелец';
-
-  @override
-  String companyReadOnlyOrgView(String title) {
-    return '$title — просмотр организации (только чтение)';
-  }
 
   @override
   String get companyRole => 'Роль';

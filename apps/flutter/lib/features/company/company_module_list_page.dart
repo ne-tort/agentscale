@@ -125,24 +125,52 @@ class _CompanyModuleListPageState extends State<CompanyModuleListPage> {
     }
   }
 
-  String _sourceLabel(AppLocalizations l10n, Map<String, dynamic> m) =>
-      companyEntitySourceLabel(l10n, m['source'] as String?);
+  Future<void> _copyModule(AppEntityRow row) async {
+    try {
+      final body = await companyContext.api.copyModule(
+        companyId: widget.companyId,
+        moduleId: row.id,
+      );
+      if (!mounted) return;
+      await _reload();
+      if (!mounted) return;
+      final id = body['id'] as String?;
+      final moduleName = body['name'] as String? ?? row.title;
+      if (id == null) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => CompanyModuleDetailPage(
+            companyId: widget.companyId,
+            moduleId: id,
+            moduleName: moduleName,
+          ),
+        ),
+      );
+      if (mounted) await _reload();
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    }
+  }
+
+  bool _rowWritable(AppEntityRow row) {
+    final mod = _modules.firstWhere((m) => m['id'] == row.id, orElse: () => const {});
+    return mod['writable'] == true;
+  }
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final rows = _modules.map((m) {
       final bindCount = m['cabinet_bindings_count'] as int? ?? 0;
-      final writable = companyEntityWritable(m);
+      final style = companyEntityRowStyle(context, m['source'] as String?);
       return AppEntityRow(
         id: m['id'] as String,
         title: m['name'] as String? ?? m['id'] as String,
-        subtitle: _sourceLabel(l10n, m),
+        rowColor: style.rowColor,
+        titleBold: style.titleBold,
         cells: {
-          'source': _sourceLabel(l10n, m),
           'cabinets': '$bindCount',
         },
-        trailing: writable ? null : Icon(Icons.lock_outline, size: 18, color: Theme.of(context).disabledColor),
       );
     }).toList();
 
@@ -163,14 +191,13 @@ class _CompanyModuleListPageState extends State<CompanyModuleListPage> {
               rows: rows,
               primaryColumnLabel: l10n.commonName,
               columns: [
-                AppEntityColumn(id: 'source', label: l10n.adminCabinetOwnerScope, width: 120),
                 AppEntityColumn(id: 'cabinets', label: l10n.commonCabinets, width: 96),
               ],
               onOpen: _openModule,
-              onDelete: (row) async {
-                final mod = _modules.firstWhere((m) => m['id'] == row.id, orElse: () => const {});
-                if (mod['writable'] == true) await _deleteModule(row);
-              },
+              onCopy: _copyModule,
+              onDelete: _deleteModule,
+              copyableOf: (_) => true,
+              deletableOf: _rowWritable,
               empty: EmptyPlaceholder(
                 title: l10n.companyNoModules,
                 subtitle: l10n.companyModulesEmptyHint,

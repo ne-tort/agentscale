@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from prodavan.api.v1.identity import CreateEmployeeBody
-from prodavan.domain.companies.login import validate_login_username
+from prodavan.domain.companies.login import company_effective_login, validate_login_username
 from prodavan.domain.employees.login import employee_kc_email
 from prodavan.domain.errors import AppError
 
@@ -32,6 +32,11 @@ def test_validate_login_username_rejects_invalid() -> None:
 
 def test_validate_login_username_accepts_dotted() -> None:
     assert validate_login_username("alice.dev") == "alice.dev"
+
+
+def test_company_effective_login_is_company_id() -> None:
+    company = type("Co", (), {"id": "co_abc123"})()
+    assert company_effective_login(company) == "co_abc123"
 
 
 def test_employee_kc_email() -> None:

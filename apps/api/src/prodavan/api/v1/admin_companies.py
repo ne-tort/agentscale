@@ -66,12 +66,6 @@ class CompanyPasswordBody(BaseModel):
     password: str = Field(min_length=8, max_length=200)
 
 
-class CompanyLoginBody(BaseModel):
-    model_config = {"extra": "forbid"}
-
-    login: str = Field(min_length=3, max_length=64)
-
-
 class AssignCabinetEmployeeBody(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -256,16 +250,6 @@ async def set_company_password_admin(
     return await AdminCompanyService(session).set_company_password(
         company_id, password=body.password
     )
-
-
-@router.put("/{company_id}/login")
-async def set_company_login_admin(
-    company_id: str,
-    body: CompanyLoginBody,
-    _: PlatformAdminDep,
-    session: SessionDep,
-) -> dict:
-    return await AdminCompanyService(session).set_company_login(company_id, login=body.login)
 
 
 company_router = APIRouter(prefix="/companies", tags=["companies"])

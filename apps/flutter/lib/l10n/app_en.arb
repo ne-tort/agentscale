@@ -837,6 +837,26 @@
       }
     }
   },
+  "companyAddEmployee": "Add employee",
+  "companyAddCabinet": "Add cabinet",
+  "companyPauseEmployee": "Pause employee",
+  "companyPauseEmployeeConfirm": "Pause {login}? They will lose access until re-enabled.",
+  "@companyPauseEmployeeConfirm": {
+    "placeholders": {
+      "login": {
+        "type": "String"
+      }
+    }
+  },
+  "companyEnableEmployee": "Enable employee",
+  "companyEnableEmployeeConfirm": "Enable {login}? They will regain access.",
+  "@companyEnableEmployeeConfirm": {
+    "placeholders": {
+      "login": {
+        "type": "String"
+      }
+    }
+  },
   "companyInviteEmployee": "Invite employee",
   "companyInviteViaKeycloakNoPassword": "Invite via Keycloak — no password field",
   "companyInviteViaKeycloakPasswordNotAccepted": "Invite via Keycloak — password is not accepted here.",
@@ -859,11 +879,9 @@
   "companyNoAiKeys": "No AI keys",
   "companyKeyPlatformBound": "From platform",
   "companyKeySourceLocal": "Local",
-  "companyKeyReadOnlyBanner": "Platform-bound key — read only",
   "companyAddModule": "Add module",
   "companyNoModules": "No modules",
   "companyModulesEmptyHint": "Create a local module or wait for platform assignment",
-  "companyModuleReadOnlyBanner": "Platform-assigned module — read only; you can bind cabinets",
   "companyCreateRuntimeKeyHint": "Add a company-owned key for your employees' projects",
   "errorConflict": "Data conflict. Refresh and try again.",
   "errorForbidden": "You do not have permission for this action.",
@@ -897,14 +915,6 @@
     }
   },
   "companyOwner": "Owner",
-  "companyReadOnlyOrgView": "{title} — read-only org view",
-  "@companyReadOnlyOrgView": {
-    "placeholders": {
-      "title": {
-        "type": "String"
-      }
-    }
-  },
   "companyRole": "Role",
   "companyValidEmailRequired": "Valid email required",
   "devAdminSession": "Admin session",

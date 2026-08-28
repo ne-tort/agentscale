@@ -30,6 +30,13 @@ class RenameCabinetBody(BaseModel):
     name: str = Field(min_length=1, max_length=200)
 
 
+class CopyCabinetBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    company_id: str = Field(min_length=3, max_length=40)
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+
+
 class DataRowBody(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -57,6 +64,32 @@ async def create_cabinet(
         company_id=body.company_id,
         employee=employee,
         base_template=body.base_template,
+    )
+
+
+@router.post("/{cabinet_id}/copy", status_code=201)
+async def copy_cabinet(
+    cabinet_id: str,
+    body: CopyCabinetBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+) -> dict:
+    if employee is None:
+        from prodavan.domain.errors import AppError
+
+        raise AppError(
+            code="FORBIDDEN",
+            title="Forbidden",
+            status=403,
+            detail="employee required to copy cabinet",
+        )
+    return await CabinetInstanceService(session).copy_cabinet(
+        cabinet_id=cabinet_id,
+        company_id=body.company_id,
+        name=body.name,
+        principal=principal,
+        employee=employee,
     )
 
 

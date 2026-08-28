@@ -31,6 +31,8 @@ class PatchAdminCabinetBody(BaseModel):
     company_ids: list[str] | None = None
     module_ids: list[str] | None = None
     company_grant_scope: str | None = Field(default=None, pattern="^(selected|all)$")
+    max_projects: int | None = Field(default=None, ge=1, le=10000)
+    clear_max_projects: bool = False
 
 
 @router.get("")
@@ -92,6 +94,8 @@ async def patch_cabinet(
         company_ids=body.company_ids,
         module_ids=body.module_ids,
         company_grant_scope=body.company_grant_scope,
+        max_projects=body.max_projects,
+        clear_max_projects=body.clear_max_projects,
     )
 
 

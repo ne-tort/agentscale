@@ -182,14 +182,6 @@ class _CompanyModuleDetailPageState extends State<CompanyModuleDetailPage> {
                     severity: AppStatusSeverity.error,
                     message: AppErrors.localize(context, _error!),
                   ),
-                if (!_writable)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-                    child: AppStatusBanner(
-                      severity: AppStatusSeverity.info,
-                      message: l10n.companyModuleReadOnlyBanner,
-                    ),
-                  ),
                 AppValuePreference<String>(
                   title: l10n.commonName,
                   icon: Icons.label_outline_rounded,

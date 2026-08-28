@@ -66,7 +66,7 @@ def test_admin_cabinet_crud(client: TestClient) -> None:
     body = cab.json()
     assert body["id"].startswith("cab_")
     assert body["schema_name"].startswith("cab_inst_")
-    assert body["company_id"] == company_id
+    assert body["company_id"] is None
     assert body["owner_employee_id"] is None
     assert body["owner_scope"] == "platform"
     assert company_id in body["company_ids"]
@@ -156,8 +156,13 @@ def test_admin_cabinet_grants_company_visibility_and_assignment(client: TestClie
         headers={"Authorization": f"Bearer {boss_tok}"},
     )
     assert org.status_code == 200, org.text
-    assert any(i["id"] == cabinet_id for i in org.json()["items"])
-    assert org.json()["items"][0]["writable"] is False
+    items = org.json()["items"]
+    workspace = next((i for i in items if i.get("template_cabinet_id") == cabinet_id), None)
+    assert workspace is not None, items
+    workspace_id = workspace["id"]
+    assert workspace_id != cabinet_id
+    assert workspace["writable"] is False
+    assert workspace.get("projects_count") is not None
 
     invite = client.post(
         f"/api/v1/companies/{company_id}/employees",
@@ -168,7 +173,7 @@ def test_admin_cabinet_grants_company_visibility_and_assignment(client: TestClie
     member_id = invite.json()["employee"]["id"]
 
     assigned = client.post(
-        f"/api/v1/companies/{company_id}/cabinets/{cabinet_id}/assignments",
+        f"/api/v1/companies/{company_id}/cabinets/{workspace_id}/assignments",
         headers={"Authorization": f"Bearer {boss_tok}"},
         json={"employee_id": member_id},
     )
@@ -177,4 +182,72 @@ def test_admin_cabinet_grants_company_visibility_and_assignment(client: TestClie
     member_tok = _token(sub="member-grant", email="member@grantco.test")
     listed = client.get("/api/v1/cabinets", headers={"Authorization": f"Bearer {member_tok}"})
     assert listed.status_code == 200, listed.text
-    assert any(i["id"] == cabinet_id for i in listed.json()["items"])
+    assert any(i["id"] == workspace_id for i in listed.json()["items"])
+
+
+@requires_postgres
+def test_cabinet_max_projects_quota(client: TestClient) -> None:
+    admin = _token(sub="padmin-maxproj", platform_admin=True)
+    created = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "MaxProjCo", "password": "test-company-pass", "admin_email": "boss@maxproj.test"},
+    )
+    assert created.status_code == 201, created.text
+    company_id = created.json()["company"]["id"]
+
+    cab = client.post(
+        "/api/v1/admin/cabinets",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"name": "Limited", "company_ids": [company_id]},
+    )
+    assert cab.status_code == 200, cab.text
+    template_id = cab.json()["id"]
+
+    patched = client.patch(
+        f"/api/v1/admin/cabinets/{template_id}",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"max_projects": 1},
+    )
+    assert patched.status_code == 200, patched.text
+
+    boss_tok = _token(sub="boss-maxproj", email="boss@maxproj.test")
+    org = client.get(
+        f"/api/v1/companies/{company_id}/cabinets",
+        headers={"Authorization": f"Bearer {boss_tok}"},
+    )
+    assert org.status_code == 200, org.text
+    workspace = next(i for i in org.json()["items"] if i.get("template_cabinet_id") == template_id)
+    workspace_id = workspace["id"]
+    assert workspace["max_projects"] == 1
+
+    member_invite = client.post(
+        f"/api/v1/companies/{company_id}/employees",
+        headers={"Authorization": f"Bearer {boss_tok}"},
+        json={"email": "worker@maxproj.test", "display_name": "Worker"},
+    )
+    assert member_invite.status_code == 201, member_invite.text
+    member_id = member_invite.json()["employee"]["id"]
+    assigned = client.post(
+        f"/api/v1/companies/{company_id}/cabinets/{workspace_id}/assignments",
+        headers={"Authorization": f"Bearer {boss_tok}"},
+        json={"employee_id": member_id},
+    )
+    assert assigned.status_code == 200, assigned.text
+
+    worker_tok = _token(sub="worker-maxproj", email="worker@maxproj.test")
+    first = client.post(
+        f"/api/v1/cabinets/{workspace_id}/projects",
+        headers={"Authorization": f"Bearer {worker_tok}"},
+        json={"name": "One"},
+    )
+    assert first.status_code == 201, first.text
+    assert first.json().get("created_by_employee_id") == member_id
+
+    second = client.post(
+        f"/api/v1/cabinets/{workspace_id}/projects",
+        headers={"Authorization": f"Bearer {worker_tok}"},
+        json={"name": "Two"},
+    )
+    assert second.status_code == 409, second.text
+    assert second.json()["code"] == "PROJECT_QUOTA"

@@ -9,10 +9,10 @@
 Platform Admin (Keycloak)
   └── создаёт Company (Keycloak-креды орг-аккаунта)
         ├── создаёт Employee (Keycloak)
-        ├── назначает Employee → CabinetInstance(s)
+        ├── назначает Employee → CabinetInstance workspace(s)
         └── …
               Employee работает в UI кабинета (UI из meta)
-                └── создаёт Project (связь: Cabinet + Employee)
+                └── создаёт Project (связь: Cabinet; creator = metadata)
                       └── ProjectContainer = k8s Pod
                             ├── hydrate файлов из MinIO (по meta)
                             └── агент ↔ meta через cabinet.* MCP

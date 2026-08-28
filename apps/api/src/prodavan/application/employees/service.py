@@ -270,6 +270,51 @@ class EmployeesCommandService:
             )
         return emp
 
+    async def enable_employee(
+        self,
+        *,
+        employee_id: str,
+        principal: Principal | None = None,
+        publish_auth: bool = True,
+    ) -> EmployeeRow:
+        """Re-enable paused employee: status=active + Auth enable."""
+        from prodavan.application.auth.lifecycle import publish_enable_command
+        from prodavan.application.projects.platform_event_service import PlatformEventService
+
+        q = await self._session.execute(
+            select(EmployeeRow)
+            .where(EmployeeRow.id == employee_id)
+            .options(selectinload(EmployeeRow.memberships))
+        )
+        emp = q.scalar_one_or_none()
+        if emp is None or employee_is_soft_deleted(emp):
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Employee not found")
+        if emp.status == EmployeeStatus.ACTIVE:
+            return emp
+
+        emp.status = EmployeeStatus.ACTIVE
+        actor = principal or Principal(sub="system")
+        events = PlatformEventService(self._session)
+        login = employee_effective_login(emp)
+        for membership in emp.memberships:
+            await events.emit(
+                event_type="employee.enabled",
+                company_id=membership.company_id,
+                principal=actor,
+                payload={"employee_id": emp.id, "login": login, "email": emp.email, "paused": False},
+            )
+        await self._session.commit()
+        await self._session.refresh(emp)
+
+        if publish_auth:
+            await publish_enable_command(
+                client_ref=f"employee:{emp.id}",
+                sub=emp.keycloak_sub,
+                username=login,
+                email=emp.email,
+            )
+        return emp
+
     async def soft_delete(
         self,
         *,
