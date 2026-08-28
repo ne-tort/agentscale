@@ -167,6 +167,8 @@ jobs:
     needs: gate
     if: needs.gate.outputs.run_k8s == 'true'
     runs-on: [self-hosted, linux, docker]
+    env:
+      PRODAVAN_CI_HOST: host.docker.internal
     steps:
       - uses: actions/checkout@v4
 
@@ -215,25 +217,30 @@ jobs:
           echo "${{ runner.temp }}/ops-venv/bin" >> "${GITHUB_PATH}"
           "${{ runner.temp }}/ops-venv/bin/python" -m pip install -U pip poetry
 
+      - name: Install prodavan-ops
+        working-directory: infra/ops
+        run: poetry install --no-interaction
+
       - name: Sync PR e2e tests into cluster
+        working-directory: infra/ops
         run: |
           set -euo pipefail
+          export KUBECONFIG="$(poetry run python -c "from prodavan_ops.k8s import resolve_kubeconfig_path; print(resolve_kubeconfig_path())")"
           kubectl delete configmap prodavan-e2e-tests -n prodavan --ignore-not-found
           kubectl create configmap prodavan-e2e-tests \
-            --from-file=apps/api/tests/e2e \
+            --from-file=../../apps/api/tests/e2e \
             -n prodavan
 
       - name: Run k8s e2e Job (L3a)
         working-directory: infra/ops
-        run: |
-          poetry install --no-interaction
-          poetry run prodavan-ops e2e run --suite k8s --timeout 900
+        run: poetry run prodavan-ops e2e run --suite k8s --timeout 900
 
       - name: Cleanup k8s e2e
         if: always()
         working-directory: infra/ops
         run: |
           poetry run prodavan-ops e2e cleanup || true
+          export KUBECONFIG="$(poetry run python -c "from prodavan_ops.k8s import resolve_kubeconfig_path; print(resolve_kubeconfig_path())")"
           kubectl delete configmap prodavan-e2e-tests -n prodavan --ignore-not-found || true
 
   live:

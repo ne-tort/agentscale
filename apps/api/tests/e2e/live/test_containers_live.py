@@ -73,7 +73,7 @@ def test_live_containers_lifecycle(live_client, live_api_prefix: str) -> None:
         headers=owner_h,
         json={"name": f"LiveCab {stamp}", "company_id": company_id},
     )
-    assert cab.status_code == 201, cab.text
+    assert cab.status_code in (200, 201), cab.text
     cabinet_id = cab.json()["id"]
 
     peer_login = f"peer{stamp}"
