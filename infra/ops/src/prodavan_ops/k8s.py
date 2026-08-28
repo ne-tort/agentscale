@@ -68,6 +68,9 @@ def resolve_kubeconfig_path() -> Path:
         return _cached_kubeconfig
 
     kube = Path(os.environ.get("KUBECONFIG") or str(default_kubeconfig()))
+    if kube.name == "prodavan-kube-docker.yaml" and kube.is_file():
+        _cached_kubeconfig = kube
+        return kube
     expect = os.environ.get("PRODAVAN_CI_HOST", "").strip()
     if expect != "host.docker.internal":
         _cached_kubeconfig = kube
@@ -110,23 +113,45 @@ def wait_k3s_api_ready(*, timeout_sec: int = 30, poll_sec: float = 2.0) -> None:
     )
 
 
-def kubectl(args: list[str], *, retries: int = 2, retry_sleep: float = 1.0) -> subprocess.CompletedProcess[str]:
+def kubectl(
+    args: list[str],
+    *,
+    retries: int = 2,
+    retry_sleep: float = 1.0,
+    subprocess_timeout: float = 30.0,
+    request_timeout: str = "15s",
+) -> subprocess.CompletedProcess[str]:
     """Run kubectl with rewritten kubeconfig; retry transient API/ TLS blips."""
     path = resolve_kubeconfig_path()
+    cmd_args = list(args)
+    if not any(a.startswith("--request-timeout") for a in cmd_args):
+        cmd_args.append(f"--request-timeout={request_timeout}")
     last: subprocess.CompletedProcess[str] | None = None
     for attempt in range(1, retries + 1):
-        proc = subprocess.run(
-            ["kubectl", "--kubeconfig", str(path), *args],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        try:
+            proc = subprocess.run(
+                ["kubectl", "--kubeconfig", str(path), *cmd_args],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=subprocess_timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            err = "kubectl subprocess timed out"
+            if exc.stderr:
+                err = exc.stderr if isinstance(exc.stderr, str) else exc.stderr.decode(errors="replace")
+            proc = subprocess.CompletedProcess(
+                args=exc.cmd or ["kubectl", *cmd_args],
+                returncode=124,
+                stdout=exc.stdout or "",
+                stderr=err,
+            )
         last = proc
         if proc.returncode == 0:
             return proc
         err = (proc.stderr or proc.stdout or "").strip()
         tail = err.splitlines()[-1] if err else f"exit {proc.returncode}"
-        transient = any(
+        transient = proc.returncode == 124 or any(
             token in err
             for token in (
                 "EOF",
@@ -141,7 +166,7 @@ def kubectl(args: list[str], *, retries: int = 2, retry_sleep: float = 1.0) -> s
         )
         if not transient or attempt >= retries:
             return proc
-        print(f"kubectl retry {attempt}/{retries} ({' '.join(args[:3])}): {tail}")
+        print(f"kubectl retry {attempt}/{retries} ({' '.join(cmd_args[:3])}): {tail}")
         time.sleep(retry_sleep)
     assert last is not None
     return last
@@ -161,12 +186,50 @@ def assert_kubeconfig_docker_ready() -> None:
         )
 
 
+def _is_api_unreachable(exc: BaseException) -> bool:
+    if isinstance(exc, ApiException) and exc.status in (0, None):
+        return True
+    if isinstance(exc, ApiException) and isinstance(exc.body, str):
+        body = exc.body.lower()
+        if any(t in body for t in ("connection", "eof", "timeout", "refused", "unable to connect")):
+            return True
+    msg = str(exc).lower()
+    return any(
+        t in msg
+        for t in (
+            "connection refused",
+            "connection reset",
+            "unable to connect",
+            "eof",
+            "timed out",
+            "timeout",
+            "max retries exceeded",
+            "failed to establish",
+            "name or service not known",
+        )
+    )
+
+
+def require_k8s_api(*, timeout_sec: int = 15) -> None:
+    """Fail fast before long rollout/Argo waits if cluster API is down."""
+    wait_k3s_api_ready(timeout_sec=timeout_sec)
+
+
+def _fail_unreachable(exc: BaseException, *, streak: int, limit: int = 3) -> None:
+    if _is_api_unreachable(exc) and streak >= limit:
+        raise RuntimeError(
+            f"Kubernetes API unreachable ({exc}). "
+            "On Windows host run elevated: infra/github-runner/Sync-KubeForDocker.ps1"
+        ) from exc
+
+
 def rollout_restart(
     namespace: str = "prodavan",
     deployments: tuple[str, ...] = FIRST_PARTY_DEPLOYMENTS,
     timeout_sec: int = 600,
 ) -> None:
     """Patch pod-template annotation so kubelet re-pulls :latest (Always)."""
+    require_k8s_api()
     load_kube()
     apps = client.AppsV1Api()
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -182,12 +245,30 @@ def rollout_restart(
                 }
             }
         }
-        apps.patch_namespaced_deployment(name=name, namespace=namespace, body=body)
+        try:
+            apps.patch_namespaced_deployment(name=name, namespace=namespace, body=body)
+        except ApiException as exc:
+            _fail_unreachable(exc, streak=1, limit=1)
+            raise
+        except Exception as exc:
+            _fail_unreachable(exc, streak=1, limit=1)
+            raise
         print(f"rollout restart requested: {namespace}/{name}")
     deadline = time.time() + timeout_sec
     for name in deployments:
+        unreachable_streak = 0
         while time.time() < deadline:
-            dep = apps.read_namespaced_deployment(name=name, namespace=namespace)
+            try:
+                dep = apps.read_namespaced_deployment(name=name, namespace=namespace)
+            except ApiException as exc:
+                unreachable_streak += 1
+                _fail_unreachable(exc, streak=unreachable_streak)
+                raise
+            except Exception as exc:
+                unreachable_streak += 1
+                _fail_unreachable(exc, streak=unreachable_streak)
+                raise
+            unreachable_streak = 0
             status = dep.status
             desired = dep.spec.replicas or 0
             updated = (status.updated_replicas or 0) if status else 0
@@ -210,10 +291,12 @@ def wait_argo_app(
     poll_sec: float = 5.0,
 ) -> None:
     """Wait until Argo Application is Synced + Healthy."""
+    require_k8s_api()
     load_kube()
     api = client.CustomObjectsApi()
     deadline = time.time() + timeout_sec
     last = ""
+    unreachable_streak = 0
     while time.time() < deadline:
         try:
             obj = api.get_namespaced_custom_object(
@@ -224,9 +307,16 @@ def wait_argo_app(
                 name=name,
             )
         except ApiException as exc:
+            unreachable_streak += 1
+            _fail_unreachable(exc, streak=unreachable_streak)
             last = f"get Application failed: {exc.status} {exc.reason}"
             time.sleep(poll_sec)
             continue
+        except Exception as exc:
+            unreachable_streak += 1
+            _fail_unreachable(exc, streak=unreachable_streak)
+            raise
+        unreachable_streak = 0
         status = (obj or {}).get("status") or {}
         sync = ((status.get("sync") or {}).get("status")) or "Unknown"
         health = ((status.get("health") or {}).get("status")) or "Unknown"
@@ -247,7 +337,12 @@ def wait_argo_app(
                 name=name,
                 body={"metadata": {"annotations": ann}},
             )
-        except ApiException:
-            pass
+        except ApiException as exc:
+            unreachable_streak += 1
+            _fail_unreachable(exc, streak=unreachable_streak)
+        except Exception as exc:
+            unreachable_streak += 1
+            _fail_unreachable(exc, streak=unreachable_streak)
+            raise
         time.sleep(poll_sec)
     raise TimeoutError(f"Argo Application {name} not ready within {timeout_sec}s ({last})")

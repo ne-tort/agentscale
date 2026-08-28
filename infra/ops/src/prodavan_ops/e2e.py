@@ -12,6 +12,7 @@ from prodavan_ops.paths import overlay_e2e
 
 E2E_NAMESPACE = "prodavan"
 E2E_JOB = "prodavan-e2e-runner"
+_API_FAIL_STREAK = 0
 
 
 def _apply_e2e_overlay() -> None:
@@ -26,7 +27,7 @@ def _apply_e2e_overlay() -> None:
     print(proc.stdout.strip() or f"applied {path}")
 
 
-def _delete_job() -> None:
+def _delete_job(*, fast: bool = False) -> None:
     proc = kubectl(
         [
             "delete",
@@ -37,7 +38,9 @@ def _delete_job() -> None:
             "--ignore-not-found",
             "--wait=false",
         ],
-        retries=2,
+        retries=1 if fast else 2,
+        subprocess_timeout=20.0 if fast else 30.0,
+        request_timeout="10s" if fast else "15s",
     )
     if proc.returncode == 0 and proc.stdout.strip():
         print(proc.stdout.strip())
@@ -47,6 +50,7 @@ def _delete_job() -> None:
 
 
 def _job_counts() -> tuple[int, int, int] | None:
+    global _API_FAIL_STREAK
     proc = kubectl(
         [
             "get",
@@ -62,9 +66,20 @@ def _job_counts() -> tuple[int, int, int] | None:
     if proc.returncode != 0:
         err = (proc.stderr or proc.stdout or "").strip()
         if "NotFound" in err:
+            _API_FAIL_STREAK = 0
             return None
+        if any(
+            token in err
+            for token in ("EOF", "timeout", "Timeout", "Unable to connect", "connection refused", "TLS", "SSL")
+        ):
+            _API_FAIL_STREAK += 1
+            if _API_FAIL_STREAK >= 3:
+                raise RuntimeError(
+                    f"Kubernetes API unreachable while polling Job ({err.splitlines()[-1] if err else proc.returncode})"
+                )
         print(f"kubectl get job transient error: {err.splitlines()[-1] if err else proc.returncode}")
         return None
+    _API_FAIL_STREAK = 0
     parts = (proc.stdout or "0,0,0").split(",")
     while len(parts) < 3:
         parts.append("0")
@@ -134,10 +149,15 @@ def run_e2e(*, suite: str = "k8s", timeout_sec: int = 900) -> None:
 
 
 def cleanup_e2e(*, unsync: bool = False) -> None:
-    """Delete e2e Job and overlay resources."""
-    _delete_job()
+    """Delete e2e Job and overlay resources (best-effort, bounded timeouts)."""
+    _delete_job(fast=True)
     path = overlay_e2e()
-    proc = kubectl(["delete", "-k", str(path), "--ignore-not-found"], retries=2)
+    proc = kubectl(
+        ["delete", "-k", str(path), "--ignore-not-found", "--wait=false"],
+        retries=1,
+        subprocess_timeout=20.0,
+        request_timeout="10s",
+    )
     if proc.returncode != 0:
         print(proc.stderr.strip() or f"kubectl delete -k {path} failed ({proc.returncode})")
     if unsync:

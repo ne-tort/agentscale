@@ -36,6 +36,25 @@ def test_smoke_all_paths_200(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "http://10.0.0.1:8088/" in joined
 
 
+def test_smoke_fails_fast_on_connect_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
+            pass
+
+        def __enter__(self) -> FakeClient:
+            return self
+
+        def __exit__(self, *args) -> None:  # noqa: ANN002
+            return None
+
+        def get(self, url: str, headers: dict | None = None) -> None:
+            raise httpx.ConnectError("connection refused", request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "Client", FakeClient)
+    with pytest.raises(RuntimeError, match="unreachable"):
+        smoke(addr="127.0.0.1", port=9, attempts=6, sleep_sec=0, connect_fail_limit=3)
+
+
 def test_smoke_fails_on_non_200(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeResp:
         status_code = 503

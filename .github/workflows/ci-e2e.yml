@@ -253,6 +253,7 @@ jobs:
 
       - name: Cleanup k8s e2e
         if: always()
+        timeout-minutes: 2
         working-directory: infra/ops
         run: |
           poetry run prodavan-ops e2e cleanup || true

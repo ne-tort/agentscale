@@ -28,6 +28,7 @@ concurrency:
 env:
   HTTP_PORT: "8088"
   SMOKE_ADDR: "127.0.0.1"
+  PRODAVAN_CI_HOST: host.docker.internal
 
 jobs:
   wait-smoke:
@@ -69,6 +70,14 @@ jobs:
       - name: Install prodavan-ops
         working-directory: infra/ops
         run: poetry install --no-interaction
+
+      - name: Prepare Docker kubeconfig
+        working-directory: infra/ops
+        run: |
+          set -euo pipefail
+          path="$(poetry run python -c "from prodavan_ops.k8s import resolve_kubeconfig_path; print(resolve_kubeconfig_path())")"
+          echo "KUBECONFIG=${path}" >> "${GITHUB_ENV}"
+          kubectl get ns prodavan --request-timeout=10s
 
       - name: Rollout first-party (after CI Images)
         if: github.event_name == 'workflow_run' || github.event_name == 'workflow_dispatch'

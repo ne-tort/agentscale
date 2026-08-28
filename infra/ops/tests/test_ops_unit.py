@@ -81,6 +81,25 @@ def test_resolve_kubeconfig_rewrites_when_ci_host(
     assert os.environ["KUBECONFIG"] == str(path)
 
 
+def test_resolve_kubeconfig_skips_rewrite_when_already_docker_yaml(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from prodavan_ops import k8s as k8s_mod
+    from prodavan_ops.k8s import resolve_kubeconfig_path
+
+    k8s_mod._cached_kubeconfig = None
+    dest = tmp_path / "prodavan-kube-docker.yaml"
+    dest.write_text(
+        "clusters:\n- cluster:\n    server: https://host.docker.internal:6443\n"
+        "    insecure-skip-tls-verify: true\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("PRODAVAN_CI_HOST", "host.docker.internal")
+    monkeypatch.setenv("KUBECONFIG", str(dest))
+    assert resolve_kubeconfig_path() == dest
+    k8s_mod._cached_kubeconfig = None
+
+
 def test_verify_image_pins_accepts_first_party_latest() -> None:
     manifest = """
 apiVersion: apps/v1
@@ -173,6 +192,16 @@ def test_export_windows_kubeconfig_script_targets_docker_gateway() -> None:
     assert "host.docker.internal" in text
     assert "insecure-skip-tls-verify" in text
     assert "WINDOWS_KUBECONFIG" in text
+
+
+def test_is_api_unreachable_detects_connection_errors() -> None:
+    from kubernetes.client.rest import ApiException
+
+    from prodavan_ops.k8s import _is_api_unreachable
+
+    assert _is_api_unreachable(ApiException(status=0, reason="Connection refused"))
+    assert _is_api_unreachable(ConnectionError("connection refused"))
+    assert not _is_api_unreachable(ApiException(status=403, reason="Forbidden"))
 
 
 def test_first_party_latest_constants() -> None:
