@@ -173,9 +173,10 @@ jobs:
   k8s:
     needs: gate
     if: needs.gate.outputs.run_k8s == 'true'
+    timeout-minutes: 25
     concurrency:
       group: prodavan-e2e-k8s-cluster
-      cancel-in-progress: false
+      cancel-in-progress: true
     runs-on: [self-hosted, linux, docker]
     env:
       PRODAVAN_CI_HOST: host.docker.internal
@@ -275,23 +276,25 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Resolve live hosts
-        run: |
-          ADDR="${PRODAVAN_CI_HOST:-127.0.0.1}"
-          echo "PRODAVAN_E2E_BASE_URL=http://${ADDR}:8088" >> "${GITHUB_ENV}"
-          echo "PRODAVAN_E2E_KC_URL=http://${ADDR}:8089" >> "${GITHUB_ENV}"
-
-      - name: Probe live API
         timeout-minutes: 1
         run: |
           set -euo pipefail
-          BASE="${PRODAVAN_E2E_BASE_URL:-http://127.0.0.1:8088}"
-          for i in 1 2 3; do
-            if curl -fsS --connect-timeout 3 --max-time 10 "${BASE}/health/live"; then
+          candidates=()
+          if [ -n "${PRODAVAN_CI_HOST:-}" ]; then
+            candidates+=("${PRODAVAN_CI_HOST}")
+          fi
+          candidates+=("127.0.0.1")
+          for addr in "${candidates[@]}"; do
+            base="http://${addr}:8088"
+            if curl -fsS --connect-timeout 3 --max-time 10 "${base}/health/live" >/dev/null; then
+              echo "live API ok at ${base}"
+              echo "PRODAVAN_E2E_BASE_URL=${base}" >> "${GITHUB_ENV}"
+              echo "PRODAVAN_E2E_KC_URL=http://${addr}:8089" >> "${GITHUB_ENV}"
               exit 0
             fi
-            sleep 2
+            echo "live API not reachable at ${base}"
           done
-          echo "Live API unreachable at ${BASE}/health/live" >&2
+          echo "Live API unreachable (tried: ${candidates[*]})" >&2
           exit 1
 
       - uses: actions/setup-python@v5
