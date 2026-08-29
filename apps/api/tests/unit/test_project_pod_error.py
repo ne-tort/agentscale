@@ -118,7 +118,7 @@ async def test_sync_desired_reload_recovers_project_from_error() -> None:
     )
 
     assert project.status == ProjectStatus.ACTIVE
-    assert failed.status == PodStatus.RUNNING
+    assert failed.status == PodStatus.PROVISIONING
     recovered = [c.kwargs["event_type"] for c in project_events.emit.await_args_list]
     assert "project.recovered" in recovered
 

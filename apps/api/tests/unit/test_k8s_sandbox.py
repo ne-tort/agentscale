@@ -69,3 +69,35 @@ async def test_k8s_client_get_pod_not_found() -> None:
         ac.return_value.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
         snap = await client.get_pod("pod-missing")
     assert snap is None
+
+
+def test_parse_snapshot_hydrating_init_container() -> None:
+    from prodavan.infrastructure.k8s.sandbox.client import _parse_snapshot
+
+    body = {
+        "metadata": {"name": "pod-wk-demo", "labels": {}},
+        "status": {
+            "phase": "Pending",
+            "initContainerStatuses": [
+                {"name": "hydrate", "state": {"running": {"startedAt": "2026-01-01T00:00:00Z"}}},
+            ],
+        },
+    }
+    snap = _parse_snapshot(body)
+    assert snap.hydrating is True
+    assert snap.phase == "Pending"
+
+
+@pytest.mark.asyncio
+async def test_k8s_client_get_pod_metrics_not_found() -> None:
+    auth = MagicMock(spec=InClusterAuth)
+    auth.api_base.return_value = "https://k8s.example"
+    auth.headers.return_value = {"Authorization": "Bearer x"}
+    auth.client_kwargs.return_value = {"verify": False, "timeout": 1.0}
+    client = K8sSandboxClient(namespace="prodavan-sandboxes", auth=auth)
+    mock_response = MagicMock()
+    mock_response.status_code = 404
+    with patch("prodavan.infrastructure.k8s.sandbox.client.httpx.AsyncClient") as ac:
+        ac.return_value.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
+        metrics = await client.get_pod_metrics("pod-missing")
+    assert metrics is None

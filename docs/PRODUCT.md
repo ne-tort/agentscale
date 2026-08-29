@@ -82,6 +82,6 @@ Future base modules (MCP, Files, Prompts, …) follow the same pattern: edit in 
 - **Create** (`draft`) — DB record + project settings only; no Pod, no workspace files.
 - **Launch** — first materialize + Pod provision (`POST /projects/{id}/launch`); requires agent provider + AI key. On pod failure → `error` (not silent rollback).
 - **Reload** — retry pod after `error` (`POST /projects/{id}/reload`); Redis rate limit 1/min, 3/30min; disabled when Redis unavailable.
-- **Container UI** — employee subpage with k8s pod metrics (`GET /projects/{id}/container`, `/container/metrics`).
+- **Container UI** — employee subpage with live `observed_state` (`GET /projects/{id}/container`, `/container/metrics`). **`running`** only after verified CPU/RAM sample from metrics-server; grace period **`starting`** after k8s Ready.
 - **Sync** — apply module binding changes to existing Pod workspace (`POST /projects/{id}/sync`); module folder prune + hydrate.
 - **Agent reset** — cancel sessions + purge chat history (`POST /projects/{id}/agent/reset`); lives in agent BC, not pod_service.

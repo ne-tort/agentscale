@@ -28,7 +28,7 @@ class StubPodRuntimeAdapter:
         return None
 
     async def get_status(self, *, runtime_ref: str) -> dict[str, Any]:
-        return {"runtime_ref": runtime_ref, "phase": "Running", "stub": True}
+        return {"runtime_ref": runtime_ref, "phase": "Unknown", "stub": True, "ready": False}
 
     async def list_managed_pods(self) -> list[dict[str, Any]]:
         return []

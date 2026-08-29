@@ -109,7 +109,12 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
   bool get _containerUnhealthy =>
       _isError ||
       (_status == 'active' &&
-          !containerRuntimeHealthy({'runtime': _runtime, 'status': _status, 'last_error': _runtime?['last_error']}));
+          !containerRuntimeHealthy({
+            'runtime': _runtime,
+            'status': _status,
+            'last_error': _runtime?['last_error'],
+            'observed_state': _runtime?['observed_state'],
+          }));
 
   bool get _aiProviderNeedsSelection =>
       _availableKeys.length >= 2 && (_resolvedKeyId ?? '').isEmpty;

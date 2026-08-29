@@ -12,6 +12,7 @@ from prodavan.application.pod_service.factory import build_pod_runtime
 from prodavan.application.pod_service.lifecycle_emitter import PodLifecycleEmitter
 from prodavan.application.pod_service.ports.pod_runtime import PodRuntimePort
 from prodavan.application.pod_service.query import PodQuery
+from prodavan.application.pod_service.runtime_observation import RuntimeObservationService
 from prodavan.domain.identity import Principal
 from prodavan.domain.pods import PodDesiredState, PodStatus
 from prodavan.domain.projects import ProjectStatus
@@ -104,8 +105,22 @@ class PodReconcileService:
 
         sample_stats = await PodMetricsSampler(self._session).sample_managed_pods()
 
+        observation = RuntimeObservationService(self._session)
+        q_obs = await self._session.execute(
+            select(ProjectPodRow, ProjectRow)
+            .join(ProjectRow, ProjectRow.id == ProjectPodRow.project_id)
+            .where(ProjectPodRow.status.notin_((PodStatus.TERMINATED, PodStatus.FAILED)))
+        )
+        promote_actions = 0
+        for pod, project in q_obs.all():
+            if project is None:
+                continue
+            action = await observation.promote_or_demote(project=project, pod=pod)
+            if action != "noop":
+                promote_actions += 1
+
         await self._session.commit()
-        return {"fixed": fixed, "zombies_deleted": zombies, "metrics": sample_stats}
+        return {"fixed": fixed, "zombies_deleted": zombies, "metrics": sample_stats, "observed": promote_actions}
 
     async def _reap_zombies(self) -> int:
         """Delete k8s Pods managed by pod-service without a live PG row."""

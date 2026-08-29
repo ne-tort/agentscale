@@ -59,15 +59,17 @@ class ProjectQuery:
             project_id=project_id, principal=principal, employee=employee, write=False, allow_paused=True
         )
         runtime = await PodQuery(self._session).runtime_view(row.id)
+        observed_state = runtime.get("observed_state") if runtime else None
         return {
             "project_id": row.id,
             "project_name": row.name,
             "status": row.status,
+            "observed_state": observed_state,
             "container_ref": row.container_ref,
             "workspace_key": row.workspace_key,
             "runtime": runtime,
             "runtime_metrics": runtime.get("metrics") if runtime else None,
-            "k8s_phase": (runtime.get("phase") or runtime.get("status")) if runtime else None,
+            "k8s_phase": runtime.get("phase") if runtime else None,
             "last_error": runtime.get("last_error") if runtime else None,
         }
 

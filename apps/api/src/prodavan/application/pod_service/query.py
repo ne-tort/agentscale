@@ -5,15 +5,15 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from prodavan.application.pod_service.factory import build_pod_metrics, build_pod_runtime
-from prodavan.config.settings import settings
+from prodavan.application.pod_service.runtime_observation import RuntimeObservationService
 from prodavan.domain.pods import POD_TERMINAL_STATUSES, PodStatus
-from prodavan.infrastructure.persistence.models.projects import ProjectPodRow
+from prodavan.infrastructure.persistence.models.projects import ProjectPodRow, ProjectRow
 
 
 class PodQuery:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self._observation = RuntimeObservationService(session)
 
     async def get_for_project(self, project_id: str) -> dict | None:
         row = await self._get_live_row(project_id)
@@ -28,9 +28,12 @@ class PodQuery:
     async def runtime_view(self, project_id: str) -> dict | None:
         """Runtime for UI — includes failed pod when no live pod exists."""
         row = await self._get_live_row(project_id)
+        project = await self._session.get(ProjectRow, project_id)
         if row is None:
             row = await self._get_failed_row(project_id)
         if row is None:
+            if project is not None and project.launch_phase == "preparing":
+                return await self._observation.observe(project=project, pod=None)
             return None
         return await self._build_runtime_summary(row, project_id)
 
@@ -57,51 +60,18 @@ class PodQuery:
 
     async def _build_runtime_summary(self, row: ProjectPodRow, project_id: str) -> dict:
         pod = self._public(row)
+        project = await self._session.get(ProjectRow, project_id)
+        observed = await self._observation.observe(project=project, pod=row)
         summary = {
             "pod_id": pod["id"],
             "status": pod["status"],
+            "orchestrator_status": pod["status"],
             "desired_state": pod["desired_state"],
             "runtime_ref": pod["runtime_ref"],
-            "last_error": pod["last_error"],
+            "last_error": observed.get("last_error") or pod["last_error"],
             "hydrate_generation": pod["hydrate_generation"],
+            **observed,
         }
-        mode = (settings.pod_runtime_mode or "stub").strip().lower()
-        if mode == "k8s" and row.runtime_ref:
-            from prodavan.application.metrics.query import MetricsQuery
-
-            cached = await MetricsQuery(self._session).get_project_runtime_metrics(project_id)
-            if cached is not None:
-                if cached.get("phase") is not None:
-                    summary["phase"] = cached.get("phase")
-                if cached.get("restarts") is not None:
-                    summary["restarts"] = cached.get("restarts")
-                if cached.get("ready") is not None:
-                    summary["ready"] = cached.get("ready")
-                metrics_body = {
-                    k: cached[k]
-                    for k in ("cpu_millicores", "memory_bytes", "timestamp")
-                    if k in cached and cached[k] is not None
-                }
-                if metrics_body:
-                    summary["metrics"] = metrics_body
-                if cached.get("degraded"):
-                    summary["metrics_degraded"] = True
-                    summary["metrics_degraded_reason"] = cached.get("degraded_reason")
-                return summary
-            try:
-                runtime = build_pod_runtime()
-                k8s = await runtime.get_status(runtime_ref=row.runtime_ref)
-                summary["phase"] = k8s.get("phase")
-                summary["restarts"] = k8s.get("restarts")
-                summary["ready"] = k8s.get("ready")
-                summary["runtime_uid"] = k8s.get("uid")
-                metrics_port = build_pod_metrics()
-                if metrics_port is not None:
-                    metrics = await metrics_port.get_pod_metrics(runtime_ref=row.runtime_ref)
-                    if metrics:
-                        summary["metrics"] = metrics
-            except Exception:
-                summary["phase"] = "Unknown"
         return summary
 
     async def list_orphans(self) -> list[dict]:

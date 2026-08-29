@@ -29,6 +29,8 @@ class PodSnapshot:
     ready: bool
     labels: dict[str, str]
     hydrate_generation: int | None = None
+    hydrating: bool = False
+    hydrate_failed: bool = False
 
     def as_status_dict(self) -> dict[str, Any]:
         return {
@@ -38,7 +40,26 @@ class PodSnapshot:
             "restarts": self.restarts,
             "ready": self.ready,
             "stub": False,
+            "hydrating": self.hydrating,
+            "hydrate_failed": self.hydrate_failed,
         }
+
+
+def _init_hydrate_state(status: dict[str, Any]) -> tuple[bool, bool]:
+    """Return (hydrating, hydrate_failed) for initContainer ``hydrate``."""
+    init_statuses = status.get("initContainerStatuses") or []
+    for ics in init_statuses:
+        if str(ics.get("name") or "") != "hydrate":
+            continue
+        state = ics.get("state") or {}
+        if state.get("waiting") or state.get("running"):
+            return True, False
+        terminated = state.get("terminated") or {}
+        exit_code = terminated.get("exitCode")
+        if exit_code is not None and int(exit_code) != 0:
+            return False, True
+        return False, False
+    return False, False
 
 
 def _parse_snapshot(body: dict[str, Any]) -> PodSnapshot:
@@ -58,6 +79,7 @@ def _parse_snapshot(body: dict[str, Any]) -> PodSnapshot:
             ready = True
     gen_raw = labels.get("prodavan.io/hydrate-generation")
     hydrate_gen = int(gen_raw) if gen_raw is not None and str(gen_raw).isdigit() else None
+    hydrating, hydrate_failed = _init_hydrate_state(status)
     return PodSnapshot(
         name=str(meta.get("name") or ""),
         uid=meta.get("uid"),
@@ -66,6 +88,8 @@ def _parse_snapshot(body: dict[str, Any]) -> PodSnapshot:
         ready=ready,
         labels=labels,
         hydrate_generation=hydrate_gen,
+        hydrating=hydrating,
+        hydrate_failed=hydrate_failed,
     )
 
 
@@ -184,3 +208,9 @@ class K8sSandboxClient:
                 "cpu_millicores": max(1, cpu_nano // 1_000_000) if cpu_nano else 0,
                 "memory_bytes": mem_bytes,
             }
+
+    async def probe_metrics_server(self) -> bool:
+        url = f"{self._auth.api_base()}/apis/metrics.k8s.io/v1beta1"
+        async with httpx.AsyncClient(**self._auth.client_kwargs()) as client:
+            response = await client.get(url, headers=self._auth.headers())
+            return response.status_code == 200

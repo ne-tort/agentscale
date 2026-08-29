@@ -1208,6 +1208,84 @@ abstract class AppLocalizations {
   /// **'K8s'**
   String get adminContainerColK8s;
 
+  /// No description provided for @containerObservedStateLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Observed state'**
+  String get containerObservedStateLabel;
+
+  /// No description provided for @containerObservedPreparing.
+  ///
+  /// In en, this message translates to:
+  /// **'Preparing workspace'**
+  String get containerObservedPreparing;
+
+  /// No description provided for @containerObservedProvisioning.
+  ///
+  /// In en, this message translates to:
+  /// **'Provisioning pod'**
+  String get containerObservedProvisioning;
+
+  /// No description provided for @containerObservedHydrating.
+  ///
+  /// In en, this message translates to:
+  /// **'Hydrating files'**
+  String get containerObservedHydrating;
+
+  /// No description provided for @containerObservedStarting.
+  ///
+  /// In en, this message translates to:
+  /// **'Starting (awaiting metrics)'**
+  String get containerObservedStarting;
+
+  /// No description provided for @containerObservedRunning.
+  ///
+  /// In en, this message translates to:
+  /// **'Running (verified)'**
+  String get containerObservedRunning;
+
+  /// No description provided for @containerObservedDegraded.
+  ///
+  /// In en, this message translates to:
+  /// **'Degraded'**
+  String get containerObservedDegraded;
+
+  /// No description provided for @containerObservedFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed'**
+  String get containerObservedFailed;
+
+  /// No description provided for @containerObservedPaused.
+  ///
+  /// In en, this message translates to:
+  /// **'Paused'**
+  String get containerObservedPaused;
+
+  /// No description provided for @containerObservedAbsent.
+  ///
+  /// In en, this message translates to:
+  /// **'Absent'**
+  String get containerObservedAbsent;
+
+  /// No description provided for @containerObservedUnknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown'**
+  String get containerObservedUnknown;
+
+  /// No description provided for @containerMetricsAwaiting.
+  ///
+  /// In en, this message translates to:
+  /// **'CPU/RAM: awaiting first metrics sample'**
+  String get containerMetricsAwaiting;
+
+  /// No description provided for @adminContainerOrchestratorStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Orchestrator status'**
+  String get adminContainerOrchestratorStatus;
+
   /// No description provided for @adminDeleteContainerConfirm.
   ///
   /// In en, this message translates to:

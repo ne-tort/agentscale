@@ -644,6 +644,46 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminContainerColK8s => 'K8s';
 
   @override
+  String get containerObservedStateLabel => 'Observed state';
+
+  @override
+  String get containerObservedPreparing => 'Preparing workspace';
+
+  @override
+  String get containerObservedProvisioning => 'Provisioning pod';
+
+  @override
+  String get containerObservedHydrating => 'Hydrating files';
+
+  @override
+  String get containerObservedStarting => 'Starting (awaiting metrics)';
+
+  @override
+  String get containerObservedRunning => 'Running (verified)';
+
+  @override
+  String get containerObservedDegraded => 'Degraded';
+
+  @override
+  String get containerObservedFailed => 'Failed';
+
+  @override
+  String get containerObservedPaused => 'Paused';
+
+  @override
+  String get containerObservedAbsent => 'Absent';
+
+  @override
+  String get containerObservedUnknown => 'Unknown';
+
+  @override
+  String get containerMetricsAwaiting =>
+      'CPU/RAM: awaiting first metrics sample';
+
+  @override
+  String get adminContainerOrchestratorStatus => 'Orchestrator status';
+
+  @override
   String adminDeleteContainerConfirm(String name) {
     return 'Delete project \"$name\"? Workspace will be wiped.';
   }

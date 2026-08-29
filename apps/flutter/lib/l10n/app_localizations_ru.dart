@@ -644,6 +644,46 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminContainerColK8s => 'K8s';
 
   @override
+  String get containerObservedStateLabel => 'Наблюдаемое состояние';
+
+  @override
+  String get containerObservedPreparing => 'Подготовка workspace';
+
+  @override
+  String get containerObservedProvisioning => 'Создание pod';
+
+  @override
+  String get containerObservedHydrating => 'Копирование файлов';
+
+  @override
+  String get containerObservedStarting => 'Запуск (ожидание метрик)';
+
+  @override
+  String get containerObservedRunning => 'Запущен (подтверждено)';
+
+  @override
+  String get containerObservedDegraded => 'Деградация';
+
+  @override
+  String get containerObservedFailed => 'Ошибка';
+
+  @override
+  String get containerObservedPaused => 'На паузе';
+
+  @override
+  String get containerObservedAbsent => 'Отсутствует';
+
+  @override
+  String get containerObservedUnknown => 'Неизвестно';
+
+  @override
+  String get containerMetricsAwaiting =>
+      'CPU/RAM: ожидание первого sample метрик';
+
+  @override
+  String get adminContainerOrchestratorStatus => 'Статус оркестратора';
+
+  @override
   String adminDeleteContainerConfirm(String name) {
     return 'Удалить проект «$name»? Workspace будет очищен.';
   }

@@ -215,6 +215,8 @@ class ProjectCommand:
             platform_fallback=company_policy.platform_fallback,
         )
         enabled = await self._resolve_enabled_module_ids(row)
+        row.launch_phase = "preparing"
+        await self._session.flush()
         mat = await self._materialize.materialize_project(
             session=self._session,
             project_id=row.id,
@@ -225,6 +227,8 @@ class ProjectCommand:
             enabled_module_ids=enabled,
         )
         row.materialize_manifest = dict(mat.module_paths or {})
+        row.launch_phase = None
+        await self._session.flush()
         await self._pods.provision_for_project(row.id, principal=principal, start=False)
         try:
             await self._pods.sync_desired(
@@ -233,6 +237,9 @@ class ProjectCommand:
                 principal=principal,
                 reason="launch",
             )
+            from prodavan.application.pod_service.runtime_observation import RuntimeObservationService
+
+            await RuntimeObservationService(self._session).wait_for_running(project_id=row.id)
             row.status = ProjectStatus.ACTIVE
             await self._events.emit(
                 event_type="project.started",
@@ -244,6 +251,7 @@ class ProjectCommand:
             )
         except Exception:
             row.status = ProjectStatus.ERROR
+            row.launch_phase = None
         await self._session.commit()
         await self._session.refresh(row)
         out = await self._project_public(row, include_runtime=True)
@@ -575,7 +583,6 @@ class ProjectCommand:
             preferred_provider=row.agent_provider or company_policy.preferred_provider,
             platform_fallback=company_policy.platform_fallback,
         )
-        row.status = ProjectStatus.ACTIVE
         try:
             await self._pods.sync_desired(
                 row.id,
@@ -583,6 +590,10 @@ class ProjectCommand:
                 principal=principal,
                 reason="resume",
             )
+            from prodavan.application.pod_service.runtime_observation import RuntimeObservationService
+
+            await RuntimeObservationService(self._session).wait_for_running(project_id=row.id)
+            row.status = ProjectStatus.ACTIVE
             await self._events.emit(
                 event_type="project.resumed",
                 company_id=row.company_id,
@@ -654,6 +665,9 @@ class ProjectCommand:
                 principal=principal,
                 reason="reload",
             )
+            from prodavan.application.pod_service.runtime_observation import RuntimeObservationService
+
+            await RuntimeObservationService(self._session).wait_for_running(project_id=row.id)
             row.status = ProjectStatus.ACTIVE
         except Exception:
             row.status = ProjectStatus.ERROR

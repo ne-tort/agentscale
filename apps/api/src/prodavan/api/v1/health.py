@@ -101,4 +101,31 @@ async def readiness(request: Request) -> dict[str, Any]:
                 )
             checks[name] = "ok"
 
+    if settings.pod_k8s_required:
+        from prodavan.core.infra.k8s_manager import get_k8s_manager
+
+        k8s_mgr = get_k8s_manager()
+        if k8s_mgr is None or k8s_mgr.client is None:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "NOT_READY",
+                    "message": "metrics_server: k8s client unavailable",
+                    "checks": {**checks, "metrics_server": "fail"},
+                    **extras,
+                },
+            )
+        metrics_ok = await k8s_mgr.client.probe_metrics_server()
+        if not metrics_ok:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "NOT_READY",
+                    "message": "metrics_server: unavailable",
+                    "checks": {**checks, "metrics_server": "fail"},
+                    **extras,
+                },
+            )
+        checks["metrics_server"] = "ok"
+
     return {"status": "ok", **_build_meta(), "checks": checks, **extras}

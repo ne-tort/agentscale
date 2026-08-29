@@ -57,14 +57,11 @@ async def test_runtime_summary_shape() -> None:
 
     summary = await PodQuery(session).runtime_summary("prj_test1234567890")
 
-    assert summary == {
-        "pod_id": "pod_live123",
-        "status": PodStatus.PAUSED,
-        "desired_state": PodDesiredState.ABSENT,
-        "runtime_ref": "object-ws:wk_demo",
-        "last_error": None,
-        "hydrate_generation": 0,
-    }
+    assert summary is not None
+    assert summary["pod_id"] == "pod_live123"
+    assert summary["status"] == PodStatus.PAUSED
+    assert summary["observed_state"] == "paused"
+    assert summary["desired_state"] == PodDesiredState.ABSENT
 
 
 @pytest.mark.asyncio

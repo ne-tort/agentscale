@@ -179,7 +179,7 @@ async def test_sync_desired_revives_failed_pod() -> None:
     )
 
     runtime.ensure_running.assert_awaited_once()
-    assert failed.status == PodStatus.RUNNING
+    assert failed.status == PodStatus.PROVISIONING
     assert failed.last_error is None
 
 

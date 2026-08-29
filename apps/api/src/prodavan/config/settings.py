@@ -107,6 +107,9 @@ class Settings(BaseSettings):
     pod_sandbox_memory_request: str = "256Mi"
     pod_sandbox_memory_limit: str = "1Gi"
     pod_ready_timeout_sec: int = 120
+    pod_metrics_grace_sec: int = 90
+    pod_provisioning_timeout_sec: int = 300
+    pod_preparing_timeout_sec: int = 120
     pod_k8s_required: bool = False
     sandbox_k8s_pvc: str = "prodavan-api-storage"
     sandbox_k8s_job_image: str = "ghcr.io/ne-tort/prodavan-api:local"
