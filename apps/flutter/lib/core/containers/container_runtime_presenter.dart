@@ -156,6 +156,16 @@ bool containerRuntimeNeedsAttention(Map<String, dynamic>? item) {
   return runtimeMap(item) == null;
 }
 
+/// Project list row — error if status=error or active with unhealthy container.
+bool projectShowsContainerError(Map<String, dynamic>? project) {
+  if (project?['status'] == 'error') return true;
+  if (project?['status'] != 'active') return false;
+  final observed = project?['observed_state'] as String?;
+  if (observed == null || observed.isEmpty) return false;
+  const ok = {'running', 'paused', 'preparing', 'provisioning', 'hydrating', 'starting'};
+  return !ok.contains(observed);
+}
+
 bool containerRuntimeHealthy(Map<String, dynamic>? item) {
   return _observedState(item) == 'running';
 }

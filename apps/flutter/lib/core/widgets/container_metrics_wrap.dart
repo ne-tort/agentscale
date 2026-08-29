@@ -82,27 +82,7 @@ class ContainerMetricsWrap extends StatelessWidget {
     final uptimeValue = formatContainerUptime(container, l10n);
     final restartsValue = formatContainerRestarts(container, l10n);
     final createdValue = formatContainerCreatedAt(container, l10n);
-
-    final resourceTiles = <Widget>[
-      if (_cpu(l10n) != null)
-        StatTile(
-          label: l10n.adminContainerMetricsCpu,
-          value: _cpu(l10n)!,
-          icon: Icons.speed_outlined,
-        ),
-      if (_memory(l10n) != null)
-        StatTile(
-          label: l10n.adminContainerMetricsMemory,
-          value: _memory(l10n)!,
-          icon: Icons.memory_outlined,
-        ),
-      if (_storage(l10n) != null)
-        StatTile(
-          label: l10n.commonStorageBytes,
-          value: _storage(l10n)!,
-          icon: Icons.storage_outlined,
-        ),
-    ];
+    final storageValue = _storage(l10n);
 
     final lifecycleRows = <Widget>[
       _readOnlyRow(
@@ -146,6 +126,38 @@ class ContainerMetricsWrap extends StatelessWidget {
           title: l10n.containerCreatedAt,
           value: createdValue,
           icon: Icons.add_circle_outline,
+        ),
+    ];
+
+    if (hasError && storageValue != null) {
+      lifecycleRows.insert(
+        1,
+        _readOnlyRow(
+          title: l10n.commonStorageBytes,
+          value: storageValue,
+          icon: Icons.storage_outlined,
+        ),
+      );
+    }
+
+    final resourceTiles = <Widget>[
+      if (!hasError && _cpu(l10n) != null)
+        StatTile(
+          label: l10n.adminContainerMetricsCpu,
+          value: _cpu(l10n)!,
+          icon: Icons.speed_outlined,
+        ),
+      if (!hasError && _memory(l10n) != null)
+        StatTile(
+          label: l10n.adminContainerMetricsMemory,
+          value: _memory(l10n)!,
+          icon: Icons.memory_outlined,
+        ),
+      if (!hasError && storageValue != null)
+        StatTile(
+          label: l10n.commonStorageBytes,
+          value: storageValue,
+          icon: Icons.storage_outlined,
         ),
     ];
 

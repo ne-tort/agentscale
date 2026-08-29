@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/containers/container_runtime_presenter.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
@@ -118,9 +119,32 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
     return '${text.substring(0, _aboutMaxLen)}…';
   }
 
-  Color? _rowColor(BuildContext context, Map<String, dynamic> project) {
+  String _statusLabel(Map<String, dynamic> project, AppLocalizations l10n) {
+    final status = project['status'] as String?;
+    if (projectShowsContainerError(project)) {
+      return l10n.containerObservedFailed;
+    }
+    return switch (status) {
+      'active' => l10n.adminContainerStatusActive,
+      'paused' => l10n.adminContainerStatusPaused,
+      'error' => l10n.containerObservedFailed,
+      'draft' => 'draft',
+      _ => status ?? l10n.commonEmDash,
+    };
+  }
+
+  Color? _statusColor(BuildContext context, Map<String, dynamic> project) {
+    if (projectShowsContainerError(project)) {
+      return context.appColors.danger;
+    }
     final status = project['status'] as String?;
     if (status == 'error') return context.appColors.danger;
+    if (status == 'draft' || status == 'paused') return context.appColors.warning;
+    return null;
+  }
+
+  Color? _rowColor(BuildContext context, Map<String, dynamic> project) {
+    final status = project['status'] as String?;
     if (status == 'draft' || status == 'paused') return context.appColors.warning;
     return null;
   }
@@ -134,10 +158,16 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
             id: p['id'] as String,
             title: p['name'] as String? ?? p['id'] as String,
             rowColor: _rowColor(context, p),
+            cellWidgets: {
+              'status': Text(
+                _statusLabel(p, l10n),
+                style: TextStyle(color: _statusColor(context, p)),
+              ),
+            },
             cells: {
               'about': _truncateAbout(p['about'] as String?),
               'creator': p['created_by_login'] as String? ?? '—',
-              'status': p['status'] as String? ?? '—',
+              'status': _statusLabel(p, l10n),
             },
           ),
         )

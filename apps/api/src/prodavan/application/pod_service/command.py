@@ -378,10 +378,6 @@ class PodCommand:
         await self._runtime.ensure_running(runtime_ref=ref, context=ctx)
         ws_key = pod.workspace_key or project.workspace_key
         await self._hydrate.hydrate(workspace_key=ws_key, runtime_ref=ref)
-        if mode != "k8s":
-            from prodavan.application.pod_service.runtime_observation import emit_stub_metrics_heartbeat
-
-            await emit_stub_metrics_heartbeat(self._session, project=project, pod=pod)
         pod.status = PodStatus.PROVISIONING
         project.container_ref = ref
         await self._events.emit(

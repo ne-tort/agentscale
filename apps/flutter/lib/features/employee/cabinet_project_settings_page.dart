@@ -332,7 +332,7 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
               enabled: !_busy,
               onTap: _resumeProject,
             ),
-          if (_launched && !paused && _hasPod && !_isError)
+          if (_launched && !paused && _hasPod && !_isError && !_containerUnhealthy)
             AppNavPreference(
               title: l10n.projectProjectManagement,
               icon: Icons.tune_outlined,

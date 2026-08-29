@@ -11,6 +11,7 @@ from prodavan.application.pod_service.runtime_observation import RuntimeObservat
 from prodavan.core.events.envelope import EventEnvelope
 from prodavan.domain.pods import PodDesiredState, PodStatus
 from prodavan.domain.pods.observed_state import ObservedState
+from prodavan.domain.projects import ProjectStatus
 from prodavan.infrastructure.persistence.models.projects import ProjectPodRow, ProjectRow
 
 
@@ -69,26 +70,50 @@ async def test_observe_preparing_from_launch_phase() -> None:
 
 
 @pytest.mark.asyncio
-async def test_observe_stub_running_with_verified_metrics() -> None:
+async def test_observe_stub_running_without_metrics() -> None:
     session = AsyncMock()
     svc = RuntimeObservationService(session)
     project = _project()
-    pod = _pod(status=PodStatus.PROVISIONING)
-    ts = EventEnvelope.now_iso()
-    svc._metrics_query.get_project_runtime_metrics = AsyncMock(  # type: ignore[method-assign]
-        return_value={
-            "cpu_millicores": 5,
-            "memory_bytes": 4096,
-            "timestamp": ts,
-            "phase": "Running",
-            "ready": True,
-        }
-    )
+    pod = _pod(status=PodStatus.RUNNING)
     with patch("prodavan.application.pod_service.runtime_observation.settings") as mock_settings:
         mock_settings.pod_runtime_mode = "stub"
         out = await svc.observe(project=project, pod=pod)
     assert out["observed_state"] == ObservedState.RUNNING.value
-    assert out.get("metrics_fresh") is True
+    assert out.get("stub") is True
+    assert "metrics" not in out
+
+
+@pytest.mark.asyncio
+async def test_observe_stub_failed() -> None:
+    session = AsyncMock()
+    svc = RuntimeObservationService(session)
+    project = _project()
+    pod = _pod(status=PodStatus.FAILED, last_error="boom")
+    with patch("prodavan.application.pod_service.runtime_observation.settings") as mock_settings:
+        mock_settings.pod_runtime_mode = "stub"
+        out = await svc.observe(project=project, pod=pod)
+    assert out["observed_state"] == ObservedState.FAILED.value
+    assert out.get("last_error") == "boom"
+
+
+@pytest.mark.asyncio
+async def test_promote_or_demote_k8s_unknown_with_error() -> None:
+    session = MagicMock()
+    svc = RuntimeObservationService(session)
+    project = _project()
+    pod = _pod(status=PodStatus.RUNNING)
+    svc.observe = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "observed_state": ObservedState.UNKNOWN.value,
+            "last_error": "metrics not verified",
+        }
+    )
+    with patch("prodavan.application.pod_service.runtime_observation.settings") as mock_settings:
+        mock_settings.pod_runtime_mode = "k8s"
+        action = await svc.promote_or_demote(project=project, pod=pod)
+    assert action == "demoted"
+    assert pod.status == PodStatus.FAILED
+    assert project.status == ProjectStatus.ERROR
 
 
 @pytest.mark.asyncio

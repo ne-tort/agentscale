@@ -81,6 +81,18 @@ class RuntimeObservationService:
         timeout_sec: float | None = None,
         poll_sec: float = 2.0,
     ) -> dict[str, Any]:
+        mode = (settings.pod_runtime_mode or "stub").strip().lower()
+        if mode != "k8s":
+            project = await self._session.get(ProjectRow, project_id)
+            pod = await self._get_live_pod(project_id)
+            if project is None or pod is None:
+                raise RuntimeError("project or pod missing while waiting for running")
+            await self.promote_or_demote(project=project, pod=pod)
+            await self._session.flush()
+            if pod.status != PodStatus.RUNNING:
+                raise RuntimeError(f"stub pod not running after promote; status={pod.status}")
+            return await self.observe(project=project, pod=pod)
+
         deadline = datetime.now(UTC).timestamp() + float(
             timeout_sec or settings.pod_provisioning_timeout_sec
         )
@@ -111,9 +123,19 @@ class RuntimeObservationService:
 
     async def promote_or_demote(self, *, project: ProjectRow, pod: ProjectPodRow) -> str:
         """Sync DB orchestrator status from observation. Returns action taken."""
+        now = datetime.now(UTC)
+        mode = (settings.pod_runtime_mode or "stub").strip().lower()
+
+        if mode != "k8s":
+            if pod.status == PodStatus.PROVISIONING and pod.desired_state == PodDesiredState.RUNNING.value:
+                pod.status = PodStatus.RUNNING
+                pod.last_error = None
+                pod.last_started_at = now
+                return "promoted"
+            return "noop"
+
         obs = await self.observe(project=project, pod=pod)
         state = obs.get("observed_state")
-        now = datetime.now(UTC)
 
         if pod.status == PodStatus.PROVISIONING:
             age = (now - self._as_utc(pod.updated_at)).total_seconds()
@@ -130,11 +152,17 @@ class RuntimeObservationService:
             pod.last_started_at = now
             return "promoted"
 
-        if state in {
+        unhealthy = state in {
             ObservedState.FAILED.value,
             ObservedState.DEGRADED.value,
             ObservedState.ABSENT.value,
-        } and pod.status == PodStatus.RUNNING and pod.desired_state == PodDesiredState.RUNNING.value:
+        } or (state == ObservedState.UNKNOWN.value and bool(obs.get("last_error")))
+
+        if (
+            unhealthy
+            and pod.status == PodStatus.RUNNING
+            and pod.desired_state == PodDesiredState.RUNNING.value
+        ):
             pod.status = PodStatus.FAILED
             pod.last_error = obs.get("last_error") or f"observed {state}"
             if project.status == ProjectStatus.ACTIVE:
@@ -313,54 +341,43 @@ class RuntimeObservationService:
         )
 
     async def _observe_stub(self, project: ProjectRow, pod: ProjectPodRow) -> dict[str, Any]:
-        cached = await self._metrics_query.get_project_runtime_metrics(project.id)
-        if self._metrics_verified(None, cached):
-            metrics_body = {
-                k: cached[k]  # type: ignore[index]
-                for k in ("cpu_millicores", "memory_bytes", "timestamp")
-                if cached.get(k) is not None  # type: ignore[union-attr]
-            }
+        """Stub mode — no k8s pod; trust orchestrator DB status (no fake metrics)."""
+        if pod.status == PodStatus.FAILED:
+            return self._summary(
+                ObservedState.FAILED,
+                orchestrator_status=pod.status,
+                desired_state=pod.desired_state,
+                last_error=pod.last_error,
+                stub=True,
+            )
+        if pod.desired_state == PodDesiredState.ABSENT.value or pod.status in {
+            PodStatus.PAUSED,
+            PodStatus.PAUSING,
+        }:
+            return self._summary(
+                ObservedState.PAUSED,
+                orchestrator_status=pod.status,
+                desired_state=pod.desired_state,
+                stub=True,
+            )
+        if pod.status == PodStatus.RUNNING:
             return self._summary(
                 ObservedState.RUNNING,
                 orchestrator_status=pod.status,
                 desired_state=pod.desired_state,
                 phase="Running",
                 ready=True,
-                metrics=metrics_body,
-                metrics_fresh=True,
-                restarts=cached.get("restarts") if cached else 0,
-                started_at=cached.get("timestamp") if cached else None,
                 stub=True,
             )
-
         if pod.status == PodStatus.PROVISIONING:
-            age = (datetime.now(UTC) - self._as_utc(pod.updated_at)).total_seconds()
-            if age > settings.pod_provisioning_timeout_sec:
-                return self._summary(
-                    ObservedState.FAILED,
-                    orchestrator_status=pod.status,
-                    desired_state=pod.desired_state,
-                    last_error=f"stub provisioning timeout after {int(age)}s",
-                    stub=True,
-                )
             return self._summary(
                 ObservedState.STARTING,
                 orchestrator_status=pod.status,
                 desired_state=pod.desired_state,
                 stub=True,
             )
-
-        if pod.status == PodStatus.RUNNING:
-            return self._summary(
-                ObservedState.UNKNOWN,
-                orchestrator_status=pod.status,
-                desired_state=pod.desired_state,
-                last_error="stub pod without verified metrics",
-                stub=True,
-            )
-
         return self._summary(
-            ObservedState.UNKNOWN,
+            ObservedState.PROVISIONING,
             orchestrator_status=pod.status,
             desired_state=pod.desired_state,
             stub=True,
@@ -460,38 +477,3 @@ class RuntimeObservationService:
         if stub:
             out["stub"] = True
         return out
-
-
-async def emit_stub_metrics_heartbeat(
-    session: AsyncSession,
-    *,
-    project: ProjectRow,
-    pod: ProjectPodRow,
-) -> None:
-    """Write synthetic CPU/RAM sample so stub mode can reach verified running."""
-    from prodavan.application.metrics.adapters.redis_metrics_store import build_metrics_store
-    from prodavan.application.metrics.command import MetricsCommand
-    from prodavan.core.events.envelope import metrics_envelope
-
-    ts = EventEnvelope.now_iso()
-    payload = {
-        "pod_id": pod.id,
-        "cpu_millicores": 1,
-        "memory_bytes": 32 * 1024 * 1024,
-        "phase": "Running",
-        "restarts": 0,
-        "ready": True,
-        "timestamp": ts,
-        "stub": True,
-    }
-    store = build_metrics_store()
-    envelope = metrics_envelope(
-        event_id=f"met_stub_{pod.id[:8]}",
-        event_type="pod.metrics.sample",
-        company_id=project.company_id,
-        project_id=project.id,
-        cabinet_id=project.cabinet_id,
-        payload=payload,
-        occurred_at=ts,
-    )
-    await MetricsCommand(session, store=store).ingest_envelope(envelope)

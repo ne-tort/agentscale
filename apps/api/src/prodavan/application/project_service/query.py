@@ -38,14 +38,17 @@ class ProjectQuery:
             owner = await self._session.get(EmployeeRow, row.owner_employee_id)
             if owner is not None:
                 created_by_login = owner.login
+        runtime: dict | None = None
+        if include_runtime:
+            runtime = await PodQuery(self._session).runtime_view(row.id)
         out = project_public(
             row,
             limits=limits,
             company_subscription=subscription,
             created_by_login=created_by_login,
         )
-        if include_runtime:
-            out["runtime"] = await PodQuery(self._session).runtime_view(row.id)
+        if runtime is not None:
+            out["runtime"] = runtime
         return out
 
     async def get_container(
@@ -117,14 +120,23 @@ class ProjectQuery:
             ):
                 continue
             login = logins.get(row.owner_employee_id) if row.owner_employee_id else None
-            items.append(
-                project_public(
-                    row,
-                    limits=limits,
-                    company_subscription=subscription,
-                    created_by_login=login,
-                )
+            runtime: dict | None = None
+            if row.status in {
+                ProjectStatus.ACTIVE,
+                ProjectStatus.ERROR,
+                ProjectStatus.PAUSED,
+            } and row.container_ref:
+                runtime = await PodQuery(self._session).runtime_view(row.id)
+            item = project_public(
+                row,
+                limits=limits,
+                company_subscription=subscription,
+                created_by_login=login,
             )
+            if runtime:
+                item["observed_state"] = runtime.get("observed_state")
+                item["container_last_error"] = runtime.get("last_error")
+            items.append(item)
         return items
 
     async def list_ids(
