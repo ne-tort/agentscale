@@ -6,7 +6,7 @@ from prodavan.config.settings import settings
 from prodavan.core.infra.database_resource import DatabaseEngineResource
 from prodavan.core.infra.k8s_manager import k8s_manager_from_settings
 from prodavan.core.infra.kafka_manager import KafkaManager
-from prodavan.core.infra.metrics_presence_consumer_resource import MetricsPresenceConsumerResource
+from prodavan.core.infra.metrics_consumer_resource import MetricsConsumerResource
 from prodavan.core.infra.platform_bootstrap_resource import PlatformBootstrapResource
 from prodavan.core.infra.redis_manager import RedisManager
 from prodavan.core.infra.trigger_worker_resource import TriggerWorkerResource
@@ -60,6 +60,7 @@ def build_lifespan_manager() -> LifespanManager:
             topic_auth_commands=settings.kafka_topic_auth_commands,
             topic_auth_events=settings.kafka_topic_auth_events,
             topic_relation_events=settings.kafka_topic_relation_events,
+            topic_metrics_events=settings.kafka_topic_metrics_events,
             required=settings.kafka_required,
             consumer_enabled=settings.kafka_consumer_enabled,
             consumer_group=settings.kafka_consumer_group,
@@ -72,7 +73,7 @@ def build_lifespan_manager() -> LifespanManager:
     )
     manager.register(worker_manager_from_settings())
     if settings.kafka_consumer_enabled:
-        manager.register(MetricsPresenceConsumerResource())
+        manager.register(MetricsConsumerResource())
     manager.register(PlatformBootstrapResource())
     manager.register(TriggerWorkerResource())
     _lifespan_manager = manager

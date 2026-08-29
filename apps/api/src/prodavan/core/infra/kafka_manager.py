@@ -58,6 +58,7 @@ class KafkaManager(LifespanResource):
         topic_auth_commands: str = "prodavan.auth.commands",
         topic_auth_events: str = "prodavan.auth.events",
         topic_relation_events: str = "prodavan.relation.events",
+        topic_metrics_events: str = "prodavan.metrics.events",
         required: bool = False,
         buffer_size: int = 200,
         consumer_enabled: bool = False,
@@ -76,6 +77,7 @@ class KafkaManager(LifespanResource):
         self._topic_auth_commands = topic_auth_commands
         self._topic_auth_events = topic_auth_events
         self._topic_relation_events = topic_relation_events
+        self._topic_metrics_events = topic_metrics_events
         self._required = required
         self._consumer_enabled = consumer_enabled
         self._consumer_group = consumer_group
@@ -150,6 +152,8 @@ class KafkaManager(LifespanResource):
             return self._topic_auth_events
         if bus == "relation_event":
             return self._topic_relation_events
+        if bus == "metrics":
+            return self._topic_metrics_events
         raise ValueError(f"unknown bus: {bus}")
 
     def recent_envelopes(self) -> list[dict[str, Any]]:
@@ -174,6 +178,7 @@ class KafkaManager(LifespanResource):
                 envelope.event_id,
             )
             await self._local_auth_dispatch(envelope)
+            await self._local_metrics_dispatch(envelope)
             return True
         topic = self.topic_for(envelope.bus)
         key = (envelope.project_id or envelope.company_id or envelope.event_id).encode("utf-8")
@@ -224,6 +229,20 @@ class KafkaManager(LifespanResource):
             )
         finally:
             self._local_auth_depth -= 1
+
+    async def _local_metrics_dispatch(self, envelope: EventEnvelope) -> None:
+        if envelope.bus not in {"platform", "metrics"}:
+            return
+        try:
+            from prodavan.application.metrics.consumer.registry import handle_metrics_envelope
+
+            await handle_metrics_envelope(envelope)
+        except Exception:
+            logger.exception(
+                "kafka: local metrics dispatch failed bus=%s type=%s",
+                envelope.bus,
+                envelope.event_type,
+            )
 
     async def _apply_auth_bind(self, payload: dict[str, Any]) -> None:
         from prodavan.application.identity.auth_bind import apply_auth_user_registered_payload
@@ -490,6 +509,7 @@ class KafkaManager(LifespanResource):
             self._topic_auth_commands,
             self._topic_auth_events,
             self._topic_relation_events,
+            self._topic_metrics_events,
         ]
         try:
             from aiokafka.admin import AIOKafkaAdminClient, NewTopic
@@ -554,13 +574,14 @@ class KafkaManager(LifespanResource):
                 await self._producer.start()
                 await self._ensure_topics()
                 logger.info(
-                    "kafka: producer started servers=%s topics=%s,%s,%s,%s,%s (attempt %s/%s)",
+                    "kafka: producer started servers=%s topics=%s,%s,%s,%s,%s,%s (attempt %s/%s)",
                     self._bootstrap,
                     self._topic_platform,
                     self._topic_triggers,
                     self._topic_auth_commands,
                     self._topic_auth_events,
                     self._topic_relation_events,
+                    self._topic_metrics_events,
                     attempt,
                     attempts,
                 )

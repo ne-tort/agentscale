@@ -26,6 +26,22 @@ async def list_company_containers(
     return await AdminContainerReadService(session).list_containers_for_company(company_id, limit=limit)
 
 
+@router.get("/{project_id}/metrics")
+async def get_company_container_metrics(
+    company_id: str,
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+    window: str = Query(default="1h"),
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    await AdminContainerReadService(session).get_container_for_company(company_id, project_id)
+    from prodavan.application.metrics.query import MetricsQuery
+
+    return await MetricsQuery(session).get_project_metrics(project_id, window=window)
+
+
 @router.get("/{project_id}")
 async def get_company_container(
     company_id: str,

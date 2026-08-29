@@ -82,6 +82,12 @@ class Settings(BaseSettings):
     admin_metrics_subscription_expiring_days: int = 30
     # Redis presence TTL for auth.login / token_refreshed (seconds).
     metrics_presence_ttl_sec: int = 900
+    kafka_topic_metrics_events: str = "prodavan.metrics.events"
+    kafka_metrics_group: str = "prodavan-metrics"
+    metrics_sample_ttl_sec: int = 900
+    metrics_sample_interval_sec: int = 60
+    metrics_delta_min_cpu_millicores: int = 50
+    metrics_delta_min_memory_bytes: int = 32 * 1024 * 1024
 
     # L07 local-ws MCP package processes (opt-in; no bubblewrap/k8s yet)
     mcp_sandbox_spawn: bool = False

@@ -78,6 +78,19 @@ OpenTelemetry span per `sync_desired` with child spans for k8s API calls — sam
 
 Sort/filter by: company, phase, restarts, last_started_at.
 
+## Prodavan Metrics BC (in prodavan-api)
+
+Cluster addon **metrics-server** supplies raw CPU/RAM. Prodavan does **not** deploy a separate metrics microservice.
+
+```text
+PodReconcileService → PodMetricsSampler → metrics-server (read)
+  → Kafka prodavan.metrics.events (pod.metrics.sample | pod.metrics.degraded)
+  → MetricsConsumerResource → Redis (latest + series)
+  → MetricsQuery → REST / containers / runtime
+```
+
+Verify on dev: [`docs/07-infrastructure/wsl-dev.md`](../../../07-infrastructure/wsl-dev.md#k8s-metrics-server).
+
 ## Alerts (target)
 
 | Condition | Action |

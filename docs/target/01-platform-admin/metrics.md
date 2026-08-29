@@ -2,10 +2,27 @@
 
 Кросс-компанийный мониторинг на вкладке «Сводка» и на `AdminCompanyDetailPage`.
 
+## Два слоя observability
+
+| Слой | Что | Где |
+|------|-----|-----|
+| **k8s metrics-server** | CPU/RAM pod'ов (`metrics.k8s.io`) | Cluster addon (kube-system), **не** отдельный Prodavan Deployment |
+| **Metrics BC** | Presence, company aggregates, pod runtime samples | Изолированный слой в `prodavan-api` (`application/metrics/`) |
+
+Pipeline pod runtime:
+
+```text
+PodReconcileService / PodMetricsSampler
+  → metrics-server (read)
+  → Kafka prodavan.metrics.events (pod.metrics.sample)
+  → MetricsConsumerResource → Redis (latest + series)
+  → GET .../containers/{project_id}/metrics | runtime summary
+```
+
 ## Presence (online)
 
 Auth Service публикует `auth.login`, `auth.token_refreshed`, `auth.logout` в platform Kafka bus.
-Metrics consumer (`application/metrics/`) обновляет Redis:
+Metrics consumer обновляет Redis:
 
 - `presence:employee:{id}` — сотрудник онлайн (TTL `metrics_presence_ttl_sec`, default 900)
 - `presence:company:{login}` — org principal компании онлайн
@@ -28,6 +45,16 @@ Read path: `MetricsReadService` batch MGET при list/metrics. Без Redis —
 | `storage_bytes` | Объём workspace (оценка) |
 | `last_activity_at` | Последняя активность сотрудника |
 
+## Pod / container runtime metrics
+
+| Поле | Источник |
+|------|----------|
+| `cpu_millicores`, `memory_bytes` | metrics-server via sampler |
+| `phase`, `restarts`, `ready` | k8s Pod status |
+| `metrics_degraded` | metrics-server недоступен |
+
+Delta optimization: publish/store только при interval elapsed, status change или CPU/RAM delta > threshold.
+
 ## Алерты
 
 | Алерт | Условие |
@@ -42,8 +69,9 @@ Read path: `MetricsReadService` batch MGET при list/metrics. Без Redis —
 ```http
 GET /api/v1/admin/metrics/companies
 GET /api/v1/admin/companies/{id}/metrics
+GET /api/v1/companies/{company_id}/containers/{project_id}/metrics?window=1h
 ```
 
-Ответы агрегируются из platform DB + Redis presence + telemetry (без чтения содержимого файлов проектов).
+Ответы агрегируются из platform DB + Redis presence + Redis pod samples (без чтения содержимого файлов проектов).
 
 List endpoints обогащаются полем `online: bool` (компания или сотрудник).

@@ -26,6 +26,11 @@ SaaS: **управление изолированными Pod'ами через 
 2. **UI** — список контейнеров/проектов, статус, pause/resume, вход в workspace агента (не модалка-чат).
 3. **Agent inside Pod** — провайдер через `AgentProviderPort`, работа с **файлами** (upload, read, edit, bundles), tool calls, HITL; не thin wrapper над completions API.
 
+## Observability
+
+- **k8s metrics-server** — cluster addon для CPU/RAM sandbox pod'ов; Prodavan не деплоит отдельный metrics microservice.
+- **Metrics BC** (`application/metrics/`) — внутри `prodavan-api`: Kafka consumer, Redis (presence + pod samples), REST для admin/company UI.
+
 ## Что уже в коде (as-built)
 
 Смотреть **код и тесты**, не legacy-канон:

@@ -90,8 +90,12 @@ class PodReconcileService:
         zombies = await self._reap_zombies()
         fixed += zombies
 
+        from prodavan.application.pod_service.metrics_sampler import PodMetricsSampler
+
+        sample_stats = await PodMetricsSampler(self._session).sample_managed_pods()
+
         await self._session.commit()
-        return {"fixed": fixed, "zombies_deleted": zombies}
+        return {"fixed": fixed, "zombies_deleted": zombies, "metrics": sample_stats}
 
     async def _reap_zombies(self) -> int:
         """Delete k8s Pods managed by pod-service without a live PG row."""

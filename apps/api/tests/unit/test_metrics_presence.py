@@ -38,12 +38,18 @@ async def test_handle_auth_event_set_and_clear() -> None:
 
     with (
         patch(
-            "prodavan.application.metrics.consumer.PresenceResolver.resolve_auth_payload",
+            "prodavan.application.metrics.consumer.presence_handler.PresenceResolver.resolve_auth_payload",
             new=AsyncMock(return_value=resolved),
         ),
-        patch("prodavan.application.metrics.consumer.set_presence", new=AsyncMock(return_value=True)) as set_mock,
-        patch("prodavan.application.metrics.consumer.clear_presence", new=AsyncMock(return_value=True)) as clear_mock,
-        patch("prodavan.application.metrics.consumer.get_session_factory"),
+        patch(
+            "prodavan.application.metrics.consumer.presence_handler.set_presence",
+            new=AsyncMock(return_value=True),
+        ) as set_mock,
+        patch(
+            "prodavan.application.metrics.consumer.presence_handler.clear_presence",
+            new=AsyncMock(return_value=True),
+        ) as clear_mock,
+        patch("prodavan.application.metrics.consumer.presence_handler.get_session_factory"),
     ):
         await handle_auth_event("auth.login", {"sub": "kc_1", "roles": ["employee"]})
         set_mock.assert_awaited_once_with("employee", "emp_1")
@@ -60,7 +66,7 @@ async def test_handle_platform_envelope_filters_bus() -> None:
         payload={"sub": "kc_1"},
     )
     with patch(
-        "prodavan.application.metrics.consumer.handle_auth_event",
+        "prodavan.application.metrics.consumer.presence_handler.handle_auth_event",
         new=AsyncMock(),
     ) as handler:
         await handle_platform_envelope(envelope)
@@ -68,7 +74,7 @@ async def test_handle_platform_envelope_filters_bus() -> None:
 
     other = platform_envelope(event_id="e2", event_type="company.created")
     with patch(
-        "prodavan.application.metrics.consumer.handle_auth_event",
+        "prodavan.application.metrics.consumer.presence_handler.handle_auth_event",
         new=AsyncMock(),
     ) as handler:
         await handle_platform_envelope(other)

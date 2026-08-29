@@ -98,5 +98,26 @@ Runner (outside k3s): [`infra/github-runner/README.md`](../../infra/github-runne
 | kubectl connection refused | k3s running? `sudo systemctl status k3s` |
 | Argo OutOfSync | merge to `main`; check Application `prodavan-dev` |
 | ImagePullBackOff | SealedSecret `ghcr-pull` — [`SECRETS.md`](../../infra/k3s/overlays/dev/SECRETS.md) |
+| Flutter: «metrics-server недоступен» на контейнере | См. [k8s metrics-server](#k8s-metrics-server) ниже |
 
 Legacy compose/k3d/bootstrap scripts **removed** — do not restore.
+
+---
+
+## k8s metrics-server
+
+**Не путать с Prodavan Metrics BC:** отдельного Deployment `prodavan-metrics` нет. CPU/RAM pod'ов читает `prodavan-api` через **cluster addon** `metrics-server` (namespace `kube-system`, k3s ставит по умолчанию).
+
+Проверка в WSL:
+
+```bash
+export KUBECONFIG=~/.kube/prodavan-dev.yaml
+kubectl get deployment -n kube-system metrics-server
+kubectl top pods -n prodavan-sandboxes   # нужны running sandbox pod'ы
+```
+
+RBAC для API: `infra/k3s/base/prodavan-sandbox/rbac-sandboxes.yaml` — `metrics.k8s.io/pods` get/list.
+
+Prodavan pipeline: `pod_service` sampler → Kafka `prodavan.metrics.events` → Metrics BC (Redis) → REST для UI. Если metrics-server недоступен, UI показывает banner; reconcile продолжает работать.
+
+Канон: [`docs/target/14-project-containers/k3s-runtime/metrics-observability.md`](../target/14-project-containers/k3s-runtime/metrics-observability.md).

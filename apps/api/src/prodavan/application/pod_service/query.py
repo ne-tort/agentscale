@@ -46,6 +46,27 @@ class PodQuery:
         }
         mode = (settings.pod_runtime_mode or "stub").strip().lower()
         if mode == "k8s" and row.runtime_ref:
+            from prodavan.application.metrics.query import MetricsQuery
+
+            cached = await MetricsQuery(self._session).get_project_runtime_metrics(project_id)
+            if cached is not None:
+                if cached.get("phase") is not None:
+                    summary["phase"] = cached.get("phase")
+                if cached.get("restarts") is not None:
+                    summary["restarts"] = cached.get("restarts")
+                if cached.get("ready") is not None:
+                    summary["ready"] = cached.get("ready")
+                metrics_body = {
+                    k: cached[k]
+                    for k in ("cpu_millicores", "memory_bytes", "timestamp")
+                    if k in cached and cached[k] is not None
+                }
+                if metrics_body:
+                    summary["metrics"] = metrics_body
+                if cached.get("degraded"):
+                    summary["metrics_degraded"] = True
+                    summary["metrics_degraded_reason"] = cached.get("degraded_reason")
+                return summary
             try:
                 runtime = build_pod_runtime()
                 k8s = await runtime.get_status(runtime_ref=row.runtime_ref)

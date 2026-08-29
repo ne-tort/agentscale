@@ -10,5 +10,6 @@
 | Employee key binding | `employee_ai_key_bindings` | Implemented |
 | Cabinet key binding | `cabinet_ai_key_bindings` | Implemented |
 | resolve_for_project | `AiKeysService` | Implemented |
-| metrics-server | infra | Out of scope |
+| Metrics BC in API | Kafka ingest + Redis + REST | Implemented |
+| k8s metrics-server | cluster addon (kube-system) | Required infra; see wsl-dev.md |
 | Agent chat in Flutter | — | Deferred (PRODUCT.md) |

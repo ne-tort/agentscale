@@ -1,0 +1,23 @@
+"""Metrics store port — hot samples in Redis."""
+
+from __future__ import annotations
+
+from typing import Any, Protocol
+
+
+class MetricsStorePort(Protocol):
+    async def put_project_latest(self, project_id: str, sample: dict[str, Any]) -> None: ...
+
+    async def get_project_latest(self, project_id: str) -> dict[str, Any] | None: ...
+
+    async def append_project_series(
+        self, project_id: str, window: str, sample: dict[str, Any], *, max_points: int
+    ) -> None: ...
+
+    async def get_project_series(self, project_id: str, window: str) -> list[dict[str, Any]]: ...
+
+    async def get_pod_last_sample(self, pod_id: str) -> dict[str, Any] | None: ...
+
+    async def put_pod_last_sample(self, pod_id: str, sample: dict[str, Any]) -> None: ...
+
+    async def mark_event_processed(self, event_id: str) -> bool: ...

@@ -66,6 +66,7 @@ String formatContainerRuntimeDetail(Map<String, dynamic>? item, AppLocalizations
   }
 
   final metrics = runtime['metrics'] ?? item?['runtime_metrics'];
+  final metricsDegraded = runtime['metrics_degraded'] == true || item?['metrics_degraded'] == true;
   if (metrics is Map) {
     final cpu = metrics['cpu_millicores'];
     final mem = metrics['memory_bytes'];
@@ -75,7 +76,7 @@ String formatContainerRuntimeDetail(Map<String, dynamic>? item, AppLocalizations
     if (mem is num) {
       lines.add('${l10n.adminContainerMetricsMemory}: ${_formatBytes(mem, l10n)}');
     }
-  } else if (phase == 'Running' || podStatus == 'running') {
+  } else if (metricsDegraded || phase == 'Running' || podStatus == 'running') {
     lines.add(l10n.adminContainerMetricsUnavailable);
   }
 

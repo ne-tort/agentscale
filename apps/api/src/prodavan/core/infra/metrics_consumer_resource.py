@@ -1,4 +1,4 @@
-"""Kafka consumer for platform auth events → Redis presence (metrics BC)."""
+"""Metrics BC Kafka consumer — platform presence + metrics samples."""
 
 from __future__ import annotations
 
@@ -14,65 +14,68 @@ from prodavan.core.lifespan.resource import LifespanResource
 logger = logging.getLogger(__name__)
 
 
-class MetricsPresenceConsumerResource(LifespanResource):
-    """Subscribe to platform events topic when kafka consumer is enabled."""
+class MetricsConsumerResource(LifespanResource):
+    """Subscribe to platform auth events and metrics sample topic."""
 
     def __init__(self) -> None:
-        self._consumer: Any = None
-        self._task: asyncio.Task[None] | None = None
+        self._consumers: list[Any] = []
+        self._tasks: list[asyncio.Task[None]] = []
         self._stop: asyncio.Event | None = None
         self._handled: int = 0
 
     @property
     def name(self) -> str:
-        return "metrics_presence_consumer"
+        return "metrics_consumer"
 
     async def startup(self) -> None:
         if not settings.kafka_enabled or not settings.kafka_consumer_enabled:
-            logger.info("metrics presence consumer: disabled")
+            logger.info("metrics consumer: disabled")
             return
         bootstrap = (settings.kafka_bootstrap_servers or "").strip()
         if not bootstrap:
-            logger.warning("metrics presence consumer: no bootstrap servers")
+            logger.warning("metrics consumer: no bootstrap servers")
             return
         try:
             from aiokafka import AIOKafkaConsumer
 
             self._stop = asyncio.Event()
-            self._consumer = AIOKafkaConsumer(
+            topics = [
                 settings.kafka_topic_platform_events,
+                settings.kafka_topic_metrics_events,
+            ]
+            consumer = AIOKafkaConsumer(
+                *topics,
                 bootstrap_servers=bootstrap,
-                client_id=f"{settings.kafka_client_id}-metrics-presence",
-                group_id=settings.kafka_metrics_presence_group,
+                client_id=f"{settings.kafka_client_id}-metrics",
+                group_id=settings.kafka_metrics_group,
                 enable_auto_commit=True,
                 auto_offset_reset="latest",
             )
-            await self._consumer.start()
-            self._task = asyncio.create_task(
-                self._consume_loop(self._stop),
-                name="prodavan-metrics-presence-consumer",
+            await consumer.start()
+            self._consumers.append(consumer)
+            self._tasks.append(
+                asyncio.create_task(self._consume_loop(consumer, self._stop), name="prodavan-metrics-consumer")
             )
             logger.info(
-                "metrics presence consumer: started topic=%s group=%s",
-                settings.kafka_topic_platform_events,
-                settings.kafka_metrics_presence_group,
+                "metrics consumer: started topics=%s group=%s",
+                topics,
+                settings.kafka_metrics_group,
             )
         except Exception:
-            logger.exception("metrics presence consumer: startup failed")
-            self._consumer = None
+            logger.exception("metrics consumer: startup failed")
+            self._consumers.clear()
 
-    async def _consume_loop(self, stop: asyncio.Event) -> None:
-        from prodavan.application.metrics.consumer import handle_platform_envelope
+    async def _consume_loop(self, consumer: Any, stop: asyncio.Event) -> None:
+        from prodavan.application.metrics.consumer.registry import handle_metrics_envelope
 
-        assert self._consumer is not None
         try:
             while not stop.is_set():
                 try:
-                    batch = await self._consumer.getmany(timeout_ms=500, max_records=50)
+                    batch = await consumer.getmany(timeout_ms=500, max_records=50)
                 except Exception:
                     if stop.is_set():
                         break
-                    logger.exception("metrics presence consumer: getmany failed")
+                    logger.exception("metrics consumer: getmany failed")
                     await asyncio.sleep(1.0)
                     continue
                 if not batch:
@@ -94,43 +97,44 @@ class MetricsPresenceConsumerResource(LifespanResource):
                             )
                         except Exception:
                             logger.warning(
-                                "metrics presence consumer: skip bad message offset=%s",
+                                "metrics consumer: skip bad message offset=%s",
                                 msg.offset,
                             )
                             continue
                         try:
-                            await handle_platform_envelope(envelope)
+                            await handle_metrics_envelope(envelope)
                             self._handled += 1
                         except Exception:
                             logger.exception(
-                                "metrics presence consumer: handle failed type=%s",
+                                "metrics consumer: handle failed type=%s bus=%s",
                                 data.get("event_type"),
+                                data.get("bus"),
                             )
         finally:
-            logger.info("metrics presence consumer: stopped handled=%s", self._handled)
+            logger.info("metrics consumer: stopped handled=%s", self._handled)
 
     async def shutdown(self) -> None:
         if self._stop is not None:
             self._stop.set()
-        if self._task is not None:
+        for task in self._tasks:
             try:
-                await asyncio.wait_for(self._task, timeout=5.0)
+                await asyncio.wait_for(task, timeout=5.0)
             except (TimeoutError, asyncio.CancelledError):
-                self._task.cancel()
-            self._task = None
+                task.cancel()
+        self._tasks.clear()
         self._stop = None
-        if self._consumer is not None:
+        for consumer in self._consumers:
             try:
-                await self._consumer.stop()
+                await consumer.stop()
             except Exception:
-                logger.exception("metrics presence consumer: stop failed")
-            self._consumer = None
+                logger.exception("metrics consumer: stop failed")
+        self._consumers.clear()
 
     async def health(self) -> bool | None:
         if not settings.kafka_enabled or not settings.kafka_consumer_enabled:
             return None
-        if self._consumer is None:
+        if not self._consumers:
             return False
-        if self._task is None or self._task.done():
+        if not self._tasks or any(task.done() for task in self._tasks):
             return False
         return True

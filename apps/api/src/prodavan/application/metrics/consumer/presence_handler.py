@@ -1,4 +1,4 @@
-"""Kafka consumer handlers — auth presence on platform events bus."""
+"""Presence ingest handler."""
 
 from __future__ import annotations
 
@@ -22,8 +22,7 @@ PRESENCE_SET_EVENTS = frozenset(
 PRESENCE_CLEAR_EVENTS = frozenset({"auth.logout"})
 
 
-async def handle_platform_envelope(envelope: EventEnvelope) -> None:
-    """Process platform auth events for Redis presence."""
+async def handle_presence_envelope(envelope: EventEnvelope) -> None:
     if envelope.bus != "platform":
         return
     event_type = envelope.event_type
