@@ -80,8 +80,14 @@ abstract final class ModuleMetaValidator {
       if (nav != null) {
         if (nav is! Map) return 'tab nav must be an object';
         final contour = nav['contour'];
-        if (contour is! String || !ShellNavContour.all.contains(contour)) {
+        if (contour != null &&
+            (contour is! String || !ShellNavContour.all.contains(contour))) {
           return 'invalid tab nav.contour: $contour';
+        }
+        final placement = nav['placement'];
+        if (placement != null &&
+            (placement is! String || !ShellNavPlacement.all.contains(placement))) {
+          return 'invalid tab nav.placement: $placement';
         }
       }
     }

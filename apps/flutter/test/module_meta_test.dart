@@ -215,6 +215,33 @@ void main() {
       expect(err, contains('seed_rows'));
     });
 
+    test('accepts employee nav.contour with placement', () {
+      final json = Map<String, dynamic>.from(suppliersManifestJson());
+      json['tabs'] = [
+        {
+          'id': 'tab_ok',
+          'title': 'OK',
+          'view_slug': 'suppliers_list',
+          'nav': {'contour': 'employee', 'placement': 'management'},
+        },
+      ];
+      expect(ModuleMetaValidator.validate(json), isNull);
+    });
+
+    test('rejects invalid nav.placement', () {
+      final json = Map<String, dynamic>.from(suppliersManifestJson());
+      json['tabs'] = [
+        {
+          'id': 'tab_bad',
+          'title': 'Bad',
+          'view_slug': 'suppliers_list',
+          'nav': {'contour': 'employee', 'placement': 'sidebar'},
+        },
+      ];
+      final err = ModuleMetaValidator.validate(json);
+      expect(err, contains('nav.placement'));
+    });
+
     test('rejects invalid nav.contour', () {
       final json = Map<String, dynamic>.from(suppliersManifestJson());
       json['tabs'] = [
@@ -222,7 +249,7 @@ void main() {
           'id': 'tab_bad',
           'title': 'Bad',
           'view_slug': 'suppliers_list',
-          'nav': {'contour': 'employee'},
+          'nav': {'contour': 'unknown'},
         },
       ];
       final err = ModuleMetaValidator.validate(json);

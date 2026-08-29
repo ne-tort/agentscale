@@ -42,9 +42,9 @@ Tabs = **то, что видит пользователь** в панели на
 | `badge` | Optional count dot |
 | `nav` | Optional product-shell injection — see below |
 
-## Shell navigation (Admin / Company)
+## Shell navigation (Admin / Company / Employee)
 
-Tabs may declare product-shell placement for **preview** and future runtime (when module is bound/deployed):
+Tabs may declare product-shell placement for **preview** and runtime when module is bound/deployed:
 
 ```json
 {
@@ -54,16 +54,29 @@ Tabs may declare product-shell placement for **preview** and future runtime (whe
   "icon": "local_shipping_outlined",
   "view_slug": "suppliers_list",
   "enabled": true,
-  "nav": { "contour": "admin" }
+  "nav": { "contour": "employee", "placement": "rail" }
 }
 ```
 
 | `nav.contour` | Meaning |
 |---------------|---------|
-| `admin` | Would appear in Platform Admin shell rail / mobile **Management** hub |
-| `company` | Would appear in Company admin shell — same rules |
+| `admin` | Platform Admin shell rail / mobile **Management** hub |
+| `company` | Company admin shell — same rules |
+| `employee` \| `cabinet` | Employee cabinet shell — see placement below |
 
-Without `nav` — tab stays in cabinet/preview TabBar only (default).
+| `nav.placement` | Employee cabinet | Admin / Company |
+|-----------------|------------------|-----------------|
+| `rail` | Primary sidebar (wide) | Desktop rail |
+| `management` | **Управление** hub only (narrow) | Mobile Management hub |
+| `none` | Not in shell; in-page hub / deep link | Same |
+
+**Defaults (employee / cabinet contour):**
+
+- Tab **without** `nav` → `placement: management` (not rail).
+- Explicit `placement: rail` — modules that belong in the sidebar (e.g. Suppliers).
+- `nav.contour: admin|company` — unchanged; placement defaults to rail on desktop / management on narrow (existing Admin/Company behavior).
+
+Without `nav` on admin/company tabs — tab stays in cabinet/preview TabBar only (default).
 
 **Preview (seed editor):** `ModuleMetaPreviewPage` renders shell nav chips/rail mock for the **current module only** — not live Admin catalog merge.
 

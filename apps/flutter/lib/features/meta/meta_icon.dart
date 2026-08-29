@@ -32,9 +32,23 @@ IconData metaIconFromName(String? name, {IconData fallback = Icons.extension_out
 abstract final class ShellNavContour {
   static const admin = 'admin';
   static const company = 'company';
+  static const employee = 'employee';
+  static const cabinet = 'cabinet';
 
-  static const all = {admin, company};
+  static const all = {admin, company, employee, cabinet};
 }
+
+/// Placement within employee cabinet or admin/company shell (`nav.placement`).
+abstract final class ShellNavPlacement {
+  static const rail = 'rail';
+  static const management = 'management';
+  static const none = 'none';
+
+  static const all = {rail, management, none};
+}
+
+/// Resolved placement for employee [CabinetShell] navigation.
+enum CabinetNavPlacement { rail, management, none }
 
 /// One dynamic nav item merged from module meta tabs.
 class ShellNavEntry {
@@ -63,6 +77,32 @@ String? shellNavContourOf(Map<String, dynamic> tab) {
   if (nav is! Map) return null;
   final contour = nav['contour'];
   return contour is String ? contour : null;
+}
+
+/// Parses tab `nav.placement` when present.
+String? shellNavPlacementOf(Map<String, dynamic> tab) {
+  final nav = tab['nav'];
+  if (nav is! Map) return null;
+  final placement = nav['placement'];
+  return placement is String ? placement : null;
+}
+
+/// Resolves employee cabinet shell placement for a tab.
+///
+/// Admin/company contours are excluded from cabinet shell (`none`).
+/// Tabs without `nav` default to [CabinetNavPlacement.management].
+CabinetNavPlacement cabinetNavPlacementOf(Map<String, dynamic> tab) {
+  final contour = shellNavContourOf(tab);
+  if (contour == ShellNavContour.admin || contour == ShellNavContour.company) {
+    return CabinetNavPlacement.none;
+  }
+  final explicit = shellNavPlacementOf(tab);
+  if (explicit == ShellNavPlacement.none) return CabinetNavPlacement.none;
+  if (explicit == ShellNavPlacement.rail) return CabinetNavPlacement.rail;
+  if (explicit == ShellNavPlacement.management) {
+    return CabinetNavPlacement.management;
+  }
+  return CabinetNavPlacement.management;
 }
 
 /// Builds sorted shell nav entries from module list + tab arrays.

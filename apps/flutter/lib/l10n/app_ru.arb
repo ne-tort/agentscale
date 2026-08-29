@@ -375,6 +375,14 @@
   "adminModulePreviewEmpty": "Добавьте JSON модуля для предзаполнения",
   "adminModuleJsonInvalid": "Неверный JSON",
   "adminMetaInvalid": "Метаданные",
+  "metaAddNew": "Добавить новый {item}",
+  "@metaAddNew": {
+    "placeholders": {
+      "item": {
+        "type": "String"
+      }
+    }
+  },
   "adminModulePreviewMode": "Предзаполнение",
   "adminModulePreviewShellNav": "Навигация shell (предпросмотр)",
   "adminModulePreviewCabinetTabs": "Вкладки кабинета",

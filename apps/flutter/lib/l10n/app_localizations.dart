@@ -956,6 +956,12 @@ abstract class AppLocalizations {
   /// **'Metadata'**
   String get adminMetaInvalid;
 
+  /// No description provided for @metaAddNew.
+  ///
+  /// In en, this message translates to:
+  /// **'Add new {item}'**
+  String metaAddNew(String item);
+
   /// No description provided for @adminModulePreviewMode.
   ///
   /// In en, this message translates to:

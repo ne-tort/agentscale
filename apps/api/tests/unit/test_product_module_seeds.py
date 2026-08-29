@@ -32,3 +32,14 @@ def test_mcp_meta_has_zip_materialize_rule() -> None:
     meta = mod_mcp_meta()
     rules = meta["materialize"]
     assert any(r["target"]["format"] == "mcp_package" for r in rules)
+
+
+def test_collection_views_use_inline_add_without_primary_action() -> None:
+    for meta_fn in (mod_mcp_meta, mod_files_meta, mod_prompts_meta):
+        views = meta_fn()["views"]
+        collections = [v for v in views if v.get("kind") == "collection"]
+        assert collections, meta_fn.__name__
+        for coll in collections:
+            ui = coll["ui_json"]
+            assert "primary_action" not in ui
+            assert ui["inline_add"]["title"]

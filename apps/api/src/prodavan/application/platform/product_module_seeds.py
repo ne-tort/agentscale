@@ -22,6 +22,15 @@ _BLOCK_LABELS = {
     "others": "Others",
 }
 
+_BLOCK_INLINE_TITLES = {
+    "rules": "Добавить правило",
+    "skills": "Добавить skill",
+    "output_schema": "Добавить output schema",
+    "guardrails": "Добавить guardrail",
+    "examples": "Добавить example",
+    "others": "Добавить запись",
+}
+
 
 def _collection_view(
     *,
@@ -30,6 +39,7 @@ def _collection_view(
     form_slug: str,
     title_field: str = "name",
     label: str = "Имя",
+    inline_title: str = "Добавить запись",
 ) -> dict[str, Any]:
     return {
         "slug": slug,
@@ -41,9 +51,8 @@ def _collection_view(
             "title_field": title_field,
             "subtitle_fields": [],
             "columns": [{"field": title_field, "label": label}],
-            "primary_action": {"kind": "create_row", "label": "Добавить"},
             "row_tap": {"kind": "open_form", "view": form_slug},
-            "inline_add": {"field": title_field, "label": "Новый item"},
+            "inline_add": {"field": title_field, "title": inline_title},
         },
     }
 
@@ -70,11 +79,13 @@ def _prompt_item_views(block_type: str) -> tuple[dict[str, Any], dict[str, Any]]
     list_slug = f"{block_type}_list"
     form_slug = f"{block_type}_form"
     label = _BLOCK_LABELS.get(block_type, block_type)
+    inline_title = _BLOCK_INLINE_TITLES.get(block_type, f"Добавить {label.lower()}")
     coll = _collection_view(
         slug=list_slug,
         table_slug="prompt_items",
         form_slug=form_slug,
         label=label,
+        inline_title=inline_title,
     )
     ui = coll["ui_json"]
     ui["row_filter"] = {"block_type": block_type}
@@ -311,6 +322,7 @@ def mod_prompts_meta() -> dict[str, list[Any]]:
                 "icon": "psychology_outlined",
                 "view_slug": "prompts_hub",
                 "enabled": True,
+                "nav": {"contour": "employee", "placement": "management"},
             }
         ],
         "materialize": _prompts_materialize_rules(),
@@ -379,6 +391,7 @@ def mod_files_meta() -> dict[str, list[Any]]:
                 table_slug="files",
                 form_slug="files_form",
                 label="Имя",
+                inline_title="Добавить файл",
             ),
             {
                 "slug": "files_form",
@@ -406,6 +419,7 @@ def mod_files_meta() -> dict[str, list[Any]]:
                 "view_slug": "files_list",
                 "table_slug": "files",
                 "enabled": True,
+                "nav": {"contour": "employee", "placement": "management"},
             }
         ],
         "materialize": [
@@ -474,6 +488,7 @@ def mod_mcp_meta() -> dict[str, list[Any]]:
                 slug="mcp_packages_list",
                 table_slug="mcp_packages",
                 form_slug="mcp_packages_form",
+                inline_title="Добавить MCP package",
             ),
             {
                 "slug": "mcp_packages_form",
@@ -502,6 +517,7 @@ def mod_mcp_meta() -> dict[str, list[Any]]:
                 "view_slug": "mcp_packages_list",
                 "table_slug": "mcp_packages",
                 "enabled": True,
+                "nav": {"contour": "employee", "placement": "management"},
             }
         ],
         "materialize": [

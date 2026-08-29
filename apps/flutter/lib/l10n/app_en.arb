@@ -373,6 +373,14 @@
   "adminModulePreviewEmpty": "Add module JSON to edit seed data",
   "adminModuleJsonInvalid": "Invalid JSON",
   "adminMetaInvalid": "Metadata",
+  "metaAddNew": "Add new {item}",
+  "@metaAddNew": {
+    "placeholders": {
+      "item": {
+        "type": "String"
+      }
+    }
+  },
   "adminModulePreviewMode": "Seed data",
   "adminModulePreviewShellNav": "Shell nav (preview)",
   "adminModulePreviewCabinetTabs": "Cabinet tabs",

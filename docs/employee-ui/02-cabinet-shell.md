@@ -7,13 +7,15 @@
 - Logo → `CabinetOverviewPage`
 - Rail destinations:
   - **Projects** (system, order 10)
-  - Dynamic entries from `CabinetNavLoader` (module tabs)
+  - Module tabs with `nav.placement: rail` only
+- **No** «Управление» destination on desktop
 - Trailing: **Settings** → `EmployeeSettingsBody`
 
 ## Narrow (<600px)
 
-- Bottom nav: Management hub
-- Hub → push Projects / module pages
+- Bottom nav: **Управление** hub only (like CompanyShell)
+- Hub list: module tabs with `nav.placement: management` (from parent shell — no reload)
+- **Projects** — not in hub; available on wide rail only (or via overview/deep link later)
 - Settings — trailing bottom item
 
 ## State machine

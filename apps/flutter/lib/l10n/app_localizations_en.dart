@@ -508,6 +508,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminMetaInvalid => 'Metadata';
 
   @override
+  String metaAddNew(String item) {
+    return 'Add new $item';
+  }
+
+  @override
   String get adminModulePreviewMode => 'Seed data';
 
   @override

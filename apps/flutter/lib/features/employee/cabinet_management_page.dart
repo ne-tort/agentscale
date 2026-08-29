@@ -4,45 +4,21 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_list_item.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
+import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/employee/cabinet_module_host.dart';
 import 'package:prodavan/features/employee/cabinet_nav_loader.dart';
-import 'package:prodavan/features/employee/cabinet_projects_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Narrow-only hub: Projects + bound module tabs.
-class CabinetManagementPage extends StatefulWidget {
-  const CabinetManagementPage({super.key, required this.cabinetId});
+/// Narrow-only hub: module tabs with `nav.placement: management` (from parent shell).
+class CabinetManagementPage extends StatelessWidget {
+  const CabinetManagementPage({
+    super.key,
+    required this.cabinetId,
+    required this.entries,
+  });
 
   final String cabinetId;
-
-  @override
-  State<CabinetManagementPage> createState() => _CabinetManagementPageState();
-}
-
-class _CabinetManagementPageState extends State<CabinetManagementPage> {
-  bool _loading = true;
-  List<CabinetNavEntry> _entries = const [];
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    setState(() => _loading = true);
-    try {
-      final entries = await loadCabinetNavEntries(widget.cabinetId);
-      if (!mounted) return;
-      setState(() {
-        _entries = entries;
-        _loading = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _loading = false);
-    }
-  }
+  final List<CabinetNavEntry> entries;
 
   Future<void> _open(BuildContext context, Widget page) {
     return Navigator.of(context).push<void>(
@@ -53,10 +29,11 @@ class _CabinetManagementPageState extends State<CabinetManagementPage> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    if (_loading) {
+
+    if (entries.isEmpty) {
       return AppScaffold(
         title: Text(l10n.navManagement),
-        body: const Center(child: CircularProgressIndicator()),
+        body: EmptyPlaceholder(title: l10n.navManagement),
       );
     }
 
@@ -64,28 +41,17 @@ class _CabinetManagementPageState extends State<CabinetManagementPage> {
       title: Text(l10n.navManagement),
       body: ListView.separated(
         padding: const EdgeInsets.all(AppSpacing.md),
-        itemCount: 1 + _entries.length,
+        itemCount: entries.length,
         separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
         itemBuilder: (context, i) {
-          if (i == 0) {
-            return AppListItem(
-              leading: const Icon(Icons.folder_outlined),
-              title: Text(l10n.navProjects),
-              trailing: const AppTrailingChevron(),
-              onTap: () => _open(
-                context,
-                CabinetProjectsPage(cabinetId: widget.cabinetId),
-              ),
-            );
-          }
-          final entry = _entries[i - 1];
+          final entry = entries[i];
           return AppListItem(
             leading: Icon(entry.icon),
             title: Text(entry.label),
             trailing: const AppTrailingChevron(),
             onTap: () => _open(
               context,
-              CabinetModuleHost(cabinetId: widget.cabinetId, entry: entry),
+              CabinetModuleHost(cabinetId: cabinetId, entry: entry),
             ),
           );
         },

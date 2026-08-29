@@ -65,11 +65,53 @@ View = **как показать** данные таблицы. Отделён �
 | `columns[].label` | `AppEntityColumn.label` |
 | `columns[].width` | fixed width |
 | `columns[].tone_from` | lookup column `ui.tone_map` |
-| `primary_action.kind=create_row` | toolbar add → form view or inline create |
+| `primary_action.kind=create_row` | toolbar add → form (only when **no** `inline_add`) |
+| `inline_add` | `AppInlineAddField` — canonical inline create (see below) |
 | `row_tap.kind=open_form` | `Navigator.push` form view |
 | `empty` | `EmptyPlaceholder` — laconic |
+| `scaffold.title` | Optional app bar title (MetaLabel); default — none |
 
 **List/table mode:** page provides `AppCollectionViewModeButton`; meta не задаёт mode.
+
+**Create paths (mutually exclusive on collection):**
+
+| Config | UI |
+|--------|-----|
+| `inline_add` present | `AppInlineAddField` above table; no toolbar `+`, no empty-state create button |
+| `primary_action` only | toolbar `AppIconButton` + optional empty action → opens form |
+
+### MetaLabel (UI strings)
+
+Labels in meta may be:
+
+```json
+"title": "Добавить MCP package"
+"title": { "ru": "Добавить файл", "en": "Add file" }
+"title": { "l10n": "metaAddNew", "args": { "item": "MCP package" } }
+```
+
+Used for `inline_add.title`, `columns[].label`, `empty.title`, `scaffold.title`. Legacy `inline_add.label` is an alias for `title`.
+
+Interpreter: [`meta_label.dart`](../../../../apps/flutter/lib/features/meta/meta_label.dart) → core widgets ([`AppInlineAddField`](../../../../apps/flutter/lib/core/widgets/app_inline_add_field.dart), [`AppEntityCollection`](../../../../apps/flutter/lib/core/widgets/app_entity_collection.dart)).
+
+### `inline_add`
+
+```json
+"inline_add": {
+  "field": "name",
+  "title": "Добавить MCP package",
+  "hintText": "Добавить MCP package"
+}
+```
+
+| Field | Maps to |
+|-------|---------|
+| `field` | body key set on create |
+| `title` | collapsed row label (`AppInlineAddField.title`) |
+| `hintText` | expanded TextField hint (default = `title`) |
+| `label` | deprecated alias for `title` |
+
+Hairline divider under field is built into `AppInlineAddField` (same as Company employees / Admin lists).
 
 ### `form` → preference fields
 
@@ -173,5 +215,7 @@ EmptyPlaceholder(title: "Метаданные", subtitle: "<parse error code>")
 | `form` + `widget: file_upload` | FileUploadField | `file_ref` via `/cabinets/{id}/content/upload` |
 
 Collection extras: `inline_add`, `row_filter`, `context_bind.profile_id=contextRowId`.
+
+**Page titles:** shell hosts do not inject tab titles into `AppScaffold`. Set `ui_json.scaffold.title` (MetaLabel) only when an app bar title is required (e.g. nested form).
 
 Дальше: [tabs-navigation](04-tabs-navigation.md)

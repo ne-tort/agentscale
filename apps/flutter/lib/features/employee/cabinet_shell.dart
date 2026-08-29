@@ -27,14 +27,19 @@ class CabinetShell extends StatefulWidget {
 }
 
 class _CabinetShellState extends State<CabinetShell> {
-  int _contentIndex = 0;
-  int _railSelected = 0;
+  static const _overviewIndex = 0;
+  static const _projectsIndex = 1;
+
+  int _contentIndex = _overviewIndex;
+  int? _railSelected;
+  int _narrowStackIndex = 1;
   bool _subpageOpen = false;
   bool _navLoading = true;
-  List<CabinetNavEntry> _moduleEntries = const [];
+  List<CabinetNavEntry> _railEntries = const [];
+  List<CabinetNavEntry> _managementEntries = const [];
 
-  int get _moduleCount => _moduleEntries.length;
-  int get _settingsIndex => 1 + _moduleCount + 1;
+  int get _railModuleCount => _railEntries.length;
+  int get _settingsIndex => _projectsIndex + 1 + _railModuleCount;
 
   @override
   void initState() {
@@ -45,16 +50,18 @@ class _CabinetShellState extends State<CabinetShell> {
   Future<void> _loadNav() async {
     setState(() => _navLoading = true);
     try {
-      final entries = await loadCabinetNavEntries(widget.cabinetId);
+      final bundle = await loadCabinetNavBundle(widget.cabinetId);
       if (!mounted) return;
       setState(() {
-        _moduleEntries = entries;
+        _railEntries = bundle.rail;
+        _managementEntries = bundle.management;
         _navLoading = false;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _moduleEntries = const [];
+        _railEntries = const [];
+        _managementEntries = const [];
         _navLoading = false;
       });
     }
@@ -65,78 +72,104 @@ class _CabinetShellState extends State<CabinetShell> {
     setState(() => _subpageOpen = open);
   }
 
-  void _selectRail(int railIndex) {
+  void _goOverview() {
     setState(() {
-      _railSelected = railIndex;
-      _contentIndex = railIndex + 1;
+      _contentIndex = _overviewIndex;
+      _railSelected = null;
+      _narrowStackIndex = 0;
+      _subpageOpen = false;
+    });
+  }
+
+  void _selectRail(int index) {
+    setState(() {
+      _railSelected = index;
+      _contentIndex = index + 1;
+      _narrowStackIndex = 1;
+      _subpageOpen = false;
     });
   }
 
   void _selectSettingsWide() {
     setState(() {
       _contentIndex = _settingsIndex;
-      _railSelected = -1;
+      _railSelected = null;
+      _subpageOpen = false;
     });
   }
 
-  void _goOverview() {
+  void _selectNarrowMain() {
     setState(() {
-      _contentIndex = 0;
-      _railSelected = -1;
+      _narrowStackIndex = 1;
+      _subpageOpen = false;
+    });
+  }
+
+  void _selectNarrowSettings() {
+    setState(() {
+      _narrowStackIndex = 2;
+      _subpageOpen = false;
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final wide = AppBreakpoints.isWide(context);
-
-    final moduleDestinations = _moduleEntries
-        .map(
-          (e) => AppNavDestination(icon: e.icon, label: e.label),
-        )
-        .toList();
-
-    final destinations = [
-      AppNavDestination(icon: Icons.folder_outlined, label: l10n.navProjects),
-      ...moduleDestinations,
-      AppNavDestination(icon: Icons.tune_outlined, label: l10n.navManagement),
-    ];
-
+    final narrow = AppBreakpoints.isNarrow(context);
     final settingsDest = AppNavDestination(
       icon: Icons.settings_outlined,
       label: l10n.settings,
     );
 
-    if (!wide) {
+    if (narrow) {
       return AppLayout(
         constrainBody: false,
         subpageOpen: _subpageOpen,
-        selectedIndex: _contentIndex.clamp(0, _settingsIndex),
-        onDestinationSelected: (i) {
-          if (i == _settingsIndex) {
-            _selectSettingsWide();
-          } else {
-            setState(() {
-              _contentIndex = i;
-              _railSelected = i > 0 ? i - 1 : -1;
-            });
-          }
-        },
+        selectedIndex: _narrowStackIndex == 1 ? 0 : null,
+        trailingDestination: settingsDest,
+        trailingSelected: _narrowStackIndex == 2,
+        onTrailingSelected: _selectNarrowSettings,
+        onDestinationSelected: (_) => _selectNarrowMain(),
         onLogoTap: _goOverview,
         destinations: [
-          AppNavDestination(icon: Icons.dashboard_outlined, label: l10n.navOverview),
-          ...destinations,
+          AppNavDestination(icon: Icons.apps_outlined, label: l10n.navManagement),
         ],
-        trailingDestination: settingsDest,
-        trailingSelected: _contentIndex == _settingsIndex,
-        onTrailingSelected: _selectSettingsWide,
         body: IndexedStack(
-          index: _contentIndex.clamp(0, _settingsIndex),
-          children: _buildBranches(l10n),
+          index: _narrowStackIndex,
+          children: [
+            AppShellBranch(
+              active: _narrowStackIndex == 0,
+              onSubpageOpenChanged:
+                  _narrowStackIndex == 0 ? _onSubpageOpenChanged : null,
+              root: CabinetOverviewPage(
+                cabinetId: widget.cabinetId,
+                cabinetName: widget.cabinetName,
+              ),
+            ),
+            AppShellBranch(
+              active: _narrowStackIndex == 1,
+              onSubpageOpenChanged:
+                  _narrowStackIndex == 1 ? _onSubpageOpenChanged : null,
+              root: CabinetManagementPage(
+                cabinetId: widget.cabinetId,
+                entries: _managementEntries,
+              ),
+            ),
+            EmployeeSettingsBody(
+              cabinetId: widget.cabinetId,
+              cabinetName: widget.cabinetName,
+            ),
+          ],
         ),
       );
     }
+
+    final railDestinations = [
+      AppNavDestination(icon: Icons.folder_outlined, label: l10n.navProjects),
+      ..._railEntries.map(
+        (e) => AppNavDestination(icon: e.icon, label: e.label),
+      ),
+    ];
 
     return AppLayout(
       constrainBody: false,
@@ -147,18 +180,18 @@ class _CabinetShellState extends State<CabinetShell> {
       onTrailingSelected: _selectSettingsWide,
       onDestinationSelected: _selectRail,
       onLogoTap: _goOverview,
-      destinations: destinations,
+      destinations: railDestinations,
       body: _navLoading
           ? const Center(child: CircularProgressIndicator())
           : IndexedStack(
               index: _contentIndex,
-              children: _buildBranches(l10n),
+              children: _buildWideBranches(l10n),
             ),
     );
   }
 
-  List<Widget> _buildBranches(AppLocalizations l10n) {
-    final modulePages = _moduleEntries
+  List<Widget> _buildWideBranches(AppLocalizations l10n) {
+    final railModulePages = _railEntries
         .map(
           (e) => CabinetModuleHost(
             cabinetId: widget.cabinetId,
@@ -168,10 +201,12 @@ class _CabinetShellState extends State<CabinetShell> {
         .toList();
 
     final mainPages = [
-      CabinetOverviewPage(cabinetId: widget.cabinetId, cabinetName: widget.cabinetName),
+      CabinetOverviewPage(
+        cabinetId: widget.cabinetId,
+        cabinetName: widget.cabinetName,
+      ),
       CabinetProjectsPage(cabinetId: widget.cabinetId),
-      ...modulePages,
-      CabinetManagementPage(cabinetId: widget.cabinetId),
+      ...railModulePages,
     ];
 
     return [

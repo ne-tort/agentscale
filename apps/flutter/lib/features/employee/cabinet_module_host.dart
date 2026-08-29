@@ -6,6 +6,7 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/employee/cabinet_nav_loader.dart';
 import 'package:prodavan/features/meta/interpreters/hub_interpreter.dart';
+import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/runtime/cabinet_data_controller.dart';
 import 'package:prodavan/features/meta/runtime/runtime_data_adapter.dart';
@@ -120,8 +121,12 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
       );
     }
 
+    final nestedTitle = _nestedViewSlug != null
+        ? resolveViewScaffoldTitle(view, l10n, locale: Localizations.localeOf(context))
+        : null;
+
     return AppScaffold(
-      title: Text(_nestedViewSlug == null ? widget.entry.label : (view['title'] as String? ?? viewSlug)),
+      title: nestedTitle != null ? Text(nestedTitle) : null,
       actions: _nestedViewSlug != null
           ? [
               IconButton(

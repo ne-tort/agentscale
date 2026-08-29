@@ -126,7 +126,8 @@
     "view_slug": "suppliers_list",
     "table_slug": "suppliers",
     "enabled": true,
-    "system": false
+    "system": false,
+    "nav": { "contour": "employee", "placement": "rail" }
   }
 ]
 ```

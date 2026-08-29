@@ -508,6 +508,11 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminMetaInvalid => 'Метаданные';
 
   @override
+  String metaAddNew(String item) {
+    return 'Добавить новый $item';
+  }
+
+  @override
   String get adminModulePreviewMode => 'Предзаполнение';
 
   @override
