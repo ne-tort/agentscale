@@ -45,8 +45,31 @@ class ProjectQuery:
             created_by_login=created_by_login,
         )
         if include_runtime:
-            out["runtime"] = await PodQuery(self._session).runtime_summary(row.id)
+            out["runtime"] = await PodQuery(self._session).runtime_view(row.id)
         return out
+
+    async def get_container(
+        self,
+        *,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        row = await self._access.require_access(
+            project_id=project_id, principal=principal, employee=employee, write=False, allow_paused=True
+        )
+        runtime = await PodQuery(self._session).runtime_view(row.id)
+        return {
+            "project_id": row.id,
+            "project_name": row.name,
+            "status": row.status,
+            "container_ref": row.container_ref,
+            "workspace_key": row.workspace_key,
+            "runtime": runtime,
+            "runtime_metrics": runtime.get("metrics") if runtime else None,
+            "k8s_phase": (runtime.get("phase") or runtime.get("status")) if runtime else None,
+            "last_error": runtime.get("last_error") if runtime else None,
+        }
 
     async def get(
         self,

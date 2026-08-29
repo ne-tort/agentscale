@@ -403,6 +403,48 @@ class ProdavanApi {
     }
   }
 
+  Future<Map<String, dynamic>> getProjectContainer(String projectId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.get(_uri('/projects/$projectId/container'), extraHeaders: _workHeaders);
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Map<String, dynamic>> getProjectContainerMetrics(
+    String projectId, {
+    String window = '1h',
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.get(
+        _uri('/projects/$projectId/container/metrics?window=${Uri.encodeComponent(window)}'),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Map<String, dynamic>> reloadProject(String projectId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.post(_uri('/projects/$projectId/reload'), extraHeaders: _workHeaders);
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
   Future<List<String>> listProjectModuleIds(String projectId) async {
     final prevProj = this.projectId;
     this.projectId = projectId;

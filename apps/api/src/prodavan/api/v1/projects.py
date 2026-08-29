@@ -135,6 +135,46 @@ async def get_project(
     return await ProjectQuery(session).get(project_id=project_id, principal=principal, employee=employee)
 
 
+@router.get("/projects/{project_id}/container")
+async def get_project_container(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await ProjectQuery(session).get_container(
+        project_id=project_id, principal=principal, employee=employee
+    )
+
+
+@router.get("/projects/{project_id}/container/metrics")
+async def get_project_container_metrics(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+    window: str = "1h",
+) -> dict:
+    await ProjectAccessPolicy(session).require_access(
+        project_id=project_id, principal=principal, employee=employee, write=False, allow_paused=True
+    )
+    from prodavan.application.metrics.query import MetricsQuery
+
+    return await MetricsQuery(session).get_project_metrics(project_id, window=window)
+
+
+@router.post("/projects/{project_id}/reload")
+async def reload_project(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await ProjectCommand(session).reload_project(
+        project_id=project_id, principal=principal, employee=employee
+    )
+
+
 @router.patch("/projects/{project_id}")
 async def patch_project(
     project_id: str,

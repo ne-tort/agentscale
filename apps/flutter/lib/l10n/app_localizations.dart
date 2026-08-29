@@ -3506,6 +3506,18 @@ abstract class AppLocalizations {
   /// **'Launch project'**
   String get projectLaunchProject;
 
+  /// No description provided for @projectContainer.
+  ///
+  /// In en, this message translates to:
+  /// **'Container'**
+  String get projectContainer;
+
+  /// No description provided for @projectReload.
+  ///
+  /// In en, this message translates to:
+  /// **'Reload'**
+  String get projectReload;
+
   /// No description provided for @projectUpdateProject.
   ///
   /// In en, this message translates to:

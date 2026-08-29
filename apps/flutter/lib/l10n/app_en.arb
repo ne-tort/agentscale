@@ -1091,6 +1091,8 @@
   "projectCreatorColumn": "Creator",
   "projectCreatorLabel": "Creator",
   "projectLaunchProject": "Launch project",
+  "projectContainer": "Container",
+  "projectReload": "Reload",
   "projectUpdateProject": "Update project",
   "projectResetAgent": "Reset agent",
   "projectConfigureBeforeLaunch": "Select AI provider before launch",

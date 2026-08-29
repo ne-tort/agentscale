@@ -29,7 +29,8 @@ SaaS: **управление изолированными Pod'ами через 
 ## Observability
 
 - **k8s metrics-server** — cluster addon для CPU/RAM sandbox pod'ов; Prodavan не деплоит отдельный metrics microservice.
-- **Metrics BC** (`application/metrics/`) — внутри `prodavan-api`: Kafka consumer, Redis (presence + pod samples), REST для admin/company UI.
+- **Metrics BC** (`application/metrics/`) — внутри `prodavan-api`: Kafka consumer, Redis (presence + pod samples), REST для admin/company/employee container UI.
+- **Project lifecycle** — статусы `draft` | `active` | `paused` | `error` | `completed`. `error` = pod не поднялся; recovery через `POST /projects/{id}/reload` (Redis rate limit, fail-closed).
 
 ## Что уже в коде (as-built)
 
@@ -79,6 +80,8 @@ Future base modules (MCP, Files, Prompts, …) follow the same pattern: edit in 
 ## Project lifecycle (employee UI)
 
 - **Create** (`draft`) — DB record + project settings only; no Pod, no workspace files.
-- **Launch** — first materialize + Pod provision (`POST /projects/{id}/launch`); requires agent provider + AI key.
+- **Launch** — first materialize + Pod provision (`POST /projects/{id}/launch`); requires agent provider + AI key. On pod failure → `error` (not silent rollback).
+- **Reload** — retry pod after `error` (`POST /projects/{id}/reload`); Redis rate limit 1/min, 3/30min; disabled when Redis unavailable.
+- **Container UI** — employee subpage with k8s pod metrics (`GET /projects/{id}/container`, `/container/metrics`).
 - **Sync** — apply module binding changes to existing Pod workspace (`POST /projects/{id}/sync`); module folder prune + hydrate.
 - **Agent reset** — cancel sessions + purge chat history (`POST /projects/{id}/agent/reset`); lives in agent BC, not pod_service.

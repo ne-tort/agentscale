@@ -168,7 +168,8 @@ async def test_sync_desired_revives_failed_pod() -> None:
 
     runtime = AsyncMock()
     events = AsyncMock(spec=PodLifecycleEmitter)
-    cmd = PodCommand(session, runtime=runtime, events=events)
+    cmd = PodCommand(session, runtime=runtime, events=events, hydrate=AsyncMock())
+    cmd._project_events = AsyncMock()
 
     await cmd.sync_desired(
         project.id,

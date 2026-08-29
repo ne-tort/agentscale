@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/session/work_context.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
@@ -117,6 +118,13 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
     return '${text.substring(0, _aboutMaxLen)}…';
   }
 
+  Color? _rowColor(BuildContext context, Map<String, dynamic> project) {
+    final status = project['status'] as String?;
+    if (status == 'error') return context.appColors.danger;
+    if (status == 'draft' || status == 'paused') return context.appColors.warning;
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -125,6 +133,7 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
           (p) => AppEntityRow(
             id: p['id'] as String,
             title: p['name'] as String? ?? p['id'] as String,
+            rowColor: _rowColor(context, p),
             cells: {
               'about': _truncateAbout(p['about'] as String?),
               'creator': p['created_by_login'] as String? ?? '—',

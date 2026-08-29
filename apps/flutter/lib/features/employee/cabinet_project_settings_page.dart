@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/containers/container_runtime_presenter.dart';
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
@@ -12,6 +13,7 @@ import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 import 'package:prodavan/core/widgets/project_metrics_wrap.dart';
 import 'package:prodavan/features/employee/project_ai_key_select_page.dart';
+import 'package:prodavan/features/employee/project_container_page.dart';
 import 'package:prodavan/features/employee/project_module_settings_page.dart';
 import 'package:prodavan/features/employee/project_modules_table.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -37,6 +39,7 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
   String? _resolvedKeyId;
   String? _creatorName;
   String? _status;
+  Map<String, dynamic>? _runtime;
   bool _hasPod = false;
   List<Map<String, dynamic>> _availableKeys = const [];
   List<Map<String, dynamic>> _projectModules = const [];
@@ -87,7 +90,10 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
         _creatorName = project['created_by_login'] as String? ??
             project['created_by_employee_id'] as String?;
         _status = project['status'] as String? ?? 'draft';
-        _hasPod = project['runtime'] != null;
+        _runtime = project['runtime'] is Map
+            ? Map<String, dynamic>.from(project['runtime'] as Map)
+            : null;
+        _hasPod = _runtime != null;
         _availableKeys = keys;
         _projectModules = modules;
         _metrics = metrics;
@@ -101,6 +107,16 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
   }
 
   bool get _configuredForLaunch => (_resolvedKeyId ?? '').isNotEmpty;
+
+  bool get _isError => _status == 'error';
+
+  bool get _launched =>
+      _status == 'active' || _status == 'paused' || _status == 'error' || _status == 'completed';
+
+  bool get _containerUnhealthy =>
+      _isError ||
+      (_status == 'active' &&
+          !containerRuntimeHealthy({'runtime': _runtime, 'status': _status, 'last_error': _runtime?['last_error']}));
 
   bool get _aiProviderNeedsSelection =>
       _availableKeys.length >= 2 && (_resolvedKeyId ?? '').isEmpty;
@@ -190,8 +206,12 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
   Future<void> _launch() async {
     setState(() => _busy = true);
     try {
-      await workContext.api.launchProject(widget.projectId);
+      final result = await workContext.api.launchProject(widget.projectId);
       if (!mounted) return;
+      if (result['status'] == 'error') {
+        await _load();
+        return;
+      }
       AppSnackBar.success(context, AppLocalizations.of(context).projectLaunchSuccess);
       await _load();
     } catch (e) {
@@ -199,6 +219,30 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _reload() async {
+    setState(() => _busy = true);
+    try {
+      await workContext.api.reloadProject(widget.projectId);
+      if (!mounted) return;
+      await _load();
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _openContainer() {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ProjectContainerPage(
+          projectId: widget.projectId,
+          projectName: _name,
+        ),
+      ),
+    ).then((_) => _load());
   }
 
   Future<void> _togglePause() async {
@@ -265,6 +309,7 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
     final paused = _status == 'paused';
     final selectedName = _selectedKeyName();
     final warning = context.appColors.warning;
+    final error = context.appColors.danger;
 
     return AppScaffold(
       title: Text(l10n.projectProjectSettings),
@@ -317,14 +362,29 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
                 onEnabledChanged: _toggleModule,
               ),
             ),
-          if (!_hasPod && _configuredForLaunch)
+          if (!_launched && _configuredForLaunch && !_isError)
             AppNavPreference(
               title: l10n.projectLaunchProject,
               icon: Icons.rocket_launch_outlined,
               enabled: !_busy,
               onTap: _launch,
             ),
-          if (_hasPod) ...[
+          if (_launched)
+            AppNavPreference(
+              title: l10n.projectContainer,
+              icon: Icons.dns_outlined,
+              accentColor: _containerUnhealthy ? error : null,
+              enabled: !_busy,
+              onTap: _openContainer,
+            ),
+          if (_isError)
+            AppNavPreference(
+              title: l10n.projectReload,
+              icon: Icons.refresh_outlined,
+              enabled: !_busy,
+              onTap: _reload,
+            ),
+          if (_hasPod && !_isError) ...[
             AppNavPreference(
               title: paused ? l10n.projectResumeProject : l10n.projectPauseProject,
               icon: paused ? Icons.play_arrow_outlined : Icons.pause_outlined,

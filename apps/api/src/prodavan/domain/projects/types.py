@@ -13,6 +13,7 @@ class ProjectStatus(StrEnum):
     DRAFT = "draft"
     ACTIVE = "active"
     PAUSED = "paused"
+    ERROR = "error"
     COMPLETED = "completed"
     DELETED = "deleted"
 
@@ -52,6 +53,8 @@ PLATFORM_EVENT_TYPES = frozenset(
         "project.started",
         "project.paused",
         "project.resumed",
+        "project.failed",
+        "project.recovered",
         "project.completed",
         "project.deleted",
         "project.restored",

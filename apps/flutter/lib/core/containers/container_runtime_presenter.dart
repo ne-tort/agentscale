@@ -28,9 +28,14 @@ String formatContainerRuntimeCell(Map<String, dynamic>? item, AppLocalizations l
 String formatContainerRuntimeDetail(Map<String, dynamic>? item, AppLocalizations l10n) {
   final runtime = runtimeMap(item);
   if (runtime == null) {
+    final lastError = item?['last_error'];
+    if (lastError != null && '$lastError'.trim().isNotEmpty) {
+      return '${l10n.adminContainerLastError}: ${'$lastError'.trim()}';
+    }
     return switch (item?['status'] as String?) {
       'paused' => l10n.adminContainerRuntimePaused,
       'active' => l10n.adminContainerRuntimeNotStarted,
+      'error' => l10n.commonEmDash,
       _ => l10n.commonEmDash,
     };
   }
@@ -91,6 +96,23 @@ String formatContainerRuntimeDetail(Map<String, dynamic>? item, AppLocalizations
 bool containerRuntimeNeedsAttention(Map<String, dynamic>? item) {
   if (item?['status'] != 'active') return false;
   return runtimeMap(item) == null;
+}
+
+bool containerRuntimeHealthy(Map<String, dynamic>? item) {
+  final runtime = runtimeMap(item);
+  if (runtime == null) return false;
+  final podStatus = runtime['status'] as String?;
+  if (podStatus == 'failed') return false;
+  final lastError = runtime['last_error'] ?? item?['last_error'];
+  if (lastError != null && '$lastError'.trim().isNotEmpty) return false;
+  if (podStatus == 'running') {
+    final phase = item?['k8s_phase'] as String? ?? runtime['phase'] as String?;
+    if (phase != null && phase.trim().isNotEmpty && phase.trim() != 'Running') {
+      return false;
+    }
+    return true;
+  }
+  return false;
 }
 
 String _formatBytes(num bytes, AppLocalizations l10n) {

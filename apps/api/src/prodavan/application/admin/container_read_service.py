@@ -17,8 +17,9 @@ from prodavan.infrastructure.persistence.models.projects import ProjectRow
 # active/running first, then paused, then other non-deleted
 _STATUS_ORDER = case(
     (ProjectRow.status == ProjectStatus.ACTIVE, 0),
-    (ProjectRow.status == ProjectStatus.PAUSED, 1),
-    else_=2,
+    (ProjectRow.status == ProjectStatus.ERROR, 1),
+    (ProjectRow.status == ProjectStatus.PAUSED, 2),
+    else_=3,
 )
 
 

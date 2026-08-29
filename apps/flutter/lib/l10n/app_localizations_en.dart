@@ -1905,6 +1905,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectLaunchProject => 'Launch project';
 
   @override
+  String get projectContainer => 'Container';
+
+  @override
+  String get projectReload => 'Reload';
+
+  @override
   String get projectUpdateProject => 'Update project';
 
   @override

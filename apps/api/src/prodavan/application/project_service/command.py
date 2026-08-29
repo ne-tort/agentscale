@@ -52,8 +52,8 @@ class ProjectCommand:
         self._pods = PodCommand(session)
         self._relations = RelationsCommand(session)
 
-    async def _project_public(self, row: ProjectRow) -> dict:
-        return await self._query._project_public(row)
+    async def _project_public(self, row: ProjectRow, *, include_runtime: bool = False) -> dict:
+        return await self._query._project_public(row, include_runtime=include_runtime)
 
     async def create(
         self,
@@ -219,24 +219,27 @@ class ProjectCommand:
         )
         row.materialize_manifest = dict(mat.module_paths or {})
         await self._pods.provision_for_project(row.id, principal=principal, start=False)
-        await self._pods.sync_desired(
-            row.id,
-            PodDesiredState.RUNNING,
-            principal=principal,
-            reason="launch",
-        )
-        row.status = ProjectStatus.ACTIVE
-        await self._events.emit(
-            event_type="project.started",
-            company_id=row.company_id,
-            project_id=row.id,
-            cabinet_id=row.cabinet_id,
-            principal=principal,
-            payload={"source": "launch"},
-        )
+        try:
+            await self._pods.sync_desired(
+                row.id,
+                PodDesiredState.RUNNING,
+                principal=principal,
+                reason="launch",
+            )
+            row.status = ProjectStatus.ACTIVE
+            await self._events.emit(
+                event_type="project.started",
+                company_id=row.company_id,
+                project_id=row.id,
+                cabinet_id=row.cabinet_id,
+                principal=principal,
+                payload={"source": "launch"},
+            )
+        except Exception:
+            row.status = ProjectStatus.ERROR
         await self._session.commit()
         await self._session.refresh(row)
-        out = await self._project_public(row)
+        out = await self._project_public(row, include_runtime=True)
         out["materialize"] = {
             "workspace_root": mat.workspace_root,
             "mcp_config_path": mat.mcp_config_path,
@@ -566,21 +569,26 @@ class ProjectCommand:
             platform_fallback=company_policy.platform_fallback,
         )
         row.status = ProjectStatus.ACTIVE
-        await self._pods.sync_desired(
-            row.id,
-            PodDesiredState.RUNNING,
-            principal=principal,
-            reason="resume",
-        )
-        await self._events.emit(
-            event_type="project.resumed",
-            company_id=row.company_id,
-            project_id=row.id,
-            cabinet_id=row.cabinet_id,
-            principal=principal,
-        )
+        try:
+            await self._pods.sync_desired(
+                row.id,
+                PodDesiredState.RUNNING,
+                principal=principal,
+                reason="resume",
+            )
+            await self._events.emit(
+                event_type="project.resumed",
+                company_id=row.company_id,
+                project_id=row.id,
+                cabinet_id=row.cabinet_id,
+                principal=principal,
+            )
+        except Exception:
+            row.status = ProjectStatus.ERROR
         await self._session.commit()
         await self._session.refresh(row)
+        if row.status != ProjectStatus.ACTIVE:
+            return await self._project_public(row, include_runtime=True)
         try:
             from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
             from prodavan.core.jobs.enqueue import enqueue_trigger_drain
@@ -595,6 +603,56 @@ class ProjectCommand:
         except Exception:
             pass
         return await self._project_public(row)
+
+    async def reload_project(
+        self,
+        *,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        from prodavan.core.infra.cache import cache_key, rate_limit_enforce
+
+        row = await self._access.require_access(
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+            allow_paused=True,
+        )
+        if row.status != ProjectStatus.ERROR:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="project is not in error state",
+            )
+        await rate_limit_enforce(
+            cache_key("pod-reload", project_id, "1m"),
+            limit=1,
+            window_sec=60,
+            detail="pod reload rate limit exceeded (1 per minute)",
+        )
+        await rate_limit_enforce(
+            cache_key("pod-reload", project_id, "30m"),
+            limit=3,
+            window_sec=1800,
+            detail="pod reload rate limit exceeded (3 per 30 minutes)",
+        )
+        await self._pods.provision_for_project(row.id, principal=principal, start=False)
+        try:
+            await self._pods.sync_desired(
+                row.id,
+                PodDesiredState.RUNNING,
+                principal=principal,
+                reason="reload",
+            )
+            row.status = ProjectStatus.ACTIVE
+        except Exception:
+            row.status = ProjectStatus.ERROR
+        await self._session.commit()
+        await self._session.refresh(row)
+        return await self._project_public(row, include_runtime=True)
 
     async def complete(
         self,

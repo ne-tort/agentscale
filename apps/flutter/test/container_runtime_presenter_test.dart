@@ -34,4 +34,30 @@ void main() {
     expect(text, contains('12m'));
     expect(text, contains('64.0 MiB'));
   });
+
+  test('formatContainerRuntimeDetail shows last_error for error without runtime', () {
+    final l10n = AppLocalizationsRu();
+    final text = formatContainerRuntimeDetail(
+      const {'status': 'error', 'last_error': 'k8s boom', 'runtime': null},
+      l10n,
+    );
+    expect(text, contains('k8s boom'));
+  });
+
+  test('containerRuntimeHealthy false for failed pod', () {
+    expect(
+      containerRuntimeHealthy(const {
+        'status': 'active',
+        'runtime': {'status': 'failed', 'last_error': 'boom'},
+      }),
+      isFalse,
+    );
+    expect(
+      containerRuntimeHealthy(const {
+        'status': 'active',
+        'runtime': {'status': 'running', 'phase': 'Running'},
+      }),
+      isTrue,
+    );
+  });
 }

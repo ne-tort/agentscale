@@ -11,6 +11,15 @@ class _Row:
 
 def test_project_status_includes_draft() -> None:
     assert ProjectStatus.DRAFT == "draft"
+    assert ProjectStatus.ERROR == "error"
+
+
+def test_project_is_error_inert() -> None:
+    from prodavan.domain.lifecycle import project_is_error, project_is_inert
+
+    assert project_is_error(_Row("error"))
+    assert project_is_inert(_Row("error"))
+    assert not project_is_inert(_Row("active"))
 
 
 def test_project_is_draft() -> None:

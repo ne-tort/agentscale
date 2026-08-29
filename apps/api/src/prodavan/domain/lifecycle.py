@@ -73,8 +73,17 @@ def project_is_completed(row: Any) -> bool:
     return str(getattr(row, "status", "") or "") == ProjectStatus.COMPLETED
 
 
+def project_is_error(row: Any) -> bool:
+    return str(getattr(row, "status", "") or "") == ProjectStatus.ERROR
+
+
 def project_is_inert(row: Any) -> bool:
-    return project_is_soft_deleted(row) or project_is_paused(row) or project_is_completed(row)
+    return (
+        project_is_soft_deleted(row)
+        or project_is_paused(row)
+        or project_is_completed(row)
+        or project_is_error(row)
+    )
 
 
 def company_alive_clause(model: Any) -> ColumnElement[bool]:

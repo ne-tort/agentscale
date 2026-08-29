@@ -66,3 +66,31 @@ async def test_runtime_summary_shape() -> None:
         "hydrate_generation": 0,
     }
 
+
+@pytest.mark.asyncio
+async def test_runtime_view_includes_failed_pod() -> None:
+    session = AsyncMock()
+    failed = ProjectPodRow(
+        id="pod_failed",
+        project_id="prj_test1234567890",
+        workspace_key="wk_demo",
+        status=PodStatus.FAILED,
+        desired_state=PodDesiredState.RUNNING,
+        runtime_ref="object-ws:wk_demo",
+        last_error="boom",
+        hydrate_generation=0,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    live_result = MagicMock()
+    live_result.scalar_one_or_none.return_value = None
+    failed_result = MagicMock()
+    failed_result.scalar_one_or_none.return_value = failed
+    session.execute = AsyncMock(side_effect=[live_result, failed_result])
+
+    summary = await PodQuery(session).runtime_view("prj_test1234567890")
+
+    assert summary is not None
+    assert summary["status"] == PodStatus.FAILED
+    assert summary["last_error"] == "boom"
+

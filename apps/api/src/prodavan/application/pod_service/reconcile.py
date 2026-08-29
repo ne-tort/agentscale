@@ -56,19 +56,25 @@ class PodReconcileService:
                 pod, desired
             )
             if drift:
-                await self._pods.sync_desired(
-                    project.id,
-                    desired,
-                    principal=_SYSTEM,
-                    reason="reconcile",
-                )
-                fixed += 1
+                try:
+                    await self._pods.sync_desired(
+                        project.id,
+                        desired,
+                        principal=_SYSTEM,
+                        reason="reconcile",
+                    )
+                    fixed += 1
+                except Exception:
+                    logger.exception("pod reconcile sync failed project_id=%s", project.id)
+                    fixed += 1
 
         active_q = await self._session.execute(
             select(ProjectRow).where(ProjectRow.status == ProjectStatus.ACTIVE)
         )
         pod_query = PodQuery(self._session)
         for project in active_q.scalars().all():
+            if project.status == ProjectStatus.ERROR:
+                continue
             if await pod_query.get_for_project(project.id) is not None:
                 continue
             had_pod = await self._session.execute(
@@ -79,13 +85,17 @@ class PodReconcileService:
             if had_pod.scalar_one_or_none() is None:
                 continue
             await self._pods.provision_for_project(project.id, principal=_SYSTEM, start=False)
-            await self._pods.sync_desired(
-                project.id,
-                PodDesiredState.RUNNING,
-                principal=_SYSTEM,
-                reason="reconcile",
-            )
-            fixed += 1
+            try:
+                await self._pods.sync_desired(
+                    project.id,
+                    PodDesiredState.RUNNING,
+                    principal=_SYSTEM,
+                    reason="reconcile",
+                )
+                fixed += 1
+            except Exception:
+                logger.exception("pod reconcile reprovision failed project_id=%s", project.id)
+                fixed += 1
 
         zombies = await self._reap_zombies()
         fixed += zombies

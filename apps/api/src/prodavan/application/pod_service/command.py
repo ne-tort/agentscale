@@ -83,7 +83,17 @@ class PodCommand:
         try:
             if desired == PodDesiredState.RUNNING:
                 await self._apply_running(project, pod, principal=principal)
-                event_type = "pod.resumed" if reason == "resume" else "pod.started"
+                if project.status == ProjectStatus.ERROR:
+                    project.status = ProjectStatus.ACTIVE
+                    await self._project_events.emit(
+                        event_type="project.recovered",
+                        company_id=project.company_id,
+                        project_id=project.id,
+                        cabinet_id=project.cabinet_id,
+                        principal=principal,
+                        payload={"source": reason or "reload"},
+                    )
+                event_type = "pod.resumed" if reason in {"resume", "reload"} else "pod.started"
                 await self._events.emit(
                     event_type=event_type,
                     company_id=project.company_id,
@@ -146,6 +156,16 @@ class PodCommand:
                 pod_id=pod.id,
                 payload={"error": pod.last_error, **(payload or {})},
             )
+            if desired == PodDesiredState.RUNNING and project.status != ProjectStatus.ERROR:
+                project.status = ProjectStatus.ERROR
+                await self._project_events.emit(
+                    event_type="project.failed",
+                    company_id=project.company_id,
+                    project_id=project.id,
+                    cabinet_id=project.cabinet_id,
+                    principal=principal,
+                    payload={"error": pod.last_error, "reason": reason},
+                )
             raise
 
         project.container_ref = pod.runtime_ref or project.container_ref
@@ -260,12 +280,15 @@ class PodCommand:
         pod = await self._get_live_row(project_id)
         if pod is None:
             await self.provision_for_project(project_id, principal=principal, start=False)
-        await self.sync_desired(
-            project_id,
-            PodDesiredState.RUNNING,
-            principal=principal,
-            reason="lazy.start",
-        )
+        try:
+            await self.sync_desired(
+                project_id,
+                PodDesiredState.RUNNING,
+                principal=principal,
+                reason="lazy.start",
+            )
+        except Exception:
+            logger.exception("lazy start failed project_id=%s", project_id)
 
     async def force_kill(self, *, pod_id: str, principal: Principal) -> dict:
         pod = await self._session.get(ProjectPodRow, pod_id)

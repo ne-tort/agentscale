@@ -92,6 +92,44 @@ async def release_lock(key: str, token: str) -> bool:
         return False
 
 
+async def rate_limit_enforce(key: str, *, limit: int, window_sec: int, detail: str = "rate limit exceeded") -> None:
+    """Fixed-window counter — raises when limit exceeded or Redis unavailable (fail-closed)."""
+    from prodavan.core.infra.redis_manager import get_redis_manager
+    from prodavan.domain.errors import AppError
+
+    mgr = get_redis_manager()
+    if mgr is None or not mgr.enabled:
+        raise AppError(
+            code="REDIS_UNAVAILABLE",
+            title="Service Unavailable",
+            status=503,
+            detail="redis unavailable",
+        )
+    if limit < 1 or window_sec < 1:
+        return
+    try:
+        count = await mgr.client.incr(key)
+        if int(count) == 1:
+            await mgr.client.expire(key, int(window_sec))
+        if int(count) > int(limit):
+            raise AppError(
+                code="RATE_LIMITED",
+                title="Too Many Requests",
+                status=429,
+                detail=detail,
+            )
+    except AppError:
+        raise
+    except Exception:
+        logger.exception("rate_limit_enforce failed key=%s", key)
+        raise AppError(
+            code="REDIS_UNAVAILABLE",
+            title="Service Unavailable",
+            status=503,
+            detail="redis unavailable",
+        ) from None
+
+
 async def rate_limit_allow(key: str, *, limit: int, window_sec: int) -> bool:
     """Fixed-window counter: allow if count <= limit within window. No-op → allow."""
     from prodavan.core.infra.redis_manager import get_redis_manager

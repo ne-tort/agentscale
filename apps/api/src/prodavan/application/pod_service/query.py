@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.pod_service.factory import build_pod_metrics, build_pod_runtime
 from prodavan.config.settings import settings
-from prodavan.domain.pods import POD_TERMINAL_STATUSES
+from prodavan.domain.pods import POD_TERMINAL_STATUSES, PodStatus
 from prodavan.infrastructure.persistence.models.projects import ProjectPodRow
 
 
@@ -16,25 +16,46 @@ class PodQuery:
         self._session = session
 
     async def get_for_project(self, project_id: str) -> dict | None:
-        q = await self._session.execute(
-            select(ProjectPodRow).where(
-                ProjectPodRow.project_id == project_id,
-                ProjectPodRow.status.notin_(tuple(POD_TERMINAL_STATUSES)),
-            )
-        )
-        row = q.scalar_one_or_none()
+        row = await self._get_live_row(project_id)
         return self._public(row) if row else None
 
     async def runtime_summary(self, project_id: str) -> dict | None:
+        row = await self._get_live_row(project_id)
+        if row is None:
+            return None
+        return await self._build_runtime_summary(row, project_id)
+
+    async def runtime_view(self, project_id: str) -> dict | None:
+        """Runtime for UI — includes failed pod when no live pod exists."""
+        row = await self._get_live_row(project_id)
+        if row is None:
+            row = await self._get_failed_row(project_id)
+        if row is None:
+            return None
+        return await self._build_runtime_summary(row, project_id)
+
+    async def _get_live_row(self, project_id: str) -> ProjectPodRow | None:
         q = await self._session.execute(
             select(ProjectPodRow).where(
                 ProjectPodRow.project_id == project_id,
                 ProjectPodRow.status.notin_(tuple(POD_TERMINAL_STATUSES)),
             )
         )
-        row = q.scalar_one_or_none()
-        if row is None:
-            return None
+        return q.scalar_one_or_none()
+
+    async def _get_failed_row(self, project_id: str) -> ProjectPodRow | None:
+        q = await self._session.execute(
+            select(ProjectPodRow)
+            .where(
+                ProjectPodRow.project_id == project_id,
+                ProjectPodRow.status == PodStatus.FAILED,
+            )
+            .order_by(ProjectPodRow.updated_at.desc())
+            .limit(1)
+        )
+        return q.scalar_one_or_none()
+
+    async def _build_runtime_summary(self, row: ProjectPodRow, project_id: str) -> dict:
         pod = self._public(row)
         summary = {
             "pod_id": pod["id"],

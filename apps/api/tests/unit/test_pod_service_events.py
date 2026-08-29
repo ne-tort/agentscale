@@ -19,6 +19,8 @@ def test_platform_event_types_include_pod_events() -> None:
         "pod.paused",
         "pod.terminated",
         "pod.failed",
+        "project.failed",
+        "project.recovered",
     ):
         assert event in PLATFORM_EVENT_TYPES
 

@@ -1907,6 +1907,12 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectLaunchProject => 'Запустить проект';
 
   @override
+  String get projectContainer => 'Контейнер';
+
+  @override
+  String get projectReload => 'Перезагрузить';
+
+  @override
   String get projectUpdateProject => 'Обновить проект';
 
   @override

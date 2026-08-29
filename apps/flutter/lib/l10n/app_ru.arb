@@ -1093,6 +1093,8 @@
   "projectCreatorColumn": "Создатель",
   "projectCreatorLabel": "Создатель",
   "projectLaunchProject": "Запустить проект",
+  "projectContainer": "Контейнер",
+  "projectReload": "Перезагрузить",
   "projectUpdateProject": "Обновить проект",
   "projectResetAgent": "Сбросить агента",
   "projectConfigureBeforeLaunch": "Укажите провайдер AI перед запуском",
