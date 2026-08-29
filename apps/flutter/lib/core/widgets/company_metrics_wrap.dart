@@ -11,10 +11,14 @@ class CompanyMetricsWrap extends StatelessWidget {
     super.key,
     required this.metrics,
     this.includeAgentDetail = false,
+    this.showActiveEmployees = true,
+    this.showLastActivity = true,
   });
 
   final Map<String, dynamic>? metrics;
   final bool includeAgentDetail;
+  final bool showActiveEmployees;
+  final bool showLastActivity;
 
   String _metric(String key, {String fallback = '0'}) {
     final v = metrics?[key];
@@ -36,7 +40,8 @@ class CompanyMetricsWrap extends StatelessWidget {
       children: [
         StatTile(label: l10n.commonEmployees, value: _metric('employees_total')),
         StatTile(label: l10n.adminEmployeesOnline, value: _metric('employees_online')),
-        StatTile(label: l10n.adminActiveEmployees, value: _metric('employees_active')),
+        if (showActiveEmployees)
+          StatTile(label: l10n.adminActiveEmployees, value: _metric('employees_active')),
         StatTile(
           label: l10n.commonCabinets,
           value: l10n.adminCompanyCabinetsRunning(
@@ -51,7 +56,7 @@ class CompanyMetricsWrap extends StatelessWidget {
           StatTile(label: l10n.adminAiKeysBound, value: _metric('ai_keys_bound')),
         ],
         StatTile(label: l10n.commonStorageBytes, value: storageValue),
-        if (metrics?['last_activity_at'] != null)
+        if (showLastActivity && metrics?['last_activity_at'] != null)
           StatTile(
             label: l10n.commonLastActivity,
             value: _metric('last_activity_at', fallback: l10n.commonEmDash),

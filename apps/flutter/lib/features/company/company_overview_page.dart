@@ -89,7 +89,11 @@ class _CompanyOverviewPageState extends State<CompanyOverviewPage> {
                   ),
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-                  child: CompanyMetricsWrap(metrics: _metrics),
+                  child: CompanyMetricsWrap(
+                    metrics: _metrics,
+                    showActiveEmployees: false,
+                    showLastActivity: false,
+                  ),
                 ),
               ],
             ),

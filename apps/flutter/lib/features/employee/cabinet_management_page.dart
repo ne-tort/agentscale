@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_list_item.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_section_header.dart';
 import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/employee/cabinet_module_host.dart';
@@ -64,15 +63,7 @@ class CabinetManagementPage extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
 
     if (embedded) {
-      return AppScaffold(
-        body: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            AppSectionHeader(title: l10n.navManagement),
-            Expanded(child: _listBody(l10n)),
-          ],
-        ),
-      );
+      return AppScaffold(body: _listBody(l10n));
     }
 
     return AppScaffold(

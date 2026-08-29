@@ -46,6 +46,11 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
 
   bool get _scopeEditable => _key != null;
 
+  String _bindingCountSubtitle(AppLocalizations l10n, int count) {
+    if (count == 0) return l10n.commonNotSet;
+    return l10n.adminBindingsSelected('$count');
+  }
+
   @override
   void initState() {
     super.initState();
@@ -317,7 +322,7 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
               icon: Icons.pause_circle_outline_rounded,
               onTap: _pauseKey,
             ),
-          if (_scopeEditable && _employees.isNotEmpty)
+          if (hasSecret && _scopeEditable && _employees.isNotEmpty)
             AppMultiChoicePreference<String>(
               title: l10n.navEmployees,
               icon: Icons.group_outlined,
@@ -328,6 +333,7 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
                 final e = _employees.firstWhere((x) => x['id'] == id, orElse: () => {'login': id});
                 return e['login'] as String? ?? e['display_name'] as String? ?? id;
               },
+              presentValues: (ids) => _bindingCountSubtitle(l10n, ids.length),
               onSave: (ids) async {
                 await companyContext.api.setAiKeyScopeBindings(
                   companyId: widget.companyId,
@@ -339,7 +345,7 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
                 await _load();
               },
             ),
-          if (_scopeEditable && _cabinets.isNotEmpty)
+          if (hasSecret && _scopeEditable && _cabinets.isNotEmpty)
             AppMultiChoicePreference<String>(
               title: l10n.navCabinets,
               icon: Icons.view_module_outlined,
@@ -350,6 +356,7 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
                 final c = _cabinets.firstWhere((x) => x['id'] == id, orElse: () => {'name': id});
                 return c['name'] as String? ?? id;
               },
+              presentValues: (ids) => _bindingCountSubtitle(l10n, ids.length),
               onSave: (ids) async {
                 await companyContext.api.setAiKeyScopeBindings(
                   companyId: widget.companyId,
@@ -361,7 +368,7 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
                 await _load();
               },
             ),
-          if (_scopeEditable && _projects.isNotEmpty)
+          if (hasSecret && _scopeEditable && _projects.isNotEmpty)
             AppMultiChoicePreference<String>(
               title: l10n.navProjects,
               icon: Icons.folder_outlined,
@@ -375,6 +382,7 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
                 );
                 return p['project_name'] as String? ?? p['name'] as String? ?? id;
               },
+              presentValues: (ids) => _bindingCountSubtitle(l10n, ids.length),
               onSave: (ids) async {
                 await companyContext.api.setAiKeyScopeBindings(
                   companyId: widget.companyId,

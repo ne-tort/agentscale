@@ -7,7 +7,6 @@ import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_inline_add_field.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_section_header.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/employee/cabinet_project_settings_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -126,7 +125,6 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          AppSectionHeader(title: l10n.navProjects),
           AppInlineAddField(
             title: l10n.projectAddHint,
             hintText: l10n.projectAddHint,

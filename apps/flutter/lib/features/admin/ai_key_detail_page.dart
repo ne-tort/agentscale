@@ -319,22 +319,23 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
               await _load();
             },
           ),
-          AppMultiChoicePreference<String>(
-            title: l10n.adminCompanyBindings,
-            icon: Icons.link_rounded,
-            values: _boundIds.toSet(),
-            choices: _companyChoices.toList(),
-            keyFor: (v) => v,
-            labelFor: _companyLabel,
-            presentValues: (_) => _bindingsSubtitle(l10n),
-            onSave: (ids) async {
-              await adminContext.api.setAiKeyCompanies(
-                keyId: widget.keyId,
-                companyIds: ids.toList(),
-              );
-              await _load();
-            },
-          ),
+          if (hasSecret)
+            AppMultiChoicePreference<String>(
+              title: l10n.adminCompanyBindings,
+              icon: Icons.link_rounded,
+              values: _boundIds.toSet(),
+              choices: _companyChoices.toList(),
+              keyFor: (v) => v,
+              labelFor: _companyLabel,
+              presentValues: (_) => _bindingsSubtitle(l10n),
+              onSave: (ids) async {
+                await adminContext.api.setAiKeyCompanies(
+                  keyId: widget.keyId,
+                  companyIds: ids.toList(),
+                );
+                await _load();
+              },
+            ),
           AppSubscriptionPreference(
             title: l10n.adminSubscription,
             endsAt: nextDisplay,

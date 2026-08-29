@@ -148,13 +148,6 @@ class _AdminProjectContainersPageState extends State<AdminProjectContainersPage>
 
     return AppScaffold(
       title: widget.embedded ? null : Text(l10n.navContainers),
-      actions: [
-        IconButton(
-          tooltip: l10n.commonReload,
-          onPressed: _loading ? null : () => _reload(),
-          icon: const Icon(Icons.refresh),
-        ),
-      ],
       body: AppEntityCollection(
         loading: _loading,
         rows: rows,
