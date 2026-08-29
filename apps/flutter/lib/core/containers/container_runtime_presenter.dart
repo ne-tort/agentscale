@@ -71,14 +71,33 @@ String formatContainerTimestamp(String? iso, AppLocalizations l10n) {
   }
 }
 
+String? containerLastLaunchIso(Map<String, dynamic>? item) {
+  return _runtimeString(item, 'started_at') ?? _runtimeString(item, 'last_started_at');
+}
+
+String formatContainerLastLaunch(Map<String, dynamic>? item, AppLocalizations l10n) {
+  return formatContainerTimestamp(containerLastLaunchIso(item), l10n);
+}
+
+bool containerHasError(Map<String, dynamic>? item) {
+  if (containerLastError(item) != null) return true;
+  final state = _observedState(item);
+  return state == 'failed' || state == 'degraded';
+}
+
+bool containerMetricHasValue(String formatted, AppLocalizations l10n) {
+  return formatted.trim().isNotEmpty && formatted != l10n.commonEmDash;
+}
+
 String formatContainerCreatedAt(Map<String, dynamic>? item, AppLocalizations l10n) {
   final created = _runtimeString(item, 'pod_created_at') ??
       _runtimeString(item, 'k8s_created_at');
   return formatContainerTimestamp(created, l10n);
 }
 
+@Deprecated('Use formatContainerLastLaunch')
 String formatContainerStartedAt(Map<String, dynamic>? item, AppLocalizations l10n) {
-  return formatContainerTimestamp(_runtimeString(item, 'started_at'), l10n);
+  return formatContainerLastLaunch(item, l10n);
 }
 
 String formatContainerUptime(Map<String, dynamic>? item, AppLocalizations l10n) {

@@ -99,16 +99,31 @@ class _CabinetShellState extends State<CabinetShell> {
     });
   }
 
-  void _selectNarrowMain() {
+  void _selectNarrowSettings() {
     setState(() {
-      _narrowStackIndex = 1;
+      _narrowStackIndex = 3;
       _subpageOpen = false;
     });
   }
 
-  void _selectNarrowSettings() {
+  int? _narrowSelectedDestIndex() {
+    if (_narrowStackIndex == 3) return null;
+    return switch (_narrowStackIndex) {
+      0 => 1,
+      1 => 0,
+      2 => 2,
+      _ => 0,
+    };
+  }
+
+  void _onNarrowDestinationSelected(int index) {
     setState(() {
-      _narrowStackIndex = 2;
+      _narrowStackIndex = switch (index) {
+        0 => 1,
+        1 => 0,
+        2 => 2,
+        _ => 1,
+      };
       _subpageOpen = false;
     });
   }
@@ -126,13 +141,15 @@ class _CabinetShellState extends State<CabinetShell> {
       return AppLayout(
         constrainBody: false,
         subpageOpen: _subpageOpen,
-        selectedIndex: _narrowStackIndex == 1 ? 0 : null,
+        selectedIndex: _narrowSelectedDestIndex(),
         trailingDestination: settingsDest,
-        trailingSelected: _narrowStackIndex == 2,
+        trailingSelected: _narrowStackIndex == 3,
         onTrailingSelected: _selectNarrowSettings,
-        onDestinationSelected: (_) => _selectNarrowMain(),
+        onDestinationSelected: _onNarrowDestinationSelected,
         onLogoTap: _goOverview,
         destinations: [
+          AppNavDestination(icon: Icons.folder_outlined, label: l10n.navProjects),
+          AppNavDestination(icon: Icons.dashboard_outlined, label: l10n.navOverview),
           AppNavDestination(icon: Icons.apps_outlined, label: l10n.navManagement),
         ],
         body: IndexedStack(
@@ -151,6 +168,12 @@ class _CabinetShellState extends State<CabinetShell> {
               active: _narrowStackIndex == 1,
               onSubpageOpenChanged:
                   _narrowStackIndex == 1 ? _onSubpageOpenChanged : null,
+              root: CabinetProjectsPage(cabinetId: widget.cabinetId),
+            ),
+            AppShellBranch(
+              active: _narrowStackIndex == 2,
+              onSubpageOpenChanged:
+                  _narrowStackIndex == 2 ? _onSubpageOpenChanged : null,
               root: CabinetManagementPage(
                 cabinetId: widget.cabinetId,
                 entries: _managementEntries,

@@ -102,6 +102,8 @@ class PodReconcileService:
         fixed += zombies
 
         from prodavan.application.pod_service.metrics_sampler import PodMetricsSampler
+        from prodavan.application.pod_service.runtime_observation import emit_stub_metrics_heartbeat
+        from prodavan.config.settings import settings
 
         sample_stats = await PodMetricsSampler(self._session).sample_managed_pods()
 
@@ -111,10 +113,13 @@ class PodReconcileService:
             .join(ProjectRow, ProjectRow.id == ProjectPodRow.project_id)
             .where(ProjectPodRow.status.notin_((PodStatus.TERMINATED, PodStatus.FAILED)))
         )
+        stub_mode = (settings.pod_runtime_mode or "stub").strip().lower() != "k8s"
         promote_actions = 0
         for pod, project in q_obs.all():
             if project is None:
                 continue
+            if stub_mode and pod.status == PodStatus.RUNNING and pod.desired_state == PodDesiredState.RUNNING.value:
+                await emit_stub_metrics_heartbeat(self._session, project=project, pod=pod)
             action = await observation.promote_or_demote(project=project, pod=pod)
             if action != "noop":
                 promote_actions += 1

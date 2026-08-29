@@ -140,7 +140,7 @@ void main() {
       expect(find.text('Управление'), findsWidgets);
     });
 
-    testWidgets('narrow bottom nav shows only Management hub', (tester) async {
+    testWidgets('narrow bottom nav shows Projects, Overview, and Management', (tester) async {
       tester.view.physicalSize = const Size(400, 800);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -154,7 +154,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       expect(find.byType(NavigationBar), findsOneWidget);
-      expect(find.text('Проекты'), findsNothing);
+      expect(find.text('Проекты'), findsOneWidget);
+      expect(find.text('Обзор'), findsOneWidget);
+      expect(find.text('Управление'), findsOneWidget);
     });
   });
 }

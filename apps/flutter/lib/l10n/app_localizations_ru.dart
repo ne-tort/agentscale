@@ -653,7 +653,10 @@ class AppLocalizationsRu extends AppLocalizations {
   String get containerCreatedAt => 'Создан';
 
   @override
-  String get containerStartedAt => 'Запущен';
+  String get containerLastLaunch => 'Последний запуск';
+
+  @override
+  String get containerStartedAt => 'Последний запуск';
 
   @override
   String get containerUptime => 'Время работы';
@@ -733,6 +736,9 @@ class AppLocalizationsRu extends AppLocalizations {
   @override
   String get containerMetricsAwaiting =>
       'CPU/RAM: ожидание первого sample метрик';
+
+  @override
+  String get containerErrorCopied => 'Ошибка скопирована в буфер обмена';
 
   @override
   String get adminContainerOrchestratorStatus => 'Статус оркестратора';

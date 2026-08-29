@@ -1,12 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:prodavan/core/containers/container_runtime_presenter.dart';
 import 'package:prodavan/core/format/storage_format.dart';
+import 'package:prodavan/core/preferences/app_preference_tile.dart';
+import 'package:prodavan/core/preferences/app_value_preference.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/stat_tile.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Container page metrics — resource tiles on top, lifecycle tiles below.
+/// Container page metrics — resource StatTiles on top, lifecycle preference rows below.
 class ContainerMetricsWrap extends StatelessWidget {
   const ContainerMetricsWrap({
     super.key,
@@ -33,95 +38,128 @@ class ContainerMetricsWrap extends StatelessWidget {
     return null;
   }
 
-  String _cpu(AppLocalizations l10n) {
+  String? _cpu(AppLocalizations l10n) {
     final cpu = _latest?['cpu_millicores'];
     if (cpu is num) return '${cpu.round()}m';
-    return l10n.commonEmDash;
+    return null;
   }
 
-  String _memory(AppLocalizations l10n) {
+  String? _memory(AppLocalizations l10n) {
     final mem = _latest?['memory_bytes'];
     if (mem is num) return formatStorageGb(mem);
-    return l10n.commonEmDash;
+    return null;
   }
 
-  String _storage(AppLocalizations l10n) {
+  String? _storage(AppLocalizations l10n) {
     final bytes = projectMetrics?['storage_bytes'];
     if (bytes is num) return formatStorageGb(bytes);
-    return l10n.commonEmDash;
+    return null;
+  }
+
+  Widget _readOnlyRow({
+    required String title,
+    required String value,
+    required IconData icon,
+    Color? accentColor,
+  }) {
+    return AppPreferenceTile(
+      title: title,
+      icon: icon,
+      accentColor: accentColor,
+      subtitle: Text(value),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final hasError = containerHasError(container);
     final lastError = containerLastError(container);
+    final errorColor = context.appColors.danger;
+
+    final stateValue = formatContainerStateValue(container, l10n);
+    final lastLaunchValue = formatContainerLastLaunch(container, l10n);
+    final uptimeValue = formatContainerUptime(container, l10n);
+    final restartsValue = formatContainerRestarts(container, l10n);
+    final createdValue = formatContainerCreatedAt(container, l10n);
+
+    final resourceTiles = <Widget>[
+      if (_cpu(l10n) != null)
+        StatTile(
+          label: l10n.adminContainerMetricsCpu,
+          value: _cpu(l10n)!,
+          icon: Icons.speed_outlined,
+        ),
+      if (_memory(l10n) != null)
+        StatTile(
+          label: l10n.adminContainerMetricsMemory,
+          value: _memory(l10n)!,
+          icon: Icons.memory_outlined,
+        ),
+      if (_storage(l10n) != null)
+        StatTile(
+          label: l10n.commonStorageBytes,
+          value: _storage(l10n)!,
+          icon: Icons.storage_outlined,
+        ),
+    ];
+
+    final lifecycleRows = <Widget>[
+      _readOnlyRow(
+        title: l10n.containerStateLabel,
+        value: stateValue,
+        icon: Icons.circle,
+        accentColor: hasError ? errorColor : null,
+      ),
+      if (containerMetricHasValue(lastLaunchValue, l10n))
+        _readOnlyRow(
+          title: l10n.containerLastLaunch,
+          value: lastLaunchValue,
+          icon: Icons.play_circle_outline,
+        ),
+      if (!hasError && containerMetricHasValue(uptimeValue, l10n))
+        _readOnlyRow(
+          title: l10n.containerUptime,
+          value: uptimeValue,
+          icon: Icons.timer_outlined,
+        ),
+      if (!hasError && containerMetricHasValue(restartsValue, l10n))
+        _readOnlyRow(
+          title: l10n.containerRestarts,
+          value: restartsValue,
+          icon: Icons.restart_alt_outlined,
+        ),
+      if (lastError != null)
+        AppValuePreference<String>(
+          title: l10n.adminContainerLastError,
+          icon: Icons.error_outline,
+          value: lastError,
+          enabled: false,
+          onTap: () {
+            Clipboard.setData(ClipboardData(text: lastError));
+            AppSnackBar.info(context, l10n.containerErrorCopied);
+          },
+          onSave: (_) async {},
+        ),
+      if (containerMetricHasValue(createdValue, l10n))
+        _readOnlyRow(
+          title: l10n.containerCreatedAt,
+          value: createdValue,
+          icon: Icons.add_circle_outline,
+        ),
+    ];
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Wrap(
-          spacing: AppSpacing.sm,
-          runSpacing: AppSpacing.sm,
-          children: [
-            StatTile(
-              label: l10n.adminContainerMetricsCpu,
-              value: _cpu(l10n),
-              icon: Icons.speed_outlined,
-            ),
-            StatTile(
-              label: l10n.adminContainerMetricsMemory,
-              value: _memory(l10n),
-              icon: Icons.memory_outlined,
-            ),
-            StatTile(
-              label: l10n.commonStorageBytes,
-              value: _storage(l10n),
-              icon: Icons.storage_outlined,
-            ),
-          ],
-        ),
-        SizedBox(height: AppSpacing.md),
-        Wrap(
-          spacing: AppSpacing.sm,
-          runSpacing: AppSpacing.sm,
-          children: [
-            StatTile(
-              label: l10n.containerStateLabel,
-              value: formatContainerStateValue(container, l10n),
-              icon: Icons.circle,
-              width: 180,
-            ),
-            StatTile(
-              label: l10n.containerCreatedAt,
-              value: formatContainerCreatedAt(container, l10n),
-              icon: Icons.add_circle_outline,
-              width: 200,
-            ),
-            StatTile(
-              label: l10n.containerStartedAt,
-              value: formatContainerStartedAt(container, l10n),
-              icon: Icons.play_circle_outline,
-              width: 200,
-            ),
-            StatTile(
-              label: l10n.containerUptime,
-              value: formatContainerUptime(container, l10n),
-              icon: Icons.timer_outlined,
-            ),
-            StatTile(
-              label: l10n.containerRestarts,
-              value: formatContainerRestarts(container, l10n),
-              icon: Icons.restart_alt_outlined,
-            ),
-            if (lastError != null)
-              StatTile(
-                label: l10n.adminContainerLastError,
-                value: lastError,
-                icon: Icons.error_outline,
-                width: 280,
-              ),
-          ],
-        ),
+        if (resourceTiles.isNotEmpty)
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: resourceTiles,
+          ),
+        if (resourceTiles.isNotEmpty) SizedBox(height: AppSpacing.md),
+        ...lifecycleRows,
       ],
     );
   }

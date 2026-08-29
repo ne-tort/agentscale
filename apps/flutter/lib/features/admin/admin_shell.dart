@@ -61,16 +61,16 @@ class _AdminShellState extends State<AdminShell> {
     });
   }
 
-  void _selectNarrowMain() {
+  void _selectNarrowSettings() {
     setState(() {
-      _narrowStackIndex = 1;
+      _narrowStackIndex = 2;
       _subpageOpen = false;
     });
   }
 
-  void _selectNarrowSettings() {
+  void _onNarrowDestinationSelected(int index) {
     setState(() {
-      _narrowStackIndex = 2;
+      _narrowStackIndex = index == 0 ? 0 : 1;
       _subpageOpen = false;
     });
   }
@@ -88,13 +88,14 @@ class _AdminShellState extends State<AdminShell> {
       return AppLayout(
         constrainBody: false,
         subpageOpen: _subpageOpen,
-        selectedIndex: _narrowStackIndex == 1 ? 0 : null,
+        selectedIndex: _narrowStackIndex == 2 ? null : _narrowStackIndex.clamp(0, 1),
         trailingDestination: settingsDest,
         trailingSelected: _narrowStackIndex == 2,
         onTrailingSelected: _selectNarrowSettings,
-        onDestinationSelected: (_) => _selectNarrowMain(),
+        onDestinationSelected: _onNarrowDestinationSelected,
         onLogoTap: _goOverview,
         destinations: [
+          AppNavDestination(icon: Icons.dashboard_outlined, label: l10n.navOverview),
           AppNavDestination(icon: Icons.apps_outlined, label: l10n.navManagement),
         ],
         body: IndexedStack(

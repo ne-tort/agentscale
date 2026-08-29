@@ -653,7 +653,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get containerCreatedAt => 'Created';
 
   @override
-  String get containerStartedAt => 'Started';
+  String get containerLastLaunch => 'Last launch';
+
+  @override
+  String get containerStartedAt => 'Last launch';
 
   @override
   String get containerUptime => 'Uptime';
@@ -727,6 +730,9 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get containerMetricsAwaiting =>
       'CPU/RAM: awaiting first metrics sample';
+
+  @override
+  String get containerErrorCopied => 'Error copied to clipboard';
 
   @override
   String get adminContainerOrchestratorStatus => 'Orchestrator status';

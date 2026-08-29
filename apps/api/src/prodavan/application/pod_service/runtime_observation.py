@@ -96,6 +96,7 @@ class RuntimeObservationService:
             state = last.get("observed_state")
             if state == ObservedState.RUNNING.value:
                 pod.status = PodStatus.RUNNING
+                pod.last_started_at = datetime.now(UTC)
                 await self._session.flush()
                 return last
             if state in {ObservedState.FAILED.value, ObservedState.DEGRADED.value}:
@@ -126,6 +127,7 @@ class RuntimeObservationService:
         if state == ObservedState.RUNNING.value and pod.status == PodStatus.PROVISIONING:
             pod.status = PodStatus.RUNNING
             pod.last_error = None
+            pod.last_started_at = now
             return "promoted"
 
         if state in {

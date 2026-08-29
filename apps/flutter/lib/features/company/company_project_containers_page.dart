@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import 'package:prodavan/core/containers/container_runtime_presenter.dart';
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/company_context.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
@@ -146,7 +145,6 @@ class _CompanyProjectContainersPageState extends State<CompanyProjectContainersP
         titleColor: _statusColor(context, status),
         cells: {
           'status': _statusLabel(status, l10n),
-          'k8s': formatContainerRuntimeCell(item, l10n),
           'employee': _ownerLabel(item, l10n),
           'provider': _cell(item['agent_provider'], l10n),
           'cabinet': _cell(item['cabinet_name'], l10n),

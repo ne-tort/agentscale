@@ -34,6 +34,15 @@ void main() {
     );
   });
 
+  test('formatContainerLastLaunch uses last_started_at fallback', () {
+    final l10n = AppLocalizationsRu();
+    final ts = DateTime.utc(2026, 8, 29, 12, 0).toIso8601String();
+    expect(
+      formatContainerLastLaunch({'runtime': {'last_started_at': ts}}, l10n),
+      isNot(l10n.commonEmDash),
+    );
+  });
+
   test('formatContainerUptime from started_at', () {
     final l10n = AppLocalizationsRu();
     final started = DateTime.now().toUtc().subtract(const Duration(hours: 2, minutes: 5));

@@ -441,7 +441,8 @@
   "containerObservedStateLabel": "Состояние",
   "containerStateLabel": "Состояние",
   "containerCreatedAt": "Создан",
-  "containerStartedAt": "Запущен",
+  "containerLastLaunch": "Последний запуск",
+  "containerStartedAt": "Последний запуск",
   "containerUptime": "Время работы",
   "containerRestarts": "Перезапуски",
   "containerDurationDays": "{count, plural, one{{count} д} few{{count} д} many{{count} д} other{{count} д}}",
@@ -473,6 +474,7 @@
   "containerObservedAbsent": "Не создан",
   "containerObservedUnknown": "Неизвестно",
   "containerMetricsAwaiting": "CPU/RAM: ожидание первого sample метрик",
+  "containerErrorCopied": "Ошибка скопирована в буфер обмена",
   "adminContainerOrchestratorStatus": "Статус оркестратора",
   "adminDeleteContainerConfirm": "Удалить проект «{name}»? Workspace будет очищен.",
   "@adminDeleteContainerConfirm": {

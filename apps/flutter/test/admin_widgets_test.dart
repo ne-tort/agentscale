@@ -108,7 +108,7 @@ void main() {
     expect(find.text('Prodavan'), findsWidgets);
     expect(find.text('Management'), findsNothing);
 
-    // Phone-width surface → bottom bar: Management + Settings (overview via logo only).
+    // Phone-width surface → bottom bar: Overview + Management + Settings (Projects on employee only).
     tester.view.physicalSize = const Size(390, 800);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.resetPhysicalSize);
@@ -120,7 +120,7 @@ void main() {
     final labels = bar.destinations
         .map((d) => (d as NavigationDestination).label)
         .toList();
-    expect(labels, ['Management', 'Settings']);
+    expect(labels, ['Overview', 'Management', 'Settings']);
     expect(find.text('Companies'), findsOneWidget);
 
     await tester.tap(find.text('Settings'));

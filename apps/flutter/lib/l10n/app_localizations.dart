@@ -1226,10 +1226,16 @@ abstract class AppLocalizations {
   /// **'Created'**
   String get containerCreatedAt;
 
+  /// No description provided for @containerLastLaunch.
+  ///
+  /// In en, this message translates to:
+  /// **'Last launch'**
+  String get containerLastLaunch;
+
   /// No description provided for @containerStartedAt.
   ///
   /// In en, this message translates to:
-  /// **'Started'**
+  /// **'Last launch'**
   String get containerStartedAt;
 
   /// No description provided for @containerUptime.
@@ -1327,6 +1333,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'CPU/RAM: awaiting first metrics sample'**
   String get containerMetricsAwaiting;
+
+  /// No description provided for @containerErrorCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Error copied to clipboard'**
+  String get containerErrorCopied;
 
   /// No description provided for @adminContainerOrchestratorStatus.
   ///

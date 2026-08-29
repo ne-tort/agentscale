@@ -72,6 +72,7 @@ class PodQuery:
             "hydrate_generation": pod["hydrate_generation"],
             "pod_created_at": pod["created_at"],
             "pod_updated_at": pod["updated_at"],
+            "last_started_at": pod["last_started_at"],
             **observed,
         }
         return summary
@@ -95,6 +96,7 @@ class PodQuery:
             "desired_state": row.desired_state,
             "runtime_ref": row.runtime_ref,
             "last_error": row.last_error,
+            "last_started_at": row.last_started_at.isoformat() if row.last_started_at else None,
             "hydrate_generation": row.hydrate_generation,
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
