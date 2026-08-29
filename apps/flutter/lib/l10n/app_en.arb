@@ -436,16 +436,39 @@
   "adminContainerRuntimePausedShort": "Stopped",
   "adminContainerRuntimeAttention": "Project is active but no k8s pod yet. Open the agent or tap Resume.",
   "adminContainerColK8s": "K8s",
-  "containerObservedStateLabel": "Observed state",
-  "containerObservedPreparing": "Preparing workspace",
-  "containerObservedProvisioning": "Provisioning pod",
-  "containerObservedHydrating": "Hydrating files",
-  "containerObservedStarting": "Starting (awaiting metrics)",
-  "containerObservedRunning": "Running (verified)",
+  "containerObservedStateLabel": "State",
+  "containerStateLabel": "State",
+  "containerCreatedAt": "Created",
+  "containerStartedAt": "Started",
+  "containerUptime": "Uptime",
+  "containerRestarts": "Restarts",
+  "containerDurationDays": "{count, plural, one{{count} d} other{{count} d}}",
+  "@containerDurationDays": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "containerDurationHours": "{count, plural, one{{count} h} other{{count} h}}",
+  "@containerDurationHours": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "containerDurationMinutes": "{count, plural, one{{count} min} other{{count} min}}",
+  "@containerDurationMinutes": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "containerObservedPreparing": "Preparing",
+  "containerObservedProvisioning": "Provisioning",
+  "containerObservedHydrating": "Hydrating",
+  "containerObservedStarting": "Starting",
+  "containerObservedRunning": "Running",
   "containerObservedDegraded": "Degraded",
   "containerObservedFailed": "Failed",
   "containerObservedPaused": "Paused",
-  "containerObservedAbsent": "Absent",
+  "containerObservedAbsent": "Not created",
   "containerObservedUnknown": "Unknown",
   "containerMetricsAwaiting": "CPU/RAM: awaiting first metrics sample",
   "adminContainerOrchestratorStatus": "Orchestrator status",
@@ -1047,6 +1070,7 @@
   },
   "projectNoProjects": "No projects",
   "projectPauseProject": "Pause project",
+  "projectProjectManagement": "Project management",
   "projectPausedBanner": "Project is paused — chat, uploads and agent runs are disabled",
   "projectPausedDisabledHint": "Chat, uploads and agent runs are disabled while paused",
   "projectPausedListSubtitle": "Paused — chat, uploads and agent runs disabled",

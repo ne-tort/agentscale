@@ -182,9 +182,17 @@ class RuntimeObservationService:
         ready = bool(k8s_status.get("ready"))
         hydrating = bool(k8s_status.get("hydrating"))
         hydrate_failed = bool(k8s_status.get("hydrate_failed"))
+        timing: dict[str, Any] = {}
+        if k8s_status.get("started_at"):
+            timing["started_at"] = k8s_status["started_at"]
+        if k8s_status.get("created_at"):
+            timing["k8s_created_at"] = k8s_status["created_at"]
+
+        def obs(state: ObservedState, **kw: Any) -> dict[str, Any]:
+            return self._summary(state, **timing, **kw)
 
         if hydrate_failed:
-            return self._summary(
+            return obs(
                 ObservedState.FAILED,
                 orchestrator_status=pod.status,
                 desired_state=pod.desired_state,
@@ -195,7 +203,7 @@ class RuntimeObservationService:
             )
 
         if phase == "NotFound":
-            return self._summary(
+            return obs(
                 ObservedState.FAILED if pod.desired_state == PodDesiredState.RUNNING.value else ObservedState.ABSENT,
                 orchestrator_status=pod.status,
                 desired_state=pod.desired_state,
@@ -204,7 +212,7 @@ class RuntimeObservationService:
             )
 
         if phase == "Failed":
-            return self._summary(
+            return obs(
                 ObservedState.FAILED,
                 orchestrator_status=pod.status,
                 desired_state=pod.desired_state,
@@ -215,7 +223,7 @@ class RuntimeObservationService:
             )
 
         if hydrating:
-            return self._summary(
+            return obs(
                 ObservedState.HYDRATING,
                 orchestrator_status=pod.status,
                 desired_state=pod.desired_state,
@@ -227,7 +235,7 @@ class RuntimeObservationService:
         if phase in _PROVISIONING_PHASES:
             age = (datetime.now(UTC) - self._as_utc(pod.updated_at)).total_seconds()
             if age > settings.pod_provisioning_timeout_sec:
-                return self._summary(
+                return obs(
                     ObservedState.FAILED,
                     orchestrator_status=pod.status,
                     desired_state=pod.desired_state,
@@ -236,7 +244,7 @@ class RuntimeObservationService:
                     last_error=f"provisioning timeout after {int(age)}s",
                     restarts=k8s_status.get("restarts"),
                 )
-            return self._summary(
+            return obs(
                 ObservedState.PROVISIONING,
                 orchestrator_status=pod.status,
                 desired_state=pod.desired_state,
@@ -257,7 +265,7 @@ class RuntimeObservationService:
                         logger.exception("live metrics fetch failed runtime_ref=%s", runtime_ref)
 
             if self._metrics_verified(metrics_body, cached):
-                return self._summary(
+                return obs(
                     ObservedState.RUNNING,
                     orchestrator_status=pod.status,
                     desired_state=pod.desired_state,
@@ -270,7 +278,7 @@ class RuntimeObservationService:
 
             grace_age = (datetime.now(UTC) - self._as_utc(pod.updated_at)).total_seconds()
             if grace_age <= settings.pod_metrics_grace_sec:
-                return self._summary(
+                return obs(
                     ObservedState.STARTING,
                     orchestrator_status=pod.status,
                     desired_state=pod.desired_state,
@@ -281,7 +289,7 @@ class RuntimeObservationService:
                     restarts=k8s_status.get("restarts"),
                 )
 
-            return self._summary(
+            return obs(
                 ObservedState.DEGRADED,
                 orchestrator_status=pod.status,
                 desired_state=pod.desired_state,
@@ -293,7 +301,7 @@ class RuntimeObservationService:
                 restarts=k8s_status.get("restarts"),
             )
 
-        return self._summary(
+        return obs(
             ObservedState.UNKNOWN,
             orchestrator_status=pod.status,
             desired_state=pod.desired_state,
@@ -318,6 +326,8 @@ class RuntimeObservationService:
                 ready=True,
                 metrics=metrics_body,
                 metrics_fresh=True,
+                restarts=cached.get("restarts") if cached else 0,
+                started_at=cached.get("timestamp") if cached else None,
                 stub=True,
             )
 
@@ -415,6 +425,8 @@ class RuntimeObservationService:
         last_error: str | None = None,
         restarts: Any = None,
         stub: bool = False,
+        started_at: str | None = None,
+        k8s_created_at: str | None = None,
     ) -> dict[str, Any]:
         out: dict[str, Any] = {
             "observed_state": observed_state.value,
@@ -439,6 +451,10 @@ class RuntimeObservationService:
             out["last_error"] = last_error
         if restarts is not None:
             out["restarts"] = restarts
+        if started_at:
+            out["started_at"] = started_at
+        if k8s_created_at:
+            out["k8s_created_at"] = k8s_created_at
         if stub:
             out["stub"] = True
         return out

@@ -1211,37 +1211,85 @@ abstract class AppLocalizations {
   /// No description provided for @containerObservedStateLabel.
   ///
   /// In en, this message translates to:
-  /// **'Observed state'**
+  /// **'State'**
   String get containerObservedStateLabel;
+
+  /// No description provided for @containerStateLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'State'**
+  String get containerStateLabel;
+
+  /// No description provided for @containerCreatedAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Created'**
+  String get containerCreatedAt;
+
+  /// No description provided for @containerStartedAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Started'**
+  String get containerStartedAt;
+
+  /// No description provided for @containerUptime.
+  ///
+  /// In en, this message translates to:
+  /// **'Uptime'**
+  String get containerUptime;
+
+  /// No description provided for @containerRestarts.
+  ///
+  /// In en, this message translates to:
+  /// **'Restarts'**
+  String get containerRestarts;
+
+  /// No description provided for @containerDurationDays.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{count} d} other{{count} d}}'**
+  String containerDurationDays(int count);
+
+  /// No description provided for @containerDurationHours.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{count} h} other{{count} h}}'**
+  String containerDurationHours(int count);
+
+  /// No description provided for @containerDurationMinutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, one{{count} min} other{{count} min}}'**
+  String containerDurationMinutes(int count);
 
   /// No description provided for @containerObservedPreparing.
   ///
   /// In en, this message translates to:
-  /// **'Preparing workspace'**
+  /// **'Preparing'**
   String get containerObservedPreparing;
 
   /// No description provided for @containerObservedProvisioning.
   ///
   /// In en, this message translates to:
-  /// **'Provisioning pod'**
+  /// **'Provisioning'**
   String get containerObservedProvisioning;
 
   /// No description provided for @containerObservedHydrating.
   ///
   /// In en, this message translates to:
-  /// **'Hydrating files'**
+  /// **'Hydrating'**
   String get containerObservedHydrating;
 
   /// No description provided for @containerObservedStarting.
   ///
   /// In en, this message translates to:
-  /// **'Starting (awaiting metrics)'**
+  /// **'Starting'**
   String get containerObservedStarting;
 
   /// No description provided for @containerObservedRunning.
   ///
   /// In en, this message translates to:
-  /// **'Running (verified)'**
+  /// **'Running'**
   String get containerObservedRunning;
 
   /// No description provided for @containerObservedDegraded.
@@ -1265,7 +1313,7 @@ abstract class AppLocalizations {
   /// No description provided for @containerObservedAbsent.
   ///
   /// In en, this message translates to:
-  /// **'Absent'**
+  /// **'Not created'**
   String get containerObservedAbsent;
 
   /// No description provided for @containerObservedUnknown.
@@ -3385,6 +3433,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Pause project'**
   String get projectPauseProject;
+
+  /// No description provided for @projectProjectManagement.
+  ///
+  /// In en, this message translates to:
+  /// **'Project management'**
+  String get projectProjectManagement;
 
   /// No description provided for @projectPausedBanner.
   ///

@@ -4,9 +4,9 @@ import 'package:prodavan/core/containers/container_runtime_presenter.dart';
 import 'package:prodavan/l10n/app_localizations_ru.dart';
 
 void main() {
-  test('formatContainerRuntimeCell uses observed_state not db status', () {
+  test('formatContainerStateValue uses observed_state not db status', () {
     final l10n = AppLocalizationsRu();
-    final text = formatContainerRuntimeCell(
+    final text = formatContainerStateValue(
       const {
         'status': 'active',
         'observed_state': 'starting',
@@ -18,44 +18,31 @@ void main() {
     expect(text, isNot('running'));
   });
 
-  test('formatContainerRuntimeDetail shows observed state and awaiting metrics', () {
+  test('formatContainerStateValue localizes running', () {
     final l10n = AppLocalizationsRu();
-    final text = formatContainerRuntimeDetail(
-      const {
-        'status': 'active',
-        'observed_state': 'starting',
-        'k8s_phase': 'Running',
-        'runtime': {
-          'observed_state': 'starting',
-          'phase': 'Running',
-          'orchestrator_status': 'provisioning',
-          'desired_state': 'running',
-          'ready': true,
-        },
-      },
-      l10n,
+    expect(
+      formatContainerStateValue(const {'observed_state': 'running'}, l10n),
+      'Запущен',
     );
-    expect(text, contains(l10n.containerObservedStarting));
-    expect(text, contains(l10n.containerMetricsAwaiting));
-    expect(text, contains('provisioning'));
   });
 
-  test('formatContainerRuntimeDetail shows metrics when running verified', () {
+  test('formatContainerRestarts reads runtime restarts', () {
     final l10n = AppLocalizationsRu();
-    final text = formatContainerRuntimeDetail(
-      {
-        'status': 'active',
-        'observed_state': 'running',
-        'runtime': {
-          'observed_state': 'running',
-          'phase': 'Running',
-          'metrics': {'cpu_millicores': 12, 'memory_bytes': 67108864},
-        },
-      },
+    expect(
+      formatContainerRestarts(const {'runtime': {'restarts': 3}}, l10n),
+      '3',
+    );
+  });
+
+  test('formatContainerUptime from started_at', () {
+    final l10n = AppLocalizationsRu();
+    final started = DateTime.now().toUtc().subtract(const Duration(hours: 2, minutes: 5));
+    final text = formatContainerUptime(
+      {'runtime': {'started_at': started.toIso8601String()}},
       l10n,
     );
-    expect(text, contains('12m'));
-    expect(text, contains('64.0 MiB'));
+    expect(text, contains('2'));
+    expect(text, contains('5'));
   });
 
   test('containerRuntimeHealthy only when observed_state running', () {

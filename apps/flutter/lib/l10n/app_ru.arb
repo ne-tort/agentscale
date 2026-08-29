@@ -438,16 +438,39 @@
   "adminContainerRuntimePausedShort": "Остановлен",
   "adminContainerRuntimeAttention": "Проект активен, но pod ещё не создан в k8s. Откройте агент или нажмите «Возобновить».",
   "adminContainerColK8s": "K8s",
-  "containerObservedStateLabel": "Наблюдаемое состояние",
-  "containerObservedPreparing": "Подготовка workspace",
-  "containerObservedProvisioning": "Создание pod",
-  "containerObservedHydrating": "Копирование файлов",
-  "containerObservedStarting": "Запуск (ожидание метрик)",
-  "containerObservedRunning": "Запущен (подтверждено)",
-  "containerObservedDegraded": "Деградация",
+  "containerObservedStateLabel": "Состояние",
+  "containerStateLabel": "Состояние",
+  "containerCreatedAt": "Создан",
+  "containerStartedAt": "Запущен",
+  "containerUptime": "Время работы",
+  "containerRestarts": "Перезапуски",
+  "containerDurationDays": "{count, plural, one{{count} д} few{{count} д} many{{count} д} other{{count} д}}",
+  "@containerDurationDays": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "containerDurationHours": "{count, plural, one{{count} ч} few{{count} ч} many{{count} ч} other{{count} ч}}",
+  "@containerDurationHours": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "containerDurationMinutes": "{count, plural, one{{count} мин} few{{count} мин} many{{count} мин} other{{count} мин}}",
+  "@containerDurationMinutes": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "containerObservedPreparing": "Подготовка",
+  "containerObservedProvisioning": "Создание",
+  "containerObservedHydrating": "Загрузка файлов",
+  "containerObservedStarting": "Запуск",
+  "containerObservedRunning": "Запущен",
+  "containerObservedDegraded": "Сбой метрик",
   "containerObservedFailed": "Ошибка",
   "containerObservedPaused": "На паузе",
-  "containerObservedAbsent": "Отсутствует",
+  "containerObservedAbsent": "Не создан",
   "containerObservedUnknown": "Неизвестно",
   "containerMetricsAwaiting": "CPU/RAM: ожидание первого sample метрик",
   "adminContainerOrchestratorStatus": "Статус оркестратора",
@@ -1048,7 +1071,8 @@
     }
   },
   "projectNoProjects": "Нет проектов",
-  "projectPauseProject": "Поставить на паузу",
+  "projectPauseProject": "Приостановить проект",
+  "projectProjectManagement": "Управление проектом",
   "projectPausedBanner": "Проект на паузе — чат, загрузки и запуски агента отключены",
   "projectPausedDisabledHint": "Чат, загрузки и запуски агента недоступны на паузе",
   "projectPausedListSubtitle": "На паузе — чат, загрузки и запуски агента отключены",

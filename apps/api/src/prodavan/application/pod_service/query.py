@@ -70,6 +70,8 @@ class PodQuery:
             "runtime_ref": pod["runtime_ref"],
             "last_error": observed.get("last_error") or pod["last_error"],
             "hydrate_generation": pod["hydrate_generation"],
+            "pod_created_at": pod["created_at"],
+            "pod_updated_at": pod["updated_at"],
             **observed,
         }
         return summary

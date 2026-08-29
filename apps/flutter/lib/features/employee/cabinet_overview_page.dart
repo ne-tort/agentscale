@@ -89,7 +89,7 @@ class _CabinetOverviewPageState extends State<CabinetOverviewPage> {
                       message: AppErrors.localize(context, _error!),
                     ),
                   ),
-                CabinetMetricsWrap(metrics: _metrics),
+                CabinetMetricsWrap(metrics: _metrics, showLastActivity: false),
               ],
             ),
     );

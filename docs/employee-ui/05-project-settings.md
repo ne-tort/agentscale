@@ -29,8 +29,8 @@
 | запущен (`active`/`paused`/`error`) | **Контейнер** → `ProjectContainerPage` (`GET /container`, pod CPU/RAM) |
 | pod unhealthy / `error` | tile «Контейнер» — danger color |
 | `error` | **Перезагрузить** → `POST /reload` (rate limit Redis: 1/min, 3/30min) |
-| Pod live, `active` | **Приостановить** / **Обновить** / **Сбросить агента** |
-| Pod live, `paused` | **Возобновить** / … |
+| Pod live, `active` | **Управление проектом** → `ProjectManagementPage`: **Приостановить проект** (warning), **Обновить**, **Сбросить агента** |
+| Pod live, `paused` | **Возобновить проект** (warning) на settings; update/reset скрыты |
 
 Подстраница **Контейнер** — `observed_state` (источник истины), live k8s phase, orchestrator status, CPU/RAM только при `running` (verified metrics). Без info-баннеров.
 

@@ -644,25 +644,79 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminContainerColK8s => 'K8s';
 
   @override
-  String get containerObservedStateLabel => 'Наблюдаемое состояние';
+  String get containerObservedStateLabel => 'Состояние';
 
   @override
-  String get containerObservedPreparing => 'Подготовка workspace';
+  String get containerStateLabel => 'Состояние';
 
   @override
-  String get containerObservedProvisioning => 'Создание pod';
+  String get containerCreatedAt => 'Создан';
 
   @override
-  String get containerObservedHydrating => 'Копирование файлов';
+  String get containerStartedAt => 'Запущен';
 
   @override
-  String get containerObservedStarting => 'Запуск (ожидание метрик)';
+  String get containerUptime => 'Время работы';
 
   @override
-  String get containerObservedRunning => 'Запущен (подтверждено)';
+  String get containerRestarts => 'Перезапуски';
 
   @override
-  String get containerObservedDegraded => 'Деградация';
+  String containerDurationDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count д',
+      many: '$count д',
+      few: '$count д',
+      one: '$count д',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String containerDurationHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count ч',
+      many: '$count ч',
+      few: '$count ч',
+      one: '$count ч',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String containerDurationMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count мин',
+      many: '$count мин',
+      few: '$count мин',
+      one: '$count мин',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get containerObservedPreparing => 'Подготовка';
+
+  @override
+  String get containerObservedProvisioning => 'Создание';
+
+  @override
+  String get containerObservedHydrating => 'Загрузка файлов';
+
+  @override
+  String get containerObservedStarting => 'Запуск';
+
+  @override
+  String get containerObservedRunning => 'Запущен';
+
+  @override
+  String get containerObservedDegraded => 'Сбой метрик';
 
   @override
   String get containerObservedFailed => 'Ошибка';
@@ -671,7 +725,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get containerObservedPaused => 'На паузе';
 
   @override
-  String get containerObservedAbsent => 'Отсутствует';
+  String get containerObservedAbsent => 'Не создан';
 
   @override
   String get containerObservedUnknown => 'Неизвестно';
@@ -1832,7 +1886,10 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectNoProjects => 'Нет проектов';
 
   @override
-  String get projectPauseProject => 'Поставить на паузу';
+  String get projectPauseProject => 'Приостановить проект';
+
+  @override
+  String get projectProjectManagement => 'Управление проектом';
 
   @override
   String get projectPausedBanner =>

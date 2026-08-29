@@ -31,9 +31,11 @@ class PodSnapshot:
     hydrate_generation: int | None = None
     hydrating: bool = False
     hydrate_failed: bool = False
+    created_at: str | None = None
+    started_at: str | None = None
 
     def as_status_dict(self) -> dict[str, Any]:
-        return {
+        out: dict[str, Any] = {
             "runtime_ref": self.name,
             "phase": self.phase,
             "uid": self.uid,
@@ -43,6 +45,11 @@ class PodSnapshot:
             "hydrating": self.hydrating,
             "hydrate_failed": self.hydrate_failed,
         }
+        if self.created_at:
+            out["created_at"] = self.created_at
+        if self.started_at:
+            out["started_at"] = self.started_at
+        return out
 
 
 def _init_hydrate_state(status: dict[str, Any]) -> tuple[bool, bool]:
@@ -60,6 +67,18 @@ def _init_hydrate_state(status: dict[str, Any]) -> tuple[bool, bool]:
             return False, True
         return False, False
     return False, False
+
+
+def _container_started_at(status: dict[str, Any], *, name: str = "sandbox") -> str | None:
+    for cs in status.get("containerStatuses") or []:
+        if str(cs.get("name") or "") != name:
+            continue
+        state = cs.get("state") or {}
+        running = state.get("running") or {}
+        started = running.get("startedAt")
+        if started:
+            return str(started)
+    return None
 
 
 def _parse_snapshot(body: dict[str, Any]) -> PodSnapshot:
@@ -90,6 +109,8 @@ def _parse_snapshot(body: dict[str, Any]) -> PodSnapshot:
         hydrate_generation=hydrate_gen,
         hydrating=hydrating,
         hydrate_failed=hydrate_failed,
+        created_at=meta.get("creationTimestamp"),
+        started_at=_container_started_at(status),
     )
 
 

@@ -644,22 +644,70 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminContainerColK8s => 'K8s';
 
   @override
-  String get containerObservedStateLabel => 'Observed state';
+  String get containerObservedStateLabel => 'State';
 
   @override
-  String get containerObservedPreparing => 'Preparing workspace';
+  String get containerStateLabel => 'State';
 
   @override
-  String get containerObservedProvisioning => 'Provisioning pod';
+  String get containerCreatedAt => 'Created';
 
   @override
-  String get containerObservedHydrating => 'Hydrating files';
+  String get containerStartedAt => 'Started';
 
   @override
-  String get containerObservedStarting => 'Starting (awaiting metrics)';
+  String get containerUptime => 'Uptime';
 
   @override
-  String get containerObservedRunning => 'Running (verified)';
+  String get containerRestarts => 'Restarts';
+
+  @override
+  String containerDurationDays(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count d',
+      one: '$count d',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String containerDurationHours(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count h',
+      one: '$count h',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String containerDurationMinutes(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count min',
+      one: '$count min',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get containerObservedPreparing => 'Preparing';
+
+  @override
+  String get containerObservedProvisioning => 'Provisioning';
+
+  @override
+  String get containerObservedHydrating => 'Hydrating';
+
+  @override
+  String get containerObservedStarting => 'Starting';
+
+  @override
+  String get containerObservedRunning => 'Running';
 
   @override
   String get containerObservedDegraded => 'Degraded';
@@ -671,7 +719,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get containerObservedPaused => 'Paused';
 
   @override
-  String get containerObservedAbsent => 'Absent';
+  String get containerObservedAbsent => 'Not created';
 
   @override
   String get containerObservedUnknown => 'Unknown';
@@ -1831,6 +1879,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get projectPauseProject => 'Pause project';
+
+  @override
+  String get projectProjectManagement => 'Project management';
 
   @override
   String get projectPausedBanner =>

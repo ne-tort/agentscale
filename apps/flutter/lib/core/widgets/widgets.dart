@@ -19,6 +19,7 @@ export 'app_switch.dart';
 export 'app_trailing_chevron.dart';
 export 'company_metrics_wrap.dart';
 export 'cabinet_metrics_wrap.dart';
+export 'container_metrics_wrap.dart';
 export 'project_metrics_wrap.dart';
 export 'empty_placeholder.dart';
 export 'stat_tile.dart';

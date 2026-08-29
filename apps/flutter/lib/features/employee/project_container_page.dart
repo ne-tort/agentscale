@@ -1,14 +1,11 @@
 import 'package:flutter/material.dart';
 
-import 'package:prodavan/core/containers/container_runtime_presenter.dart';
-import 'package:prodavan/core/format/storage_format.dart';
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/stat_tile.dart';
-import 'package:prodavan/l10n/app_localizations.dart';
+import 'package:prodavan/core/widgets/container_metrics_wrap.dart';
 
 /// Project container — pod runtime and k8s metrics (employee).
 class ProjectContainerPage extends StatefulWidget {
@@ -30,6 +27,7 @@ class _ProjectContainerPageState extends State<ProjectContainerPage> {
   bool _loading = true;
   Map<String, dynamic>? _container;
   Map<String, dynamic>? _metrics;
+  Map<String, dynamic>? _projectMetrics;
 
   @override
   void initState() {
@@ -52,19 +50,25 @@ class _ProjectContainerPageState extends State<ProjectContainerPage> {
     try {
       final container = await workContext.api.getProjectContainer(widget.projectId);
       Map<String, dynamic>? metrics;
+      Map<String, dynamic>? projectMetrics;
       try {
         metrics = await workContext.api.getProjectContainerMetrics(widget.projectId);
+      } catch (_) {}
+      try {
+        projectMetrics = await workContext.api.getProjectMetrics(widget.projectId);
       } catch (_) {}
       if (!mounted) return;
       if (silent &&
           appRefreshDataEquals(_container, container) &&
           appRefreshDataEquals(_metrics, metrics) &&
+          appRefreshDataEquals(_projectMetrics, projectMetrics) &&
           !_loading) {
         return;
       }
       setState(() {
         _container = container;
         _metrics = metrics;
+        _projectMetrics = projectMetrics;
         _loading = false;
       });
     } catch (e) {
@@ -77,12 +81,6 @@ class _ProjectContainerPageState extends State<ProjectContainerPage> {
 
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final latest = _metrics?['latest'];
-    final latestMap = latest is Map ? Map<String, dynamic>.from(latest) : null;
-    final cpu = latestMap?['cpu_millicores'];
-    final mem = latestMap?['memory_bytes'];
-
     return AppScaffold(
       title: Text(widget.projectName),
       body: _loading && _container == null
@@ -90,26 +88,10 @@ class _ProjectContainerPageState extends State<ProjectContainerPage> {
           : ListView(
               padding: EdgeInsets.all(AppSpacing.md),
               children: [
-                Text(
-                  formatContainerRuntimeDetail(_container, l10n),
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                SizedBox(height: AppSpacing.md),
-                Wrap(
-                  spacing: AppSpacing.sm,
-                  runSpacing: AppSpacing.sm,
-                  children: [
-                    if (cpu is num)
-                      StatTile(
-                        label: l10n.adminContainerMetricsCpu,
-                        value: '${cpu.round()}m',
-                      ),
-                    if (mem is num)
-                      StatTile(
-                        label: l10n.adminContainerMetricsMemory,
-                        value: formatStorageGb(mem),
-                      ),
-                  ],
+                ContainerMetricsWrap(
+                  container: _container,
+                  runtimeMetrics: _metrics,
+                  projectMetrics: _projectMetrics,
                 ),
               ],
             ),

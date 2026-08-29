@@ -5,15 +5,14 @@ import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
-import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
-import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 import 'package:prodavan/core/widgets/project_metrics_wrap.dart';
 import 'package:prodavan/features/employee/project_ai_key_select_page.dart';
 import 'package:prodavan/features/employee/project_container_page.dart';
+import 'package:prodavan/features/employee/project_management_page.dart';
 import 'package:prodavan/features/employee/project_modules_list_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -217,50 +216,22 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
     ).then((_) => _load());
   }
 
-  Future<void> _togglePause() async {
+  void _openManagement() {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ProjectManagementPage(
+          projectId: widget.projectId,
+          projectName: _name,
+        ),
+      ),
+    ).then((_) => _load());
+  }
+
+  Future<void> _resumeProject() async {
     setState(() => _busy = true);
     try {
-      if (_status == 'paused') {
-        await workContext.api.resumeProject(widget.projectId);
-      } else {
-        await workContext.api.pauseProject(widget.projectId);
-      }
+      await workContext.api.resumeProject(widget.projectId);
       await _load();
-    } catch (e) {
-      if (mounted) AppErrors.showSnack(context, e);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _syncProject() async {
-    setState(() => _busy = true);
-    try {
-      await workContext.api.syncProject(widget.projectId);
-      if (!mounted) return;
-      AppSnackBar.success(context, AppLocalizations.of(context).projectUpdateSuccess);
-    } catch (e) {
-      if (mounted) AppErrors.showSnack(context, e);
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
-  Future<void> _resetAgent() async {
-    final l10n = AppLocalizations.of(context);
-    final ok = await AppConfirmPage.push(
-      context,
-      title: l10n.projectResetAgent,
-      message: l10n.projectResetAgent,
-      confirmLabel: l10n.projectResetAgent,
-      severity: AppStatusSeverity.warning,
-    );
-    if (!ok) return;
-    setState(() => _busy = true);
-    try {
-      await workContext.api.resetProjectAgent(widget.projectId);
-      if (!mounted) return;
-      AppSnackBar.success(context, l10n.projectResetSuccess);
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     } finally {
@@ -353,26 +324,21 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
               enabled: !_busy,
               onTap: _reload,
             ),
-          if (_hasPod && !_isError) ...[
+          if (_launched && paused && _hasPod)
             AppNavPreference(
-              title: paused ? l10n.projectResumeProject : l10n.projectPauseProject,
-              icon: paused ? Icons.play_arrow_outlined : Icons.pause_outlined,
+              title: l10n.projectResumeProject,
+              icon: Icons.play_arrow_outlined,
+              accentColor: warning,
               enabled: !_busy,
-              onTap: _togglePause,
+              onTap: _resumeProject,
             ),
+          if (_launched && !paused && _hasPod && !_isError)
             AppNavPreference(
-              title: l10n.projectUpdateProject,
-              icon: Icons.sync_outlined,
+              title: l10n.projectProjectManagement,
+              icon: Icons.tune_outlined,
               enabled: !_busy,
-              onTap: _syncProject,
+              onTap: _openManagement,
             ),
-            AppNavPreference(
-              title: l10n.projectResetAgent,
-              icon: Icons.restart_alt_outlined,
-              enabled: !_busy,
-              onTap: _resetAgent,
-            ),
-          ],
         ],
       ),
     );
