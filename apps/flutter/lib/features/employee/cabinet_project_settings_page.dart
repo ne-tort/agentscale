@@ -14,11 +14,10 @@ import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 import 'package:prodavan/core/widgets/project_metrics_wrap.dart';
 import 'package:prodavan/features/employee/project_ai_key_select_page.dart';
 import 'package:prodavan/features/employee/project_container_page.dart';
-import 'package:prodavan/features/employee/project_module_settings_page.dart';
-import 'package:prodavan/features/employee/project_modules_table.dart';
+import 'package:prodavan/features/employee/project_modules_list_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Project settings — name, about, launch/pause/resume, AI provider, modules.
+/// Project settings — name, about, launch/pause/resume, AI provider, modules nav.
 class CabinetProjectSettingsPage extends StatefulWidget {
   const CabinetProjectSettingsPage({
     super.key,
@@ -42,7 +41,6 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
   Map<String, dynamic>? _runtime;
   bool _hasPod = false;
   List<Map<String, dynamic>> _availableKeys = const [];
-  List<Map<String, dynamic>> _projectModules = const [];
   Map<String, dynamic>? _metrics;
   bool _loading = true;
   bool _busy = false;
@@ -64,10 +62,6 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
       Map<String, dynamic>? metrics;
       try {
         metrics = await workContext.api.getProjectMetrics(widget.projectId);
-      } catch (_) {}
-      List<Map<String, dynamic>> modules = const [];
-      try {
-        modules = await workContext.api.listProjectModules(widget.projectId);
       } catch (_) {}
       if (!mounted) return;
 
@@ -95,7 +89,6 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
             : null;
         _hasPod = _runtime != null;
         _availableKeys = keys;
-        _projectModules = modules;
         _metrics = metrics;
         _loading = false;
       });
@@ -165,42 +158,16 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
     }
   }
 
-  Future<void> _toggleModule(String moduleId, bool enabled) async {
-    final ids = _projectModules
-        .where((m) => m['enabled'] == true)
-        .map((m) => m['module_id'] as String)
-        .whereType<String>()
-        .toSet();
-    if (enabled) {
-      ids.add(moduleId);
-    } else {
-      ids.remove(moduleId);
-    }
-    try {
-      await workContext.api.patchProjectModules(
-        widget.projectId,
-        moduleIds: ids.toList(),
-      );
-      await _load();
-    } catch (e) {
-      if (mounted) AppErrors.showSnack(context, e);
-    }
-  }
-
-  Future<void> _openModule(Map<String, dynamic> module) async {
-    final moduleId = module['module_id'] as String?;
-    if (moduleId == null) return;
-    await Navigator.of(context).push<void>(
+  void _openModules() {
+    Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
-        builder: (_) => ProjectModuleSettingsPage(
+        builder: (_) => ProjectModulesListPage(
           cabinetId: widget.cabinetId,
           projectId: widget.projectId,
-          moduleId: moduleId,
-          moduleName: module['name'] as String? ?? moduleId,
+          projectName: _name,
         ),
       ),
     );
-    if (mounted) await _load();
   }
 
   Future<void> _launch() async {
@@ -301,7 +268,7 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
     final l10n = AppLocalizations.of(context);
     if (_loading) {
       return AppScaffold(
-        title: Text(l10n.projectProjectSettings),
+        title: Text(_name.isNotEmpty ? _name : l10n.projectProjectSettings),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
@@ -312,13 +279,13 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
     final error = context.appColors.danger;
 
     return AppScaffold(
-      title: Text(l10n.projectProjectSettings),
+      title: Text(_name),
       body: ListView(
         padding: EdgeInsets.all(AppSpacing.md),
         children: [
           Padding(
             padding: EdgeInsets.only(bottom: AppSpacing.md),
-            child: ProjectMetricsWrap(metrics: _metrics),
+            child: ProjectMetricsWrap(metrics: _metrics, showLastActivity: false),
           ),
           AppValuePreference<String>(
             title: l10n.projectProjectName,
@@ -353,15 +320,12 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
               trailing: const AppTrailingChevron(),
               onTap: _pickAiKey,
             ),
-          if (_projectModules.isNotEmpty)
-            Padding(
-              padding: EdgeInsets.only(bottom: AppSpacing.md),
-              child: ProjectModulesTable(
-                modules: _projectModules,
-                onOpen: _openModule,
-                onEnabledChanged: _toggleModule,
-              ),
-            ),
+          AppNavPreference(
+            title: l10n.projectModulesLabel,
+            icon: Icons.extension_outlined,
+            enabled: !_busy,
+            onTap: _openModules,
+          ),
           if (!_launched && _configuredForLaunch && !_isError)
             AppNavPreference(
               title: l10n.projectLaunchProject,

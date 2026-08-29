@@ -12,11 +12,13 @@ class ProjectModulesTable extends StatelessWidget {
     required this.modules,
     required this.onOpen,
     required this.onEnabledChanged,
+    this.showHeader = true,
   });
 
   final List<Map<String, dynamic>> modules;
   final ValueChanged<Map<String, dynamic>> onOpen;
   final Future<void> Function(String moduleId, bool enabled) onEnabledChanged;
+  final bool showHeader;
 
   @override
   Widget build(BuildContext context) {
@@ -43,13 +45,14 @@ class ProjectModulesTable extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.only(left: AppSpacing.md, bottom: AppSpacing.sm),
-          child: Text(
-            l10n.projectModulesLabel,
-            style: Theme.of(context).textTheme.titleMedium,
+        if (showHeader)
+          Padding(
+            padding: const EdgeInsets.only(left: AppSpacing.md, bottom: AppSpacing.sm),
+            child: Text(
+              l10n.projectModulesLabel,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
           ),
-        ),
         SizedBox(
           height: (rows.length * 48.0).clamp(120, 360),
           child: AppEntityCollection(

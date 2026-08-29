@@ -128,6 +128,13 @@ class ProjectCommand:
                 "visibility_mode": row.visibility_mode,
             },
         )
+        from prodavan.application.project_service.module_settings import ProjectModuleSettingsService
+
+        await ProjectModuleSettingsService(self._session).ensure_default_profiles_for_project(
+            project=row,
+            principal=principal,
+            employee=employee,
+        )
         await self._session.commit()
         await self._session.refresh(row)
         return await self._project_public(row)

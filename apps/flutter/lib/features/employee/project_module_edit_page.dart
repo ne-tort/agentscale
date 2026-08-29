@@ -7,11 +7,13 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_radio.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
+import 'package:prodavan/features/employee/cabinet_module_host.dart';
+import 'package:prodavan/features/employee/cabinet_nav_loader.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Module properties for a project — profile selection via project_ids.
-class ProjectModuleSettingsPage extends StatefulWidget {
-  const ProjectModuleSettingsPage({
+/// Project-scoped module editor — profile pick (if any) + module meta UI.
+class ProjectModuleEditPage extends StatefulWidget {
+  const ProjectModuleEditPage({
     super.key,
     required this.cabinetId,
     required this.projectId,
@@ -25,13 +27,14 @@ class ProjectModuleSettingsPage extends StatefulWidget {
   final String moduleName;
 
   @override
-  State<ProjectModuleSettingsPage> createState() => _ProjectModuleSettingsPageState();
+  State<ProjectModuleEditPage> createState() => _ProjectModuleEditPageState();
 }
 
-class _ProjectModuleSettingsPageState extends State<ProjectModuleSettingsPage> {
+class _ProjectModuleEditPageState extends State<ProjectModuleEditPage> {
   bool _loading = true;
   bool _saving = false;
   Map<String, dynamic>? _module;
+  CabinetNavEntry? _navEntry;
 
   @override
   void initState() {
@@ -46,9 +49,11 @@ class _ProjectModuleSettingsPageState extends State<ProjectModuleSettingsPage> {
         widget.projectId,
         widget.moduleId,
       );
+      final entry = await loadFirstModuleNavEntry(widget.cabinetId, widget.moduleId);
       if (!mounted) return;
       setState(() {
         _module = mod;
+        _navEntry = entry;
         _loading = false;
       });
     } catch (e) {
@@ -111,65 +116,69 @@ class _ProjectModuleSettingsPageState extends State<ProjectModuleSettingsPage> {
     final hasProfiles = mod['has_profiles'] == true;
     final profiles = (mod['profiles'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
     final selectedId = _selectedProfileId;
+    final entry = _navEntry;
 
     return AppScaffold(
       title: Text(widget.moduleName),
-      body: ListView(
-        padding: EdgeInsets.all(AppSpacing.md),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (hasProfiles) ...[
             Padding(
-              padding: EdgeInsets.only(bottom: AppSpacing.sm),
+              padding: EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.md, AppSpacing.md, AppSpacing.sm),
               child: Text(
                 l10n.projectSelectModuleProfile,
                 style: Theme.of(context).textTheme.titleMedium,
               ),
             ),
-            if (_saving)
-              const LinearProgressIndicator(),
-            if (profiles.isEmpty)
-              EmptyPlaceholder(title: l10n.adminPromptProfiles)
-            else
+            if (_saving) const LinearProgressIndicator(),
+            if (profiles.isNotEmpty)
               SizedBox(
-                height: (profiles.length * 48.0).clamp(120, 320),
-                child: AppEntityCollection(
-                  mode: AppEntityCollectionMode.table,
-                  rows: [
-                    for (final p in profiles)
-                      AppEntityRow(
-                        id: p['profile_id'] as String,
-                        title: p['name'] as String? ?? p['profile_id'] as String,
-                        cellWidgets: {
-                          'select': AppRadio<String>(
-                            value: p['profile_id'] as String,
-                            groupValue: selectedId,
-                            onChanged: _saving
-                                ? null
-                                : (_) => _pickProfile(p['profile_id'] as String),
-                          ),
-                        },
+                height: (profiles.length * 48.0).clamp(96, 240),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                  child: AppEntityCollection(
+                    mode: AppEntityCollectionMode.table,
+                    rows: [
+                      for (final p in profiles)
+                        AppEntityRow(
+                          id: p['profile_id'] as String,
+                          title: p['name'] as String? ?? p['profile_id'] as String,
+                          cellWidgets: {
+                            'select': AppRadio<String>(
+                              value: p['profile_id'] as String,
+                              groupValue: selectedId,
+                              onChanged: _saving
+                                  ? null
+                                  : (_) => _pickProfile(p['profile_id'] as String),
+                            ),
+                          },
+                        ),
+                    ],
+                    primaryColumnLabel: l10n.commonName,
+                    columns: [
+                      AppEntityColumn(
+                        id: 'select',
+                        label: '',
+                        width: 48,
+                        align: AppEntityColumnAlign.center,
                       ),
-                  ],
-                  primaryColumnLabel: l10n.commonName,
-                  columns: [
-                    AppEntityColumn(
-                      id: 'select',
-                      label: '',
-                      width: 48,
-                      align: AppEntityColumnAlign.center,
-                    ),
-                  ],
-                  onOpen: (row) => _pickProfile(row.id),
+                    ],
+                    onOpen: (row) => _pickProfile(row.id),
+                  ),
                 ),
               ),
-          ] else
-            Padding(
-              padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
-              child: Text(
-                l10n.projectModuleNoProfiles,
-                style: Theme.of(context).textTheme.bodyMedium,
-              ),
-            ),
+            SizedBox(height: AppSpacing.sm),
+          ],
+          Expanded(
+            child: entry == null
+                ? Center(child: EmptyPlaceholder(title: l10n.adminMetaInvalid))
+                : CabinetModuleHost(
+                    cabinetId: widget.cabinetId,
+                    entry: entry,
+                    embedded: true,
+                  ),
+          ),
         ],
       ),
     );

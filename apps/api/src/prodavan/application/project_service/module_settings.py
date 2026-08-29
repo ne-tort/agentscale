@@ -37,6 +37,34 @@ def _profile_hub_config(views: list[Any]) -> dict[str, str] | None:
     return None
 
 
+def _profile_explicit_for_project(body: dict[str, Any], project_id: str) -> bool:
+    pids = body.get("project_ids")
+    return isinstance(pids, list) and project_id in [str(p) for p in pids]
+
+
+def _has_explicit_profile_assignment(profiles: list[dict[str, Any]], project_id: str) -> bool:
+    return any(_profile_explicit_for_project(item["body"], project_id) for item in profiles)
+
+
+def pick_default_profile_row_id(profiles: list[dict[str, Any]]) -> str | None:
+    """Default profile for a new project: name Default, else is_default, else alphabetical."""
+    if not profiles:
+        return None
+    candidates: list[tuple[str, str, dict[str, Any]]] = []
+    for item in profiles:
+        body = item["body"]
+        name = str(body.get("name") or item["row_id"])
+        candidates.append((item["row_id"], name, body))
+    for row_id, name, _ in candidates:
+        if name.strip().lower() == "default":
+            return row_id
+    for row_id, _, body in candidates:
+        if body.get("is_default"):
+            return row_id
+    candidates.sort(key=lambda c: c[1].lower())
+    return candidates[0][0]
+
+
 class ProjectModuleSettingsService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -126,10 +154,50 @@ class ProjectModuleSettingsService:
             return None
         defaults = [(rid, name) for rid, name, is_def in matches if is_def]
         if defaults:
-            rid, name = defaults[0]
+            rid, name = sorted(defaults, key=lambda x: x[1].lower())[0]
             return {"profile_id": rid, "profile_name": name}
-        rid, name, _ = matches[0]
+        rid, name, _ = sorted(matches, key=lambda x: x[1].lower())[0]
         return {"profile_id": rid, "profile_name": name}
+
+    async def ensure_default_profiles_for_project(
+        self,
+        *,
+        project: ProjectRow,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> None:
+        """Assign default module profiles on project create (explicit project_ids)."""
+        inst = await self._session.get(CabinetInstanceRow, project.cabinet_id)
+        if inst is None:
+            return
+        for module_id, _ in await self._cabinet_modules(project.cabinet_id):
+            hub: dict[str, str] | None = None
+            try:
+                views_doc = await self._meta.get_document(module_id=module_id, slug="views")
+                views = views_doc.get("body")
+                if isinstance(views, list):
+                    hub = _profile_hub_config(views)
+            except AppError:
+                hub = None
+            if hub is None:
+                continue
+            profiles = await self._profile_rows(
+                schema_name=inst.schema_name,
+                module_id=module_id,
+                profile_table=hub["profile_table"],
+            )
+            if not profiles or _has_explicit_profile_assignment(profiles, project.id):
+                continue
+            profile_id = pick_default_profile_row_id(profiles)
+            if profile_id is None:
+                continue
+            await self.set_profile(
+                project_id=project.id,
+                module_id=module_id,
+                profile_id=profile_id,
+                principal=principal,
+                employee=employee,
+            )
 
     async def list_modules(
         self,

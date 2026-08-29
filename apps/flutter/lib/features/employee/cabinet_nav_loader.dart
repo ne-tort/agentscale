@@ -105,14 +105,23 @@ Future<List<CabinetNavEntry>> loadCabinetNavEntries(
 Future<({List<CabinetNavEntry> rail, List<CabinetNavEntry> management})>
     loadCabinetNavBundle(String cabinetId) async {
   final raw = await _loadRawCabinetNavEntries(cabinetId);
-  return (
-    rail: _finalizeCabinetNavEntries(
-      raw.where((e) => cabinetNavPlacementOf(e.tab) == CabinetNavPlacement.rail).toList(),
-    ),
-    management: _finalizeCabinetNavEntries(
-      raw
-          .where((e) => cabinetNavPlacementOf(e.tab) == CabinetNavPlacement.management)
-          .toList(),
-    ),
-  );
+    return (
+        rail: _finalizeCabinetNavEntries(
+            raw.where((e) => cabinetNavPlacementOf(e.tab) == CabinetNavPlacement.rail).toList(),
+        ),
+        management: _finalizeCabinetNavEntries(
+            raw
+                .where((e) => cabinetNavPlacementOf(e.tab) == CabinetNavPlacement.management)
+                .toList(),
+        ),
+    );
+}
+
+/// First enabled nav tab for a module (management/rail/none — any placement).
+Future<CabinetNavEntry?> loadFirstModuleNavEntry(String cabinetId, String moduleId) async {
+  final raw = await _loadRawCabinetNavEntries(cabinetId);
+  final matches = raw.where((e) => e.moduleId == moduleId).toList();
+  if (matches.isEmpty) return null;
+  final finalized = _finalizeCabinetNavEntries(matches);
+  return finalized.first;
 }
