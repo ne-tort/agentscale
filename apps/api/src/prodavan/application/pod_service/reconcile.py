@@ -115,7 +115,7 @@ class PodReconcileService:
         for pod, project in q_obs.all():
             if project is None:
                 continue
-            action = await observation.promote_or_demote(project=project, pod=pod)
+            action = await observation.sync_runtime_health(project=project, pod=pod)
             if action != "noop":
                 promote_actions += 1
 

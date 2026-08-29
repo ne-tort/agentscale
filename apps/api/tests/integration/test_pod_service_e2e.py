@@ -254,6 +254,30 @@ def test_trigger_dispatch_requires_launch(client: TestClient) -> None:
 
 
 @requires_postgres
+def test_cabinet_soft_delete_emits_pod_terminated(client: TestClient) -> None:
+    """Cabinet soft-delete cascades to projects and terminates running pods."""
+    _, admin, owner_h, project_id = _setup_project(client)
+    admin_h = {"Authorization": f"Bearer {admin}"}
+
+    _ensure_pod_running(client, owner_h, project_id)
+    cabinet_id = client.get(f"/api/v1/projects/{project_id}", headers=owner_h).json()["cabinet_id"]
+
+    deleted = client.delete(f"/api/v1/cabinets/{cabinet_id}", headers=owner_h)
+    assert deleted.status_code == 200, deleted.text
+    body = deleted.json()
+    assert body.get("soft") is True
+    assert project_id in body.get("projects_soft_deleted", [])
+
+    events = _platform_events(
+        client,
+        admin_h=admin_h,
+        project_id=project_id,
+        event_type="pod.terminated",
+    )
+    assert len(events) >= 1
+
+
+@requires_postgres
 def test_delete_emits_pod_terminated(client: TestClient) -> None:
     _, admin, owner_h, project_id = _setup_project(client)
     admin_h = {"Authorization": f"Bearer {admin}"}

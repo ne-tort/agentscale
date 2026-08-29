@@ -45,7 +45,9 @@ class PodQuery:
                 return await self._observation.observe(project=project, pod=None)
             return None
         if project is not None:
-            await self._observation.promote_or_demote(project=project, pod=row)
+            action = await self._observation.sync_runtime_health(project=project, pod=row)
+            if action != "noop":
+                await self._session.commit()
         return await self._build_runtime_summary(row, project_id)
 
     async def _get_live_row(self, project_id: str) -> ProjectPodRow | None:

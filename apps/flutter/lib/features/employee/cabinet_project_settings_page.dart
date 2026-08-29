@@ -34,6 +34,7 @@ class CabinetProjectSettingsPage extends StatefulWidget {
 class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage> {
   String _name = '';
   String _about = '';
+  String _budget = '';
   String? _resolvedKeyId;
   String? _creatorName;
   String? _status;
@@ -42,7 +43,11 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
   List<Map<String, dynamic>> _availableKeys = const [];
   Map<String, dynamic>? _metrics;
   bool _loading = true;
-  bool _busy = false;
+  bool _launching = false;
+  bool _reloading = false;
+  bool _resuming = false;
+
+  bool get _busy => _launching || _reloading || _resuming;
 
   @override
   void initState() {
@@ -79,6 +84,8 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
       setState(() {
         _name = project['name'] as String? ?? '';
         _about = project['about'] as String? ?? '';
+        final budgetTokens = project['budget_tokens'];
+        _budget = budgetTokens == null ? '' : '$budgetTokens';
         _resolvedKeyId = resolvedKeyId;
         _creatorName = project['created_by_login'] as String? ??
             project['created_by_employee_id'] as String?;
@@ -101,6 +108,15 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
   bool get _configuredForLaunch => (_resolvedKeyId ?? '').isNotEmpty;
 
   bool get _isError => _status == 'error';
+
+  bool get _showReload {
+    if (!_hasPod) return false;
+    if (_isError) return true;
+    return projectShowsContainerError({
+      'status': _status,
+      'observed_state': _runtime?['observed_state'],
+    });
+  }
 
   bool get _launched =>
       _status == 'active' || _status == 'paused' || _status == 'error' || _status == 'completed';
@@ -139,6 +155,24 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
     if (mounted) setState(() => _about = v.trim());
   }
 
+  Future<void> _saveBudget(String v) async {
+    final trimmed = v.trim();
+    final tokens = trimmed.isEmpty ? null : int.parse(trimmed);
+    await workContext.api.patchProject(
+      projectId: widget.projectId,
+      budgetTokens: tokens,
+      updateBudgetTokens: true,
+    );
+    if (mounted) setState(() => _budget = trimmed);
+  }
+
+  bool _validBudgetInput(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return true;
+    final n = int.tryParse(trimmed);
+    return n != null && n >= 0;
+  }
+
   Future<void> _saveKey(String keyId) async {
     await workContext.api.patchProject(
       projectId: widget.projectId,
@@ -175,7 +209,9 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
   }
 
   Future<void> _launch() async {
-    setState(() => _busy = true);
+    final l10n = AppLocalizations.of(context);
+    AppSnackBar.info(context, l10n.projectLaunchStartingSnack);
+    setState(() => _launching = true);
     try {
       final result = await workContext.api.launchProject(widget.projectId);
       if (!mounted) return;
@@ -183,25 +219,26 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
         await _load();
         return;
       }
-      AppSnackBar.success(context, AppLocalizations.of(context).projectLaunchSuccess);
+      AppSnackBar.success(context, l10n.projectLaunchSuccess);
       await _load();
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _launching = false);
     }
   }
 
   Future<void> _reload() async {
-    setState(() => _busy = true);
+    setState(() => _reloading = true);
     try {
       await workContext.api.reloadProject(widget.projectId);
       if (!mounted) return;
+      AppSnackBar.success(context, AppLocalizations.of(context).projectReloadSuccess);
       await _load();
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _reloading = false);
     }
   }
 
@@ -228,14 +265,16 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
   }
 
   Future<void> _resumeProject() async {
-    setState(() => _busy = true);
+    final l10n = AppLocalizations.of(context);
+    AppSnackBar.info(context, l10n.projectResumeStartingSnack);
+    setState(() => _resuming = true);
     try {
       await workContext.api.resumeProject(widget.projectId);
       await _load();
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _resuming = false);
     }
   }
 
@@ -253,6 +292,7 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
     final selectedName = _selectedKeyName();
     final warning = context.appColors.warning;
     final error = context.appColors.danger;
+    final success = context.appColors.success;
 
     return AppScaffold(
       title: Text(_name),
@@ -274,6 +314,15 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
             icon: Icons.notes_outlined,
             value: _about,
             onSave: _saveAbout,
+          ),
+          AppValuePreference<String>(
+            title: l10n.projectBudgetLabel,
+            icon: Icons.account_balance_wallet_outlined,
+            value: _budget,
+            digitsOnly: true,
+            validateInput: _validBudgetInput,
+            invalidMessage: l10n.errorValidation,
+            onSave: _saveBudget,
           ),
           AppValuePreference<String>(
             title: l10n.projectCreatorLabel,
@@ -302,11 +351,14 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
             enabled: !_busy,
             onTap: _openModules,
           ),
-          if (!_launched && _configuredForLaunch && !_isError)
+          if (!_launched && _configuredForLaunch && !_showReload)
             AppNavPreference(
               title: l10n.projectLaunchProject,
               icon: Icons.rocket_launch_outlined,
               enabled: !_busy,
+              loading: _launching,
+              loadingLabel: l10n.projectLaunchInProgress,
+              accentColor: success,
               onTap: _launch,
             ),
           if (_launched)
@@ -317,11 +369,13 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
               enabled: !_busy,
               onTap: _openContainer,
             ),
-          if (_isError)
+          if (_showReload)
             AppNavPreference(
               title: l10n.projectReload,
               icon: Icons.refresh_outlined,
               enabled: !_busy,
+              loading: _reloading,
+              loadingLabel: l10n.projectReload,
               onTap: _reload,
             ),
           if (_launched && paused && _hasPod)
@@ -330,9 +384,11 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
               icon: Icons.play_arrow_outlined,
               accentColor: warning,
               enabled: !_busy,
+              loading: _resuming,
+              loadingLabel: l10n.projectResumeInProgress,
               onTap: _resumeProject,
             ),
-          if (_launched && !paused && _hasPod && !_isError && !_containerUnhealthy)
+          if (_launched && !paused && _hasPod && !_showReload && !_containerUnhealthy)
             AppNavPreference(
               title: l10n.projectProjectManagement,
               icon: Icons.tune_outlined,

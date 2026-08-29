@@ -29,7 +29,6 @@ class CreateProjectBody(BaseModel):
 
     name: str = Field(min_length=1, max_length=200)
     agent_provider: str | None = Field(default=None, max_length=32)
-    budget_tokens: int | None = Field(default=None, ge=0)
 
 
 class PatchProjectBody(BaseModel):
@@ -37,6 +36,7 @@ class PatchProjectBody(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
     about: str | None = Field(default=None, max_length=8000)
+    budget_tokens: int | None = Field(default=None, ge=0)
     agent_provider: str | None = Field(default=None, max_length=32)
     resolved_ai_key_id: str | None = Field(default=None, max_length=40)
 
@@ -93,7 +93,6 @@ async def create_project(
         employee=employee,
         principal=principal,
         agent_provider=body.agent_provider,
-        budget_tokens=body.budget_tokens,
     )
 
 
@@ -195,6 +194,8 @@ async def patch_project(
         name=fields.get("name"),
         about=fields.get("about"),
         update_about="about" in fields,
+        budget_tokens=fields.get("budget_tokens"),
+        update_budget_tokens="budget_tokens" in fields,
         agent_provider=fields.get("agent_provider"),
         update_agent_provider="agent_provider" in fields,
         resolved_ai_key_id=fields.get("resolved_ai_key_id"),

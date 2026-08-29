@@ -136,6 +136,17 @@ apps/api/.env.example
 
 | Celery jobs (drain / dispatch / idle / rematerialize / wipe) | **partial (P0 w4)** | CLI + beat + job locks + wipe retries; in-process fallback when Celery off |
 
+### Container lifecycle — known gaps (next iteration)
+
+| Область | Статус | Заметка |
+|---------|--------|---------|
+| Cabinet soft-delete → pod terminate | **done** | `CabinetInstanceService.soft_delete` → project delete → pod terminate; integration `test_cabinet_soft_delete_emits_pod_terminated` |
+| Cabinet hard purge → k8s terminate | **gap** | `delete_with_cascade` не вызывает sync terminate для live pods |
+| Celery rematerialize → hydrate bump | **gap** | async rematerialize не поднимает `hydrate_generation` для running pod |
+| MCP zip + file_ref materialize E2E | **gap** | базовый AGENTS.md + mcp.json; zip MCP paths и file_ref — без e2e |
+| Meta syntax validator vs materialize rules | **gap** | UI validator не проверяет materialize-контракт |
+| «Обновить проект» (`POST /sync`) UI loading | **done** | spinner на management page |
+
 ## Проверка
 
 ```text

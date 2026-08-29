@@ -13,6 +13,9 @@ class AppNavPreference extends StatelessWidget {
     this.subtitle,
     this.accentColor,
     this.enabled = true,
+    this.loading = false,
+    this.loadingLabel,
+    this.leading,
   });
 
   final String title;
@@ -21,24 +24,41 @@ class AppNavPreference extends StatelessWidget {
   final Widget? subtitle;
   final Color? accentColor;
   final bool enabled;
+  final bool loading;
+  final String? loadingLabel;
+  final Widget? leading;
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final effectiveTitle = loading && loadingLabel != null ? loadingLabel! : title;
+    final iconColor = enabled && !loading
+        ? (accentColor ?? scheme.onSurfaceVariant)
+        : Theme.of(context).disabledColor;
+
     return AppPreferenceTile(
-      title: title,
+      title: effectiveTitle,
       icon: icon,
-      enabled: enabled,
-      leading: Icon(
-        icon,
-        size: 24,
-        color: enabled
-            ? (accentColor ?? Theme.of(context).colorScheme.onSurfaceVariant)
-            : Theme.of(context).disabledColor,
-      ),
+      enabled: enabled && !loading,
+      leading: loading
+          ? SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: accentColor ?? scheme.primary,
+              ),
+            )
+          : leading ??
+              Icon(
+                icon,
+                size: 24,
+                color: iconColor,
+              ),
       subtitle: subtitle,
       accentColor: accentColor,
-      trailing: const AppTrailingChevron(),
-      onTap: enabled ? onTap : null,
+      trailing: loading ? null : const AppTrailingChevron(),
+      onTap: enabled && !loading ? onTap : null,
     );
   }
 }

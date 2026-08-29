@@ -95,10 +95,16 @@ class ContainerMetricsWrap extends StatelessWidget {
         accentColor: hasError ? errorColor : null,
       ),
       if (podServiceId != null)
-        _readOnlyRow(
+        AppValuePreference<String>(
           title: l10n.containerPodServiceId,
-          value: podServiceId,
           icon: Icons.tag_outlined,
+          value: podServiceId,
+          enabled: false,
+          onTap: () {
+            Clipboard.setData(ClipboardData(text: podServiceId));
+            AppSnackBar.info(context, l10n.containerPodIdCopied);
+          },
+          onSave: (_) async {},
         ),
       if (k8sPodName != null)
         _readOnlyRow(

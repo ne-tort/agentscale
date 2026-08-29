@@ -61,6 +61,29 @@ def test_metrics_verified_requires_fresh_cpu_mem() -> None:
     assert not RuntimeObservationService._metrics_verified(None, {"degraded": True})
 
 
+def test_project_is_recoverable_active_degraded() -> None:
+    from prodavan.application.pod_service.runtime_observation import project_is_recoverable
+    from prodavan.domain.pods.observed_state import ObservedState
+
+    project = _project()
+    pod = _pod(status=PodStatus.RUNNING)
+    assert project_is_recoverable(
+        project,
+        pod,
+        {"observed_state": ObservedState.DEGRADED.value},
+    )
+    assert not project_is_recoverable(project, pod, {"observed_state": ObservedState.RUNNING.value})
+
+
+def test_project_is_recoverable_error_status() -> None:
+    from prodavan.application.pod_service.runtime_observation import project_is_recoverable
+    from prodavan.domain.projects import ProjectStatus
+
+    project = _project()
+    project.status = ProjectStatus.ERROR
+    assert project_is_recoverable(project, None, None)
+
+
 @pytest.mark.asyncio
 async def test_observe_preparing_from_launch_phase() -> None:
     session = AsyncMock()
@@ -78,6 +101,7 @@ async def test_observe_stub_running_without_metrics() -> None:
     pod = _pod(status=PodStatus.RUNNING)
     with patch("prodavan.application.pod_service.runtime_observation.settings") as mock_settings:
         mock_settings.pod_runtime_mode = "stub"
+        mock_settings.pod_provisioning_timeout_sec = 300
         out = await svc.observe(project=project, pod=pod)
     assert out["observed_state"] == ObservedState.STARTING.value
     assert out.get("stub") is True
@@ -95,6 +119,44 @@ async def test_observe_stub_failed() -> None:
         out = await svc.observe(project=project, pod=pod)
     assert out["observed_state"] == ObservedState.FAILED.value
     assert out.get("last_error") == "boom"
+
+
+@pytest.mark.asyncio
+async def test_observe_stub_provisioning_timeout() -> None:
+    session = AsyncMock()
+    svc = RuntimeObservationService(session)
+    project = _project()
+    pod = _pod(status=PodStatus.PROVISIONING)
+    pod.updated_at = datetime.now(UTC) - timedelta(seconds=400)
+    with patch("prodavan.application.pod_service.runtime_observation.settings") as mock_settings:
+        mock_settings.pod_runtime_mode = "stub"
+        mock_settings.pod_provisioning_timeout_sec = 300
+        out = await svc.observe(project=project, pod=pod)
+    assert out["observed_state"] == ObservedState.FAILED.value
+    assert out.get("last_error")
+    assert out.get("stub") is True
+
+
+@pytest.mark.asyncio
+async def test_promote_or_demote_stub_provisioning_timeout() -> None:
+    session = MagicMock()
+    svc = RuntimeObservationService(session)
+    project = _project()
+    pod = _pod(status=PodStatus.PROVISIONING)
+    pod.updated_at = datetime.now(UTC) - timedelta(seconds=400)
+    svc.observe = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "observed_state": ObservedState.FAILED.value,
+            "last_error": "pod runtime unavailable",
+        }
+    )
+    with patch("prodavan.application.pod_service.runtime_observation.settings") as mock_settings:
+        mock_settings.pod_runtime_mode = "stub"
+        mock_settings.pod_provisioning_timeout_sec = 300
+        action = await svc.promote_or_demote(project=project, pod=pod)
+    assert action == "failed_timeout"
+    assert pod.status == PodStatus.FAILED
+    assert project.status == ProjectStatus.ERROR
 
 
 @pytest.mark.asyncio

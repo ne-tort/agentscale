@@ -46,11 +46,15 @@ data:
   SANDBOX_K8S_NAMESPACE: prodavan
   SANDBOX_K8S_PVC: prodavan-api-storage
   SANDBOX_K8S_JOB_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
-  # pod_service: dev overlay sets POD_RUNTIME_MODE=k8s (see overlays/dev/patch-dev.yaml)
-  POD_RUNTIME_MODE: "stub"
+  POD_RUNTIME_MODE: "k8s"
+  POD_K8S_REQUIRED: "true"
+  POD_PROVISIONING_TIMEOUT_SEC: "60"
+  POD_METRICS_GRACE_SEC: "30"
+  METRICS_SAMPLE_INTERVAL_SEC: "15"
+  METRICS_SAMPLE_TTL_SEC: "60"
   POD_SANDBOX_NAMESPACE: prodavan-sandboxes
   POD_SANDBOX_SA: prodavan-project-pod
   POD_SANDBOX_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
   POD_SANDBOX_HYDRATE_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
   POD_SANDBOX_MINIO_SECRET: prodavan-minio-hydrate
-  POD_RECONCILE_WORKER_ENABLED: "false"
+  POD_RECONCILE_WORKER_ENABLED: "true"

@@ -1238,6 +1238,12 @@ abstract class AppLocalizations {
   /// **'Pod ID'**
   String get containerPodServiceId;
 
+  /// No description provided for @containerPodIdCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Pod ID copied'**
+  String get containerPodIdCopied;
+
   /// No description provided for @containerK8sPodName.
   ///
   /// In en, this message translates to:
@@ -1249,12 +1255,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Budget'**
   String get projectBudgetLabel;
-
-  /// No description provided for @projectBudgetHint.
-  ///
-  /// In en, this message translates to:
-  /// **'Token budget (optional)'**
-  String get projectBudgetHint;
 
   /// No description provided for @containerStartedAt.
   ///
@@ -3751,6 +3751,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Project launched'**
   String get projectLaunchSuccess;
+
+  /// No description provided for @projectLaunchInProgress.
+  ///
+  /// In en, this message translates to:
+  /// **'Launching project…'**
+  String get projectLaunchInProgress;
+
+  /// No description provided for @projectLaunchStartingSnack.
+  ///
+  /// In en, this message translates to:
+  /// **'Project is launching…'**
+  String get projectLaunchStartingSnack;
+
+  /// No description provided for @projectResumeInProgress.
+  ///
+  /// In en, this message translates to:
+  /// **'Resuming project…'**
+  String get projectResumeInProgress;
+
+  /// No description provided for @projectResumeStartingSnack.
+  ///
+  /// In en, this message translates to:
+  /// **'Project is resuming…'**
+  String get projectResumeStartingSnack;
+
+  /// No description provided for @projectPauseConfirmMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'While paused, the agent will be unavailable.'**
+  String get projectPauseConfirmMessage;
+
+  /// No description provided for @projectReloadSuccess.
+  ///
+  /// In en, this message translates to:
+  /// **'Project reloaded'**
+  String get projectReloadSuccess;
 
   /// No description provided for @projectUpdateSuccess.
   ///

@@ -659,13 +659,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get containerPodServiceId => 'Pod ID';
 
   @override
+  String get containerPodIdCopied => 'Pod ID copied';
+
+  @override
   String get containerK8sPodName => 'k8s pod';
 
   @override
   String get projectBudgetLabel => 'Budget';
-
-  @override
-  String get projectBudgetHint => 'Token budget (optional)';
 
   @override
   String get containerStartedAt => 'Last launch';
@@ -2051,6 +2051,25 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get projectLaunchSuccess => 'Project launched';
+
+  @override
+  String get projectLaunchInProgress => 'Launching project…';
+
+  @override
+  String get projectLaunchStartingSnack => 'Project is launching…';
+
+  @override
+  String get projectResumeInProgress => 'Resuming project…';
+
+  @override
+  String get projectResumeStartingSnack => 'Project is resuming…';
+
+  @override
+  String get projectPauseConfirmMessage =>
+      'While paused, the agent will be unavailable.';
+
+  @override
+  String get projectReloadSuccess => 'Project reloaded';
 
   @override
   String get projectUpdateSuccess => 'Project updated';

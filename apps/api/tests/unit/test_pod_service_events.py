@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -47,7 +47,8 @@ async def test_pause_emits_pod_before_project_event() -> None:
     )
     principal = Principal(sub="emp:test", roles=frozenset({"employee"}))
 
-    cmd = ProjectCommand(session)
+    with patch("prodavan.application.pod_service.command.build_pod_runtime", return_value=MagicMock()):
+        cmd = ProjectCommand(session)
     cmd._access.require_access = AsyncMock(return_value=row)
     cmd._stop_and_pause_runtime = AsyncMock()
     cmd._events.emit = AsyncMock()

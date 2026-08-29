@@ -659,13 +659,13 @@ class AppLocalizationsRu extends AppLocalizations {
   String get containerPodServiceId => 'Pod ID';
 
   @override
+  String get containerPodIdCopied => 'Pod ID скопирован';
+
+  @override
   String get containerK8sPodName => 'Pod в k8s';
 
   @override
   String get projectBudgetLabel => 'Бюджет';
-
-  @override
-  String get projectBudgetHint => 'Бюджет токенов (опционально)';
 
   @override
   String get containerStartedAt => 'Последний запуск';
@@ -2060,6 +2060,25 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get projectLaunchSuccess => 'Проект запущен';
+
+  @override
+  String get projectLaunchInProgress => 'Запуск проекта…';
+
+  @override
+  String get projectLaunchStartingSnack => 'Проект запускается…';
+
+  @override
+  String get projectResumeInProgress => 'Возобновление проекта…';
+
+  @override
+  String get projectResumeStartingSnack => 'Проект возобновляется…';
+
+  @override
+  String get projectPauseConfirmMessage =>
+      'При приостановке проекта агент будет недоступен.';
+
+  @override
+  String get projectReloadSuccess => 'Проект перезагружен';
 
   @override
   String get projectUpdateSuccess => 'Проект обновлён';

@@ -9,7 +9,6 @@ import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_inline_add_field.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/employee/cabinet_project_settings_page.dart';
@@ -31,7 +30,6 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
   bool _loading = true;
   Object? _error;
   List<Map<String, dynamic>> _projects = const [];
-  String _budgetDraft = '';
 
   @override
   void initState() {
@@ -63,21 +61,10 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
   Future<void> _create(String name) async {
     final trimmed = name.trim();
     if (trimmed.isEmpty) return;
-    final l10n = AppLocalizations.of(context);
-    int? budgetTokens;
-    final budgetRaw = _budgetDraft.trim();
-    if (budgetRaw.isNotEmpty) {
-      budgetTokens = int.tryParse(budgetRaw);
-      if (budgetTokens == null || budgetTokens < 0) {
-        if (mounted) AppSnackBar.error(context, l10n.errorValidation);
-        return;
-      }
-    }
     try {
       final created = await workContext.api.createProject(
         cabinetId: widget.cabinetId,
         name: trimmed,
-        budgetTokens: budgetTokens,
       );
       if (!mounted) return;
       final id = created['id'] as String;
@@ -196,17 +183,6 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
             hintText: l10n.projectAddHint,
             validator: (raw) => raw.trim().isNotEmpty,
             onSave: _create,
-          ),
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: AppSpacing.md),
-            child: TextField(
-              decoration: InputDecoration(
-                labelText: l10n.projectBudgetHint,
-                isDense: true,
-              ),
-              keyboardType: TextInputType.number,
-              onChanged: (v) => _budgetDraft = v,
-            ),
           ),
           if (_loading)
             const Expanded(child: Center(child: CircularProgressIndicator()))

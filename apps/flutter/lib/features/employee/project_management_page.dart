@@ -28,6 +28,9 @@ class ProjectManagementPage extends StatefulWidget {
 
 class _ProjectManagementPageState extends State<ProjectManagementPage> {
   bool _busy = false;
+  bool _pausing = false;
+  bool _resuming = false;
+  bool _syncing = false;
   bool _loading = true;
   String? _status;
 
@@ -53,7 +56,16 @@ class _ProjectManagementPageState extends State<ProjectManagementPage> {
   }
 
   Future<void> _pause() async {
-    setState(() => _busy = true);
+    final l10n = AppLocalizations.of(context);
+    final ok = await AppConfirmPage.push(
+      context,
+      title: l10n.projectPauseProject,
+      message: l10n.projectPauseConfirmMessage,
+      confirmLabel: l10n.projectPauseProject,
+      severity: AppStatusSeverity.warning,
+    );
+    if (!ok) return;
+    setState(() => _pausing = true);
     try {
       await workContext.api.pauseProject(widget.projectId);
       if (!mounted) return;
@@ -61,12 +73,14 @@ class _ProjectManagementPageState extends State<ProjectManagementPage> {
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _pausing = false);
     }
   }
 
   Future<void> _resume() async {
-    setState(() => _busy = true);
+    final l10n = AppLocalizations.of(context);
+    AppSnackBar.info(context, l10n.projectResumeStartingSnack);
+    setState(() => _resuming = true);
     try {
       await workContext.api.resumeProject(widget.projectId);
       if (!mounted) return;
@@ -74,12 +88,12 @@ class _ProjectManagementPageState extends State<ProjectManagementPage> {
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _resuming = false);
     }
   }
 
   Future<void> _syncProject() async {
-    setState(() => _busy = true);
+    setState(() => _syncing = true);
     try {
       await workContext.api.syncProject(widget.projectId);
       if (!mounted) return;
@@ -87,7 +101,7 @@ class _ProjectManagementPageState extends State<ProjectManagementPage> {
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _syncing = false);
     }
   }
 
@@ -118,7 +132,8 @@ class _ProjectManagementPageState extends State<ProjectManagementPage> {
     final l10n = AppLocalizations.of(context);
     final warning = context.appColors.warning;
     final paused = _status == 'paused';
-    final enabled = !_busy && !_loading;
+    final actionBusy = _pausing || _resuming || _syncing || _busy;
+    final enabled = !actionBusy && !_loading;
 
     return AppScaffold(
       title: Text(l10n.projectProjectManagement),
@@ -128,19 +143,13 @@ class _ProjectManagementPageState extends State<ProjectManagementPage> {
               padding: EdgeInsets.all(AppSpacing.md),
               children: [
                 if (paused)
-                  Padding(
-                    padding: EdgeInsets.only(bottom: AppSpacing.sm),
-                    child: AppStatusBanner(
-                      severity: AppStatusSeverity.warning,
-                      message: l10n.projectPausedBanner,
-                    ),
-                  ),
-                if (paused)
                   AppNavPreference(
                     title: l10n.projectResumeProject,
                     icon: Icons.play_arrow_outlined,
                     accentColor: warning,
                     enabled: enabled,
+                    loading: _resuming,
+                    loadingLabel: l10n.projectResumeInProgress,
                     onTap: _resume,
                   )
                 else ...[
@@ -149,12 +158,16 @@ class _ProjectManagementPageState extends State<ProjectManagementPage> {
                     icon: Icons.pause_outlined,
                     accentColor: warning,
                     enabled: enabled,
+                    loading: _pausing,
+                    loadingLabel: l10n.projectPauseProject,
                     onTap: _pause,
                   ),
                   AppNavPreference(
                     title: l10n.projectUpdateProject,
                     icon: Icons.sync_outlined,
                     enabled: enabled,
+                    loading: _syncing,
+                    loadingLabel: l10n.projectUpdateProject,
                     onTap: _syncProject,
                   ),
                   AppNavPreference(

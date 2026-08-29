@@ -127,31 +127,92 @@ async def test_sync_desired_reload_recovers_project_from_error() -> None:
 async def test_reload_project_requires_error_status() -> None:
     session = AsyncMock()
     row = _project(status=ProjectStatus.ACTIVE)
-    cmd = ProjectCommand(session)
+    with patch("prodavan.application.pod_service.command.build_pod_runtime", return_value=MagicMock()):
+        cmd = ProjectCommand(session)
     cmd._access.require_access = AsyncMock(return_value=row)
 
-    with pytest.raises(AppError) as exc:
-        await cmd.reload_project(project_id=row.id, principal=_principal(), employee=None)
+    with patch("prodavan.application.pod_service.query.PodQuery") as pq_cls:
+        pq = pq_cls.return_value
+        pq.runtime_view = AsyncMock(return_value={})
+        pq._get_failed_row = AsyncMock(return_value=None)
+        with patch(
+            "prodavan.application.pod_service.runtime_observation.RuntimeObservationService"
+        ) as obs_cls:
+            obs_cls.return_value._get_live_pod = AsyncMock(return_value=None)
+            obs_cls.return_value.observe = AsyncMock(return_value={"observed_state": "running"})
+            with pytest.raises(AppError) as exc:
+                await cmd.reload_project(project_id=row.id, principal=_principal(), employee=None)
 
     assert exc.value.status == 422
+
+
+@pytest.mark.asyncio
+async def test_reload_project_allowed_when_active_container_degraded() -> None:
+    session = AsyncMock()
+    row = _project(status=ProjectStatus.ACTIVE)
+    pod = ProjectPodRow(
+        id="pod_live",
+        project_id=row.id,
+        workspace_key=row.workspace_key,
+        status=PodStatus.RUNNING,
+        desired_state=PodDesiredState.RUNNING.value,
+        runtime_ref="pod-wk-demo",
+        hydrate_generation=0,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    with patch("prodavan.application.pod_service.command.build_pod_runtime", return_value=MagicMock()):
+        cmd = ProjectCommand(session)
+    cmd._access.require_access = AsyncMock(return_value=row)
+    cmd._pods.provision_for_project = AsyncMock()
+    cmd._pods.sync_desired = AsyncMock()
+    cmd._project_public = AsyncMock(return_value={"id": row.id, "status": ProjectStatus.ACTIVE})
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock()
+
+    with patch("prodavan.application.pod_service.query.PodQuery") as pq_cls:
+        pq = pq_cls.return_value
+        pq.runtime_view = AsyncMock(return_value={"observed_state": "degraded"})
+        pq._get_failed_row = AsyncMock(return_value=None)
+        with patch(
+            "prodavan.application.pod_service.runtime_observation.RuntimeObservationService"
+        ) as obs_cls:
+            obs_cls.return_value._get_live_pod = AsyncMock(return_value=pod)
+            obs_cls.return_value.observe = AsyncMock(
+                return_value={"observed_state": "degraded", "last_error": "metrics missing"}
+            )
+            obs_cls.return_value.wait_for_running = AsyncMock()
+            with patch("prodavan.core.infra.cache.rate_limit_enforce", new_callable=AsyncMock):
+                await cmd.reload_project(project_id=row.id, principal=_principal(), employee=None)
+
+    cmd._pods.sync_desired.assert_awaited()
 
 
 @pytest.mark.asyncio
 async def test_reload_project_rate_limit_redis_unavailable() -> None:
     session = AsyncMock()
     row = _project(status=ProjectStatus.ERROR)
-    cmd = ProjectCommand(session)
+    with patch("prodavan.application.pod_service.command.build_pod_runtime", return_value=MagicMock()):
+        cmd = ProjectCommand(session)
     cmd._access.require_access = AsyncMock(return_value=row)
 
-    with patch("prodavan.core.infra.cache.rate_limit_enforce", new_callable=AsyncMock) as rl:
-        rl.side_effect = AppError(
-            code="REDIS_UNAVAILABLE",
-            title="Service Unavailable",
-            status=503,
-            detail="redis unavailable",
-        )
-        with pytest.raises(AppError) as exc:
-            await cmd.reload_project(project_id=row.id, principal=_principal(), employee=None)
+    with patch("prodavan.application.pod_service.query.PodQuery") as pq_cls:
+        pq = pq_cls.return_value
+        pq.runtime_view = AsyncMock(return_value={})
+        pq._get_failed_row = AsyncMock(return_value=None)
+        with patch(
+            "prodavan.application.pod_service.runtime_observation.RuntimeObservationService"
+        ) as obs_cls:
+            obs_cls.return_value._get_live_pod = AsyncMock(return_value=None)
+            with patch("prodavan.core.infra.cache.rate_limit_enforce", new_callable=AsyncMock) as rl:
+                rl.side_effect = AppError(
+                    code="REDIS_UNAVAILABLE",
+                    title="Service Unavailable",
+                    status=503,
+                    detail="redis unavailable",
+                )
+                with pytest.raises(AppError) as exc:
+                    await cmd.reload_project(project_id=row.id, principal=_principal(), employee=None)
 
     assert exc.value.code == "REDIS_UNAVAILABLE"
 

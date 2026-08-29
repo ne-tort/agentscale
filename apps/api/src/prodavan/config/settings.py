@@ -84,8 +84,8 @@ class Settings(BaseSettings):
     metrics_presence_ttl_sec: int = 900
     kafka_topic_metrics_events: str = "prodavan.metrics.events"
     kafka_metrics_group: str = "prodavan-metrics"
-    metrics_sample_ttl_sec: int = 900
-    metrics_sample_interval_sec: int = 60
+    metrics_sample_ttl_sec: int = 60
+    metrics_sample_interval_sec: int = 15
     metrics_delta_min_cpu_millicores: int = 50
     metrics_delta_min_memory_bytes: int = 32 * 1024 * 1024
 
@@ -95,7 +95,7 @@ class Settings(BaseSettings):
     sandbox_k8s_jobs: bool = False
     sandbox_k8s_namespace: str = "prodavan"
     # pod_service runtime: stub (object-ws) | k8s (real Pod adapter).
-    pod_runtime_mode: str = "stub"
+    pod_runtime_mode: str = "k8s"
     pod_reconcile_worker_enabled: bool = False
     pod_sandbox_namespace: str = "prodavan-sandboxes"
     pod_sandbox_image: str = "ghcr.io/ne-tort/prodavan-api:local"
@@ -107,8 +107,8 @@ class Settings(BaseSettings):
     pod_sandbox_memory_request: str = "256Mi"
     pod_sandbox_memory_limit: str = "1Gi"
     pod_ready_timeout_sec: int = 120
-    pod_metrics_grace_sec: int = 90
-    pod_provisioning_timeout_sec: int = 300
+    pod_metrics_grace_sec: int = 30
+    pod_provisioning_timeout_sec: int = 60
     pod_preparing_timeout_sec: int = 120
     pod_k8s_required: bool = False
     sandbox_k8s_pvc: str = "prodavan-api-storage"

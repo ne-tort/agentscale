@@ -64,7 +64,6 @@ class ProjectCommand:
         employee: EmployeeRow,
         principal: Principal,
         agent_provider: str | None = None,
-        budget_tokens: int | None = None,
     ) -> dict:
         if not name.strip():
             raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="name required")
@@ -117,7 +116,6 @@ class ProjectCommand:
             workspace_key=ws_key,
             container_ref=container_ref_for(ws_key),
             agent_provider=normalize_agent_provider(agent_provider),
-            budget_tokens=budget_tokens,
         )
         self._session.add(row)
         await self._session.flush()
@@ -292,6 +290,8 @@ class ProjectCommand:
         name: str | None = None,
         about: str | None = None,
         update_about: bool = False,
+        budget_tokens: int | None = None,
+        update_budget_tokens: bool = False,
         agent_provider: str | None = None,
         update_agent_provider: bool = False,
         resolved_ai_key_id: str | None = None,
@@ -316,6 +316,8 @@ class ProjectCommand:
             row.name = trimmed
         if update_about:
             row.about = (about or "").strip() or None
+        if update_budget_tokens:
+            row.budget_tokens = budget_tokens
         if update_agent_provider:
             row.agent_provider = normalize_agent_provider(agent_provider)
         if update_resolved_ai_key_id:
@@ -645,7 +647,23 @@ class ProjectCommand:
             write=True,
             allow_paused=True,
         )
-        if row.status != ProjectStatus.ERROR:
+        from prodavan.application.pod_service.query import PodQuery
+        from prodavan.application.pod_service.runtime_observation import (
+            RuntimeObservationService,
+            project_is_recoverable,
+        )
+
+        await PodQuery(self._session).runtime_view(project_id)
+        await self._session.refresh(row)
+        pod_row = await RuntimeObservationService(self._session)._get_live_pod(project_id)
+        if pod_row is None:
+            pod_row = await PodQuery(self._session)._get_failed_row(project_id)
+        obs = (
+            await RuntimeObservationService(self._session).observe(project=row, pod=pod_row)
+            if pod_row is not None
+            else None
+        )
+        if not project_is_recoverable(row, pod_row, obs):
             raise AppError(
                 code="VALIDATION_ERROR",
                 title="Validation Error",

@@ -22,6 +22,31 @@ from prodavan.infrastructure.persistence.models.projects import ProjectPodRow, P
 logger = logging.getLogger(__name__)
 
 _PROVISIONING_PHASES = frozenset({"Pending", "ContainerCreating", "PodInitializing"})
+_UNHEALTHY_OBSERVED = frozenset(
+    {
+        ObservedState.FAILED.value,
+        ObservedState.DEGRADED.value,
+        ObservedState.ABSENT.value,
+    }
+)
+
+
+def project_is_recoverable(
+    project: ProjectRow,
+    pod: ProjectPodRow | None,
+    obs: dict[str, Any] | None,
+) -> bool:
+    """True when reload/recovery is meaningful (project or container unhealthy)."""
+    if project.status == ProjectStatus.ERROR:
+        return True
+    if project.status != ProjectStatus.ACTIVE or pod is None:
+        return False
+    if pod.status == PodStatus.FAILED and bool((pod.last_error or "").strip()):
+        return True
+    state = (obs or {}).get("observed_state")
+    if state in _UNHEALTHY_OBSERVED:
+        return True
+    return state == ObservedState.UNKNOWN.value and bool((obs or {}).get("last_error"))
 
 
 class RuntimeObservationService:
@@ -117,25 +142,54 @@ class RuntimeObservationService:
             f"last={last}"
         )
 
+    async def sync_runtime_health(self, *, project: ProjectRow, pod: ProjectPodRow) -> str:
+        """Sync project/pod DB status from live observation. Returns action taken."""
+        return await self.promote_or_demote(project=project, pod=pod)
+
     async def promote_or_demote(self, *, project: ProjectRow, pod: ProjectPodRow) -> str:
         """Sync DB orchestrator status from observation. Returns action taken."""
         now = datetime.now(UTC)
-        mode = (settings.pod_runtime_mode or "stub").strip().lower()
-
-        if mode != "k8s":
-            return "noop"
-
         obs = await self.observe(project=project, pod=pod)
         state = obs.get("observed_state")
 
         if pod.status == PodStatus.PROVISIONING:
             age = (now - self._as_utc(pod.updated_at)).total_seconds()
-            if age > settings.pod_provisioning_timeout_sec:
+            fail_observed = state in {
+                ObservedState.FAILED.value,
+                ObservedState.DEGRADED.value,
+            } or (state == ObservedState.UNKNOWN.value and bool(obs.get("last_error")))
+            if age > settings.pod_provisioning_timeout_sec or fail_observed:
                 pod.status = PodStatus.FAILED
-                pod.last_error = f"provisioning timeout after {int(age)}s"
+                pod.last_error = obs.get("last_error") or f"provisioning timeout after {int(age)}s"
                 if project.status == ProjectStatus.ACTIVE:
                     project.status = ProjectStatus.ERROR
                 return "failed_timeout"
+
+        mode = (settings.pod_runtime_mode or "stub").strip().lower()
+        if mode != "k8s":
+            if (
+                pod.status == PodStatus.RUNNING
+                and pod.desired_state == PodDesiredState.RUNNING.value
+                and state != ObservedState.RUNNING.value
+            ):
+                age = (now - self._as_utc(pod.updated_at)).total_seconds()
+                transitional = state in {
+                    ObservedState.PREPARING.value,
+                    ObservedState.PROVISIONING.value,
+                    ObservedState.HYDRATING.value,
+                    ObservedState.STARTING.value,
+                }
+                if (
+                    not transitional
+                    or age > settings.pod_provisioning_timeout_sec
+                    or state in {ObservedState.FAILED.value, ObservedState.DEGRADED.value}
+                ):
+                    pod.status = PodStatus.FAILED
+                    pod.last_error = obs.get("last_error") or f"observed {state}"
+                    if project.status == ProjectStatus.ACTIVE:
+                        project.status = ProjectStatus.ERROR
+                    return "demoted"
+            return "noop"
 
         if state == ObservedState.RUNNING.value and pod.status == PodStatus.PROVISIONING:
             pod.status = PodStatus.RUNNING
@@ -181,6 +235,17 @@ class RuntimeObservationService:
             pod.last_error = obs.get("last_error") or f"observed {state}"
             if project.status == ProjectStatus.ACTIVE:
                 project.status = ProjectStatus.ERROR
+            return "demoted"
+
+        if (
+            project.status == ProjectStatus.ACTIVE
+            and pod.desired_state == PodDesiredState.RUNNING.value
+            and state in _UNHEALTHY_OBSERVED
+            and pod.status not in {PodStatus.FAILED, PodStatus.TERMINATED}
+        ):
+            pod.status = PodStatus.FAILED
+            pod.last_error = obs.get("last_error") or f"observed {state}"
+            project.status = ProjectStatus.ERROR
             return "demoted"
 
         return "noop"
@@ -320,7 +385,7 @@ class RuntimeObservationService:
                     restarts=k8s_status.get("restarts"),
                 )
 
-            grace_age = (datetime.now(UTC) - self._as_utc(pod.updated_at)).total_seconds()
+            grace_age = (datetime.now(UTC) - self._runtime_baseline(pod)).total_seconds()
             if grace_age <= settings.pod_metrics_grace_sec:
                 return obs(
                     ObservedState.STARTING,
@@ -375,6 +440,18 @@ class RuntimeObservationService:
                 stub=True,
             )
         if pod.desired_state == PodDesiredState.RUNNING.value:
+            age = (datetime.now(UTC) - self._as_utc(pod.updated_at)).total_seconds()
+            if age > settings.pod_provisioning_timeout_sec:
+                return self._summary(
+                    ObservedState.FAILED,
+                    orchestrator_status=pod.status,
+                    desired_state=pod.desired_state,
+                    last_error=(
+                        "pod runtime unavailable (no k8s pod verified within "
+                        f"{int(settings.pod_provisioning_timeout_sec)}s)"
+                    ),
+                    stub=True,
+                )
             return self._summary(
                 ObservedState.STARTING,
                 orchestrator_status=pod.status,
@@ -411,9 +488,17 @@ class RuntimeObservationService:
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=UTC)
             age = (datetime.now(UTC) - dt).total_seconds()
-            return age <= max(60, int(settings.metrics_sample_ttl_sec)) * 2
+            return age <= min(60, int(settings.metrics_sample_ttl_sec))
         except (TypeError, ValueError):
             return False
+
+    @staticmethod
+    def _runtime_baseline(pod: ProjectPodRow) -> datetime:
+        if pod.last_started_at is not None:
+            return RuntimeObservationService._as_utc(pod.last_started_at)
+        if pod.created_at is not None:
+            return RuntimeObservationService._as_utc(pod.created_at)
+        return RuntimeObservationService._as_utc(pod.updated_at)
 
     async def _get_live_pod(self, project_id: str) -> ProjectPodRow | None:
         from sqlalchemy import select
