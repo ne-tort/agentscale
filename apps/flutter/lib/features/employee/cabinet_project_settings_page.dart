@@ -3,12 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Project settings — name, about, pause/resume, provider, AI key picker.
+/// Project settings — name, about, launch/pause/resume, provider, AI key, modules.
 class CabinetProjectSettingsPage extends StatefulWidget {
   const CabinetProjectSettingsPage({
     super.key,
@@ -32,6 +34,7 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
   String? _resolvedKeyId;
   String? _creatorName;
   String? _status;
+  bool _hasPod = false;
   List<Map<String, dynamic>> _availableKeys = const [];
   List<Map<String, dynamic>> _cabinetModules = const [];
   List<String> _enabledModuleIds = const [];
@@ -68,8 +71,10 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
         _about = project['about'] as String? ?? '';
         _agentProvider = project['agent_provider'] as String?;
         _resolvedKeyId = project['resolved_ai_key_id'] as String?;
-        _creatorName = project['created_by_employee_id'] as String?;
-        _status = project['status'] as String? ?? 'active';
+        _creatorName = project['created_by_login'] as String? ??
+            project['created_by_employee_id'] as String?;
+        _status = project['status'] as String? ?? 'draft';
+        _hasPod = project['runtime'] != null;
         _availableKeys = keys;
         _cabinetModules = modules;
         _enabledModuleIds = enabled;
@@ -84,6 +89,9 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
       AppErrors.showSnack(context, e);
     }
   }
+
+  bool get _configuredForLaunch =>
+      (_agentProvider ?? '').isNotEmpty && (_resolvedKeyId ?? '').isNotEmpty;
 
   Future<void> _saveName(String v) async {
     final name = v.trim();
@@ -115,6 +123,20 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
     if (mounted) setState(() => _resolvedKeyId = keyId);
   }
 
+  Future<void> _launch() async {
+    setState(() => _busy = true);
+    try {
+      await workContext.api.launchProject(widget.projectId);
+      if (!mounted) return;
+      AppSnackBar.success(context, AppLocalizations.of(context).projectLaunchSuccess);
+      await _load();
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<void> _togglePause() async {
     setState(() => _busy = true);
     try {
@@ -131,12 +153,34 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
     }
   }
 
-  Future<void> _rematerialize() async {
+  Future<void> _syncProject() async {
     setState(() => _busy = true);
     try {
-      await workContext.api.rematerializeProject(widget.projectId);
+      await workContext.api.syncProject(widget.projectId);
       if (!mounted) return;
-      AppSnackBar.success(context, AppLocalizations.of(context).projectRematerializeWorkspace);
+      AppSnackBar.success(context, AppLocalizations.of(context).projectUpdateSuccess);
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _resetAgent() async {
+    final l10n = AppLocalizations.of(context);
+    final ok = await AppConfirmPage.push(
+      context,
+      title: l10n.projectResetAgent,
+      message: l10n.projectResetAgent,
+      confirmLabel: l10n.projectResetAgent,
+      severity: AppStatusSeverity.warning,
+    );
+    if (!ok) return;
+    setState(() => _busy = true);
+    try {
+      await workContext.api.resetProjectAgent(widget.projectId);
+      if (!mounted) return;
+      AppSnackBar.success(context, l10n.projectResetSuccess);
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     } finally {
@@ -231,18 +275,41 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
               },
               onSave: (ids) => _saveModules(ids.toList()),
             ),
-          AppNavPreference(
-            title: paused ? l10n.projectResumeProject : l10n.projectPauseProject,
-            icon: paused ? Icons.play_arrow_outlined : Icons.pause_outlined,
-            enabled: !_busy,
-            onTap: _togglePause,
-          ),
-          AppNavPreference(
-            title: l10n.projectRematerializeWorkspace,
-            icon: Icons.refresh_outlined,
-            enabled: !_busy,
-            onTap: _rematerialize,
-          ),
+          if (!_hasPod && !_configuredForLaunch)
+            Padding(
+              padding: EdgeInsets.only(bottom: AppSpacing.sm),
+              child: AppStatusBanner(
+                severity: AppStatusSeverity.info,
+                message: l10n.projectConfigureBeforeLaunch,
+              ),
+            ),
+          if (!_hasPod && _configuredForLaunch)
+            AppNavPreference(
+              title: l10n.projectLaunchProject,
+              icon: Icons.rocket_launch_outlined,
+              enabled: !_busy,
+              onTap: _launch,
+            ),
+          if (_hasPod) ...[
+            AppNavPreference(
+              title: paused ? l10n.projectResumeProject : l10n.projectPauseProject,
+              icon: paused ? Icons.play_arrow_outlined : Icons.pause_outlined,
+              enabled: !_busy,
+              onTap: _togglePause,
+            ),
+            AppNavPreference(
+              title: l10n.projectUpdateProject,
+              icon: Icons.sync_outlined,
+              enabled: !_busy,
+              onTap: _syncProject,
+            ),
+            AppNavPreference(
+              title: l10n.projectResetAgent,
+              icon: Icons.restart_alt_outlined,
+              enabled: !_busy,
+              onTap: _resetAgent,
+            ),
+          ],
         ],
       ),
     );

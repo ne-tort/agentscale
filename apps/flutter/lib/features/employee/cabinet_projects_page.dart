@@ -22,6 +22,8 @@ class CabinetProjectsPage extends StatefulWidget {
 }
 
 class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
+  static const _aboutMaxLen = 80;
+
   bool _loading = true;
   Object? _error;
   List<Map<String, dynamic>> _projects = const [];
@@ -108,6 +110,13 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
     ).then((_) => _reload());
   }
 
+  String _truncateAbout(String? about) {
+    final text = (about ?? '').trim();
+    if (text.isEmpty) return '—';
+    if (text.length <= _aboutMaxLen) return text;
+    return '${text.substring(0, _aboutMaxLen)}…';
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -116,7 +125,11 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
           (p) => AppEntityRow(
             id: p['id'] as String,
             title: p['name'] as String? ?? p['id'] as String,
-            cells: {'status': p['status'] as String? ?? '—'},
+            cells: {
+              'about': _truncateAbout(p['about'] as String?),
+              'creator': p['created_by_login'] as String? ?? '—',
+              'status': p['status'] as String? ?? '—',
+            },
           ),
         )
         .toList();
@@ -148,8 +161,10 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
                 padding: EdgeInsets.all(AppSpacing.md),
                 child: AppEntityCollection(
                   rows: rows,
-                  columns: const [
-                    AppEntityColumn(id: 'status', label: 'Status'),
+                  columns: [
+                    AppEntityColumn(id: 'about', label: l10n.projectAboutColumn),
+                    AppEntityColumn(id: 'creator', label: l10n.projectCreatorColumn),
+                    AppEntityColumn(id: 'status', label: l10n.projectProjectStatus),
                   ],
                   onOpen: _openSettings,
                   onDelete: _delete,

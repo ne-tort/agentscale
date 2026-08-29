@@ -427,16 +427,44 @@ class ProdavanApi {
     _throwIfError(res);
   }
 
-  Future<Map<String, dynamic>> rematerializeProject(String projectId) async {
+  Future<Map<String, dynamic>> launchProject(String projectId) async {
     final prevProj = this.projectId;
     this.projectId = projectId;
     try {
-      final res = await AuthHttp.post(_uri('/projects/$projectId/materialize'), extraHeaders: _workHeaders);
+      final res = await AuthHttp.post(_uri('/projects/$projectId/launch'), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
       this.projectId = prevProj;
     }
+  }
+
+  Future<Map<String, dynamic>> syncProject(String projectId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.post(_uri('/projects/$projectId/sync'), extraHeaders: _workHeaders);
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Map<String, dynamic>> resetProjectAgent(String projectId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.post(_uri('/projects/$projectId/agent/reset'), extraHeaders: _workHeaders);
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Map<String, dynamic>> rematerializeProject(String projectId) async {
+    return syncProject(projectId);
   }
 
   Future<Map<String, dynamic>> pauseProject(String projectId) async {

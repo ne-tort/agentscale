@@ -28,6 +28,7 @@ def project_public(
     *,
     limits: dict | None = None,
     company_subscription: dict | None = None,
+    created_by_login: str | None = None,
 ) -> dict:
     visibility = getattr(row, "visibility_mode", None) or "cabinet_shared"
     out = {
@@ -36,6 +37,7 @@ def project_public(
         "cabinet_id": row.cabinet_id,
         "owner_employee_id": row.owner_employee_id,
         "created_by_employee_id": row.owner_employee_id,
+        "created_by_login": created_by_login,
         "name": row.name,
         "slug": row.slug,
         "status": row.status,

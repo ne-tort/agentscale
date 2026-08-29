@@ -556,6 +556,42 @@ class AgentSessionService:
         )
         return await self._cancel_session_rows(list(result.scalars().all()))
 
+    async def reset_for_project(self, *, project_id: str) -> dict:
+        """Stop agent sessions and purge chat history for a launched project."""
+        from sqlalchemy import delete
+
+        cancelled = await self.cancel_active_for_project(project_id=project_id)
+        result = await self._session.execute(
+            select(AgentSessionRow).where(AgentSessionRow.project_id == project_id)
+        )
+        rows = list(result.scalars().all())
+        session_ids = [row.id for row in rows]
+        for row in rows:
+            if row.status == AgentSessionStatus.ACTIVE:
+                continue
+            try:
+                adapter = get_agent_adapter(api_kind=row.api_kind)
+                handle = AgentHandle(
+                    id=row.vendor_agent_id,
+                    provider=row.provider,
+                    cwd=row.cwd,
+                    model=row.model,
+                )
+                await adapter.close(handle)
+            except Exception:
+                pass
+        if session_ids:
+            await self._session.execute(
+                delete(AgentEventRow).where(AgentEventRow.session_id.in_(session_ids))
+            )
+            await self._session.execute(
+                delete(AgentUsageRow).where(AgentUsageRow.session_id.in_(session_ids))
+            )
+            await self._session.execute(
+                delete(AgentSessionRow).where(AgentSessionRow.id.in_(session_ids))
+            )
+        return {"project_id": project_id, "cancelled": cancelled, "sessions_cleared": len(session_ids)}
+
     async def cancel_active_for_company(self, *, company_id: str) -> int:
         """Best-effort cancel of ACTIVE sessions across company projects (subscription suspend)."""
         from prodavan.infrastructure.persistence.models.projects import ProjectRow

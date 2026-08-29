@@ -106,7 +106,7 @@ class ProjectCommand:
             owner_employee_id=employee.id,
             name=name.strip(),
             slug=slug,
-            status=ProjectStatus.ACTIVE,
+            status=ProjectStatus.DRAFT,
             visibility_mode=ProjectVisibilityMode.CABINET_SHARED,
             workspace_key=ws_key,
             container_ref=container_ref_for(ws_key),
@@ -115,14 +115,6 @@ class ProjectCommand:
         self._session.add(row)
         await self._session.flush()
 
-        mat = await self._materialize.materialize_project(
-            session=self._session,
-            project_id=project_id,
-            cabinet_id=cabinet_id,
-            cabinet_name=inst.name,
-            project_name=row.name,
-        )
-        await self._triggers.enqueue(project_id=project_id, kind="project.prepare", payload={"source": "create"})
         await self._events.emit(
             event_type="project.created",
             company_id=row.company_id,
@@ -135,6 +127,112 @@ class ProjectCommand:
                 "created_by_employee_id": employee.id,
                 "visibility_mode": row.visibility_mode,
             },
+        )
+        await self._session.commit()
+        await self._session.refresh(row)
+        return await self._project_public(row)
+
+    async def _get_live_pod(self, project_id: str) -> ProjectPodRow | None:
+        q = await self._session.execute(
+            select(ProjectPodRow).where(
+                ProjectPodRow.project_id == project_id,
+                ProjectPodRow.status.notin_((PodStatus.TERMINATED, PodStatus.FAILED)),
+            )
+        )
+        return q.scalar_one_or_none()
+
+    async def _resolve_enabled_module_ids(self, row: ProjectRow) -> list[str]:
+        from prodavan.application.modules.module_binding_service import ModuleBindingService
+        from prodavan.infrastructure.persistence.models.projects import ProjectModuleBindingRow
+
+        q = await self._session.execute(
+            select(ProjectModuleBindingRow.module_id).where(
+                ProjectModuleBindingRow.project_id == row.id
+            )
+        )
+        bound = list(q.scalars().all())
+        if bound:
+            return bound
+        return await ModuleBindingService(self._session).list_module_ids_for_cabinet(row.cabinet_id)
+
+    async def launch(
+        self,
+        *,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        from prodavan.application.ai_keys.service import AiKeysService
+
+        row = await self._access.require_access(
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+            allow_paused=True,
+        )
+        live_pod = await self._get_live_pod(row.id)
+        if live_pod is not None:
+            raise AppError(
+                code="POD_ALREADY_EXISTS",
+                title="Conflict",
+                status=409,
+                detail="project pod already exists",
+            )
+        if row.status not in {ProjectStatus.DRAFT, ProjectStatus.ACTIVE}:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="project cannot be launched in current status",
+            )
+        if not row.agent_provider:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="agent_provider required before launch",
+            )
+        if not row.resolved_ai_key_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="resolved_ai_key_id required before launch",
+            )
+        inst = await self._cabinets.get_instance(row.cabinet_id)
+        company_policy = await AdminCompanyService(self._session).get_agent_policy(row.company_id)
+        await AiKeysService(self._session).resolve_credentials_for_project(
+            project=row,
+            preferred_provider=row.agent_provider or company_policy.preferred_provider,
+            platform_fallback=company_policy.platform_fallback,
+        )
+        enabled = await self._resolve_enabled_module_ids(row)
+        mat = await self._materialize.materialize_project(
+            session=self._session,
+            project_id=row.id,
+            cabinet_id=row.cabinet_id,
+            cabinet_name=inst.name,
+            project_name=row.name,
+            when="project.created",
+            enabled_module_ids=enabled,
+        )
+        row.materialize_manifest = dict(mat.module_paths or {})
+        await self._pods.provision_for_project(row.id, principal=principal, start=False)
+        await self._pods.sync_desired(
+            row.id,
+            PodDesiredState.RUNNING,
+            principal=principal,
+            reason="launch",
+        )
+        row.status = ProjectStatus.ACTIVE
+        await self._events.emit(
+            event_type="project.started",
+            company_id=row.company_id,
+            project_id=row.id,
+            cabinet_id=row.cabinet_id,
+            principal=principal,
+            payload={"source": "launch"},
         )
         await self._session.commit()
         await self._session.refresh(row)
@@ -324,6 +422,17 @@ class ProjectCommand:
         principal: Principal,
         employee: EmployeeRow | None,
     ) -> dict:
+        return await self.sync_project(
+            project_id=project_id, principal=principal, employee=employee
+        )
+
+    async def sync_project(
+        self,
+        *,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
         row = await self._access.require_access(
             project_id=project_id,
             principal=principal,
@@ -331,31 +440,36 @@ class ProjectCommand:
             write=True,
             allow_paused=True,
         )
+        live_pod = await self._get_live_pod(row.id)
+        if live_pod is None:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="project pod does not exist; launch project first",
+            )
         inst = await self._cabinets.get_instance(row.cabinet_id)
-        mat = await self._materialize.materialize_project(
+        from prodavan.application.modules.module_binding_service import ModuleBindingService
+
+        all_modules = await ModuleBindingService(self._session).list_module_ids_for_cabinet(row.cabinet_id)
+        enabled = await self._resolve_enabled_module_ids(row)
+        mat = await self._materialize.sync_project(
             session=self._session,
-            project_id=row.id,
-            cabinet_id=row.cabinet_id,
+            project=row,
             cabinet_name=inst.name,
-            project_name=row.name,
+            when="project.sync",
+            enabled_module_ids=enabled,
+            all_cabinet_module_ids=all_modules,
         )
 
-        pod_q = await self._session.execute(
-            select(ProjectPodRow).where(
-                ProjectPodRow.project_id == row.id,
-                ProjectPodRow.status.notin_((PodStatus.TERMINATED, PodStatus.FAILED)),
+        live_pod.hydrate_generation += 1
+        if row.status == ProjectStatus.ACTIVE:
+            await self._pods.sync_desired(
+                row.id,
+                PodDesiredState.RUNNING,
+                principal=principal,
+                reason="sync",
             )
-        )
-        pod = pod_q.scalar_one_or_none()
-        if pod is not None:
-            pod.hydrate_generation += 1
-            if row.status == ProjectStatus.ACTIVE:
-                await self._pods.sync_desired(
-                    row.id,
-                    PodDesiredState.RUNNING,
-                    principal=principal,
-                    reason="rematerialize",
-                )
 
         await self._session.commit()
 
@@ -390,6 +504,13 @@ class ProjectCommand:
             )
         if row.status == ProjectStatus.PAUSED:
             return await self._project_public(row)
+        if await self._get_live_pod(row.id) is None:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="project has no pod to pause",
+            )
         await self._stop_and_pause_runtime(row, principal=principal, reason="pause")
         row.status = ProjectStatus.PAUSED
         emit_payload = dict(payload or {})
@@ -427,6 +548,13 @@ class ProjectCommand:
                 title="Validation Error",
                 status=422,
                 detail="project is not paused or completed",
+            )
+        if await self._get_live_pod(row.id) is None:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="project has no pod to resume",
             )
         company_policy = await AdminCompanyService(self._session).get_agent_policy(row.company_id)
         await AiKeysService(self._session).resolve_credentials_for_project(

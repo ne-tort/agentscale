@@ -10,6 +10,7 @@ from enum import StrEnum
 
 
 class ProjectStatus(StrEnum):
+    DRAFT = "draft"
     ACTIVE = "active"
     PAUSED = "paused"
     COMPLETED = "completed"

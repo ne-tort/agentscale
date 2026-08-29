@@ -74,4 +74,11 @@ Row-level **`project_ids`** (JSON array in row body): empty or absent → row ap
 
 Module-level **MP binding** (`module_project_bindings`): if bindings exist, module materializes only for bound projects.
 
-Future base modules (MCP, Files, Prompts, …) follow the same pattern: edit in cabinet UI, scope rows to projects, materialize into Pod workspace on project create/resume.
+Future base modules (MCP, Files, Prompts, …) follow the same pattern: edit in cabinet UI, scope rows to projects, materialize into Pod workspace on **launch** or **sync** (not on create).
+
+## Project lifecycle (employee UI)
+
+- **Create** (`draft`) — DB record + project settings only; no Pod, no workspace files.
+- **Launch** — first materialize + Pod provision (`POST /projects/{id}/launch`); requires agent provider + AI key.
+- **Sync** — apply module binding changes to existing Pod workspace (`POST /projects/{id}/sync`); module folder prune + hydrate.
+- **Agent reset** — cancel sessions + purge chat history (`POST /projects/{id}/agent/reset`); lives in agent BC, not pod_service.

@@ -1896,7 +1896,35 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectAboutLabel => 'О проекте';
 
   @override
+  String get projectAboutColumn => 'О проекте';
+
+  @override
+  String get projectCreatorColumn => 'Создатель';
+
+  @override
   String get projectCreatorLabel => 'Создатель';
+
+  @override
+  String get projectLaunchProject => 'Запустить проект';
+
+  @override
+  String get projectUpdateProject => 'Обновить проект';
+
+  @override
+  String get projectResetAgent => 'Сбросить агента';
+
+  @override
+  String get projectConfigureBeforeLaunch =>
+      'Укажите провайдер агента и ключ перед запуском';
+
+  @override
+  String get projectLaunchSuccess => 'Проект запущен';
+
+  @override
+  String get projectUpdateSuccess => 'Проект обновлён';
+
+  @override
+  String get projectResetSuccess => 'Агент сброшен';
 
   @override
   String get projectAiKeyLabel => 'AI-ключ';

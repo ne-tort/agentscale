@@ -77,20 +77,44 @@ def _setup_cabinet(client: TestClient) -> tuple[str, str, str]:
     return company_id, cab.json()["id"], owner_tok
 
 
+def _configure_and_launch(client: TestClient, owner_h: dict[str, str], project_id: str) -> dict:
+    keys = client.get(f"/api/v1/projects/{project_id}/ai-keys/available", headers=owner_h)
+    assert keys.status_code == 200, keys.text
+    items = keys.json().get("items") or []
+    assert items, keys.text
+    key_id = items[0]["id"]
+    patched = client.patch(
+        f"/api/v1/projects/{project_id}",
+        headers=owner_h,
+        json={"agent_provider": "cursor", "resolved_ai_key_id": key_id},
+    )
+    assert patched.status_code == 200, patched.text
+    launched = client.post(f"/api/v1/projects/{project_id}/launch", headers=owner_h)
+    assert launched.status_code == 200, launched.text
+    return launched.json()
+
+
 @requires_postgres
 def test_project_create_materialize_lifecycle(client: TestClient) -> None:
     _, cabinet_id, owner_tok = _setup_cabinet(client)
+    owner_h = {"Authorization": f"Bearer {owner_tok}"}
     created = client.post(
         f"/api/v1/cabinets/{cabinet_id}/projects",
-        headers={"Authorization": f"Bearer {owner_tok}"},
+        headers=owner_h,
         json={"name": "Demo Run"},
     )
     assert created.status_code == 201, created.text
     body = created.json()
     project_id = body["id"]
-    assert body["status"] == "active"
+    assert body["status"] == "draft"
     assert body["container_ref"].startswith("object-ws:")
-    ws_root = Path(body["materialize"]["workspace_root"])
+    assert "materialize" not in body
+
+    got = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
+    assert got.json().get("runtime") is None
+
+    launched = _configure_and_launch(client, owner_h, project_id)
+    ws_root = Path(launched["materialize"]["workspace_root"])
     assert ws_root.is_dir()
     assert (ws_root / "AGENTS.md").is_file()
     assert (ws_root / "CLAUDE.md").is_file()
@@ -99,28 +123,29 @@ def test_project_create_materialize_lifecycle(client: TestClient) -> None:
 
     listed = client.get(
         f"/api/v1/cabinets/{cabinet_id}/projects",
-        headers={"Authorization": f"Bearer {owner_tok}"},
+        headers=owner_h,
     )
     assert listed.status_code == 200
-    assert any(p["id"] == project_id for p in listed.json()["items"])
+    listed_item = next(p for p in listed.json()["items"] if p["id"] == project_id)
+    assert listed_item.get("created_by_login")
 
     paused = client.post(
         f"/api/v1/projects/{project_id}/pause",
-        headers={"Authorization": f"Bearer {owner_tok}"},
+        headers=owner_h,
     )
     assert paused.status_code == 200
     assert paused.json()["status"] == "paused"
 
     resumed = client.post(
         f"/api/v1/projects/{project_id}/resume",
-        headers={"Authorization": f"Bearer {owner_tok}"},
+        headers=owner_h,
     )
     assert resumed.status_code == 200
     assert resumed.json()["status"] == "active"
 
     trig = client.post(
         f"/api/v1/projects/{project_id}/triggers",
-        headers={"Authorization": f"Bearer {owner_tok}"},
+        headers=owner_h,
         json={"kind": "chat.message", "payload": {"text": "hello"}},
     )
     assert trig.status_code == 202
@@ -128,7 +153,7 @@ def test_project_create_materialize_lifecycle(client: TestClient) -> None:
 
     att = client.post(
         f"/api/v1/projects/{project_id}/attachments",
-        headers={"Authorization": f"Bearer {owner_tok}"},
+        headers=owner_h,
         json={
             "filename": "note.txt",
             "content_base64": base64.b64encode(b"hello file").decode("ascii"),
@@ -140,7 +165,7 @@ def test_project_create_materialize_lifecycle(client: TestClient) -> None:
 
     deleted = client.delete(
         f"/api/v1/projects/{project_id}",
-        headers={"Authorization": f"Bearer {owner_tok}"},
+        headers=owner_h,
     )
     assert deleted.status_code == 200
     assert deleted.json()["status"] == "deleted"
@@ -148,7 +173,7 @@ def test_project_create_materialize_lifecycle(client: TestClient) -> None:
 
     purged = client.delete(
         f"/api/v1/projects/{project_id}/purge",
-        headers={"Authorization": f"Bearer {owner_tok}"},
+        headers=owner_h,
     )
     assert purged.status_code == 200, purged.text
     assert not ws_root.exists()
@@ -166,6 +191,7 @@ def test_rematerialize_allowed_when_paused(client: TestClient) -> None:
     )
     assert created.status_code == 201, created.text
     project_id = created.json()["id"]
+    _configure_and_launch(client, owner_h, project_id)
 
     paused = client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
     assert paused.status_code == 200
@@ -196,6 +222,7 @@ def test_paused_allows_patch_and_attachment_delete_blocks_upload(client: TestCli
     )
     assert created.status_code == 201, created.text
     project_id = created.json()["id"]
+    _configure_and_launch(client, owner_h, project_id)
 
     att = client.post(
         f"/api/v1/projects/{project_id}/attachments",

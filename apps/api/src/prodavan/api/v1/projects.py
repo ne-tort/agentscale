@@ -194,6 +194,18 @@ async def list_project_ai_keys(
     return {"items": items}
 
 
+@router.post("/projects/{project_id}/launch")
+async def launch_project(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await ProjectCommand(session).launch(
+        project_id=project_id, principal=principal, employee=employee
+    )
+
+
 @router.post("/projects/{project_id}/materialize")
 async def rematerialize_project(
     project_id: str,
@@ -201,9 +213,51 @@ async def rematerialize_project(
     session: SessionDep,
     employee: EmployeeDep,
 ) -> dict:
-    return await ProjectCommand(session).rematerialize(
+    return await ProjectCommand(session).sync_project(
         project_id=project_id, principal=principal, employee=employee
     )
+
+
+@router.post("/projects/{project_id}/sync")
+async def sync_project(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await ProjectCommand(session).sync_project(
+        project_id=project_id, principal=principal, employee=employee
+    )
+
+
+@router.post("/projects/{project_id}/agent/reset")
+async def reset_project_agent(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.agent.session_service import AgentSessionService
+    from prodavan.application.project_service import ProjectAccessPolicy
+    from prodavan.domain.projects import ProjectStatus
+
+    row = await ProjectAccessPolicy(session).require_access(
+        project_id=project_id,
+        principal=principal,
+        employee=employee,
+        write=True,
+        allow_paused=True,
+    )
+    if row.status == ProjectStatus.DRAFT:
+        raise AppError(
+            code="VALIDATION_ERROR",
+            title="Validation Error",
+            status=422,
+            detail="project not launched",
+        )
+    result = await AgentSessionService(session).reset_for_project(project_id=project_id)
+    await session.commit()
+    return result
 
 
 @router.post("/projects/{project_id}/pause")

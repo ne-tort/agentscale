@@ -1893,7 +1893,35 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectAboutLabel => 'About';
 
   @override
+  String get projectAboutColumn => 'About';
+
+  @override
+  String get projectCreatorColumn => 'Creator';
+
+  @override
   String get projectCreatorLabel => 'Creator';
+
+  @override
+  String get projectLaunchProject => 'Launch project';
+
+  @override
+  String get projectUpdateProject => 'Update project';
+
+  @override
+  String get projectResetAgent => 'Reset agent';
+
+  @override
+  String get projectConfigureBeforeLaunch =>
+      'Set agent provider and AI key before launch';
+
+  @override
+  String get projectLaunchSuccess => 'Project launched';
+
+  @override
+  String get projectUpdateSuccess => 'Project updated';
+
+  @override
+  String get projectResetSuccess => 'Agent reset';
 
   @override
   String get projectAiKeyLabel => 'AI key';

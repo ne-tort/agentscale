@@ -135,7 +135,7 @@ def _prompts_materialize_rules() -> list[dict[str, Any]]:
         {
             "id": "agents_active_profile",
             "enabled": True,
-            "when": ["project.created", "project.resumed"],
+            "when": ["project.created", "project.resumed", "project.sync"],
             "priority": 10,
             "source": {
                 "type": "row",
@@ -160,7 +160,7 @@ def _prompts_materialize_rules() -> list[dict[str, Any]]:
             {
                 "id": f"{block_type}_active_profile",
                 "enabled": True,
-                "when": ["project.created", "project.resumed"],
+                "when": ["project.created", "project.resumed", "project.sync"],
                 "priority": prio,
                 "source": {
                     "type": "rows",
@@ -473,7 +473,7 @@ def mod_files_meta() -> dict[str, list[Any]]:
             {
                 "id": "files_to_workspace",
                 "enabled": True,
-                "when": ["project.created", "project.resumed"],
+                "when": ["project.created", "project.resumed", "project.sync"],
                 "priority": 50,
                 "source": {"type": "rows", "table_slug": "files"},
                 "target": {
@@ -574,7 +574,7 @@ def mod_mcp_meta() -> dict[str, list[Any]]:
             {
                 "id": "mcp_packages_enabled",
                 "enabled": True,
-                "when": ["project.created", "project.resumed"],
+                "when": ["project.created", "project.resumed", "project.sync"],
                 "priority": 60,
                 "source": {
                     "type": "rows",

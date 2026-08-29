@@ -50,6 +50,8 @@ class AgentTriggerDispatcher:
         )
         if project.status == ProjectStatus.PAUSED:
             return {"dispatched": False, "reason": "project_paused"}
+        if project.status == ProjectStatus.DRAFT:
+            return {"dispatched": False, "reason": "project_not_launched"}
         return await self._dispatch_one(project_id=project_id, principal=principal, employee=employee)
 
     async def dispatch_batch(
@@ -70,6 +72,8 @@ class AgentTriggerDispatcher:
         )
         if project.status == ProjectStatus.PAUSED:
             return {"dispatched": False, "reason": "project_paused", "items": []}
+        if project.status == ProjectStatus.DRAFT:
+            return {"dispatched": False, "reason": "project_not_launched", "items": []}
         limit = max_n if 1 <= max_n <= _HARD_DRAIN_MAX else _DEFAULT_DRAIN_MAX
         results: list[dict] = []
         for _ in range(limit):
@@ -306,6 +310,13 @@ class AgentTriggerDispatcher:
 
         try:
             if trigger.kind in {"chat.message", "telegram.message", "chat.regenerate"}:
+                project = await self._projects.get_project(project_id)
+                if project.status == ProjectStatus.DRAFT:
+                    return await self._finish_hard_fail(trigger, "project_not_launched")
+                from prodavan.application.pod_service.query import PodQuery
+
+                if await PodQuery(self._session).get_for_project(project_id) is None:
+                    return await self._finish_hard_fail(trigger, "project_not_launched")
                 await self._pods.ensure_running_for_project(project_id, principal=principal)
 
             if trigger.kind in {"chat.message", "telegram.message"}:

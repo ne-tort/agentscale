@@ -45,6 +45,7 @@ class MaterializePlanner:
         cabinet_id: str,
         project_id: str,
         when: str = "project.created",
+        enabled_module_ids: list[str] | None = None,
     ) -> tuple[list[MaterializeOp], str | None]:
         inst = await self._session.get(CabinetInstanceRow, cabinet_id)
         if inst is None:
@@ -53,7 +54,9 @@ class MaterializePlanner:
             schema_name=inst.schema_name,
             project_id=project_id,
         )
-        module_ids = await self._bindings.list_module_ids_for_cabinet(cabinet_id)
+        module_ids = enabled_module_ids
+        if module_ids is None:
+            module_ids = await self._bindings.list_module_ids_for_cabinet(cabinet_id)
         ops: list[MaterializeOp] = []
         for module_id in module_ids:
             bound_projects = await self._bindings.list_project_ids(module_id)
@@ -101,6 +104,37 @@ class MaterializePlanner:
                     ops.extend(row_ops)
         ops.sort(key=lambda o: (o.priority, o.rule_id))
         return ops, active_profile_id
+
+    async def load_workspace_roots(self, module_id: str) -> list[str]:
+        q = await self._session.execute(
+            select(ModuleMetaDocumentRow.body).where(
+                ModuleMetaDocumentRow.module_id == module_id,
+                ModuleMetaDocumentRow.slug == "materialize_roots",
+            )
+        )
+        body = q.scalar_one_or_none()
+        if isinstance(body, dict):
+            roots = body.get("workspace_roots")
+            if isinstance(roots, list):
+                return [str(r) for r in roots if r]
+        return []
+
+    async def plan_paths_for_module(
+        self,
+        *,
+        cabinet_id: str,
+        project_id: str,
+        module_id: str,
+        when: str = "project.sync",
+    ) -> list[str]:
+        """All workspace paths this module would write (for prune of disabled modules)."""
+        ops, _ = await self.plan_for_project(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            when=when,
+            enabled_module_ids=[module_id],
+        )
+        return [op.workspace_path for op in ops if op.workspace_path]
 
     async def _load_materialize_rules(self, module_id: str) -> list[dict[str, Any]]:
         q = await self._session.execute(

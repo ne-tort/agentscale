@@ -5,11 +5,12 @@ alwaysApply: true
 
 # Deploy via PR
 
-Self-contained product/infra fixes (UI polish, API fixes, docs, tests) **commit → push → PR** and follow GitOps. Do not stop at a local commit when the change is ready to ship.
+Self-contained product/infra fixes (UI polish, API fixes, docs, tests) **commit → push → PR** in the **same session** — no «done» without a PR URL. Follow GitOps. Do not stop at a local commit or unpushed branch when the change is ready to ship.
 
 Flow: **PR → CI Gate → Auto-merge → CI Images → Argo sync → Verify Dev**.
 
-- Do not ask “commit?” again if the user already said to deploy / PR / ship.
+- **Task is not done until PR exists** — always end with commit + push + PR link for the user.
+- Do not ask “commit?” or “create PR?” when the diff is ready — do it immediately.
 - Do not bypass GitOps (`kubectl apply`, manual migrate, local-only “done”).
 - Keep `tools/_*.sh` and secrets out of the PR.
 - If CI Gate fails, fix on the same PR branch and push; wait for green Verify Dev before declaring done.

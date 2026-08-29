@@ -61,6 +61,10 @@ def project_is_soft_deleted(row: Any) -> bool:
     return str(getattr(row, "status", "") or "") == ProjectStatus.DELETED
 
 
+def project_is_draft(row: Any) -> bool:
+    return str(getattr(row, "status", "") or "") == ProjectStatus.DRAFT
+
+
 def project_is_paused(row: Any) -> bool:
     return str(getattr(row, "status", "") or "") == ProjectStatus.PAUSED
 

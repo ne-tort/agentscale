@@ -148,6 +148,34 @@ class WorkspaceLayoutWriter:
         key = inbox_object_key(workspace_key=self._workspace_key, filename=safe)
         return ensure_file_store().get_bytes_sync(key)
 
+    def remove_relative_path(self, relative_path: str) -> None:
+        rel = relative_path.lstrip("/").replace("\\", "/")
+        key = workspace_object_key(workspace_key=self._workspace_key, relative_path=rel)
+        try:
+            ensure_file_store().delete_sync(key)
+        except FileNotFoundError:
+            pass
+        local = self._root / rel
+        if local.is_file():
+            local.unlink(missing_ok=True)
+        elif local.is_dir():
+            shutil.rmtree(local, ignore_errors=True)
+
+    def wipe_prefix(self, prefix: str) -> None:
+        rel = prefix.lstrip("/").replace("\\", "/")
+        if rel and not rel.endswith("/"):
+            if "/" not in rel and "." in rel.split("/")[-1]:
+                self.remove_relative_path(rel)
+                return
+            rel = f"{rel}/"
+        key_prefix = workspace_object_key(workspace_key=self._workspace_key, relative_path=rel)
+        ensure_file_store().delete_prefix_sync(key_prefix)
+        local = self._root / rel
+        if local.is_dir():
+            shutil.rmtree(local, ignore_errors=True)
+        elif local.is_file():
+            local.unlink(missing_ok=True)
+
     def remove_project_tree(self) -> dict[str, Any]:
         """Stop MCP sandboxes, wipe object-store prefix (verified), then local FS tree."""
         from prodavan.application.projects.project_wipe import wipe_project_tree

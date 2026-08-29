@@ -3482,11 +3482,65 @@ abstract class AppLocalizations {
   /// **'About'**
   String get projectAboutLabel;
 
+  /// No description provided for @projectAboutColumn.
+  ///
+  /// In en, this message translates to:
+  /// **'About'**
+  String get projectAboutColumn;
+
+  /// No description provided for @projectCreatorColumn.
+  ///
+  /// In en, this message translates to:
+  /// **'Creator'**
+  String get projectCreatorColumn;
+
   /// No description provided for @projectCreatorLabel.
   ///
   /// In en, this message translates to:
   /// **'Creator'**
   String get projectCreatorLabel;
+
+  /// No description provided for @projectLaunchProject.
+  ///
+  /// In en, this message translates to:
+  /// **'Launch project'**
+  String get projectLaunchProject;
+
+  /// No description provided for @projectUpdateProject.
+  ///
+  /// In en, this message translates to:
+  /// **'Update project'**
+  String get projectUpdateProject;
+
+  /// No description provided for @projectResetAgent.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset agent'**
+  String get projectResetAgent;
+
+  /// No description provided for @projectConfigureBeforeLaunch.
+  ///
+  /// In en, this message translates to:
+  /// **'Set agent provider and AI key before launch'**
+  String get projectConfigureBeforeLaunch;
+
+  /// No description provided for @projectLaunchSuccess.
+  ///
+  /// In en, this message translates to:
+  /// **'Project launched'**
+  String get projectLaunchSuccess;
+
+  /// No description provided for @projectUpdateSuccess.
+  ///
+  /// In en, this message translates to:
+  /// **'Project updated'**
+  String get projectUpdateSuccess;
+
+  /// No description provided for @projectResetSuccess.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent reset'**
+  String get projectResetSuccess;
 
   /// No description provided for @projectAiKeyLabel.
   ///

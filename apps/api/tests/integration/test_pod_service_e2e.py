@@ -99,6 +99,23 @@ def _setup_two_projects(client: TestClient) -> tuple[str, str, dict[str, str], s
     return company_id, admin, owner_h, project_a, proj_b.json()["id"]
 
 
+def _configure_and_launch(client: TestClient, owner_h: dict[str, str], project_id: str) -> dict:
+    keys = client.get(f"/api/v1/projects/{project_id}/ai-keys/available", headers=owner_h)
+    assert keys.status_code == 200, keys.text
+    items = keys.json().get("items") or []
+    assert items, keys.text
+    key_id = items[0]["id"]
+    patched = client.patch(
+        f"/api/v1/projects/{project_id}",
+        headers=owner_h,
+        json={"agent_provider": "cursor", "resolved_ai_key_id": key_id},
+    )
+    assert patched.status_code == 200, patched.text
+    launched = client.post(f"/api/v1/projects/{project_id}/launch", headers=owner_h)
+    assert launched.status_code == 200, launched.text
+    return launched.json()
+
+
 def _ensure_pod_running(client: TestClient, owner_h: dict[str, str], project_id: str) -> dict:
     got = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
     assert got.status_code == 200, got.text
@@ -107,12 +124,11 @@ def _ensure_pod_running(client: TestClient, owner_h: dict[str, str], project_id:
     if runtime is not None and runtime.get("status") == "running":
         return runtime
 
-    if body.get("status") == "active":
-        paused = client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
-        assert paused.status_code == 200, paused.text
-
-    resumed = client.post(f"/api/v1/projects/{project_id}/resume", headers=owner_h)
-    assert resumed.status_code == 200, resumed.text
+    if body.get("status") == "draft" or runtime is None:
+        _configure_and_launch(client, owner_h, project_id)
+    elif body.get("status") == "paused":
+        resumed = client.post(f"/api/v1/projects/{project_id}/resume", headers=owner_h)
+        assert resumed.status_code == 200, resumed.text
 
     after = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
     runtime = after.json().get("runtime")
@@ -138,24 +154,19 @@ def _platform_events(
 
 @requires_postgres
 def test_project_runtime_lifecycle(client: TestClient) -> None:
-    """Create → no runtime; resume → running; pause → paused."""
+    """Create draft → launch → running; pause → paused; resume → running."""
     _, admin, owner_h, project_id = _setup_project(client)
     admin_h = {"Authorization": f"Bearer {admin}"}
 
     got = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
     assert got.status_code == 200, got.text
+    assert got.json()["status"] == "draft"
     assert got.json().get("runtime") is None
 
-    client.post(f"/api/v1/projects/{project_id}/triggers/dispatch?max=10", headers=owner_h)
+    _configure_and_launch(client, owner_h, project_id)
 
-    client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
-
-    resumed = client.post(f"/api/v1/projects/{project_id}/resume", headers=owner_h)
-    assert resumed.status_code == 200, resumed.text
-    assert resumed.json()["status"] == "active"
-
-    active_after_resume = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
-    assert active_after_resume.json()["runtime"]["status"] == "running"
+    active_after_launch = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
+    assert active_after_launch.json()["runtime"]["status"] == "running"
 
     paused = client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
     assert paused.status_code == 200, paused.text
@@ -186,6 +197,7 @@ def test_pause_emits_pod_before_project_event(client: TestClient) -> None:
     _, admin, owner_h, project_id = _setup_project(client)
     admin_h = {"Authorization": f"Bearer {admin}"}
 
+    _configure_and_launch(client, owner_h, project_id)
     client.post(f"/api/v1/projects/{project_id}/triggers/dispatch?max=10", headers=owner_h)
     client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
     client.post(f"/api/v1/projects/{project_id}/resume", headers=owner_h)
@@ -197,15 +209,9 @@ def test_pause_emits_pod_before_project_event(client: TestClient) -> None:
 
 
 @requires_postgres
-def test_trigger_dispatch_lazy_starts_pod(client: TestClient) -> None:
-    """Active project without resume: first chat dispatch provisions and starts pod."""
-    _, admin, owner_h, project_id = _setup_project(client)
-    admin_h = {"Authorization": f"Bearer {admin}"}
-
-    client.post(f"/api/v1/projects/{project_id}/triggers/dispatch?max=10", headers=owner_h)
-
-    before = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
-    assert before.json().get("runtime") is None
+def test_trigger_dispatch_requires_launch(client: TestClient) -> None:
+    """Draft project: chat dispatch fails until explicit launch."""
+    _, _, owner_h, project_id = _setup_project(client)
 
     queued = client.post(
         f"/api/v1/projects/{project_id}/triggers",
@@ -219,26 +225,32 @@ def test_trigger_dispatch_lazy_starts_pod(client: TestClient) -> None:
         headers=owner_h,
     )
     assert dispatched.status_code == 200, dispatched.text
-    assert dispatched.json().get("dispatched") is True
+    assert dispatched.json().get("dispatched") is False
+    assert any(
+        item.get("reason") == "project_not_launched"
+        for item in (dispatched.json().get("items") or [])
+    ) or dispatched.json().get("reason") == "project_not_launched"
+
+    _configure_and_launch(client, owner_h, project_id)
+
+    queued2 = client.post(
+        f"/api/v1/projects/{project_id}/triggers",
+        headers=owner_h,
+        json={"kind": "chat.message", "payload": {"text": "after launch"}},
+    )
+    assert queued2.status_code == 202, queued2.text
+
+    dispatched2 = client.post(
+        f"/api/v1/projects/{project_id}/triggers/dispatch?max=5",
+        headers=owner_h,
+    )
+    assert dispatched2.status_code == 200, dispatched2.text
+    assert dispatched2.json().get("dispatched") is True
 
     after = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
     runtime = after.json().get("runtime")
     assert runtime is not None
     assert runtime["status"] == "running"
-    assert runtime["desired_state"] == "running"
-
-    events = _platform_events(client, admin_h=admin_h, project_id=project_id, event_type="pod.started")
-    assert len(events) >= 1
-
-    started = _platform_events(
-        client, admin_h=admin_h, project_id=project_id, event_type="project.started"
-    )
-    assert len(started) >= 1
-
-    hydrated = _platform_events(
-        client, admin_h=admin_h, project_id=project_id, event_type="pod.hydrated"
-    )
-    assert len(hydrated) >= 1
 
 
 @requires_postgres
@@ -246,9 +258,7 @@ def test_delete_emits_pod_terminated(client: TestClient) -> None:
     _, admin, owner_h, project_id = _setup_project(client)
     admin_h = {"Authorization": f"Bearer {admin}"}
 
-    client.post(f"/api/v1/projects/{project_id}/triggers/dispatch?max=10", headers=owner_h)
-    client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
-    client.post(f"/api/v1/projects/{project_id}/resume", headers=owner_h)
+    _ensure_pod_running(client, owner_h, project_id)
 
     deleted = client.delete(f"/api/v1/projects/{project_id}", headers=owner_h)
     assert deleted.status_code == 200, deleted.text
@@ -285,9 +295,7 @@ def test_admin_force_kill_and_reconcile(client: TestClient) -> None:
     _, admin, owner_h, project_id = _setup_project(client)
     admin_h = {"Authorization": f"Bearer {admin}"}
 
-    client.post(f"/api/v1/projects/{project_id}/triggers/dispatch?max=10", headers=owner_h)
-    client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
-    client.post(f"/api/v1/projects/{project_id}/resume", headers=owner_h)
+    _ensure_pod_running(client, owner_h, project_id)
 
     row = client.get(f"/api/v1/admin/containers/{project_id}", headers=admin_h)
     assert row.status_code == 200, row.text

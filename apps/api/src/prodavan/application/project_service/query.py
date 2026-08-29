@@ -33,7 +33,17 @@ class ProjectQuery:
     async def _project_public(self, row: ProjectRow, *, include_runtime: bool = False) -> dict:
         limits = await self._attachment_limits(row.company_id)
         subscription = await self._subscription.subscription_state(row.company_id)
-        out = project_public(row, limits=limits, company_subscription=subscription)
+        created_by_login: str | None = None
+        if row.owner_employee_id:
+            owner = await self._session.get(EmployeeRow, row.owner_employee_id)
+            if owner is not None:
+                created_by_login = owner.login
+        out = project_public(
+            row,
+            limits=limits,
+            company_subscription=subscription,
+            created_by_login=created_by_login,
+        )
         if include_runtime:
             out["runtime"] = await PodQuery(self._session).runtime_summary(row.id)
         return out
@@ -67,13 +77,29 @@ class ProjectQuery:
             .where(ProjectRow.cabinet_id == cabinet_id, ProjectRow.status != ProjectStatus.DELETED)
             .order_by(ProjectRow.created_at.desc())
         )
+        rows = list(q.scalars().all())
+        owner_ids = {r.owner_employee_id for r in rows if r.owner_employee_id}
+        logins: dict[str, str] = {}
+        if owner_ids:
+            eq = await self._session.execute(
+                select(EmployeeRow.id, EmployeeRow.login).where(EmployeeRow.id.in_(owner_ids))
+            )
+            logins = {eid: login for eid, login in eq.all()}
         items: list[dict] = []
-        for row in q.scalars().all():
+        for row in rows:
             if not await self._access.can_view_project(
                 project=row, principal=principal, employee=employee
             ):
                 continue
-            items.append(project_public(row, limits=limits, company_subscription=subscription))
+            login = logins.get(row.owner_employee_id) if row.owner_employee_id else None
+            items.append(
+                project_public(
+                    row,
+                    limits=limits,
+                    company_subscription=subscription,
+                    created_by_login=login,
+                )
+            )
         return items
 
     async def list_ids(
