@@ -147,8 +147,8 @@ class AgentSessionService:
             session_id=None,
             policy=company_policy,
         )
-        credential = await self._keys.resolve_credentials(
-            company_id=project.company_id,
+        credential = await self._keys.resolve_credentials_for_project(
+            project=project,
             preferred_provider=project.agent_provider or company_policy.preferred_provider,
             platform_fallback=company_policy.platform_fallback,
         )

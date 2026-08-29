@@ -54,10 +54,24 @@ class CompanyAiKeyBindingRow(Base):
 
 class EmployeeAiKeyBindingRow(Base):
     __tablename__ = "employee_ai_key_bindings"
-    __table_args__ = (UniqueConstraint("employee_id", "key_id", name="uq_employee_ai_key"),)
+    __table_args__ = (
+        UniqueConstraint("company_id", "employee_id", "key_id", name="uq_employee_ai_key_company"),
+    )
 
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: _id("ekb"))
+    company_id: Mapped[str] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     employee_id: Mapped[str] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    key_id: Mapped[str] = mapped_column(ForeignKey("ai_provider_keys.id", ondelete="CASCADE"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ProjectAiKeyBindingRow(Base):
+    __tablename__ = "project_ai_key_bindings"
+    __table_args__ = (UniqueConstraint("project_id", "key_id", name="uq_project_ai_key"),)
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: _id("pkb"))
+    company_id: Mapped[str] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     key_id: Mapped[str] = mapped_column(ForeignKey("ai_provider_keys.id", ondelete="CASCADE"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

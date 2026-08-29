@@ -37,10 +37,14 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
   String _displayName = '';
   List<Map<String, dynamic>> _employees = const [];
   List<Map<String, dynamic>> _cabinets = const [];
+  List<Map<String, dynamic>> _projects = const [];
   Set<String> _boundEmployeeIds = const {};
   Set<String> _boundCabinetIds = const {};
+  Set<String> _boundProjectIds = const {};
 
   bool get _writable => companyEntityWritable(_key ?? const {});
+
+  bool get _scopeEditable => _key != null;
 
   @override
   void initState() {
@@ -66,18 +70,16 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
         companyId: widget.companyId,
         keyId: widget.keyId,
       );
-      final writable = companyEntityWritable(key);
       final employees = await companyContext.api.listEmployees(widget.companyId);
       final cabinets = await companyContext.api.listOrgCabinets(widget.companyId);
+      final containers = await companyContext.api.listContainers(companyId: widget.companyId);
       Map<String, dynamic> bindings = const {};
-      if (writable) {
-        try {
-          bindings = await companyContext.api.getAiKeyScopeBindings(
-            companyId: widget.companyId,
-            keyId: widget.keyId,
-          );
-        } catch (_) {}
-      }
+      try {
+        bindings = await companyContext.api.getAiKeyScopeBindings(
+          companyId: widget.companyId,
+          keyId: widget.keyId,
+        );
+      } catch (_) {}
       if (!mounted) return;
       if (silent && appRefreshDataEquals(_key, key) && !_loading) return;
       setState(() {
@@ -85,8 +87,10 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
         _displayName = key['name'] as String? ?? widget.keyName;
         _employees = employees;
         _cabinets = cabinets;
+        _projects = containers;
         _boundEmployeeIds = (bindings['employee_ids'] as List?)?.cast<String>().toSet() ?? {};
         _boundCabinetIds = (bindings['cabinet_ids'] as List?)?.cast<String>().toSet() ?? {};
+        _boundProjectIds = (bindings['project_ids'] as List?)?.cast<String>().toSet() ?? {};
         _loading = false;
       });
     } catch (e) {
@@ -313,7 +317,7 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
               icon: Icons.pause_circle_outline_rounded,
               onTap: _pauseKey,
             ),
-          if (_writable && _employees.isNotEmpty)
+          if (_scopeEditable && _employees.isNotEmpty)
             AppMultiChoicePreference<String>(
               title: l10n.navEmployees,
               icon: Icons.group_outlined,
@@ -330,11 +334,12 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
                   keyId: widget.keyId,
                   employeeIds: ids.toList(),
                   cabinetIds: _boundCabinetIds.toList(),
+                  projectIds: _boundProjectIds.toList(),
                 );
                 await _load();
               },
             ),
-          if (_writable && _cabinets.isNotEmpty)
+          if (_scopeEditable && _cabinets.isNotEmpty)
             AppMultiChoicePreference<String>(
               title: l10n.navCabinets,
               icon: Icons.view_module_outlined,
@@ -351,6 +356,32 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
                   keyId: widget.keyId,
                   employeeIds: _boundEmployeeIds.toList(),
                   cabinetIds: ids.toList(),
+                  projectIds: _boundProjectIds.toList(),
+                );
+                await _load();
+              },
+            ),
+          if (_scopeEditable && _projects.isNotEmpty)
+            AppMultiChoicePreference<String>(
+              title: l10n.navProjects,
+              icon: Icons.folder_outlined,
+              values: _boundProjectIds,
+              choices: _projects.map((p) => p['id'] as String).whereType<String>().toList(),
+              keyFor: (id) => id,
+              labelFor: (id) {
+                final p = _projects.firstWhere(
+                  (x) => x['id'] == id,
+                  orElse: () => {'project_name': id},
+                );
+                return p['project_name'] as String? ?? p['name'] as String? ?? id;
+              },
+              onSave: (ids) async {
+                await companyContext.api.setAiKeyScopeBindings(
+                  companyId: widget.companyId,
+                  keyId: widget.keyId,
+                  employeeIds: _boundEmployeeIds.toList(),
+                  cabinetIds: _boundCabinetIds.toList(),
+                  projectIds: ids.toList(),
                 );
                 await _load();
               },

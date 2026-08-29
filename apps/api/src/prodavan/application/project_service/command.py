@@ -429,8 +429,8 @@ class ProjectCommand:
                 detail="project is not paused or completed",
             )
         company_policy = await AdminCompanyService(self._session).get_agent_policy(row.company_id)
-        await AiKeysService(self._session).resolve_credentials(
-            company_id=row.company_id,
+        await AiKeysService(self._session).resolve_credentials_for_project(
+            project=row,
             preferred_provider=row.agent_provider or company_policy.preferred_provider,
             platform_fallback=company_policy.platform_fallback,
         )

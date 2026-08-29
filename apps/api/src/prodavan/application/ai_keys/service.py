@@ -25,8 +25,9 @@ from prodavan.infrastructure.persistence.models.ai_keys import (
     CabinetAiKeyBindingRow,
     CompanyAiKeyBindingRow,
     EmployeeAiKeyBindingRow,
+    ProjectAiKeyBindingRow,
 )
-from prodavan.infrastructure.persistence.models.identity import CompanyRow, EmployeeRow
+from prodavan.infrastructure.persistence.models.identity import CompanyRow, MembershipRow
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
 from prodavan.infrastructure.secrets.file_store import new_key_id
 from prodavan.infrastructure.secrets.store import SecretStore, get_secret_store
@@ -340,6 +341,10 @@ class AiKeysService:
             out.append(pub)
         return out
 
+    async def require_company_key_visible(self, key_id: str, company_id: str) -> AiProviderKeyRow:
+        await self.get_key_for_company(key_id, company_id)
+        return await self._get_row(key_id)
+
     async def require_company_writable_key(self, key_id: str, company_id: str) -> AiProviderKeyRow:
         row = await self._get_row(key_id)
         if row.owner_scope != "company" or row.owner_company_id != company_id:
@@ -464,13 +469,19 @@ class AiKeysService:
         self, key_id: str, company_ids: list[str], *, principal: Principal | None = None
     ) -> dict:
         await self._get_row(key_id)
+        old_ids = set(await self._company_ids(key_id))
         await self._replace_bindings(key_id, company_ids)
+        new_ids = set(await self._company_ids(key_id))
+        removed = old_ids - new_ids
+        actor = principal or Principal(sub="system:ai-key-cascade")
+        for company_id in removed:
+            await self.cascade_company_key_revoked(company_id, key_id, principal=actor)
         await self._session.commit()
         await self._emit_audit(
             event_type="ai_key.companies_set",
             key_id=key_id,
             principal=principal,
-            detail={"company_ids": list(company_ids)},
+            detail={"company_ids": list(company_ids), "removed_company_ids": list(removed)},
         )
         return await self.get_key(key_id)
 
@@ -503,6 +514,8 @@ class AiKeysService:
         from prodavan.application.agent.session_service import AgentSessionService
         from prodavan.application.project_service import ProjectCommand, ProjectQuery
         from prodavan.domain.projects import ProjectStatus
+
+        await self._clear_scope_bindings_for_key(key_id)
 
         actor = principal or Principal(sub="system:ai-key-cascade")
         sessions_cancelled = await AgentSessionService(self._session).cancel_active_for_key(
@@ -682,47 +695,105 @@ class AiKeysService:
         for cid in unique:
             self._session.add(CompanyAiKeyBindingRow(company_id=cid, key_id=key_id))
 
-    async def list_available_keys_for_project(self, *, project: ProjectRow) -> list[dict]:
-        ids: set[str] = set()
-        items: list[dict] = []
-        if project.resolved_ai_key_id:
-            ids.add(project.resolved_ai_key_id)
-        if project.owner_employee_id:
-            q = await self._session.execute(
-                select(AiProviderKeyRow)
-                .join(EmployeeAiKeyBindingRow, EmployeeAiKeyBindingRow.key_id == AiProviderKeyRow.id)
-                .where(
-                    EmployeeAiKeyBindingRow.employee_id == project.owner_employee_id,
-                    AiProviderKeyRow.status == KeyStatus.ACTIVE,
-                )
-            )
-            for row in q.scalars().all():
-                ids.add(row.id)
-        q_cab = await self._session.execute(
-            select(AiProviderKeyRow)
-            .join(CabinetAiKeyBindingRow, CabinetAiKeyBindingRow.key_id == AiProviderKeyRow.id)
-            .where(
-                CabinetAiKeyBindingRow.cabinet_id == project.cabinet_id,
-                AiProviderKeyRow.status == KeyStatus.ACTIVE,
-            )
+    async def _has_scope_bindings_for_company(self, key_id: str, company_id: str) -> bool:
+        from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
+
+        eq = await self._session.execute(
+            select(EmployeeAiKeyBindingRow.id).where(
+                EmployeeAiKeyBindingRow.key_id == key_id,
+                EmployeeAiKeyBindingRow.company_id == company_id,
+            ).limit(1)
         )
-        for row in q_cab.scalars().all():
-            ids.add(row.id)
+        if eq.scalar_one_or_none() is not None:
+            return True
+        cq = await self._session.execute(
+            select(CabinetAiKeyBindingRow.id)
+            .join(CabinetInstanceRow, CabinetInstanceRow.id == CabinetAiKeyBindingRow.cabinet_id)
+            .where(
+                CabinetAiKeyBindingRow.key_id == key_id,
+                CabinetInstanceRow.company_id == company_id,
+            )
+            .limit(1)
+        )
+        if cq.scalar_one_or_none() is not None:
+            return True
+        pq = await self._session.execute(
+            select(ProjectAiKeyBindingRow.id).where(
+                ProjectAiKeyBindingRow.key_id == key_id,
+                ProjectAiKeyBindingRow.company_id == company_id,
+            ).limit(1)
+        )
+        return pq.scalar_one_or_none() is not None
+
+    async def project_is_key_allowed(self, project: ProjectRow, key_id: str) -> bool:
+        try:
+            await self.get_key_for_company(key_id, project.company_id)
+        except AppError:
+            return False
+        if not await self._has_scope_bindings_for_company(key_id, project.company_id):
+            return True
+        if project.owner_employee_id:
+            eq = await self._session.execute(
+                select(EmployeeAiKeyBindingRow.id).where(
+                    EmployeeAiKeyBindingRow.key_id == key_id,
+                    EmployeeAiKeyBindingRow.company_id == project.company_id,
+                    EmployeeAiKeyBindingRow.employee_id == project.owner_employee_id,
+                ).limit(1)
+            )
+            if eq.scalar_one_or_none() is not None:
+                return True
+        from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
+
+        cq = await self._session.execute(
+            select(CabinetAiKeyBindingRow.id)
+            .join(CabinetInstanceRow, CabinetInstanceRow.id == CabinetAiKeyBindingRow.cabinet_id)
+            .where(
+                CabinetAiKeyBindingRow.key_id == key_id,
+                CabinetAiKeyBindingRow.cabinet_id == project.cabinet_id,
+                CabinetInstanceRow.company_id == project.company_id,
+            )
+            .limit(1)
+        )
+        if cq.scalar_one_or_none() is not None:
+            return True
+        pq = await self._session.execute(
+            select(ProjectAiKeyBindingRow.id).where(
+                ProjectAiKeyBindingRow.key_id == key_id,
+                ProjectAiKeyBindingRow.company_id == project.company_id,
+                ProjectAiKeyBindingRow.project_id == project.id,
+            ).limit(1)
+        )
+        return pq.scalar_one_or_none() is not None
+
+    async def _project_has_runtime_key_available(
+        self, project: ProjectRow, *, exclude_key_id: str | None = None
+    ) -> bool:
+        for item in await self.list_available_keys_for_project(project=project):
+            kid = item.get("id")
+            if not isinstance(kid, str) or (exclude_key_id and kid == exclude_key_id):
+                continue
+            row = await self._get_row(kid)
+            active, _ = self._apply_lazy_expiry(row)
+            if (
+                active
+                and is_runtime_api_kind(row.api_kind)
+                and (row.secret_ref or "").strip()
+            ):
+                return True
+        return False
+
+    async def list_available_keys_for_project(self, *, project: ProjectRow) -> list[dict]:
+        items: list[dict] = []
         for key in await self.list_keys_for_company(project.company_id):
             kid = key.get("id")
-            if isinstance(kid, str):
-                ids.add(kid)
-        for kid in ids:
-            try:
-                items.append(await self.get_key_for_company(kid, project.company_id))
-            except AppError:
+            if not isinstance(kid, str):
                 continue
-        dedup: dict[str, dict] = {}
-        for item in items:
-            iid = item.get("id")
-            if isinstance(iid, str):
-                dedup[iid] = item
-        return list(dedup.values())
+            if key.get("status") != KeyStatus.ACTIVE:
+                continue
+            if not await self.project_is_key_allowed(project, kid):
+                continue
+            items.append(key)
+        return items
 
     async def require_key_available_for_project(self, *, project: ProjectRow, key_id: str) -> None:
         available = {k["id"] for k in await self.list_available_keys_for_project(project=project)}
@@ -741,37 +812,80 @@ class AiKeysService:
         preferred_provider: str | None = None,
         platform_fallback: bool = False,
     ) -> ResolvedCredential:
-        if project.resolved_ai_key_id:
-            row = await self._get_row(project.resolved_ai_key_id)
-            if row.status != KeyStatus.ACTIVE:
-                raise AppError(code="NO_AI_KEY", title="No AI key", status=404, detail="resolved key inactive")
-            runtime, disabled = self._pick_runtime_rows([row], preferred_provider=preferred_provider)
-            await self._finalize_lazy_disabled(disabled)
-            if runtime:
-                secret = self._secrets.get(runtime[0].secret_ref)
-                return ResolvedCredential(
-                    key_id=runtime[0].id,
-                    provider=runtime[0].provider,
-                    api_kind=runtime[0].api_kind,
-                    secret=secret,
-                )
-        return await self.resolve_credentials(
-            company_id=project.company_id,
-            preferred_provider=preferred_provider or project.agent_provider,
-            platform_fallback=platform_fallback,
+        _ = platform_fallback  # project resolve never uses unbound platform pool
+        available = await self.list_available_keys_for_project(project=project)
+        rows: list[AiProviderKeyRow] = []
+        for item in available:
+            kid = item.get("id")
+            if isinstance(kid, str):
+                rows.append(await self._get_row(kid))
+        runtime, disabled = self._pick_runtime_rows(
+            rows, preferred_provider=preferred_provider or project.agent_provider
         )
+        await self._finalize_lazy_disabled(disabled)
+
+        chosen: AiProviderKeyRow | None = None
+        if project.resolved_ai_key_id:
+            matched = [r for r in runtime if r.id == project.resolved_ai_key_id]
+            if matched:
+                chosen = matched[0]
+        if chosen is None and runtime:
+            chosen = runtime[0]
+
+        if chosen is None:
+            only_cli = bool(rows) and all(r.api_kind == ApiKind.CLI_SUBSCRIPTION for r in rows)
+            detail = (
+                "only cli_subscription bindings; not a runtime credential"
+                if only_cli
+                else "no active runtime AI key for project"
+            )
+            raise AppError(code="NO_AI_KEY", title="No AI key", status=404, detail=detail)
+
+        secret = self._secrets.get(chosen.secret_ref)
+        return ResolvedCredential(
+            key_id=chosen.id,
+            provider=chosen.provider,
+            api_kind=chosen.api_kind,
+            secret=secret,
+        )
+
+    async def _scope_employee_ids(self, *, key_id: str, company_id: str) -> list[str]:
+        q = await self._session.execute(
+            select(EmployeeAiKeyBindingRow.employee_id).where(
+                EmployeeAiKeyBindingRow.key_id == key_id,
+                EmployeeAiKeyBindingRow.company_id == company_id,
+            )
+        )
+        return list(q.scalars().all())
+
+    async def _scope_cabinet_ids(self, *, key_id: str, company_id: str) -> list[str]:
+        from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
+
+        q = await self._session.execute(
+            select(CabinetAiKeyBindingRow.cabinet_id)
+            .join(CabinetInstanceRow, CabinetInstanceRow.id == CabinetAiKeyBindingRow.cabinet_id)
+            .where(
+                CabinetAiKeyBindingRow.key_id == key_id,
+                CabinetInstanceRow.company_id == company_id,
+            )
+        )
+        return list(q.scalars().all())
+
+    async def _scope_project_ids(self, *, key_id: str, company_id: str) -> list[str]:
+        q = await self._session.execute(
+            select(ProjectAiKeyBindingRow.project_id).where(
+                ProjectAiKeyBindingRow.key_id == key_id,
+                ProjectAiKeyBindingRow.company_id == company_id,
+            )
+        )
+        return list(q.scalars().all())
 
     async def get_key_scope_bindings(self, *, key_id: str, company_id: str) -> dict:
         await self.get_key_for_company(key_id, company_id)
-        eq = await self._session.execute(
-            select(EmployeeAiKeyBindingRow.employee_id).where(EmployeeAiKeyBindingRow.key_id == key_id)
-        )
-        cq = await self._session.execute(
-            select(CabinetAiKeyBindingRow.cabinet_id).where(CabinetAiKeyBindingRow.key_id == key_id)
-        )
         return {
-            "employee_ids": list(eq.scalars().all()),
-            "cabinet_ids": list(cq.scalars().all()),
+            "employee_ids": await self._scope_employee_ids(key_id=key_id, company_id=company_id),
+            "cabinet_ids": await self._scope_cabinet_ids(key_id=key_id, company_id=company_id),
+            "project_ids": await self._scope_project_ids(key_id=key_id, company_id=company_id),
         }
 
     async def set_key_scope_bindings(
@@ -781,19 +895,29 @@ class AiKeysService:
         company_id: str,
         employee_ids: list[str],
         cabinet_ids: list[str],
+        project_ids: list[str],
+        principal: Principal | None = None,
     ) -> dict:
-        await self.require_company_writable_key(key_id, company_id)
+        await self.require_company_key_visible(key_id, company_id)
         emp_unique = list(dict.fromkeys(employee_ids))
         cab_unique = list(dict.fromkeys(cabinet_ids))
+        proj_unique = list(dict.fromkeys(project_ids))
+
         for eid in emp_unique:
-            emp = await self._session.get(EmployeeRow, eid)
-            if emp is None:
+            mem = await self._session.execute(
+                select(MembershipRow.id).where(
+                    MembershipRow.company_id == company_id,
+                    MembershipRow.employee_id == eid,
+                ).limit(1)
+            )
+            if mem.scalar_one_or_none() is None:
                 raise AppError(
                     code="VALIDATION_ERROR",
                     title="Validation Error",
                     status=422,
                     detail=f"unknown employee_id: {eid}",
                 )
+
         from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 
         for cid in cab_unique:
@@ -805,21 +929,231 @@ class AiKeysService:
                     status=422,
                     detail=f"unknown cabinet_id: {cid}",
                 )
+
+        for pid in proj_unique:
+            proj = await self._session.get(ProjectRow, pid)
+            if proj is None or proj.company_id != company_id:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail=f"unknown project_id: {pid}",
+                )
+
+        old_cab = set(await self._scope_cabinet_ids(key_id=key_id, company_id=company_id))
+        old_proj = set(await self._scope_project_ids(key_id=key_id, company_id=company_id))
+        new_cab = set(cab_unique)
+        new_proj = set(proj_unique)
+
+        actor = principal or Principal(sub="system:ai-key-cascade")
+
         existing_emp = await self._session.execute(
-            select(EmployeeAiKeyBindingRow).where(EmployeeAiKeyBindingRow.key_id == key_id)
+            select(EmployeeAiKeyBindingRow).where(
+                EmployeeAiKeyBindingRow.key_id == key_id,
+                EmployeeAiKeyBindingRow.company_id == company_id,
+            )
         )
         for b in existing_emp.scalars().all():
             await self._session.delete(b)
         await self._session.flush()
         for eid in emp_unique:
-            self._session.add(EmployeeAiKeyBindingRow(employee_id=eid, key_id=key_id))
+            self._session.add(
+                EmployeeAiKeyBindingRow(company_id=company_id, employee_id=eid, key_id=key_id)
+            )
+
         existing_cab = await self._session.execute(
-            select(CabinetAiKeyBindingRow).where(CabinetAiKeyBindingRow.key_id == key_id)
+            select(CabinetAiKeyBindingRow)
+            .join(CabinetInstanceRow, CabinetInstanceRow.id == CabinetAiKeyBindingRow.cabinet_id)
+            .where(
+                CabinetAiKeyBindingRow.key_id == key_id,
+                CabinetInstanceRow.company_id == company_id,
+            )
         )
         for b in existing_cab.scalars().all():
             await self._session.delete(b)
         await self._session.flush()
         for cid in cab_unique:
             self._session.add(CabinetAiKeyBindingRow(cabinet_id=cid, key_id=key_id))
+
+        existing_proj = await self._session.execute(
+            select(ProjectAiKeyBindingRow).where(
+                ProjectAiKeyBindingRow.key_id == key_id,
+                ProjectAiKeyBindingRow.company_id == company_id,
+            )
+        )
+        for b in existing_proj.scalars().all():
+            await self._session.delete(b)
+        await self._session.flush()
+        for pid in proj_unique:
+            self._session.add(
+                ProjectAiKeyBindingRow(company_id=company_id, project_id=pid, key_id=key_id)
+            )
+
+        for cid in old_cab - new_cab:
+            await self.cascade_cabinet_key_revoked(cid, key_id, principal=actor)
+        for pid in old_proj - new_proj:
+            await self.cascade_project_key_revoked(pid, key_id, principal=actor)
+        # employee unbind: no pause cascade
+
         await self._session.commit()
         return await self.get_key_scope_bindings(key_id=key_id, company_id=company_id)
+
+    async def _clear_scope_bindings_for_company_key(self, company_id: str, key_id: str) -> None:
+        from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
+
+        eq = await self._session.execute(
+            select(EmployeeAiKeyBindingRow).where(
+                EmployeeAiKeyBindingRow.key_id == key_id,
+                EmployeeAiKeyBindingRow.company_id == company_id,
+            )
+        )
+        for b in eq.scalars().all():
+            await self._session.delete(b)
+
+        cq = await self._session.execute(
+            select(CabinetAiKeyBindingRow)
+            .join(CabinetInstanceRow, CabinetInstanceRow.id == CabinetAiKeyBindingRow.cabinet_id)
+            .where(
+                CabinetAiKeyBindingRow.key_id == key_id,
+                CabinetInstanceRow.company_id == company_id,
+            )
+        )
+        for b in cq.scalars().all():
+            await self._session.delete(b)
+
+        pq = await self._session.execute(
+            select(ProjectAiKeyBindingRow).where(
+                ProjectAiKeyBindingRow.key_id == key_id,
+                ProjectAiKeyBindingRow.company_id == company_id,
+            )
+        )
+        for b in pq.scalars().all():
+            await self._session.delete(b)
+        await self._session.flush()
+
+    async def _clear_scope_bindings_for_key(self, key_id: str) -> None:
+        for model in (EmployeeAiKeyBindingRow, CabinetAiKeyBindingRow, ProjectAiKeyBindingRow):
+            q = await self._session.execute(select(model).where(model.key_id == key_id))
+            for b in q.scalars().all():
+                await self._session.delete(b)
+        await self._session.flush()
+
+    async def cascade_company_key_revoked(
+        self, company_id: str, key_id: str, *, principal: Principal | None = None
+    ) -> dict[str, Any]:
+        from prodavan.application.agent.session_service import AgentSessionService
+        from prodavan.application.project_service import ProjectCommand, ProjectQuery
+        from prodavan.domain.projects import ProjectStatus
+
+        await self._clear_scope_bindings_for_company_key(company_id, key_id)
+
+        q = await self._session.execute(
+            select(ProjectRow).where(
+                ProjectRow.company_id == company_id,
+                ProjectRow.resolved_ai_key_id == key_id,
+            )
+        )
+        for project in q.scalars().all():
+            project.resolved_ai_key_id = None
+        await self._session.flush()
+
+        sessions_cancelled = await AgentSessionService(self._session).cancel_active_for_key(
+            key_id=key_id
+        )
+        await self._session.flush()
+
+        actor = principal or Principal(sub="system:ai-key-cascade")
+        projects_cmd = ProjectCommand(self._session)
+        query = ProjectQuery(self._session)
+        projects_paused: list[str] = []
+        for project_id in await query.list_ids(company_id=company_id, status=ProjectStatus.ACTIVE):
+            project = await self._session.get(ProjectRow, project_id)
+            if project is None:
+                continue
+            if await self._project_has_runtime_key_available(project, exclude_key_id=key_id):
+                continue
+            await projects_cmd.pause(
+                project_id=project_id,
+                principal=actor,
+                employee=None,
+                skip_access=True,
+            )
+            projects_paused.append(project_id)
+
+        return {
+            "sessions_cancelled": sessions_cancelled,
+            "projects_paused": projects_paused,
+            "company_id": company_id,
+            "key_id": key_id,
+        }
+
+    async def cascade_cabinet_key_revoked(
+        self, cabinet_id: str, key_id: str, *, principal: Principal | None = None
+    ) -> dict[str, Any]:
+        from prodavan.application.project_service import ProjectCommand, ProjectQuery
+        from prodavan.domain.projects import ProjectStatus
+
+        actor = principal or Principal(sub="system:ai-key-cascade")
+        projects_cmd = ProjectCommand(self._session)
+        query = ProjectQuery(self._session)
+        projects_paused: list[str] = []
+
+        for project_id in await query.list_ids(cabinet_id=cabinet_id, status=ProjectStatus.ACTIVE):
+            project = await self._session.get(ProjectRow, project_id)
+            if project is None:
+                continue
+            if await self.project_is_key_allowed(project, key_id):
+                continue
+            affected = project.resolved_ai_key_id == key_id
+            if not affected and not await self._project_has_runtime_key_available(
+                project, exclude_key_id=key_id
+            ):
+                affected = True
+            if not affected:
+                continue
+            if project.resolved_ai_key_id == key_id:
+                if await self._project_has_runtime_key_available(project, exclude_key_id=key_id):
+                    project.resolved_ai_key_id = None
+                    continue
+            if not await self._project_has_runtime_key_available(project, exclude_key_id=key_id):
+                await projects_cmd.pause(
+                    project_id=project_id,
+                    principal=actor,
+                    employee=None,
+                    skip_access=True,
+                )
+                projects_paused.append(project_id)
+
+        return {"projects_paused": projects_paused, "cabinet_id": cabinet_id, "key_id": key_id}
+
+    async def cascade_project_key_revoked(
+        self, project_id: str, key_id: str, *, principal: Principal | None = None
+    ) -> dict[str, Any]:
+        from prodavan.application.project_service import ProjectCommand
+        from prodavan.domain.projects import ProjectStatus
+
+        project = await self._session.get(ProjectRow, project_id)
+        if project is None or project.status != ProjectStatus.ACTIVE:
+            return {"projects_paused": [], "project_id": project_id, "key_id": key_id}
+
+        actor = principal or Principal(sub="system:ai-key-cascade")
+        projects_cmd = ProjectCommand(self._session)
+        paused = False
+
+        if project.resolved_ai_key_id == key_id:
+            if await self._project_has_runtime_key_available(project, exclude_key_id=key_id):
+                project.resolved_ai_key_id = None
+            else:
+                await projects_cmd.pause(
+                    project_id=project_id,
+                    principal=actor,
+                    employee=None,
+                    skip_access=True,
+                )
+                paused = True
+
+        return {
+            "projects_paused": [project_id] if paused else [],
+            "project_id": project_id,
+            "key_id": key_id,
+        }

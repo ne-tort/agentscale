@@ -9,6 +9,8 @@ from prodavan.domain.cabinets.types import (
     CabinetAssignmentStatus,
     CabinetCompanyGrantScope,
     CabinetGrantStatus,
+    CabinetOwnerScope,
+    CabinetStatus,
 )
 from prodavan.domain.modules import ModuleCompanyGrantScope
 from prodavan.infrastructure.persistence.models.ai_keys import CompanyAiKeyBindingRow
@@ -61,7 +63,15 @@ class RelationsQuery:
 
     async def has_cabinet_company_grant(self, *, cabinet_id: str, company_id: str) -> bool:
         inst = await self._session.get(CabinetInstanceRow, cabinet_id)
-        if inst is not None and inst.company_grant_scope == CabinetCompanyGrantScope.ALL:
+        if inst is None:
+            return False
+        if inst.company_grant_scope == CabinetCompanyGrantScope.ALL:
+            return True
+        if (
+            inst.owner_scope == CabinetOwnerScope.COMPANY
+            and inst.owner_company_id == company_id
+            and inst.status != CabinetStatus.DELETED
+        ):
             return True
         q = await self._session.execute(
             select(CabinetCompanyGrantRow.id).where(

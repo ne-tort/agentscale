@@ -217,6 +217,13 @@ def test_org_cabinets_include_basic_workspace(client: TestClient) -> None:
     assert basic["name"] == "Базовый"
     assert basic["writable"] is False
 
+    assignments = client.get(
+        f"/api/v1/companies/{company_id}/cabinets/{basic['id']}/assignments",
+        headers={"Authorization": f"Bearer {boss_tok}"},
+    )
+    assert assignments.status_code == 200, assignments.text
+    assert "items" in assignments.json()
+
 
 @requires_postgres
 def test_cabinet_max_projects_quota(client: TestClient) -> None:

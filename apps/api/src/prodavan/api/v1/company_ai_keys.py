@@ -168,6 +168,7 @@ class KeyScopeBindingsBody(BaseModel):
 
     employee_ids: list[str] = Field(default_factory=list)
     cabinet_ids: list[str] = Field(default_factory=list)
+    project_ids: list[str] = Field(default_factory=list)
 
 
 @router.get("/{key_id}/scope-bindings")
@@ -197,4 +198,5 @@ async def set_key_scope_bindings(
         company_id=company_id,
         employee_ids=body.employee_ids,
         cabinet_ids=body.cabinet_ids,
+        project_ids=body.project_ids,
     )

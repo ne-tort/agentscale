@@ -474,12 +474,14 @@ class CompanyApi {
     required String keyId,
     required List<String> employeeIds,
     required List<String> cabinetIds,
+    required List<String> projectIds,
   }) async {
     final res = await AuthHttp.put(
       _uri('/companies/$companyId/ai-keys/$keyId/scope-bindings'),
       body: jsonEncode({
         'employee_ids': employeeIds,
         'cabinet_ids': cabinetIds,
+        'project_ids': projectIds,
       }),
     );
     _throwIfError(res);
