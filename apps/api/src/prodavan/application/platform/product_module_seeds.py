@@ -13,79 +13,97 @@ _BLOCK_TYPES = [
     "others",
 ]
 
-_BLOCK_LABELS = {
-    "rules": "Rules",
-    "skills": "Skills",
-    "output_schema": "Output Schema",
-    "guardrails": "Guardrails",
-    "examples": "Examples",
-    "others": "Others",
+_BLOCK_LABELS: dict[str, dict[str, str]] = {
+    "rules": {"ru": "Правила", "en": "Rules"},
+    "skills": {"ru": "Умения", "en": "Skills"},
+    "output_schema": {"ru": "Схема ответа", "en": "Output schema"},
+    "guardrails": {"ru": "Безопасность", "en": "Guardrails"},
+    "examples": {"ru": "Примеры", "en": "Examples"},
+    "others": {"ru": "Другое", "en": "Others"},
 }
 
 _BLOCK_INLINE_TITLES = {
     "rules": "Добавить правило",
-    "skills": "Добавить skill",
-    "output_schema": "Добавить output schema",
-    "guardrails": "Добавить guardrail",
-    "examples": "Добавить example",
+    "skills": "Добавить умение",
+    "output_schema": "Добавить схему ответа",
+    "guardrails": "Добавить ограничение",
+    "examples": "Добавить пример",
     "others": "Добавить запись",
 }
+
+_BLOCK_EMPTY_TITLES: dict[str, dict[str, str]] = {
+    "rules": {"ru": "Нет правил", "en": "No rules"},
+    "skills": {"ru": "Нет умений", "en": "No skills"},
+    "output_schema": {"ru": "Нет схем", "en": "No schemas"},
+    "guardrails": {"ru": "Нет ограничений", "en": "No guardrails"},
+    "examples": {"ru": "Нет примеров", "en": "No examples"},
+    "others": {"ru": "Нет записей", "en": "No items"},
+}
+
+
+def _empty(title_ru: str, title_en: str) -> dict[str, Any]:
+    return {"title": {"ru": title_ru, "en": title_en}}
+
+
+def _project_ids_column(table_slug: str) -> dict[str, Any]:
+    return {
+        "table_slug": table_slug,
+        "name": "project_ids",
+        "label": {"ru": "Проекты", "en": "Projects"},
+        "type": "json",
+        "required": False,
+        "default": [],
+        "ui": {"widget": "project_multiselect", "empty_means": "all"},
+    }
 
 
 def _collection_view(
     *,
     slug: str,
     table_slug: str,
-    form_slug: str,
+    form_slug: str | None = None,
+    open_view_slug: str | None = None,
     title_field: str = "name",
-    label: str = "Имя",
+    label: str | dict[str, str] = "Имя",
     inline_title: str = "Добавить запись",
+    empty: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if open_view_slug is not None:
+        row_tap: dict[str, Any] = {"kind": "open_view", "view": open_view_slug}
+    else:
+        row_tap = {"kind": "open_form", "view": form_slug or ""}
+    ui: dict[str, Any] = {
+        "version": 1,
+        "kind": "collection",
+        "title_field": title_field,
+        "subtitle_fields": [],
+        "columns": [{"field": title_field, "label": label}],
+        "row_tap": row_tap,
+        "inline_add": {"field": title_field, "title": inline_title},
+    }
+    if empty is not None:
+        ui["empty"] = empty
     return {
         "slug": slug,
         "table_slug": table_slug,
         "kind": "collection",
-        "ui_json": {
-            "version": 1,
-            "kind": "collection",
-            "title_field": title_field,
-            "subtitle_fields": [],
-            "columns": [{"field": title_field, "label": label}],
-            "row_tap": {"kind": "open_form", "view": form_slug},
-            "inline_add": {"field": title_field, "title": inline_title},
-        },
-    }
-
-
-def _markdown_form(*, slug: str, table_slug: str, title: str) -> dict[str, Any]:
-    return {
-        "slug": slug,
-        "table_slug": table_slug,
-        "kind": "form",
-        "ui_json": {
-            "version": 1,
-            "kind": "form",
-            "mode": "edit",
-            "title": title,
-            "fields": [
-                {"column": "name", "widget": "value"},
-                {"column": "body_md", "widget": "markdown_editor"},
-            ],
-        },
+        "ui_json": ui,
     }
 
 
 def _prompt_item_views(block_type: str) -> tuple[dict[str, Any], dict[str, Any]]:
     list_slug = f"{block_type}_list"
     form_slug = f"{block_type}_form"
-    label = _BLOCK_LABELS.get(block_type, block_type)
-    inline_title = _BLOCK_INLINE_TITLES.get(block_type, f"Добавить {label.lower()}")
+    label = _BLOCK_LABELS.get(block_type, {"ru": block_type, "en": block_type})
+    inline_title = _BLOCK_INLINE_TITLES.get(block_type, f"Добавить {block_type}")
+    empty = _BLOCK_EMPTY_TITLES.get(block_type, {"ru": "Нет записей", "en": "No items"})
     coll = _collection_view(
         slug=list_slug,
         table_slug="prompt_items",
         form_slug=form_slug,
         label=label,
         inline_title=inline_title,
+        empty={"title": empty},
     )
     ui = coll["ui_json"]
     ui["row_filter"] = {"block_type": block_type}
@@ -104,6 +122,7 @@ def _prompt_item_views(block_type: str) -> tuple[dict[str, Any], dict[str, Any]]
                 "fields": [
                     {"column": "name", "widget": "value"},
                     {"column": "body_md", "widget": "markdown_editor"},
+                    {"column": "project_ids", "widget": "project_multiselect"},
                 ],
                 "hidden_defaults": {"block_type": block_type},
             },
@@ -161,6 +180,28 @@ def _prompts_materialize_rules() -> list[dict[str, Any]]:
 
 def mod_prompts_meta() -> dict[str, list[Any]]:
     views: list[dict[str, Any]] = [
+        _collection_view(
+            slug="prompt_profiles_list",
+            table_slug="prompt_profiles",
+            open_view_slug="prompts_hub",
+            inline_title="Добавить профиль",
+            empty=_empty("Нет профилей", "No profiles"),
+        ),
+        {
+            "slug": "prompt_profiles_form",
+            "table_slug": "prompt_profiles",
+            "kind": "form",
+            "ui_json": {
+                "version": 1,
+                "kind": "form",
+                "mode": "edit",
+                "title": {"ru": "Профиль", "en": "Profile"},
+                "fields": [
+                    {"column": "name", "widget": "value"},
+                    {"column": "project_ids", "widget": "project_multiselect"},
+                ],
+            },
+        },
         {
             "slug": "prompts_hub",
             "kind": "profile_hub",
@@ -252,6 +293,7 @@ def mod_prompts_meta() -> dict[str, list[Any]]:
                 "required": False,
                 "default": False,
             },
+            _project_ids_column("prompt_profiles"),
             {
                 "table_slug": "profile_settings",
                 "name": "profile_id",
@@ -312,6 +354,7 @@ def mod_prompts_meta() -> dict[str, list[Any]]:
                 "required": False,
                 "default": "",
             },
+            _project_ids_column("prompt_items"),
         ],
         "views": views,
         "tabs": [
@@ -320,7 +363,8 @@ def mod_prompts_meta() -> dict[str, list[Any]]:
                 "title": "Промпты",
                 "order": 10,
                 "icon": "psychology_outlined",
-                "view_slug": "prompts_hub",
+                "view_slug": "prompt_profiles_list",
+                "table_slug": "prompt_profiles",
                 "enabled": True,
                 "nav": {"contour": "employee", "placement": "management"},
             }
@@ -331,7 +375,7 @@ def mod_prompts_meta() -> dict[str, list[Any]]:
                 {
                     "table_slug": "prompt_profiles",
                     "row_id": "profile_default",
-                    "body": {"name": "Default", "is_default": True},
+                    "body": {"name": "Default", "is_default": True, "project_ids": []},
                 },
                 {
                     "table_slug": "profile_settings",
@@ -384,6 +428,7 @@ def mod_files_meta() -> dict[str, list[Any]]:
                 "type": "file_ref",
                 "required": False,
             },
+            _project_ids_column("files"),
         ],
         "views": [
             _collection_view(
@@ -392,6 +437,7 @@ def mod_files_meta() -> dict[str, list[Any]]:
                 form_slug="files_form",
                 label="Имя",
                 inline_title="Добавить файл",
+                empty=_empty("Нет файлов", "No files"),
             ),
             {
                 "slug": "files_form",
@@ -406,6 +452,7 @@ def mod_files_meta() -> dict[str, list[Any]]:
                         {"column": "name", "widget": "value"},
                         {"column": "target_path", "widget": "value"},
                         {"column": "file_ref", "widget": "file_upload"},
+                        {"column": "project_ids", "widget": "project_multiselect"},
                     ],
                 },
             },
@@ -482,13 +529,15 @@ def mod_mcp_meta() -> dict[str, list[Any]]:
                 "type": "file_ref",
                 "required": True,
             },
+            _project_ids_column("mcp_packages"),
         ],
         "views": [
             _collection_view(
                 slug="mcp_packages_list",
                 table_slug="mcp_packages",
                 form_slug="mcp_packages_form",
-                inline_title="Добавить MCP package",
+                inline_title="Добавить MCP",
+                empty=_empty("Нет MCP", "No MCP"),
             ),
             {
                 "slug": "mcp_packages_form",
@@ -498,12 +547,13 @@ def mod_mcp_meta() -> dict[str, list[Any]]:
                     "version": 1,
                     "kind": "form",
                     "mode": "edit",
-                    "title": "MCP package",
+                    "title": "MCP",
                     "fields": [
                         {"column": "name", "widget": "value"},
                         {"column": "version", "widget": "value"},
                         {"column": "enabled", "widget": "switch"},
                         {"column": "file_ref", "widget": "file_upload", "accept": ".zip"},
+                        {"column": "project_ids", "widget": "project_multiselect"},
                     ],
                 },
             },

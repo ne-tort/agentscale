@@ -68,7 +68,8 @@ View = **как показать** данные таблицы. Отделён �
 | `primary_action.kind=create_row` | toolbar add → form (only when **no** `inline_add`) |
 | `inline_add` | `AppInlineAddField` — canonical inline create (see below) |
 | `row_tap.kind=open_form` | `Navigator.push` form view |
-| `empty` | `EmptyPlaceholder` — laconic |
+| `row_tap.kind=open_view` | `Navigator.push` any view (e.g. profile hub) |
+| `empty` | `EmptyPlaceholder` — laconic per-table (`{"ru":"Нет MCP","en":"No MCP"}`) |
 | `scaffold.title` | Optional app bar title (MetaLabel); default — none |
 
 **List/table mode:** page provides `AppCollectionViewModeButton`; meta не задаёт mode.
@@ -210,9 +211,10 @@ EmptyPlaceholder(title: "Метаданные", subtitle: "<parse error code>")
 
 | `ui_json.kind` | Interpreter | Notes |
 |----------------|-------------|-------|
-| `profile_hub` | ProfileHubInterpreter | Radio профилей + nav blocks |
+| `profile_hub` | ProfileHubInterpreter | Nav blocks; radio only when opened without profile context |
 | `form` + `widget: markdown_editor` | MarkdownEditorField | AGENTS.md, prompt items |
 | `form` + `widget: file_upload` | FileUploadField | `file_ref` via `/cabinets/{id}/content/upload` |
+| `form` + `widget: project_multiselect` | ProjectMultiselectField | `project_ids` column; empty = all projects |
 
 Collection extras: `inline_add`, `row_filter`, `context_bind.profile_id=contextRowId`.
 

@@ -11,7 +11,7 @@ import 'package:prodavan/features/employee/cabinet_projects_page.dart';
 import 'package:prodavan/features/employee/employee_settings_body.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Employee cabinet shell — same layout pattern as [CompanyShell].
+/// Employee cabinet shell — Projects + optional rail modules + Management page in sidebar.
 class CabinetShell extends StatefulWidget {
   const CabinetShell({
     super.key,
@@ -39,7 +39,8 @@ class _CabinetShellState extends State<CabinetShell> {
   List<CabinetNavEntry> _managementEntries = const [];
 
   int get _railModuleCount => _railEntries.length;
-  int get _settingsIndex => _projectsIndex + 1 + _railModuleCount;
+  int get _managementIndex => _projectsIndex + 1 + _railModuleCount;
+  int get _settingsIndex => _managementIndex + 1;
 
   @override
   void initState() {
@@ -169,6 +170,7 @@ class _CabinetShellState extends State<CabinetShell> {
       ..._railEntries.map(
         (e) => AppNavDestination(icon: e.icon, label: e.label),
       ),
+      AppNavDestination(icon: Icons.apps_outlined, label: l10n.navManagement),
     ];
 
     return AppLayout(
@@ -196,6 +198,7 @@ class _CabinetShellState extends State<CabinetShell> {
           (e) => CabinetModuleHost(
             cabinetId: widget.cabinetId,
             entry: e,
+            embedded: true,
           ),
         )
         .toList();
@@ -207,6 +210,11 @@ class _CabinetShellState extends State<CabinetShell> {
       ),
       CabinetProjectsPage(cabinetId: widget.cabinetId),
       ...railModulePages,
+      CabinetManagementPage(
+        cabinetId: widget.cabinetId,
+        entries: _managementEntries,
+        embedded: true,
+      ),
     ];
 
     return [

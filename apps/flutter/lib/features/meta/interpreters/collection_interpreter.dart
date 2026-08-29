@@ -76,11 +76,12 @@ class CollectionViewInterpreter extends StatelessWidget {
           ),
           onOpen: (row) {
             final rowTap = uiJson['row_tap'];
-            if (rowTap is Map && rowTap['kind'] == 'open_form') {
-              final formView = rowTap['view'] as String?;
-              if (formView != null && onOpenForm != null) {
-                onOpenForm!(formView, rowId: row.id);
-                return;
+            if (rowTap is Map && onOpenForm != null) {
+              final kind = rowTap['kind'] as String?;
+              final targetView = rowTap['view'] as String?;
+              if (targetView != null &&
+                  (kind == 'open_form' || kind == 'open_view')) {
+                onOpenForm!(targetView, rowId: row.id);
               }
             }
           },

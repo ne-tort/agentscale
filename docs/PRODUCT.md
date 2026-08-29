@@ -57,3 +57,21 @@ GitOps, k3s, CI — не legacy: [`07-infrastructure/runbook.md`](07-infrastruct
 2. **`docs/target/`** (кроме `12-layer-docs`, `07-infrastructure` cross-links) — **не канон**, не блокировать работу «gap map».
 3. E2E — **backend/API**; Flutter E2E не обязателен для merge.
 4. Приоритет фич: **Pod UI + agent-in-pod с файлами** > admin metrics > meta-syntax > прочий канонный шум.
+
+## Module data model (base modules)
+
+```text
+Platform meta (template)  →  Cabinet module_data_rows (storage)  →  Project workspace (materialize)
+```
+
+| Layer | What |
+|-------|------|
+| **Template** | Shared module meta: tables, views, materialize rules |
+| **Cabinet** | Per-cabinet rows in `module_data_rows` (JSONB body) |
+| **Project** | Materialize filters rows by `project_ids` in body; profile pick by `prompt_profiles.project_ids`; optional MP binding skips whole module |
+
+Row-level **`project_ids`** (JSON array in row body): empty or absent → row applies to **all** projects in the cabinet; otherwise only listed projects.
+
+Module-level **MP binding** (`module_project_bindings`): if bindings exist, module materializes only for bound projects.
+
+Future base modules (MCP, Files, Prompts, …) follow the same pattern: edit in cabinet UI, scope rows to projects, materialize into Pod workspace on project create/resume.

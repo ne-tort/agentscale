@@ -9,19 +9,22 @@ import 'package:prodavan/features/meta/interpreters/hub_interpreter.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/runtime/cabinet_data_controller.dart';
+import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/features/meta/runtime/runtime_data_adapter.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Renders one module tab view inside [CabinetShell].
+/// Renders one module tab view inside [CabinetShell] or pushed from [CabinetManagementPage].
 class CabinetModuleHost extends StatefulWidget {
   const CabinetModuleHost({
     super.key,
     required this.cabinetId,
     required this.entry,
+    this.embedded = false,
   });
 
   final String cabinetId;
   final CabinetNavEntry entry;
+  final bool embedded;
 
   @override
   State<CabinetModuleHost> createState() => _CabinetModuleHostState();
@@ -32,8 +35,6 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
   Object? _error;
   ModuleMetaManifest? _manifest;
   RuntimeDataAdapter? _adapter;
-  String? _nestedViewSlug;
-  String? _nestedRowId;
 
   @override
   void initState() {
@@ -87,61 +88,72 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
   }
 
   void _openView(String viewSlug, {String? rowId}) {
-    setState(() {
-      _nestedViewSlug = viewSlug;
-      _nestedRowId = rowId;
-    });
-  }
-
-  void _popView() {
-    setState(() {
-      _nestedViewSlug = null;
-      _nestedRowId = null;
-    });
+    final manifest = _manifest;
+    final adapter = _adapter;
+    if (manifest == null || adapter == null) return;
+    final view = manifest.viewBySlug(viewSlug);
+    if (view == null) return;
+    final l10n = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context);
+    final title = resolveViewScaffoldTitle(view, l10n, locale: locale);
+    final fallback = view['label'] as String? ?? viewSlug;
+    final pageTitle = (title != null && title.isNotEmpty) ? title : fallback;
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (ctx) => ModuleRuntimeScope(
+          cabinetId: widget.cabinetId,
+          api: workContext.api,
+          child: AppScaffold(
+            title: Text(pageTitle),
+            body: ViewInterpreterHost(
+              manifest: manifest,
+              view: view,
+              seeds: adapter,
+              rowId: rowId,
+              onOpenView: _openView,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     if (_loading) {
-      return const AppScaffold(body: Center(child: CircularProgressIndicator()));
+      return const Center(child: CircularProgressIndicator());
     }
     if (_error != null) {
-      return AppScaffold(
-        body: Center(child: Text('$_error')),
-      );
+      return Center(child: Text('$_error'));
     }
     final manifest = _manifest!;
     final adapter = _adapter!;
-    final viewSlug = _nestedViewSlug ?? widget.entry.viewSlug;
+    final viewSlug = widget.entry.viewSlug;
+    if (viewSlug.isEmpty) {
+      return EmptyPlaceholder(title: l10n.adminMetaInvalid);
+    }
     final view = manifest.viewBySlug(viewSlug);
     if (view == null) {
-      return AppScaffold(
-        body: EmptyPlaceholder(title: l10n.adminMetaInvalid),
-      );
+      return EmptyPlaceholder(title: l10n.adminMetaInvalid);
     }
 
-    final nestedTitle = _nestedViewSlug != null
-        ? resolveViewScaffoldTitle(view, l10n, locale: Localizations.localeOf(context))
-        : null;
-
-    return AppScaffold(
-      title: nestedTitle != null ? Text(nestedTitle) : null,
-      actions: _nestedViewSlug != null
-          ? [
-              IconButton(
-                icon: const Icon(Icons.arrow_back),
-                onPressed: _popView,
-              ),
-            ]
-          : null,
-      body: ViewInterpreterHost(
+    final body = ModuleRuntimeScope(
+      cabinetId: widget.cabinetId,
+      api: workContext.api,
+      child: ViewInterpreterHost(
         manifest: manifest,
         view: view,
         seeds: adapter,
-        rowId: _nestedRowId,
         onOpenView: _openView,
       ),
+    );
+
+    if (widget.embedded) return body;
+
+    return AppScaffold(
+      title: Text(widget.entry.label),
+      body: body,
     );
   }
 }

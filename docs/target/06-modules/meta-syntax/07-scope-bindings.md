@@ -93,7 +93,9 @@ Employee opens Project P in Cabinet C
   → + tabs scope.projects = bound IF MP(module, P) exists
 ```
 
-Module meta **does not** store project ids — only `scope.projects=bound`; runtime checks `module_project_bindings`.
+Module meta **does not** store project ids at template level — only `scope.projects=bound`; runtime checks `module_project_bindings`.
+
+**Row-level scoping (v1):** column `project_ids` (`type: json`, widget `project_multiselect`) in row body. Empty list = all projects in cabinet. Materialize and future project-context UI filter by this field. Orthogonal to MP: MP = module visible to project; `project_ids` = row included in that project's workspace.
 
 ## Multi-module merge
 

@@ -20,6 +20,16 @@ def test_prompts_meta_has_materialize_and_seed() -> None:
     assert any(t["slug"] == "prompt_profiles" for t in meta["tables"])
     assert meta["materialize"]
     assert meta["seed_rows"]["items"]
+    tab = meta["tabs"][0]
+    assert tab["view_slug"] == "prompt_profiles_list"
+    assert any(c["name"] == "project_ids" for c in meta["columns"])
+
+
+def test_mcp_inline_add_is_laconic() -> None:
+    meta = mod_mcp_meta()
+    coll = next(v for v in meta["views"] if v["slug"] == "mcp_packages_list")
+    assert coll["ui_json"]["inline_add"]["title"] == "Добавить MCP"
+    assert coll["ui_json"]["empty"]["title"]["ru"] == "Нет MCP"
 
 
 def test_files_meta_has_file_ref_column() -> None:

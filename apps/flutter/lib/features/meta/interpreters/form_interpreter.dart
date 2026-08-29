@@ -7,6 +7,8 @@ import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
 import 'package:prodavan/features/meta/widgets/markdown_editor_field.dart';
+import 'package:prodavan/features/meta/widgets/project_multiselect_field.dart';
+import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 class FormViewInterpreter extends StatefulWidget {
@@ -125,7 +127,9 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
   }
 
   Widget _field(BuildContext context, Map<String, dynamic> column, String name, Map<String, dynamic> uiJson) {
-    final label = column['label'] as String? ?? name;
+    final l10n = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context);
+    final label = resolveMetaLabel(column['label'] ?? name, l10n, locale: locale);
     final type = column['type'] as String? ?? 'text';
     final value = _values[name];
     final fields = uiJson['fields'];
@@ -139,6 +143,14 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       }
     }
 
+    if (widgetKind == 'project_multiselect') {
+      return ProjectMultiselectField(
+        label: label,
+        value: value,
+        readOnly: widget.readOnly,
+        onChanged: (ids) => _persist(name, ids),
+      );
+    }
     if (widgetKind == 'markdown_editor') {
       return MarkdownEditorField(
         label: label,

@@ -4,6 +4,7 @@ import 'package:prodavan/core/preferences/app_nav_preference.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/meta/meta_icon.dart';
+import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -16,6 +17,7 @@ class ProfileHubInterpreter extends StatelessWidget {
     required this.seeds,
     required this.onOpenView,
     this.readOnly = false,
+    this.contextProfileId,
   });
 
   final ModuleMetaManifest manifest;
@@ -23,10 +25,12 @@ class ProfileHubInterpreter extends StatelessWidget {
   final dynamic seeds;
   final void Function(String viewSlug, {String? rowId}) onOpenView;
   final bool readOnly;
+  final String? contextProfileId;
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context);
     final ui = view['ui_json'];
     if (ui is! Map) {
       return EmptyPlaceholder(title: l10n.adminMetaInvalid);
@@ -42,22 +46,32 @@ class ProfileHubInterpreter extends StatelessWidget {
 
     final profiles = seeds.itemsForTable(profileTable);
     if (profiles.isEmpty) {
-      return EmptyPlaceholder(title: l10n.adminModuleSeedEmpty);
+      return EmptyPlaceholder(
+        title: resolveMetaLabel(
+          {'ru': 'Нет профилей', 'en': 'No profiles'},
+          l10n,
+          locale: locale,
+        ),
+      );
     }
 
-    String? activeProfileId;
-    for (final s in seeds.itemsForTable(settingsTable)) {
-      final body = s['body'];
-      if (body is Map && body[activeField] == true) {
-        activeProfileId = body[profileIdField]?.toString();
-        break;
+    String? activeProfileId = contextProfileId;
+    if (activeProfileId == null) {
+      for (final s in seeds.itemsForTable(settingsTable)) {
+        final body = s['body'];
+        if (body is Map && body[activeField] == true) {
+          activeProfileId = body[profileIdField]?.toString();
+          break;
+        }
       }
+      activeProfileId ??= _profileIdFromRow(profiles.first);
     }
-    activeProfileId ??= _profileIdFromRow(profiles.first);
 
-    return ListView(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-      children: [
+    final fixedProfile = contextProfileId != null;
+    final children = <Widget>[];
+
+    if (!fixedProfile) {
+      children.addAll([
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
           child: Text(
@@ -83,21 +97,31 @@ class ProfileHubInterpreter extends StatelessWidget {
                   },
           ),
         const Divider(),
-        for (final item in blocks.whereType<Map>())
-          AppNavPreference(
-            title: item['title'] as String? ?? '—',
-            icon: metaIconFromName(item['icon'] as String?, fallback: Icons.chevron_right),
-            onTap: () {
-              final target = item['target'];
-              if (target is Map && target['kind'] == 'view') {
-                final viewSlug = target['view'] as String?;
-                if (viewSlug != null) {
-                  onOpenView(viewSlug, rowId: activeProfileId);
-                }
+      ]);
+    }
+
+    children.addAll([
+      for (final item in blocks.whereType<Map>())
+        AppNavPreference(
+          title: resolveMetaLabel(item['title'], l10n, locale: locale).isNotEmpty
+              ? resolveMetaLabel(item['title'], l10n, locale: locale)
+              : '—',
+          icon: metaIconFromName(item['icon'] as String?, fallback: Icons.chevron_right),
+          onTap: () {
+            final target = item['target'];
+            if (target is Map && target['kind'] == 'view') {
+              final viewSlug = target['view'] as String?;
+              if (viewSlug != null) {
+                onOpenView(viewSlug, rowId: activeProfileId);
               }
-            },
-          ),
-      ],
+            }
+          },
+        ),
+    ]);
+
+    return ListView(
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+      children: children,
     );
   }
 

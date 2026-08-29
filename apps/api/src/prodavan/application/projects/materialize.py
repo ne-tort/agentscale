@@ -59,7 +59,11 @@ class ProjectMaterializeService:
         writer.ensure_dirs()
 
         planner = MaterializePlanner(session)
-        ops, _active = await planner.plan_for_project(cabinet_id=cabinet_id, when=when)
+        ops, _active = await planner.plan_for_project(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            when=when,
+        )
         executor = MaterializeExecutor(session)
         written, mcp_packages = await executor.execute(
             writer=writer, cabinet_id=cabinet_id, ops=ops

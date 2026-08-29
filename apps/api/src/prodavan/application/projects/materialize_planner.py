@@ -43,15 +43,22 @@ class MaterializePlanner:
         self,
         *,
         cabinet_id: str,
+        project_id: str,
         when: str = "project.created",
     ) -> tuple[list[MaterializeOp], str | None]:
         inst = await self._session.get(CabinetInstanceRow, cabinet_id)
         if inst is None:
             return [], None
-        active_profile_id = await self._resolve_active_profile_id(schema_name=inst.schema_name)
+        active_profile_id = await self._resolve_active_profile_id(
+            schema_name=inst.schema_name,
+            project_id=project_id,
+        )
         module_ids = await self._bindings.list_module_ids_for_cabinet(cabinet_id)
         ops: list[MaterializeOp] = []
         for module_id in module_ids:
+            bound_projects = await self._bindings.list_project_ids(module_id)
+            if bound_projects and project_id not in bound_projects:
+                continue
             rules = await self._load_materialize_rules(module_id)
             for rule in rules:
                 if not rule.get("enabled", True):
@@ -74,6 +81,7 @@ class MaterializePlanner:
                         target=target,
                         fmt=fmt,
                         active_profile_id=active_profile_id,
+                        project_id=project_id,
                         priority=priority,
                     )
                     if op:
@@ -87,6 +95,7 @@ class MaterializePlanner:
                         target=target,
                         fmt=fmt,
                         active_profile_id=active_profile_id,
+                        project_id=project_id,
                         priority=priority,
                     )
                     ops.extend(row_ops)
@@ -105,26 +114,36 @@ class MaterializePlanner:
             return [r for r in body if isinstance(r, dict)]
         return []
 
-    async def _resolve_active_profile_id(self, *, schema_name: str) -> str | None:
+    async def _resolve_active_profile_id(
+        self,
+        *,
+        schema_name: str,
+        project_id: str,
+    ) -> str | None:
         qschema = qident(schema_name)
         q = await self._session.execute(
             text(
                 f"""
-                SELECT body
+                SELECT row_id, body
                 FROM {qschema}.module_data_rows
                 WHERE module_id = 'mod_prompts'
-                  AND table_slug = 'profile_settings'
-                  AND (body->>'active')::boolean IS TRUE
-                LIMIT 1
+                  AND table_slug = 'prompt_profiles'
+                ORDER BY updated_at
                 """
             )
         )
-        row = q.fetchone()
-        if row is None:
+        matches: list[tuple[str, bool]] = []
+        for row in q.fetchall():
+            body = row.body if isinstance(row.body, dict) else {}
+            if not _row_applies_to_project(body, project_id):
+                continue
+            matches.append((str(row.row_id), bool(body.get("is_default"))))
+        if not matches:
             return None
-        body = row.body if isinstance(row.body, dict) else {}
-        pid = body.get("profile_id")
-        return str(pid) if pid else None
+        defaults = [rid for rid, is_def in matches if is_def]
+        if defaults:
+            return defaults[0]
+        return matches[0][0]
 
     async def _fetch_row(
         self,
@@ -157,6 +176,7 @@ class MaterializePlanner:
         module_id: str,
         table_slug: str,
         filt: dict[str, Any] | None,
+        project_id: str,
     ) -> list[dict[str, Any]]:
         qschema = qident(schema_name)
         q = await self._session.execute(
@@ -173,6 +193,8 @@ class MaterializePlanner:
         for r in q.fetchall():
             body = r.body if isinstance(r.body, dict) else {}
             if filt and not _row_matches_filter(body, filt):
+                continue
+            if not _row_applies_to_project(body, project_id):
                 continue
             out.append({"row_id": r.row_id, **body})
         return out
@@ -197,6 +219,7 @@ class MaterializePlanner:
         target: dict[str, Any],
         fmt: str,
         active_profile_id: str | None,
+        project_id: str,
         priority: int,
     ) -> MaterializeOp | None:
         table_slug = source.get("table_slug") or ""
@@ -210,6 +233,8 @@ class MaterializePlanner:
             row_id=row_id,
         )
         if body is None:
+            return None
+        if not _row_applies_to_project(body, project_id):
             return None
         str_body = {k: str(v) for k, v in body.items() if v is not None}
         ws_path = self._substitute(str(target.get("workspace_path") or ""), {**ctx, **str_body})
@@ -236,6 +261,7 @@ class MaterializePlanner:
         target: dict[str, Any],
         fmt: str,
         active_profile_id: str | None,
+        project_id: str,
         priority: int,
     ) -> list[MaterializeOp]:
         table_slug = source.get("table_slug") or ""
@@ -250,6 +276,7 @@ class MaterializePlanner:
             module_id=module_id,
             table_slug=table_slug,
             filt=filt,
+            project_id=project_id,
         )
         field = source.get("field") or target.get("field")
         ops: list[MaterializeOp] = []
@@ -282,3 +309,12 @@ def _row_matches_filter(body: dict[str, Any], filt: dict[str, Any]) -> bool:
         elif str(val) != str(expected):
             return False
     return True
+
+
+def _row_applies_to_project(body: dict[str, Any], project_id: str) -> bool:
+    pids = body.get("project_ids")
+    if pids is None:
+        return True
+    if not isinstance(pids, list) or len(pids) == 0:
+        return True
+    return project_id in [str(p) for p in pids]

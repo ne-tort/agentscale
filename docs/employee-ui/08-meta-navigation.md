@@ -21,13 +21,14 @@ Future<List<CabinetNavEntry>> loadCabinetNavEntries(
 
 | `nav.placement` | Wide sidebar | Narrow «Управление» |
 |---------------|--------------|---------------------|
-| `rail` | yes | no |
-| `management` | no | yes |
+| `rail` | module tab in rail | no |
+| `management` | inside **«Управление»** page (always in employee sidebar) | inside **«Управление»** page |
 | `none` | no | no |
 
-## System tab
+## System pages (employee sidebar)
 
-- **Projects** — hardcoded in shell rail (order 10), **not** inside «Управление»
+- **Projects** — hardcoded rail entry, **not** inside «Управление»
+- **Управление** — hardcoded rail entry (wide + narrow); lists tabs with `nav.placement: management`
 
 ## Body
 

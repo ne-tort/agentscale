@@ -117,6 +117,7 @@ class ViewInterpreterHost extends StatelessWidget {
           seeds: seeds,
           onOpenView: onOpenView,
           readOnly: readOnly,
+          contextProfileId: rowId,
         );
       default:
         return EmptyPlaceholder(title: AppLocalizations.of(context).adminMetaInvalid);

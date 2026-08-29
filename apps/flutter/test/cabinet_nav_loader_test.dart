@@ -123,7 +123,7 @@ void main() {
   });
 
   group('CabinetShell destinations', () {
-    testWidgets('wide rail has Projects but not Management', (tester) async {
+    testWidgets('wide rail has Projects and Management', (tester) async {
       tester.view.physicalSize = const Size(900, 700);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -137,7 +137,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       expect(find.text('Проекты'), findsWidgets);
-      expect(find.text('Управление'), findsNothing);
+      expect(find.text('Управление'), findsWidgets);
     });
 
     testWidgets('narrow bottom nav shows only Management hub', (tester) async {
