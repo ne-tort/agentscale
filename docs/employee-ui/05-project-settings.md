@@ -8,17 +8,24 @@
 |------|-----|-----|
 | Name | `PATCH /projects/{id}` | `AppValuePreference` |
 | About | `PATCH` `about` | multiline preference |
-| Modules | `GET/PATCH .../modules` | multi-select cabinet modules |
+| Modules | `GET/PATCH .../modules` | table: name, profile, checkbox; tap → module properties + profile pick (`project_ids`) |
 | Creator | `created_by_login` | read-only |
-| Agent provider | `agent_provider` | dropdown |
-| AI key | `resolved_ai_key_id` | picker from available keys |
+| Провайдер AI | `PATCH` `resolved_ai_key_id` | табличный picker scoped AI-ключей; backend выставляет `agent_provider` из ключа |
+| Metrics | `GET /projects/{id}/metrics` | `ProjectMetricsWrap` вверху страницы |
+
+## Провайдер AI
+
+- Один nav-tile «Провайдер AI» → `ProjectAiKeySelectPage` (таблица: название, провайдер, подписка, radio).
+- Без «Авто» и без отдельного dropdown codex/cursor/claude.
+- 1 доступный ключ → auto-select при открытии settings.
+- 2+ ключей → не выбран до явного выбора; label tile warning до выбора.
 
 ## Lifecycle кнопки
 
 | Состояние | Кнопки |
 |-----------|--------|
-| `draft`, нет Pod, провайдер+ключ заданы | **Запустить проект** → `POST /launch` |
-| `draft`, не настроен | подсказка «Укажите провайдер и ключ» |
+| `draft`, нет Pod, ключ задан | **Запустить проект** → `POST /launch` |
+| `draft`, не настроен | подсказка «Укажите провайдер AI» |
 | Pod есть, `active` | **Приостановить проект** → `POST /pause` |
 | Pod есть, `paused` | **Возобновить проект** → `POST /resume` |
 | Pod есть | **Обновить проект** → `POST /sync` (materialize + hydrate) |

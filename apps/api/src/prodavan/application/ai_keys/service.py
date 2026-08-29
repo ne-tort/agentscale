@@ -792,6 +792,9 @@ class AiKeysService:
                 continue
             if not await self.project_is_key_allowed(project, kid):
                 continue
+            api_kind = key.get("api_kind")
+            if not isinstance(api_kind, str) or not is_runtime_api_kind(api_kind):
+                continue
             items.append(key)
         return items
 
@@ -804,6 +807,13 @@ class AiKeysService:
                 status=422,
                 detail="AI key not available for project",
             )
+
+    async def agent_provider_for_project_key(self, *, project: ProjectRow, key_id: str) -> str:
+        from prodavan.application.project_service.public import agent_provider_from_key_row
+
+        await self.require_key_available_for_project(project=project, key_id=key_id)
+        row = await self._get_row(key_id)
+        return agent_provider_from_key_row(row)
 
     async def resolve_credentials_for_project(
         self,

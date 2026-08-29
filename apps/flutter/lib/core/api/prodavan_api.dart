@@ -379,6 +379,30 @@ class ProdavanApi {
     }
   }
 
+  Future<Map<String, dynamic>> getCabinetMetrics(String cabinetId) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await AuthHttp.get(_uri('/cabinets/$cabinetId/metrics'), extraHeaders: _workHeaders);
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
+  Future<Map<String, dynamic>> getProjectMetrics(String projectId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.get(_uri('/projects/$projectId/metrics'), extraHeaders: _workHeaders);
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
   Future<List<String>> listProjectModuleIds(String projectId) async {
     final prevProj = this.projectId;
     this.projectId = projectId;
@@ -389,6 +413,56 @@ class ProdavanApi {
       final items = body['module_ids'];
       if (items is List) return items.cast<String>();
       return const [];
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> listProjectModules(String projectId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.get(_uri('/projects/$projectId/modules'), extraHeaders: _workHeaders);
+      _throwIfError(res);
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final items = body['items'];
+      if (items is List) return items.cast<Map<String, dynamic>>();
+      return const [];
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Map<String, dynamic>> getProjectModule(String projectId, String moduleId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.get(
+        _uri('/projects/$projectId/modules/$moduleId'),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Map<String, dynamic>> patchProjectModuleProfile({
+    required String projectId,
+    required String moduleId,
+    required String profileId,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.patch(
+        _uri('/projects/$projectId/modules/$moduleId/profile'),
+        body: jsonEncode({'profile_id': profileId}),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
       this.projectId = prevProj;
     }

@@ -3341,7 +3341,7 @@ abstract class AppLocalizations {
   /// No description provided for @projectPreferredAgentProvider.
   ///
   /// In en, this message translates to:
-  /// **'Preferred agent provider'**
+  /// **'AI provider'**
   String get projectPreferredAgentProvider;
 
   /// No description provided for @projectPreviewTruncated.
@@ -3521,8 +3521,44 @@ abstract class AppLocalizations {
   /// No description provided for @projectConfigureBeforeLaunch.
   ///
   /// In en, this message translates to:
-  /// **'Set agent provider and AI key before launch'**
+  /// **'Select AI provider before launch'**
   String get projectConfigureBeforeLaunch;
+
+  /// No description provided for @projectAiProviderNotSelected.
+  ///
+  /// In en, this message translates to:
+  /// **'Not selected'**
+  String get projectAiProviderNotSelected;
+
+  /// No description provided for @projectAiKeyColumnProvider.
+  ///
+  /// In en, this message translates to:
+  /// **'Provider'**
+  String get projectAiKeyColumnProvider;
+
+  /// No description provided for @projectAiKeyColumnSubscription.
+  ///
+  /// In en, this message translates to:
+  /// **'Subscription'**
+  String get projectAiKeyColumnSubscription;
+
+  /// No description provided for @projectModuleProfileColumn.
+  ///
+  /// In en, this message translates to:
+  /// **'Profile'**
+  String get projectModuleProfileColumn;
+
+  /// No description provided for @projectSelectModuleProfile.
+  ///
+  /// In en, this message translates to:
+  /// **'Select profile'**
+  String get projectSelectModuleProfile;
+
+  /// No description provided for @projectModuleNoProfiles.
+  ///
+  /// In en, this message translates to:
+  /// **'This module has no profiles'**
+  String get projectModuleNoProfiles;
 
   /// No description provided for @projectLaunchSuccess.
   ///

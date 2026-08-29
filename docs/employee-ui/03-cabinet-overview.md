@@ -4,10 +4,18 @@
 
 ## Данные
 
-- `GET /cabinets/{id}` — name, projects_count, modules
-- Метрики: число проектов, active/paused (из list), bound modules count
+- `GET /cabinets/{id}/metrics` — scoped метрики кабинета
+
+## Метрики (без модулей)
+
+- сотрудники кабинета (assignments), онлайн
+- проекты
+- токены агентов, сообщения
+- storage workspace проектов
+- last activity (optional)
 
 ## UI
 
-- `StatTile` / wrap по образцу `CompanyOverviewPage`
+- `CabinetMetricsWrap` / `StatTile` по образцу `CompanyOverviewPage`
+- `AppAutoRefreshBinder` для фонового обновления
 - Без редактирования кабинета (rename — company admin)

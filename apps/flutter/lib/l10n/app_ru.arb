@@ -1051,7 +1051,7 @@
       }
     }
   },
-  "projectPreferredAgentProvider": "Предпочтительный провайдер агента",
+  "projectPreferredAgentProvider": "Провайдер AI",
   "projectPreviewTruncated": "Превью обрезано до первых 200k символов",
   "projectProject": "Проект",
   "projectProjectName": "Название проекта",
@@ -1095,7 +1095,13 @@
   "projectLaunchProject": "Запустить проект",
   "projectUpdateProject": "Обновить проект",
   "projectResetAgent": "Сбросить агента",
-  "projectConfigureBeforeLaunch": "Укажите провайдер агента и ключ перед запуском",
+  "projectConfigureBeforeLaunch": "Укажите провайдер AI перед запуском",
+  "projectAiProviderNotSelected": "Не выбран",
+  "projectAiKeyColumnProvider": "Провайдер",
+  "projectAiKeyColumnSubscription": "Подписка",
+  "projectModuleProfileColumn": "Профиль",
+  "projectSelectModuleProfile": "Выбор профиля",
+  "projectModuleNoProfiles": "У модуля нет профилей",
   "projectLaunchSuccess": "Проект запущен",
   "projectUpdateSuccess": "Проект обновлён",
   "projectResetSuccess": "Агент сброшен",

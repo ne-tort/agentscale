@@ -1815,8 +1815,7 @@ class AppLocalizationsRu extends AppLocalizations {
   }
 
   @override
-  String get projectPreferredAgentProvider =>
-      'Предпочтительный провайдер агента';
+  String get projectPreferredAgentProvider => 'Провайдер AI';
 
   @override
   String get projectPreviewTruncated =>
@@ -1915,7 +1914,25 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get projectConfigureBeforeLaunch =>
-      'Укажите провайдер агента и ключ перед запуском';
+      'Укажите провайдер AI перед запуском';
+
+  @override
+  String get projectAiProviderNotSelected => 'Не выбран';
+
+  @override
+  String get projectAiKeyColumnProvider => 'Провайдер';
+
+  @override
+  String get projectAiKeyColumnSubscription => 'Подписка';
+
+  @override
+  String get projectModuleProfileColumn => 'Профиль';
+
+  @override
+  String get projectSelectModuleProfile => 'Выбор профиля';
+
+  @override
+  String get projectModuleNoProfiles => 'У модуля нет профилей';
 
   @override
   String get projectLaunchSuccess => 'Проект запущен';

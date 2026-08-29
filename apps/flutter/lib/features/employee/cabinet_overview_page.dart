@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/l10n/app_localizations.dart';
+import 'package:prodavan/core/widgets/cabinet_metrics_wrap.dart';
 
-/// Cabinet overview — project count and bound modules.
+/// Cabinet overview — scoped org metrics (StatTile wrap).
 class CabinetOverviewPage extends StatefulWidget {
   const CabinetOverviewPage({
     super.key,
@@ -23,33 +24,48 @@ class CabinetOverviewPage extends StatefulWidget {
 }
 
 class _CabinetOverviewPageState extends State<CabinetOverviewPage> {
+  late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
   Object? _error;
-  int _projectCount = 0;
-  int _moduleCount = 0;
+  Map<String, dynamic>? _metrics;
 
   @override
   void initState() {
     super.initState();
+    _autoRefresh = AppAutoRefreshBinder(
+      onTick: () => _reload(silent: true),
+      isActive: () => appAutoRefreshIsActive(context),
+    )..attach();
     _reload();
   }
 
-  Future<void> _reload() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final projects = await workContext.api.listProjects(widget.cabinetId);
-      final modules = await workContext.api.listCabinetModules(widget.cabinetId);
-      if (!mounted) return;
+  @override
+  void dispose() {
+    _autoRefresh.dispose();
+    super.dispose();
+  }
+
+  Future<void> _reload({bool silent = false}) async {
+    if (!silent && mounted) {
       setState(() {
-        _projectCount = projects.length;
-        _moduleCount = modules.length;
+        _loading = true;
+        _error = null;
+      });
+    }
+    try {
+      final metrics = await workContext.api.getCabinetMetrics(widget.cabinetId);
+      if (!mounted) return;
+      if (silent && appRefreshDataEquals(_metrics, metrics) && !_loading) {
+        return;
+      }
+      setState(() {
+        _metrics = metrics;
         _loading = false;
+        _error = null;
       });
     } catch (e) {
       if (!mounted) return;
+      if (silent) return;
       setState(() {
         _error = e;
         _loading = false;
@@ -59,32 +75,23 @@ class _CabinetOverviewPageState extends State<CabinetOverviewPage> {
 
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
     return AppScaffold(
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? Center(
-                  child: AppStatusBanner(
-                    severity: AppStatusSeverity.error,
-                    message: AppErrors.localize(context, _error!),
+          : ListView(
+              padding: EdgeInsets.all(AppSpacing.md),
+              children: [
+                if (_error != null)
+                  Padding(
+                    padding: EdgeInsets.only(bottom: AppSpacing.sm),
+                    child: AppStatusBanner(
+                      severity: AppStatusSeverity.error,
+                      message: AppErrors.localize(context, _error!),
+                    ),
                   ),
-                )
-              : ListView(
-                  padding: EdgeInsets.all(AppSpacing.md),
-                  children: [
-                    ListTile(
-                      leading: const Icon(Icons.folder_outlined),
-                      title: Text(l10n.navProjects),
-                      trailing: Text('$_projectCount'),
-                    ),
-                    ListTile(
-                      leading: const Icon(Icons.extension_outlined),
-                      title: Text(l10n.navModules),
-                      trailing: Text('$_moduleCount'),
-                    ),
-                  ],
-                ),
+                CabinetMetricsWrap(metrics: _metrics),
+              ],
+            ),
     );
   }
 }

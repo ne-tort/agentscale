@@ -1813,7 +1813,7 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get projectPreferredAgentProvider => 'Preferred agent provider';
+  String get projectPreferredAgentProvider => 'AI provider';
 
   @override
   String get projectPreviewTruncated =>
@@ -1911,8 +1911,25 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectResetAgent => 'Reset agent';
 
   @override
-  String get projectConfigureBeforeLaunch =>
-      'Set agent provider and AI key before launch';
+  String get projectConfigureBeforeLaunch => 'Select AI provider before launch';
+
+  @override
+  String get projectAiProviderNotSelected => 'Not selected';
+
+  @override
+  String get projectAiKeyColumnProvider => 'Provider';
+
+  @override
+  String get projectAiKeyColumnSubscription => 'Subscription';
+
+  @override
+  String get projectModuleProfileColumn => 'Profile';
+
+  @override
+  String get projectSelectModuleProfile => 'Select profile';
+
+  @override
+  String get projectModuleNoProfiles => 'This module has no profiles';
 
   @override
   String get projectLaunchSuccess => 'Project launched';

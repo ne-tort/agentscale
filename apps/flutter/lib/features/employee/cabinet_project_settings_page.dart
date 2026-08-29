@@ -2,15 +2,21 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/work_context.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
+import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
+import 'package:prodavan/core/widgets/project_metrics_wrap.dart';
+import 'package:prodavan/features/employee/project_ai_key_select_page.dart';
+import 'package:prodavan/features/employee/project_module_settings_page.dart';
+import 'package:prodavan/features/employee/project_modules_table.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Project settings — name, about, launch/pause/resume, provider, AI key, modules.
+/// Project settings — name, about, launch/pause/resume, AI provider, modules.
 class CabinetProjectSettingsPage extends StatefulWidget {
   const CabinetProjectSettingsPage({
     super.key,
@@ -26,18 +32,15 @@ class CabinetProjectSettingsPage extends StatefulWidget {
 }
 
 class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage> {
-  static const _providers = <String?>[null, 'cursor', 'codex', 'claude_code'];
-
   String _name = '';
   String _about = '';
-  String? _agentProvider;
   String? _resolvedKeyId;
   String? _creatorName;
   String? _status;
   bool _hasPod = false;
   List<Map<String, dynamic>> _availableKeys = const [];
-  List<Map<String, dynamic>> _cabinetModules = const [];
-  List<String> _enabledModuleIds = const [];
+  List<Map<String, dynamic>> _projectModules = const [];
+  Map<String, dynamic>? _metrics;
   bool _loading = true;
   bool _busy = false;
 
@@ -55,32 +58,39 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
       try {
         keys = await workContext.api.listProjectAiKeys(widget.projectId);
       } catch (_) {}
-      final modules = await workContext.api.listCabinetModules(widget.cabinetId);
-      List<String> enabled = const [];
+      Map<String, dynamic>? metrics;
       try {
-        enabled = await workContext.api.listProjectModuleIds(widget.projectId);
-      } catch (_) {
-        enabled = modules
-            .map((m) => m['module_id'] as String? ?? m['id'] as String? ?? '')
-            .where((id) => id.isNotEmpty)
-            .toList();
-      }
+        metrics = await workContext.api.getProjectMetrics(widget.projectId);
+      } catch (_) {}
+      List<Map<String, dynamic>> modules = const [];
+      try {
+        modules = await workContext.api.listProjectModules(widget.projectId);
+      } catch (_) {}
       if (!mounted) return;
+
+      var resolvedKeyId = project['resolved_ai_key_id'] as String?;
+      if (resolvedKeyId == null && keys.length == 1) {
+        final onlyId = keys.first['id'] as String?;
+        if (onlyId != null) {
+          await workContext.api.patchProject(
+            projectId: widget.projectId,
+            resolvedAiKeyId: onlyId,
+          );
+          resolvedKeyId = onlyId;
+        }
+      }
+
       setState(() {
         _name = project['name'] as String? ?? '';
         _about = project['about'] as String? ?? '';
-        _agentProvider = project['agent_provider'] as String?;
-        _resolvedKeyId = project['resolved_ai_key_id'] as String?;
+        _resolvedKeyId = resolvedKeyId;
         _creatorName = project['created_by_login'] as String? ??
             project['created_by_employee_id'] as String?;
         _status = project['status'] as String? ?? 'draft';
         _hasPod = project['runtime'] != null;
         _availableKeys = keys;
-        _cabinetModules = modules;
-        _enabledModuleIds = enabled;
-        if (_resolvedKeyId == null && keys.isNotEmpty) {
-          _resolvedKeyId = keys.first['id'] as String?;
-        }
+        _projectModules = modules;
+        _metrics = metrics;
         _loading = false;
       });
     } catch (e) {
@@ -90,8 +100,19 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
     }
   }
 
-  bool get _configuredForLaunch =>
-      (_agentProvider ?? '').isNotEmpty && (_resolvedKeyId ?? '').isNotEmpty;
+  bool get _configuredForLaunch => (_resolvedKeyId ?? '').isNotEmpty;
+
+  bool get _aiProviderNeedsSelection =>
+      _availableKeys.length >= 2 && (_resolvedKeyId ?? '').isEmpty;
+
+  String? _selectedKeyName() {
+    for (final k in _availableKeys) {
+      if (k['id'] == _resolvedKeyId) {
+        return k['name'] as String? ?? _resolvedKeyId;
+      }
+    }
+    return null;
+  }
 
   Future<void> _saveName(String v) async {
     final name = v.trim();
@@ -105,22 +126,65 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
     if (mounted) setState(() => _about = v.trim());
   }
 
-  Future<void> _saveProvider(String? provider) async {
-    await workContext.api.patchProject(
-      projectId: widget.projectId,
-      agentProvider: provider,
-      clearAgentProvider: provider == null,
-    );
-    if (mounted) setState(() => _agentProvider = provider);
-  }
-
-  Future<void> _saveKey(String? keyId) async {
+  Future<void> _saveKey(String keyId) async {
     await workContext.api.patchProject(
       projectId: widget.projectId,
       resolvedAiKeyId: keyId,
-      clearResolvedAiKeyId: keyId == null,
     );
     if (mounted) setState(() => _resolvedKeyId = keyId);
+  }
+
+  Future<void> _pickAiKey() async {
+    if (_availableKeys.isEmpty) return;
+    final picked = await ProjectAiKeySelectPage.push(
+      context,
+      keys: _availableKeys,
+      selectedKeyId: _resolvedKeyId,
+    );
+    if (picked == null || !mounted) return;
+    try {
+      await _saveKey(picked);
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    }
+  }
+
+  Future<void> _toggleModule(String moduleId, bool enabled) async {
+    final ids = _projectModules
+        .where((m) => m['enabled'] == true)
+        .map((m) => m['module_id'] as String)
+        .whereType<String>()
+        .toSet();
+    if (enabled) {
+      ids.add(moduleId);
+    } else {
+      ids.remove(moduleId);
+    }
+    try {
+      await workContext.api.patchProjectModules(
+        widget.projectId,
+        moduleIds: ids.toList(),
+      );
+      await _load();
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    }
+  }
+
+  Future<void> _openModule(Map<String, dynamic> module) async {
+    final moduleId = module['module_id'] as String?;
+    if (moduleId == null) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ProjectModuleSettingsPage(
+          cabinetId: widget.cabinetId,
+          projectId: widget.projectId,
+          moduleId: moduleId,
+          moduleName: module['name'] as String? ?? moduleId,
+        ),
+      ),
+    );
+    if (mounted) await _load();
   }
 
   Future<void> _launch() async {
@@ -188,11 +252,6 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
     }
   }
 
-  Future<void> _saveModules(List<String> ids) async {
-    await workContext.api.patchProjectModules(widget.projectId, moduleIds: ids);
-    if (mounted) setState(() => _enabledModuleIds = ids);
-  }
-
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -204,20 +263,18 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
     }
 
     final paused = _status == 'paused';
-    final keyOptions = _availableKeys
-        .map((k) => k['id'] as String)
-        .whereType<String>()
-        .toList();
-    final keyLabels = {
-      for (final k in _availableKeys)
-        k['id'] as String: k['name'] as String? ?? k['id'] as String,
-    };
+    final selectedName = _selectedKeyName();
+    final warning = context.appColors.warning;
 
     return AppScaffold(
       title: Text(l10n.projectProjectSettings),
       body: ListView(
         padding: EdgeInsets.all(AppSpacing.md),
         children: [
+          Padding(
+            padding: EdgeInsets.only(bottom: AppSpacing.md),
+            child: ProjectMetricsWrap(metrics: _metrics),
+          ),
           AppValuePreference<String>(
             title: l10n.projectProjectName,
             icon: Icons.title_outlined,
@@ -237,50 +294,27 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
             enabled: false,
             onSave: (_) async {},
           ),
-          AppChoicePreference<String?>(
-            title: l10n.projectPreferredAgentProvider,
-            icon: Icons.smart_toy_outlined,
-            value: _agentProvider,
-            choices: _providers,
-            keyFor: (v) => v ?? '__default__',
-            labelFor: (v) => v ?? l10n.projectCompanyDefault,
-            onSave: _saveProvider,
-          ),
-          if (keyOptions.isNotEmpty)
-            AppChoicePreference<String?>(
-              title: l10n.projectAiKeyLabel,
-              icon: Icons.key_outlined,
-              value: _resolvedKeyId,
-              choices: [null, ...keyOptions],
-              keyFor: (v) => v ?? '__auto__',
-              labelFor: (v) => v == null ? l10n.commonAuto : (keyLabels[v] ?? v),
-              onSave: _saveKey,
+          if (_availableKeys.isNotEmpty)
+            AppPreferenceTile(
+              title: l10n.projectPreferredAgentProvider,
+              icon: Icons.smart_toy_outlined,
+              accentColor: _aiProviderNeedsSelection ? warning : null,
+              subtitle: Text(
+                selectedName ?? l10n.projectAiProviderNotSelected,
+                style: _aiProviderNeedsSelection
+                    ? TextStyle(color: warning)
+                    : null,
+              ),
+              trailing: const AppTrailingChevron(),
+              onTap: _pickAiKey,
             ),
-          if (_cabinetModules.isNotEmpty)
-            AppMultiChoicePreference<String>(
-              title: l10n.projectModulesLabel,
-              icon: Icons.extension_outlined,
-              values: _enabledModuleIds.toSet(),
-              choices: _cabinetModules
-                  .map((m) => m['module_id'] as String? ?? m['id'] as String? ?? '')
-                  .where((id) => id.isNotEmpty)
-                  .toList(),
-              keyFor: (id) => id,
-              labelFor: (id) {
-                final mod = _cabinetModules.firstWhere(
-                  (m) => (m['module_id'] ?? m['id']) == id,
-                  orElse: () => {'name': id},
-                );
-                return mod['name'] as String? ?? id;
-              },
-              onSave: (ids) => _saveModules(ids.toList()),
-            ),
-          if (!_hasPod && !_configuredForLaunch)
+          if (_projectModules.isNotEmpty)
             Padding(
-              padding: EdgeInsets.only(bottom: AppSpacing.sm),
-              child: AppStatusBanner(
-                severity: AppStatusSeverity.info,
-                message: l10n.projectConfigureBeforeLaunch,
+              padding: EdgeInsets.only(bottom: AppSpacing.md),
+              child: ProjectModulesTable(
+                modules: _projectModules,
+                onOpen: _openModule,
+                onEnabledChanged: _toggleModule,
               ),
             ),
           if (!_hasPod && _configuredForLaunch)

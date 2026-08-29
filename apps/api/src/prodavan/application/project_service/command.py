@@ -297,10 +297,13 @@ class ProjectCommand:
             if resolved_ai_key_id:
                 from prodavan.application.ai_keys.service import AiKeysService
 
-                await AiKeysService(self._session).require_key_available_for_project(
+                keys = AiKeysService(self._session)
+                row.agent_provider = await keys.agent_provider_for_project_key(
                     project=row,
                     key_id=resolved_ai_key_id,
                 )
+            else:
+                row.agent_provider = None
             row.resolved_ai_key_id = resolved_ai_key_id
         await self._session.commit()
         await self._session.refresh(row)

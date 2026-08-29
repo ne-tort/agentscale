@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.quota_service import CompanyQuotaService
 from prodavan.application.ai_keys.service import AiKeysService
+from prodavan.application.metrics.read_service import MetricsReadService
 from prodavan.config.settings import settings
 from prodavan.domain.admin import subscription_read_model
 from prodavan.domain.cabinets import CabinetStatus
@@ -201,4 +202,187 @@ class CompanyMetricsAggregator:
             "employees_keycloak_unbound": employees_keycloak_unbound,
             **key_metrics,
             **sub,
+        }
+
+
+class CabinetMetricsAggregator:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+        self._read = MetricsReadService()
+
+    async def _require_cabinet(self, cabinet_id: str) -> CabinetInstanceRow:
+        row = await self._session.get(CabinetInstanceRow, cabinet_id)
+        if row is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Cabinet not found")
+        return row
+
+    async def assignment_employee_ids(self, cabinet_id: str) -> list[str]:
+        from prodavan.domain.cabinets.types import CabinetAssignmentStatus
+        from prodavan.infrastructure.persistence.models.cabinets import CabinetEmployeeAssignmentRow
+
+        q = await self._session.execute(
+            select(func.distinct(CabinetEmployeeAssignmentRow.employee_id)).where(
+                CabinetEmployeeAssignmentRow.cabinet_id == cabinet_id,
+                CabinetEmployeeAssignmentRow.status == CabinetAssignmentStatus.ACTIVE,
+            )
+        )
+        return [str(eid) for eid in q.scalars().all() if eid]
+
+    async def aggregate(self, cabinet_id: str) -> dict:
+        await self._require_cabinet(cabinet_id)
+        emp_ids = await self.assignment_employee_ids(cabinet_id)
+        employees_total = len(emp_ids)
+        employees_online = await self._read.employees_online(emp_ids)
+
+        proj_q = await self._session.execute(
+            select(func.count())
+            .select_from(ProjectRow)
+            .where(
+                ProjectRow.cabinet_id == cabinet_id,
+                ProjectRow.status != ProjectStatus.DELETED,
+            )
+        )
+        projects_total = int(proj_q.scalar_one() or 0)
+
+        usage_q = await self._session.execute(
+            select(
+                func.coalesce(func.sum(AgentUsageRow.input_tokens), 0),
+                func.coalesce(func.sum(AgentUsageRow.output_tokens), 0),
+            )
+            .select_from(AgentUsageRow)
+            .join(AgentSessionRow, AgentSessionRow.id == AgentUsageRow.session_id)
+            .join(ProjectRow, ProjectRow.id == AgentSessionRow.project_id)
+            .where(ProjectRow.cabinet_id == cabinet_id)
+        )
+        usage_row = usage_q.one()
+        input_tok = int(usage_row[0] or 0)
+        output_tok = int(usage_row[1] or 0)
+
+        msg_q = await self._session.execute(
+            select(func.count())
+            .select_from(AgentEventRow)
+            .join(AgentSessionRow, AgentSessionRow.id == AgentEventRow.session_id)
+            .join(ProjectRow, ProjectRow.id == AgentSessionRow.project_id)
+            .where(
+                ProjectRow.cabinet_id == cabinet_id,
+                AgentEventRow.event_type == "text_delta",
+            )
+        )
+        agent_messages = int(msg_q.scalar_one() or 0)
+
+        sess_q = await self._session.execute(
+            select(func.max(AgentSessionRow.updated_at))
+            .join(ProjectRow, ProjectRow.id == AgentSessionRow.project_id)
+            .where(ProjectRow.cabinet_id == cabinet_id)
+        )
+        proj_upd_q = await self._session.execute(
+            select(func.max(ProjectRow.updated_at)).where(
+                ProjectRow.cabinet_id == cabinet_id,
+                ProjectRow.status != ProjectStatus.DELETED,
+            )
+        )
+        evt_q = await self._session.execute(
+            select(func.max(AgentEventRow.created_at))
+            .join(AgentSessionRow, AgentSessionRow.id == AgentEventRow.session_id)
+            .join(ProjectRow, ProjectRow.id == AgentSessionRow.project_id)
+            .where(ProjectRow.cabinet_id == cabinet_id)
+        )
+        candidates = [sess_q.scalar_one(), proj_upd_q.scalar_one(), evt_q.scalar_one()]
+        times = [t for t in candidates if t is not None]
+        last_activity = max(times) if times else None
+
+        from prodavan.application.admin.storage_metrics import company_blob_storage_bytes
+
+        keys_q = await self._session.execute(
+            select(ProjectRow.workspace_key).where(
+                ProjectRow.cabinet_id == cabinet_id,
+                ProjectRow.status != ProjectStatus.DELETED,
+            )
+        )
+        storage_bytes = company_blob_storage_bytes(
+            workspace_keys=list(keys_q.scalars().all()),
+            cabinet_ids=[],
+        )
+
+        return {
+            "cabinet_id": cabinet_id,
+            "employees_total": employees_total,
+            "employees_online": employees_online,
+            "projects_total": projects_total,
+            "agent_tokens_used": input_tok + output_tok,
+            "agent_input_tokens": input_tok,
+            "agent_output_tokens": output_tok,
+            "agent_messages": agent_messages,
+            "storage_bytes": storage_bytes,
+            "last_activity_at": last_activity.isoformat() if last_activity else None,
+        }
+
+
+class ProjectMetricsAggregator:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def _require_project(self, project_id: str) -> ProjectRow:
+        row = await self._session.get(ProjectRow, project_id)
+        if row is None or row.status == ProjectStatus.DELETED:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Project not found")
+        return row
+
+    async def aggregate(self, project_id: str) -> dict:
+        row = await self._require_project(project_id)
+
+        usage_q = await self._session.execute(
+            select(
+                func.coalesce(func.sum(AgentUsageRow.input_tokens), 0),
+                func.coalesce(func.sum(AgentUsageRow.output_tokens), 0),
+            )
+            .select_from(AgentUsageRow)
+            .join(AgentSessionRow, AgentSessionRow.id == AgentUsageRow.session_id)
+            .where(AgentSessionRow.project_id == project_id)
+        )
+        usage_row = usage_q.one()
+        input_tok = int(usage_row[0] or 0)
+        output_tok = int(usage_row[1] or 0)
+
+        msg_q = await self._session.execute(
+            select(func.count())
+            .select_from(AgentEventRow)
+            .join(AgentSessionRow, AgentSessionRow.id == AgentEventRow.session_id)
+            .where(
+                AgentSessionRow.project_id == project_id,
+                AgentEventRow.event_type == "text_delta",
+            )
+        )
+        agent_messages = int(msg_q.scalar_one() or 0)
+
+        sess_q = await self._session.execute(
+            select(func.max(AgentSessionRow.updated_at)).where(
+                AgentSessionRow.project_id == project_id
+            )
+        )
+        evt_q = await self._session.execute(
+            select(func.max(AgentEventRow.created_at))
+            .join(AgentSessionRow, AgentSessionRow.id == AgentEventRow.session_id)
+            .where(AgentSessionRow.project_id == project_id)
+        )
+        candidates = [sess_q.scalar_one(), row.updated_at, evt_q.scalar_one()]
+        times = [t for t in candidates if t is not None]
+        last_activity = max(times) if times else None
+
+        from prodavan.application.admin.storage_metrics import company_blob_storage_bytes
+
+        storage_bytes = company_blob_storage_bytes(
+            workspace_keys=[row.workspace_key] if row.workspace_key else [],
+            cabinet_ids=[],
+        )
+
+        return {
+            "project_id": project_id,
+            "status": row.status,
+            "agent_tokens_used": input_tok + output_tok,
+            "agent_input_tokens": input_tok,
+            "agent_output_tokens": output_tok,
+            "agent_messages": agent_messages,
+            "storage_bytes": storage_bytes,
+            "last_activity_at": last_activity.isoformat() if last_activity else None,
         }

@@ -106,6 +106,21 @@ async def list_cabinets(
     return {"items": items}
 
 
+@router.get("/{cabinet_id}/metrics")
+async def get_cabinet_metrics(
+    cabinet_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+) -> dict:
+    await CabinetInstanceService(session).get(
+        cabinet_id=cabinet_id, principal=principal, employee=employee
+    )
+    from prodavan.application.metrics.query import MetricsQuery
+
+    return await MetricsQuery(session).cabinet_metrics(cabinet_id)
+
+
 @router.get("/{cabinet_id}")
 async def get_cabinet(
     cabinet_id: str,

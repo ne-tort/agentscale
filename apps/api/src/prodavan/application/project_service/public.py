@@ -4,9 +4,21 @@ from __future__ import annotations
 
 from prodavan.domain.ai_keys import AiProvider
 from prodavan.domain.errors import AppError
+from prodavan.infrastructure.persistence.models.ai_keys import AiProviderKeyRow
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
 
 _ALLOWED_PROVIDERS = frozenset(p.value for p in AiProvider)
+
+
+def agent_provider_from_key_row(row: AiProviderKeyRow) -> str:
+    """Map selected AI key → project agent_provider for launch/runtime."""
+    provider = (row.provider or "").strip()
+    if provider in _ALLOWED_PROVIDERS:
+        return provider
+    api_kind = (row.api_kind or "").strip()
+    if api_kind == "anthropic_api":
+        return AiProvider.CLAUDE_CODE.value
+    return AiProvider.CODEX.value
 
 
 def normalize_agent_provider(value: str | None) -> str | None:

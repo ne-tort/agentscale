@@ -108,6 +108,23 @@ async def list_projects(
     return {"items": items}
 
 
+@router.get("/projects/{project_id}/metrics")
+async def get_project_summary_metrics(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.project_service import ProjectAccessPolicy
+
+    await ProjectAccessPolicy(session).require_access(
+        project_id=project_id, principal=principal, employee=employee, write=False, allow_paused=True
+    )
+    from prodavan.application.metrics.query import MetricsQuery
+
+    return await MetricsQuery(session).project_metrics(project_id)
+
+
 @router.get("/projects/{project_id}")
 async def get_project(
     project_id: str,
@@ -150,12 +167,55 @@ async def get_project_modules(
     session: SessionDep,
     employee: EmployeeDep,
 ) -> dict:
-    from prodavan.application.project_service import ProjectCommand
+    from prodavan.application.project_service.module_settings import ProjectModuleSettingsService
 
-    ids = await ProjectCommand(session).list_module_ids(
+    return await ProjectModuleSettingsService(session).list_modules(
         project_id=project_id, principal=principal, employee=employee
     )
-    return {"module_ids": ids}
+
+
+class ProjectModuleProfileBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    profile_id: str = Field(min_length=1, max_length=80)
+
+
+@router.get("/projects/{project_id}/modules/{module_id}")
+async def get_project_module(
+    project_id: str,
+    module_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.project_service.module_settings import ProjectModuleSettingsService
+
+    return await ProjectModuleSettingsService(session).get_module(
+        project_id=project_id,
+        module_id=module_id,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.patch("/projects/{project_id}/modules/{module_id}/profile")
+async def patch_project_module_profile(
+    project_id: str,
+    module_id: str,
+    body: ProjectModuleProfileBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.project_service.module_settings import ProjectModuleSettingsService
+
+    return await ProjectModuleSettingsService(session).set_profile(
+        project_id=project_id,
+        module_id=module_id,
+        profile_id=body.profile_id,
+        principal=principal,
+        employee=employee,
+    )
 
 
 @router.patch("/projects/{project_id}/modules")

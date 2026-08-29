@@ -8,7 +8,11 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.metrics.adapters.redis_metrics_store import build_metrics_store
-from prodavan.application.metrics.aggregator import CompanyMetricsAggregator
+from prodavan.application.metrics.aggregator import (
+    CabinetMetricsAggregator,
+    CompanyMetricsAggregator,
+    ProjectMetricsAggregator,
+)
 from prodavan.application.metrics.read_service import MetricsReadService
 from prodavan.config.settings import settings
 
@@ -25,6 +29,12 @@ class MetricsQuery:
         emp_ids = await self._aggregator.membership_employee_ids(company_id)
         metrics["employees_online"] = await self._read.employees_online(emp_ids)
         return metrics
+
+    async def cabinet_metrics(self, cabinet_id: str) -> dict[str, Any]:
+        return await CabinetMetricsAggregator(self._session).aggregate(cabinet_id)
+
+    async def project_metrics(self, project_id: str) -> dict[str, Any]:
+        return await ProjectMetricsAggregator(self._session).aggregate(project_id)
 
     async def get_project_runtime_metrics(
         self,

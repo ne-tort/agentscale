@@ -86,9 +86,10 @@ def _configure_and_launch(client: TestClient, owner_h: dict[str, str], project_i
     patched = client.patch(
         f"/api/v1/projects/{project_id}",
         headers=owner_h,
-        json={"agent_provider": "cursor", "resolved_ai_key_id": key_id},
+        json={"resolved_ai_key_id": key_id},
     )
     assert patched.status_code == 200, patched.text
+    assert patched.json()["agent_provider"] == "cursor"
     launched = client.post(f"/api/v1/projects/{project_id}/launch", headers=owner_h)
     assert launched.status_code == 200, launched.text
     return launched.json()
@@ -1555,3 +1556,75 @@ def test_project_resume_requires_valid_ai_key(client: TestClient) -> None:
     assert blocked.status_code == 404, blocked.text
     assert blocked.json()["code"] == "NO_AI_KEY"
     assert client.get(f"/api/v1/projects/{project_id}", headers=owner_h).json()["status"] == "paused"
+
+
+@requires_postgres
+def test_patch_resolved_ai_key_sets_agent_provider(client: TestClient) -> None:
+    _, cabinet_id, owner_tok = _setup_cabinet(client)
+    owner_h = {"Authorization": f"Bearer {owner_tok}"}
+    created = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "Key Only Proj"},
+    )
+    assert created.status_code == 201, created.text
+    project_id = created.json()["id"]
+    assert created.json()["agent_provider"] is None
+
+    keys = client.get(f"/api/v1/projects/{project_id}/ai-keys/available", headers=owner_h)
+    assert keys.status_code == 200, keys.text
+    key_id = keys.json()["items"][0]["id"]
+
+    patched = client.patch(
+        f"/api/v1/projects/{project_id}",
+        headers=owner_h,
+        json={"resolved_ai_key_id": key_id},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["resolved_ai_key_id"] == key_id
+    assert patched.json()["agent_provider"] == "cursor"
+
+    cleared = client.patch(
+        f"/api/v1/projects/{project_id}",
+        headers=owner_h,
+        json={"resolved_ai_key_id": None},
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["resolved_ai_key_id"] is None
+    assert cleared.json()["agent_provider"] is None
+
+
+@requires_postgres
+def test_cabinet_and_project_metrics(client: TestClient) -> None:
+    _, cabinet_id, owner_tok = _setup_cabinet(client)
+    owner_h = {"Authorization": f"Bearer {owner_tok}"}
+    created = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "Metrics Proj"},
+    )
+    assert created.status_code == 201, created.text
+    project_id = created.json()["id"]
+
+    cab_metrics = client.get(f"/api/v1/cabinets/{cabinet_id}/metrics", headers=owner_h)
+    assert cab_metrics.status_code == 200, cab_metrics.text
+    cab_body = cab_metrics.json()
+    assert cab_body["cabinet_id"] == cabinet_id
+    assert cab_body["projects_total"] >= 1
+    assert "agent_tokens_used" in cab_body
+    assert "employees_total" in cab_body
+    assert "module_bindings_count" not in cab_body
+
+    proj_metrics = client.get(f"/api/v1/projects/{project_id}/metrics", headers=owner_h)
+    assert proj_metrics.status_code == 200, proj_metrics.text
+    proj_body = proj_metrics.json()
+    assert proj_body["project_id"] == project_id
+    assert proj_body["status"] == "draft"
+    assert proj_body["agent_tokens_used"] == 0
+
+    mod_list = client.get(f"/api/v1/projects/{project_id}/modules", headers=owner_h)
+    assert mod_list.status_code == 200, mod_list.text
+    mod_body = mod_list.json()
+    assert "module_ids" in mod_body
+    assert "items" in mod_body
+    assert isinstance(mod_body["items"], list)
