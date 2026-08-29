@@ -161,3 +161,40 @@ async def rotate_company_key_secret(
     svc = AiKeysService(session)
     await svc.require_company_writable_key(key_id, company_id)
     return await svc.rotate_secret(key_id, body.secret, principal=principal)
+
+
+class KeyScopeBindingsBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    employee_ids: list[str] = Field(default_factory=list)
+    cabinet_ids: list[str] = Field(default_factory=list)
+
+
+@router.get("/{key_id}/scope-bindings")
+async def get_key_scope_bindings(
+    company_id: str,
+    key_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    return await AiKeysService(session).get_key_scope_bindings(key_id=key_id, company_id=company_id)
+
+
+@router.put("/{key_id}/scope-bindings")
+async def set_key_scope_bindings(
+    company_id: str,
+    key_id: str,
+    body: KeyScopeBindingsBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    return await AiKeysService(session).set_key_scope_bindings(
+        key_id=key_id,
+        company_id=company_id,
+        employee_ids=body.employee_ids,
+        cabinet_ids=body.cabinet_ids,
+    )

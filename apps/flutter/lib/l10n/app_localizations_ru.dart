@@ -588,6 +588,57 @@ class AppLocalizationsRu extends AppLocalizations {
   String get adminContainerMetricsHole => 'K8s метрики';
 
   @override
+  String get adminContainerK8sPhase => 'Фаза k8s';
+
+  @override
+  String get adminContainerPodStatus => 'Статус pod';
+
+  @override
+  String get adminContainerDesiredState => 'Желаемое состояние';
+
+  @override
+  String get adminContainerPodReadyTrue => 'Pod готов';
+
+  @override
+  String get adminContainerPodReadyFalse => 'Pod не готов';
+
+  @override
+  String get adminContainerPodRestarts => 'Перезапуски';
+
+  @override
+  String get adminContainerMetricsCpu => 'CPU';
+
+  @override
+  String get adminContainerMetricsMemory => 'Память';
+
+  @override
+  String get adminContainerMetricsUnavailable =>
+      'CPU/RAM: metrics-server недоступен';
+
+  @override
+  String get adminContainerLastError => 'Ошибка';
+
+  @override
+  String get adminContainerRuntimeNotStarted =>
+      'Pod не запущен. Стартует при первом обращении к агенту или после «Возобновить».';
+
+  @override
+  String get adminContainerRuntimeNotStartedShort => 'Не запущен';
+
+  @override
+  String get adminContainerRuntimePaused => 'Pod остановлен — проект на паузе.';
+
+  @override
+  String get adminContainerRuntimePausedShort => 'Остановлен';
+
+  @override
+  String get adminContainerRuntimeAttention =>
+      'Проект активен, но pod ещё не создан в k8s. Откройте агент или нажмите «Возобновить».';
+
+  @override
+  String get adminContainerColK8s => 'K8s';
+
+  @override
   String adminDeleteContainerConfirm(String name) {
     return 'Удалить проект «$name»? Workspace будет очищен.';
   }
@@ -1829,6 +1880,45 @@ class AppLocalizationsRu extends AppLocalizations {
   @override
   String get projectWorkspaceRematerializedNoPackages =>
       'Workspace пересоздан (без MCP-пакетов)';
+
+  @override
+  String get navProjects => 'Проекты';
+
+  @override
+  String get projectAddHint => 'Добавить проект';
+
+  @override
+  String get projectAboutLabel => 'О проекте';
+
+  @override
+  String get projectCreatorLabel => 'Создатель';
+
+  @override
+  String get projectAiKeyLabel => 'AI-ключ';
+
+  @override
+  String get projectModulesLabel => 'Модули';
+
+  @override
+  String get commonAuto => 'Авто';
+
+  @override
+  String get employeeContactEmail => 'Контактный email';
+
+  @override
+  String get employeePassword => 'Пароль';
+
+  @override
+  String get employeeSwitchCabinet => 'Сменить кабинет';
+
+  @override
+  String get employeeSingleCabinet => 'Доступен только один кабинет';
+
+  @override
+  String get employeePasswordChanged => 'Пароль обновлён';
+
+  @override
+  String get employeeContactEmailSaved => 'Контактный email сохранён';
 
   @override
   String get settings => 'Настройки';

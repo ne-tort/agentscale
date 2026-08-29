@@ -323,18 +323,27 @@ class ProdavanApi {
   Future<Map<String, dynamic>> patchProject({
     required String projectId,
     String? name,
+    String? about,
     String? agentProvider,
     bool clearAgentProvider = false,
+    String? resolvedAiKeyId,
+    bool clearResolvedAiKeyId = false,
   }) async {
     final prevProj = this.projectId;
     this.projectId = projectId;
     try {
       final body = <String, dynamic>{};
       if (name != null) body['name'] = name;
+      if (about != null) body['about'] = about;
       if (clearAgentProvider) {
         body['agent_provider'] = null;
       } else if (agentProvider != null) {
         body['agent_provider'] = agentProvider;
+      }
+      if (clearResolvedAiKeyId) {
+        body['resolved_ai_key_id'] = null;
+      } else if (resolvedAiKeyId != null) {
+        body['resolved_ai_key_id'] = resolvedAiKeyId;
       }
       final res = await AuthHttp.patch(_uri('/projects/$projectId'), body: jsonEncode(body), extraHeaders: _workHeaders);
       _throwIfError(res);
@@ -344,11 +353,85 @@ class ProdavanApi {
     }
   }
 
+  Future<void> deleteProject(String projectId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.delete(_uri('/projects/$projectId'), extraHeaders: _workHeaders);
+      _throwIfError(res);
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> listProjectAiKeys(String projectId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.get(_uri('/projects/$projectId/ai-keys/available'), extraHeaders: _workHeaders);
+      _throwIfError(res);
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final items = body['items'];
+      if (items is List) return items.cast<Map<String, dynamic>>();
+      return const [];
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<List<String>> listProjectModuleIds(String projectId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.get(_uri('/projects/$projectId/modules'), extraHeaders: _workHeaders);
+      _throwIfError(res);
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final items = body['module_ids'];
+      if (items is List) return items.cast<String>();
+      return const [];
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<void> patchProjectModules(String projectId, {required List<String> moduleIds}) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.patch(
+        _uri('/projects/$projectId/modules'),
+        body: jsonEncode({'module_ids': moduleIds}),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<void> setMyPassword(String password) async {
+    final res = await AuthHttp.put(
+      _uri('/me/password'),
+      body: jsonEncode({'password': password}),
+      extraHeaders: _workHeaders,
+    );
+    _throwIfError(res);
+  }
+
+  Future<void> patchMyContactEmail(String contactEmail) async {
+    final res = await AuthHttp.patch(
+      _uri('/me/contact-email'),
+      body: jsonEncode({'contact_email': contactEmail.isEmpty ? null : contactEmail}),
+      extraHeaders: _workHeaders,
+    );
+    _throwIfError(res);
+  }
+
   Future<Map<String, dynamic>> rematerializeProject(String projectId) async {
     final prevProj = this.projectId;
     this.projectId = projectId;
     try {
-      final res = await AuthHttp.post(_uri('/projects/$projectId/rematerialize'), extraHeaders: _workHeaders);
+      final res = await AuthHttp.post(_uri('/projects/$projectId/materialize'), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {

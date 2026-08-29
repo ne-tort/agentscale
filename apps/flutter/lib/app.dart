@@ -4,7 +4,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'package:prodavan/core/settings/app_settings_controller.dart';
 import 'package:prodavan/core/theme/app_theme.dart';
-import 'package:prodavan/features/employee/session_gate_page.dart';
+import 'package:prodavan/features/auth/session_gate_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Platform entry — session restore → Sign in; locale + theme from settings.

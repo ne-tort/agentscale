@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/containers/container_runtime_presenter.dart';
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/admin_context.dart';
@@ -155,6 +156,14 @@ class _AdminContainerDetailPageState extends State<AdminContainerDetailPage> {
                       message: l10n.projectPausedBanner,
                     ),
                   ),
+                if (containerRuntimeNeedsAttention(_item))
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
+                    child: AppStatusBanner(
+                      severity: AppStatusSeverity.info,
+                      message: l10n.adminContainerRuntimeAttention,
+                    ),
+                  ),
                 AppPreferenceTile(
                   title: l10n.adminContainerColStatus,
                   icon: Icons.circle,
@@ -197,7 +206,7 @@ class _AdminContainerDetailPageState extends State<AdminContainerDetailPage> {
                 AppPreferenceTile(
                   title: l10n.adminContainerMetricsHole,
                   icon: Icons.monitor_heart_outlined,
-                  subtitle: Text(l10n.commonEmDash),
+                  subtitle: Text(formatContainerRuntimeDetail(_item, l10n)),
                 ),
                 const SizedBox(height: AppSpacing.md),
                 if (!paused)

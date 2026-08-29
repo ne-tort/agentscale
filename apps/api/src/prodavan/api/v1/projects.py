@@ -35,7 +35,15 @@ class PatchProjectBody(BaseModel):
     model_config = {"extra": "forbid"}
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
+    about: str | None = Field(default=None, max_length=8000)
     agent_provider: str | None = Field(default=None, max_length=32)
+    resolved_ai_key_id: str | None = Field(default=None, max_length=40)
+
+
+class PatchProjectModulesBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    module_ids: list[str] = Field(default_factory=list)
 
 
 class TriggerBody(BaseModel):
@@ -126,9 +134,64 @@ async def patch_project(
         principal=principal,
         employee=employee,
         name=fields.get("name"),
+        about=fields.get("about"),
+        update_about="about" in fields,
         agent_provider=fields.get("agent_provider"),
         update_agent_provider="agent_provider" in fields,
+        resolved_ai_key_id=fields.get("resolved_ai_key_id"),
+        update_resolved_ai_key_id="resolved_ai_key_id" in fields,
     )
+
+
+@router.get("/projects/{project_id}/modules")
+async def get_project_modules(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.project_service import ProjectCommand
+
+    ids = await ProjectCommand(session).list_module_ids(
+        project_id=project_id, principal=principal, employee=employee
+    )
+    return {"module_ids": ids}
+
+
+@router.patch("/projects/{project_id}/modules")
+async def patch_project_modules(
+    project_id: str,
+    body: PatchProjectModulesBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.project_service import ProjectCommand
+
+    ids = await ProjectCommand(session).set_module_ids(
+        project_id=project_id,
+        module_ids=body.module_ids,
+        principal=principal,
+        employee=employee,
+    )
+    return {"module_ids": ids}
+
+
+@router.get("/projects/{project_id}/ai-keys/available")
+async def list_project_ai_keys(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.ai_keys.service import AiKeysService
+    from prodavan.application.project_service import ProjectAccessPolicy
+
+    row = await ProjectAccessPolicy(session).require_access(
+        project_id=project_id, principal=principal, employee=employee, write=False, allow_paused=True
+    )
+    items = await AiKeysService(session).list_available_keys_for_project(project=row)
+    return {"items": items}
 
 
 @router.post("/projects/{project_id}/materialize")

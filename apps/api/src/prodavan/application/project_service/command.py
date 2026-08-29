@@ -167,8 +167,12 @@ class ProjectCommand:
         principal: Principal,
         employee: EmployeeRow | None,
         name: str | None = None,
+        about: str | None = None,
+        update_about: bool = False,
         agent_provider: str | None = None,
         update_agent_provider: bool = False,
+        resolved_ai_key_id: str | None = None,
+        update_resolved_ai_key_id: bool = False,
     ) -> dict:
         row = await self._access.require_access(
             project_id=project_id,
@@ -187,8 +191,19 @@ class ProjectCommand:
                     detail="name required",
                 )
             row.name = trimmed
+        if update_about:
+            row.about = (about or "").strip() or None
         if update_agent_provider:
             row.agent_provider = normalize_agent_provider(agent_provider)
+        if update_resolved_ai_key_id:
+            if resolved_ai_key_id:
+                from prodavan.application.ai_keys.service import AiKeysService
+
+                await AiKeysService(self._session).require_key_available_for_project(
+                    project=row,
+                    key_id=resolved_ai_key_id,
+                )
+            row.resolved_ai_key_id = resolved_ai_key_id
         await self._session.commit()
         await self._session.refresh(row)
         return await self._project_public(row)
@@ -598,6 +613,76 @@ class ProjectCommand:
         out["purged"] = True
         out["workspace_wipe"] = wipe
         return out
+
+    async def list_module_ids(
+        self,
+        *,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> list[str]:
+        from sqlalchemy import select
+
+        from prodavan.infrastructure.persistence.models.projects import ProjectModuleBindingRow
+
+        row = await self._access.require_access(
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            write=False,
+            allow_paused=True,
+        )
+        q = await self._session.execute(
+            select(ProjectModuleBindingRow.module_id).where(
+                ProjectModuleBindingRow.project_id == row.id
+            )
+        )
+        bound = list(q.scalars().all())
+        if bound:
+            return bound
+        from prodavan.application.modules.module_binding_service import ModuleBindingService
+
+        return await ModuleBindingService(self._session).list_module_ids_for_cabinet(row.cabinet_id)
+
+    async def set_module_ids(
+        self,
+        *,
+        project_id: str,
+        module_ids: list[str],
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> list[str]:
+        from sqlalchemy import delete
+
+        from prodavan.application.modules.module_binding_service import ModuleBindingService
+        from prodavan.infrastructure.persistence.models.projects import ProjectModuleBindingRow
+
+        row = await self._access.require_access(
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+            allow_paused=True,
+        )
+        allowed = set(
+            await ModuleBindingService(self._session).list_module_ids_for_cabinet(row.cabinet_id)
+        )
+        unique = list(dict.fromkeys(module_ids))
+        for mid in unique:
+            if mid not in allowed:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail=f"module not bound to cabinet: {mid}",
+                )
+        await self._session.execute(
+            delete(ProjectModuleBindingRow).where(ProjectModuleBindingRow.project_id == row.id)
+        )
+        for mid in unique:
+            self._session.add(ProjectModuleBindingRow(project_id=row.id, module_id=mid))
+        await self._session.commit()
+        return unique
 
     async def _wipe_workspace(self, row: ProjectRow) -> dict:
         try:

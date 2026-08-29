@@ -91,6 +91,36 @@ void main() {
     expect(cell.style?.color, warning);
   });
 
+  testWidgets('entity collection table mode scrolls when rows exceed height', (tester) async {
+    final rows = List.generate(
+      24,
+      (i) => AppEntityRow(
+        id: '$i',
+        title: 'ai-key-$i',
+        cells: const {'x': 'cell'},
+      ),
+    );
+    await tester.binding.setSurfaceSize(const Size(900, 220));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      themed(
+        AppScaffold(
+          body: AppEntityCollection(
+            mode: AppEntityCollectionMode.table,
+            rows: rows,
+            primaryColumnLabel: 'Key',
+            columns: const [AppEntityColumn(id: 'x', label: 'Type')],
+            onOpen: (_) {},
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byType(SingleChildScrollView), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('catalog select page multi select', (tester) async {
     await tester.pumpWidget(
       themed(

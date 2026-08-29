@@ -5,7 +5,7 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_icon_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
-import 'package:prodavan/features/employee/cabinet_list_page.dart';
+import 'package:prodavan/features/employee/employee_navigation.dart';
 import 'package:prodavan/features/settings/open_app_settings.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -18,9 +18,7 @@ class ContourSelectorPage extends StatelessWidget {
   Future<void> _select(BuildContext context, String companyId) async {
     await tokenSession.setCompanyId(companyId);
     if (!context.mounted) return;
-    Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(builder: (_) => const CabinetListPage()),
-    );
+    await navigateToEmployeeCabinets(context);
   }
 
   @override

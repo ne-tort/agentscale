@@ -102,6 +102,7 @@ async def me(
             "id": employee.id,
             "status": employee.status,
             "email": employee.email,
+            "contact_email": employee.contact_email,
             "memberships": await _memberships_public(session, list(employee.memberships)),
         },
         "work_context": {
@@ -324,3 +325,46 @@ async def switch_company(
         raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
     await EntitlementService(session).require_membership(employee.id, company_id)
     return {"company_id": company_id, "jwt_reissued": False}
+
+
+class MePasswordBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    password: str = Field(min_length=8, max_length=200)
+
+
+class MeContactEmailBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    contact_email: str | None = Field(default=None, max_length=320)
+
+
+@router.put("/me/password")
+async def set_my_password(
+    body: MePasswordBody,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+    session: SessionDep,
+) -> dict:
+    if employee is None:
+        raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
+    from prodavan.application.employees.service import EmployeesCommandService
+
+    await EmployeesCommandService(session).set_password(employee_id=employee.id, password=body.password)
+    return {"password_set": True}
+
+
+@router.patch("/me/contact-email")
+async def patch_my_contact_email(
+    body: MeContactEmailBody,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+    session: SessionDep,
+) -> dict:
+    if employee is None:
+        raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
+    from prodavan.application.employees.service import EmployeesCommandService
+
+    emp = await EmployeesCommandService(session).update_contact_email(
+        employee_id=employee.id,
+        contact_email=body.contact_email,
+    )
+    return {"contact_email": emp.contact_email}

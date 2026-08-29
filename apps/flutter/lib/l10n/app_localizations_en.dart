@@ -588,6 +588,57 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminContainerMetricsHole => 'K8s metrics';
 
   @override
+  String get adminContainerK8sPhase => 'K8s phase';
+
+  @override
+  String get adminContainerPodStatus => 'Pod status';
+
+  @override
+  String get adminContainerDesiredState => 'Desired state';
+
+  @override
+  String get adminContainerPodReadyTrue => 'Pod ready';
+
+  @override
+  String get adminContainerPodReadyFalse => 'Pod not ready';
+
+  @override
+  String get adminContainerPodRestarts => 'Restarts';
+
+  @override
+  String get adminContainerMetricsCpu => 'CPU';
+
+  @override
+  String get adminContainerMetricsMemory => 'Memory';
+
+  @override
+  String get adminContainerMetricsUnavailable =>
+      'CPU/RAM: metrics-server unavailable';
+
+  @override
+  String get adminContainerLastError => 'Error';
+
+  @override
+  String get adminContainerRuntimeNotStarted =>
+      'Pod is not running. It starts on first agent use or after Resume.';
+
+  @override
+  String get adminContainerRuntimeNotStartedShort => 'Not running';
+
+  @override
+  String get adminContainerRuntimePaused => 'Pod stopped — project is paused.';
+
+  @override
+  String get adminContainerRuntimePausedShort => 'Stopped';
+
+  @override
+  String get adminContainerRuntimeAttention =>
+      'Project is active but no k8s pod yet. Open the agent or tap Resume.';
+
+  @override
+  String get adminContainerColK8s => 'K8s';
+
+  @override
   String adminDeleteContainerConfirm(String name) {
     return 'Delete project \"$name\"? Workspace will be wiped.';
   }
@@ -1826,6 +1877,45 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get projectWorkspaceRematerializedNoPackages =>
       'Workspace rematerialized (no MCP packages)';
+
+  @override
+  String get navProjects => 'Projects';
+
+  @override
+  String get projectAddHint => 'Add project';
+
+  @override
+  String get projectAboutLabel => 'About';
+
+  @override
+  String get projectCreatorLabel => 'Creator';
+
+  @override
+  String get projectAiKeyLabel => 'AI key';
+
+  @override
+  String get projectModulesLabel => 'Modules';
+
+  @override
+  String get commonAuto => 'Auto';
+
+  @override
+  String get employeeContactEmail => 'Contact email';
+
+  @override
+  String get employeePassword => 'Password';
+
+  @override
+  String get employeeSwitchCabinet => 'Switch cabinet';
+
+  @override
+  String get employeeSingleCabinet => 'Only one cabinet available';
+
+  @override
+  String get employeePasswordChanged => 'Password updated';
+
+  @override
+  String get employeeContactEmailSaved => 'Contact email saved';
 
   @override
   String get settings => 'Settings';

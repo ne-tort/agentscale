@@ -43,6 +43,8 @@ def project_public(
         "workspace_key": row.workspace_key,
         "container_ref": row.container_ref,
         "agent_provider": row.agent_provider,
+        "about": getattr(row, "about", None),
+        "resolved_ai_key_id": getattr(row, "resolved_ai_key_id", None),
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }

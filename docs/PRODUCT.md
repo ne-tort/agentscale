@@ -37,6 +37,7 @@ SaaS: **управление изолированными Pod'ами через 
 | Backend e2e (API, не UI) | `apps/api/tests/integration/`, `tests/e2e/k8s/`, `tests/e2e/live/` |
 | Agent + chat + files | `application/agent/`, `api/v1/agent.py`, content/assets |
 | Flutter UI (частично) | `apps/flutter/lib/features/` |
+| **Employee UI канон** | [`employee-ui/README.md`](employee-ui/README.md) |
 | As-built слои | [`target/12-layer-docs/`](target/12-layer-docs/) — **описание кода**, не закон |
 
 **Dev deployment** (`infra/k3s/overlays/dev/`): `POD_RUNTIME_MODE=k8s`, real Pod'ы в `prodavan-sandboxes`. После merge → CI Images → Argo sync.

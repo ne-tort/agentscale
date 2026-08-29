@@ -35,6 +35,10 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
   bool _loading = true;
   Map<String, dynamic>? _key;
   String _displayName = '';
+  List<Map<String, dynamic>> _employees = const [];
+  List<Map<String, dynamic>> _cabinets = const [];
+  Set<String> _boundEmployeeIds = const {};
+  Set<String> _boundCabinetIds = const {};
 
   bool get _writable => companyEntityWritable(_key ?? const {});
 
@@ -62,11 +66,27 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
         companyId: widget.companyId,
         keyId: widget.keyId,
       );
+      final writable = companyEntityWritable(key);
+      final employees = await companyContext.api.listEmployees(widget.companyId);
+      final cabinets = await companyContext.api.listOrgCabinets(widget.companyId);
+      Map<String, dynamic> bindings = const {};
+      if (writable) {
+        try {
+          bindings = await companyContext.api.getAiKeyScopeBindings(
+            companyId: widget.companyId,
+            keyId: widget.keyId,
+          );
+        } catch (_) {}
+      }
       if (!mounted) return;
       if (silent && appRefreshDataEquals(_key, key) && !_loading) return;
       setState(() {
         _key = key;
         _displayName = key['name'] as String? ?? widget.keyName;
+        _employees = employees;
+        _cabinets = cabinets;
+        _boundEmployeeIds = (bindings['employee_ids'] as List?)?.cast<String>().toSet() ?? {};
+        _boundCabinetIds = (bindings['cabinet_ids'] as List?)?.cast<String>().toSet() ?? {};
         _loading = false;
       });
     } catch (e) {
@@ -292,6 +312,48 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
               title: l10n.adminDisableKey,
               icon: Icons.pause_circle_outline_rounded,
               onTap: _pauseKey,
+            ),
+          if (_writable && _employees.isNotEmpty)
+            AppMultiChoicePreference<String>(
+              title: l10n.navEmployees,
+              icon: Icons.group_outlined,
+              values: _boundEmployeeIds,
+              choices: _employees.map((e) => e['id'] as String).whereType<String>().toList(),
+              keyFor: (id) => id,
+              labelFor: (id) {
+                final e = _employees.firstWhere((x) => x['id'] == id, orElse: () => {'login': id});
+                return e['login'] as String? ?? e['display_name'] as String? ?? id;
+              },
+              onSave: (ids) async {
+                await companyContext.api.setAiKeyScopeBindings(
+                  companyId: widget.companyId,
+                  keyId: widget.keyId,
+                  employeeIds: ids.toList(),
+                  cabinetIds: _boundCabinetIds.toList(),
+                );
+                await _load();
+              },
+            ),
+          if (_writable && _cabinets.isNotEmpty)
+            AppMultiChoicePreference<String>(
+              title: l10n.navCabinets,
+              icon: Icons.view_module_outlined,
+              values: _boundCabinetIds,
+              choices: _cabinets.map((c) => c['id'] as String).whereType<String>().toList(),
+              keyFor: (id) => id,
+              labelFor: (id) {
+                final c = _cabinets.firstWhere((x) => x['id'] == id, orElse: () => {'name': id});
+                return c['name'] as String? ?? id;
+              },
+              onSave: (ids) async {
+                await companyContext.api.setAiKeyScopeBindings(
+                  companyId: widget.companyId,
+                  keyId: widget.keyId,
+                  employeeIds: _boundEmployeeIds.toList(),
+                  cabinetIds: ids.toList(),
+                );
+                await _load();
+              },
             ),
         ],
       ),

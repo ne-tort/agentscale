@@ -126,6 +126,8 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
   static const double _columnSpacing = 12;
   static const double _horizontalMargin = 12;
   static const double _primaryMinWidth = 140;
+  static const double _flexColumnMinWidth = 96;
+  static const double _mutateTrailingMinWidth = 128;
 
   String? _editFocusId;
 
@@ -328,9 +330,16 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
           0,
           (sum, c) => sum + (c.width ?? 0),
         );
+        final flexMin = widget.columns
+                .where((c) => c.width == null)
+                .length *
+            _flexColumnMinWidth;
+        final mutateMin = _mutateEnabled ? _mutateTrailingMinWidth : 0;
         final minTableWidth = _horizontalMargin * 2 +
             _primaryMinWidth +
             fixedWidth +
+            flexMin +
+            mutateMin +
             widget.columns.length * _columnSpacing;
         final needsScroll = minTableWidth > tableWidth;
         final lastColIndex = widget.columns.isEmpty ? -1 : widget.columns.length - 1;
@@ -374,7 +383,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                             style: headingStyle,
                             textAlign: _textAlign(c.align),
                             softWrap: false,
-                            overflow: TextOverflow.visible,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         )
                       : const SizedBox.shrink(),
@@ -434,10 +443,16 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
           child: table,
         );
 
-        if (!needsScroll) return child;
+        Widget tableBody = child;
+        if (needsScroll) {
+          tableBody = SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: child,
+          );
+        }
         return SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          child: child,
+          scrollDirection: Axis.vertical,
+          child: tableBody,
         );
       },
     );

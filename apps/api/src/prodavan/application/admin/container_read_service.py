@@ -49,7 +49,7 @@ def _item(
         "created_at": project.created_at.isoformat() if project.created_at else None,
         "updated_at": project.updated_at.isoformat() if project.updated_at else None,
         "runtime": runtime,
-        "runtime_metrics": None,
+        "runtime_metrics": runtime.get("metrics") if runtime else None,
         "k8s_phase": (runtime.get("phase") or runtime.get("status")) if runtime else None,
         "last_error": runtime.get("last_error") if runtime else None,
     }

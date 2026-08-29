@@ -52,6 +52,28 @@ class CompanyAiKeyBindingRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class EmployeeAiKeyBindingRow(Base):
+    __tablename__ = "employee_ai_key_bindings"
+    __table_args__ = (UniqueConstraint("employee_id", "key_id", name="uq_employee_ai_key"),)
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: _id("ekb"))
+    employee_id: Mapped[str] = mapped_column(ForeignKey("employees.id", ondelete="CASCADE"), nullable=False)
+    key_id: Mapped[str] = mapped_column(ForeignKey("ai_provider_keys.id", ondelete="CASCADE"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class CabinetAiKeyBindingRow(Base):
+    __tablename__ = "cabinet_ai_key_bindings"
+    __table_args__ = (UniqueConstraint("cabinet_id", "key_id", name="uq_cabinet_ai_key"),)
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: _id("cab"))
+    cabinet_id: Mapped[str] = mapped_column(
+        ForeignKey("cabinet_instances.id", ondelete="CASCADE"), nullable=False
+    )
+    key_id: Mapped[str] = mapped_column(ForeignKey("ai_provider_keys.id", ondelete="CASCADE"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class AiKeyAuditEventRow(Base):
     """Mutation audit for AI keys (was created ad-hoc via SQL; must live in ORM for alembic check)."""
 

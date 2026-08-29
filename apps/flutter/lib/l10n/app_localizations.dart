@@ -1106,6 +1106,102 @@ abstract class AppLocalizations {
   /// **'K8s metrics'**
   String get adminContainerMetricsHole;
 
+  /// No description provided for @adminContainerK8sPhase.
+  ///
+  /// In en, this message translates to:
+  /// **'K8s phase'**
+  String get adminContainerK8sPhase;
+
+  /// No description provided for @adminContainerPodStatus.
+  ///
+  /// In en, this message translates to:
+  /// **'Pod status'**
+  String get adminContainerPodStatus;
+
+  /// No description provided for @adminContainerDesiredState.
+  ///
+  /// In en, this message translates to:
+  /// **'Desired state'**
+  String get adminContainerDesiredState;
+
+  /// No description provided for @adminContainerPodReadyTrue.
+  ///
+  /// In en, this message translates to:
+  /// **'Pod ready'**
+  String get adminContainerPodReadyTrue;
+
+  /// No description provided for @adminContainerPodReadyFalse.
+  ///
+  /// In en, this message translates to:
+  /// **'Pod not ready'**
+  String get adminContainerPodReadyFalse;
+
+  /// No description provided for @adminContainerPodRestarts.
+  ///
+  /// In en, this message translates to:
+  /// **'Restarts'**
+  String get adminContainerPodRestarts;
+
+  /// No description provided for @adminContainerMetricsCpu.
+  ///
+  /// In en, this message translates to:
+  /// **'CPU'**
+  String get adminContainerMetricsCpu;
+
+  /// No description provided for @adminContainerMetricsMemory.
+  ///
+  /// In en, this message translates to:
+  /// **'Memory'**
+  String get adminContainerMetricsMemory;
+
+  /// No description provided for @adminContainerMetricsUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'CPU/RAM: metrics-server unavailable'**
+  String get adminContainerMetricsUnavailable;
+
+  /// No description provided for @adminContainerLastError.
+  ///
+  /// In en, this message translates to:
+  /// **'Error'**
+  String get adminContainerLastError;
+
+  /// No description provided for @adminContainerRuntimeNotStarted.
+  ///
+  /// In en, this message translates to:
+  /// **'Pod is not running. It starts on first agent use or after Resume.'**
+  String get adminContainerRuntimeNotStarted;
+
+  /// No description provided for @adminContainerRuntimeNotStartedShort.
+  ///
+  /// In en, this message translates to:
+  /// **'Not running'**
+  String get adminContainerRuntimeNotStartedShort;
+
+  /// No description provided for @adminContainerRuntimePaused.
+  ///
+  /// In en, this message translates to:
+  /// **'Pod stopped — project is paused.'**
+  String get adminContainerRuntimePaused;
+
+  /// No description provided for @adminContainerRuntimePausedShort.
+  ///
+  /// In en, this message translates to:
+  /// **'Stopped'**
+  String get adminContainerRuntimePausedShort;
+
+  /// No description provided for @adminContainerRuntimeAttention.
+  ///
+  /// In en, this message translates to:
+  /// **'Project is active but no k8s pod yet. Open the agent or tap Resume.'**
+  String get adminContainerRuntimeAttention;
+
+  /// No description provided for @adminContainerColK8s.
+  ///
+  /// In en, this message translates to:
+  /// **'K8s'**
+  String get adminContainerColK8s;
+
   /// No description provided for @adminDeleteContainerConfirm.
   ///
   /// In en, this message translates to:
@@ -3361,6 +3457,84 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Workspace rematerialized (no MCP packages)'**
   String get projectWorkspaceRematerializedNoPackages;
+
+  /// No description provided for @navProjects.
+  ///
+  /// In en, this message translates to:
+  /// **'Projects'**
+  String get navProjects;
+
+  /// No description provided for @projectAddHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Add project'**
+  String get projectAddHint;
+
+  /// No description provided for @projectAboutLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'About'**
+  String get projectAboutLabel;
+
+  /// No description provided for @projectCreatorLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Creator'**
+  String get projectCreatorLabel;
+
+  /// No description provided for @projectAiKeyLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'AI key'**
+  String get projectAiKeyLabel;
+
+  /// No description provided for @projectModulesLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Modules'**
+  String get projectModulesLabel;
+
+  /// No description provided for @commonAuto.
+  ///
+  /// In en, this message translates to:
+  /// **'Auto'**
+  String get commonAuto;
+
+  /// No description provided for @employeeContactEmail.
+  ///
+  /// In en, this message translates to:
+  /// **'Contact email'**
+  String get employeeContactEmail;
+
+  /// No description provided for @employeePassword.
+  ///
+  /// In en, this message translates to:
+  /// **'Password'**
+  String get employeePassword;
+
+  /// No description provided for @employeeSwitchCabinet.
+  ///
+  /// In en, this message translates to:
+  /// **'Switch cabinet'**
+  String get employeeSwitchCabinet;
+
+  /// No description provided for @employeeSingleCabinet.
+  ///
+  /// In en, this message translates to:
+  /// **'Only one cabinet available'**
+  String get employeeSingleCabinet;
+
+  /// No description provided for @employeePasswordChanged.
+  ///
+  /// In en, this message translates to:
+  /// **'Password updated'**
+  String get employeePasswordChanged;
+
+  /// No description provided for @employeeContactEmailSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Contact email saved'**
+  String get employeeContactEmailSaved;
 
   /// No description provided for @settings.
   ///

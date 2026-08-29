@@ -20,8 +20,14 @@ from prodavan.domain.ai_keys import (
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.domain.ownership import company_view_flags
-from prodavan.infrastructure.persistence.models.ai_keys import AiProviderKeyRow, CompanyAiKeyBindingRow
-from prodavan.infrastructure.persistence.models.identity import CompanyRow
+from prodavan.infrastructure.persistence.models.ai_keys import (
+    AiProviderKeyRow,
+    CabinetAiKeyBindingRow,
+    CompanyAiKeyBindingRow,
+    EmployeeAiKeyBindingRow,
+)
+from prodavan.infrastructure.persistence.models.identity import CompanyRow, EmployeeRow
+from prodavan.infrastructure.persistence.models.projects import ProjectRow
 from prodavan.infrastructure.secrets.file_store import new_key_id
 from prodavan.infrastructure.secrets.store import SecretStore, get_secret_store
 
@@ -675,3 +681,145 @@ class AiKeysService:
         await self._session.flush()
         for cid in unique:
             self._session.add(CompanyAiKeyBindingRow(company_id=cid, key_id=key_id))
+
+    async def list_available_keys_for_project(self, *, project: ProjectRow) -> list[dict]:
+        ids: set[str] = set()
+        items: list[dict] = []
+        if project.resolved_ai_key_id:
+            ids.add(project.resolved_ai_key_id)
+        if project.owner_employee_id:
+            q = await self._session.execute(
+                select(AiProviderKeyRow)
+                .join(EmployeeAiKeyBindingRow, EmployeeAiKeyBindingRow.key_id == AiProviderKeyRow.id)
+                .where(
+                    EmployeeAiKeyBindingRow.employee_id == project.owner_employee_id,
+                    AiProviderKeyRow.status == KeyStatus.ACTIVE,
+                )
+            )
+            for row in q.scalars().all():
+                ids.add(row.id)
+        q_cab = await self._session.execute(
+            select(AiProviderKeyRow)
+            .join(CabinetAiKeyBindingRow, CabinetAiKeyBindingRow.key_id == AiProviderKeyRow.id)
+            .where(
+                CabinetAiKeyBindingRow.cabinet_id == project.cabinet_id,
+                AiProviderKeyRow.status == KeyStatus.ACTIVE,
+            )
+        )
+        for row in q_cab.scalars().all():
+            ids.add(row.id)
+        for key in await self.list_keys_for_company(project.company_id):
+            kid = key.get("id")
+            if isinstance(kid, str):
+                ids.add(kid)
+        for kid in ids:
+            try:
+                items.append(await self.get_key_for_company(kid, project.company_id))
+            except AppError:
+                continue
+        dedup: dict[str, dict] = {}
+        for item in items:
+            iid = item.get("id")
+            if isinstance(iid, str):
+                dedup[iid] = item
+        return list(dedup.values())
+
+    async def require_key_available_for_project(self, *, project: ProjectRow, key_id: str) -> None:
+        available = {k["id"] for k in await self.list_available_keys_for_project(project=project)}
+        if key_id not in available:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="AI key not available for project",
+            )
+
+    async def resolve_credentials_for_project(
+        self,
+        *,
+        project: ProjectRow,
+        preferred_provider: str | None = None,
+        platform_fallback: bool = False,
+    ) -> ResolvedCredential:
+        if project.resolved_ai_key_id:
+            row = await self._get_row(project.resolved_ai_key_id)
+            if row.status != KeyStatus.ACTIVE:
+                raise AppError(code="NO_AI_KEY", title="No AI key", status=404, detail="resolved key inactive")
+            runtime, disabled = self._pick_runtime_rows([row], preferred_provider=preferred_provider)
+            await self._finalize_lazy_disabled(disabled)
+            if runtime:
+                secret = self._secrets.get(runtime[0].secret_ref)
+                return ResolvedCredential(
+                    key_id=runtime[0].id,
+                    provider=runtime[0].provider,
+                    api_kind=runtime[0].api_kind,
+                    secret=secret,
+                )
+        return await self.resolve_credentials(
+            company_id=project.company_id,
+            preferred_provider=preferred_provider or project.agent_provider,
+            platform_fallback=platform_fallback,
+        )
+
+    async def get_key_scope_bindings(self, *, key_id: str, company_id: str) -> dict:
+        await self.get_key_for_company(key_id, company_id)
+        eq = await self._session.execute(
+            select(EmployeeAiKeyBindingRow.employee_id).where(EmployeeAiKeyBindingRow.key_id == key_id)
+        )
+        cq = await self._session.execute(
+            select(CabinetAiKeyBindingRow.cabinet_id).where(CabinetAiKeyBindingRow.key_id == key_id)
+        )
+        return {
+            "employee_ids": list(eq.scalars().all()),
+            "cabinet_ids": list(cq.scalars().all()),
+        }
+
+    async def set_key_scope_bindings(
+        self,
+        *,
+        key_id: str,
+        company_id: str,
+        employee_ids: list[str],
+        cabinet_ids: list[str],
+    ) -> dict:
+        await self.require_company_writable_key(key_id, company_id)
+        emp_unique = list(dict.fromkeys(employee_ids))
+        cab_unique = list(dict.fromkeys(cabinet_ids))
+        for eid in emp_unique:
+            emp = await self._session.get(EmployeeRow, eid)
+            if emp is None:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail=f"unknown employee_id: {eid}",
+                )
+        from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
+
+        for cid in cab_unique:
+            cab = await self._session.get(CabinetInstanceRow, cid)
+            if cab is None or cab.company_id != company_id:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail=f"unknown cabinet_id: {cid}",
+                )
+        existing_emp = await self._session.execute(
+            select(EmployeeAiKeyBindingRow).where(EmployeeAiKeyBindingRow.key_id == key_id)
+        )
+        for b in existing_emp.scalars().all():
+            await self._session.delete(b)
+        await self._session.flush()
+        for eid in emp_unique:
+            self._session.add(EmployeeAiKeyBindingRow(employee_id=eid, key_id=key_id))
+        existing_cab = await self._session.execute(
+            select(CabinetAiKeyBindingRow).where(CabinetAiKeyBindingRow.key_id == key_id)
+        )
+        for b in existing_cab.scalars().all():
+            await self._session.delete(b)
+        await self._session.flush()
+        for cid in cab_unique:
+            self._session.add(CabinetAiKeyBindingRow(cabinet_id=cid, key_id=key_id))
+        await self._session.commit()
+        return await self.get_key_scope_bindings(key_id=key_id, company_id=company_id)

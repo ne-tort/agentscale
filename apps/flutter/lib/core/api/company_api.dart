@@ -458,6 +458,34 @@ class CompanyApi {
     _throwIfError(res);
   }
 
+  Future<Map<String, dynamic>> getAiKeyScopeBindings({
+    required String companyId,
+    required String keyId,
+  }) async {
+    final res = await AuthHttp.get(
+      _uri('/companies/$companyId/ai-keys/$keyId/scope-bindings'),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> setAiKeyScopeBindings({
+    required String companyId,
+    required String keyId,
+    required List<String> employeeIds,
+    required List<String> cabinetIds,
+  }) async {
+    final res = await AuthHttp.put(
+      _uri('/companies/$companyId/ai-keys/$keyId/scope-bindings'),
+      body: jsonEncode({
+        'employee_ids': employeeIds,
+        'cabinet_ids': cabinetIds,
+      }),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   void _throwIfError(http.Response res) {
     if (res.statusCode >= 400) {
       throw ProdavanApiException(res.statusCode, res.body);

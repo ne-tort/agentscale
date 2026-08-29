@@ -115,4 +115,17 @@ class AppTheme {
   static ThemeData get light => forMode(AppThemeMode.light);
   static ThemeData get dark => forMode(AppThemeMode.dark);
   static ThemeData get ultraDark => forMode(AppThemeMode.ultraDark);
+
+  /// Login screen only: light mode uses gray page + white card (inverted vs default).
+  static ThemeData loginPage(ThemeData base, AppThemeMode mode) {
+    if (mode != AppThemeMode.light) return base;
+    final palette = AppPalette.light;
+    return base.copyWith(
+      scaffoldBackgroundColor: palette.surfaceContainer,
+      cardTheme: base.cardTheme.copyWith(color: palette.surface),
+      inputDecorationTheme: base.inputDecorationTheme.copyWith(
+        fillColor: palette.surface.withValues(alpha: 0.55),
+      ),
+    );
+  }
 }
