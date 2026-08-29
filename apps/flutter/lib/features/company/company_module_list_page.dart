@@ -205,7 +205,7 @@ class _CompanyModuleListPageState extends State<CompanyModuleListPage> {
               deletableOf: _rowWritable,
               empty: EmptyPlaceholder(
                 title: l10n.companyNoModules,
-                subtitle: l10n.companyModulesEmptyHint,
+                icon: Icons.extension_outlined,
               ),
             ),
           ),

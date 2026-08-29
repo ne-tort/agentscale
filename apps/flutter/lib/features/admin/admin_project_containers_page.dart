@@ -164,6 +164,7 @@ class _AdminProjectContainersPageState extends State<AdminProjectContainersPage>
         onDelete: _delete,
         empty: EmptyPlaceholder(
           title: l10n.adminNoContainers,
+          icon: Icons.dns_outlined,
         ),
       ),
     );

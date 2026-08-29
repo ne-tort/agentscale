@@ -271,7 +271,7 @@ class _AdminAiKeyListPageState extends State<AdminAiKeyListPage> {
             onEnabledChanged: _setKeyEnabled,
             empty: EmptyPlaceholder(
               title: l10n.adminNoAiKeys,
-              subtitle: l10n.adminCreateRuntimeKeyHint,
+              icon: Icons.key_outlined,
             ),
           ),
         ),

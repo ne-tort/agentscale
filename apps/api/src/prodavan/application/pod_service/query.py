@@ -10,6 +10,15 @@ from prodavan.domain.pods import POD_TERMINAL_STATUSES, PodStatus
 from prodavan.infrastructure.persistence.models.projects import ProjectPodRow, ProjectRow
 
 
+def _k8s_pod_name(observed: dict, runtime_ref: str | None) -> str | None:
+    if observed.get("stub"):
+        return None
+    ref = (runtime_ref or "").strip()
+    if ref.startswith("pod-"):
+        return ref
+    return None
+
+
 class PodQuery:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -70,6 +79,7 @@ class PodQuery:
             "orchestrator_status": pod["status"],
             "desired_state": pod["desired_state"],
             "runtime_ref": pod["runtime_ref"],
+            "k8s_pod_name": _k8s_pod_name(observed, pod.get("runtime_ref")),
             "last_error": observed.get("last_error") or pod["last_error"],
             "hydrate_generation": pod["hydrate_generation"],
             "pod_created_at": pod["created_at"],

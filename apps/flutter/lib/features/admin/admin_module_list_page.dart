@@ -205,6 +205,7 @@ class _AdminModuleListPageState extends State<AdminModuleListPage> {
               copyableOf: (_) => true,
               empty: EmptyPlaceholder(
                 title: l10n.adminNoModules,
+                icon: Icons.extension_outlined,
               ),
             ),
           ),

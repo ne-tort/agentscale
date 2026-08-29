@@ -37,7 +37,10 @@ class ContourSelectorPage extends StatelessWidget {
         ),
       ],
       body: items.isEmpty
-          ? EmptyPlaceholder(title: l10n.commonEmpty, icon: Icons.business_outlined)
+          ? EmptyPlaceholder(
+              title: l10n.adminNoCompanies,
+              icon: Icons.business_outlined,
+            )
           : ListView.separated(
         padding: const EdgeInsets.all(AppSpacing.lg),
         itemCount: items.length,

@@ -109,7 +109,10 @@ class _ProjectModuleEditPageState extends State<ProjectModuleEditPage> {
     if (mod == null) {
       return AppScaffold(
         title: Text(widget.moduleName),
-        body: EmptyPlaceholder(title: l10n.commonEmpty),
+        body: EmptyPlaceholder(
+          title: l10n.companyNoModules,
+          icon: Icons.extension_outlined,
+        ),
       );
     }
 

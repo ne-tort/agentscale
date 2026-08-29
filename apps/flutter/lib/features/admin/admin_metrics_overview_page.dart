@@ -246,7 +246,7 @@ class _AdminMetricsOverviewPageState extends State<AdminMetricsOverviewPage> {
                           ],
                         )
                       : EmptyPlaceholder(
-                          title: l10n.adminCreateCompanyToSeeMetrics,
+                          title: l10n.adminNoCompanies,
                           icon: Icons.analytics_outlined,
                           fillViewport: false,
                         ),

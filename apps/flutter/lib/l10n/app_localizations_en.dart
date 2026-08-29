@@ -656,6 +656,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get containerLastLaunch => 'Last launch';
 
   @override
+  String get containerPodServiceId => 'Pod ID';
+
+  @override
+  String get containerK8sPodName => 'k8s pod';
+
+  @override
+  String get projectBudgetLabel => 'Budget';
+
+  @override
+  String get projectBudgetHint => 'Token budget (optional)';
+
+  @override
   String get containerStartedAt => 'Last launch';
 
   @override
@@ -1310,7 +1322,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get commonAdding => 'Adding…';
 
   @override
-  String get commonAgentTokens => 'Agent tokens';
+  String get commonAgentTokens => 'Tokens';
 
   @override
   String get commonApiBaseUrl => 'API base URL';
@@ -1643,6 +1655,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get errorUnauthorized => 'Session expired. Please sign in again.';
+
+  @override
+  String get errorInvalidCredentials => 'Incorrect username or password';
 
   @override
   String get errorUnexpected => 'Something went wrong.';

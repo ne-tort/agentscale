@@ -167,6 +167,7 @@ class CatalogService:
             select(ReferenceCatalogEntryRow).where(
                 ReferenceCatalogEntryRow.catalog_id == catalog_id,
                 ReferenceCatalogEntryRow.id == entry_id,
+                ReferenceCatalogEntryRow.archived_at.is_(None),
             )
         )
         if clash.scalar_one_or_none() is not None:

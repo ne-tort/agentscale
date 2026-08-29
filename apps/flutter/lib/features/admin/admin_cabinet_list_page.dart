@@ -181,6 +181,7 @@ class _AdminCabinetListPageState extends State<AdminCabinetListPage> {
               onDelete: _deleteCabinet,
               empty: EmptyPlaceholder(
                 title: l10n.adminNoCabinets,
+                icon: Icons.folder_outlined,
               ),
             ),
           ),

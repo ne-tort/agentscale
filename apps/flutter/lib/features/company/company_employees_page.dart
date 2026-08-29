@@ -196,7 +196,10 @@ class _CompanyEmployeesPageState extends State<CompanyEmployeesPage> {
                 ),
               ],
               onOpen: _openEmployee,
-              empty: EmptyPlaceholder(title: l10n.companyNoEmployees),
+              empty: EmptyPlaceholder(
+                title: l10n.companyNoEmployees,
+                icon: Icons.group_outlined,
+              ),
             ),
           ),
         ],

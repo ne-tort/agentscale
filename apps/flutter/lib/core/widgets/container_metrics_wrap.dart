@@ -84,6 +84,9 @@ class ContainerMetricsWrap extends StatelessWidget {
     final createdValue = formatContainerCreatedAt(container, l10n);
     final storageValue = _storage(l10n);
 
+    final podServiceId = containerPodServiceId(container);
+    final k8sPodName = containerK8sPodName(container);
+
     final lifecycleRows = <Widget>[
       _readOnlyRow(
         title: l10n.containerStateLabel,
@@ -91,6 +94,18 @@ class ContainerMetricsWrap extends StatelessWidget {
         icon: Icons.circle,
         accentColor: hasError ? errorColor : null,
       ),
+      if (podServiceId != null)
+        _readOnlyRow(
+          title: l10n.containerPodServiceId,
+          value: podServiceId,
+          icon: Icons.tag_outlined,
+        ),
+      if (k8sPodName != null)
+        _readOnlyRow(
+          title: l10n.containerK8sPodName,
+          value: k8sPodName,
+          icon: Icons.dns_outlined,
+        ),
       if (containerMetricHasValue(lastLaunchValue, l10n))
         _readOnlyRow(
           title: l10n.containerLastLaunch,

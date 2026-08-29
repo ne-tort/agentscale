@@ -1232,6 +1232,30 @@ abstract class AppLocalizations {
   /// **'Last launch'**
   String get containerLastLaunch;
 
+  /// No description provided for @containerPodServiceId.
+  ///
+  /// In en, this message translates to:
+  /// **'Pod ID'**
+  String get containerPodServiceId;
+
+  /// No description provided for @containerK8sPodName.
+  ///
+  /// In en, this message translates to:
+  /// **'k8s pod'**
+  String get containerK8sPodName;
+
+  /// No description provided for @projectBudgetLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Budget'**
+  String get projectBudgetLabel;
+
+  /// No description provided for @projectBudgetHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Token budget (optional)'**
+  String get projectBudgetHint;
+
   /// No description provided for @containerStartedAt.
   ///
   /// In en, this message translates to:
@@ -2363,7 +2387,7 @@ abstract class AppLocalizations {
   /// No description provided for @commonAgentTokens.
   ///
   /// In en, this message translates to:
-  /// **'Agent tokens'**
+  /// **'Tokens'**
   String get commonAgentTokens;
 
   /// No description provided for @commonApiBaseUrl.
@@ -2995,6 +3019,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Session expired. Please sign in again.'**
   String get errorUnauthorized;
+
+  /// No description provided for @errorInvalidCredentials.
+  ///
+  /// In en, this message translates to:
+  /// **'Incorrect username or password'**
+  String get errorInvalidCredentials;
 
   /// No description provided for @errorUnexpected.
   ///

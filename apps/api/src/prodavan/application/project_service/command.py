@@ -22,6 +22,7 @@ from prodavan.application.projects.trigger_service import ProjectTriggerService
 from prodavan.application.relations.commands import RelationsCommand
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
+from prodavan.domain.lifecycle import project_alive_clause
 from prodavan.domain.pods import PodDesiredState, PodStatus
 from prodavan.domain.projects import (
     ProjectStatus,
@@ -63,6 +64,7 @@ class ProjectCommand:
         employee: EmployeeRow,
         principal: Principal,
         agent_provider: str | None = None,
+        budget_tokens: int | None = None,
     ) -> dict:
         if not name.strip():
             raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="name required")
@@ -87,7 +89,11 @@ class ProjectCommand:
         )
         slug = slugify_name(name)
         existing = await self._session.execute(
-            select(ProjectRow).where(ProjectRow.cabinet_id == cabinet_id, ProjectRow.slug == slug)
+            select(ProjectRow).where(
+                ProjectRow.cabinet_id == cabinet_id,
+                ProjectRow.slug == slug,
+                project_alive_clause(ProjectRow),
+            )
         )
         if existing.scalar_one_or_none() is not None:
             raise AppError(
@@ -111,6 +117,7 @@ class ProjectCommand:
             workspace_key=ws_key,
             container_ref=container_ref_for(ws_key),
             agent_provider=normalize_agent_provider(agent_provider),
+            budget_tokens=budget_tokens,
         )
         self._session.add(row)
         await self._session.flush()

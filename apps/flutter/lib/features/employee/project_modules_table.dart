@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_switch.dart';
+import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Project modules table — name, profile, enable checkbox.
@@ -72,6 +73,11 @@ class ProjectModulesTable extends StatelessWidget {
               final mod = modules.firstWhere((m) => m['module_id'] == row.id);
               onOpen(mod);
             },
+            empty: EmptyPlaceholder(
+              title: l10n.companyNoModules,
+              icon: Icons.extension_outlined,
+              fillViewport: false,
+            ),
           ),
         ),
       ],

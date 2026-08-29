@@ -293,6 +293,7 @@ class ProdavanApi {
     required String cabinetId,
     required String name,
     String? agentProvider,
+    int? budgetTokens,
   }) async {
     final prevCab = this.cabinetId;
     this.cabinetId = cabinetId;
@@ -300,6 +301,7 @@ class ProdavanApi {
       final res = await AuthHttp.post(_uri('/cabinets/$cabinetId/projects'), body: jsonEncode({
           'name': name,
           if (agentProvider != null && agentProvider.isNotEmpty) 'agent_provider': agentProvider,
+          if (budgetTokens != null) 'budget_tokens': budgetTokens,
         }), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;

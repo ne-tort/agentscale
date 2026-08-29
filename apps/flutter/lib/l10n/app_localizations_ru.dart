@@ -656,6 +656,18 @@ class AppLocalizationsRu extends AppLocalizations {
   String get containerLastLaunch => 'Последний запуск';
 
   @override
+  String get containerPodServiceId => 'Pod ID';
+
+  @override
+  String get containerK8sPodName => 'Pod в k8s';
+
+  @override
+  String get projectBudgetLabel => 'Бюджет';
+
+  @override
+  String get projectBudgetHint => 'Бюджет токенов (опционально)';
+
+  @override
   String get containerStartedAt => 'Последний запуск';
 
   @override
@@ -1318,7 +1330,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get commonAdding => 'Добавление…';
 
   @override
-  String get commonAgentTokens => 'Токены агента';
+  String get commonAgentTokens => 'Токены';
 
   @override
   String get commonApiBaseUrl => 'Базовый URL API';
@@ -1651,6 +1663,9 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get errorUnauthorized => 'Сессия истекла. Войдите снова.';
+
+  @override
+  String get errorInvalidCredentials => 'Неправильный логин или пароль';
 
   @override
   String get errorUnexpected => 'Что-то пошло не так.';

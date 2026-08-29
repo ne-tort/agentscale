@@ -379,6 +379,7 @@ class ProjectMetricsAggregator:
         return {
             "project_id": project_id,
             "status": row.status,
+            "budget_tokens": row.budget_tokens,
             "agent_tokens_used": input_tok + output_tok,
             "agent_input_tokens": input_tok,
             "agent_output_tokens": output_tok,

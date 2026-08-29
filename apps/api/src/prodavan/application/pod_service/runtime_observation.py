@@ -87,10 +87,6 @@ class RuntimeObservationService:
             pod = await self._get_live_pod(project_id)
             if project is None or pod is None:
                 raise RuntimeError("project or pod missing while waiting for running")
-            await self.promote_or_demote(project=project, pod=pod)
-            await self._session.flush()
-            if pod.status != PodStatus.RUNNING:
-                raise RuntimeError(f"stub pod not running after promote; status={pod.status}")
             return await self.observe(project=project, pod=pod)
 
         deadline = datetime.now(UTC).timestamp() + float(
@@ -127,11 +123,6 @@ class RuntimeObservationService:
         mode = (settings.pod_runtime_mode or "stub").strip().lower()
 
         if mode != "k8s":
-            if pod.status == PodStatus.PROVISIONING and pod.desired_state == PodDesiredState.RUNNING.value:
-                pod.status = PodStatus.RUNNING
-                pod.last_error = None
-                pod.last_started_at = now
-                return "promoted"
             return "noop"
 
         obs = await self.observe(project=project, pod=pod)
@@ -151,6 +142,29 @@ class RuntimeObservationService:
             pod.last_error = None
             pod.last_started_at = now
             return "promoted"
+
+        if (
+            pod.status == PodStatus.RUNNING
+            and pod.desired_state == PodDesiredState.RUNNING.value
+            and state
+            not in {
+                ObservedState.RUNNING.value,
+                ObservedState.PAUSED.value,
+            }
+        ):
+            age = (now - self._as_utc(pod.updated_at)).total_seconds()
+            transitional = state in {
+                ObservedState.PREPARING.value,
+                ObservedState.PROVISIONING.value,
+                ObservedState.HYDRATING.value,
+                ObservedState.STARTING.value,
+            }
+            if not transitional or age > settings.pod_provisioning_timeout_sec:
+                pod.status = PodStatus.FAILED
+                pod.last_error = obs.get("last_error") or f"observed {state}"
+                if project.status == ProjectStatus.ACTIVE:
+                    project.status = ProjectStatus.ERROR
+                return "demoted"
 
         unhealthy = state in {
             ObservedState.FAILED.value,
@@ -341,7 +355,7 @@ class RuntimeObservationService:
         )
 
     async def _observe_stub(self, project: ProjectRow, pod: ProjectPodRow) -> dict[str, Any]:
-        """Stub mode — no k8s pod; trust orchestrator DB status (no fake metrics)."""
+        """Stub mode — no k8s pod; never report verified running."""
         if pod.status == PodStatus.FAILED:
             return self._summary(
                 ObservedState.FAILED,
@@ -360,16 +374,7 @@ class RuntimeObservationService:
                 desired_state=pod.desired_state,
                 stub=True,
             )
-        if pod.status == PodStatus.RUNNING:
-            return self._summary(
-                ObservedState.RUNNING,
-                orchestrator_status=pod.status,
-                desired_state=pod.desired_state,
-                phase="Running",
-                ready=True,
-                stub=True,
-            )
-        if pod.status == PodStatus.PROVISIONING:
+        if pod.desired_state == PodDesiredState.RUNNING.value:
             return self._summary(
                 ObservedState.STARTING,
                 orchestrator_status=pod.status,

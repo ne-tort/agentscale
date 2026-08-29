@@ -26,16 +26,29 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> {
-  String _username = '';
-  String _password = '';
+  final _usernameController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _usernameFocus = FocusNode();
+  final _passwordFocus = FocusNode();
+
   bool _loadingConfig = true;
   bool _connecting = false;
   bool _passwordLogin = false;
+  bool _obscurePassword = true;
 
   @override
   void initState() {
     super.initState();
     _loadConfig();
+  }
+
+  @override
+  void dispose() {
+    _usernameController.dispose();
+    _passwordController.dispose();
+    _usernameFocus.dispose();
+    _passwordFocus.dispose();
+    super.dispose();
   }
 
   Future<void> _loadConfig() async {
@@ -62,8 +75,8 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _submit() async {
-    final username = _username.trim();
-    final password = _password;
+    final username = _usernameController.text.trim();
+    final password = _passwordController.text;
     if (username.isEmpty || password.isEmpty || _connecting || !_passwordLogin) {
       return;
     }
@@ -85,13 +98,19 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  void _onPasswordSubmitted(String _) {
+    if (_usernameController.text.trim().isNotEmpty) {
+      _submit();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final canSubmit = !_connecting &&
         _passwordLogin &&
-        _username.trim().isNotEmpty &&
-        _password.isNotEmpty;
+        _usernameController.text.trim().isNotEmpty &&
+        _passwordController.text.isNotEmpty;
 
     return Theme(
       data: AppTheme.loginPage(Theme.of(context), appSettings.themeMode),
@@ -109,58 +128,80 @@ class _LoginPageState extends State<LoginPage> {
                         horizontal: AppSpacing.sm,
                         vertical: AppSpacing.md,
                       ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: AppSpacing.sm,
-                            ),
-                            child: AppSectionHeader(
-                              title: l10n.authSignIn,
-                              trailing: AppIconButton(
-                                icon: Icons.settings_outlined,
-                                tooltip: l10n.settings,
-                                onPressed: () => openAppSettings(context),
+                      child: FocusTraversalGroup(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: AppSpacing.sm,
+                              ),
+                              child: AppSectionHeader(
+                                title: l10n.authSignIn,
+                                trailing: AppIconButton(
+                                  icon: Icons.settings_outlined,
+                                  tooltip: l10n.settings,
+                                  onPressed: () => openAppSettings(context),
+                                ),
                               ),
                             ),
-                          ),
-                          AppValuePreference<String>(
-                            title: l10n.authLogin,
-                            icon: Icons.person_outline_rounded,
-                            value: _username,
-                            enabled: !_connecting,
-                            onSave: (v) async {
-                              setState(() => _username = v.trim());
-                            },
-                          ),
-                          AppValuePreference<String>(
-                            title: l10n.authPassword,
-                            icon: Icons.key_outlined,
-                            value: _password,
-                            obscureText: true,
-                            enabled: !_connecting,
-                            presentValue: (v) => v.isEmpty ? '' : '••••••••',
-                            formatInputValue: (v) => v,
-                            onSave: (v) async {
-                              setState(() => _password = v);
-                            },
-                          ),
-                          if (_connecting)
-                            const Padding(
-                              padding: EdgeInsets.all(AppSpacing.lg),
-                              child: Center(
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                            AppPreferenceTile(
+                              title: l10n.authLogin,
+                              icon: Icons.person_outline_rounded,
+                              enabled: !_connecting,
+                              subtitle: TextField(
+                                controller: _usernameController,
+                                focusNode: _usernameFocus,
+                                enabled: !_connecting,
+                                textInputAction: TextInputAction.next,
+                                decoration: kBorderlessInputDecoration,
+                                onChanged: (_) => setState(() {}),
+                                onSubmitted: (_) => _passwordFocus.requestFocus(),
                               ),
-                            )
-                          else if (canSubmit)
-                            AppNavPreference(
-                              title: l10n.authSignIn,
-                              icon: Icons.login_rounded,
-                              onTap: _submit,
                             ),
-                        ],
+                            AppPreferenceTile(
+                              title: l10n.authPassword,
+                              icon: Icons.key_outlined,
+                              enabled: !_connecting,
+                              trailing: IconButton(
+                                icon: Icon(
+                                  _obscurePassword
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
+                                ),
+                                onPressed: _connecting
+                                    ? null
+                                    : () => setState(
+                                          () => _obscurePassword = !_obscurePassword,
+                                        ),
+                              ),
+                              subtitle: TextField(
+                                controller: _passwordController,
+                                focusNode: _passwordFocus,
+                                enabled: !_connecting,
+                                obscureText: _obscurePassword,
+                                textInputAction: TextInputAction.done,
+                                decoration: kBorderlessInputDecoration,
+                                onChanged: (_) => setState(() {}),
+                                onSubmitted: _onPasswordSubmitted,
+                              ),
+                            ),
+                            if (_connecting)
+                              const Padding(
+                                padding: EdgeInsets.all(AppSpacing.lg),
+                                child: Center(
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                              )
+                            else if (canSubmit)
+                              AppNavPreference(
+                                title: l10n.authSignIn,
+                                icon: Icons.login_rounded,
+                                onTap: _submit,
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   ),

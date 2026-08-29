@@ -39,7 +39,10 @@ class CabinetManagementPage extends StatelessWidget {
 
   Widget _listBody(AppLocalizations l10n) {
     if (entries.isEmpty) {
-      return EmptyPlaceholder(title: l10n.navManagement);
+      return EmptyPlaceholder(
+        title: l10n.companyNoModules,
+        icon: Icons.apps_outlined,
+      );
     }
 
     return ListView.separated(

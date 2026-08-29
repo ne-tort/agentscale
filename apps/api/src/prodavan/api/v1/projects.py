@@ -29,6 +29,7 @@ class CreateProjectBody(BaseModel):
 
     name: str = Field(min_length=1, max_length=200)
     agent_provider: str | None = Field(default=None, max_length=32)
+    budget_tokens: int | None = Field(default=None, ge=0)
 
 
 class PatchProjectBody(BaseModel):
@@ -92,6 +93,7 @@ async def create_project(
         employee=employee,
         principal=principal,
         agent_provider=body.agent_provider,
+        budget_tokens=body.budget_tokens,
     )
 
 

@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from prodavan.application.pod_service.runtime_observation import RuntimeObservationService
+from prodavan.config.settings import settings
 from prodavan.core.events.envelope import EventEnvelope
 from prodavan.domain.pods import PodDesiredState, PodStatus
 from prodavan.domain.pods.observed_state import ObservedState
@@ -78,7 +79,7 @@ async def test_observe_stub_running_without_metrics() -> None:
     with patch("prodavan.application.pod_service.runtime_observation.settings") as mock_settings:
         mock_settings.pod_runtime_mode = "stub"
         out = await svc.observe(project=project, pod=pod)
-    assert out["observed_state"] == ObservedState.RUNNING.value
+    assert out["observed_state"] == ObservedState.STARTING.value
     assert out.get("stub") is True
     assert "metrics" not in out
 
@@ -179,6 +180,10 @@ async def test_promote_provisioning_to_running() -> None:
     svc.observe = AsyncMock(  # type: ignore[method-assign]
         return_value={"observed_state": ObservedState.RUNNING.value}
     )
-    action = await svc.promote_or_demote(project=project, pod=pod)
+    with (
+        patch.object(settings, "pod_runtime_mode", "k8s"),
+        patch.object(settings, "pod_provisioning_timeout_sec", 300),
+    ):
+        action = await svc.promote_or_demote(project=project, pod=pod)
     assert action == "promoted"
     assert pod.status == PodStatus.RUNNING

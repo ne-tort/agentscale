@@ -87,7 +87,10 @@ class ProjectAiKeySelectPage extends StatelessWidget {
     return AppScaffold(
       title: Text(l10n.projectPreferredAgentProvider),
       body: keys.isEmpty
-          ? EmptyPlaceholder(title: l10n.commonEmpty)
+          ? EmptyPlaceholder(
+              title: l10n.companyNoAiKeys,
+              icon: Icons.key_outlined,
+            )
           : Padding(
               padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
               child: AppEntityCollection(

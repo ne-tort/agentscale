@@ -32,7 +32,10 @@ class HubViewInterpreter extends StatelessWidget {
     }
     final items = ui['items'];
     if (items is! List || items.isEmpty) {
-      return EmptyPlaceholder(title: l10n.commonEmpty);
+      return EmptyPlaceholder(
+        title: l10n.cabinetNoRows,
+        icon: Icons.list_alt_outlined,
+      );
     }
 
     return ListView(

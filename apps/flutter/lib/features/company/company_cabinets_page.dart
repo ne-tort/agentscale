@@ -245,7 +245,7 @@ class _CompanyCabinetsPageState extends State<CompanyCabinetsPage> {
               deletableOf: _rowWritable,
               empty: EmptyPlaceholder(
                 title: l10n.companyNoCabinets,
-                subtitle: l10n.companyCabinetsEmptyHint,
+                icon: Icons.view_module_outlined,
               ),
             ),
           ),

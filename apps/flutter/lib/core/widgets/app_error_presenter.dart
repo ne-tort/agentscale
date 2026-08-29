@@ -119,8 +119,8 @@ abstract final class AppErrors {
     if (code == null || code.isEmpty) return null;
     return switch (code) {
       'KEYCLOAK_ADMIN' || 'IDENTITY_PROVIDER' => l10n.errorIdentityProvider,
-      'UNAUTHORIZED' || 'NOT_AUTHENTICATED' || 'INVALID_CREDENTIALS' =>
-        l10n.errorUnauthorized,
+      'INVALID_CREDENTIALS' => l10n.errorInvalidCredentials,
+      'UNAUTHORIZED' || 'NOT_AUTHENTICATED' => l10n.errorUnauthorized,
       'FORBIDDEN' || 'NOT_AUTHORIZED' => l10n.errorForbidden,
       'NOT_FOUND' => l10n.errorNotFound,
       'CONFLICT' || 'PROJECT_EXISTS' => l10n.errorConflict,

@@ -167,7 +167,10 @@ class _CompanyProjectContainersPageState extends State<CompanyProjectContainersP
         ],
         onOpen: _open,
         onDelete: _delete,
-        empty: EmptyPlaceholder(title: l10n.adminNoContainers),
+        empty: EmptyPlaceholder(
+          title: l10n.adminNoContainers,
+          icon: Icons.dns_outlined,
+        ),
       ),
     );
   }

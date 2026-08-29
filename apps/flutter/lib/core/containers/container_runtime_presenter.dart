@@ -167,5 +167,24 @@ bool projectShowsContainerError(Map<String, dynamic>? project) {
 }
 
 bool containerRuntimeHealthy(Map<String, dynamic>? item) {
+  if (item?['runtime']?['stub'] == true) return false;
   return _observedState(item) == 'running';
+}
+
+String? containerPodServiceId(Map<String, dynamic>? item) {
+  final runtime = runtimeMap(item);
+  final id = runtime?['pod_id'] ?? item?['pod_id'];
+  if (id == null) return null;
+  final s = '$id'.trim();
+  return s.isEmpty ? null : s;
+}
+
+String? containerK8sPodName(Map<String, dynamic>? item) {
+  final runtime = runtimeMap(item);
+  if (runtime?['stub'] == true) return null;
+  final name = runtime?['k8s_pod_name'] ?? runtime?['runtime_ref'];
+  if (name == null) return null;
+  final s = '$name'.trim();
+  if (s.isEmpty || s.startsWith('object-ws:')) return null;
+  return s;
 }

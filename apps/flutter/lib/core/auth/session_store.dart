@@ -2,6 +2,10 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Persist OIDC/test session — tokens in secure storage (L01/L05).
+///
+/// Web/Electron: tokens live in [FlutterSecureStorage] / site storage, not HTTP
+/// cookies. Clearing browser cookies alone does not sign the user out — use
+/// in-app logout or clear site data / local storage for this origin.
 class SessionStore {
   static const _keyBaseUrl = 'prodavan.api.base_url';
   static const _keyCompanyId = 'prodavan.api.company_id';

@@ -206,6 +206,7 @@ class _AdminCompanyListPageState extends State<AdminCompanyListPage> {
               onDelete: _deleteCompany,
               empty: EmptyPlaceholder(
                 title: l10n.adminNoCompanies,
+                icon: Icons.business_outlined,
               ),
             ),
           ),

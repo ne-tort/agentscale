@@ -255,7 +255,7 @@ class _CompanyAiKeyListPageState extends State<CompanyAiKeyListPage> {
               },
               empty: EmptyPlaceholder(
                 title: l10n.companyNoAiKeys,
-                subtitle: l10n.companyCreateRuntimeKeyHint,
+                icon: Icons.key_outlined,
               ),
             ),
           ),

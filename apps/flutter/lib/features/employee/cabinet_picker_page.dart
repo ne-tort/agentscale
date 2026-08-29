@@ -7,6 +7,7 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_section_header.dart';
+import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/employee/cabinet_shell.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -100,6 +101,10 @@ class _CabinetPickerPageState extends State<CabinetPickerPage> {
                     AppEntityColumn(id: 'status', label: 'Status'),
                   ],
                   onOpen: _enter,
+                  empty: EmptyPlaceholder(
+                    title: l10n.adminNoCabinets,
+                    icon: Icons.view_module_outlined,
+                  ),
                 ),
               ),
             ),
