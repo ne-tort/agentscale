@@ -151,3 +151,24 @@ List<ShellNavEntry> mergeShellNavEntries({
         e,
   ];
 }
+
+/// Split catalog shell entries by placement (admin/company contours).
+({List<ShellNavEntry> rail, List<ShellNavEntry> management}) splitShellNavEntries(
+  List<ShellNavEntry> entries,
+) {
+  final rail = <ShellNavEntry>[];
+  final management = <ShellNavEntry>[];
+  for (final entry in entries) {
+    final placement = shellNavPlacementOf(entry.tab);
+    if (placement == ShellNavPlacement.none) continue;
+    if (placement == ShellNavPlacement.rail) {
+      rail.add(entry);
+    } else if (placement == ShellNavPlacement.management) {
+      management.add(entry);
+    } else {
+      rail.add(entry);
+      management.add(entry);
+    }
+  }
+  return (rail: rail, management: management);
+}

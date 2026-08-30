@@ -12,6 +12,9 @@ import 'package:prodavan/features/company/company_module_list_page.dart';
 import 'package:prodavan/features/company/company_overview_page.dart';
 import 'package:prodavan/features/company/company_settings_body.dart';
 import 'package:prodavan/features/company/company_project_containers_page.dart';
+import 'package:prodavan/features/meta/meta_icon.dart';
+import 'package:prodavan/features/meta/module_shell_nav_page.dart';
+import 'package:prodavan/features/meta/shell_nav_loader.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Company admin shell — logo → overview; rail without Overview tab.
@@ -24,13 +27,45 @@ class CompanyShell extends StatefulWidget {
 
 class _CompanyShellState extends State<CompanyShell> {
   static const _overviewIndex = 0;
-  static const _sectionCount = 5;
-  static const _settingsIndex = 6;
+  static const _platformCount = 5;
 
   int _contentIndex = _overviewIndex;
   int? _railSelected;
   int _narrowStackIndex = 1;
   bool _subpageOpen = false;
+  bool _navLoading = true;
+  List<ShellNavEntry> _railEntries = const [];
+  List<ShellNavEntry> _managementEntries = const [];
+
+  int get _settingsIndex => 1 + _platformCount + _railEntries.length;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadNav();
+  }
+
+  Future<void> _loadNav() async {
+    final companyId = companyContext.companyId;
+    if (companyId == null) return;
+    setState(() => _navLoading = true);
+    try {
+      final bundle = await ShellNavLoader.loadCompanyBundle(companyContext.api, companyId);
+      if (!mounted) return;
+      setState(() {
+        _railEntries = bundle.rail;
+        _managementEntries = bundle.management;
+        _navLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _railEntries = const [];
+        _managementEntries = const [];
+        _navLoading = false;
+      });
+    }
+  }
 
   void _onSubpageOpenChanged(bool open) {
     if (_subpageOpen != open) setState(() => _subpageOpen = open);
@@ -111,7 +146,10 @@ class _CompanyShellState extends State<CompanyShell> {
             AppShellBranch(
               active: _narrowStackIndex == 1,
               onSubpageOpenChanged: _narrowStackIndex == 1 ? _onSubpageOpenChanged : null,
-              root: CompanyManagementPage(companyId: companyId),
+              root: CompanyManagementPage(
+                companyId: companyId,
+                moduleEntries: _managementEntries,
+              ),
             ),
             CompanySettingsBody(companyId: companyId),
           ],
@@ -119,13 +157,17 @@ class _CompanyShellState extends State<CompanyShell> {
       );
     }
 
-    final mainPages = [
-      CompanyOverviewPage(companyId: companyId),
-      CompanyEmployeesPage(companyId: companyId),
-      CompanyAiKeyListPage(companyId: companyId, embedded: true),
-      CompanyProjectContainersPage(companyId: companyId, embedded: true),
-      CompanyCabinetsPage(companyId: companyId),
-      CompanyModuleListPage(companyId: companyId, embedded: true),
+    final platformDestinations = [
+      AppNavDestination(icon: Icons.group_outlined, label: l10n.navEmployees),
+      AppNavDestination(icon: Icons.key_outlined, label: l10n.navAiKeys),
+      AppNavDestination(icon: Icons.dns_outlined, label: l10n.navContainers),
+      AppNavDestination(icon: Icons.view_module_outlined, label: l10n.navCabinets),
+      AppNavDestination(icon: Icons.extension_outlined, label: l10n.navModules),
+    ];
+
+    final railDestinations = [
+      ...platformDestinations,
+      ..._railEntries.map((e) => AppNavDestination(icon: e.icon, label: e.label)),
     ];
 
     return AppLayout(
@@ -137,25 +179,49 @@ class _CompanyShellState extends State<CompanyShell> {
       onTrailingSelected: _selectSettingsWide,
       onDestinationSelected: _selectRail,
       onLogoTap: _goOverview,
-      destinations: [
-        AppNavDestination(icon: Icons.group_outlined, label: l10n.navEmployees),
-        AppNavDestination(icon: Icons.key_outlined, label: l10n.navAiKeys),
-        AppNavDestination(icon: Icons.dns_outlined, label: l10n.navContainers),
-        AppNavDestination(icon: Icons.view_module_outlined, label: l10n.navCabinets),
-        AppNavDestination(icon: Icons.extension_outlined, label: l10n.navModules),
-      ],
-      body: IndexedStack(
-        index: _contentIndex,
-        children: [
-          for (var i = 0; i < _sectionCount + 1; i++)
-            AppShellBranch(
-              active: _contentIndex == i,
-              onSubpageOpenChanged: _contentIndex == i ? _onSubpageOpenChanged : null,
-              root: mainPages[i],
+      destinations: railDestinations,
+      body: _navLoading
+          ? const Center(child: CircularProgressIndicator())
+          : IndexedStack(
+              index: _contentIndex,
+              children: _buildWideBranches(companyId),
             ),
-          CompanySettingsBody(companyId: companyId),
-        ],
-      ),
     );
+  }
+
+  List<Widget> _buildWideBranches(String companyId) {
+    final platformPages = [
+      CompanyOverviewPage(companyId: companyId),
+      CompanyEmployeesPage(companyId: companyId),
+      CompanyAiKeyListPage(companyId: companyId, embedded: true),
+      CompanyProjectContainersPage(companyId: companyId, embedded: true),
+      CompanyCabinetsPage(companyId: companyId),
+      CompanyModuleListPage(companyId: companyId, embedded: true),
+    ];
+
+    final modulePages = _railEntries
+        .map(
+          (e) => ModuleShellNavPage(
+            entry: e,
+            embedded: true,
+            companyId: companyId,
+          ),
+        )
+        .toList();
+
+    final mainPages = [
+      ...platformPages,
+      ...modulePages,
+    ];
+
+    return [
+      for (var i = 0; i < mainPages.length; i++)
+        AppShellBranch(
+          active: _contentIndex == i,
+          onSubpageOpenChanged: _contentIndex == i ? _onSubpageOpenChanged : null,
+          root: mainPages[i],
+        ),
+      CompanySettingsBody(companyId: companyId),
+    ];
   }
 }

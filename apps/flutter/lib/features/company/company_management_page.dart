@@ -9,13 +9,20 @@ import 'package:prodavan/features/company/company_cabinets_page.dart';
 import 'package:prodavan/features/company/company_employees_page.dart';
 import 'package:prodavan/features/company/company_module_list_page.dart';
 import 'package:prodavan/features/company/company_project_containers_page.dart';
+import 'package:prodavan/features/meta/meta_icon.dart';
+import 'package:prodavan/features/meta/module_shell_nav_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Narrow-only hub: Employees / AI Keys / Containers / Cabinets / Modules.
+/// Narrow-only hub: Employees / AI Keys / Containers / Cabinets / Modules + catalog modules.
 class CompanyManagementPage extends StatelessWidget {
-  const CompanyManagementPage({super.key, required this.companyId});
+  const CompanyManagementPage({
+    super.key,
+    required this.companyId,
+    this.moduleEntries = const [],
+  });
 
   final String companyId;
+  final List<ShellNavEntry> moduleEntries;
 
   Future<void> _open(BuildContext context, Widget page) {
     return Navigator.of(context).push<void>(
@@ -23,35 +30,56 @@ class CompanyManagementPage extends StatelessWidget {
     );
   }
 
+  Future<void> _openModule(BuildContext context, ShellNavEntry entry) {
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => AppScaffold(
+          title: Text(entry.label),
+          body: ModuleShellNavPage(
+            entry: entry,
+            embedded: true,
+            companyId: companyId,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final items = <({IconData icon, String label, Widget page})>[
+    final items = <({IconData icon, String label, VoidCallback onTap})>[
       (
         icon: Icons.group_outlined,
         label: l10n.navEmployees,
-        page: CompanyEmployeesPage(companyId: companyId),
+        onTap: () => _open(context, CompanyEmployeesPage(companyId: companyId)),
       ),
       (
         icon: Icons.key_outlined,
         label: l10n.navAiKeys,
-        page: CompanyAiKeyListPage(companyId: companyId),
+        onTap: () => _open(context, CompanyAiKeyListPage(companyId: companyId)),
       ),
       (
         icon: Icons.dns_outlined,
         label: l10n.navContainers,
-        page: CompanyProjectContainersPage(companyId: companyId),
+        onTap: () => _open(context, CompanyProjectContainersPage(companyId: companyId)),
       ),
       (
         icon: Icons.view_module_outlined,
         label: l10n.navCabinets,
-        page: CompanyCabinetsPage(companyId: companyId),
+        onTap: () => _open(context, CompanyCabinetsPage(companyId: companyId)),
       ),
       (
         icon: Icons.extension_outlined,
         label: l10n.navModules,
-        page: CompanyModuleListPage(companyId: companyId),
+        onTap: () => _open(context, CompanyModuleListPage(companyId: companyId)),
       ),
+      for (final entry in moduleEntries)
+        (
+          icon: entry.icon,
+          label: entry.label,
+          onTap: () => _openModule(context, entry),
+        ),
     ];
 
     return AppScaffold(
@@ -66,7 +94,7 @@ class CompanyManagementPage extends StatelessWidget {
             leading: Icon(item.icon),
             title: Text(item.label),
             trailing: const AppTrailingChevron(),
-            onTap: () => _open(context, item.page),
+            onTap: item.onTap,
           );
         },
       ),

@@ -80,7 +80,7 @@ Without `nav` on admin/company tabs — tab stays in cabinet/preview TabBar only
 
 **Preview (seed editor):** `ModuleMetaPreviewPage` renders shell nav chips/rail mock for the **current module only** — not live Admin catalog merge.
 
-**Live Admin/Company shell:** does **not** scan all catalog modules. Runtime merge from bound/installations is follow-up (cabinet/project context).
+**Live Admin/Company shell:** runtime merge from module catalog via [ShellNavLoader](../../../apps/flutter/lib/features/meta/shell_nav_loader.dart) — same rules as cabinet shell.
 
 **Merge rules (when runtime applies):**
 

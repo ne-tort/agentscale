@@ -9,11 +9,18 @@ import 'package:prodavan/features/admin/admin_module_list_page.dart';
 import 'package:prodavan/features/admin/admin_project_containers_page.dart';
 import 'package:prodavan/features/admin/ai_key_list_page.dart';
 import 'package:prodavan/features/admin/company_list_page.dart';
+import 'package:prodavan/features/meta/meta_icon.dart';
+import 'package:prodavan/features/meta/module_shell_nav_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Narrow-only hub: Companies / AI Keys / Projects / Cabinets / Modules.
+/// Narrow-only hub: Companies / AI Keys / Projects / Cabinets / Modules + catalog modules.
 class AdminManagementPage extends StatelessWidget {
-  const AdminManagementPage({super.key});
+  const AdminManagementPage({
+    super.key,
+    this.moduleEntries = const [],
+  });
+
+  final List<ShellNavEntry> moduleEntries;
 
   Future<void> _open(BuildContext context, Widget page) {
     return Navigator.of(context).push<void>(
@@ -21,35 +28,52 @@ class AdminManagementPage extends StatelessWidget {
     );
   }
 
+  Future<void> _openModule(BuildContext context, ShellNavEntry entry) {
+    return Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => AppScaffold(
+          title: Text(entry.label),
+          body: ModuleShellNavPage(entry: entry, embedded: true),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final items = <({IconData icon, String label, Widget page})>[
+    final items = <({IconData icon, String label, VoidCallback onTap})>[
       (
         icon: Icons.business_outlined,
         label: l10n.navCompanies,
-        page: const AdminCompanyListPage(),
+        onTap: () => _open(context, const AdminCompanyListPage()),
       ),
       (
         icon: Icons.key_outlined,
         label: l10n.navAiKeys,
-        page: const AdminAiKeyListPage(),
+        onTap: () => _open(context, const AdminAiKeyListPage()),
       ),
       (
         icon: Icons.dns_outlined,
         label: l10n.navContainers,
-        page: const AdminProjectContainersPage(),
+        onTap: () => _open(context, const AdminProjectContainersPage()),
       ),
       (
         icon: Icons.folder_outlined,
         label: l10n.navCabinets,
-        page: const AdminCabinetListPage(),
+        onTap: () => _open(context, const AdminCabinetListPage()),
       ),
       (
         icon: Icons.extension_outlined,
         label: l10n.navModules,
-        page: const AdminModuleListPage(),
+        onTap: () => _open(context, const AdminModuleListPage()),
       ),
+      for (final entry in moduleEntries)
+        (
+          icon: entry.icon,
+          label: entry.label,
+          onTap: () => _openModule(context, entry),
+        ),
     ];
 
     return AppScaffold(
@@ -64,7 +88,7 @@ class AdminManagementPage extends StatelessWidget {
             leading: Icon(item.icon),
             title: Text(item.label),
             trailing: const AppTrailingChevron(),
-            onTap: () => _open(context, item.page),
+            onTap: item.onTap,
           );
         },
       ),

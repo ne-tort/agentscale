@@ -57,4 +57,19 @@ abstract final class ShellNavLoader {
     }
     return mergeShellNavEntries(contour: contour, modules: parsed);
   }
+
+  static Future<({List<ShellNavEntry> rail, List<ShellNavEntry> management})> loadAdminBundle(
+    AdminApi api,
+  ) async {
+    final entries = await loadAdmin(api);
+    return splitShellNavEntries(entries);
+  }
+
+  static Future<({List<ShellNavEntry> rail, List<ShellNavEntry> management})> loadCompanyBundle(
+    CompanyApi api,
+    String companyId,
+  ) async {
+    final entries = await loadCompany(api, companyId);
+    return splitShellNavEntries(entries);
+  }
 }

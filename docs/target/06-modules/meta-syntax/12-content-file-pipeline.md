@@ -175,7 +175,7 @@ Column setup: `type: text` + `ui.widget: markdown_editor` in view (see [views-ui
 
 | ID | Gap |
 |----|-----|
-| P-META-FILE-01 | Align all docs/examples from `object_key` → canonical FileRef |
+| P-META-FILE-01 | Align all docs/examples from `object_key` → canonical FileRef | **done** |
 | P-META-FILE-02 | Row write validates FileRef against Content Service |
 | P-META-FILE-03 | `format: template` in MaterializeExecutor | **done** (#160) |
 | P-META-FILE-04 | Auto materialize rule from column `file.materialize` | **done** |

@@ -366,6 +366,43 @@ void main() {
       expect(entries.map((e) => e.label), contains('Reports · Mod A'));
       expect(entries.map((e) => e.label), contains('Reports · Mod B'));
     });
+
+    test('splitShellNavEntries separates rail and management', () {
+      const railOnly = ShellNavEntry(
+        moduleId: 'mod_a',
+        moduleName: 'A',
+        tab: {
+          'title': 'Rail',
+          'view_slug': 'v1',
+          'nav': {'contour': 'admin', 'placement': 'rail'},
+        },
+        label: 'Rail',
+      );
+      const mgmtOnly = ShellNavEntry(
+        moduleId: 'mod_b',
+        moduleName: 'B',
+        tab: {
+          'title': 'Mgmt',
+          'view_slug': 'v2',
+          'nav': {'contour': 'admin', 'placement': 'management'},
+        },
+        label: 'Mgmt',
+      );
+      const both = ShellNavEntry(
+        moduleId: 'mod_c',
+        moduleName: 'C',
+        tab: {
+          'title': 'Both',
+          'view_slug': 'v3',
+          'nav': {'contour': 'admin'},
+        },
+        label: 'Both',
+      );
+
+      final split = splitShellNavEntries([railOnly, mgmtOnly, both]);
+      expect(split.rail.map((e) => e.label), ['Rail', 'Both']);
+      expect(split.management.map((e) => e.label), ['Mgmt', 'Both']);
+    });
   });
 
   group('SeedDataController', () {
