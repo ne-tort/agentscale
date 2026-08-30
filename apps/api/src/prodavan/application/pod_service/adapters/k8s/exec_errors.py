@@ -6,6 +6,25 @@ from prodavan.domain.errors import AppError
 from prodavan.infrastructure.k8s.errors import K8sError, K8sNotFoundError, PermanentK8sError, TransientK8sError
 
 
+def _invalid_status_detail(exc: BaseException) -> str:
+    response = getattr(exc, "response", None)
+    if response is not None:
+        body = getattr(response, "body", b"") or b""
+        if body:
+            try:
+                import json
+
+                message = json.loads(body).get("message")
+                if message:
+                    return str(message)[:500]
+            except Exception:
+                pass
+        status_code = getattr(response, "status_code", None)
+        if status_code:
+            return f"kubernetes denied pod exec: HTTP {status_code}"
+    return "kubernetes denied pod exec (RBAC or policy)"
+
+
 def app_error_from_exec_failure(exc: BaseException) -> AppError:
     """Convert exec transport errors to RFC7807-friendly AppError."""
     try:
@@ -20,14 +39,14 @@ def app_error_from_exec_failure(exc: BaseException) -> AppError:
                 code="POD_EXEC_FORBIDDEN",
                 title="Forbidden",
                 status=403,
-                detail="kubernetes denied pod exec (RBAC or policy)",
+                detail=_invalid_status_detail(exc),
             )
         if status_code == 404:
             return AppError(
                 code="POD_NOT_FOUND",
                 title="Not Found",
                 status=404,
-                detail="pod not found in kubernetes",
+                detail=_invalid_status_detail(exc),
             )
         return AppError(
             code="POD_EXEC_UNAVAILABLE",

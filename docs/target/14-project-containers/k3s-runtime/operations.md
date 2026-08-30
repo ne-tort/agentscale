@@ -93,6 +93,6 @@ Zombie policy: [k8s-contract.md](../k8s-contract.md).
 Minimum rules for `pod-service` SA — см. [gitops-rbac.md](gitops-rbac.md):
 
 - `pods`: create, get, list, watch, delete, patch
-- `pods/exec`: create (files port)
+- `pods/exec`: create, get (WebSocket exec for files port; GET upgrade requires get)
 - `jobs`: create, get, delete (hydrate job mode)
 - `pods/metrics` or `metrics.k8s.io`: get (metrics port)

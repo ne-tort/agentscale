@@ -27,10 +27,12 @@ def test_maps_invalid_status_403() -> None:
 
     class _Resp:
         status_code = 403
+        body = b'{"message":"cannot get pods/exec"}'
 
     err = app_error_from_exec_failure(InvalidStatus(_Resp()))
     assert err.code == "POD_EXEC_FORBIDDEN"
     assert err.status == 403
+    assert "cannot get pods/exec" in err.detail
 
 
 def test_raises_app_error_not_generic_exception() -> None:
