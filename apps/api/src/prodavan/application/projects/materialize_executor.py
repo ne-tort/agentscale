@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,6 +45,18 @@ class MaterializeExecutor:
                     if pkg:
                         mcp_packages.append(pkg)
                         written.append(f"packages/{pkg['name']}")
+                elif op.format == "json_rows":
+                    path = self._write_json_rows(writer, op)
+                    if path:
+                        written.append(path)
+                elif op.format == "json_single":
+                    path = self._write_json_single(writer, op)
+                    if path:
+                        written.append(path)
+                elif op.format == "template":
+                    path = self._write_template(writer, op)
+                    if path:
+                        written.append(path)
             except Exception:
                 logger.exception("materialize op failed rule=%s path=%s", op.rule_id, op.workspace_path)
         if mcp_packages:
@@ -53,7 +67,12 @@ class MaterializeExecutor:
         return written, mcp_packages
 
     async def _write_raw(self, writer: WorkspaceLayoutWriter, op: MaterializeOp) -> str | None:
-        if not op.workspace_path or op.row_body is None:
+        if not op.workspace_path:
+            return None
+        if op.static_value is not None and op.row_body is None:
+            writer.write_text_file(relative_path=op.workspace_path, text=op.static_value)
+            return op.workspace_path
+        if op.row_body is None:
             return None
         field = op.field or "body_md"
         val = op.row_body.get(field)
@@ -73,6 +92,37 @@ class MaterializeExecutor:
         if raw is None:
             return None
         writer.write_bytes_file(relative_path=op.workspace_path, data=raw)
+        return op.workspace_path
+
+    def _write_json_rows(self, writer: WorkspaceLayoutWriter, op: MaterializeOp) -> str | None:
+        if not op.workspace_path or not op.rows_bodies:
+            return None
+        payload = [{k: v for k, v in row.items() if k != "row_id"} for row in op.rows_bodies]
+        writer.write_text_file(
+            relative_path=op.workspace_path,
+            text=json.dumps(payload, ensure_ascii=False, indent=2),
+        )
+        return op.workspace_path
+
+    def _write_json_single(self, writer: WorkspaceLayoutWriter, op: MaterializeOp) -> str | None:
+        if not op.workspace_path or op.row_body is None:
+            return None
+        body = {k: v for k, v in op.row_body.items() if k != "row_id"}
+        writer.write_text_file(
+            relative_path=op.workspace_path,
+            text=json.dumps(body, ensure_ascii=False, indent=2),
+        )
+        return op.workspace_path
+
+    def _write_template(self, writer: WorkspaceLayoutWriter, op: MaterializeOp) -> str | None:
+        if not op.workspace_path:
+            return None
+        template = op.template_text or ""
+        ctx = op.row_body or {}
+        if op.static_value is not None and not template:
+            template = op.static_value
+        text = _render_template(template, ctx)
+        writer.write_text_file(relative_path=op.workspace_path, text=text)
         return op.workspace_path
 
     async def _write_mcp_package(
@@ -108,3 +158,12 @@ class MaterializeExecutor:
                 except FileNotFoundError:
                     return None
         return None
+
+
+def _render_template(template: str, ctx: dict[str, Any]) -> str:
+    def repl(match: re.Match[str]) -> str:
+        key = match.group(1)
+        val = ctx.get(key)
+        return "" if val is None else str(val)
+
+    return re.sub(r"\{\{(\w+)\}\}", repl, template)

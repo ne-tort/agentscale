@@ -31,6 +31,8 @@ class MaterializeOp:
     static_value: str | None = None
     file_ref: dict[str, Any] | None = None
     mcp_package_name: str | None = None
+    rows_bodies: list[dict[str, Any]] | None = None
+    template_text: str | None = None
 
 
 class MaterializePlanner:
@@ -102,6 +104,36 @@ class MaterializePlanner:
                         priority=priority,
                     )
                     ops.extend(row_ops)
+                elif source_type == "static":
+                    ctx = {"active_profile_id": active_profile_id}
+                    ws_path = self._substitute(str(target.get("workspace_path") or ""), ctx)
+                    if ws_path:
+                        ops.append(
+                            MaterializeOp(
+                                rule_id=rule_id,
+                                module_id=module_id,
+                                workspace_path=ws_path,
+                                format=fmt,
+                                source_type="static",
+                                priority=priority,
+                                static_value=str(source.get("value") or ""),
+                                template_text=str(target["template"])
+                                if isinstance(target.get("template"), str)
+                                else None,
+                            )
+                        )
+                elif source_type == "meta_document":
+                    op = await self._plan_meta_document_op(
+                        module_id=module_id,
+                        rule_id=rule_id,
+                        source=source,
+                        target=target,
+                        fmt=fmt,
+                        active_profile_id=active_profile_id,
+                        priority=priority,
+                    )
+                    if op:
+                        ops.append(op)
         ops.sort(key=lambda o: (o.priority, o.rule_id))
         return ops, active_profile_id
 
@@ -282,6 +314,9 @@ class MaterializePlanner:
             priority=priority,
             row_body=body,
             field=str(field) if field else None,
+            template_text=str(target["template"])
+            if isinstance(target.get("template"), str)
+            else None,
         )
         return op
 
@@ -313,6 +348,21 @@ class MaterializePlanner:
             project_id=project_id,
         )
         field = source.get("field") or target.get("field")
+        if fmt == "json_rows":
+            ws_path = self._substitute(str(target.get("workspace_path") or ""), ctx)
+            if ws_path and rows:
+                return [
+                    MaterializeOp(
+                        rule_id=rule_id,
+                        module_id=module_id,
+                        workspace_path=ws_path,
+                        format="json_rows",
+                        source_type="rows",
+                        priority=priority,
+                        rows_bodies=rows,
+                    )
+                ]
+            return []
         ops: list[MaterializeOp] = []
         for i, body in enumerate(rows):
             str_ctx = {k: str(v) for k, v in body.items() if v is not None}
@@ -332,6 +382,48 @@ class MaterializePlanner:
             )
             ops.append(op)
         return ops
+
+    async def _plan_meta_document_op(
+        self,
+        *,
+        module_id: str,
+        rule_id: str,
+        source: dict[str, Any],
+        target: dict[str, Any],
+        fmt: str,
+        active_profile_id: str | None,
+        priority: int,
+    ) -> MaterializeOp | None:
+        slug = source.get("slug")
+        if not isinstance(slug, str) or not slug:
+            return None
+        try:
+            doc = await self._meta.get_document(module_id=module_id, slug=slug)
+        except Exception:
+            return None
+        body = doc.get("body")
+        field = source.get("field")
+        value: Any = body
+        if field and isinstance(body, dict):
+            value = body.get(field)
+        ctx = {"active_profile_id": active_profile_id}
+        ws_path = self._substitute(str(target.get("workspace_path") or ""), ctx)
+        if not ws_path:
+            return None
+        text = value if isinstance(value, str) else str(value or "")
+        return MaterializeOp(
+            rule_id=rule_id,
+            module_id=module_id,
+            workspace_path=ws_path,
+            format=fmt,
+            source_type="meta_document",
+            priority=priority,
+            static_value=text if fmt in ("raw", "template") else None,
+            row_body={"value": value} if isinstance(value, dict) else {"text": text},
+            template_text=str(target["template"])
+            if isinstance(target.get("template"), str)
+            else None,
+        )
 
 
 def _row_matches_filter(body: dict[str, Any], filt: dict[str, Any]) -> bool:
