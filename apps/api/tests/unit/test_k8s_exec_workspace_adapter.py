@@ -59,6 +59,37 @@ async def test_list_entries_parses_workspace_fs_json(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_entries_maps_exec_transport_error(monkeypatch) -> None:
+    pytest.importorskip("websockets")
+    from websockets.exceptions import InvalidStatus
+
+    client = AsyncMock()
+    client.namespace = "prodavan-sandboxes"
+    client.auth = object()
+    client.get_pod = AsyncMock(return_value=_running_pod())
+
+    class _Resp:
+        status_code = 403
+
+    async def _exec(**kwargs):
+        _ = kwargs
+        raise InvalidStatus(_Resp())
+
+    monkeypatch.setattr(
+        "prodavan.application.pod_service.adapters.k8s.workspace_exec.exec_in_pod",
+        _exec,
+    )
+
+    adapter = K8sExecWorkspaceAdapter(client=client)
+    from prodavan.domain.errors import AppError
+
+    with pytest.raises(AppError) as exc_info:
+        await adapter.list_entries(runtime_ref="pod-demo", path="")
+    assert exc_info.value.code == "POD_EXEC_FORBIDDEN"
+    assert exc_info.value.status == 403
+
+
+@pytest.mark.asyncio
 async def test_read_bytes_returns_stdout(monkeypatch) -> None:
     client = AsyncMock()
     client.namespace = "prodavan-sandboxes"

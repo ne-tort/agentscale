@@ -6,6 +6,7 @@ import json
 import logging
 from typing import Any
 
+from prodavan.application.pod_service.adapters.k8s.exec_errors import app_error_from_exec_failure
 from prodavan.application.pod_service.adapters.k8s.workspace_exec_cmd import build_workspace_fs_command
 from prodavan.application.pod_service.ports.workspace import PodWorkspacePort, WorkspaceEntry
 from prodavan.application.pod_service.workspace_paths import normalize_workspace_path
@@ -35,8 +36,13 @@ class K8sExecWorkspaceAdapter:
     def __init__(self, *, client: K8sSandboxClient) -> None:
         self._client = client
 
-    async def _run_json(self, *, runtime_ref: str, args: list[str]) -> dict[str, Any]:
-        snap = await self._client.get_pod(runtime_ref)
+    async def _require_running_snap(self, runtime_ref: str):
+        try:
+            snap = await self._client.get_pod(runtime_ref)
+        except AppError:
+            raise
+        except Exception as exc:
+            raise app_error_from_exec_failure(exc) from exc
         if snap is None or not snap.ready or snap.phase != "Running":
             raise AppError(
                 code="POD_NOT_RUNNING",
@@ -44,12 +50,21 @@ class K8sExecWorkspaceAdapter:
                 status=409,
                 detail="pod is not running",
             )
-        result = await exec_in_pod(
-            auth=self._client.auth,
-            namespace=self._client.namespace,
-            pod_name=runtime_ref,
-            command=build_workspace_fs_command(args),
-        )
+        return snap
+
+    async def _run_json(self, *, runtime_ref: str, args: list[str]) -> dict[str, Any]:
+        await self._require_running_snap(runtime_ref)
+        try:
+            result = await exec_in_pod(
+                auth=self._client.auth,
+                namespace=self._client.namespace,
+                pod_name=runtime_ref,
+                command=build_workspace_fs_command(args),
+            )
+        except AppError:
+            raise
+        except Exception as exc:
+            raise app_error_from_exec_failure(exc) from exc
         if result.exit_code not in (0, None):
             err = result.stderr.decode("utf-8", errors="replace")[:500]
             raise AppError(
@@ -70,20 +85,18 @@ class K8sExecWorkspaceAdapter:
             ) from exc
 
     async def _run_bytes(self, *, runtime_ref: str, args: list[str]) -> bytes:
-        snap = await self._client.get_pod(runtime_ref)
-        if snap is None or not snap.ready or snap.phase != "Running":
-            raise AppError(
-                code="POD_NOT_RUNNING",
-                title="Conflict",
-                status=409,
-                detail="pod is not running",
+        await self._require_running_snap(runtime_ref)
+        try:
+            result = await exec_in_pod(
+                auth=self._client.auth,
+                namespace=self._client.namespace,
+                pod_name=runtime_ref,
+                command=build_workspace_fs_command(args),
             )
-        result = await exec_in_pod(
-            auth=self._client.auth,
-            namespace=self._client.namespace,
-            pod_name=runtime_ref,
-            command=build_workspace_fs_command(args),
-        )
+        except AppError:
+            raise
+        except Exception as exc:
+            raise app_error_from_exec_failure(exc) from exc
         if result.exit_code not in (0, None):
             err = result.stderr.decode("utf-8", errors="replace")[:500]
             raise AppError(

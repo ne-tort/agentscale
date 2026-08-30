@@ -47,6 +47,7 @@ def test_build_pod_body_labels() -> None:
     assert body["spec"]["initContainers"][0]["name"] == "hydrate"
     sandbox_env = {item["name"]: item.get("value") for item in body["spec"]["containers"][0]["env"]}
     assert sandbox_env["LOG_LEVEL"] == "debug"
+    assert body["spec"]["containers"][0]["command"] == ["sleep", "infinity"]
 
 
 def test_in_cluster_auth_available(tmp_path: Path) -> None:

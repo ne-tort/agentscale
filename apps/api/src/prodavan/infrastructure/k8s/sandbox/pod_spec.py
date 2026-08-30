@@ -77,6 +77,8 @@ def build_pod_body(
         "name": "sandbox",
         "image": image,
         "imagePullPolicy": "IfNotPresent",
+        # API image defaults to uvicorn; sandbox Pod is an agent workspace holder only.
+        "command": ["sleep", "infinity"],
         "workingDir": _WORKSPACE_MOUNT,
         "env": main_env,
         "volumeMounts": [{"name": "workspace", "mountPath": _WORKSPACE_MOUNT}],
