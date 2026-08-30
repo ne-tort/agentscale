@@ -12,6 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.cabinets.access import CabinetAccessService
 from prodavan.application.modules.module_meta_service import ModuleMetaDocumentService
+from prodavan.application.modules.module_row_validator import (
+    columns_for_table,
+    validate_row_body,
+)
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.infrastructure.cabinets.sql import qident
@@ -166,6 +170,9 @@ class CabinetModuleService:
         body = await self._merge_column_defaults(
             module_id=module_id, table_slug=table_slug, body=body
         )
+        body = await self._validate_row(
+            module_id=module_id, table_slug=table_slug, body=body
+        )
         row_id = f"row_{uuid.uuid4().hex[:12]}"
         created_by = employee.id if employee is not None else principal.sub
         qschema = qident(inst.schema_name)
@@ -216,6 +223,9 @@ class CabinetModuleService:
             cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
         )
         await self._require_installed(inst.schema_name, module_id=module_id)
+        body = await self._validate_row(
+            module_id=module_id, table_slug=table_slug, body=body
+        )
         qschema = qident(inst.schema_name)
         result = await self._session.execute(
             text(
@@ -299,6 +309,17 @@ class CabinetModuleService:
             if "default" in col:
                 merged[name] = col["default"]
         return merged
+
+    async def _validate_row(self, *, module_id: str, table_slug: str, body: dict) -> dict:
+        try:
+            doc = await self._meta.get_document(module_id=module_id, slug="columns")
+        except AppError:
+            return body
+        raw = doc.get("body")
+        columns = columns_for_table(raw, table_slug)
+        if not columns:
+            return body
+        return validate_row_body(body, columns)
 
     async def _require_module_binding(self, *, cabinet_id: str, module_id: str) -> None:
         q = await self._session.execute(
