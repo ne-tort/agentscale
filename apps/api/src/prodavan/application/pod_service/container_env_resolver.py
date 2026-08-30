@@ -9,11 +9,7 @@ from typing import Any
 _ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _DEFAULT_WHEN = frozenset({"project.launch", "project.sync", "project.resumed", "project.reload"})
 
-
-def _list_entries(doc: Any) -> list[dict[str, Any]]:
-    if not isinstance(doc, list):
-        return []
-    return [dict(item) for item in doc if isinstance(item, dict)]
+RowFieldGetter = Callable[[dict[str, Any]], str | None]
 
 
 def _when_matches(entry: dict[str, Any], lifecycle: str) -> bool:
@@ -25,12 +21,35 @@ def _when_matches(entry: dict[str, Any], lifecycle: str) -> bool:
     return lifecycle in [str(item) for item in when]
 
 
+def field_value_as_env_string(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    return None
+
+
+def field_value_as_secret_ref(value: Any) -> str | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    if isinstance(value, dict):
+        ref = value.get("secret_ref")
+        if isinstance(ref, str) and ref.strip():
+            return ref.strip()
+    return None
+
+
 def resolve_plain_env(
     entries: Iterable[dict[str, Any]],
     *,
     lifecycle: str,
+    row_field_getter: RowFieldGetter | None = None,
 ) -> list[tuple[str, str]]:
-    """Merge literal container_env entries for a lifecycle event."""
+    """Merge literal and row-backed container_env entries for a lifecycle event."""
     out: list[tuple[str, str]] = []
     seen: set[str] = set()
     for entry in entries:
@@ -39,12 +58,20 @@ def resolve_plain_env(
         env_name = entry.get("env_name")
         if not isinstance(env_name, str) or not _ENV_NAME_RE.match(env_name):
             continue
-        if entry.get("value_from") is not None:
-            continue
-        value = entry.get("value")
-        if not isinstance(value, str):
-            continue
         if env_name in seen:
+            continue
+
+        value: str | None = None
+        value_from = entry.get("value_from")
+        if isinstance(value_from, dict):
+            if row_field_getter is None:
+                continue
+            value = row_field_getter(value_from)
+        else:
+            raw = entry.get("value")
+            value = raw if isinstance(raw, str) else None
+
+        if value is None:
             continue
         seen.add(env_name)
         out.append((env_name, value))
@@ -56,8 +83,9 @@ def resolve_secret_env(
     *,
     lifecycle: str,
     secret_getter: Callable[[str], str],
+    row_field_getter: RowFieldGetter | None = None,
 ) -> list[tuple[str, str]]:
-    """Resolve static secret_ref entries from container_env_secrets."""
+    """Resolve static and row-backed container_env_secrets entries."""
     out: list[tuple[str, str]] = []
     seen: set[str] = set()
     for entry in entries:
@@ -66,15 +94,23 @@ def resolve_secret_env(
         env_name = entry.get("env_name")
         if not isinstance(env_name, str) or not _ENV_NAME_RE.match(env_name):
             continue
-        if entry.get("secret_ref_from") is not None:
-            continue
-        secret_ref = entry.get("secret_ref")
-        if not isinstance(secret_ref, str) or not secret_ref.strip():
-            continue
         if env_name in seen:
             continue
+
+        secret_ref: str | None = None
+        secret_ref_from = entry.get("secret_ref_from")
+        if isinstance(secret_ref_from, dict):
+            if row_field_getter is None:
+                continue
+            secret_ref = row_field_getter(secret_ref_from)
+        else:
+            raw = entry.get("secret_ref")
+            secret_ref = raw.strip() if isinstance(raw, str) and raw.strip() else None
+
+        if secret_ref is None:
+            continue
         seen.add(env_name)
-        out.append((env_name, secret_getter(secret_ref.strip())))
+        out.append((env_name, secret_getter(secret_ref)))
     return out
 
 

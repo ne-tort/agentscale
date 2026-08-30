@@ -2,8 +2,7 @@
 
 Meta-table syntax для **переменных окружения sandbox Pod** и **секретов** без plaintext в meta JSON.
 
-**As-built (MVP):** Pod получает `WORKSPACE_KEY`, `PROJECT_ID`, MinIO hydrate credentials, плюс merged `container_env` / static `container_env_secrets` из module meta ([pod_spec.py](../../../apps/api/src/prodavan/infrastructure/k8s/sandbox/pod_spec.py), [container_env_loader.py](../../../apps/api/src/prodavan/application/pod_service/container_env_loader.py)).  
-**Target:** `value_from` / `secret_ref_from` row resolution — P-META-ENV-02.
+**As-built (MVP):** Pod получает `WORKSPACE_KEY`, `PROJECT_ID`, MinIO hydrate credentials, плюс merged `container_env` / `container_env_secrets` из module meta — literal, static `secret_ref`, и row `value_from` / `secret_ref_from` ([container_env_loader.py](../../../apps/api/src/prodavan/application/pod_service/container_env_loader.py)).
 
 См. [AI keys / Vault](../../02-ai-provider-keys/domain.md) · [env-matrix](../../../07-infrastructure/env-matrix.md).
 
@@ -88,7 +87,7 @@ Maps Pod env names to **secret references**, resolved at launch by platform (nev
 2. Merge `container_env` + resolved `container_env_secrets`
 3. `pod_spec.py` adds env / envFrom Secret (k8s Secret created per Pod or shared SA)
 
-**Gap:** P-META-ENV-01 — **partial (static refs)**; row `value_from` / `secret_ref_from` → P-META-ENV-02.
+**Gap:** P-META-ENV-01 — **done** (#162); P-META-ENV-02 row refs — **done** (#163).
 
 ## Column type: `secret_ref` (row storage)
 
@@ -178,7 +177,7 @@ Settings: `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_KV_MOUNT`, `VAULT_KV_PATH_PREFIX` 
 
 | ID | Description | Priority |
 |----|-------------|----------|
-| P-META-ENV-01 | `container_env` + static `container_env_secrets` → pod_spec | **partial** |
+| P-META-ENV-01 | `container_env` + static `container_env_secrets` → pod_spec | **done** (#162) |
+| P-META-ENV-02 | `value_from` / `secret_ref_from` row resolution at launch | **done** (#163) |
 | P-META-VAULT-01 | `secret_ref` column + upload UI → Vault | P1 |
 | P-META-VAULT-02 | Cabinet-scoped Vault path prefix + ACL | P2 |
-| P-META-ENV-02 | `value_from` row field resolution at launch | P2 |

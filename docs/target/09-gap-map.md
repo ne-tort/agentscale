@@ -80,7 +80,7 @@
 | **P-META-FILE-02** | Row write validates FileRef vs Content Service | **done** (#159 row validator) | — |
 | **P-META-FILE-03** | `format: template` in MaterializeExecutor | **done** (#160) | — |
 | **P-META-FILE-04** | Auto materialize from column `file.materialize` | Manual rules in slug `materialize` | P3 |
-| **P-META-ENV-01** | `container_env` + `container_env_secrets` → pod_spec | Pod env: WORKSPACE_KEY, MINIO_* only | P1 (in PR) |
+| **P-META-ENV-01** | `container_env` + `container_env_secrets` → pod_spec | **done** (#162, #163) | — |
 | **P-META-VAULT-01** | `secret_ref` column + masked upload UI → Vault | AI keys only (`vault://ai_keys/…`) | P1 |
 | **P-META-VAULT-02** | Cabinet-scoped Vault paths + ACL | — | P2 |
 
