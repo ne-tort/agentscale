@@ -7,6 +7,7 @@ import json
 from prodavan.application.projects.materialize_executor import (
     MaterializeExecutor,
     _render_template,
+    _should_skip_copy_blob,
 )
 from prodavan.application.projects.materialize_planner import MaterializeOp
 
@@ -21,6 +22,9 @@ class _MemoryWriter:
 
     def write_bytes_file(self, *, relative_path: str, data: bytes) -> None:
         self.byte_files[relative_path] = data
+
+    def read_bytes_file(self, relative_path: str) -> bytes | None:
+        return self.byte_files.get(relative_path)
 
 
 def test_write_json_rows() -> None:
@@ -58,3 +62,15 @@ def test_write_template() -> None:
 
 def test_render_template() -> None:
     assert _render_template("x={{a}} y={{missing}}", {"a": 1}) == "x=1 y="
+
+
+def test_should_skip_copy_blob_when_sha256_matches() -> None:
+    writer = _MemoryWriter()
+    data = b"same-content"
+    import hashlib
+
+    digest = hashlib.sha256(data).hexdigest()
+    writer.write_bytes_file(relative_path="seed/a.pdf", data=data)
+    assert _should_skip_copy_blob(writer, "seed/a.pdf", {"sha256": digest})
+    assert not _should_skip_copy_blob(writer, "seed/a.pdf", {"sha256": "deadbeef"})
+    assert not _should_skip_copy_blob(writer, "seed/missing.pdf", {"sha256": digest})

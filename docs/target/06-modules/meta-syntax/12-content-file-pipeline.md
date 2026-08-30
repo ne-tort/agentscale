@@ -69,7 +69,7 @@ Legacy alias `object_key` in docs — **deprecated**; use `storage_key`.
 }
 ```
 
-Optional `file.materialize.target_template` in column meta — **spec only** (not auto-generated in MVP); declare explicit rule in slug `materialize`.
+Optional `file.materialize.target_template` in column meta — auto-generates `copy_blob` rules (P-META-FILE-04); explicit slug `materialize` still overrides by rule id.
 
 ## Phase B — Reference in row
 
@@ -178,5 +178,5 @@ Column setup: `type: text` + `ui.widget: markdown_editor` in view (see [views-ui
 | P-META-FILE-01 | Align all docs/examples from `object_key` → canonical FileRef |
 | P-META-FILE-02 | Row write validates FileRef against Content Service |
 | P-META-FILE-03 | `format: template` in MaterializeExecutor | **done** (#160) |
-| P-META-FILE-04 | Auto materialize rule from column `file.materialize` |
-| P-META-FILE-05 | Re-materialize skip by sha256/etag |
+| P-META-FILE-04 | Auto materialize rule from column `file.materialize` | **done** |
+| P-META-FILE-05 | Re-materialize skip by sha256/etag | **done** (sha256 on FileRef) |

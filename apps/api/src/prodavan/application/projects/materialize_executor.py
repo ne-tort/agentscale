@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import re
@@ -88,6 +89,8 @@ class MaterializeExecutor:
         ref = op.file_ref or (op.row_body or {}).get(op.field or "file_ref")
         if not isinstance(ref, dict) or not op.workspace_path:
             return None
+        if _should_skip_copy_blob(writer, op.workspace_path, ref):
+            return op.workspace_path
         raw = await self._load_file_ref(ref)
         if raw is None:
             return None
@@ -158,6 +161,17 @@ class MaterializeExecutor:
                 except FileNotFoundError:
                     return None
         return None
+
+
+def _should_skip_copy_blob(writer: WorkspaceLayoutWriter, workspace_path: str, ref: dict[str, Any]) -> bool:
+    """P-META-FILE-05: skip rewrite when workspace file matches FileRef sha256."""
+    expected = ref.get("sha256")
+    if not isinstance(expected, str) or not expected.strip():
+        return False
+    existing = writer.read_bytes_file(workspace_path)
+    if existing is None:
+        return False
+    return hashlib.sha256(existing).hexdigest() == expected.strip()
 
 
 def _render_template(template: str, ctx: dict[str, Any]) -> str:

@@ -65,6 +65,7 @@ class MaterializePlanner:
             if bound_projects and project_id not in bound_projects:
                 continue
             rules = await self._load_materialize_rules(module_id)
+            rules = _merge_materialize_rules(rules, await self._auto_rules_from_columns(module_id))
             for rule in rules:
                 if not rule.get("enabled", True):
                     continue
@@ -179,6 +180,59 @@ class MaterializePlanner:
         if isinstance(body, list):
             return [r for r in body if isinstance(r, dict)]
         return []
+
+    async def _load_columns(self, module_id: str) -> list[dict[str, Any]]:
+        q = await self._session.execute(
+            select(ModuleMetaDocumentRow.body).where(
+                ModuleMetaDocumentRow.module_id == module_id,
+                ModuleMetaDocumentRow.slug == "columns",
+            )
+        )
+        body = q.scalar_one_or_none()
+        if isinstance(body, list):
+            return [c for c in body if isinstance(c, dict)]
+        return []
+
+    async def _auto_rules_from_columns(self, module_id: str) -> list[dict[str, Any]]:
+        """P-META-FILE-04: derive copy_blob rules from column file.materialize."""
+        rules: list[dict[str, Any]] = []
+        for col in await self._load_columns(module_id):
+            if col.get("type") != "file_ref":
+                continue
+            file_block = col.get("file")
+            if not isinstance(file_block, dict):
+                continue
+            mat = file_block.get("materialize")
+            if not isinstance(mat, dict) or not mat.get("enabled"):
+                continue
+            target_tpl = mat.get("target_template")
+            if not isinstance(target_tpl, str) or not target_tpl.strip():
+                continue
+            table_slug = col.get("table_slug")
+            name = col.get("name")
+            if not isinstance(table_slug, str) or not table_slug:
+                continue
+            if not isinstance(name, str) or not name:
+                continue
+            when = mat.get("when")
+            rules.append(
+                {
+                    "id": f"auto_{table_slug}_{name}",
+                    "enabled": True,
+                    "when": when if isinstance(when, list) and when else ["project.created", "project.resumed"],
+                    "priority": int(mat.get("priority") or 200),
+                    "source": {
+                        "type": "rows",
+                        "table_slug": table_slug,
+                        "field": name,
+                    },
+                    "target": {
+                        "workspace_path": target_tpl.strip(),
+                        "format": "copy_blob",
+                    },
+                }
+            )
+        return rules
 
     async def _resolve_active_profile_id(
         self,
@@ -365,7 +419,7 @@ class MaterializePlanner:
             return []
         ops: list[MaterializeOp] = []
         for i, body in enumerate(rows):
-            str_ctx = {k: str(v) for k, v in body.items() if v is not None}
+            str_ctx = _row_path_context(body, field if isinstance(field, str) else None)
             ws_path = self._substitute(str(target.get("workspace_path") or ""), {**ctx, **str_ctx})
             file_ref = body.get(field) if field and fmt in ("copy_blob", "mcp_package") else None
             op = MaterializeOp(
@@ -444,3 +498,38 @@ def _row_applies_to_project(body: dict[str, Any], project_id: str) -> bool:
     if not isinstance(pids, list) or len(pids) == 0:
         return True
     return project_id in [str(p) for p in pids]
+
+
+def _merge_materialize_rules(
+    explicit: list[dict[str, Any]],
+    auto_generated: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    explicit_ids = {
+        str(r.get("id"))
+        for r in explicit
+        if isinstance(r.get("id"), str) and str(r.get("id"))
+    }
+    merged = list(explicit)
+    for rule in auto_generated:
+        rid = rule.get("id")
+        if isinstance(rid, str) and rid and rid not in explicit_ids:
+            merged.append(rule)
+    return merged
+
+
+def _row_path_context(body: dict[str, Any], field: str | None) -> dict[str, str]:
+    ctx: dict[str, str] = {}
+    row_id = body.get("row_id")
+    if row_id is not None:
+        ctx["row_id"] = str(row_id)
+    for key, val in body.items():
+        if val is None or isinstance(val, (dict, list)):
+            continue
+        ctx[key] = str(val)
+    if field:
+        ref = body.get(field)
+        if isinstance(ref, dict):
+            filename = ref.get("filename")
+            if isinstance(filename, str) and filename:
+                ctx["filename"] = filename
+    return ctx

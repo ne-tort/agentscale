@@ -51,6 +51,18 @@ class WorkspaceLayoutWriter:
         rel = relative_path.lstrip("/").replace("\\", "/")
         self._put_workspace_bytes(rel, data, content_type=content_type or "application/octet-stream")
 
+    def read_bytes_file(self, relative_path: str) -> bytes | None:
+        """Read workspace blob if present (for materialize idempotency)."""
+        rel = relative_path.lstrip("/").replace("\\", "/")
+        key = workspace_object_key(workspace_key=self._workspace_key, relative_path=rel)
+        try:
+            return ensure_file_store().get_bytes_sync(key)
+        except FileNotFoundError:
+            local = self._root / rel
+            if local.is_file():
+                return local.read_bytes()
+            return None
+
     def write_agents(self, *, cabinet_name: str, project_name: str, agents_md: str | None) -> None:
         text = agents_md or (
             f"# {project_name}\n\n"

@@ -79,7 +79,7 @@
 | **P-META-FILE-01** | FileRef `storage_key` + `asset_id`/`version_id` | Upload + copy_blob live; docs had `object_key` | P2 (docs aligned) |
 | **P-META-FILE-02** | Row write validates FileRef vs Content Service | **done** (#159 row validator) | — |
 | **P-META-FILE-03** | `format: template` in MaterializeExecutor | **done** (#160) | — |
-| **P-META-FILE-04** | Auto materialize from column `file.materialize` | Manual rules in slug `materialize` | P3 |
+| **P-META-FILE-04** | Auto materialize from column `file.materialize` | **done** (auto rules from columns) | — |
 | **P-META-ENV-01** | `container_env` + `container_env_secrets` → pod_spec | **done** (#162, #163) | — |
 | **P-META-VAULT-01** | `secret_ref` column + masked upload UI → Vault | **done** (cabinet upload API + Flutter) | — |
 | **P-META-VAULT-02** | Cabinet-scoped Vault paths + ACL | — | P2 |

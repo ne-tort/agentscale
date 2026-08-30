@@ -138,7 +138,7 @@ Column `file` block (upload constraints only):
 }
 ```
 
-Materialize path is declared in slug `materialize` (`format: copy_blob`), not auto from column meta in MVP.
+Materialize path can be declared in slug `materialize` (`format: copy_blob`) or auto from column `file.materialize.enabled`.
 
 ### Text → `.md` without upload
 
