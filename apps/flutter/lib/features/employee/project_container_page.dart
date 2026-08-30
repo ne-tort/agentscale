@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/container_metrics_wrap.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Project container — pod runtime and k8s metrics (employee).
 class ProjectContainerPage extends StatefulWidget {
@@ -25,6 +29,7 @@ class ProjectContainerPage extends StatefulWidget {
 class _ProjectContainerPageState extends State<ProjectContainerPage> {
   late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
+  bool _reloading = false;
   Map<String, dynamic>? _container;
   Map<String, dynamic>? _metrics;
   Map<String, dynamic>? _projectMetrics;
@@ -79,8 +84,25 @@ class _ProjectContainerPageState extends State<ProjectContainerPage> {
     }
   }
 
+  Future<void> _reload() async {
+    setState(() => _reloading = true);
+    try {
+      await workContext.api.reloadProject(widget.projectId);
+      if (!mounted) return;
+      AppSnackBar.success(context, AppLocalizations.of(context).projectReloadSuccess);
+      await _load();
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _reloading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final warning = context.appColors.warning;
+
     return AppScaffold(
       title: Text(widget.projectName),
       body: _loading && _container == null
@@ -92,6 +114,15 @@ class _ProjectContainerPageState extends State<ProjectContainerPage> {
                   container: _container,
                   runtimeMetrics: _metrics,
                   projectMetrics: _projectMetrics,
+                ),
+                AppNavPreference(
+                  title: l10n.projectReload,
+                  icon: Icons.refresh_outlined,
+                  accentColor: warning,
+                  enabled: !_reloading,
+                  loading: _reloading,
+                  loadingLabel: l10n.projectReload,
+                  onTap: _reload,
                 ),
               ],
             ),

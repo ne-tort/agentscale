@@ -369,7 +369,16 @@ class RuntimeObservationService:
                     try:
                         live_metrics = await metrics_port.get_pod_metrics(runtime_ref=runtime_ref)
                         if live_metrics:
-                            metrics_body = live_metrics
+                            metrics_body = {
+                                **live_metrics,
+                                "timestamp": EventEnvelope.now_iso(),
+                            }
+                            await PodMetricsSampler(self._session).cache_live_metrics(
+                                pod=pod,
+                                project=project,
+                                metrics=live_metrics,
+                                status=k8s_status,
+                            )
                     except Exception:
                         logger.exception("live metrics fetch failed runtime_ref=%s", runtime_ref)
 

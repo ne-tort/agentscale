@@ -75,6 +75,6 @@ class MetricsQuery:
             if dt.tzinfo is None:
                 dt = dt.replace(tzinfo=UTC)
             age = (datetime.now(UTC) - dt).total_seconds()
-            return age > max(60, int(settings.metrics_sample_ttl_sec)) * 2
+            return age > int(settings.metrics_sample_ttl_sec)
         except (TypeError, ValueError):
             return True

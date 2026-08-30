@@ -188,9 +188,13 @@ class WorkerManager(LifespanResource):
                 "schedule": interval,
             }
         if self._schedule_pod_reconcile:
+            from prodavan.config.settings import settings as app_settings
+
             beat["prodavan-pod-reconcile"] = {
                 "task": job_names.POD_RECONCILE,
-                "schedule": schedule(run_every=max(60.0, self._trigger_interval_sec * 6)),
+                "schedule": schedule(
+                    run_every=max(float(app_settings.metrics_sample_interval_sec), 15.0)
+                ),
             }
         app.conf.beat_schedule = beat
         job_tasks.register_tasks(app)

@@ -8,6 +8,7 @@ from prodavan.core.infra.k8s_manager import k8s_manager_from_settings
 from prodavan.core.infra.kafka_manager import KafkaManager
 from prodavan.core.infra.metrics_consumer_resource import MetricsConsumerResource
 from prodavan.core.infra.platform_bootstrap_resource import PlatformBootstrapResource
+from prodavan.core.infra.pod_metrics_sampler_resource import PodMetricsSamplerResource
 from prodavan.core.infra.redis_manager import RedisManager
 from prodavan.core.infra.trigger_worker_resource import TriggerWorkerResource
 from prodavan.core.lifespan.manager import LifespanManager
@@ -75,6 +76,7 @@ def build_lifespan_manager() -> LifespanManager:
     if settings.kafka_consumer_enabled:
         manager.register(MetricsConsumerResource())
     manager.register(PlatformBootstrapResource())
+    manager.register(PodMetricsSamplerResource())
     manager.register(TriggerWorkerResource())
     _lifespan_manager = manager
     return manager

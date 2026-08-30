@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -85,7 +85,9 @@ async def test_runtime_view_includes_failed_pod() -> None:
     failed_result.scalar_one_or_none.return_value = failed
     session.execute = AsyncMock(side_effect=[live_result, failed_result])
 
-    summary = await PodQuery(session).runtime_view("prj_test1234567890")
+    with patch("prodavan.config.settings.settings") as mock_settings:
+        mock_settings.pod_runtime_mode = "stub"
+        summary = await PodQuery(session).runtime_view("prj_test1234567890")
 
     assert summary is not None
     assert summary["status"] == PodStatus.FAILED

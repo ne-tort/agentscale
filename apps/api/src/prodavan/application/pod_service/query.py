@@ -45,6 +45,11 @@ class PodQuery:
                 return await self._observation.observe(project=project, pod=None)
             return None
         if project is not None:
+            from prodavan.application.pod_service.metrics_sampler import PodMetricsSampler
+            from prodavan.config.settings import settings
+
+            if (settings.pod_runtime_mode or "stub").strip().lower() == "k8s":
+                await PodMetricsSampler(self._session).sample_project(project_id)
             action = await self._observation.sync_runtime_health(project=project, pod=row)
             if action != "noop":
                 await self._session.commit()

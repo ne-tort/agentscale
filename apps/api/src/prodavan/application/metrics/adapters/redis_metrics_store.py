@@ -28,7 +28,8 @@ def _dedup_key(event_id: str) -> str:
 
 
 def _ttl_sec() -> int:
-    return max(60, int(settings.metrics_sample_ttl_sec))
+    interval = max(5, int(settings.metrics_sample_interval_sec))
+    return max(int(settings.metrics_sample_ttl_sec), interval * 4)
 
 
 class RedisMetricsStore:
