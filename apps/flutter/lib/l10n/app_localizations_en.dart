@@ -665,7 +665,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get containerPodIdCopied => 'Pod ID copied';
 
   @override
-  String get containerK8sPodName => 'k8s pod';
+  String get containerKubId => 'Kub ID';
+
+  @override
+  String get containerKubIdCopied => 'Kub ID copied';
 
   @override
   String get projectBudgetLabel => 'Budget';

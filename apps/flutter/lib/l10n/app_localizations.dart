@@ -1169,7 +1169,7 @@ abstract class AppLocalizations {
   /// No description provided for @adminContainerMetricsUnavailable.
   ///
   /// In en, this message translates to:
-  /// **'CPU/RAM: metrics-server unavailable'**
+  /// **'Metrics not yet received or unavailable'**
   String get adminContainerMetricsUnavailable;
 
   /// No description provided for @adminContainerLastError.
@@ -1250,11 +1250,17 @@ abstract class AppLocalizations {
   /// **'Pod ID copied'**
   String get containerPodIdCopied;
 
-  /// No description provided for @containerK8sPodName.
+  /// No description provided for @containerKubId.
   ///
   /// In en, this message translates to:
-  /// **'k8s pod'**
-  String get containerK8sPodName;
+  /// **'Kub ID'**
+  String get containerKubId;
+
+  /// No description provided for @containerKubIdCopied.
+  ///
+  /// In en, this message translates to:
+  /// **'Kub ID copied'**
+  String get containerKubIdCopied;
 
   /// No description provided for @projectBudgetLabel.
   ///

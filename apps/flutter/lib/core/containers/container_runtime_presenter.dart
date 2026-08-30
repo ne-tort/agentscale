@@ -98,6 +98,19 @@ bool containerMetricsUnavailable(Map<String, dynamic>? item) {
   return true;
 }
 
+bool containerIsPaused(Map<String, dynamic>? item) =>
+    _observedState(item) == 'paused' || item?['status'] == 'paused';
+
+bool containerShowResourceStatTiles(Map<String, dynamic>? item) =>
+    !containerHasError(item) &&
+    !containerMetricsUnavailable(item) &&
+    !containerIsPaused(item);
+
+bool containerShowStorageInLifecycle(Map<String, dynamic>? item) =>
+    containerHasError(item) ||
+    containerMetricsUnavailable(item) ||
+    containerIsPaused(item);
+
 bool _isMetricsOnlyError(String err) {
   final lower = err.toLowerCase();
   return lower.contains('metrics-server')

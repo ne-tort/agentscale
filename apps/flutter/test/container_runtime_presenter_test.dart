@@ -71,4 +71,58 @@ void main() {
       isFalse,
     );
   });
+
+  test('containerShowResourceStatTiles false when paused', () {
+    expect(
+      containerShowResourceStatTiles(const {
+        'status': 'active',
+        'observed_state': 'paused',
+        'runtime': {'metrics_available': true},
+      }),
+      isFalse,
+    );
+    expect(
+      containerShowResourceStatTiles(const {
+        'status': 'paused',
+        'runtime': {'metrics_available': true},
+      }),
+      isFalse,
+    );
+    expect(
+      containerShowResourceStatTiles(const {
+        'status': 'active',
+        'observed_state': 'running',
+        'runtime': {'metrics_available': true, 'metrics': {'cpu_millicores': 100}},
+      }),
+      isTrue,
+    );
+  });
+
+  test('containerShowStorageInLifecycle true when paused or error or metrics unavailable', () {
+    expect(
+      containerShowStorageInLifecycle(const {'observed_state': 'paused'}),
+      isTrue,
+    );
+    expect(
+      containerShowStorageInLifecycle(const {
+        'observed_state': 'running',
+        'runtime': {'metrics_available': false},
+      }),
+      isTrue,
+    );
+    expect(
+      containerShowStorageInLifecycle(const {
+        'observed_state': 'failed',
+        'runtime': {'last_error': 'pod crash'},
+      }),
+      isTrue,
+    );
+    expect(
+      containerShowStorageInLifecycle(const {
+        'observed_state': 'running',
+        'runtime': {'metrics_available': true, 'metrics': {'cpu_millicores': 1}},
+      }),
+      isFalse,
+    );
+  });
 }

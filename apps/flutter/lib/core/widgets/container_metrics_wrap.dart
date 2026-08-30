@@ -111,10 +111,16 @@ class ContainerMetricsWrap extends StatelessWidget {
           onSave: (_) async {},
         ),
       if (k8sPodName != null)
-        _readOnlyRow(
-          title: l10n.containerK8sPodName,
-          value: k8sPodName,
+        AppValuePreference<String>(
+          title: l10n.containerKubId,
           icon: Icons.dns_outlined,
+          value: k8sPodName,
+          enabled: false,
+          onTap: () {
+            Clipboard.setData(ClipboardData(text: k8sPodName));
+            AppSnackBar.info(context, l10n.containerKubIdCopied);
+          },
+          onSave: (_) async {},
         ),
       if (containerMetricHasValue(lastLaunchValue, l10n))
         _readOnlyRow(
@@ -154,7 +160,7 @@ class ContainerMetricsWrap extends StatelessWidget {
         ),
     ];
 
-    if ((hasError || metricsUnavailable) && storageValue != null) {
+    if (containerShowStorageInLifecycle(container) && storageValue != null) {
       lifecycleRows.insert(
         1,
         _readOnlyRow(
@@ -166,7 +172,7 @@ class ContainerMetricsWrap extends StatelessWidget {
     }
 
     final resourceTiles = <Widget>[];
-    if (!hasError && !metricsUnavailable) {
+    if (containerShowResourceStatTiles(container)) {
       if (cpuValue != null)
         resourceTiles.add(
           StatTile(
