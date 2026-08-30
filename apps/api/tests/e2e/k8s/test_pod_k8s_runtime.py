@@ -100,6 +100,21 @@ def _ensure_pod_running(client: TestClient, owner_h: dict[str, str], project_id:
     return runtime
 
 
+def _platform_events(
+    client: TestClient,
+    *,
+    admin_h: dict[str, str],
+    project_id: str,
+    event_type: str | None = None,
+) -> list[dict]:
+    url = f"/api/v1/admin/platform-events?project_id={project_id}"
+    if event_type:
+        url += f"&event_type={event_type}"
+    resp = client.get(url, headers=admin_h)
+    assert resp.status_code == 200, resp.text
+    return resp.json()["items"]
+
+
 def test_k8s_resume_creates_running_pod_with_phase(k8s_client: TestClient) -> None:
     """Real Pod in sandboxes NS: resume → running + k8s phase."""
     _, admin, owner_h, project_id = _setup_project(k8s_client)
@@ -183,9 +198,14 @@ def test_k8s_lazy_start_via_trigger_dispatch(k8s_client: TestClient) -> None:
 
 
 def test_k8s_rematerialize_increments_generation(k8s_client: TestClient) -> None:
-    _, _, owner_h, project_id = _setup_project(k8s_client)
+    _, admin, owner_h, project_id = _setup_project(k8s_client)
+    admin_h = {"Authorization": f"Bearer {admin}"}
     before = _ensure_pod_running(k8s_client, owner_h, project_id)
     assert before["hydrate_generation"] == 0
+
+    hydrated_before = _platform_events(
+        k8s_client, admin_h=admin_h, project_id=project_id, event_type="pod.hydrated"
+    )
 
     remat = k8s_client.post(f"/api/v1/projects/{project_id}/materialize", headers=owner_h)
     assert remat.status_code == 200, remat.text
@@ -195,6 +215,13 @@ def test_k8s_rematerialize_increments_generation(k8s_client: TestClient) -> None
     assert runtime["status"] == "running"
     assert runtime["hydrate_generation"] == 1
     assert runtime["pod_id"] == before["pod_id"]
+    assert_k8s_pod_running(project_id)
+
+    hydrated_after = _platform_events(
+        k8s_client, admin_h=admin_h, project_id=project_id, event_type="pod.hydrated"
+    )
+    assert len(hydrated_after) > len(hydrated_before)
+    assert hydrated_after[-1]["payload"].get("generation") == 1
 
 
 def test_k8s_admin_force_kill_clears_runtime(k8s_client: TestClient) -> None:
