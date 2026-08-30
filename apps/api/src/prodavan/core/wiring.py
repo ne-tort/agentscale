@@ -70,6 +70,8 @@ def build_lifespan_manager() -> LifespanManager:
             relation_events_group=settings.kafka_relation_events_group,
             drain_debounce_sec=settings.kafka_drain_debounce_sec,
             consumer_mode=settings.kafka_consumer_mode,
+            rematerialize_via_bus=settings.kafka_rematerialize_via_bus,
+            platform_jobs_group=settings.kafka_platform_jobs_group,
         )
     )
     manager.register(worker_manager_from_settings())

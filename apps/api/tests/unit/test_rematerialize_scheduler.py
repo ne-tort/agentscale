@@ -27,18 +27,18 @@ async def test_schedule_cabinet_rematerialize_enqueues_projects() -> None:
             "prodavan.application.projects.rematerialize_scheduler.ProjectQuery"
         ) as query_cls,
         patch(
-            "prodavan.application.projects.rematerialize_scheduler.enqueue_rematerialize_project"
-        ) as enqueue,
+            "prodavan.application.projects.rematerialize_scheduler.request_rematerialize_project",
+            AsyncMock(return_value={"enqueued": True}),
+        ) as request,
     ):
         query_cls.return_value.list_ids = AsyncMock(return_value=["proj_a", "proj_b"])
-        enqueue.return_value = {"enqueued": True}
 
         out = await schedule_cabinet_rematerialize(
             session, cabinet_id="cab_1", module_id="mod_files"
         )
 
     assert out["scheduled"] == 2
-    assert enqueue.call_count == 2
+    assert request.await_count == 2
 
 
 @pytest.mark.asyncio

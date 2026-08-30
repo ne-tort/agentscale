@@ -42,6 +42,9 @@ class KafkaManager(LifespanResource):
     - ``kick`` (default): debounce → ``prodavan.jobs.trigger_drain``
     - ``dispatch``: per message → ``prodavan.jobs.dispatch_trigger(event_id)``
 
+    Platform jobs (optional, ``rematerialize_via_bus``):
+    - ``project.rematerialize.requested`` on platform topic → ``prodavan.jobs.rematerialize_project``
+
     Auth topics (when consumer enabled):
     - ``auth.commands`` → Auth Service register handler → publish ``auth.events``
     - ``auth.events`` → enqueue ``apply_auth_user_registered``
@@ -66,6 +69,8 @@ class KafkaManager(LifespanResource):
         auth_commands_group: str = "prodavan-auth-commands",
         auth_events_group: str = "prodavan-auth-events",
         relation_events_group: str = "prodavan-relation-events",
+        platform_jobs_group: str = "prodavan-platform-jobs",
+        rematerialize_via_bus: bool = False,
         drain_debounce_sec: float = 1.0,
         consumer_mode: str = "kick",
     ) -> None:
@@ -84,6 +89,8 @@ class KafkaManager(LifespanResource):
         self._auth_commands_group = auth_commands_group
         self._auth_events_group = auth_events_group
         self._relation_events_group = relation_events_group
+        self._platform_jobs_group = platform_jobs_group
+        self._rematerialize_via_bus = bool(rematerialize_via_bus)
         self._drain_debounce_sec = max(0.1, float(drain_debounce_sec))
         mode = (consumer_mode or "kick").strip().lower()
         self._consumer_mode: ConsumerMode = "dispatch" if mode == "dispatch" else "kick"
@@ -92,14 +99,17 @@ class KafkaManager(LifespanResource):
         self._auth_commands_consumer: Any = None
         self._auth_events_consumer: Any = None
         self._relation_events_consumer: Any = None
+        self._platform_jobs_consumer: Any = None
         self._consume_task: asyncio.Task[None] | None = None
         self._auth_commands_task: asyncio.Task[None] | None = None
         self._auth_events_task: asyncio.Task[None] | None = None
         self._relation_events_task: asyncio.Task[None] | None = None
+        self._platform_jobs_task: asyncio.Task[None] | None = None
         self._stop: asyncio.Event | None = None
         self._buffer: deque[dict[str, Any]] = deque(maxlen=max(1, buffer_size))
         self._drain_kicks: int = 0
         self._dispatch_enqueues: int = 0
+        self._rematerialize_enqueues: int = 0
         self._auth_register_handled: int = 0
         self._auth_bind_enqueues: int = 0
         self._relation_events_handled: int = 0
@@ -117,13 +127,15 @@ class KafkaManager(LifespanResource):
         """True when all enabled consumer loops are alive (triggers + auth + relation)."""
         if not self._consumer_enabled:
             return False
-        tasks = (
+        required_tasks = (
             self._consume_task,
             self._auth_commands_task,
             self._auth_events_task,
             self._relation_events_task,
         )
-        return all(t is not None and not t.done() for t in tasks)
+        if self._rematerialize_via_bus:
+            required_tasks = (*required_tasks, self._platform_jobs_task)
+        return all(t is not None and not t.done() for t in required_tasks)
 
     @property
     def consumer_mode(self) -> ConsumerMode:
@@ -140,6 +152,10 @@ class KafkaManager(LifespanResource):
     @property
     def dispatch_enqueues(self) -> int:
         return self._dispatch_enqueues
+
+    @property
+    def rematerialize_enqueues(self) -> int:
+        return self._rematerialize_enqueues
 
     def topic_for(self, bus: str) -> str:
         if bus == "platform":
@@ -285,6 +301,17 @@ class KafkaManager(LifespanResource):
         logger.info(
             "kafka consumer: dispatch_trigger id=%s enqueued=%s",
             trigger_id,
+            result.get("enqueued"),
+        )
+
+    def _enqueue_rematerialize(self, project_id: str) -> None:
+        from prodavan.core.jobs.enqueue import enqueue_rematerialize_project
+
+        result = enqueue_rematerialize_project(project_id)
+        self._rematerialize_enqueues += 1
+        logger.info(
+            "kafka consumer: rematerialize_project id=%s enqueued=%s",
+            project_id,
             result.get("enqueued"),
         )
 
@@ -501,6 +528,38 @@ class KafkaManager(LifespanResource):
                 self._relation_events_handled,
             )
 
+    async def _consume_platform_jobs(self, stop: asyncio.Event) -> None:
+        assert self._platform_jobs_consumer is not None
+        from prodavan.core.jobs.rematerialize_bus import handle_rematerialize_requested_envelope
+
+        try:
+            while not stop.is_set():
+                try:
+                    batch = await self._platform_jobs_consumer.getmany(timeout_ms=500, max_records=50)
+                except Exception:
+                    if stop.is_set():
+                        break
+                    logger.exception("kafka: platform jobs consumer getmany failed")
+                    await asyncio.sleep(1.0)
+                    continue
+                if not batch:
+                    continue
+                for _tp, messages in batch.items():
+                    for msg in messages:
+                        try:
+                            data = json.loads(msg.value.decode("utf-8"))
+                        except Exception:
+                            logger.warning("kafka: skip bad platform job message offset=%s", msg.offset)
+                            continue
+                        project_id = handle_rematerialize_requested_envelope(data)
+                        if project_id:
+                            self._enqueue_rematerialize(project_id)
+        finally:
+            logger.info(
+                "kafka: platform jobs consumer stopped enqueues=%s",
+                self._rematerialize_enqueues,
+            )
+
     async def _ensure_topics(self) -> None:
         """Best-effort create platform + project_trigger + auth + relation topics."""
         topics = [
@@ -668,6 +727,21 @@ class KafkaManager(LifespanResource):
                 self._consume_relation_events(self._stop),
                 name="prodavan-kafka-relation-events",
             )
+
+            if self._rematerialize_via_bus:
+                self._platform_jobs_consumer = AIOKafkaConsumer(
+                    self._topic_platform,
+                    bootstrap_servers=self._bootstrap,
+                    client_id=f"{self._client_id}-platform-jobs",
+                    group_id=self._platform_jobs_group,
+                    enable_auto_commit=True,
+                    auto_offset_reset="latest",
+                )
+                await self._platform_jobs_consumer.start()
+                self._platform_jobs_task = asyncio.create_task(
+                    self._consume_platform_jobs(self._stop),
+                    name="prodavan-kafka-platform-jobs",
+                )
         except Exception:
             logger.exception("kafka: consumer startup failed (producer still up)")
             self._consumer = None
@@ -680,6 +754,7 @@ class KafkaManager(LifespanResource):
             "_auth_commands_task",
             "_auth_events_task",
             "_relation_events_task",
+            "_platform_jobs_task",
         ):
             task = getattr(self, task_attr)
             if task is not None:
@@ -694,6 +769,7 @@ class KafkaManager(LifespanResource):
             "_auth_commands_consumer",
             "_auth_events_consumer",
             "_relation_events_consumer",
+            "_platform_jobs_consumer",
         ):
             cons = getattr(self, cons_attr)
             if cons is not None:

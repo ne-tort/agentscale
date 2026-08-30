@@ -157,6 +157,10 @@ class Settings(BaseSettings):
     kafka_drain_debounce_sec: float = 1.0
     # kick = debounce → trigger_drain; dispatch = enqueue dispatch_trigger(event_id).
     kafka_consumer_mode: str = "kick"
+    # When true + consumer enabled: rematerialize scheduler publishes platform bus command
+    # instead of direct Celery enqueue; platform consumer enqueues the task.
+    kafka_rematerialize_via_bus: bool = False
+    kafka_platform_jobs_group: str = "prodavan-platform-jobs"
 
     # External webhook/telegram ingress rate limit (C-CACHE); 0 = disabled.
     ingress_rate_limit_per_minute: int = 120

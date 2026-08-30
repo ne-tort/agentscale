@@ -135,6 +135,24 @@ def test_kafka_dispatch_enqueue_increments(monkeypatch: pytest.MonkeyPatch) -> N
     assert calls == ["trg_abc"]
 
 
+def test_kafka_rematerialize_enqueue_increments(monkeypatch: pytest.MonkeyPatch) -> None:
+    set_kafka_manager(None)
+    mgr = KafkaManager(enabled=False, rematerialize_via_bus=True)
+    calls: list[str] = []
+
+    def _fake_rematerialize(project_id: str) -> dict:
+        calls.append(project_id)
+        return {"enqueued": False, "reason": "celery_disabled", "project_id": project_id}
+
+    monkeypatch.setattr(
+        "prodavan.core.jobs.enqueue.enqueue_rematerialize_project",
+        _fake_rematerialize,
+    )
+    mgr._enqueue_rematerialize("proj_remat")
+    assert mgr.rematerialize_enqueues == 1
+    assert calls == ["proj_remat"]
+
+
 def test_kafka_consumer_mode_defaults_to_kick() -> None:
     mgr = KafkaManager(enabled=False, consumer_mode="weird")
     assert mgr.consumer_mode == "kick"

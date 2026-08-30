@@ -147,7 +147,7 @@ apps/api/.env.example
 | MCP zip + file_ref materialize E2E | **done** | integration `test_project_materialize_copy_blob_and_mcp_package` |
 | Meta syntax validator vs materialize rules | **done** | `module_meta_validator` + Flutter parity; product seeds validated |
 | k8s e2e `pod.hydrated` after rematerialize | **done** | `test_k8s_rematerialize_increments_generation` asserts platform event + running pod |
-| Kafka rematerialize event bus | **gap** | Celery enqueue direct; event bus cutover deferred (L00 C-JOBS) |
+| Kafka rematerialize event bus | **partial** | `KAFKA_REMATERIALIZE_VIA_BUS` publishes `project.rematerialize.requested`; platform consumer enqueues Celery; default off |
 | Flutter module save → rematerialize UX | **done** | API `rematerialize` in row CRUD response + SnackBar on cabinet module page |
 | «Обновить проект» (`POST /sync`) UI loading | **done** | spinner на management page |
 

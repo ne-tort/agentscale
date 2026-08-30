@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.modules.module_meta_service import ModuleMetaDocumentService
 from prodavan.application.project_service.command import ProjectCommand
 from prodavan.application.project_service.query import ProjectQuery
-from prodavan.core.jobs.enqueue import enqueue_rematerialize_project
+from prodavan.core.jobs.rematerialize_bus import request_rematerialize_project
 from prodavan.domain.projects import ProjectStatus
 
 logger = logging.getLogger(__name__)
@@ -46,7 +46,12 @@ async def schedule_cabinet_rematerialize(
     enqueued: list[str] = []
     synced: list[str] = []
     for project_id in project_ids:
-        result = enqueue_rematerialize_project(project_id)
+        result = await request_rematerialize_project(
+            project_id,
+            cabinet_id=cabinet_id,
+            module_id=module_id,
+            source="cabinet_module",
+        )
         if result.get("enqueued"):
             enqueued.append(project_id)
             continue
