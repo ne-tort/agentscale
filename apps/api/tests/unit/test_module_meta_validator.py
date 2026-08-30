@@ -110,3 +110,22 @@ def test_validate_manifest_direct() -> None:
     with pytest.raises(AppError) as exc:
         validate_manifest(broken)
     assert "invalid column type" in (exc.value.detail or "")
+
+
+def test_container_env_documents_validate() -> None:
+    slug_map = _suppliers_slug_map()
+    slug_map["container_env"] = [
+        {"env_name": "LOG_LEVEL", "value": "info", "when": ["project.launch"]},
+    ]
+    slug_map["container_env_secrets"] = [
+        {"env_name": "API_TOKEN", "secret_ref": "file://tok_1", "when": ["project.launch"]},
+    ]
+    validate_merged_slug_map(slug_map)
+
+
+def test_container_env_invalid_env_name() -> None:
+    slug_map = _suppliers_slug_map()
+    slug_map["container_env"] = [{"env_name": "bad-name", "value": "info"}]
+    with pytest.raises(AppError) as exc:
+        validate_merged_slug_map(slug_map)
+    assert "invalid env_name" in (exc.value.detail or "")

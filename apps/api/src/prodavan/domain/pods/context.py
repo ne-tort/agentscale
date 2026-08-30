@@ -12,3 +12,4 @@ class PodRuntimeContext:
     company_id: str
     workspace_key: str
     hydrate_generation: int = 0
+    extra_env: tuple[tuple[str, str], ...] = ()

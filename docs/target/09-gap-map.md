@@ -24,7 +24,7 @@
 | **P-CAB-01** | Company **назначает** Employee ↔ Cabinet | **Grants + assignment API + Flutter** | Verify Dev E2E |
 | **P-CAB-02** | UI кабинета из module meta | Module template + `module_data_rows` API; employee UI = placeholder | Generic meta UI next |
 | **P-MOD-01** | **Module** catalog + cabinet bind + per-cabinet data | **Admin CRUD + meta + materialize + runtime data API + Flutter** | Physical DDL; meta editor UI |
-| **P-MOD-02** | Meta-table **syntax** spec + interpreters | **[meta-syntax](06-modules/meta-syntax/) documented**; shell `nav.contour` preview in seed editor | Live catalog shell merge; cabinet UI renderer; materialize engine |
+| **P-MOD-02** | Meta-table **syntax** spec + interpreters | **[meta-syntax](06-modules/meta-syntax/) documented**; validator (#158), row validation (#159), materialize (#160), actions (#161) | Live catalog shell merge; `value_from` env |
 | **P-MAT-01** | Pod hydrate из meta/MinIO | object-ws; нет Pod; file_ref слаб | Materialize/Pod debt |
 | **P-POD-01** | `ProjectPod` → k8s Pod; inert → delete Pod | **Code:** `K8sPodRuntimeAdapter`, hydrate initContainer, reconcile zombies; **GitOps:** sandboxes RBAC + overlay wired | Verify Dev e2e with `POD_RUNTIME_MODE=k8s`; integration test `POD_K8S_INTEGRATION=1` — [P2](11-implementation-plan/P2-k3s-runtime.md) Phase 5 |
 | **P-POD-02** | `pod_service` BC isolated | **`application/pod_service/`**; `ProjectCommand` → `PodCommand.sync_desired` | done · [pod-service](14-project-containers/pod-service.md) |
@@ -77,10 +77,10 @@
 | ID | Spec | As-built | Priority |
 |----|------|----------|----------|
 | **P-META-FILE-01** | FileRef `storage_key` + `asset_id`/`version_id` | Upload + copy_blob live; docs had `object_key` | P2 (docs aligned) |
-| **P-META-FILE-02** | Row write validates FileRef vs Content Service | No validator on write | P1 |
-| **P-META-FILE-03** | `format: template` in MaterializeExecutor | Docs only | P2 |
+| **P-META-FILE-02** | Row write validates FileRef vs Content Service | **done** (#159 row validator) | — |
+| **P-META-FILE-03** | `format: template` in MaterializeExecutor | **done** (#160) | — |
 | **P-META-FILE-04** | Auto materialize from column `file.materialize` | Manual rules in slug `materialize` | P3 |
-| **P-META-ENV-01** | `container_env` + `container_env_secrets` → pod_spec | Pod env: WORKSPACE_KEY, MINIO_* only | P1 |
+| **P-META-ENV-01** | `container_env` + `container_env_secrets` → pod_spec | Pod env: WORKSPACE_KEY, MINIO_* only | P1 (in PR) |
 | **P-META-VAULT-01** | `secret_ref` column + masked upload UI → Vault | AI keys only (`vault://ai_keys/…`) | P1 |
 | **P-META-VAULT-02** | Cabinet-scoped Vault paths + ACL | — | P2 |
 

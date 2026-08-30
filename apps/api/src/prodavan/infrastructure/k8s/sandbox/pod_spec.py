@@ -67,15 +67,18 @@ def build_pod_body(
         "env": init_env,
         "volumeMounts": [{"name": "workspace", "mountPath": _WORKSPACE_MOUNT}],
     }
+    main_env: list[dict[str, Any]] = [
+        {"name": "WORKSPACE_KEY", "value": context.workspace_key},
+        {"name": "PROJECT_ID", "value": context.project_id},
+    ]
+    for name, value in context.extra_env:
+        main_env.append({"name": name, "value": value})
     main_container = {
         "name": "sandbox",
         "image": image,
         "imagePullPolicy": "IfNotPresent",
         "workingDir": _WORKSPACE_MOUNT,
-        "env": [
-            {"name": "WORKSPACE_KEY", "value": context.workspace_key},
-            {"name": "PROJECT_ID", "value": context.project_id},
-        ],
+        "env": main_env,
         "volumeMounts": [{"name": "workspace", "mountPath": _WORKSPACE_MOUNT}],
         "resources": {
             "requests": {"cpu": cpu_request, "memory": memory_request},

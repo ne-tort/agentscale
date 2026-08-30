@@ -14,6 +14,15 @@ from prodavan.domain.pods import PodDesiredState, PodStatus
 from prodavan.infrastructure.persistence.models.projects import ProjectPodRow, ProjectRow
 
 
+@pytest.fixture(autouse=True)
+def _noop_container_env_loader():
+    with patch(
+        "prodavan.application.pod_service.command.ContainerEnvLoader.load_for_project",
+        new=AsyncMock(return_value=()),
+    ):
+        yield
+
+
 def _principal() -> Principal:
     return Principal(sub="emp:test", roles=frozenset({"employee"}))
 

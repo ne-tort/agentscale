@@ -7,6 +7,7 @@ import logging
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.application.pod_service.container_env_loader import ContainerEnvLoader
 from prodavan.application.pod_service.factory import build_hydrate, build_pod_runtime
 from prodavan.application.pod_service.lifecycle_emitter import PodLifecycleEmitter
 from prodavan.application.pod_service.ports.hydrate import HydratePort
@@ -396,7 +397,10 @@ class PodCommand:
         ref = pod.runtime_ref or runtime_ref_for(project.workspace_key, mode=mode)
         pod.runtime_ref = ref
         pod.status = PodStatus.PROVISIONING
-        ctx = self._runtime_context(project, pod)
+        extra_env = await ContainerEnvLoader(self._session).load_for_project(
+            project, lifecycle="project.launch"
+        )
+        ctx = self._runtime_context(project, pod, extra_env=extra_env)
         await self._runtime.ensure_running(runtime_ref=ref, context=ctx)
         ws_key = pod.workspace_key or project.workspace_key
         await self._hydrate.hydrate(workspace_key=ws_key, runtime_ref=ref)
@@ -428,13 +432,19 @@ class PodCommand:
         pod.desired_state = PodDesiredState.ABSENT
 
     @staticmethod
-    def _runtime_context(project: ProjectRow, pod: ProjectPodRow) -> PodRuntimeContext:
+    def _runtime_context(
+        project: ProjectRow,
+        pod: ProjectPodRow,
+        *,
+        extra_env: tuple[tuple[str, str], ...] = (),
+    ) -> PodRuntimeContext:
         return PodRuntimeContext(
             pod_id=pod.id,
             project_id=project.id,
             company_id=project.company_id,
             workspace_key=pod.workspace_key or project.workspace_key,
             hydrate_generation=pod.hydrate_generation,
+            extra_env=extra_env,
         )
 
     @staticmethod

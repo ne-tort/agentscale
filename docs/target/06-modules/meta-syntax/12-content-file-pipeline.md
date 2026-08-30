@@ -136,7 +136,7 @@ Create `.md` files from text fields — **no Content Service upload**:
 
 Column setup: `type: text` + `ui.widget: markdown_editor` in view (see [views-ui](03-views-ui.md)).
 
-**Gap:** `format: template` (Mustache in path/body) — documented, not in executor yet (P-META-FILE-03).
+**As-built:** `format: template` in MaterializeExecutor (#160).
 
 ## End-to-end diagram
 
@@ -177,6 +177,6 @@ Column setup: `type: text` + `ui.widget: markdown_editor` in view (see [views-ui
 |----|-----|
 | P-META-FILE-01 | Align all docs/examples from `object_key` → canonical FileRef |
 | P-META-FILE-02 | Row write validates FileRef against Content Service |
-| P-META-FILE-03 | `format: template` in MaterializeExecutor |
+| P-META-FILE-03 | `format: template` in MaterializeExecutor | **done** (#160) |
 | P-META-FILE-04 | Auto materialize rule from column `file.materialize` |
 | P-META-FILE-05 | Re-materialize skip by sha256/etag |

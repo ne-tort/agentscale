@@ -26,6 +26,7 @@ def test_build_pod_body_labels() -> None:
         company_id="cmp_abc",
         workspace_key="wk_demo",
         hydrate_generation=2,
+        extra_env=(("LOG_LEVEL", "debug"),),
     )
     body = build_pod_body(
         runtime_ref="pod-wk-demo",
@@ -44,6 +45,8 @@ def test_build_pod_body_labels() -> None:
     assert labels["prodavan.io/pod-id"] == "pod_abc"
     assert labels["prodavan.io/hydrate-generation"] == "2"
     assert body["spec"]["initContainers"][0]["name"] == "hydrate"
+    sandbox_env = {item["name"]: item.get("value") for item in body["spec"]["containers"][0]["env"]}
+    assert sandbox_env["LOG_LEVEL"] == "debug"
 
 
 def test_in_cluster_auth_available(tmp_path: Path) -> None:

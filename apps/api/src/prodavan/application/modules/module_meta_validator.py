@@ -17,8 +17,21 @@ VIEW_KINDS = frozenset({"collection", "form", "hub", "detail", "board", "profile
 SHELL_NAV_CONTOURS = frozenset({"admin", "company", "employee", "cabinet"})
 SHELL_NAV_PLACEMENTS = frozenset({"rail", "management", "none"})
 
+_ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+_LIFECYCLE_WHEN = frozenset({"project.launch", "project.sync", "project.resumed", "project.reload"})
+
 ARRAY_DOCUMENT_SLUGS = frozenset(
-    {"tables", "columns", "views", "tabs", "actions", "materialize", "mcp_tools"}
+    {
+        "tables",
+        "columns",
+        "views",
+        "tabs",
+        "actions",
+        "materialize",
+        "mcp_tools",
+        "container_env",
+        "container_env_secrets",
+    }
 )
 META_DOCUMENT_SLUGS = ARRAY_DOCUMENT_SLUGS | {"seed_rows"}
 
@@ -145,3 +158,53 @@ def validate_manifest(manifest: dict[str, list[dict[str, Any]]]) -> None:
 
 def validate_merged_slug_map(slug_map: dict[str, Any]) -> None:
     validate_manifest(manifest_from_slug_map(slug_map))
+    _validate_container_env_doc(slug_map.get("container_env"))
+    _validate_container_env_secrets_doc(slug_map.get("container_env_secrets"))
+
+
+def _validate_container_env_doc(body: Any) -> None:
+    if body is None:
+        return
+    if not isinstance(body, list):
+        raise _meta_error("container_env body must be a JSON array")
+    for idx, entry in enumerate(body):
+        if not isinstance(entry, dict):
+            raise _meta_error(f"container_env[{idx}] must be an object")
+        env_name = entry.get("env_name")
+        if not isinstance(env_name, str) or not _ENV_NAME_RE.match(env_name):
+            raise _meta_error(f"container_env[{idx}] invalid env_name: {env_name!r}")
+        has_value = isinstance(entry.get("value"), str)
+        has_value_from = isinstance(entry.get("value_from"), dict)
+        if not has_value and not has_value_from:
+            raise _meta_error(f"container_env[{idx}] requires value or value_from")
+        when = entry.get("when")
+        if when is not None:
+            if not isinstance(when, list):
+                raise _meta_error(f"container_env[{idx}] when must be an array")
+            for item in when:
+                if not isinstance(item, str) or item not in _LIFECYCLE_WHEN:
+                    raise _meta_error(f"container_env[{idx}] invalid when: {item!r}")
+
+
+def _validate_container_env_secrets_doc(body: Any) -> None:
+    if body is None:
+        return
+    if not isinstance(body, list):
+        raise _meta_error("container_env_secrets body must be a JSON array")
+    for idx, entry in enumerate(body):
+        if not isinstance(entry, dict):
+            raise _meta_error(f"container_env_secrets[{idx}] must be an object")
+        env_name = entry.get("env_name")
+        if not isinstance(env_name, str) or not _ENV_NAME_RE.match(env_name):
+            raise _meta_error(f"container_env_secrets[{idx}] invalid env_name: {env_name!r}")
+        has_ref = isinstance(entry.get("secret_ref"), str) and bool(entry.get("secret_ref", "").strip())
+        has_ref_from = isinstance(entry.get("secret_ref_from"), dict)
+        if not has_ref and not has_ref_from:
+            raise _meta_error(f"container_env_secrets[{idx}] requires secret_ref or secret_ref_from")
+        when = entry.get("when")
+        if when is not None:
+            if not isinstance(when, list):
+                raise _meta_error(f"container_env_secrets[{idx}] when must be an array")
+            for item in when:
+                if not isinstance(item, str) or item not in _LIFECYCLE_WHEN:
+                    raise _meta_error(f"container_env_secrets[{idx}] invalid when: {item!r}")
