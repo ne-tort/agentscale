@@ -587,6 +587,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get adminContainerStatusPaused => 'Paused';
 
   @override
+  String get adminContainerStatusDraft => 'Draft';
+
+  @override
   String get adminContainerRuntimeRef => 'Runtime ref';
 
   @override
@@ -2087,7 +2090,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get commonAuto => 'Auto';
 
   @override
-  String get employeeContactEmail => 'Contact email';
+  String get employeeContactEmail => 'Email';
 
   @override
   String get employeePassword => 'Password';
@@ -2102,7 +2105,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get employeePasswordChanged => 'Password updated';
 
   @override
-  String get employeeContactEmailSaved => 'Contact email saved';
+  String get employeeContactEmailSaved => 'Email saved';
 
   @override
   String get settings => 'Settings';

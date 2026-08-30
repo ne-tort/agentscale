@@ -129,7 +129,7 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
       'active' => l10n.adminContainerStatusActive,
       'paused' => l10n.adminContainerStatusPaused,
       'error' => l10n.containerObservedFailed,
-      'draft' => 'draft',
+      'draft' => l10n.adminContainerStatusDraft,
       _ => status ?? l10n.commonEmDash,
     };
   }

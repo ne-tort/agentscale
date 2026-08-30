@@ -373,6 +373,7 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
             AppNavPreference(
               title: l10n.projectReload,
               icon: Icons.refresh_outlined,
+              accentColor: warning,
               enabled: !_busy,
               loading: _reloading,
               loadingLabel: l10n.projectReload,

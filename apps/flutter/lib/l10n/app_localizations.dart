@@ -1100,6 +1100,12 @@ abstract class AppLocalizations {
   /// **'Paused'**
   String get adminContainerStatusPaused;
 
+  /// No description provided for @adminContainerStatusDraft.
+  ///
+  /// In en, this message translates to:
+  /// **'Draft'**
+  String get adminContainerStatusDraft;
+
   /// No description provided for @adminContainerRuntimeRef.
   ///
   /// In en, this message translates to:
@@ -3821,7 +3827,7 @@ abstract class AppLocalizations {
   /// No description provided for @employeeContactEmail.
   ///
   /// In en, this message translates to:
-  /// **'Contact email'**
+  /// **'Email'**
   String get employeeContactEmail;
 
   /// No description provided for @employeePassword.
@@ -3851,7 +3857,7 @@ abstract class AppLocalizations {
   /// No description provided for @employeeContactEmailSaved.
   ///
   /// In en, this message translates to:
-  /// **'Contact email saved'**
+  /// **'Email saved'**
   String get employeeContactEmailSaved;
 
   /// No description provided for @settings.
