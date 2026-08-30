@@ -94,3 +94,24 @@ def test_secret_ref_bad_prefix() -> None:
             _SECRET_COLUMNS,
         )
     assert "cabinet_secrets prefix" in (exc.value.detail or "")
+
+
+def test_secret_ref_cabinet_scope() -> None:
+    validate_row_body(
+        {
+            "name": "ACME",
+            "api_token": {"secret_ref": "file://cabinet_secrets/cab_1/sec_abc"},
+        },
+        _SECRET_COLUMNS,
+        cabinet_id="cab_1",
+    )
+    with pytest.raises(AppError) as exc:
+        validate_row_body(
+            {
+                "name": "ACME",
+                "api_token": {"secret_ref": "file://cabinet_secrets/cab_1/sec_abc"},
+            },
+            _SECRET_COLUMNS,
+            cabinet_id="cab_other",
+        )
+    assert "belongs to cabinet cab_1" in (exc.value.detail or "")

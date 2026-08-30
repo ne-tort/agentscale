@@ -180,4 +180,4 @@ Settings: `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_KV_MOUNT`, `VAULT_KV_PATH_PREFIX` 
 | P-META-ENV-01 | `container_env` + static `container_env_secrets` → pod_spec | **done** (#162) |
 | P-META-ENV-02 | `value_from` / `secret_ref_from` row resolution at launch | **done** (#163) |
 | P-META-VAULT-01 | `secret_ref` column + upload UI → Vault | **done** |
-| P-META-VAULT-02 | Cabinet-scoped Vault path prefix + ACL | P2 |
+| P-META-VAULT-02 | Cabinet-scoped Vault path prefix + ACL | **done** |

@@ -23,6 +23,34 @@ def secret_ref_prefix(secret_ref: str) -> str:
     return secret_ref[:24] + "…"
 
 
+def cabinet_id_from_secret_ref(secret_ref: str) -> str | None:
+    for prefix in (FILE_PREFIX, VAULT_PREFIX):
+        if secret_ref.startswith(prefix):
+            rest = secret_ref.removeprefix(prefix)
+            if "/" in rest:
+                return rest.split("/", 1)[0]
+            return None
+    return None
+
+
+def assert_cabinet_secret_scope(secret_ref: str, cabinet_id: str) -> None:
+    owner = cabinet_id_from_secret_ref(secret_ref)
+    if owner is None:
+        raise AppError(
+            code="SECRET_SCOPE_VIOLATION",
+            title="Secret scope violation",
+            status=403,
+            detail="cabinet secret_ref must use cabinet_secrets prefix",
+        )
+    if owner != cabinet_id:
+        raise AppError(
+            code="SECRET_SCOPE_VIOLATION",
+            title="Secret scope violation",
+            status=403,
+            detail=f"secret_ref belongs to cabinet {owner}, not {cabinet_id}",
+        )
+
+
 class CabinetSecretStore:
     def __init__(self, root: Path | None = None, *, vault_store: VaultSecretStore | None = None) -> None:
         self._root = root or settings.secrets_dir

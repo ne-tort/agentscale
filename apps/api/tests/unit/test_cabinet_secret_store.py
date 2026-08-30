@@ -10,6 +10,8 @@ from prodavan.config.settings import settings
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.secrets.cabinet_secret_store import (
     CabinetSecretStore,
+    assert_cabinet_secret_scope,
+    cabinet_id_from_secret_ref,
     secret_ref_prefix,
 )
 from prodavan.infrastructure.secrets.store import RoutingSecretStore
@@ -44,3 +46,17 @@ def test_routing_reads_cabinet_file_refs(tmp_path: Path, monkeypatch: pytest.Mon
     ref = cab_store.put(cabinet_id="cab_x", secret="cab-secret")
     router = RoutingSecretStore(vault_store=None)
     assert router.get(ref) == "cab-secret"
+
+
+def test_cabinet_id_from_secret_ref() -> None:
+    ref = "file://cabinet_secrets/cab_1/sec_abc"
+    assert cabinet_id_from_secret_ref(ref) == "cab_1"
+    assert cabinet_id_from_secret_ref("vault://ai_keys/x") is None
+
+
+def test_assert_cabinet_secret_scope() -> None:
+    ref = "file://cabinet_secrets/cab_1/sec_abc"
+    assert_cabinet_secret_scope(ref, "cab_1")
+    with pytest.raises(AppError) as exc:
+        assert_cabinet_secret_scope(ref, "cab_other")
+    assert exc.value.code == "SECRET_SCOPE_VIOLATION"

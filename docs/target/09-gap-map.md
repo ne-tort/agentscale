@@ -82,7 +82,7 @@
 | **P-META-FILE-04** | Auto materialize from column `file.materialize` | **done** (auto rules from columns) | — |
 | **P-META-ENV-01** | `container_env` + `container_env_secrets` → pod_spec | **done** (#162, #163) | — |
 | **P-META-VAULT-01** | `secret_ref` column + masked upload UI → Vault | **done** (cabinet upload API + Flutter) | — |
-| **P-META-VAULT-02** | Cabinet-scoped Vault paths + ACL | — | P2 |
+| **P-META-VAULT-02** | Cabinet-scoped Vault paths + ACL | **done** (scope check on row write + pod env) | — |
 
 ## Бывшие «решения канона» → пересмотр
 

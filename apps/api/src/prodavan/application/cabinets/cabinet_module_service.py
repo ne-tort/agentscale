@@ -171,7 +171,7 @@ class CabinetModuleService:
             module_id=module_id, table_slug=table_slug, body=body
         )
         body = await self._validate_row(
-            module_id=module_id, table_slug=table_slug, body=body
+            cabinet_id=cabinet_id, module_id=module_id, table_slug=table_slug, body=body
         )
         row_id = f"row_{uuid.uuid4().hex[:12]}"
         created_by = employee.id if employee is not None else principal.sub
@@ -224,7 +224,7 @@ class CabinetModuleService:
         )
         await self._require_installed(inst.schema_name, module_id=module_id)
         body = await self._validate_row(
-            module_id=module_id, table_slug=table_slug, body=body
+            cabinet_id=cabinet_id, module_id=module_id, table_slug=table_slug, body=body
         )
         qschema = qident(inst.schema_name)
         result = await self._session.execute(
@@ -310,7 +310,9 @@ class CabinetModuleService:
                 merged[name] = col["default"]
         return merged
 
-    async def _validate_row(self, *, module_id: str, table_slug: str, body: dict) -> dict:
+    async def _validate_row(
+        self, *, cabinet_id: str, module_id: str, table_slug: str, body: dict
+    ) -> dict:
         try:
             doc = await self._meta.get_document(module_id=module_id, slug="columns")
         except AppError:
@@ -319,7 +321,7 @@ class CabinetModuleService:
         columns = columns_for_table(raw, table_slug)
         if not columns:
             return body
-        return validate_row_body(body, columns)
+        return validate_row_body(body, columns, cabinet_id=cabinet_id)
 
     async def _require_module_binding(self, *, cabinet_id: str, module_id: str) -> None:
         q = await self._session.execute(

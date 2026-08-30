@@ -30,7 +30,12 @@ def columns_for_table(columns_doc: Any, table_slug: str) -> list[dict[str, Any]]
     ]
 
 
-def validate_row_body(body: dict[str, Any], columns: list[dict[str, Any]]) -> dict[str, Any]:
+def validate_row_body(
+    body: dict[str, Any],
+    columns: list[dict[str, Any]],
+    *,
+    cabinet_id: str | None = None,
+) -> dict[str, Any]:
     """Return sanitized body containing only declared column keys."""
     if not isinstance(body, dict):
         raise _row_error("row body must be a JSON object")
@@ -43,7 +48,7 @@ def validate_row_body(body: dict[str, Any], columns: list[dict[str, Any]]) -> di
 
         if name in body:
             value = body[name]
-            _validate_field(name, value, col)
+            _validate_field(name, value, col, cabinet_id=cabinet_id)
             sanitized[name] = value
         elif col.get("required") is True:
             raise _row_error(f"missing required field: {name}")
@@ -53,7 +58,7 @@ def validate_row_body(body: dict[str, Any], columns: list[dict[str, Any]]) -> di
     return sanitized
 
 
-def _validate_field(name: str, value: Any, col: dict[str, Any]) -> None:
+def _validate_field(name: str, value: Any, col: dict[str, Any], *, cabinet_id: str | None = None) -> None:
     col_type = col.get("type")
     if not isinstance(col_type, str):
         return
@@ -92,7 +97,7 @@ def _validate_field(name: str, value: Any, col: dict[str, Any]) -> None:
         case "file_ref":
             _validate_file_ref(name, value)
         case "secret_ref":
-            _validate_secret_ref(name, value)
+            _validate_secret_ref(name, value, cabinet_id=cabinet_id)
         case _:
             raise _row_error(f"{name}: unsupported column type {col_type!r}")
 
@@ -109,7 +114,7 @@ def _validate_file_ref(name: str, value: Any) -> None:
             raise _row_error(f"{name}: file_ref.{key} must be a non-empty string")
 
 
-def _validate_secret_ref(name: str, value: Any) -> None:
+def _validate_secret_ref(name: str, value: Any, *, cabinet_id: str | None = None) -> None:
     if not isinstance(value, dict):
         raise _row_error(f"{name}: secret_ref must be an object")
     ref = value.get("secret_ref")
@@ -117,6 +122,15 @@ def _validate_secret_ref(name: str, value: Any) -> None:
         raise _row_error(f"{name}: secret_ref.secret_ref must be a non-empty string")
     if not ref.startswith(_SECRET_REF_PREFIXES):
         raise _row_error(f"{name}: secret_ref must use cabinet_secrets prefix")
+    if cabinet_id is not None:
+        from prodavan.infrastructure.secrets.cabinet_secret_store import (
+            assert_cabinet_secret_scope,
+        )
+
+        try:
+            assert_cabinet_secret_scope(ref, cabinet_id)
+        except AppError as exc:
+            raise _row_error(f"{name}: {exc.detail}") from exc
     label = value.get("label")
     if label is not None and not isinstance(label, str):
         raise _row_error(f"{name}: secret_ref.label must be a string")

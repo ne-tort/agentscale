@@ -20,6 +20,7 @@ from prodavan.infrastructure.cabinets.sql import qident
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 from prodavan.infrastructure.persistence.models.modules import ModuleMetaDocumentRow
 from prodavan.infrastructure.persistence.models.projects import ProjectModuleBindingRow, ProjectRow
+from prodavan.infrastructure.secrets.cabinet_secret_store import assert_cabinet_secret_scope
 from prodavan.infrastructure.secrets.store import SecretStore, get_secret_store
 
 
@@ -93,11 +94,21 @@ class ContainerEnvLoader:
                     resolve_secret_env(
                         secret_doc,
                         lifecycle=lifecycle,
-                        secret_getter=self._secrets.get,
+                        secret_getter=self._cabinet_scoped_secret_getter(project.cabinet_id),
                         row_field_getter=_cache_getter(secret_cache),
                     )
                 )
         return merge_env_bindings(*plain_groups, *secret_groups)
+
+    def _cabinet_scoped_secret_getter(self, cabinet_id: str):
+        store = self._secrets
+
+        def getter(secret_ref: str) -> str:
+            if secret_ref.startswith(("file://cabinet_secrets/", "vault://cabinet_secrets/")):
+                assert_cabinet_secret_scope(secret_ref, cabinet_id)
+            return store.get(secret_ref)
+
+        return getter
 
     async def _build_row_cache(
         self,
