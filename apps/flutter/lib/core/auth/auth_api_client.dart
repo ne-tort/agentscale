@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:http/http.dart' as http;
 import 'package:prodavan/core/api/prodavan_api.dart';
+import 'package:prodavan/core/auth/refresh_result.dart';
 
 /// Result of Auth Service login / refresh (Prodavan API, never Keycloak).
 class AuthApiResult {
@@ -87,19 +89,29 @@ class AuthApiClient {
     return AuthApiResult.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
-  Future<AuthApiResult?> refresh({
+  Future<RefreshResult> refresh({
     required String apiBaseUrl,
     required String refreshToken,
   }) async {
-    final res = await http.post(
-      Uri.parse('${_root(apiBaseUrl)}/auth/refresh'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'refresh_token': refreshToken}),
-    );
-    if (res.statusCode < 200 || res.statusCode >= 300) {
-      return null;
+    try {
+      final res = await http.post(
+        Uri.parse('${_root(apiBaseUrl)}/auth/refresh'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'refresh_token': refreshToken}),
+      );
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        return RefreshFailed(ProdavanApiException(res.statusCode, res.body));
+      }
+      return RefreshOk(
+        AuthApiResult.fromJson(jsonDecode(res.body) as Map<String, dynamic>),
+      );
+    } on SocketException catch (e) {
+      return RefreshFailed(e);
+    } on IOException catch (e) {
+      return RefreshFailed(e);
+    } on FormatException catch (e) {
+      return RefreshFailed(e);
     }
-    return AuthApiResult.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
   }
 
   Future<void> logout({

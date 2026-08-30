@@ -1343,6 +1343,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get commonCancel => 'Cancel';
 
   @override
+  String get commonRetry => 'Retry';
+
+  @override
   String get commonCompany => 'Company';
 
   @override
@@ -2112,6 +2115,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get settings => 'Settings';
+
+  @override
+  String get sessionRestoreOffline =>
+      'Server unavailable. Your session is saved.';
 
   @override
   String get settingsLanguage => 'Language';

@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 
 import 'package:prodavan/core/auth/auth_api_client.dart';
 import 'package:prodavan/core/auth/auth_config.dart';
+import 'package:prodavan/core/auth/refresh_result.dart';
 import 'package:prodavan/core/auth/session_store.dart';
 import 'package:prodavan/core/config/api_base.dart';
 import 'package:prodavan/core/session/admin_context.dart';
@@ -66,7 +67,7 @@ class TokenSession extends ChangeNotifier {
   AuthSession? _session;
   String? _authMode;
   bool _passwordLogin = false;
-  Future<bool>? _refreshInflight;
+  Future<Object?>? _refreshInflightError;
 
   AuthSession? get session => _session;
   bool get isAuthenticated => (_session?.accessToken.isNotEmpty) ?? false;
@@ -195,31 +196,49 @@ class TokenSession extends ChangeNotifier {
     return _session!;
   }
 
-  Future<bool> refresh({bool force = false}) {
-    final inflight = _refreshInflight;
+  Future<bool> refresh({bool force = false}) async {
+    final err = await refreshWithError(force: force);
+    return err == null;
+  }
+
+  /// Returns null on success, or the failure object for [auth_session_policy].
+  Future<Object?> refreshWithError({bool force = false}) {
+    final inflight = _refreshInflightError;
     if (inflight != null) return inflight;
     final future = _refreshBody(force: force);
-    _refreshInflight = future;
+    _refreshInflightError = future;
     return future.whenComplete(() {
-      if (identical(_refreshInflight, future)) {
-        _refreshInflight = null;
+      if (identical(_refreshInflightError, future)) {
+        _refreshInflightError = null;
       }
     });
   }
 
-  Future<bool> _refreshBody({required bool force}) async {
+  Object? _lastRefreshError;
+
+  Future<Object?> _refreshBody({required bool force}) async {
     final current = _session;
-    if (current == null) return false;
-    if (!force && !_needsRefresh(current)) return true;
+    if (current == null) {
+      _lastRefreshError = StateError('Not authenticated');
+      return _lastRefreshError;
+    }
+    if (!force && !_needsRefresh(current)) return null;
     final refreshTok = current.refreshToken;
-    if (refreshTok == null || refreshTok.isEmpty) return false;
+    if (refreshTok == null || refreshTok.isEmpty) {
+      _lastRefreshError = StateError('Session expired');
+      return _lastRefreshError;
+    }
 
     try {
-      final result = await _auth.refresh(
+      final outcome = await _auth.refresh(
         apiBaseUrl: current.baseUrl,
         refreshToken: refreshTok,
       );
-      if (result == null) return false;
+      if (outcome is RefreshFailed) {
+        _lastRefreshError = outcome.error;
+        return outcome.error;
+      }
+      final result = (outcome as RefreshOk).result;
       await applyTokens(
         baseUrl: current.baseUrl,
         accessToken: result.accessToken,
@@ -228,9 +247,11 @@ class TokenSession extends ChangeNotifier {
         expiresAt: result.accessTokenExpiration,
         companyId: current.companyId,
       );
-      return true;
-    } catch (_) {
-      return false;
+      _lastRefreshError = null;
+      return null;
+    } catch (e) {
+      _lastRefreshError = e;
+      return e;
     }
   }
 

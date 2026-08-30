@@ -2426,6 +2426,12 @@ abstract class AppLocalizations {
   /// **'Cancel'**
   String get commonCancel;
 
+  /// No description provided for @commonRetry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get commonRetry;
+
   /// No description provided for @commonCompany.
   ///
   /// In en, this message translates to:
@@ -3871,6 +3877,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Settings'**
   String get settings;
+
+  /// No description provided for @sessionRestoreOffline.
+  ///
+  /// In en, this message translates to:
+  /// **'Server unavailable. Your session is saved.'**
+  String get sessionRestoreOffline;
 
   /// No description provided for @settingsLanguage.
   ///

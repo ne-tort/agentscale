@@ -1351,6 +1351,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get commonCancel => 'Отмена';
 
   @override
+  String get commonRetry => 'Повторить';
+
+  @override
   String get commonCompany => 'Компания';
 
   @override
@@ -2121,6 +2124,9 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get settings => 'Настройки';
+
+  @override
+  String get sessionRestoreOffline => 'Сервер недоступен. Сессия сохранена.';
 
   @override
   String get settingsLanguage => 'Язык';
