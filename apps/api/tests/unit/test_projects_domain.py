@@ -11,6 +11,11 @@ from prodavan.domain.projects import (
 
 def test_slugify_name() -> None:
     assert slugify_name("My Project!") == "my-project"
+    assert slugify_name("Мой проект") == "moy-proekt"
+    assert slugify_name("Другой проект") == "drugoy-proekt"
+    assert slugify_name("Мой проект") != slugify_name("Другой проект")
+    assert slugify_name("!!!") == slugify_name("!!!")  # stable hash fallback
+    assert slugify_name("!!!").startswith("project-")
 
 
 def test_workspace_and_container_ref() -> None:

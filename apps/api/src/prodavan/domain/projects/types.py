@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import mimetypes
 import re
 import uuid
@@ -196,9 +197,57 @@ def new_project_id() -> str:
     return f"proj_{uuid.uuid4().hex[:16]}"
 
 
+_CYRILLIC_TO_LATIN = str.maketrans(
+    {
+        "а": "a",
+        "б": "b",
+        "в": "v",
+        "г": "g",
+        "д": "d",
+        "е": "e",
+        "ё": "e",
+        "ж": "zh",
+        "з": "z",
+        "и": "i",
+        "й": "y",
+        "к": "k",
+        "л": "l",
+        "м": "m",
+        "н": "n",
+        "о": "o",
+        "п": "p",
+        "р": "r",
+        "с": "s",
+        "т": "t",
+        "у": "u",
+        "ф": "f",
+        "х": "h",
+        "ц": "ts",
+        "ч": "ch",
+        "ш": "sh",
+        "щ": "sch",
+        "ъ": "",
+        "ы": "y",
+        "ь": "",
+        "э": "e",
+        "ю": "yu",
+        "я": "ya",
+    }
+)
+
+
+def _transliterate_slug_source(name: str) -> str:
+    lowered = name.strip().lower()
+    return lowered.translate(_CYRILLIC_TO_LATIN)
+
+
 def slugify_name(name: str) -> str:
-    base = re.sub(r"[^a-z0-9]+", "-", name.strip().lower()).strip("-")
-    return base[:48] or "project"
+    source = _transliterate_slug_source(name)
+    base = re.sub(r"[^a-z0-9]+", "-", source).strip("-")
+    if not base:
+        digest = hashlib.sha256(name.strip().encode("utf-8")).hexdigest()[:8]
+        base = f"project-{digest}"
+    return base[:48]
 
 
 def workspace_key_for(project_id: str) -> str:

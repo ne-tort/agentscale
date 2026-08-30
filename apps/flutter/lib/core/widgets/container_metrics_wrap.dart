@@ -78,8 +78,6 @@ class ContainerMetricsWrap extends StatelessWidget {
     final lastError = containerLastError(container);
     final errorColor = context.appColors.danger;
     final warningColor = context.appColors.warning;
-    final tileAccent = metricsUnavailable ? warningColor : null;
-    final emDash = l10n.commonEmDash;
 
     final stateValue = formatContainerStateValue(container, l10n);
     final lastLaunchValue = formatContainerLastLaunch(container, l10n);
@@ -156,7 +154,7 @@ class ContainerMetricsWrap extends StatelessWidget {
         ),
     ];
 
-    if (hasError && storageValue != null) {
+    if ((hasError || metricsUnavailable) && storageValue != null) {
       lifecycleRows.insert(
         1,
         _readOnlyRow(
@@ -168,37 +166,31 @@ class ContainerMetricsWrap extends StatelessWidget {
     }
 
     final resourceTiles = <Widget>[];
-    if (!hasError) {
-      if (metricsUnavailable || cpuValue != null) {
+    if (!hasError && !metricsUnavailable) {
+      if (cpuValue != null)
         resourceTiles.add(
           StatTile(
             label: l10n.adminContainerMetricsCpu,
-            value: cpuValue ?? emDash,
+            value: cpuValue,
             icon: Icons.speed_outlined,
-            accentColor: tileAccent,
           ),
         );
-      }
-      if (metricsUnavailable || memoryValue != null) {
+      if (memoryValue != null)
         resourceTiles.add(
           StatTile(
             label: l10n.adminContainerMetricsMemory,
-            value: memoryValue ?? emDash,
+            value: memoryValue,
             icon: Icons.memory_outlined,
-            accentColor: tileAccent,
           ),
         );
-      }
-      if (metricsUnavailable || storageValue != null) {
+      if (storageValue != null)
         resourceTiles.add(
           StatTile(
             label: l10n.commonStorageBytes,
-            value: storageValue ?? emDash,
+            value: storageValue,
             icon: Icons.storage_outlined,
-            accentColor: tileAccent,
           ),
         );
-      }
     }
 
     return Column(
