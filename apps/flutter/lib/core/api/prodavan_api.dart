@@ -560,7 +560,7 @@ class ProdavanApi {
     }
   }
 
-  Future<void> patchProjectModules(String projectId, {required List<String> moduleIds}) async {
+  Future<Map<String, dynamic>> patchProjectModules(String projectId, {required List<String> moduleIds}) async {
     final prevProj = this.projectId;
     this.projectId = projectId;
     try {
@@ -570,6 +570,8 @@ class ProdavanApi {
         extraHeaders: _workHeaders,
       );
       _throwIfError(res);
+      if (res.body.isEmpty) return <String, dynamic>{'module_ids': moduleIds};
+      return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
       this.projectId = prevProj;
     }

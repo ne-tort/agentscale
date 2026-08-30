@@ -904,7 +904,7 @@ class ProjectCommand:
         module_ids: list[str],
         principal: Principal,
         employee: EmployeeRow | None,
-    ) -> list[str]:
+    ) -> dict:
         from sqlalchemy import delete
 
         from prodavan.application.modules.module_binding_service import ModuleBindingService
@@ -935,7 +935,8 @@ class ProjectCommand:
         for mid in unique:
             self._session.add(ProjectModuleBindingRow(project_id=row.id, module_id=mid))
         await self._session.commit()
-        return unique
+        sync = await self.rematerialize_background(project_id=row.id)
+        return {"module_ids": unique, "sync": sync}
 
     async def _wipe_workspace(self, row: ProjectRow) -> dict:
         try:

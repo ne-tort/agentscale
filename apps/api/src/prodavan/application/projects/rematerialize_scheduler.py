@@ -39,6 +39,35 @@ async def schedule_cabinet_rematerialize(
     if not await module_has_materialize_rules(session, module_id=module_id):
         return {"scheduled": 0, "skipped": True, "reason": "no_materialize_rules"}
 
+    return await _schedule_cabinet_projects_rematerialize(
+        session,
+        cabinet_id=cabinet_id,
+        module_id=module_id,
+        source="cabinet_module",
+    )
+
+
+async def schedule_cabinet_binding_change_rematerialize(
+    session: AsyncSession,
+    *,
+    cabinet_id: str,
+) -> dict[str, Any]:
+    """Rematerialize all projects after cabinet↔module binding changes (install/uninstall/prune)."""
+    return await _schedule_cabinet_projects_rematerialize(
+        session,
+        cabinet_id=cabinet_id,
+        module_id=None,
+        source="cabinet_binding",
+    )
+
+
+async def _schedule_cabinet_projects_rematerialize(
+    session: AsyncSession,
+    *,
+    cabinet_id: str,
+    module_id: str | None,
+    source: str,
+) -> dict[str, Any]:
     project_ids = await ProjectQuery(session).list_ids(
         cabinet_id=cabinet_id,
         exclude_status=ProjectStatus.DELETED,
@@ -50,7 +79,7 @@ async def schedule_cabinet_rematerialize(
             project_id,
             cabinet_id=cabinet_id,
             module_id=module_id,
-            source="cabinet_module",
+            source=source,
         )
         if result.get("enqueued"):
             enqueued.append(project_id)
@@ -65,10 +94,12 @@ async def schedule_cabinet_rematerialize(
                     cabinet_id,
                     project_id,
                 )
-    return {
+    out: dict[str, Any] = {
         "scheduled": len(enqueued) + len(synced),
         "enqueued": enqueued,
         "sync": synced,
         "cabinet_id": cabinet_id,
-        "module_id": module_id,
     }
+    if module_id is not None:
+        out["module_id"] = module_id
+    return out

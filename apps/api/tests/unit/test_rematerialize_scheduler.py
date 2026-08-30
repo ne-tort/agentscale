@@ -8,6 +8,7 @@ import pytest
 
 from prodavan.application.projects.rematerialize_scheduler import (
     module_has_materialize_rules,
+    schedule_cabinet_binding_change_rematerialize,
     schedule_cabinet_rematerialize,
 )
 
@@ -53,3 +54,25 @@ async def test_schedule_skips_modules_without_materialize() -> None:
         )
     assert out["skipped"] is True
     assert out["scheduled"] == 0
+
+
+@pytest.mark.asyncio
+async def test_schedule_binding_change_rematerializes_all_projects() -> None:
+    session = AsyncMock()
+    with (
+        patch(
+            "prodavan.application.projects.rematerialize_scheduler.ProjectQuery"
+        ) as query_cls,
+        patch(
+            "prodavan.application.projects.rematerialize_scheduler.request_rematerialize_project",
+            AsyncMock(return_value={"enqueued": True}),
+        ) as request,
+    ):
+        query_cls.return_value.list_ids = AsyncMock(return_value=["proj_a"])
+        out = await schedule_cabinet_binding_change_rematerialize(
+            session, cabinet_id="cab_1"
+        )
+
+    assert out["scheduled"] == 1
+    request.assert_awaited_once()
+    assert request.await_args.kwargs["source"] == "cabinet_binding"

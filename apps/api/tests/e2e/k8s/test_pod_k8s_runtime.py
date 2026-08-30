@@ -78,6 +78,23 @@ def _setup_project(client: TestClient) -> tuple[str, str, dict[str, str], str]:
     return company_id, admin, owner_h, project_id
 
 
+def _configure_and_launch(client: TestClient, owner_h: dict[str, str], project_id: str) -> dict:
+    keys = client.get(f"/api/v1/projects/{project_id}/ai-keys/available", headers=owner_h)
+    assert keys.status_code == 200, keys.text
+    items = keys.json().get("items") or []
+    assert items, keys.text
+    key_id = items[0]["id"]
+    patched = client.patch(
+        f"/api/v1/projects/{project_id}",
+        headers=owner_h,
+        json={"agent_provider": "cursor", "resolved_ai_key_id": key_id},
+    )
+    assert patched.status_code == 200, patched.text
+    launched = client.post(f"/api/v1/projects/{project_id}/launch", headers=owner_h)
+    assert launched.status_code == 200, launched.text
+    return launched.json()
+
+
 def _ensure_pod_running(client: TestClient, owner_h: dict[str, str], project_id: str) -> dict:
     got = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
     assert got.status_code == 200, got.text
@@ -86,12 +103,11 @@ def _ensure_pod_running(client: TestClient, owner_h: dict[str, str], project_id:
     if runtime is not None and runtime.get("status") == "running":
         return runtime
 
-    if body.get("status") == "active":
-        paused = client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
-        assert paused.status_code == 200, paused.text
-
-    resumed = client.post(f"/api/v1/projects/{project_id}/resume", headers=owner_h)
-    assert resumed.status_code == 200, resumed.text
+    if body.get("status") == "draft" or runtime is None:
+        _configure_and_launch(client, owner_h, project_id)
+    elif body.get("status") == "paused":
+        resumed = client.post(f"/api/v1/projects/{project_id}/resume", headers=owner_h)
+        assert resumed.status_code == 200, resumed.text
 
     after = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
     runtime = after.json().get("runtime")

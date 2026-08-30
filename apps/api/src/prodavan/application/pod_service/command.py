@@ -34,6 +34,15 @@ logger = logging.getLogger(__name__)
 _TERMINATE_REASONS = frozenset({"delete", "purge", "terminate", "detach", "force_kill"})
 _FORCE_REHYDRATE_REASONS = frozenset({"rematerialize", "sync", "reload"})
 
+_LIFECYCLE_BY_REASON: dict[str, str] = {
+    "launch": "project.launch",
+    "lazy.start": "project.launch",
+    "resume": "project.resumed",
+    "reload": "project.reload",
+    "sync": "project.sync",
+    "rematerialize": "project.sync",
+}
+
 
 class PodCommand:
     def __init__(
@@ -95,7 +104,12 @@ class PodCommand:
 
         try:
             if desired == PodDesiredState.RUNNING:
-                await self._apply_running(project, pod, principal=principal)
+                await self._apply_running(
+                    project,
+                    pod,
+                    principal=principal,
+                    lifecycle=_LIFECYCLE_BY_REASON.get(reason or "", "project.launch"),
+                )
                 if project.status == ProjectStatus.ERROR:
                     project.status = ProjectStatus.ACTIVE
                     await self._project_events.emit(
@@ -397,14 +411,19 @@ class PodCommand:
         await build_metrics_store().clear_project_latest(project.id)
 
     async def _apply_running(
-        self, project: ProjectRow, pod: ProjectPodRow, *, principal: Principal
+        self,
+        project: ProjectRow,
+        pod: ProjectPodRow,
+        *,
+        principal: Principal,
+        lifecycle: str = "project.launch",
     ) -> None:
         mode = (settings.pod_runtime_mode or "stub").strip().lower()
         ref = pod.runtime_ref or runtime_ref_for(project.workspace_key, mode=mode)
         pod.runtime_ref = ref
         pod.status = PodStatus.PROVISIONING
         extra_env = await ContainerEnvLoader(self._session).load_for_project(
-            project, lifecycle="project.launch"
+            project, lifecycle=lifecycle
         )
         ctx = self._runtime_context(project, pod, extra_env=extra_env)
         await self._runtime.ensure_running(runtime_ref=ref, context=ctx)

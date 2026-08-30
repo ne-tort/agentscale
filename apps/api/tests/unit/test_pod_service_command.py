@@ -175,18 +175,26 @@ async def test_sync_desired_rematerialize_rehydrates_running_pod() -> None:
     runtime = AsyncMock()
     hydrate = AsyncMock()
     events = AsyncMock(spec=PodLifecycleEmitter)
+    env_loader = AsyncMock()
+    env_loader.load_for_project = AsyncMock(return_value=())
 
-    cmd = PodCommand(session, runtime=runtime, events=events, hydrate=hydrate)
+    with patch(
+        "prodavan.application.pod_service.command.ContainerEnvLoader",
+        return_value=env_loader,
+    ):
+        cmd = PodCommand(session, runtime=runtime, events=events, hydrate=hydrate)
 
-    await cmd.sync_desired(
-        project.id,
-        PodDesiredState.RUNNING,
-        principal=_principal(),
-        reason="rematerialize",
-    )
+        await cmd.sync_desired(
+            project.id,
+            PodDesiredState.RUNNING,
+            principal=_principal(),
+            reason="rematerialize",
+        )
 
     runtime.ensure_running.assert_awaited()
     hydrate.hydrate.assert_awaited()
+    env_loader.load_for_project.assert_awaited()
+    assert env_loader.load_for_project.await_args.kwargs["lifecycle"] == "project.sync"
 
 
 @pytest.mark.asyncio

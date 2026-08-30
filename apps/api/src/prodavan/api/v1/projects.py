@@ -277,7 +277,7 @@ async def patch_project_modules(
         principal=principal,
         employee=employee,
     )
-    return {"module_ids": ids}
+    return ids
 
 
 @router.get("/projects/{project_id}/ai-keys/available")

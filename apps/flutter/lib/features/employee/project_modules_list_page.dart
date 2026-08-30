@@ -4,6 +4,7 @@ import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/features/employee/project_module_edit_page.dart';
 import 'package:prodavan/features/employee/project_modules_table.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -63,11 +64,16 @@ class _ProjectModulesListPageState extends State<ProjectModulesListPage> {
       ids.remove(moduleId);
     }
     try {
-      await workContext.api.patchProjectModules(
+      final result = await workContext.api.patchProjectModules(
         widget.projectId,
         moduleIds: ids.toList(),
       );
       await _load();
+      if (!mounted) return;
+      final sync = result['sync'];
+      if (sync is Map && sync['ok'] == true) {
+        AppSnackBar.success(context, AppLocalizations.of(context).projectUpdateSuccess);
+      }
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     }

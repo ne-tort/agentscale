@@ -154,6 +154,15 @@ class ModuleBindingService:
             await self._revoke_projects_for_cabinets(mid, {cabinet_id})
             await materialize.uninstall(cabinet_id=cabinet_id, module_id=mid)
 
+        if added or removed:
+            from prodavan.application.projects.rematerialize_scheduler import (
+                schedule_cabinet_binding_change_rematerialize,
+            )
+
+            await schedule_cabinet_binding_change_rematerialize(
+                self._session, cabinet_id=cabinet_id
+            )
+
         return unique
 
     async def bind_project(self, module_id: str, project_id: str) -> None:

@@ -124,6 +124,6 @@ data:
   POD_SANDBOX_SA: prodavan-project-pod
   POD_SANDBOX_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
   POD_SANDBOX_HYDRATE_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
-  # Empty — initContainer creates inbox/runs without MinIO (same as L3a e2e).
-  POD_SANDBOX_MINIO_SECRET: ""
+  # MinIO hydrate for real workspace sync into sandboxes (secret in dev/sandboxes/hydrate-secret.yaml).
+  POD_SANDBOX_MINIO_SECRET: prodavan-minio-hydrate
   POD_RECONCILE_WORKER_ENABLED: "true"
