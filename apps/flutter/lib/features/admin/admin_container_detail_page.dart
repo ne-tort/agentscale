@@ -11,6 +11,8 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
+import 'package:prodavan/features/containers/container_workspace_api.dart';
+import 'package:prodavan/features/containers/container_workspace_files_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Admin container detail — Project cascade actions (P1 transitional).
@@ -256,6 +258,25 @@ class _AdminContainerDetailPageState extends State<AdminContainerDetailPage> {
                     icon: Icons.play_circle_outline,
                     enabled: !_busy,
                     onTap: _busy ? null : _resume,
+                  ),
+                if (containerRuntimeHealthy(_item))
+                  AppNavPreference(
+                    title: l10n.projectWorkspaceFiles,
+                    icon: Icons.folder_outlined,
+                    enabled: !_busy,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (context) => ContainerWorkspaceFilesPage(
+                            title: l10n.projectWorkspaceFiles,
+                            api: AdminContainerWorkspaceApi(
+                              adminContext.api,
+                              widget.projectId,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 if (_showReload)
                   AppPreferenceTile(

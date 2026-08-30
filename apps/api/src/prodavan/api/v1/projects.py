@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Header, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
 from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
+from prodavan.api.v1.workspace_bodies import WorkspaceCopyBody, WorkspaceMoveBody
 from prodavan.application.admin.company_service import AdminCompanyService
+from prodavan.application.pod_service.workspace_service import PodWorkspaceService
 from prodavan.application.project_service import ProjectAccessPolicy, ProjectCommand, ProjectQuery
 from prodavan.application.projects import (
     ProjectAttachmentService,
@@ -173,6 +175,110 @@ async def reload_project(
 ) -> dict:
     return await ProjectCommand(session).reload_project(
         project_id=project_id, principal=principal, employee=employee
+    )
+
+
+@router.get("/projects/{project_id}/container/workspace/entries")
+async def list_project_workspace_entries(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+    path: str = Query(default=""),
+) -> dict:
+    return await PodWorkspaceService(session).list_entries(
+        project_id=project_id,
+        path=path,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.get("/projects/{project_id}/container/workspace/content")
+async def download_project_workspace_content(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+    path: str = Query(min_length=1),
+) -> Response:
+    data, entry = await PodWorkspaceService(session).read_content(
+        project_id=project_id,
+        path=path,
+        principal=principal,
+        employee=employee,
+    )
+    safe_name = entry.name.replace('"', "")
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}"'},
+    )
+
+
+@router.get("/projects/{project_id}/container/workspace/preview")
+async def preview_project_workspace_text(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+    path: str = Query(min_length=1),
+) -> dict:
+    return await PodWorkspaceService(session).preview_text(
+        project_id=project_id,
+        path=path,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.delete("/projects/{project_id}/container/workspace/entries")
+async def delete_project_workspace_entry(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+    path: str = Query(min_length=1),
+) -> dict:
+    return await PodWorkspaceService(session).delete_entry(
+        project_id=project_id,
+        path=path,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.post("/projects/{project_id}/container/workspace/move")
+async def move_project_workspace_entry(
+    project_id: str,
+    body: WorkspaceMoveBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await PodWorkspaceService(session).move_entry(
+        project_id=project_id,
+        src=body.src,
+        dst=body.dst,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.post("/projects/{project_id}/container/workspace/copy")
+async def copy_project_workspace_entry(
+    project_id: str,
+    body: WorkspaceCopyBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await PodWorkspaceService(session).copy_entry(
+        project_id=project_id,
+        src=body.src,
+        dst=body.dst,
+        principal=principal,
+        employee=employee,
     )
 
 

@@ -130,6 +130,10 @@ class K8sSandboxClient:
     def namespace(self) -> str:
         return self._namespace
 
+    @property
+    def auth(self) -> InClusterAuth:
+        return self._auth
+
     def available(self) -> bool:
         return self._auth.available()
 
@@ -235,3 +239,22 @@ class K8sSandboxClient:
         async with httpx.AsyncClient(**self._auth.client_kwargs()) as client:
             response = await client.get(url, headers=self._auth.headers())
             return response.status_code == 200
+
+    async def exec_in_container(
+        self,
+        name: str,
+        command: list[str],
+        *,
+        container: str = "sandbox",
+        timeout: float = 60.0,
+    ):
+        from prodavan.infrastructure.k8s.sandbox.exec import exec_in_pod
+
+        return await exec_in_pod(
+            auth=self._auth,
+            namespace=self._namespace,
+            pod_name=name,
+            command=command,
+            container=container,
+            timeout=timeout,
+        )

@@ -156,6 +156,7 @@ apps/api/.env.example
 | Flutter module save → rematerialize UX | **done** | API `rematerialize` in row CRUD response + SnackBar on cabinet module page |
 | «Обновить проект» (`POST /sync`) UI loading | **done** | spinner на management page |
 | Company/admin container reload | **done** | `POST .../containers/{id}/reload`; integration `test_company_containers_reload` + `test_admin_containers_reload` |
+| Live Pod workspace browser (UI) | **done** | `PodWorkspacePort` + k8s exec `workspace_fs`; REST list/preview/download; Flutter Files button when `running`; k8s e2e `AGENTS.md` |
 
 ## Проверка
 

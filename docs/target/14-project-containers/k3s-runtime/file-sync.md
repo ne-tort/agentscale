@@ -68,3 +68,15 @@ Alternative: **S3 sidecar** — agent reads presigned URLs; platform only update
 | `/workspace/.meta/` | Platform-managed (optional) |
 
 Sync excludes secrets; AI keys injected at runtime via agent port, not copied to disk when avoidable.
+
+## Live workspace read (PodWorkspacePort)
+
+When Pod is **running**, API/UI read `/workspace` via k8s exec into sandbox container (`python -m prodavan.runtime.workspace_fs`). Source of truth for the browser is **live Pod FS**, not MinIO mirror.
+
+| Operation | Mechanism |
+|-----------|-----------|
+| list / stat / read | exec → JSON or bytes stdout |
+| delete / move / copy | exec mutations (API only; no Flutter UI yet) |
+| UI gate | `observed_state == running`; button hidden otherwise |
+
+Write-back to MinIO (pause sync) remains future work — see rematerialize/hydrate paths above.

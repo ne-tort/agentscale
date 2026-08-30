@@ -495,6 +495,66 @@ class ProdavanApi {
     }
   }
 
+  Future<Map<String, dynamic>> listWorkspaceEntries({
+    required String projectId,
+    String path = '',
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.get(
+        _uri('/projects/$projectId/container/workspace/entries').replace(
+          queryParameters: {'path': path},
+        ),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Map<String, dynamic>> previewWorkspaceFile({
+    required String projectId,
+    required String path,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.get(
+        _uri('/projects/$projectId/container/workspace/preview').replace(
+          queryParameters: {'path': path},
+        ),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Uint8List> downloadWorkspaceFile({
+    required String projectId,
+    required String path,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.get(
+        _uri('/projects/$projectId/container/workspace/content').replace(
+          queryParameters: {'path': path},
+        ),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return res.bodyBytes;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
   Future<List<String>> listProjectModuleIds(String projectId) async {
     final prevProj = this.projectId;
     this.projectId = projectId;

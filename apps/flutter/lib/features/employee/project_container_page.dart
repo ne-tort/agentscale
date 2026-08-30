@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/containers/container_runtime_presenter.dart';
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
@@ -9,6 +10,8 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/container_metrics_wrap.dart';
+import 'package:prodavan/features/containers/container_workspace_api.dart';
+import 'package:prodavan/features/containers/container_workspace_files_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Project container — pod runtime and k8s metrics (employee).
@@ -115,6 +118,24 @@ class _ProjectContainerPageState extends State<ProjectContainerPage> {
                   runtimeMetrics: _metrics,
                   projectMetrics: _projectMetrics,
                 ),
+                if (containerRuntimeHealthy(_container))
+                  AppNavPreference(
+                    title: l10n.projectWorkspaceFiles,
+                    icon: Icons.folder_outlined,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (context) => ContainerWorkspaceFilesPage(
+                            title: l10n.projectWorkspaceFiles,
+                            api: EmployeeContainerWorkspaceApi(
+                              workContext.api,
+                              widget.projectId,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                 AppNavPreference(
                   title: l10n.projectReload,
                   icon: Icons.refresh_outlined,

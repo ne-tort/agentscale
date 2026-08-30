@@ -3722,6 +3722,30 @@ abstract class AppLocalizations {
   /// **'Reload'**
   String get projectReload;
 
+  /// No description provided for @projectWorkspaceFiles.
+  ///
+  /// In en, this message translates to:
+  /// **'Files'**
+  String get projectWorkspaceFiles;
+
+  /// No description provided for @projectWorkspacePreview.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview'**
+  String get projectWorkspacePreview;
+
+  /// No description provided for @projectWorkspaceDownload.
+  ///
+  /// In en, this message translates to:
+  /// **'Download'**
+  String get projectWorkspaceDownload;
+
+  /// No description provided for @projectWorkspaceDownloaded.
+  ///
+  /// In en, this message translates to:
+  /// **'File saved'**
+  String get projectWorkspaceDownloaded;
+
   /// No description provided for @projectUpdateProject.
   ///
   /// In en, this message translates to:

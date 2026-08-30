@@ -2054,6 +2054,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectReload => 'Reload';
 
   @override
+  String get projectWorkspaceFiles => 'Files';
+
+  @override
+  String get projectWorkspacePreview => 'Preview';
+
+  @override
+  String get projectWorkspaceDownload => 'Download';
+
+  @override
+  String get projectWorkspaceDownloaded => 'File saved';
+
+  @override
   String get projectUpdateProject => 'Update project';
 
   @override

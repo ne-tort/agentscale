@@ -2066,6 +2066,18 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectReload => 'Перезагрузить';
 
   @override
+  String get projectWorkspaceFiles => 'Файлы';
+
+  @override
+  String get projectWorkspacePreview => 'Просмотр';
+
+  @override
+  String get projectWorkspaceDownload => 'Скачать';
+
+  @override
+  String get projectWorkspaceDownloaded => 'Файл сохранён';
+
+  @override
   String get projectUpdateProject => 'Обновить проект';
 
   @override

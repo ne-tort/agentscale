@@ -240,6 +240,20 @@ def test_k8s_rematerialize_increments_generation(k8s_client: TestClient) -> None
     assert hydrated_after[-1]["payload"].get("generation") == 1
 
 
+def test_k8s_workspace_lists_agents_md(k8s_client: TestClient) -> None:
+    """Live pod workspace API lists materialized files (AGENTS.md at root)."""
+    _, _, owner_h, project_id = _setup_project(k8s_client)
+    _ensure_pod_running(k8s_client, owner_h, project_id)
+
+    listed = k8s_client.get(
+        f"/api/v1/projects/{project_id}/container/workspace/entries",
+        headers=owner_h,
+    )
+    assert listed.status_code == 200, listed.text
+    names = {e["name"] for e in listed.json()["entries"]}
+    assert "AGENTS.md" in names
+
+
 def test_k8s_admin_force_kill_clears_runtime(k8s_client: TestClient) -> None:
     _, admin, owner_h, project_id = _setup_project(k8s_client)
     admin_h = {"Authorization": f"Bearer {admin}"}

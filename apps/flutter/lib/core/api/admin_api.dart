@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:prodavan/core/auth/auth_http.dart';
@@ -291,6 +292,45 @@ class AdminApi {
     final res = await AuthHttp.post(_uri('/admin/containers/$projectId/reload'), body: '{}',);
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> listWorkspaceEntries({
+    required String projectId,
+    String path = '',
+  }) async {
+    final res = await AuthHttp.get(
+      _uri('/admin/containers/$projectId/workspace/entries').replace(
+        queryParameters: {'path': path},
+      ),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> previewWorkspaceFile({
+    required String projectId,
+    required String path,
+  }) async {
+    final res = await AuthHttp.get(
+      _uri('/admin/containers/$projectId/workspace/preview').replace(
+        queryParameters: {'path': path},
+      ),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Uint8List> downloadWorkspaceFile({
+    required String projectId,
+    required String path,
+  }) async {
+    final res = await AuthHttp.get(
+      _uri('/admin/containers/$projectId/workspace/content').replace(
+        queryParameters: {'path': path},
+      ),
+    );
+    _throwIfError(res);
+    return res.bodyBytes;
   }
 
   Future<void> deleteContainer(String projectId) async {
