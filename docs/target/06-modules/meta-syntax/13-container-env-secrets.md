@@ -122,7 +122,7 @@ Like `file_ref`, but stores **reference** after secure upload:
 2. Platform `RoutingSecretStore.put()` → Vault KV (same pattern as AI keys)
 3. Row stores only `secret_ref` prefix — API never returns secret body
 
-**Gap:** P-META-VAULT-01 — column type + Flutter masked upload widget.
+**Gap:** none — P-META-VAULT-01 shipped (column type, upload API, Flutter masked widget).
 
 ## Slug: `secrets` (optional module-level catalog)
 
@@ -179,5 +179,5 @@ Settings: `VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_KV_MOUNT`, `VAULT_KV_PATH_PREFIX` 
 |----|-------------|----------|
 | P-META-ENV-01 | `container_env` + static `container_env_secrets` → pod_spec | **done** (#162) |
 | P-META-ENV-02 | `value_from` / `secret_ref_from` row resolution at launch | **done** (#163) |
-| P-META-VAULT-01 | `secret_ref` column + upload UI → Vault | P1 |
+| P-META-VAULT-01 | `secret_ref` column + upload UI → Vault | **done** |
 | P-META-VAULT-02 | Cabinet-scoped Vault path prefix + ACL | P2 |

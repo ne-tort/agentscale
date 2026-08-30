@@ -61,3 +61,36 @@ def test_file_ref_missing_fields() -> None:
             _COLUMNS,
         )
     assert "file_ref missing fields" in (exc.value.detail or "")
+
+
+_SECRET_COLUMNS = [
+    {"table_slug": "suppliers", "name": "name", "type": "text", "required": True},
+    {"table_slug": "suppliers", "name": "api_token", "type": "secret_ref"},
+]
+
+
+def test_secret_ref_shape() -> None:
+    body = validate_row_body(
+        {
+            "name": "ACME",
+            "api_token": {
+                "secret_ref": "file://cabinet_secrets/cab_1/sec_abc",
+                "label": "S4B",
+                "created_at": "2026-08-30T00:00:00+00:00",
+            },
+        },
+        _SECRET_COLUMNS,
+    )
+    assert body["api_token"]["secret_ref"].startswith("file://cabinet_secrets/")
+
+
+def test_secret_ref_bad_prefix() -> None:
+    with pytest.raises(AppError) as exc:
+        validate_row_body(
+            {
+                "name": "ACME",
+                "api_token": {"secret_ref": "vault://ai_keys/x"},
+            },
+            _SECRET_COLUMNS,
+        )
+    assert "cabinet_secrets prefix" in (exc.value.detail or "")

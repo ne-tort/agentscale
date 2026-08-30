@@ -7,6 +7,8 @@ from typing import Any
 from prodavan.domain.errors import AppError
 
 _FILE_REF_REQUIRED = frozenset({"asset_id", "version_id", "storage_key", "filename"})
+_SECRET_REF_REQUIRED = frozenset({"secret_ref"})
+_SECRET_REF_PREFIXES = ("file://cabinet_secrets/", "vault://cabinet_secrets/")
 
 
 def _row_error(detail: str) -> AppError:
@@ -89,6 +91,8 @@ def _validate_field(name: str, value: Any, col: dict[str, Any]) -> None:
                 raise _row_error(f"{name}: expected ref row_id string")
         case "file_ref":
             _validate_file_ref(name, value)
+        case "secret_ref":
+            _validate_secret_ref(name, value)
         case _:
             raise _row_error(f"{name}: unsupported column type {col_type!r}")
 
@@ -103,3 +107,19 @@ def _validate_file_ref(name: str, value: Any) -> None:
         field = value.get(key)
         if not isinstance(field, str) or not field.strip():
             raise _row_error(f"{name}: file_ref.{key} must be a non-empty string")
+
+
+def _validate_secret_ref(name: str, value: Any) -> None:
+    if not isinstance(value, dict):
+        raise _row_error(f"{name}: secret_ref must be an object")
+    ref = value.get("secret_ref")
+    if not isinstance(ref, str) or not ref.strip():
+        raise _row_error(f"{name}: secret_ref.secret_ref must be a non-empty string")
+    if not ref.startswith(_SECRET_REF_PREFIXES):
+        raise _row_error(f"{name}: secret_ref must use cabinet_secrets prefix")
+    label = value.get("label")
+    if label is not None and not isinstance(label, str):
+        raise _row_error(f"{name}: secret_ref.label must be a string")
+    created_at = value.get("created_at")
+    if created_at is not None and not isinstance(created_at, str):
+        raise _row_error(f"{name}: secret_ref.created_at must be a string")

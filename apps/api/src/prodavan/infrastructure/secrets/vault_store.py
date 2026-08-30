@@ -11,7 +11,7 @@ REF_PREFIX = "vault://ai_keys/"
 
 
 class VaultSecretStore:
-    """Stores secret under KV v2 path; DB holds vault://ai_keys/{key_id}."""
+    """Stores secret under KV v2 path; DB holds vault://…/{key_id}."""
 
     def __init__(
         self,
@@ -20,11 +20,13 @@ class VaultSecretStore:
         token: str | None = None,
         mount: str | None = None,
         path_prefix: str | None = None,
+        ref_prefix: str | None = None,
     ) -> None:
         self._addr = (addr or settings.vault_addr or "").rstrip("/")
         self._token = token if token is not None else settings.vault_token
         self._mount = (mount or settings.vault_kv_mount).strip("/")
         self._path_prefix = (path_prefix or settings.vault_kv_path_prefix).strip("/")
+        self._ref_prefix = ref_prefix or REF_PREFIX
 
     def _headers(self) -> dict[str, str]:
         if not self._token:
@@ -77,10 +79,10 @@ class VaultSecretStore:
                 status=502,
                 detail=f"vault put HTTP {res.status_code}",
             )
-        return f"{REF_PREFIX}{key_id}"
+        return f"{self._ref_prefix}{key_id}"
 
     def get(self, secret_ref: str) -> str:
-        if not secret_ref.startswith(REF_PREFIX):
+        if not secret_ref.startswith(self._ref_prefix):
             raise AppError(
                 code="SECRET_BACKEND_UNSUPPORTED",
                 title="Secret backend unsupported",
@@ -94,7 +96,7 @@ class VaultSecretStore:
                 status=500,
                 detail="VAULT_ADDR not configured",
             )
-        key_id = secret_ref.removeprefix(REF_PREFIX)
+        key_id = secret_ref.removeprefix(self._ref_prefix)
         url = self._data_url(key_id)
         try:
             res = httpx.get(url, headers=self._headers(), timeout=15.0)
@@ -132,9 +134,9 @@ class VaultSecretStore:
         return value
 
     def delete(self, secret_ref: str) -> None:
-        if not secret_ref.startswith(REF_PREFIX) or not self._addr:
+        if not secret_ref.startswith(self._ref_prefix) or not self._addr:
             return
-        key_id = secret_ref.removeprefix(REF_PREFIX)
+        key_id = secret_ref.removeprefix(self._ref_prefix)
         safe = key_id.replace("/", "_").replace("..", "_")
         # KV v2 metadata delete
         url = f"{self._addr}/v1/{self._mount}/metadata/{self._path_prefix}/{safe}"

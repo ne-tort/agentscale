@@ -267,6 +267,30 @@ class ProdavanApi {
     }
   }
 
+  Future<Map<String, dynamic>> uploadCabinetModuleSecret({
+    required String cabinetId,
+    required String moduleId,
+    required String secret,
+    String? label,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await AuthHttp.post(
+        _uri('/cabinets/$cabinetId/modules/$moduleId/secrets/upload'),
+        body: jsonEncode({
+          'secret': secret,
+          if (label != null && label.isNotEmpty) 'label': label,
+        }),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
   Future<Map<String, dynamic>> uploadCabinetContent({
     required String cabinetId,
     required String filename,

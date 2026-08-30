@@ -2164,4 +2164,18 @@ class AppLocalizationsRu extends AppLocalizations {
   String settingsRefreshMinutes(String n) {
     return '$n мин';
   }
+
+  @override
+  String metaSecretConfigured(String prefix) {
+    return 'Секрет настроен: $prefix';
+  }
+
+  @override
+  String get metaSecretEnter => 'Введите секрет';
+
+  @override
+  String get metaSecretReplace => 'Заменить секрет';
+
+  @override
+  String get metaSecretSave => 'Сохранить секрет';
 }

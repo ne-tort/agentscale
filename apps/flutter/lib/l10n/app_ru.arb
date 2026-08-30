@@ -1195,5 +1195,16 @@
         "type": "String"
       }
     }
-  }
+  },
+  "metaSecretConfigured": "Секрет настроен: {prefix}",
+  "@metaSecretConfigured": {
+    "placeholders": {
+      "prefix": {
+        "type": "String"
+      }
+    }
+  },
+  "metaSecretEnter": "Введите секрет",
+  "metaSecretReplace": "Заменить секрет",
+  "metaSecretSave": "Сохранить секрет"
 }

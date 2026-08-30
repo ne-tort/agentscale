@@ -125,6 +125,7 @@ class _CabinetModuleRuntimePageState extends State<CabinetModuleRuntimePage> {
 
     return ModuleRuntimeScope(
       cabinetId: widget.cabinetId,
+      moduleId: widget.moduleId,
       api: workContext.api,
       child: AppScaffold(
         title: Row(

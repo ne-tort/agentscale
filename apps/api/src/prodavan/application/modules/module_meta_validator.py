@@ -11,7 +11,7 @@ _SLUG_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _ROW_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
 
 COLUMN_TYPES = frozenset(
-    {"text", "number", "bool", "datetime", "json", "enum", "ref", "file_ref"}
+    {"text", "number", "bool", "datetime", "json", "enum", "ref", "file_ref", "secret_ref"}
 )
 VIEW_KINDS = frozenset({"collection", "form", "hub", "detail", "board", "profile_hub"})
 SHELL_NAV_CONTOURS = frozenset({"admin", "company", "employee", "cabinet"})

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from pydantic import BaseModel, Field
 
 from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
+from prodavan.application.cabinets.cabinet_module_secret_service import CabinetModuleSecretService
 from prodavan.application.cabinets.cabinet_module_service import CabinetModuleService
 from prodavan.application.cabinets.instance_service import CabinetInstanceService
 from prodavan.application.content.cabinet_upload_service import CabinetContentUploadService
@@ -48,6 +49,13 @@ class ActionInvokeBody(BaseModel):
     model_config = {"extra": "forbid"}
 
     row_id: str | None = None
+
+
+class SecretUploadBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    secret: str = Field(min_length=1, max_length=8192)
+    label: str | None = Field(default=None, max_length=200)
 
 
 @router.post("")
@@ -308,6 +316,25 @@ async def delete_module_data_row(
         module_id=module_id,
         table_slug=table_slug,
         row_id=row_id,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.post("/{cabinet_id}/modules/{module_id}/secrets/upload")
+async def upload_module_secret(
+    cabinet_id: str,
+    module_id: str,
+    body: SecretUploadBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+) -> dict:
+    return await CabinetModuleSecretService(session).upload_secret(
+        cabinet_id=cabinet_id,
+        module_id=module_id,
+        secret=body.secret,
+        label=body.label,
         principal=principal,
         employee=employee,
     )

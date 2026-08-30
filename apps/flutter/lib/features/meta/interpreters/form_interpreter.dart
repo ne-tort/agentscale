@@ -6,6 +6,7 @@ import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
+import 'package:prodavan/features/meta/widgets/secret_upload_field.dart';
 import 'package:prodavan/features/meta/widgets/markdown_editor_field.dart';
 import 'package:prodavan/features/meta/widgets/project_multiselect_field.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
@@ -176,6 +177,21 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         label: label,
         value: value,
         cabinetId: scope.cabinetId,
+        api: scope.api,
+        readOnly: widget.readOnly,
+        onChanged: (ref) => _persist(name, ref),
+      );
+    }
+    if (widgetKind == 'secret_upload' || type == 'secret_ref') {
+      final scope = ModuleRuntimeScope.maybeOf(context);
+      if (scope == null) {
+        return ListTile(title: Text(label), subtitle: const Text('secret (preview only)'));
+      }
+      return SecretUploadField(
+        label: label,
+        value: value,
+        cabinetId: scope.cabinetId,
+        moduleId: scope.moduleId,
         api: scope.api,
         readOnly: widget.readOnly,
         onChanged: (ref) => _persist(name, ref),

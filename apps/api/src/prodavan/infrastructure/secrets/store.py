@@ -6,6 +6,15 @@ from typing import Protocol
 
 from prodavan.config.settings import settings
 from prodavan.domain.errors import AppError
+from prodavan.infrastructure.secrets.cabinet_secret_store import (
+    FILE_PREFIX as CABINET_FILE_PREFIX,
+)
+from prodavan.infrastructure.secrets.cabinet_secret_store import (
+    VAULT_PREFIX as CABINET_VAULT_PREFIX,
+)
+from prodavan.infrastructure.secrets.cabinet_secret_store import (
+    get_cabinet_secret_store,
+)
 from prodavan.infrastructure.secrets.file_store import FileSecretStore
 from prodavan.infrastructure.secrets.vault_store import VaultSecretStore
 
@@ -38,6 +47,8 @@ class RoutingSecretStore:
         return self._file.put(key_id, secret)
 
     def get(self, secret_ref: str) -> str:
+        if secret_ref.startswith(CABINET_VAULT_PREFIX) or secret_ref.startswith(CABINET_FILE_PREFIX):
+            return get_cabinet_secret_store().get(secret_ref)
         if secret_ref.startswith("vault://"):
             if self._vault is None:
                 raise AppError(
@@ -50,6 +61,9 @@ class RoutingSecretStore:
         return self._file.get(secret_ref)
 
     def delete(self, secret_ref: str) -> None:
+        if secret_ref.startswith(CABINET_VAULT_PREFIX) or secret_ref.startswith(CABINET_FILE_PREFIX):
+            get_cabinet_secret_store().delete(secret_ref)
+            return
         if secret_ref.startswith("vault://"):
             if self._vault is not None:
                 self._vault.delete(secret_ref)

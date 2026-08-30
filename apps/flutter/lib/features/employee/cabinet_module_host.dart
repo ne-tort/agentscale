@@ -102,6 +102,7 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
       MaterialPageRoute<void>(
         builder: (ctx) => ModuleRuntimeScope(
           cabinetId: widget.cabinetId,
+          moduleId: widget.entry.moduleId,
           api: workContext.api,
           child: AppScaffold(
             title: Text(pageTitle),
@@ -140,6 +141,7 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
 
     final body = ModuleRuntimeScope(
       cabinetId: widget.cabinetId,
+      moduleId: widget.entry.moduleId,
       api: workContext.api,
       child: ViewInterpreterHost(
         manifest: manifest,

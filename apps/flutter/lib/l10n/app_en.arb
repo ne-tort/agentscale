@@ -1193,5 +1193,16 @@
         "type": "String"
       }
     }
-  }
+  },
+  "metaSecretConfigured": "Secret configured: {prefix}",
+  "@metaSecretConfigured": {
+    "placeholders": {
+      "prefix": {
+        "type": "String"
+      }
+    }
+  },
+  "metaSecretEnter": "Enter secret",
+  "metaSecretReplace": "Replace secret",
+  "metaSecretSave": "Save secret"
 }

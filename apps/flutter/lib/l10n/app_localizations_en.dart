@@ -2156,4 +2156,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String settingsRefreshMinutes(String n) {
     return '$n min';
   }
+
+  @override
+  String metaSecretConfigured(String prefix) {
+    return 'Secret configured: $prefix';
+  }
+
+  @override
+  String get metaSecretEnter => 'Enter secret';
+
+  @override
+  String get metaSecretReplace => 'Replace secret';
+
+  @override
+  String get metaSecretSave => 'Save secret';
 }

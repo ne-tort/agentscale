@@ -81,7 +81,7 @@
 | **P-META-FILE-03** | `format: template` in MaterializeExecutor | **done** (#160) | — |
 | **P-META-FILE-04** | Auto materialize from column `file.materialize` | Manual rules in slug `materialize` | P3 |
 | **P-META-ENV-01** | `container_env` + `container_env_secrets` → pod_spec | **done** (#162, #163) | — |
-| **P-META-VAULT-01** | `secret_ref` column + masked upload UI → Vault | AI keys only (`vault://ai_keys/…`) | P1 |
+| **P-META-VAULT-01** | `secret_ref` column + masked upload UI → Vault | **done** (cabinet upload API + Flutter) | — |
 | **P-META-VAULT-02** | Cabinet-scoped Vault paths + ACL | — | P2 |
 
 ## Бывшие «решения канона» → пересмотр

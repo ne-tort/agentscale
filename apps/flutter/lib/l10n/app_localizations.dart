@@ -3949,6 +3949,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{n} min'**
   String settingsRefreshMinutes(String n);
+
+  /// No description provided for @metaSecretConfigured.
+  ///
+  /// In en, this message translates to:
+  /// **'Secret configured: {prefix}'**
+  String metaSecretConfigured(String prefix);
+
+  /// No description provided for @metaSecretEnter.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter secret'**
+  String get metaSecretEnter;
+
+  /// No description provided for @metaSecretReplace.
+  ///
+  /// In en, this message translates to:
+  /// **'Replace secret'**
+  String get metaSecretReplace;
+
+  /// No description provided for @metaSecretSave.
+  ///
+  /// In en, this message translates to:
+  /// **'Save secret'**
+  String get metaSecretSave;
 }
 
 class _AppLocalizationsDelegate

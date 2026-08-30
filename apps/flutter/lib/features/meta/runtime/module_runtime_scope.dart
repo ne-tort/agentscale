@@ -7,11 +7,13 @@ class ModuleRuntimeScope extends InheritedWidget {
   const ModuleRuntimeScope({
     super.key,
     required this.cabinetId,
+    required this.moduleId,
     required this.api,
     required super.child,
   });
 
   final String cabinetId;
+  final String moduleId;
   final ProdavanApi api;
 
   static ModuleRuntimeScope? maybeOf(BuildContext context) {
@@ -20,6 +22,8 @@ class ModuleRuntimeScope extends InheritedWidget {
 
   @override
   bool updateShouldNotify(ModuleRuntimeScope oldWidget) {
-    return cabinetId != oldWidget.cabinetId || api != oldWidget.api;
+    return cabinetId != oldWidget.cabinetId ||
+        moduleId != oldWidget.moduleId ||
+        api != oldWidget.api;
   }
 }

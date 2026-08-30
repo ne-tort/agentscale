@@ -12,6 +12,7 @@ abstract final class ModuleMetaValidator {
     'enum',
     'ref',
     'file_ref',
+    'secret_ref',
   };
   static const viewKinds = {'collection', 'form', 'hub', 'detail', 'board', 'profile_hub'};
 
