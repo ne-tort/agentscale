@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -20,6 +21,7 @@ from prodavan.infrastructure.keycloak.invite import reset_invite_client
 from prodavan.main import create_app
 from tests.conftest import requires_postgres, sql_backdate_project
 from tests.integration.support import owner_bearer_token
+from tests.unit.test_mcp_package_validator import _zip_with_manifest
 
 
 def _token(*, sub: str, email: str | None = None, platform_admin: bool = False) -> str:
@@ -1628,3 +1630,89 @@ def test_cabinet_and_project_metrics(client: TestClient) -> None:
     assert "module_ids" in mod_body
     assert "items" in mod_body
     assert isinstance(mod_body["items"], list)
+
+
+def _file_ref_from_upload(upload: dict) -> dict:
+    return {
+        "asset_id": upload["asset_id"],
+        "version_id": upload["version_id"],
+        "storage_key": upload["storage_key"],
+        "filename": upload["filename"],
+        "sha256": upload["sha256"],
+    }
+
+
+@requires_postgres
+def test_project_materialize_copy_blob_and_mcp_package(client: TestClient) -> None:
+    """L07: mod_files copy_blob + mod_mcp mcp_package land in workspace on launch."""
+    _, cabinet_id, owner_tok = _setup_cabinet(client)
+    owner_h = {"Authorization": f"Bearer {owner_tok}"}
+
+    file_payload = b"hello workspace file"
+    file_up = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/content/upload",
+        headers=owner_h,
+        files={"file": ("hello.txt", file_payload, "text/plain")},
+    )
+    assert file_up.status_code == 200, file_up.text
+    file_ref = _file_ref_from_upload(file_up.json())
+
+    file_row = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/modules/mod_files/data/files",
+        headers=owner_h,
+        json={
+            "body": {
+                "name": "Hello",
+                "target_path": "assets/hello.txt",
+                "file_ref": file_ref,
+            }
+        },
+    )
+    assert file_row.status_code == 200, file_row.text
+
+    mcp_zip = _zip_with_manifest("demo")
+    mcp_up = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/content/upload",
+        headers=owner_h,
+        files={"file": ("demo.zip", mcp_zip, "application/zip")},
+    )
+    assert mcp_up.status_code == 200, mcp_up.text
+    mcp_ref = _file_ref_from_upload(mcp_up.json())
+
+    mcp_row = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/modules/mod_mcp/data/mcp_packages",
+        headers=owner_h,
+        json={
+            "body": {
+                "name": "demo",
+                "version": "1.0.0",
+                "enabled": True,
+                "file_ref": mcp_ref,
+            }
+        },
+    )
+    assert mcp_row.status_code == 200, mcp_row.text
+
+    created = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "Materialize Files MCP"},
+    )
+    assert created.status_code == 201, created.text
+    project_id = created.json()["id"]
+
+    launched = _configure_and_launch(client, owner_h, project_id)
+    ws_root = Path(launched["materialize"]["workspace_root"])
+    assert ws_root.is_dir()
+
+    copied = ws_root / "assets" / "hello.txt"
+    assert copied.is_file(), list(ws_root.rglob("*"))
+    assert copied.read_bytes() == file_payload
+
+    manifest = ws_root / "packages" / "demo" / "manifest.json"
+    assert manifest.is_file(), list((ws_root / "packages").rglob("*"))
+    assert json.loads(manifest.read_text(encoding="utf-8"))["name"] == "demo"
+
+    mcp_cfg = json.loads((ws_root / "mcp.json").read_text(encoding="utf-8"))
+    pkg_names = {p.get("name") for p in mcp_cfg.get("packages") or []}
+    assert "demo" in pkg_names
