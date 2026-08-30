@@ -19,6 +19,12 @@ SHELL_NAV_PLACEMENTS = frozenset({"rail", "management", "none"})
 
 _ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _LIFECYCLE_WHEN = frozenset({"project.launch", "project.sync", "project.resumed", "project.reload"})
+_MATERIALIZE_WHEN = frozenset({"project.created", "project.resumed", "project.sync"})
+_MATERIALIZE_SOURCE_TYPES = frozenset({"row", "rows", "static", "meta_document"})
+_MATERIALIZE_FORMATS = frozenset(
+    {"raw", "json_rows", "json_single", "template", "copy_blob", "mcp_package"}
+)
+_BLOB_MATERIALIZE_FORMATS = frozenset({"copy_blob", "mcp_package"})
 
 ARRAY_DOCUMENT_SLUGS = frozenset(
     {
@@ -86,6 +92,7 @@ def manifest_from_slug_map(slug_map: dict[str, Any]) -> dict[str, list[dict[str,
 
 def validate_manifest(manifest: dict[str, list[dict[str, Any]]]) -> None:
     table_slugs: set[str] = set()
+    column_names_by_table: dict[str, set[str]] = {}
     for table in manifest["tables"]:
         slug = table.get("slug")
         if not isinstance(slug, str) or not _SLUG_RE.match(slug):
@@ -104,6 +111,7 @@ def validate_manifest(manifest: dict[str, list[dict[str, Any]]]) -> None:
         col_type = column.get("type")
         if not isinstance(col_type, str) or col_type not in COLUMN_TYPES:
             raise _meta_error(f"invalid column type: {col_type!r}")
+        column_names_by_table.setdefault(table_slug, set()).add(name)
 
     view_slugs: set[str] = set()
     for view in manifest["views"]:
@@ -154,6 +162,88 @@ def validate_manifest(manifest: dict[str, list[dict[str, Any]]]) -> None:
         body = item.get("body")
         if body is not None and not isinstance(body, dict):
             raise _meta_error(f"seed_rows body must be an object for {row_id}")
+
+    _validate_materialize_rules(manifest["materialize"], table_slugs, column_names_by_table)
+
+
+def _validate_workspace_path(path: str, *, rule_label: str) -> None:
+    if not path.strip():
+        raise _meta_error(f"{rule_label} target.workspace_path required")
+    if path.startswith(("/", "\\")) or ".." in path.replace("\\", "/"):
+        raise _meta_error(f"{rule_label} target.workspace_path must be relative: {path!r}")
+
+
+def _validate_materialize_rules(
+    rules: list[dict[str, Any]],
+    table_slugs: set[str],
+    column_names_by_table: dict[str, set[str]],
+) -> None:
+    rule_ids: set[str] = set()
+    for idx, rule in enumerate(rules):
+        label = f"materialize[{idx}]"
+        rid = rule.get("id")
+        if rid is not None:
+            if not isinstance(rid, str) or not rid.strip():
+                raise _meta_error(f"{label} id must be a non-empty string")
+            if rid in rule_ids:
+                raise _meta_error(f"duplicate materialize rule id: {rid}")
+            rule_ids.add(rid)
+            label = f"materialize[{rid}]"
+
+        when = rule.get("when")
+        if when is not None:
+            if not isinstance(when, list) or not when:
+                raise _meta_error(f"{label} when must be a non-empty array")
+            for event in when:
+                if not isinstance(event, str) or event not in _MATERIALIZE_WHEN:
+                    raise _meta_error(f"{label} invalid when event: {event!r}")
+
+        priority = rule.get("priority")
+        if priority is not None and not isinstance(priority, int):
+            raise _meta_error(f"{label} priority must be an integer")
+
+        source = rule.get("source")
+        if not isinstance(source, dict):
+            raise _meta_error(f"{label} source must be an object")
+        source_type = source.get("type") or "row"
+        if not isinstance(source_type, str) or source_type not in _MATERIALIZE_SOURCE_TYPES:
+            raise _meta_error(f"{label} invalid source.type: {source_type!r}")
+
+        table_slug = source.get("table_slug")
+        if source_type in {"row", "rows"}:
+            if not isinstance(table_slug, str) or table_slug not in table_slugs:
+                raise _meta_error(f"{label} source references unknown table: {table_slug!r}")
+        elif source_type == "meta_document":
+            doc_slug = source.get("slug")
+            if not isinstance(doc_slug, str) or not doc_slug.strip():
+                raise _meta_error(f"{label} meta_document source requires slug")
+        elif source_type == "static":
+            if source.get("value") is None and source.get("text") is None:
+                raise _meta_error(f"{label} static source requires value or text")
+
+        target = rule.get("target")
+        if not isinstance(target, dict):
+            raise _meta_error(f"{label} target must be an object")
+        ws_path = target.get("workspace_path")
+        if not isinstance(ws_path, str):
+            raise _meta_error(f"{label} target.workspace_path must be a string")
+        _validate_workspace_path(ws_path, rule_label=label)
+
+        fmt = target.get("format") or "raw"
+        if not isinstance(fmt, str) or fmt not in _MATERIALIZE_FORMATS:
+            raise _meta_error(f"{label} invalid target.format: {fmt!r}")
+
+        if fmt == "template" and not isinstance(target.get("template"), str):
+            raise _meta_error(f"{label} template format requires target.template string")
+
+        if fmt in _BLOB_MATERIALIZE_FORMATS:
+            field = target.get("field")
+            if not isinstance(field, str) or not field.strip():
+                raise _meta_error(f"{label} target.field required for format {fmt}")
+            if source_type in {"row", "rows"} and isinstance(table_slug, str):
+                cols = column_names_by_table.get(table_slug, set())
+                if field not in cols:
+                    raise _meta_error(f"{label} target.field references unknown column: {field!r}")
 
 
 def validate_merged_slug_map(slug_map: dict[str, Any]) -> None:

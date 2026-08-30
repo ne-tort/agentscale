@@ -129,3 +129,60 @@ def test_container_env_invalid_env_name() -> None:
     with pytest.raises(AppError) as exc:
         validate_merged_slug_map(slug_map)
     assert "invalid env_name" in (exc.value.detail or "")
+
+
+def test_valid_materialize_copy_blob_rule() -> None:
+    slug_map = _suppliers_slug_map()
+    slug_map["columns"].append(
+        {"table_slug": "suppliers", "name": "attachment", "type": "file_ref"}
+    )
+    slug_map["materialize"] = [
+        {
+            "id": "suppliers_file",
+            "when": ["project.created", "project.sync"],
+            "source": {"type": "rows", "table_slug": "suppliers"},
+            "target": {
+                "workspace_path": "{{name}}.bin",
+                "format": "copy_blob",
+                "field": "attachment",
+            },
+        }
+    ]
+    validate_merged_slug_map(slug_map)
+
+
+def test_materialize_unknown_table() -> None:
+    slug_map = _suppliers_slug_map()
+    slug_map["materialize"] = [
+        {
+            "source": {"type": "rows", "table_slug": "nope"},
+            "target": {"workspace_path": "out.txt", "format": "raw"},
+        }
+    ]
+    with pytest.raises(AppError) as exc:
+        validate_merged_slug_map(slug_map)
+    assert "unknown table" in (exc.value.detail or "")
+
+
+def test_materialize_copy_blob_requires_field() -> None:
+    slug_map = _suppliers_slug_map()
+    slug_map["materialize"] = [
+        {
+            "source": {"type": "rows", "table_slug": "suppliers"},
+            "target": {"workspace_path": "out.bin", "format": "copy_blob"},
+        }
+    ]
+    with pytest.raises(AppError) as exc:
+        validate_merged_slug_map(slug_map)
+    assert "target.field" in (exc.value.detail or "")
+
+
+def test_product_module_seeds_pass_meta_validation() -> None:
+    from prodavan.application.platform.product_module_seeds import (
+        mod_files_meta,
+        mod_mcp_meta,
+        mod_prompts_meta,
+    )
+
+    for meta in (mod_prompts_meta(), mod_mcp_meta(), mod_files_meta()):
+        validate_merged_slug_map(meta)

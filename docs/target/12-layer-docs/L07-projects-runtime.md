@@ -145,7 +145,8 @@ apps/api/.env.example
 | Celery rematerialize → hydrate bump | **done** | `rematerialize_background` + job lock; `sync_desired` force-rehydrate on `rematerialize`/`sync` |
 | Module data change → project rematerialize | **done** | `schedule_cabinet_rematerialize` on mod_files/mod_mcp row CRUD; Celery or inline fallback |
 | MCP zip + file_ref materialize E2E | **done** | integration `test_project_materialize_copy_blob_and_mcp_package` |
-| Meta syntax validator vs materialize rules | **gap** | UI validator не проверяет materialize-контракт |
+| Meta syntax validator vs materialize rules | **done** | `module_meta_validator` + Flutter parity; product seeds validated |
+| Kafka rematerialize event bus | **gap** | Celery enqueue direct; event bus cutover deferred (L00 C-JOBS) |
 | «Обновить проект» (`POST /sync`) UI loading | **done** | spinner на management page |
 
 ## Проверка

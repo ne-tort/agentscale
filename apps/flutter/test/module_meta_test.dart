@@ -255,6 +255,67 @@ void main() {
       final err = ModuleMetaValidator.validate(json);
       expect(err, contains('nav.contour'));
     });
+
+    test('accepts valid materialize copy_blob rule', () {
+      final json = Map<String, dynamic>.from(suppliersManifestJson());
+      json['columns'] = [
+        ...List<Map<String, dynamic>>.from(json['columns'] as List),
+        {
+          'table_slug': 'suppliers',
+          'name': 'attachment',
+          'type': 'file_ref',
+        },
+      ];
+      json['materialize'] = [
+        {
+          'id': 'files_to_workspace',
+          'when': ['project.created', 'project.sync'],
+          'source': {'type': 'rows', 'table_slug': 'suppliers'},
+          'target': {
+            'workspace_path': '{{name}}.bin',
+            'format': 'copy_blob',
+            'field': 'attachment',
+          },
+        },
+      ];
+      expect(ModuleMetaValidator.validate(json), isNull);
+    });
+
+    test('rejects materialize unknown table', () {
+      final json = Map<String, dynamic>.from(suppliersManifestJson());
+      json['materialize'] = [
+        {
+          'source': {'type': 'rows', 'table_slug': 'missing'},
+          'target': {'workspace_path': 'out.txt', 'format': 'raw'},
+        },
+      ];
+      final err = ModuleMetaValidator.validate(json);
+      expect(err, contains('unknown table'));
+    });
+
+    test('rejects materialize copy_blob without field', () {
+      final json = Map<String, dynamic>.from(suppliersManifestJson());
+      json['materialize'] = [
+        {
+          'source': {'type': 'rows', 'table_slug': 'suppliers'},
+          'target': {'workspace_path': 'out.bin', 'format': 'copy_blob'},
+        },
+      ];
+      final err = ModuleMetaValidator.validate(json);
+      expect(err, contains('target.field'));
+    });
+
+    test('rejects absolute workspace_path', () {
+      final json = Map<String, dynamic>.from(suppliersManifestJson());
+      json['materialize'] = [
+        {
+          'source': {'type': 'row', 'table_slug': 'suppliers', 'row_id': 'x'},
+          'target': {'workspace_path': '/etc/passwd', 'format': 'raw'},
+        },
+      ];
+      final err = ModuleMetaValidator.validate(json);
+      expect(err, contains('workspace_path'));
+    });
   });
 
   group('ModuleMetaManifest', () {
