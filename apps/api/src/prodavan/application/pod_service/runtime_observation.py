@@ -363,7 +363,7 @@ class RuntimeObservationService:
             )
 
         if phase == "Running" and ready:
-            if metrics_body is None and runtime_ref and not metrics_degraded:
+            if metrics_body is None and runtime_ref:
                 metrics_port = build_pod_metrics()
                 if metrics_port is not None:
                     try:
@@ -479,9 +479,12 @@ class RuntimeObservationService:
         metrics_body: dict[str, Any] | None,
         cached: dict[str, Any] | None,
     ) -> bool:
-        if cached and cached.get("degraded"):
+        if metrics_body:
+            source = metrics_body
+        elif cached and cached.get("degraded"):
             return False
-        source = metrics_body or cached
+        else:
+            source = cached
         if not source:
             return False
         cpu = source.get("cpu_millicores")

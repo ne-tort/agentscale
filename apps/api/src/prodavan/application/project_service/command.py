@@ -648,28 +648,9 @@ class ProjectCommand:
             allow_paused=True,
         )
         from prodavan.application.pod_service.query import PodQuery
-        from prodavan.application.pod_service.runtime_observation import (
-            RuntimeObservationService,
-            project_is_recoverable,
-        )
 
         await PodQuery(self._session).runtime_view(project_id)
         await self._session.refresh(row)
-        pod_row = await RuntimeObservationService(self._session)._get_live_pod(project_id)
-        if pod_row is None:
-            pod_row = await PodQuery(self._session)._get_failed_row(project_id)
-        obs = (
-            await RuntimeObservationService(self._session).observe(project=row, pod=pod_row)
-            if pod_row is not None
-            else None
-        )
-        if not project_is_recoverable(row, pod_row, obs):
-            raise AppError(
-                code="VALIDATION_ERROR",
-                title="Validation Error",
-                status=422,
-                detail="project is not in error state",
-            )
         await rate_limit_enforce(
             cache_key("pod-reload", project_id, "1m"),
             limit=1,
@@ -682,7 +663,6 @@ class ProjectCommand:
             window_sec=1800,
             detail="pod reload rate limit exceeded (3 per 30 minutes)",
         )
-        await self._pods.provision_for_project(row.id, principal=principal, start=False)
         try:
             await self._pods.sync_desired(
                 row.id,

@@ -234,6 +234,48 @@ async def test_observe_k8s_running_with_fresh_metrics() -> None:
 
 
 @pytest.mark.asyncio
+async def test_observe_k8s_live_fetch_clears_cached_degraded() -> None:
+    session = AsyncMock()
+    svc = RuntimeObservationService(session)
+    project = _project()
+    pod = _pod(status=PodStatus.RUNNING)
+    svc._metrics_query.get_project_runtime_metrics = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "degraded": True,
+            "degraded_reason": "metrics-server unavailable",
+            "phase": "Running",
+            "ready": True,
+        }
+    )
+    metrics_port = AsyncMock()
+    metrics_port.get_pod_metrics = AsyncMock(
+        return_value={"cpu_millicores": 80, "memory_bytes": 8192}
+    )
+    cache_live = AsyncMock()
+    svc_sampler = MagicMock()
+    svc_sampler.cache_live_metrics = cache_live
+
+    with patch("prodavan.application.pod_service.runtime_observation.settings") as mock_settings:
+        mock_settings.pod_runtime_mode = "k8s"
+        mock_settings.pod_provisioning_timeout_sec = 300
+        mock_settings.pod_metrics_grace_sec = 90
+        mock_settings.metrics_sample_ttl_sec = 900
+        with patch(
+            "prodavan.application.pod_service.runtime_observation.build_pod_metrics",
+            return_value=metrics_port,
+        ):
+            with patch(
+                "prodavan.application.pod_service.runtime_observation.PodMetricsSampler",
+                return_value=svc_sampler,
+            ):
+                out = await svc.observe(project=project, pod=pod)
+
+    assert out["observed_state"] == ObservedState.RUNNING.value
+    metrics_port.get_pod_metrics.assert_awaited_once()
+    cache_live.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_promote_provisioning_to_running() -> None:
     session = MagicMock()
     svc = RuntimeObservationService(session)

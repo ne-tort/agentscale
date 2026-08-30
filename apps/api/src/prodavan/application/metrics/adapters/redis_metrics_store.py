@@ -33,6 +33,17 @@ def _ttl_sec() -> int:
 
 
 class RedisMetricsStore:
+    async def clear_project_latest(self, project_id: str) -> None:
+        from prodavan.core.infra.redis_manager import get_redis_manager
+
+        mgr = get_redis_manager()
+        if mgr is None or not mgr.enabled:
+            return
+        try:
+            await mgr.client.delete(_latest_key(project_id))
+        except Exception:
+            logger.exception("metrics redis delete failed project=%s", project_id)
+
     async def put_project_latest(self, project_id: str, sample: dict[str, Any]) -> None:
         await self._set_json(_latest_key(project_id), sample, ex=_ttl_sec())
 

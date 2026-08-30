@@ -124,26 +124,29 @@ async def test_sync_desired_reload_recovers_project_from_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reload_project_requires_error_status() -> None:
+async def test_reload_project_allowed_when_healthy() -> None:
     session = AsyncMock()
     row = _project(status=ProjectStatus.ACTIVE)
     with patch("prodavan.application.pod_service.command.build_pod_runtime", return_value=MagicMock()):
         cmd = ProjectCommand(session)
     cmd._access.require_access = AsyncMock(return_value=row)
+    cmd._pods.sync_desired = AsyncMock()
+    cmd._project_public = AsyncMock(return_value={"id": row.id, "status": ProjectStatus.ACTIVE})
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock()
 
     with patch("prodavan.application.pod_service.query.PodQuery") as pq_cls:
         pq = pq_cls.return_value
         pq.runtime_view = AsyncMock(return_value={})
-        pq._get_failed_row = AsyncMock(return_value=None)
         with patch(
             "prodavan.application.pod_service.runtime_observation.RuntimeObservationService"
         ) as obs_cls:
-            obs_cls.return_value._get_live_pod = AsyncMock(return_value=None)
-            obs_cls.return_value.observe = AsyncMock(return_value={"observed_state": "running"})
-            with pytest.raises(AppError) as exc:
+            obs_cls.return_value.wait_for_running = AsyncMock()
+            with patch("prodavan.core.infra.cache.rate_limit_enforce", new_callable=AsyncMock):
                 await cmd.reload_project(project_id=row.id, principal=_principal(), employee=None)
 
-    assert exc.value.status == 422
+    cmd._pods.sync_desired.assert_awaited_once()
+    assert cmd._pods.sync_desired.await_args.kwargs["reason"] == "reload"
 
 
 @pytest.mark.asyncio
@@ -164,7 +167,6 @@ async def test_reload_project_allowed_when_active_container_degraded() -> None:
     with patch("prodavan.application.pod_service.command.build_pod_runtime", return_value=MagicMock()):
         cmd = ProjectCommand(session)
     cmd._access.require_access = AsyncMock(return_value=row)
-    cmd._pods.provision_for_project = AsyncMock()
     cmd._pods.sync_desired = AsyncMock()
     cmd._project_public = AsyncMock(return_value={"id": row.id, "status": ProjectStatus.ACTIVE})
     session.commit = AsyncMock()

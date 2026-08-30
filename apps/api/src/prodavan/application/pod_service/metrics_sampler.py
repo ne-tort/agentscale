@@ -144,6 +144,8 @@ class PodMetricsSampler:
             metrics = await metrics_port.get_pod_metrics(runtime_ref=runtime_ref)
         except Exception:
             logger.exception("pod metrics sampler failed runtime_ref=%s", runtime_ref)
+            if self._within_metrics_grace(pod):
+                return "skipped"
             await self._emit_degraded(
                 pod=pod,
                 project=project,
@@ -152,6 +154,8 @@ class PodMetricsSampler:
             return "degraded"
 
         if metrics is None:
+            if self._within_metrics_grace(pod):
+                return "skipped"
             await self._emit_degraded(
                 pod=pod,
                 project=project,
@@ -245,6 +249,18 @@ class PodMetricsSampler:
                 payload=body,
                 occurred_at=ts,
             )
+
+    @staticmethod
+    def _within_metrics_grace(pod: ProjectPodRow) -> bool:
+        from datetime import UTC, datetime
+
+        baseline = pod.last_started_at or pod.created_at or pod.updated_at
+        if baseline is None:
+            return True
+        if baseline.tzinfo is None:
+            baseline = baseline.replace(tzinfo=UTC)
+        age = (datetime.now(UTC) - baseline).total_seconds()
+        return age <= settings.pod_metrics_grace_sec
 
     async def _emit_degraded(
         self,

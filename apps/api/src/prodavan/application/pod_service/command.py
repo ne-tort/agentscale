@@ -73,6 +73,9 @@ class PodCommand:
         if pod is None:
             pod = await self._ensure_live_row(project, desired=desired)
 
+        if reason == "reload" and desired == PodDesiredState.RUNNING:
+            await self._prepare_reload(project, pod)
+
         if pod.desired_state == desired.value:
             if self._status_matches_desired(pod, desired):
                 return
@@ -187,15 +190,17 @@ class PodCommand:
         pod = await self._get_live_row(project_id)
         if pod is None:
             desired = PodDesiredState.RUNNING if start else PodDesiredState.ABSENT
-            pod = await self._create_row(project, desired=desired)
-            await self._events.emit(
-                event_type="pod.provisioned",
-                company_id=project.company_id,
-                project_id=project.id,
-                cabinet_id=project.cabinet_id,
-                principal=principal,
-                pod_id=pod.id,
-            )
+            had_failed = await self._get_failed_row(project_id) is not None
+            pod = await self._ensure_live_row(project, desired=desired)
+            if not had_failed:
+                await self._events.emit(
+                    event_type="pod.provisioned",
+                    company_id=project.company_id,
+                    project_id=project.id,
+                    cabinet_id=project.cabinet_id,
+                    principal=principal,
+                    pod_id=pod.id,
+                )
 
         if start:
             await self.sync_desired(
@@ -366,6 +371,23 @@ class PodCommand:
             company_id=project.company_id,
         )
         return pod
+
+    async def _prepare_reload(self, project: ProjectRow, pod: ProjectPodRow) -> None:
+        """Terminate live k8s workload and reset pod row so reload always recreates."""
+        ref = pod.runtime_ref or project.container_ref
+        if ref:
+            try:
+                await self._runtime.terminate(runtime_ref=ref)
+            except Exception:
+                logger.exception("reload terminate failed runtime_ref=%s", ref)
+        pod.status = PodStatus.PENDING
+        pod.last_error = None
+        pod.desired_state = PodDesiredState.RUNNING.value
+        pod.last_started_at = None
+        await self._session.flush()
+        from prodavan.application.metrics.adapters.redis_metrics_store import build_metrics_store
+
+        await build_metrics_store().clear_project_latest(project.id)
 
     async def _apply_running(
         self, project: ProjectRow, pod: ProjectPodRow, *, principal: Principal

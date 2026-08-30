@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -285,3 +285,82 @@ async def test_lazy_start_emits_project_started() -> None:
 
     project_events.emit.assert_awaited_once()
     assert project_events.emit.await_args.kwargs["event_type"] == "project.started"
+
+
+@pytest.mark.asyncio
+async def test_sync_desired_reload_restarts_running_pod() -> None:
+    session = AsyncMock()
+    project = _project()
+    pod = ProjectPodRow(
+        id="pod_abc123",
+        project_id=project.id,
+        workspace_key=project.workspace_key,
+        status=PodStatus.RUNNING,
+        desired_state=PodDesiredState.RUNNING.value,
+        runtime_ref="object-ws:wk_demo",
+        hydrate_generation=0,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    session.get = AsyncMock(return_value=project)
+
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = pod
+    session.execute = AsyncMock(return_value=execute_result)
+
+    runtime = AsyncMock()
+    hydrate = AsyncMock()
+    events = AsyncMock(spec=PodLifecycleEmitter)
+    store = AsyncMock()
+    store.clear_project_latest = AsyncMock()
+
+    cmd = PodCommand(session, runtime=runtime, events=events, hydrate=hydrate)
+    cmd._project_events = AsyncMock()
+
+    with patch(
+        "prodavan.application.metrics.adapters.redis_metrics_store.build_metrics_store",
+        return_value=store,
+    ):
+        await cmd.sync_desired(
+            project.id,
+            PodDesiredState.RUNNING,
+            principal=_principal(),
+            reason="reload",
+        )
+
+    runtime.terminate.assert_awaited_once_with(runtime_ref="object-ws:wk_demo")
+    runtime.ensure_running.assert_awaited_once()
+    store.clear_project_latest.assert_awaited_once_with(project.id)
+    assert pod.status == PodStatus.PROVISIONING
+    assert events.emit.await_args.kwargs["event_type"] == "pod.resumed"
+
+
+@pytest.mark.asyncio
+async def test_provision_reuses_failed_row() -> None:
+    session = AsyncMock()
+    project = _project()
+    failed = ProjectPodRow(
+        id="pod_failed",
+        project_id=project.id,
+        workspace_key=project.workspace_key,
+        status=PodStatus.FAILED,
+        desired_state=PodDesiredState.ABSENT.value,
+        runtime_ref="object-ws:wk_demo",
+        last_error="metrics-server unavailable",
+        hydrate_generation=0,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    session.get = AsyncMock(return_value=project)
+
+    events = AsyncMock(spec=PodLifecycleEmitter)
+    cmd = PodCommand(session, runtime=AsyncMock(), events=events)
+    cmd._get_live_row = AsyncMock(return_value=None)
+    cmd._get_failed_row = AsyncMock(return_value=failed)
+
+    out = await cmd.provision_for_project(project.id, principal=_principal(), start=False)
+
+    assert out["id"] == failed.id
+    assert failed.status == PodStatus.PENDING
+    assert failed.last_error is None
+    events.emit.assert_not_awaited()
