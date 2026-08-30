@@ -12,17 +12,17 @@
 
 | ID | Канон | Сейчас в коде | Проблема |
 |----|-------|---------------|----------|
-| **P-CO-01** | Company shell = **локальный Admin** (сотрудники, контейнеры, keys, кабинеты) | 3 tabs: metrics / employees / cabinets RO; нет Keys/Containers | Тонкий org-shell ≠ Admin parity ([03](03-companies/)) |
-| **P-CO-02** | Company **CRUD своих** AI keys (SDK/API) + видит Admin-bound **RO** | API `/companies/{id}/ai-keys` + `owner_scope` (**partial**); Flutter tab — open | Backend link live; UI later |
-| **P-CO-03** | Company list/manage containers **своих** сотрудников | Только Admin `/admin/containers` | Нет company-scoped containers |
-| **P-CO-04** | Cabinets от Admin → Company **RO**; later local CRUD | **Admin CRUD + N:M company grants**; Company RO + employee assign | Company assign UI shipped; Verify Dev |
+| **P-CO-01** | Company shell = **локальный Admin** (сотрудники, контейнеры, keys, кабинеты) | **CompanyShell** wide rail: Overview + Employees + AI Keys + Containers + Cabinets + Modules (+ catalog modules); narrow Management hub | **partial** — parity shipped; polish / E2E navigation — hole ([03](03-companies/)) |
+| **P-CO-02** | Company **CRUD своих** AI keys (SDK/API) + видит Admin-bound **RO** | API `/companies/{id}/ai-keys` + `owner_scope`; Flutter list/detail/rotate/scope-bindings | **done** |
+| **P-CO-03** | Company list/manage containers **своих** сотрудников | API `/companies/{id}/containers` pause/resume/delete; Flutter list + detail | **done** |
+| **P-CO-04** | Cabinets от Admin → Company **RO**; later local CRUD | Admin CRUD + grants; Company local cabinet CRUD + employee/module assign UI | **partial** — local CRUD + assign shipped; platform-assigned cabinets RO |
 | **P-ID-01** | **Company** имеет **Keycloak-креды** | `companies.keycloak_sub` via Auth Kafka `auth.user.register` + bind; soft-delete `deleted_at` + async cascade | Org principal async; zombies in admin metrics |
 | **P-CAS-02** | Company soft-delete → soft children (no wipe) | Soft-delete + Celery cascade; wipe only on purge | Align cascade to [00-lifecycle](00-lifecycle.md) |
 | **P-LC-01** | Unified pause / soft_delete / purge + restore | Partial (company deleted_at; project pause/delete wipe) | Recycle API; project soft without wipe |
 | **P-REL-01** | Central Relations BC: query + Kafka grant/revoke | Facade `RelationsQuery`/`RelationsCommand` + `prodavan.relation.events`; ACL reads migrated; physical consolidate later | Soft-status unify; AI/module writes via RelationsCommand |
 | **P-ID-02** | Admin / Company / Employee — три KC-сущности | Realm roles + `prodavan-keycloak-init` bootstrap; API resolution live | IdP brokers / SMTP invite polish |
-| **P-CAB-01** | Company **назначает** Employee ↔ Cabinet | **Grants + assignment API + Flutter** | Verify Dev E2E |
-| **P-CAB-02** | UI кабинета из module meta | Module template + `module_data_rows` API; employee UI = placeholder | Generic meta UI next |
+| **P-CAB-01** | Company **назначает** Employee ↔ Cabinet | Grants + assignment API + Flutter (`company_cabinet_detail_page`, `company_employee_cabinets_page`) | **done** (Verify Dev E2E — optional) |
+| **P-CAB-02** | UI кабинета из module meta | Module template + `module_data_rows` API; cabinet module runtime page + interpreters | Generic meta editor UI — hole |
 | **P-MOD-01** | **Module** catalog + cabinet bind + per-cabinet data | **Admin CRUD + meta + materialize + runtime data API + Flutter** | Physical DDL; meta editor UI |
 | **P-MOD-02** | Meta-table **syntax** spec + interpreters | **done** (#158–#166, live catalog shell merge) | — |
 | **P-MAT-01** | Pod hydrate из meta/MinIO | object-ws; нет Pod; file_ref слаб | Materialize/Pod debt |
@@ -46,8 +46,9 @@
 
 | Тема | Статус |
 |------|--------|
-| Invite employees (Company) | есть (тонкий UI) |
-| Org cabinets list RO | Admin list + company bind (MVP); Company shell RO still employee-sourced |
+| Invite employees (Company) | full-page invite + list/detail |
+| Org cabinets (Company) | local CRUD + employee/module assign; platform-assigned RO |
+| Company AI keys + containers | API + Flutter shell tabs (P-CO-02/03) |
 | Admin keys + containers | есть |
 | Company metrics aggregates | есть |
 
@@ -154,14 +155,15 @@ flowchart TB
 | Agent | Port + adapters in Pod | GLM, OpenClaw |
 | UI core | Primitives | Feature ListTile zoos |
 
-### Волны (ориентир) — сначала Company parity
+### Волны (ориентир) — Company parity largely shipped
 
-1. **P-CO-01..04** + **P-CO-02** model `owner_scope` — Company shell = Admin-like ([03](03-companies/))  
-2. **P-ID-01 / P-ID-02** — Company KC principal  
-3. **P-CAB-01** — Employee↔Cabinet grants  
-4. **P-INF-01 / P-POD-01 / P-MAT-01** — MinIO + Pod  
-5. **P-UNI-01** — универсальная иерархия (после паритета Company)  
-6. Остальное — L04–L08 по [11](11-implementation-plan/)
+1. ~~**P-CO-01..04**~~ → **partial/done** — Company shell Admin-like; E2E navigation polish optional  
+2. **P-ID-01 / P-ID-02** — Company KC principal polish (brokers / invite SMTP)  
+3. ~~**P-CAB-01**~~ → assign UI shipped  
+4. **P-INF-01 / Kafka job cutover** — rematerialize event bus (L07 gap)  
+5. **P-POD-01 / P-MAT-01** — k8s Verify Dev + MinIO SoT holes  
+6. **P-UNI-01** — универсальная иерархия (после паритета Company)  
+7. Остальное — L04–L08 по [11](11-implementation-plan/)
 
 ### Явно не делать
 

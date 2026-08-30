@@ -29,7 +29,7 @@
 | [L01](L01-identity.md) | Identity & entitlements | partial | **7** |
 | [L02](L02-ui-core.md) | UI mobile core | done | **8** |
 | [L03](L03-ai-keys.md) | AI Provider Keys | done | **8** |
-| [L04](L04-admin-company.md) | Admin + Company | not_started | **0** |
+| [L04](L04-admin-company.md) | Admin + Company | doing | **7** |
 | [L05](L05-employee-shell.md) | Employee shell | not_started | **0** |
 | [L06](L06-cabinet-runtime.md) | Cabinet Runtime | done | **8** |
 | [L07](L07-projects-runtime.md) | Projects & container | not_started | **0** |

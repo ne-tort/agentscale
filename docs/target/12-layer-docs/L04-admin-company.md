@@ -7,14 +7,14 @@
 | Quality note | Admin shell + starter catalog + subscription alerts |
 | Plan | [L04](../11-implementation-plan/L04-admin-company.md) |
 | Canon | [01-platform-admin](../01-platform-admin/), [03-companies](../03-companies/) |
-| Last updated | 2026-08-24 — model allowlist UI + enforce; dual-role by sub |
+| Last updated | 2026-08-30 — Company shell Admin parity (P-CO-01..04 subset) |
 | Owners | — |
 
 ---
 
 ## Семантика
 
-Platform Admin — компании, keys (L03), квоты/policy, metrics read models. Company — invite/disable (L01), org-вид кабинетов (metadata only); без static `profile_id` grants.
+Platform Admin — компании, keys (L03), квоты/policy, metrics read models. Company — локальный Admin shell: employees, AI keys, project containers, cabinets (local CRUD + assign), modules; invite/disable (L01); без static `profile_id` grants.
 
 ## Что сделано
 
@@ -26,7 +26,11 @@ Platform Admin — компании, keys (L03), квоты/policy, metrics read
 | Create company inline name → detail | |
 | AI Keys: list, create, bind, disable, renew, rotate | |
 | Agent policy UI incl. token budgets + max_attachment_mb + HMAC secrets + idle pause hours + model allowlist | USD authoritative billing sync |
-| Company contour: Overview / Employees / Cabinets | |
+| Company contour: Overview / Employees / AI Keys / Containers / Cabinets / Modules | |
+| Company AI keys: list, create, platform-bound RO, scope bindings, rotate/renew | P-CO-02 |
+| Company containers: org-scoped list, pause/resume/delete | P-CO-03 |
+| Company cabinets: local CRUD, employee + module assign | P-CO-04 partial |
+| Company modules: local CRUD + platform-assigned RO + cabinet bind | |
 | Invite employee full-page form | |
 | `PUT /admin/companies/{id}/subscription` → emits `company.suspended` on expire transition (cancels ACTIVE agent sessions), `company.reactivated` on renew | |
 | `DELETE /admin/companies/{id}` → disable employees → pause+delete projects (wipe) → hard-delete cabinets → delete company | |
@@ -49,8 +53,18 @@ apps/flutter/lib/features/admin/
   admin_starter_bundles_page.dart
   widgets/admin_metrics_alerts.dart
 apps/flutter/test/admin_widgets_test.dart
-apps/flutter/lib/features/company/company_invite_employee_page.dart
-apps/flutter/lib/core/api/admin_api.dart
+apps/flutter/lib/features/company/
+  company_shell.dart
+  company_management_page.dart
+  company_ai_key_{list,detail}_page.dart
+  company_project_containers_page.dart + company_container_detail_page.dart
+  company_cabinets_page.dart + company_cabinet_detail_page.dart
+  company_module_{list,detail,json}_page.dart
+  company_invite_employee_page.dart
+apps/flutter/test/company_widgets_test.dart
+apps/flutter/lib/core/api/company_api.dart
+apps/api/src/prodavan/api/v1/company_containers.py
+apps/api/src/prodavan/api/v1/company_ai_keys.py
 apps/api/src/prodavan/domain/admin/starter_catalog.py
 apps/api/src/prodavan/application/admin/starter_bundle_service.py
 apps/api/src/prodavan/api/v1/admin_starter_bundles.py
@@ -74,7 +88,8 @@ apps/api/alembic/versions/2026082309_company_subscription.py
 | Starter bundle catalog | live | metadata + Admin UI + shipped zip in fixtures |
 | Starter bundle download | live | `GET .../bundle` base64 |
 | `storage_bytes` / `last_activity_at` | done | workspace scan + activity max |
-| E2E widget tests | live (subset) | metrics alerts + AdminShell NavigationBar destinations; full admin navigation flows — hole |
+| E2E widget tests | live (subset) | metrics alerts + AdminShell NavigationBar destinations; CompanyManagementPage parity sections; full navigation flows — hole |
+| Company shell wide-rail widget test | **gap** | narrow hub covered; wide IndexedStack destinations — hole |
 | Redis runtime cache (policy/sub) | **done (P0 subset)** | policy/sub/quota; HMAC via DB `get_ingress_hmac_secrets`; sub flags recompute on cache hit |
 
 ## Quality | **7** | doing |
