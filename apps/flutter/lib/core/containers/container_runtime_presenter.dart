@@ -80,9 +80,29 @@ String formatContainerLastLaunch(Map<String, dynamic>? item, AppLocalizations l1
 }
 
 bool containerHasError(Map<String, dynamic>? item) {
-  if (containerLastError(item) != null) return true;
   final state = _observedState(item);
-  return state == 'failed' || state == 'degraded';
+  if (state == 'failed') return true;
+  final err = containerLastError(item);
+  if (err == null) return false;
+  return !_isMetricsOnlyError(err);
+}
+
+bool containerMetricsUnavailable(Map<String, dynamic>? item) {
+  if (_observedState(item) != 'running') return false;
+  final runtime = runtimeMap(item);
+  if (runtime == null) return true;
+  final available = runtime['metrics_available'];
+  if (available is bool) return !available;
+  final metrics = runtime['metrics'];
+  if (metrics is Map && metrics['cpu_millicores'] != null) return false;
+  return true;
+}
+
+bool _isMetricsOnlyError(String err) {
+  final lower = err.toLowerCase();
+  return lower.contains('metrics-server')
+      || lower.contains('metrics not')
+      || lower.contains('metrics unavailable');
 }
 
 bool containerMetricHasValue(String formatted, AppLocalizations l10n) {
@@ -162,7 +182,7 @@ bool projectShowsContainerError(Map<String, dynamic>? project) {
   if (project?['status'] != 'active') return false;
   final observed = project?['observed_state'] as String?;
   if (observed == null || observed.isEmpty) return false;
-  const ok = {'running', 'paused', 'preparing', 'provisioning', 'hydrating', 'starting'};
+  const ok = {'running', 'paused', 'preparing', 'provisioning', 'hydrating', 'starting', 'degraded'};
   return !ok.contains(observed);
 }
 

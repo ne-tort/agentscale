@@ -621,7 +621,7 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get adminContainerMetricsUnavailable =>
-      'CPU/RAM: metrics-server недоступен';
+      'Метрики ещё не получены или недоступны';
 
   @override
   String get adminContainerLastError => 'Ошибка';

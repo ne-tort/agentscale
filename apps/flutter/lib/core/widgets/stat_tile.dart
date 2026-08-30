@@ -13,6 +13,7 @@ class StatTile extends StatelessWidget {
     this.icon,
     this.width = 160,
     this.minHeight = 88,
+    this.accentColor,
   });
 
   final String label;
@@ -20,11 +21,16 @@ class StatTile extends StatelessWidget {
   final IconData? icon;
   final double width;
   final double minHeight;
+  final Color? accentColor;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = context.appColors;
+    final iconColor = accentColor ?? colors.primary;
+    final valueStyle = accentColor != null
+        ? theme.textTheme.headlineSmall?.copyWith(color: accentColor)
+        : theme.textTheme.headlineSmall;
     return SizedBox(
       width: width,
       child: AppCard(
@@ -38,7 +44,7 @@ class StatTile extends StatelessWidget {
               Row(
                 children: [
                   if (icon != null) ...[
-                    Icon(icon, size: 18, color: colors.primary),
+                    Icon(icon, size: 18, color: iconColor),
                     const SizedBox(width: AppSpacing.sm),
                   ],
                   Expanded(
@@ -56,7 +62,7 @@ class StatTile extends StatelessWidget {
               const SizedBox(height: AppSpacing.sm),
               Text(
                 value,
-                style: theme.textTheme.headlineSmall,
+                style: valueStyle,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),

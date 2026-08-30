@@ -30,16 +30,15 @@ class PodMetricsSampler:
     async def sample_managed_pods(self) -> dict[str, int]:
         mode = (settings.pod_runtime_mode or "stub").strip().lower()
         if mode != "k8s":
-            return {"sampled": 0, "skipped": 0, "degraded": 0}
+            return {"sampled": 0, "skipped": 0}
 
         metrics_port = build_pod_metrics()
         runtime_port = build_pod_runtime()
         if metrics_port is None:
-            return {"sampled": 0, "skipped": 0, "degraded": 0}
+            return {"sampled": 0, "skipped": 0}
 
         sampled = 0
         skipped = 0
-        degraded = 0
 
         q = await self._session.execute(
             select(ProjectPodRow, ProjectRow)
@@ -60,12 +59,10 @@ class PodMetricsSampler:
             )
             if emitted == "sampled":
                 sampled += 1
-            elif emitted == "degraded":
-                degraded += 1
             else:
                 skipped += 1
 
-        return {"sampled": sampled, "skipped": skipped, "degraded": degraded}
+        return {"sampled": sampled, "skipped": skipped}
 
     async def sample_project(self, project_id: str) -> str:
         """Opportunistic sample for one project (e.g. runtime_view read path)."""
@@ -143,25 +140,11 @@ class PodMetricsSampler:
             status = await runtime_port.get_status(runtime_ref=runtime_ref) or {}
             metrics = await metrics_port.get_pod_metrics(runtime_ref=runtime_ref)
         except Exception:
-            logger.exception("pod metrics sampler failed runtime_ref=%s", runtime_ref)
-            if self._within_metrics_grace(pod):
-                return "skipped"
-            await self._emit_degraded(
-                pod=pod,
-                project=project,
-                reason="metrics-server unavailable",
-            )
-            return "degraded"
+            logger.debug("pod metrics sampler skipped runtime_ref=%s", runtime_ref, exc_info=True)
+            return "skipped"
 
         if metrics is None:
-            if self._within_metrics_grace(pod):
-                return "skipped"
-            await self._emit_degraded(
-                pod=pod,
-                project=project,
-                reason="metrics-server unavailable",
-            )
-            return "degraded"
+            return "skipped"
 
         ts = EventEnvelope.now_iso()
         current = {
@@ -249,31 +232,3 @@ class PodMetricsSampler:
                 payload=body,
                 occurred_at=ts,
             )
-
-    @staticmethod
-    def _within_metrics_grace(pod: ProjectPodRow) -> bool:
-        from datetime import UTC, datetime
-
-        baseline = pod.last_started_at or pod.created_at or pod.updated_at
-        if baseline is None:
-            return True
-        if baseline.tzinfo is None:
-            baseline = baseline.replace(tzinfo=UTC)
-        age = (datetime.now(UTC) - baseline).total_seconds()
-        return age <= settings.pod_metrics_grace_sec
-
-    async def _emit_degraded(
-        self,
-        *,
-        pod: ProjectPodRow,
-        project: ProjectRow,
-        reason: str,
-    ) -> None:
-        ts = EventEnvelope.now_iso()
-        payload = {"pod_id": pod.id, "reason": reason, "degraded": True, "timestamp": ts}
-        await self._ingest_hot(
-            pod=pod,
-            project=project,
-            payload=payload,
-            event_type="pod.metrics.degraded",
-        )

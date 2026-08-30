@@ -1,4 +1,4 @@
-"""RuntimeObservationService — derive observed_state from live k8s + metrics."""
+"""RuntimeObservationService — derive observed_state from live k8s; metrics are display-only."""
 
 from __future__ import annotations
 
@@ -25,8 +25,15 @@ _PROVISIONING_PHASES = frozenset({"Pending", "ContainerCreating", "PodInitializi
 _UNHEALTHY_OBSERVED = frozenset(
     {
         ObservedState.FAILED.value,
-        ObservedState.DEGRADED.value,
         ObservedState.ABSENT.value,
+    }
+)
+_TRANSITIONAL_OBSERVED = frozenset(
+    {
+        ObservedState.PREPARING.value,
+        ObservedState.PROVISIONING.value,
+        ObservedState.HYDRATING.value,
+        ObservedState.STARTING.value,
     }
 )
 
@@ -123,8 +130,6 @@ class RuntimeObservationService:
             pod = await self._get_live_pod(project_id)
             if project is None or pod is None:
                 raise RuntimeError("project or pod missing while waiting for running")
-            await PodMetricsSampler(self._session).sample_managed_pods()
-            await self._session.commit()
             last = await self.observe(project=project, pod=pod)
             state = last.get("observed_state")
             if state == ObservedState.RUNNING.value:
@@ -132,7 +137,7 @@ class RuntimeObservationService:
                 pod.last_started_at = datetime.now(UTC)
                 await self._session.flush()
                 return last
-            if state in {ObservedState.FAILED.value, ObservedState.DEGRADED.value}:
+            if state == ObservedState.FAILED.value:
                 raise RuntimeError(
                     f"pod verification failed: observed_state={state} error={last.get('last_error')}"
                 )
@@ -152,12 +157,15 @@ class RuntimeObservationService:
         obs = await self.observe(project=project, pod=pod)
         state = obs.get("observed_state")
 
+        if pod.desired_state == PodDesiredState.ABSENT.value:
+            if state in {ObservedState.PAUSED.value, ObservedState.ABSENT.value}:
+                return "noop"
+
         if pod.status == PodStatus.PROVISIONING:
             age = (now - self._as_utc(pod.updated_at)).total_seconds()
-            fail_observed = state in {
-                ObservedState.FAILED.value,
-                ObservedState.DEGRADED.value,
-            } or (state == ObservedState.UNKNOWN.value and bool(obs.get("last_error")))
+            fail_observed = state == ObservedState.FAILED.value or (
+                state == ObservedState.UNKNOWN.value and bool(obs.get("last_error"))
+            )
             if age > settings.pod_provisioning_timeout_sec or fail_observed:
                 pod.status = PodStatus.FAILED
                 pod.last_error = obs.get("last_error") or f"provisioning timeout after {int(age)}s"
@@ -173,16 +181,11 @@ class RuntimeObservationService:
                 and state != ObservedState.RUNNING.value
             ):
                 age = (now - self._as_utc(pod.updated_at)).total_seconds()
-                transitional = state in {
-                    ObservedState.PREPARING.value,
-                    ObservedState.PROVISIONING.value,
-                    ObservedState.HYDRATING.value,
-                    ObservedState.STARTING.value,
-                }
+                transitional = state in _TRANSITIONAL_OBSERVED
                 if (
                     not transitional
                     or age > settings.pod_provisioning_timeout_sec
-                    or state in {ObservedState.FAILED.value, ObservedState.DEGRADED.value}
+                    or state == ObservedState.FAILED.value
                 ):
                     pod.status = PodStatus.FAILED
                     pod.last_error = obs.get("last_error") or f"observed {state}"
@@ -207,12 +210,7 @@ class RuntimeObservationService:
             }
         ):
             age = (now - self._as_utc(pod.updated_at)).total_seconds()
-            transitional = state in {
-                ObservedState.PREPARING.value,
-                ObservedState.PROVISIONING.value,
-                ObservedState.HYDRATING.value,
-                ObservedState.STARTING.value,
-            }
+            transitional = state in _TRANSITIONAL_OBSERVED
             if not transitional or age > settings.pod_provisioning_timeout_sec:
                 pod.status = PodStatus.FAILED
                 pod.last_error = obs.get("last_error") or f"observed {state}"
@@ -220,11 +218,9 @@ class RuntimeObservationService:
                     project.status = ProjectStatus.ERROR
                 return "demoted"
 
-        unhealthy = state in {
-            ObservedState.FAILED.value,
-            ObservedState.DEGRADED.value,
-            ObservedState.ABSENT.value,
-        } or (state == ObservedState.UNKNOWN.value and bool(obs.get("last_error")))
+        unhealthy = state in _UNHEALTHY_OBSERVED or (
+            state == ObservedState.UNKNOWN.value and bool(obs.get("last_error"))
+        )
 
         if (
             unhealthy
@@ -254,14 +250,10 @@ class RuntimeObservationService:
         runtime_ref = pod.runtime_ref or ""
         k8s_status: dict[str, Any] = {}
         metrics_body: dict[str, Any] | None = None
-        metrics_degraded = False
-        degraded_reason: str | None = None
 
         cached = await self._metrics_query.get_project_runtime_metrics(project.id)
         if cached is not None:
-            metrics_degraded = bool(cached.get("degraded"))
-            degraded_reason = cached.get("degraded_reason")
-            if not metrics_degraded:
+            if not cached.get("degraded"):
                 metrics_body = {
                     k: cached[k]
                     for k in ("cpu_millicores", "memory_bytes", "timestamp")
@@ -382,40 +374,19 @@ class RuntimeObservationService:
                     except Exception:
                         logger.exception("live metrics fetch failed runtime_ref=%s", runtime_ref)
 
-            if self._metrics_verified(metrics_body, cached):
-                return obs(
-                    ObservedState.RUNNING,
-                    orchestrator_status=pod.status,
-                    desired_state=pod.desired_state,
-                    phase=phase,
-                    ready=ready,
-                    metrics=metrics_body,
-                    metrics_fresh=True,
-                    restarts=k8s_status.get("restarts"),
-                )
-
-            grace_age = (datetime.now(UTC) - self._runtime_baseline(pod)).total_seconds()
-            if grace_age <= settings.pod_metrics_grace_sec:
-                return obs(
-                    ObservedState.STARTING,
-                    orchestrator_status=pod.status,
-                    desired_state=pod.desired_state,
-                    phase=phase,
-                    ready=ready,
-                    metrics_degraded=metrics_degraded,
-                    metrics_degraded_reason=degraded_reason,
-                    restarts=k8s_status.get("restarts"),
-                )
-
+            metrics_available = self._metrics_available(metrics_body, cached)
             return obs(
-                ObservedState.DEGRADED,
+                ObservedState.RUNNING,
                 orchestrator_status=pod.status,
                 desired_state=pod.desired_state,
                 phase=phase,
                 ready=ready,
-                metrics_degraded=True,
-                metrics_degraded_reason=degraded_reason or "metrics-server unavailable",
-                last_error=degraded_reason or "metrics not verified within grace period",
+                metrics=metrics_body if metrics_available else None,
+                metrics_fresh=metrics_available,
+                metrics_available=metrics_available,
+                metrics_unavailable_reason=(
+                    None if metrics_available else "metrics not yet available"
+                ),
                 restarts=k8s_status.get("restarts"),
             )
 
@@ -475,15 +446,13 @@ class RuntimeObservationService:
         )
 
     @staticmethod
-    def _metrics_verified(
+    def _metrics_available(
         metrics_body: dict[str, Any] | None,
         cached: dict[str, Any] | None,
     ) -> bool:
-        if metrics_body:
-            source = metrics_body
-        elif cached and cached.get("degraded"):
-            return False
-        else:
+        """True when a fresh CPU/RAM sample exists for UI display (not health)."""
+        source = metrics_body
+        if source is None and cached is not None and not cached.get("degraded"):
             source = cached
         if not source:
             return False
@@ -503,14 +472,6 @@ class RuntimeObservationService:
             return age <= min(60, int(settings.metrics_sample_ttl_sec))
         except (TypeError, ValueError):
             return False
-
-    @staticmethod
-    def _runtime_baseline(pod: ProjectPodRow) -> datetime:
-        if pod.last_started_at is not None:
-            return RuntimeObservationService._as_utc(pod.last_started_at)
-        if pod.created_at is not None:
-            return RuntimeObservationService._as_utc(pod.created_at)
-        return RuntimeObservationService._as_utc(pod.updated_at)
 
     async def _get_live_pod(self, project_id: str) -> ProjectPodRow | None:
         from sqlalchemy import select
@@ -541,8 +502,8 @@ class RuntimeObservationService:
         ready: bool | None = None,
         metrics: dict[str, Any] | None = None,
         metrics_fresh: bool = False,
-        metrics_degraded: bool = False,
-        metrics_degraded_reason: str | None = None,
+        metrics_available: bool | None = None,
+        metrics_unavailable_reason: str | None = None,
         last_error: str | None = None,
         restarts: Any = None,
         stub: bool = False,
@@ -564,10 +525,10 @@ class RuntimeObservationService:
         if metrics:
             out["metrics"] = metrics
         out["metrics_fresh"] = metrics_fresh
-        if metrics_degraded:
-            out["metrics_degraded"] = True
-            if metrics_degraded_reason:
-                out["metrics_degraded_reason"] = metrics_degraded_reason
+        if metrics_available is not None:
+            out["metrics_available"] = metrics_available
+        if metrics_unavailable_reason:
+            out["metrics_unavailable_reason"] = metrics_unavailable_reason
         if last_error:
             out["last_error"] = last_error
         if restarts is not None:

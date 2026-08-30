@@ -21,6 +21,8 @@ class MetricsCommand:
         self._store = store or build_metrics_store()
 
     async def ingest_envelope(self, envelope: EventEnvelope) -> None:
+        if envelope.event_type == "pod.metrics.degraded":
+            return
         project_id = (envelope.project_id or "").strip()
         if not project_id:
             return
@@ -31,9 +33,6 @@ class MetricsCommand:
             payload=dict(envelope.payload or {}),
             timestamp=envelope.occurred_at,
         )
-        if envelope.event_type == "pod.metrics.degraded":
-            sample.degraded = True
-            sample.degraded_reason = str(envelope.payload.get("reason") or "metrics-server unavailable")
         await self.ingest_sample(sample)
 
     async def ingest_sample(self, sample: MetricSample) -> None:

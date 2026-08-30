@@ -29,7 +29,7 @@ async def _loop(stop: asyncio.Event) -> None:
             async with factory() as session:
                 stats = await PodMetricsSampler(session).sample_managed_pods()
                 await session.commit()
-            if stats.get("sampled") or stats.get("degraded"):
+            if stats.get("sampled"):
                 logger.debug("pod metrics sampler tick stats=%s", stats)
         except asyncio.CancelledError:
             raise

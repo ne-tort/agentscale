@@ -118,11 +118,9 @@ async def test_sampler_heartbeats_when_sample_unchanged() -> None:
 
 
 @pytest.mark.asyncio
-async def test_sampler_skips_degraded_emit_within_grace() -> None:
+async def test_sampler_skips_when_metrics_unavailable() -> None:
     session = AsyncMock()
     store = MagicMock()
-    pod = _pod()
-    pod.last_started_at = datetime.now(UTC)
     metrics_port = AsyncMock()
     metrics_port.get_pod_metrics = AsyncMock(return_value=None)
     runtime_port = AsyncMock()
@@ -130,17 +128,17 @@ async def test_sampler_skips_degraded_emit_within_grace() -> None:
 
     svc = PodMetricsSampler(session)
     svc._store = store
-    svc._emit_degraded = AsyncMock()  # type: ignore[method-assign]
+    ingest = AsyncMock()
+    svc._ingest_hot = ingest  # type: ignore[method-assign]
 
     with patch("prodavan.application.pod_service.metrics_sampler.settings") as mock_settings:
-        mock_settings.pod_metrics_grace_sec = 90
         mock_settings.pod_runtime_mode = "k8s"
         result = await svc._sample_one(
-            pod=pod,
+            pod=_pod(),
             project=_project(),
             metrics_port=metrics_port,
             runtime_port=runtime_port,
         )
 
     assert result == "skipped"
-    svc._emit_degraded.assert_not_awaited()
+    ingest.assert_not_awaited()

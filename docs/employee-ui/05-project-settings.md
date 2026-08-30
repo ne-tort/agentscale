@@ -32,9 +32,9 @@
 | Pod live, `active` | **Управление проектом** → `ProjectManagementPage`: **Приостановить проект** (warning), **Обновить**, **Сбросить агента** |
 | Pod live, `paused` | **Возобновить проект** (warning) на settings; update/reset скрыты |
 
-Подстраница **Контейнер** — `observed_state` (источник истины), live k8s phase, orchestrator status, CPU/RAM только при `running` (verified metrics). Без info-баннеров.
+Подстраница **Контейнер** — `observed_state` (источник истины), live k8s phase, orchestrator status. CPU/RAM/Storage — StatTiles; при недоступных метриках warning-баннер, тайлы с warning-акцентом (контейнер не в error).
 
-`observed_state=running` только при свежем sample CPU/RAM из metrics-server. Grace-период `starting` после k8s Ready. Промежуточные: `preparing` (materialize), `provisioning`, `hydrating` (initContainer).
+`observed_state=running` при k8s Ready. Метрики CPU/RAM — опционально (`metrics_available`); отсутствие metrics-server **не** переводит проект в error. Промежуточные: `preparing`, `provisioning`, `hydrating`, `starting`.
 
 `project.error` — pod sync failed; agent triggers blocked (как paused). Recovery только через **Перезагрузить**.
 

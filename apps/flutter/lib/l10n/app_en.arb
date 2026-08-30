@@ -429,7 +429,7 @@
   "adminContainerPodRestarts": "Restarts",
   "adminContainerMetricsCpu": "CPU",
   "adminContainerMetricsMemory": "Memory",
-  "adminContainerMetricsUnavailable": "CPU/RAM: metrics-server unavailable",
+  "adminContainerMetricsUnavailable": "Metrics not yet received or unavailable",
   "adminContainerLastError": "Error",
   "adminContainerRuntimeNotStarted": "Pod is not running. It starts on first agent use or after Resume.",
   "adminContainerRuntimeNotStartedShort": "Not running",

@@ -431,7 +431,7 @@
   "adminContainerPodRestarts": "Перезапуски",
   "adminContainerMetricsCpu": "CPU",
   "adminContainerMetricsMemory": "Память",
-  "adminContainerMetricsUnavailable": "CPU/RAM: metrics-server недоступен",
+  "adminContainerMetricsUnavailable": "Метрики ещё не получены или недоступны",
   "adminContainerLastError": "Ошибка",
   "adminContainerRuntimeNotStarted": "Pod не запущен. Стартует при первом обращении к агенту или после «Возобновить».",
   "adminContainerRuntimeNotStartedShort": "Не запущен",

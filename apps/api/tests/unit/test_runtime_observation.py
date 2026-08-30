@@ -48,29 +48,33 @@ def _pod(**kwargs) -> ProjectPodRow:
     return row
 
 
-def test_metrics_verified_requires_fresh_cpu_mem() -> None:
+def test_metrics_available_requires_fresh_cpu_mem() -> None:
     ts = EventEnvelope.now_iso()
-    assert RuntimeObservationService._metrics_verified(
+    assert RuntimeObservationService._metrics_available(
         {"cpu_millicores": 10, "memory_bytes": 1024, "timestamp": ts},
         None,
     )
-    assert not RuntimeObservationService._metrics_verified(
+    assert not RuntimeObservationService._metrics_available(
         {"cpu_millicores": 10, "memory_bytes": 1024, "timestamp": "1999-01-01T00:00:00+00:00"},
         None,
     )
-    assert not RuntimeObservationService._metrics_verified(None, {"degraded": True})
+    assert not RuntimeObservationService._metrics_available(None, {"degraded": True})
 
 
-def test_project_is_recoverable_active_degraded() -> None:
+def test_project_is_recoverable_failed_only() -> None:
     from prodavan.application.pod_service.runtime_observation import project_is_recoverable
-    from prodavan.domain.pods.observed_state import ObservedState
 
     project = _project()
     pod = _pod(status=PodStatus.RUNNING)
+    assert not project_is_recoverable(
+        project,
+        pod,
+        {"observed_state": ObservedState.RUNNING.value, "metrics_available": False},
+    )
     assert project_is_recoverable(
         project,
         pod,
-        {"observed_state": ObservedState.DEGRADED.value},
+        {"observed_state": ObservedState.FAILED.value},
     )
     assert not project_is_recoverable(project, pod, {"observed_state": ObservedState.RUNNING.value})
 
@@ -180,7 +184,7 @@ async def test_promote_or_demote_k8s_unknown_with_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_observe_k8s_starting_within_grace() -> None:
+async def test_observe_k8s_running_without_metrics() -> None:
     session = AsyncMock()
     svc = RuntimeObservationService(session)
     project = _project()
@@ -197,14 +201,16 @@ async def test_observe_k8s_starting_within_grace() -> None:
     with patch("prodavan.application.pod_service.runtime_observation.settings") as mock_settings:
         mock_settings.pod_runtime_mode = "k8s"
         mock_settings.pod_provisioning_timeout_sec = 300
-        mock_settings.pod_metrics_grace_sec = 90
+        mock_settings.metrics_sample_ttl_sec = 900
         with patch("prodavan.application.pod_service.runtime_observation.build_pod_runtime", return_value=runtime_mock):
             with patch(
                 "prodavan.application.pod_service.runtime_observation.build_pod_metrics",
                 return_value=metrics_port,
             ):
                 out = await svc.observe(project=project, pod=pod)
-    assert out["observed_state"] == ObservedState.STARTING.value
+    assert out["observed_state"] == ObservedState.RUNNING.value
+    assert out.get("metrics_available") is False
+    assert out.get("metrics_unavailable_reason")
 
 
 @pytest.mark.asyncio
@@ -271,8 +277,24 @@ async def test_observe_k8s_live_fetch_clears_cached_degraded() -> None:
                 out = await svc.observe(project=project, pod=pod)
 
     assert out["observed_state"] == ObservedState.RUNNING.value
+    assert out.get("metrics_available") is True
     metrics_port.get_pod_metrics.assert_awaited_once()
     cache_live.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_promote_or_demote_pause_safe() -> None:
+    session = MagicMock()
+    svc = RuntimeObservationService(session)
+    project = _project()
+    pod = _pod(status=PodStatus.PAUSING, desired_state=PodDesiredState.ABSENT.value)
+    svc.observe = AsyncMock(  # type: ignore[method-assign]
+        return_value={"observed_state": ObservedState.ABSENT.value}
+    )
+    with patch.object(settings, "pod_runtime_mode", "k8s"):
+        action = await svc.promote_or_demote(project=project, pod=pod)
+    assert action == "noop"
+    assert project.status == ProjectStatus.ACTIVE
 
 
 @pytest.mark.asyncio

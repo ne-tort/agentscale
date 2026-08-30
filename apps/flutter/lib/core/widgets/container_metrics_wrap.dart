@@ -74,8 +74,12 @@ class ContainerMetricsWrap extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final hasError = containerHasError(container);
+    final metricsUnavailable = containerMetricsUnavailable(container);
     final lastError = containerLastError(container);
     final errorColor = context.appColors.danger;
+    final warningColor = context.appColors.warning;
+    final tileAccent = metricsUnavailable ? warningColor : null;
+    final emDash = l10n.commonEmDash;
 
     final stateValue = formatContainerStateValue(container, l10n);
     final lastLaunchValue = formatContainerLastLaunch(container, l10n);
@@ -83,6 +87,8 @@ class ContainerMetricsWrap extends StatelessWidget {
     final restartsValue = formatContainerRestarts(container, l10n);
     final createdValue = formatContainerCreatedAt(container, l10n);
     final storageValue = _storage(l10n);
+    final cpuValue = _cpu(l10n);
+    final memoryValue = _memory(l10n);
 
     final podServiceId = containerPodServiceId(container);
     final k8sPodName = containerK8sPodName(container);
@@ -130,7 +136,7 @@ class ContainerMetricsWrap extends StatelessWidget {
           value: restartsValue,
           icon: Icons.restart_alt_outlined,
         ),
-      if (lastError != null)
+      if (lastError != null && hasError)
         AppValuePreference<String>(
           title: l10n.adminContainerLastError,
           icon: Icons.error_outline,
@@ -161,30 +167,69 @@ class ContainerMetricsWrap extends StatelessWidget {
       );
     }
 
-    final resourceTiles = <Widget>[
-      if (!hasError && _cpu(l10n) != null)
-        StatTile(
-          label: l10n.adminContainerMetricsCpu,
-          value: _cpu(l10n)!,
-          icon: Icons.speed_outlined,
-        ),
-      if (!hasError && _memory(l10n) != null)
-        StatTile(
-          label: l10n.adminContainerMetricsMemory,
-          value: _memory(l10n)!,
-          icon: Icons.memory_outlined,
-        ),
-      if (!hasError && storageValue != null)
-        StatTile(
-          label: l10n.commonStorageBytes,
-          value: storageValue,
-          icon: Icons.storage_outlined,
-        ),
-    ];
+    final resourceTiles = <Widget>[];
+    if (!hasError) {
+      if (metricsUnavailable || cpuValue != null) {
+        resourceTiles.add(
+          StatTile(
+            label: l10n.adminContainerMetricsCpu,
+            value: cpuValue ?? emDash,
+            icon: Icons.speed_outlined,
+            accentColor: tileAccent,
+          ),
+        );
+      }
+      if (metricsUnavailable || memoryValue != null) {
+        resourceTiles.add(
+          StatTile(
+            label: l10n.adminContainerMetricsMemory,
+            value: memoryValue ?? emDash,
+            icon: Icons.memory_outlined,
+            accentColor: tileAccent,
+          ),
+        );
+      }
+      if (metricsUnavailable || storageValue != null) {
+        resourceTiles.add(
+          StatTile(
+            label: l10n.commonStorageBytes,
+            value: storageValue ?? emDash,
+            icon: Icons.storage_outlined,
+            accentColor: tileAccent,
+          ),
+        );
+      }
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (metricsUnavailable)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.md),
+            child: Material(
+              color: warningColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(AppSpacing.sm),
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline, color: warningColor, size: 20),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                      child: Text(
+                        l10n.adminContainerMetricsUnavailable,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              color: warningColor,
+                            ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         if (resourceTiles.isNotEmpty)
           Wrap(
             spacing: AppSpacing.sm,

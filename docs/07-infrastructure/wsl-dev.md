@@ -118,6 +118,6 @@ kubectl top pods -n prodavan-sandboxes   # нужны running sandbox pod'ы
 
 RBAC для API: `infra/k3s/base/prodavan-sandbox/rbac-sandboxes.yaml` — `metrics.k8s.io/pods` get/list.
 
-Prodavan pipeline: `pod_service` sampler → Kafka `prodavan.metrics.events` → Metrics BC (Redis) → REST для UI. Если metrics-server недоступен, UI показывает banner; reconcile продолжает работать.
+Prodavan pipeline: `pod_service` sampler → Kafka `prodavan.metrics.events` → Metrics BC (Redis) → REST для UI. Health gate — k8s Ready (`get_status` / `wait_ready`), **не** metrics-server. Если metrics-server недоступен, UI показывает warning-баннер; pod/project остаются healthy, reconcile продолжает работать.
 
 Канон: [`docs/target/14-project-containers/k3s-runtime/metrics-observability.md`](../target/14-project-containers/k3s-runtime/metrics-observability.md).
