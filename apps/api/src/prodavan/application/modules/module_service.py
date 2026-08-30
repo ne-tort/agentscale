@@ -129,13 +129,19 @@ class ModuleService:
         await self._get_row(module_id)
         await self._bindings.bind_project(module_id, project_id)
         await self._session.commit()
-        return {"module_id": module_id, "project_id": project_id, "status": "active"}
+        from prodavan.application.project_service.command import ProjectCommand
+
+        sync = await ProjectCommand(self._session).rematerialize_background(project_id=project_id)
+        return {"module_id": module_id, "project_id": project_id, "status": "active", "sync": sync}
 
     async def revoke_project(self, *, module_id: str, project_id: str) -> dict:
         await self._get_row(module_id)
         await self._bindings.revoke_project(module_id, project_id)
         await self._session.commit()
-        return {"module_id": module_id, "project_id": project_id, "status": "revoked"}
+        from prodavan.application.project_service.command import ProjectCommand
+
+        sync = await ProjectCommand(self._session).rematerialize_background(project_id=project_id)
+        return {"module_id": module_id, "project_id": project_id, "status": "revoked", "sync": sync}
 
     async def _get_row(self, module_id: str) -> ModuleRow:
         row = await self._session.get(ModuleRow, module_id)

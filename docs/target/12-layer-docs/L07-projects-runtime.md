@@ -145,6 +145,7 @@ apps/api/.env.example
 | Celery rematerialize → hydrate bump | **done** | `rematerialize_background` + job lock; `sync_desired` force-rehydrate on `rematerialize`/`sync` |
 | Module data change → project rematerialize | **done** | row CRUD + cabinet binding change + project module toggle → sync/hydrate |
 | Project module toggle → sync/hydrate | **done** | `PATCH /projects/{id}/modules` → `rematerialize_background` |
+| Admin module↔project MP bind/revoke → sync | **done** | `ModuleService.bind/revoke_project` → `rematerialize_background` |
 | Cabinet module bind/unbind → project rematerialize | **done** | `schedule_cabinet_binding_change_rematerialize` |
 | Pod env lifecycle on rehydrate | **done** | `reason` → `project.sync`/`launch`/… in `ContainerEnvLoader` |
 | Dev k8s MinIO hydrate | **done** | `POD_SANDBOX_MINIO_SECRET` restored in dev overlay |

@@ -1720,7 +1720,7 @@ def test_project_materialize_copy_blob_and_mcp_package(client: TestClient) -> No
 
 @requires_postgres
 def test_project_materialize_after_mod_files_row_on_running_pod(client: TestClient) -> None:
-    """POST /materialize after mod_files row change updates workspace on running pod."""
+    """mod_files row CRUD schedules inline rematerialize — workspace updates without manual POST /materialize."""
     _, cabinet_id, owner_tok = _setup_cabinet(client)
     owner_h = {"Authorization": f"Bearer {owner_tok}"}
 
@@ -1757,10 +1757,46 @@ def test_project_materialize_after_mod_files_row_on_running_pod(client: TestClie
     remat_meta = file_row.json().get("rematerialize") or {}
     assert int(remat_meta.get("scheduled") or 0) >= 1
 
-    remat = client.post(f"/api/v1/projects/{project_id}/materialize", headers=owner_h)
-    assert remat.status_code == 200, remat.text
-    assert remat.json().get("hydrate_generation") == 1
-
     copied = ws_root / "assets" / "sync.txt"
     assert copied.is_file()
     assert copied.read_bytes() == file_payload
+
+    got = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
+    assert got.json()["runtime"]["hydrate_generation"] >= 1
+
+
+@requires_postgres
+def test_patch_project_modules_syncs_running_pod(client: TestClient) -> None:
+    """PATCH /projects/{id}/modules rematerializes workspace on running pod (inline Celery fallback)."""
+    _, cabinet_id, owner_tok = _setup_cabinet(client)
+    owner_h = {"Authorization": f"Bearer {owner_tok}"}
+
+    created = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "Module Toggle Sync"},
+    )
+    assert created.status_code == 201, created.text
+    project_id = created.json()["id"]
+    _configure_and_launch(client, owner_h, project_id)
+
+    before = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
+    assert before.json()["runtime"]["hydrate_generation"] == 0
+
+    listed = client.get(f"/api/v1/projects/{project_id}/modules", headers=owner_h)
+    assert listed.status_code == 200, listed.text
+    all_ids = [m["module_id"] for m in listed.json()["items"]]
+    assert "mod_files" in all_ids
+
+    patched = client.patch(
+        f"/api/v1/projects/{project_id}/modules",
+        headers=owner_h,
+        json={"module_ids": ["mod_files"]},
+    )
+    assert patched.status_code == 200, patched.text
+    body = patched.json()
+    assert body["module_ids"] == ["mod_files"]
+    assert body["sync"]["ok"] is True
+
+    after = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
+    assert after.json()["runtime"]["hydrate_generation"] == 1
