@@ -492,6 +492,25 @@ def test_company_containers_reload(client: TestClient) -> None:
 
 
 @requires_postgres
+def test_admin_containers_reload(client: TestClient) -> None:
+    """Platform admin reload uses the same ProjectCommand.reload_project path as employee reload."""
+    _, admin, owner_h, project_id = _setup_project(client)
+    admin_h = {"Authorization": f"Bearer {admin}"}
+    runtime_before = _ensure_pod_running(client, owner_h, project_id)
+    pod_id_before = runtime_before["pod_id"]
+
+    reloaded = client.post(
+        f"/api/v1/admin/containers/{project_id}/reload",
+        headers=admin_h,
+    )
+    assert reloaded.status_code == 200, reloaded.text
+    body = reloaded.json()
+    assert body["status"] == "active"
+    assert body["runtime"]["status"] == "running"
+    assert body["runtime"]["pod_id"] == pod_id_before
+
+
+@requires_postgres
 def test_complete_project_pauses_pod(client: TestClient) -> None:
     """Completing a project stops runtime (pod paused) but keeps the pod row for inspection."""
     _, admin, owner_h, project_id = _setup_project(client)

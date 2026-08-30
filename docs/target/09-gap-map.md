@@ -14,7 +14,7 @@
 |----|-------|---------------|----------|
 | **P-CO-01** | Company shell = **локальный Admin** (сотрудники, контейнеры, keys, кабинеты) | **CompanyShell** wide rail: Overview + Employees + AI Keys + Containers + Cabinets + Modules (+ catalog modules); narrow Management hub | **partial** — parity shipped; polish / E2E navigation — hole ([03](03-companies/)) |
 | **P-CO-02** | Company **CRUD своих** AI keys (SDK/API) + видит Admin-bound **RO** | API `/companies/{id}/ai-keys` + `owner_scope`; Flutter list/detail/rotate/scope-bindings | **done** |
-| **P-CO-03** | Company list/manage containers **своих** сотрудников | API `/companies/{id}/containers` pause/resume/delete; Flutter list + detail | **done** |
+| **P-CO-03** | Company list/manage containers **своих** сотрудников | API `/companies/{id}/containers` pause/resume/reload/delete; Flutter list + detail | **done** |
 | **P-CO-04** | Cabinets от Admin → Company **RO**; later local CRUD | Admin CRUD + grants; Company local cabinet CRUD + employee/module assign UI | **partial** — local CRUD + assign shipped; platform-assigned cabinets RO |
 | **P-ID-01** | **Company** имеет **Keycloak-креды** | `companies.keycloak_sub` via Auth Kafka `auth.user.register` + bind; soft-delete `deleted_at` + async cascade | Org principal async; zombies in admin metrics |
 | **P-CAS-02** | Company soft-delete → soft children (no wipe) | Soft-delete + Celery cascade; wipe only on purge | Align cascade to [00-lifecycle](00-lifecycle.md) |

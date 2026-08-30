@@ -76,3 +76,30 @@ async def test_schedule_binding_change_rematerializes_all_projects() -> None:
     assert out["scheduled"] == 1
     request.assert_awaited_once()
     assert request.await_args.kwargs["source"] == "cabinet_binding"
+
+
+@pytest.mark.asyncio
+async def test_schedule_binding_change_via_bus_when_enabled() -> None:
+    session = AsyncMock()
+    with (
+        patch(
+            "prodavan.application.projects.rematerialize_scheduler.ProjectQuery"
+        ) as query_cls,
+        patch(
+            "prodavan.application.projects.rematerialize_scheduler.request_rematerialize_project",
+            AsyncMock(return_value={"enqueued": True, "via_bus": True, "project_id": "proj_a"}),
+        ) as request,
+    ):
+        query_cls.return_value.list_ids = AsyncMock(return_value=["proj_a"])
+        out = await schedule_cabinet_binding_change_rematerialize(
+            session, cabinet_id="cab_1"
+        )
+
+    assert out["scheduled"] == 1
+    assert out["enqueued"] == ["proj_a"]
+    request.assert_awaited_once_with(
+        "proj_a",
+        cabinet_id="cab_1",
+        module_id=None,
+        source="cabinet_binding",
+    )
