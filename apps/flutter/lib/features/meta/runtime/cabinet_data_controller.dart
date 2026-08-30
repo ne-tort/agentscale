@@ -124,6 +124,16 @@ class CabinetDataController extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> invokeAction(String actionId, {String? rowId}) async {
+    await api.invokeModuleAction(
+      cabinetId: cabinetId,
+      moduleId: moduleId,
+      actionId: actionId,
+      rowId: rowId,
+    );
+    await loadAll();
+  }
+
   void refresh() => notifyListeners();
 
   Map<String, dynamic> defaultBodyForTable(String tableSlug) {

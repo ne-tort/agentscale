@@ -246,6 +246,27 @@ class ProdavanApi {
     }
   }
 
+  Future<Map<String, dynamic>> invokeModuleAction({
+    required String cabinetId,
+    required String moduleId,
+    required String actionId,
+    String? rowId,
+  }) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await AuthHttp.post(
+        _uri('/cabinets/$cabinetId/modules/$moduleId/actions/$actionId/invoke'),
+        body: jsonEncode({if (rowId != null) 'row_id': rowId}),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
   Future<Map<String, dynamic>> uploadCabinetContent({
     required String cabinetId,
     required String filename,

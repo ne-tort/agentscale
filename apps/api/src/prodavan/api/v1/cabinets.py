@@ -11,6 +11,7 @@ from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
 from prodavan.application.cabinets.cabinet_module_service import CabinetModuleService
 from prodavan.application.cabinets.instance_service import CabinetInstanceService
 from prodavan.application.content.cabinet_upload_service import CabinetContentUploadService
+from prodavan.application.modules.module_action_executor import ModuleActionExecutor
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
 router = APIRouter(prefix="/cabinets", tags=["cabinets"])
@@ -41,6 +42,12 @@ class DataRowBody(BaseModel):
     model_config = {"extra": "forbid"}
 
     body: dict[str, Any]
+
+
+class ActionInvokeBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    row_id: str | None = None
 
 
 @router.post("")
@@ -303,6 +310,26 @@ async def delete_module_data_row(
         row_id=row_id,
         principal=principal,
         employee=employee,
+    )
+
+
+@router.post("/{cabinet_id}/modules/{module_id}/actions/{action_id}/invoke")
+async def invoke_module_action(
+    cabinet_id: str,
+    module_id: str,
+    action_id: str,
+    body: ActionInvokeBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+) -> dict:
+    return await ModuleActionExecutor(session).invoke(
+        cabinet_id=cabinet_id,
+        module_id=module_id,
+        action_id=action_id,
+        principal=principal,
+        employee=employee,
+        row_id=body.row_id,
     )
 
 

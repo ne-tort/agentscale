@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_icon_button.dart';
 import 'package:prodavan/core/widgets/app_inline_add_field.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/preview/preview_stub.dart';
+import 'package:prodavan/features/meta/runtime/cabinet_data_controller.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 class CollectionViewInterpreter extends StatelessWidget {
@@ -185,11 +188,12 @@ class CollectionViewInterpreter extends StatelessWidget {
             ),
           );
         } else if (kind == 'invoke_action') {
+          final actionId = t['action'] as String? ?? '';
           items.add(
             AppIconButton(
               icon: Icons.bolt_outlined,
-              tooltip: t['action'] as String? ?? 'Action',
-              onPressed: () => PreviewStub.run(context, t['action'] as String? ?? 'Action'),
+              tooltip: actionId.isEmpty ? 'Action' : actionId,
+              onPressed: () => _invokeAction(context, actionId),
             ),
           );
         }
@@ -221,6 +225,24 @@ class CollectionViewInterpreter extends StatelessWidget {
       }
     }
     return null;
+  }
+
+  Future<void> _invokeAction(BuildContext context, String actionId) async {
+    if (actionId.isEmpty) return;
+    if (seeds is CabinetDataController) {
+      try {
+        await (seeds as CabinetDataController).invokeAction(actionId);
+        if (context.mounted) {
+          AppSnackBar.info(context, actionId);
+        }
+      } catch (e) {
+        if (context.mounted) {
+          AppErrors.showSnack(context, e);
+        }
+      }
+      return;
+    }
+    PreviewStub.run(context, actionId);
   }
 
   void _create(BuildContext context, Map<String, dynamic> uiJson, String tableSlug) {
