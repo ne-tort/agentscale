@@ -15,6 +15,10 @@ logger = logging.getLogger(__name__)
 _CHANNEL_STDOUT = 1
 _CHANNEL_STDERR = 2
 _CHANNEL_ERROR = 3
+_CHANNEL_STDIN = 0
+
+# k3s / in-cluster API servers expect the remotecommand WebSocket subprotocol.
+_EXEC_SUBPROTOCOLS = ["v4.channel.k8s.io"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,6 +69,7 @@ async def exec_in_pod(
 ) -> ExecResult:
     """Run command in pod container; collect stdout/stderr."""
     from websockets.asyncio.client import connect
+    from websockets.exceptions import ConnectionClosed
 
     url = _build_exec_url(
         auth=auth,
@@ -77,7 +82,7 @@ async def exec_in_pod(
     stdout = bytearray()
     stderr = bytearray()
     error_text = bytearray()
-    exit_code: int | None = 0
+    exit_code: int | None = None
 
     ssl_ctx: Any = None
     ca = auth.client_kwargs().get("verify")
@@ -86,11 +91,23 @@ async def exec_in_pod(
 
         ssl_ctx = ssl.create_default_context(cafile=str(ca))
 
-    async with connect(url, additional_headers=headers, ssl=ssl_ctx, open_timeout=timeout) as ws:
+    async with connect(
+        url,
+        additional_headers=headers,
+        ssl=ssl_ctx,
+        open_timeout=timeout,
+        subprotocols=_EXEC_SUBPROTOCOLS,
+    ) as ws:
+        # Close stdin stream (channel 0) so kubelet does not wait for input.
+        await ws.send(bytes([_CHANNEL_STDIN]))
+
         while True:
             try:
                 message = await asyncio.wait_for(ws.recv(), timeout=timeout)
             except TimeoutError:
+                logger.warning("k8s exec timeout pod=%s cmd=%s", pod_name, command[:2])
+                break
+            except ConnectionClosed:
                 break
             if isinstance(message, str):
                 message = message.encode("utf-8")
@@ -108,18 +125,22 @@ async def exec_in_pod(
                         meta = json.loads(payload.decode("utf-8"))
                         if meta.get("status") == "Success":
                             exit_code = 0
+                        elif meta.get("status") == "Failure":
+                            exit_code = int(meta.get("code", 1))
                         elif "code" in meta:
                             exit_code = int(meta["code"])
+                        else:
+                            exit_code = 1
                     except Exception:
                         exit_code = 1
                 break
 
-    if error_text and exit_code is None:
+    if exit_code is None and error_text:
         exit_code = 1
         logger.warning(
             "k8s exec error pod=%s cmd=%s err=%s",
             pod_name,
-            command[:3],
+            command[:2],
             error_text[:200],
         )
 

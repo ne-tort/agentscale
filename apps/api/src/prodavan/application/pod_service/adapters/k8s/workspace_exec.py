@@ -6,6 +6,7 @@ import json
 import logging
 from typing import Any
 
+from prodavan.application.pod_service.adapters.k8s.workspace_exec_cmd import build_workspace_fs_command
 from prodavan.application.pod_service.ports.workspace import PodWorkspacePort, WorkspaceEntry
 from prodavan.application.pod_service.workspace_paths import normalize_workspace_path
 from prodavan.domain.errors import AppError
@@ -14,7 +15,6 @@ from prodavan.infrastructure.k8s.sandbox.exec import exec_in_pod
 
 logger = logging.getLogger(__name__)
 
-_CLI = ("python", "-m", "prodavan.runtime.workspace_fs")
 _DEFAULT_READ_MAX = 10_485_760
 
 
@@ -48,7 +48,7 @@ class K8sExecWorkspaceAdapter:
             auth=self._client.auth,
             namespace=self._client.namespace,
             pod_name=runtime_ref,
-            command=[*_CLI, *args],
+            command=build_workspace_fs_command(args),
         )
         if result.exit_code not in (0, None):
             err = result.stderr.decode("utf-8", errors="replace")[:500]
@@ -82,7 +82,7 @@ class K8sExecWorkspaceAdapter:
             auth=self._client.auth,
             namespace=self._client.namespace,
             pod_name=runtime_ref,
-            command=[*_CLI, *args],
+            command=build_workspace_fs_command(args),
         )
         if result.exit_code not in (0, None):
             err = result.stderr.decode("utf-8", errors="replace")[:500]
