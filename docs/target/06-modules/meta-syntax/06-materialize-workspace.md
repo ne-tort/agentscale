@@ -71,7 +71,7 @@ Slug: `materialize` — массив `MaterializeRule[]`.
 | `json_rows` | JSON array of row bodies |
 | `json_single` | One row body object |
 | `template` | Mustache-style `{{field}}` in template field |
-| `copy_blob` | Binary copy from MinIO object_key |
+| `copy_blob` | Binary copy from Content Service blob (`storage_key` / `version_id`) |
 
 ## Workspace layout (канон)
 
@@ -90,14 +90,35 @@ projects/{workspace_key}/
 
 Materialize rules **must** target paths under this tree.
 
-## file_ref flow
+## file_ref flow (Content Service)
+
+Three phases — see [12-content-file-pipeline](12-content-file-pipeline.md):
 
 ```text
-1. User uploads → MinIO cabinets/{cabinet_id}/files/…
-2. Row stores FileRef in module_data_rows.body
-3. project.created → materialize rule copy_blob
-4. Pod hydrate → /workspace/inbox/spec.pdf
-5. Agent reads local file; live table via cabinet.rows MCP
+Phase A — Upload
+  Meta UI file_ref → POST /cabinets/{id}/content/upload
+  → MinIO blobs/{uuid} + content_assets row
+  → FileRef in module_data_rows.body
+
+Phase B — Reference
+  Row holds asset_id, version_id, storage_key (no re-upload)
+
+Phase C — Materialize
+  project.created | sync | resumed
+  → MaterializeExecutor copy_blob → projects/{workspace_key}/workspace/{path}
+  → Pod initContainer hydrate → /workspace/{path}
+```
+
+Example `copy_blob` rule:
+
+```json
+{
+  "target": {
+    "workspace_path": "{{target_path}}",
+    "format": "copy_blob",
+    "field": "file_ref"
+  }
+}
 ```
 
 ## Re-materialize on resume

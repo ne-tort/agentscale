@@ -108,32 +108,52 @@ Admin: `PUT /admin/modules/{id}/meta/documents/columns`.
 | `json` | object/array | multiline `AppValuePreference` | schema-free sub-object |
 | `enum` | string | `AppChoicePreference` | requires `enum.values` |
 | `ref` | string (row_id) | `AppChoicePreference` | requires `ref.table` |
-| `file_ref` | FileRef object | attachment picker + viewer | requires `file` block |
+| `file_ref` | FileRef object | `FileUploadField` → Content Service | requires `file` block |
+| `secret_ref` | SecretRef object | masked upload (target) | requires `secret` block — see [13-container-env-secrets](13-container-env-secrets.md) |
 
-### FileRef object shape
+### FileRef object shape (as-built)
+
+Canonical shape after upload via Content Service (`POST /cabinets/{id}/content/upload`):
 
 ```json
 {
-  "object_key": "cabinets/cab_abc/files/spec-001.pdf",
+  "asset_id": "ca_abc123",
+  "version_id": "cbv_def456",
+  "storage_key": "blobs/abc123def456",
   "filename": "spec.pdf",
   "content_type": "application/pdf",
-  "size_bytes": 102400,
+  "size": 102400,
   "sha256": "…"
 }
 ```
 
-Column `file` block:
+Legacy `object_key` in older docs — **deprecated**; use `storage_key`. Full pipeline: [12-content-file-pipeline](12-content-file-pipeline.md).
+
+Column `file` block (upload constraints only):
 
 ```json
 {
   "accept": ["application/pdf", ".xlsx"],
-  "max_bytes": 10485760,
-  "materialize": {
-    "enabled": true,
-    "target_template": "cabinet-seed/{table_slug}/{row_id}/{filename}"
-  }
+  "max_bytes": 10485760
 }
 ```
+
+Materialize path is declared in slug `materialize` (`format: copy_blob`), not auto from column meta in MVP.
+
+### Text → `.md` without upload
+
+Column `type: text` + view widget `markdown_editor` → materialize rule `format: raw`:
+
+```json
+{
+  "table_slug": "prompts",
+  "name": "body_md",
+  "type": "text",
+  "ui": { "widget": "markdown_editor" }
+}
+```
+
+See [12-content-file-pipeline](12-content-file-pipeline.md) Phase C.
 
 ### ref block
 
@@ -188,7 +208,7 @@ write request body
   → strip unknown keys (warn audit) OR reject (strict mode)
   → type coercion (string→number where safe)
   → required / unique / ref integrity
-  → file_ref: verify object exists in MinIO
+  → file_ref: verify asset exists in Content Service (target — gap P-META-FILE-02)
   → persist module_data_rows
   → emit cabinet.data.changed (future websocket)
 ```

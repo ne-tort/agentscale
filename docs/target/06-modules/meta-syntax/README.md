@@ -70,6 +70,8 @@ Shared template в platform DB — `module_meta_documents`:
 | 9 | [validation-rules](09-validation-rules.md) | JSON Schema правила, allowlists |
 | 10 | [ai-authoring-guide](10-ai-authoring-guide.md) | Инструкции для ИИ-автора |
 | 11 | [seed-rows](11-seed-rows.md) | Предзаполнение строк при MC bind |
+| 12 | [content-file-pipeline](12-content-file-pipeline.md) | Upload → FileRef → Pod materialize (Content Service) |
+| 13 | [container-env-secrets](13-container-env-secrets.md) | Pod env vars, Vault secrets, `secret_ref` column |
 
 ## Примеры
 

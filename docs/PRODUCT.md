@@ -77,6 +77,8 @@ Module-level **MP binding** (`module_project_bindings`): if bindings exist, modu
 
 Future base modules (MCP, Files, Prompts, …) follow the same pattern: edit in cabinet UI, scope rows to projects, materialize into Pod workspace on **launch** or **sync** (not on create).
 
+**File & env pipeline (meta-syntax spec):** upload via Content Service → FileRef in row → materialize (`copy_blob` / `raw`) → Pod `/workspace`; container env and Vault secrets — declarative slugs, implementation backlog. See [12-content-file-pipeline](target/06-modules/meta-syntax/12-content-file-pipeline.md) · [13-container-env-secrets](target/06-modules/meta-syntax/13-container-env-secrets.md) · [gap map P-META-*](target/09-gap-map.md).
+
 ## Project lifecycle (employee UI)
 
 - **Create** (`draft`) — DB record + project settings only; no Pod, no workspace files.

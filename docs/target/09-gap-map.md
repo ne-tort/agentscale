@@ -72,6 +72,18 @@
 | AgentProviderPort | stub / partial | [08](08-agent-providers/) |
 | OpenClaw / GLM | нет | **не внедрять** |
 
+### Meta-syntax: files / env / Vault (spec in [12](06-modules/meta-syntax/12-content-file-pipeline.md) · [13](06-modules/meta-syntax/13-container-env-secrets.md))
+
+| ID | Spec | As-built | Priority |
+|----|------|----------|----------|
+| **P-META-FILE-01** | FileRef `storage_key` + `asset_id`/`version_id` | Upload + copy_blob live; docs had `object_key` | P2 (docs aligned) |
+| **P-META-FILE-02** | Row write validates FileRef vs Content Service | No validator on write | P1 |
+| **P-META-FILE-03** | `format: template` in MaterializeExecutor | Docs only | P2 |
+| **P-META-FILE-04** | Auto materialize from column `file.materialize` | Manual rules in slug `materialize` | P3 |
+| **P-META-ENV-01** | `container_env` + `container_env_secrets` → pod_spec | Pod env: WORKSPACE_KEY, MINIO_* only | P1 |
+| **P-META-VAULT-01** | `secret_ref` column + masked upload UI → Vault | AI keys only (`vault://ai_keys/…`) | P1 |
+| **P-META-VAULT-02** | Cabinet-scoped Vault paths + ACL | — | P2 |
+
 ## Бывшие «решения канона» → пересмотр
 
 Старые строки, которые **больше не цель** (заменены [00-entities](00-entities.md)):
