@@ -1832,6 +1832,18 @@ abstract class AppLocalizations {
   /// **'Written into project workspace on materialize (AGENTS.md + CLAUDE.md). Re-materialize projects to apply.'**
   String get cabinetAgentsMdHint;
 
+  /// No description provided for @cabinetModuleRematerializeScheduled.
+  ///
+  /// In en, this message translates to:
+  /// **'Updating {count, plural, =1{1 project workspace} other{{count} project workspaces}} in the background…'**
+  String cabinetModuleRematerializeScheduled(int count);
+
+  /// No description provided for @cabinetModuleRematerializeDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Updated {count, plural, =1{1 project workspace} other{{count} project workspaces}}'**
+  String cabinetModuleRematerializeDone(int count);
+
   /// No description provided for @cabinetArchiveTable.
   ///
   /// In en, this message translates to:

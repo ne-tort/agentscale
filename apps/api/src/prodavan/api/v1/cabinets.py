@@ -310,8 +310,8 @@ async def delete_module_data_row(
     principal: PrincipalDep,
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
-) -> None:
-    await CabinetModuleService(session).delete_data_row(
+) -> dict:
+    return await CabinetModuleService(session).delete_data_row(
         cabinet_id=cabinet_id,
         module_id=module_id,
         table_slug=table_slug,

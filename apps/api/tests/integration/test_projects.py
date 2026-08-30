@@ -1754,6 +1754,8 @@ def test_project_materialize_after_mod_files_row_on_running_pod(client: TestClie
         },
     )
     assert file_row.status_code == 200, file_row.text
+    remat_meta = file_row.json().get("rematerialize") or {}
+    assert int(remat_meta.get("scheduled") or 0) >= 1
 
     remat = client.post(f"/api/v1/projects/{project_id}/materialize", headers=owner_h)
     assert remat.status_code == 200, remat.text

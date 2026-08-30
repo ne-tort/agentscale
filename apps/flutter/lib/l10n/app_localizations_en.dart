@@ -1010,6 +1010,28 @@ class AppLocalizationsEn extends AppLocalizations {
       'Written into project workspace on materialize (AGENTS.md + CLAUDE.md). Re-materialize projects to apply.';
 
   @override
+  String cabinetModuleRematerializeScheduled(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count project workspaces',
+      one: '1 project workspace',
+    );
+    return 'Updating $_temp0 in the background…';
+  }
+
+  @override
+  String cabinetModuleRematerializeDone(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count project workspaces',
+      one: '1 project workspace',
+    );
+    return 'Updated $_temp0';
+  }
+
+  @override
   String get cabinetArchiveTable => 'Archive table';
 
   @override

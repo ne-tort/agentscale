@@ -1016,6 +1016,32 @@ class AppLocalizationsRu extends AppLocalizations {
       'Пишется в workspace проекта при materialize (AGENTS.md + CLAUDE.md). Пересоздайте проекты, чтобы применить.';
 
   @override
+  String cabinetModuleRematerializeScheduled(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count проектов',
+      many: '$count проектов',
+      few: '$count проектов',
+      one: '$count проекта',
+    );
+    return 'Обновляем workspace $_temp0 в фоне…';
+  }
+
+  @override
+  String cabinetModuleRematerializeDone(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count проектов',
+      many: '$count проектов',
+      few: '$count проекта',
+      one: '$count проект',
+    );
+    return 'Workspace обновлён: $_temp0';
+  }
+
+  @override
   String get cabinetArchiveTable => 'В архив';
 
   @override

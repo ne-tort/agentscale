@@ -227,7 +227,7 @@ class ProdavanApi {
     }
   }
 
-  Future<void> deleteModuleDataRow({
+  Future<Map<String, dynamic>> deleteModuleDataRow({
     required String cabinetId,
     required String moduleId,
     required String tableSlug,
@@ -241,6 +241,8 @@ class ProdavanApi {
         extraHeaders: _workHeaders,
       );
       _throwIfError(res);
+      if (res.body.isEmpty) return <String, dynamic>{'deleted': true};
+      return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
       this.cabinetId = prev;
     }

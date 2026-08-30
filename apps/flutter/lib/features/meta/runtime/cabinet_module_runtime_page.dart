@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/meta/interpreters/hub_interpreter.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
@@ -71,6 +72,14 @@ class _CabinetModuleRuntimePageState extends State<CabinetModuleRuntimePage> {
         moduleId: widget.moduleId,
         manifest: manifest,
       );
+      data.onProjectsRematerialize = (count, {required inline}) {
+        if (!mounted) return;
+        final l10n = AppLocalizations.of(context);
+        final message = inline
+            ? l10n.cabinetModuleRematerializeDone(count)
+            : l10n.cabinetModuleRematerializeScheduled(count);
+        AppSnackBar.info(context, message);
+      };
       await data.loadAll();
       if (!mounted) return;
       setState(() {

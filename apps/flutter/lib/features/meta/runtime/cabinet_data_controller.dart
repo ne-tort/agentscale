@@ -4,6 +4,8 @@ import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 
+typedef ProjectsRematerializeCallback = void Function(int scheduled, {required bool inline});
+
 /// Live cabinet module data — mirrors SeedDataController API for interpreters.
 class CabinetDataController extends ChangeNotifier {
   CabinetDataController({
@@ -18,6 +20,8 @@ class CabinetDataController extends ChangeNotifier {
   final String moduleId;
   ModuleMetaManifest _manifest;
   final List<Map<String, dynamic>> _items = [];
+
+  ProjectsRematerializeCallback? onProjectsRematerialize;
 
   ModuleMetaManifest get manifest => _manifest;
 
@@ -64,6 +68,16 @@ class CabinetDataController extends ChangeNotifier {
     return {};
   }
 
+  void _emitRematerialize(Map<String, dynamic>? payload) {
+    final remat = payload?['rematerialize'];
+    if (remat is! Map) return;
+    final scheduled = remat['scheduled'];
+    if (scheduled is! int || scheduled <= 0) return;
+    final sync = remat['sync'];
+    final inline = sync is List && sync.isNotEmpty;
+    onProjectsRematerialize?.call(scheduled, inline: inline);
+  }
+
   Future<String> createRow(String tableSlug, {Map<String, dynamic>? initial}) async {
     final body = initial ?? defaultBodyForTable(tableSlug);
     final created = await api.createModuleDataRow(
@@ -72,6 +86,7 @@ class CabinetDataController extends ChangeNotifier {
       tableSlug: tableSlug,
       body: body,
     );
+    _emitRematerialize(created);
     final rowId = created['row_id'] as String;
     _items.add({
       'table_slug': tableSlug,
@@ -93,6 +108,7 @@ class CabinetDataController extends ChangeNotifier {
       rowId: rowId,
       body: body,
     );
+    _emitRematerialize(updated);
     for (var i = 0; i < _items.length; i++) {
       if (_items[i]['row_id'] == rowId) {
         _items[i] = {
@@ -114,12 +130,13 @@ class CabinetDataController extends ChangeNotifier {
   Future<void> deleteRow(String rowId) async {
     final item = itemById(rowId);
     if (item == null) return;
-    await api.deleteModuleDataRow(
+    final deleted = await api.deleteModuleDataRow(
       cabinetId: cabinetId,
       moduleId: moduleId,
       tableSlug: item['table_slug'] as String,
       rowId: rowId,
     );
+    _emitRematerialize(deleted);
     _items.removeWhere((i) => i['row_id'] == rowId);
     notifyListeners();
   }

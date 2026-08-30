@@ -35,6 +35,13 @@ def _check_table_slug(table_slug: str) -> str:
     return table_slug
 
 
+def _attach_rematerialize(row: dict[str, Any], remat: dict[str, Any]) -> dict[str, Any]:
+    out = dict(row)
+    if int(remat.get("scheduled") or 0) > 0:
+        out["rematerialize"] = remat
+    return out
+
+
 def _ensure_row_body(body: Any) -> dict:
     if isinstance(body, str):
         try:
@@ -194,7 +201,7 @@ class CabinetModuleService:
             },
         )
         await self._session.commit()
-        await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id)
+        remat = await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id)
         rows = await self.list_data_rows(
             cabinet_id=cabinet_id,
             module_id=module_id,
@@ -204,7 +211,7 @@ class CabinetModuleService:
         )
         for row in rows:
             if row["row_id"] == row_id:
-                return row
+                return _attach_rematerialize(row, remat)
         raise AppError(code="INTERNAL", title="Internal Error", status=500, detail="row not found after insert")
 
     async def update_data_row(
@@ -246,7 +253,7 @@ class CabinetModuleService:
         if result.rowcount == 0:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
         await self._session.commit()
-        await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id)
+        remat = await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id)
         rows = await self.list_data_rows(
             cabinet_id=cabinet_id,
             module_id=module_id,
@@ -256,7 +263,7 @@ class CabinetModuleService:
         )
         for row in rows:
             if row["row_id"] == row_id:
-                return row
+                return _attach_rematerialize(row, remat)
         raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
 
     async def delete_data_row(
@@ -268,7 +275,7 @@ class CabinetModuleService:
         row_id: str,
         principal: Principal,
         employee: EmployeeRow | None,
-    ) -> None:
+    ) -> dict:
         table_slug = _check_table_slug(table_slug)
         inst = await self._access.require_access(
             cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
@@ -287,12 +294,13 @@ class CabinetModuleService:
         if result.rowcount == 0:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
         await self._session.commit()
-        await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id)
+        remat = await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id)
+        return {"deleted": True, "row_id": row_id, "rematerialize": remat}
 
-    async def _schedule_rematerialize(self, *, cabinet_id: str, module_id: str) -> None:
+    async def _schedule_rematerialize(self, *, cabinet_id: str, module_id: str) -> dict:
         from prodavan.application.projects.rematerialize_scheduler import schedule_cabinet_rematerialize
 
-        await schedule_cabinet_rematerialize(
+        return await schedule_cabinet_rematerialize(
             self._session,
             cabinet_id=cabinet_id,
             module_id=module_id,
