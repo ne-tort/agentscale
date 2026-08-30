@@ -101,29 +101,13 @@ def register_tasks(app) -> None:
 
     @app.task(name=job_names.REMATERIALIZE_PROJECT, bind=False)
     def rematerialize_project(project_id: str) -> dict[str, Any]:
-        from prodavan.application.projects.materialize import ProjectMaterializeService
+        from prodavan.application.project_service.command import ProjectCommand
         from prodavan.infrastructure.persistence.database import get_session_factory
-        from prodavan.infrastructure.persistence.models.projects import ProjectRow
 
         async def _run() -> dict[str, Any]:
             factory = get_session_factory()
             async with factory() as session:
-                row = await session.get(ProjectRow, project_id)
-                if row is None:
-                    return {"ok": False, "reason": "not_found", "project_id": project_id}
-                result = await ProjectMaterializeService().materialize_project(
-                    session=session,
-                    project_id=row.id,
-                    cabinet_id=row.cabinet_id,
-                    project_name=row.name,
-                )
-                await session.commit()
-                return {
-                    "ok": True,
-                    "project_id": project_id,
-                    "workspace_root": result.workspace_root,
-                    "status": result.status,
-                }
+                return await ProjectCommand(session).rematerialize_background(project_id=project_id)
 
         logger.info("celery task %s project_id=%s", job_names.REMATERIALIZE_PROJECT, project_id)
         return run_async(_run())

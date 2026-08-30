@@ -535,11 +535,16 @@ class CabinetInstanceService:
 
     async def delete_with_cascade(self, *, cabinet_id: str) -> dict:
         """Hard-purge: wipe projects + drop schema + delete row (Admin recycle)."""
-        from prodavan.application.project_service import ProjectQuery
+        from prodavan.application.project_service import ProjectCommand, ProjectQuery
         from prodavan.application.projects.project_wipe import wipe_project_tree
         from prodavan.core.jobs.enqueue import enqueue_wipe_project_tree
 
         inst = await self._access.get_instance(cabinet_id)
+
+        project_cmd = ProjectCommand(self._session)
+        for ref in await ProjectQuery(self._session).list_workspace_refs_for_cabinet(cabinet_id):
+            await project_cmd.stop_runtime_system(project_id=ref["project_id"], reason="purge")
+        await self._session.flush()
 
         project_wipes: list[dict] = []
         for ref in await ProjectQuery(self._session).list_workspace_refs_for_cabinet(cabinet_id):

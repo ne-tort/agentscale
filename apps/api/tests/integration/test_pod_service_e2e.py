@@ -343,6 +343,33 @@ def test_admin_force_kill_and_reconcile(client: TestClient) -> None:
 
 
 @requires_postgres
+def test_cabinet_admin_purge_terminates_running_pod(client: TestClient) -> None:
+    """Admin hard purge (skip soft-delete) must terminate live pods before wipe."""
+    _, admin, owner_h, project_id = _setup_project(client)
+    admin_h = {"Authorization": f"Bearer {admin}"}
+
+    _ensure_pod_running(client, owner_h, project_id)
+    cabinet_id = client.get(f"/api/v1/projects/{project_id}", headers=owner_h).json()["cabinet_id"]
+
+    purged = client.delete(f"/api/v1/admin/cabinets/{cabinet_id}/purge", headers=admin_h)
+    assert purged.status_code == 200, purged.text
+    assert purged.json().get("purged") is True
+
+    events = _platform_events(
+        client,
+        admin_h=admin_h,
+        project_id=project_id,
+        event_type="pod.terminated",
+    )
+    assert len(events) >= 1
+
+    got = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
+    assert got.status_code in (404, 200)
+    if got.status_code == 200:
+        assert got.json().get("runtime") is None
+
+
+@requires_postgres
 def test_rematerialize_running_increments_hydrate_generation(client: TestClient) -> None:
     """Active pod: materialize bumps hydrate_generation and re-hydrates without pausing."""
     _, admin, owner_h, project_id = _setup_project(client)

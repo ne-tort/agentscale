@@ -38,6 +38,8 @@ from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
 
 logger = logging.getLogger(__name__)
 
+_SYSTEM_JOB = Principal(sub="system:jobs", roles=frozenset({"platform.admin"}))
+
 
 class ProjectCommand:
     def __init__(self, session: AsyncSession) -> None:
@@ -427,23 +429,57 @@ class ProjectCommand:
         for project_id in await self._query.list_ids(
             cabinet_id=cabinet_id, exclude_status=ProjectStatus.DELETED
         ):
-            row = await self._access.get_project(project_id)
-            mat = await self._materialize.materialize_project(
-                session=self._session,
-                project_id=row.id,
-                cabinet_id=row.cabinet_id,
-                cabinet_name=None,
-                project_name=row.name,
-            )
-            projects.append(
-                {
-                    "project_id": row.id,
-                    "status": mat.status,
-                    "package_names": list(mat.package_names),
-                    "mcp_config_path": mat.mcp_config_path,
-                }
-            )
+            projects.append(await self.rematerialize_background(project_id=project_id))
         return {"cabinet_id": cabinet_id, "count": len(projects), "projects": projects}
+
+    async def rematerialize_background(self, *, project_id: str) -> dict:
+        """System/Celery rematerialize — sync workspace and bump hydrate for live pods."""
+        row = await self._access.get_project(project_id)
+        if row is None:
+            return {"ok": False, "reason": "not_found", "project_id": project_id}
+        live_pod = await self._get_live_pod(row.id)
+        mat = await self._sync_project_workspace(row)
+        if live_pod is not None:
+            live_pod.hydrate_generation += 1
+            if row.status == ProjectStatus.ACTIVE:
+                await self._pods.sync_desired(
+                    row.id,
+                    PodDesiredState.RUNNING,
+                    principal=_SYSTEM_JOB,
+                    reason="rematerialize",
+                )
+        await self._session.commit()
+        return {
+            "ok": True,
+            "project_id": row.id,
+            "workspace_root": mat.workspace_root,
+            "mcp_config_path": mat.mcp_config_path,
+            "status": mat.status,
+            "package_names": list(mat.package_names),
+            "hydrate_generation": live_pod.hydrate_generation if live_pod is not None else None,
+        }
+
+    async def stop_runtime_system(self, *, project_id: str, reason: str = "purge") -> None:
+        """Terminate/pause pod runtime without ACL (cabinet purge, cascade jobs)."""
+        row = await self._access.get_project(project_id)
+        if row is None:
+            return
+        await self._stop_and_pause_runtime(row, principal=_SYSTEM_JOB, reason=reason)
+
+    async def _sync_project_workspace(self, row: ProjectRow):
+        inst = await self._cabinets.get_instance(row.cabinet_id)
+        from prodavan.application.modules.module_binding_service import ModuleBindingService
+
+        all_modules = await ModuleBindingService(self._session).list_module_ids_for_cabinet(row.cabinet_id)
+        enabled = await self._resolve_enabled_module_ids(row)
+        return await self._materialize.sync_project(
+            session=self._session,
+            project=row,
+            cabinet_name=inst.name,
+            when="project.sync",
+            enabled_module_ids=enabled,
+            all_cabinet_module_ids=all_modules,
+        )
 
     async def rematerialize(
         self,
@@ -478,19 +514,7 @@ class ProjectCommand:
                 status=422,
                 detail="project pod does not exist; launch project first",
             )
-        inst = await self._cabinets.get_instance(row.cabinet_id)
-        from prodavan.application.modules.module_binding_service import ModuleBindingService
-
-        all_modules = await ModuleBindingService(self._session).list_module_ids_for_cabinet(row.cabinet_id)
-        enabled = await self._resolve_enabled_module_ids(row)
-        mat = await self._materialize.sync_project(
-            session=self._session,
-            project=row,
-            cabinet_name=inst.name,
-            when="project.sync",
-            enabled_module_ids=enabled,
-            all_cabinet_module_ids=all_modules,
-        )
+        mat = await self._sync_project_workspace(row)
 
         live_pod.hydrate_generation += 1
         if row.status == ProjectStatus.ACTIVE:
