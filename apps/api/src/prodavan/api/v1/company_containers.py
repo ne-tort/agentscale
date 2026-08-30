@@ -82,6 +82,20 @@ async def resume_company_container(
     )
 
 
+@router.post("/{project_id}/reload")
+async def reload_company_container(
+    company_id: str,
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    return await AdminContainerReadService(session).reload_for_company(
+        company_id=company_id, project_id=project_id, principal=principal, employee=employee
+    )
+
+
 @router.delete("/{project_id}")
 async def delete_company_container(
     company_id: str,

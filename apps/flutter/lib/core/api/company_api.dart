@@ -341,6 +341,18 @@ class CompanyApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> reloadContainer({
+    required String companyId,
+    required String projectId,
+  }) async {
+    final res = await AuthHttp.post(
+      _uri('/companies/$companyId/containers/$projectId/reload'),
+      body: '{}',
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<void> deleteContainer({
     required String companyId,
     required String projectId,

@@ -287,6 +287,12 @@ class AdminApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> reloadContainer(String projectId) async {
+    final res = await AuthHttp.post(_uri('/admin/containers/$projectId/reload'), body: '{}',);
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<void> deleteContainer(String projectId) async {
     final res = await AuthHttp.delete(_uri('/admin/containers/$projectId'));
     _throwIfError(res);

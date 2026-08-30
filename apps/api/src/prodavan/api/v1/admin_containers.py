@@ -48,6 +48,15 @@ async def resume_container(
     return await AdminContainerReadService(session).resume(project_id=project_id, principal=admin)
 
 
+@router.post("/{project_id}/reload")
+async def reload_container(
+    project_id: str,
+    admin: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    return await AdminContainerReadService(session).reload(project_id=project_id, principal=admin)
+
+
 @router.delete("/{project_id}")
 async def delete_container(
     project_id: str,

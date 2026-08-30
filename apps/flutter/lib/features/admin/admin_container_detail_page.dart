@@ -9,6 +9,7 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_confirm_page.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -31,6 +32,7 @@ class _AdminContainerDetailPageState extends State<AdminContainerDetailPage> {
   late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
   bool _busy = false;
+  bool _reloading = false;
   Map<String, dynamic>? _item;
   String _title = '';
 
@@ -109,6 +111,38 @@ class _AdminContainerDetailPageState extends State<AdminContainerDetailPage> {
       if (mounted) AppErrors.showSnack(context, e);
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  bool get _showReload {
+    final status = _item?['status'] as String?;
+    if (status == 'error') return true;
+    if (containerRuntimeNeedsAttention(_item)) return true;
+    return projectShowsContainerError({
+      'status': status,
+      'observed_state': _item?['observed_state'],
+    });
+  }
+
+  Future<void> _reload() async {
+    setState(() {
+      _busy = true;
+      _reloading = true;
+    });
+    try {
+      await adminContext.api.reloadContainer(widget.projectId);
+      await _load();
+      if (!mounted) return;
+      AppSnackBar.success(context, AppLocalizations.of(context).projectReloadSuccess);
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _reloading = false;
+        });
+      }
     }
   }
 
@@ -222,6 +256,15 @@ class _AdminContainerDetailPageState extends State<AdminContainerDetailPage> {
                     icon: Icons.play_circle_outline,
                     enabled: !_busy,
                     onTap: _busy ? null : _resume,
+                  ),
+                if (_showReload)
+                  AppPreferenceTile(
+                    title: l10n.projectReload,
+                    icon: Icons.refresh_outlined,
+                    accentColor: colors.warning,
+                    enabled: !_busy,
+                    subtitle: _reloading ? Text(l10n.projectReload) : null,
+                    onTap: _busy ? null : _reload,
                   ),
                 AppPreferenceTile(
                   title: l10n.commonDelete,

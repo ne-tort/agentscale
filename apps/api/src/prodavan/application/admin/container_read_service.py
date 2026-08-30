@@ -164,6 +164,12 @@ class AdminContainerReadService:
         await self._projects.resume(project_id=project_id, principal=principal, employee=None)
         return await self.get_container(project_id)
 
+    async def reload(self, *, project_id: str, principal: Principal) -> dict:
+        await self._projects.reload_project(
+            project_id=project_id, principal=principal, employee=None
+        )
+        return await self.get_container(project_id)
+
     async def delete(self, *, project_id: str, principal: Principal) -> dict:
         return await self._projects.delete(project_id=project_id, principal=principal, employee=None)
 
@@ -191,6 +197,20 @@ class AdminContainerReadService:
     ) -> dict:
         await self._require_company_container(company_id, project_id)
         await self._projects.resume(
+            project_id=project_id, principal=principal, employee=employee
+        )
+        return await self.get_container(project_id)
+
+    async def reload_for_company(
+        self,
+        *,
+        company_id: str,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None = None,
+    ) -> dict:
+        await self._require_company_container(company_id, project_id)
+        await self._projects.reload_project(
             project_id=project_id, principal=principal, employee=employee
         )
         return await self.get_container(project_id)

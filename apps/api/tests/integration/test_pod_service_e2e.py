@@ -474,6 +474,24 @@ def test_company_containers_pause_and_resume(client: TestClient) -> None:
 
 
 @requires_postgres
+def test_company_containers_reload(client: TestClient) -> None:
+    """Company-scoped reload restarts pod via the same path as project reload."""
+    company_id, _, owner_h, project_id = _setup_project(client)
+    runtime_before = _ensure_pod_running(client, owner_h, project_id)
+    pod_id_before = runtime_before["pod_id"]
+
+    reloaded = client.post(
+        f"/api/v1/companies/{company_id}/containers/{project_id}/reload",
+        headers=owner_h,
+    )
+    assert reloaded.status_code == 200, reloaded.text
+    body = reloaded.json()
+    assert body["status"] == "active"
+    assert body["runtime"]["status"] == "running"
+    assert body["runtime"]["pod_id"] == pod_id_before
+
+
+@requires_postgres
 def test_complete_project_pauses_pod(client: TestClient) -> None:
     """Completing a project stops runtime (pod paused) but keeps the pod row for inspection."""
     _, admin, owner_h, project_id = _setup_project(client)
