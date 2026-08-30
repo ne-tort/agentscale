@@ -32,6 +32,7 @@ from prodavan.infrastructure.persistence.models.projects import ProjectPodRow, P
 logger = logging.getLogger(__name__)
 
 _TERMINATE_REASONS = frozenset({"delete", "purge", "terminate", "detach", "force_kill"})
+_FORCE_REHYDRATE_REASONS = frozenset({"rematerialize", "sync", "reload"})
 
 
 class PodCommand:
@@ -77,11 +78,16 @@ class PodCommand:
         if reason == "reload" and desired == PodDesiredState.RUNNING:
             await self._prepare_reload(project, pod)
 
+        force_rehydrate = (
+            reason in _FORCE_REHYDRATE_REASONS and desired == PodDesiredState.RUNNING and pod is not None
+        )
+
         if pod.desired_state == desired.value:
-            if self._status_matches_desired(pod, desired):
+            if self._status_matches_desired(pod, desired) and not force_rehydrate:
                 return
             if desired == PodDesiredState.RUNNING and pod.status == PodStatus.PROVISIONING:
-                return
+                if not force_rehydrate:
+                    return
 
         pod.desired_state = desired.value
         payload = {"reason": reason} if reason else None

@@ -194,6 +194,7 @@ class CabinetModuleService:
             },
         )
         await self._session.commit()
+        await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id)
         rows = await self.list_data_rows(
             cabinet_id=cabinet_id,
             module_id=module_id,
@@ -245,6 +246,7 @@ class CabinetModuleService:
         if result.rowcount == 0:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
         await self._session.commit()
+        await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id)
         rows = await self.list_data_rows(
             cabinet_id=cabinet_id,
             module_id=module_id,
@@ -285,6 +287,16 @@ class CabinetModuleService:
         if result.rowcount == 0:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
         await self._session.commit()
+        await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id)
+
+    async def _schedule_rematerialize(self, *, cabinet_id: str, module_id: str) -> None:
+        from prodavan.application.projects.rematerialize_scheduler import schedule_cabinet_rematerialize
+
+        await schedule_cabinet_rematerialize(
+            self._session,
+            cabinet_id=cabinet_id,
+            module_id=module_id,
+        )
 
     async def _merge_column_defaults(
         self, *, module_id: str, table_slug: str, body: dict

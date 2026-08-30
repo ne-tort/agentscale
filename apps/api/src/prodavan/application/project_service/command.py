@@ -434,34 +434,23 @@ class ProjectCommand:
 
     async def rematerialize_background(self, *, project_id: str) -> dict:
         """System/Celery rematerialize — sync workspace and bump hydrate for live pods."""
-        row = await self._access.get_project(project_id)
+        row = await self._access.get_project_or_none(project_id)
         if row is None:
             return {"ok": False, "reason": "not_found", "project_id": project_id}
+        if row.status == ProjectStatus.DELETED:
+            return {"ok": False, "reason": "deleted", "project_id": project_id}
         live_pod = await self._get_live_pod(row.id)
         mat = await self._sync_project_workspace(row)
         if live_pod is not None:
-            live_pod.hydrate_generation += 1
-            if row.status == ProjectStatus.ACTIVE:
-                await self._pods.sync_desired(
-                    row.id,
-                    PodDesiredState.RUNNING,
-                    principal=_SYSTEM_JOB,
-                    reason="rematerialize",
-                )
+            await self._apply_post_rematerialize(
+                row, live_pod, principal=_SYSTEM_JOB, reason="rematerialize"
+            )
         await self._session.commit()
-        return {
-            "ok": True,
-            "project_id": row.id,
-            "workspace_root": mat.workspace_root,
-            "mcp_config_path": mat.mcp_config_path,
-            "status": mat.status,
-            "package_names": list(mat.package_names),
-            "hydrate_generation": live_pod.hydrate_generation if live_pod is not None else None,
-        }
+        return self._rematerialize_result(row, mat, live_pod, ok=True)
 
     async def stop_runtime_system(self, *, project_id: str, reason: str = "purge") -> None:
         """Terminate/pause pod runtime without ACL (cabinet purge, cascade jobs)."""
-        row = await self._access.get_project(project_id)
+        row = await self._access.get_project_or_none(project_id)
         if row is None:
             return
         await self._stop_and_pause_runtime(row, principal=_SYSTEM_JOB, reason=reason)
@@ -480,6 +469,46 @@ class ProjectCommand:
             enabled_module_ids=enabled,
             all_cabinet_module_ids=all_modules,
         )
+
+    async def _apply_post_rematerialize(
+        self,
+        row: ProjectRow,
+        live_pod: ProjectPodRow,
+        *,
+        principal: Principal,
+        reason: str,
+    ) -> None:
+        live_pod.hydrate_generation += 1
+        if row.status == ProjectStatus.ACTIVE:
+            await self._pods.sync_desired(
+                row.id,
+                PodDesiredState.RUNNING,
+                principal=principal,
+                reason=reason,
+            )
+
+    @staticmethod
+    def _rematerialize_result(
+        row: ProjectRow,
+        mat,
+        live_pod: ProjectPodRow | None,
+        *,
+        ok: bool | None = None,
+    ) -> dict:
+        out: dict = {
+            "project_id": row.id,
+            "workspace_root": mat.workspace_root,
+            "mcp_config_path": mat.mcp_config_path,
+            "status": mat.status,
+            "package_names": list(mat.package_names),
+            "sandbox_packages": list(getattr(mat, "sandbox_packages", ()) or ()),
+            "agents_source": getattr(mat, "agents_source", "default"),
+        }
+        if live_pod is not None:
+            out["hydrate_generation"] = live_pod.hydrate_generation
+        if ok is not None:
+            out["ok"] = ok
+        return out
 
     async def rematerialize(
         self,
@@ -516,26 +545,11 @@ class ProjectCommand:
             )
         mat = await self._sync_project_workspace(row)
 
-        live_pod.hydrate_generation += 1
-        if row.status == ProjectStatus.ACTIVE:
-            await self._pods.sync_desired(
-                row.id,
-                PodDesiredState.RUNNING,
-                principal=principal,
-                reason="sync",
-            )
+        await self._apply_post_rematerialize(row, live_pod, principal=principal, reason="sync")
 
         await self._session.commit()
 
-        return {
-            "project_id": row.id,
-            "workspace_root": mat.workspace_root,
-            "mcp_config_path": mat.mcp_config_path,
-            "status": mat.status,
-            "package_names": list(mat.package_names),
-            "sandbox_packages": list(mat.sandbox_packages),
-            "agents_source": mat.agents_source,
-        }
+        return self._rematerialize_result(row, mat, live_pod)
 
     async def pause(
         self,

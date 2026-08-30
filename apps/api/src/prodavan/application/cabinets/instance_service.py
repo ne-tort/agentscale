@@ -544,7 +544,7 @@ class CabinetInstanceService:
         project_cmd = ProjectCommand(self._session)
         for ref in await ProjectQuery(self._session).list_workspace_refs_for_cabinet(cabinet_id):
             await project_cmd.stop_runtime_system(project_id=ref["project_id"], reason="purge")
-        await self._session.flush()
+        await self._session.commit()
 
         project_wipes: list[dict] = []
         for ref in await ProjectQuery(self._session).list_workspace_refs_for_cabinet(cabinet_id):

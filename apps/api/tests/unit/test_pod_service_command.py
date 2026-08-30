@@ -152,6 +152,44 @@ async def test_sync_desired_idempotent_when_already_running() -> None:
 
 
 @pytest.mark.asyncio
+async def test_sync_desired_rematerialize_rehydrates_running_pod() -> None:
+    session = AsyncMock()
+    project = _project()
+    pod = ProjectPodRow(
+        id="pod_abc123",
+        project_id=project.id,
+        workspace_key=project.workspace_key,
+        status=PodStatus.RUNNING,
+        desired_state=PodDesiredState.RUNNING,
+        runtime_ref="object-ws:wk_demo",
+        hydrate_generation=0,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    session.get = AsyncMock(return_value=project)
+
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = pod
+    session.execute = AsyncMock(return_value=execute_result)
+
+    runtime = AsyncMock()
+    hydrate = AsyncMock()
+    events = AsyncMock(spec=PodLifecycleEmitter)
+
+    cmd = PodCommand(session, runtime=runtime, events=events, hydrate=hydrate)
+
+    await cmd.sync_desired(
+        project.id,
+        PodDesiredState.RUNNING,
+        principal=_principal(),
+        reason="rematerialize",
+    )
+
+    runtime.ensure_running.assert_awaited()
+    hydrate.hydrate.assert_awaited()
+
+
+@pytest.mark.asyncio
 async def test_sync_desired_revives_failed_pod() -> None:
     session = AsyncMock()
     project = _project()

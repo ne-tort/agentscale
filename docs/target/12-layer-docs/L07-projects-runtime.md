@@ -142,7 +142,8 @@ apps/api/.env.example
 |---------|--------|---------|
 | Cabinet soft-delete → pod terminate | **done** | `CabinetInstanceService.soft_delete` → project delete → pod terminate; integration `test_cabinet_soft_delete_emits_pod_terminated` |
 | Cabinet hard purge → k8s terminate | **done** | `delete_with_cascade` → `stop_runtime_system`; integration `test_cabinet_admin_purge_terminates_running_pod` |
-| Celery rematerialize → hydrate bump | **done** | `ProjectCommand.rematerialize_background` + Celery task; unit `test_jobs_rematerialize` |
+| Celery rematerialize → hydrate bump | **done** | `rematerialize_background` + job lock; `sync_desired` force-rehydrate on `rematerialize`/`sync` |
+| Module data change → project rematerialize | **done** | `schedule_cabinet_rematerialize` on mod_files/mod_mcp row CRUD; Celery or inline fallback |
 | MCP zip + file_ref materialize E2E | **done** | integration `test_project_materialize_copy_blob_and_mcp_package` |
 | Meta syntax validator vs materialize rules | **gap** | UI validator не проверяет materialize-контракт |
 | «Обновить проект» (`POST /sync`) UI loading | **done** | spinner на management page |

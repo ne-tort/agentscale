@@ -105,9 +105,15 @@ def register_tasks(app) -> None:
         from prodavan.infrastructure.persistence.database import get_session_factory
 
         async def _run() -> dict[str, Any]:
-            factory = get_session_factory()
-            async with factory() as session:
-                return await ProjectCommand(session).rematerialize_background(project_id=project_id)
+            pid = (project_id or "").strip()
+            lock_job = f"rematerialize:{pid}"
+
+            async def _work() -> dict[str, Any]:
+                factory = get_session_factory()
+                async with factory() as session:
+                    return await ProjectCommand(session).rematerialize_background(project_id=pid)
+
+            return await run_with_job_lock(lock_job, ttl_sec=300, fn=_work)
 
         logger.info("celery task %s project_id=%s", job_names.REMATERIALIZE_PROJECT, project_id)
         return run_async(_run())

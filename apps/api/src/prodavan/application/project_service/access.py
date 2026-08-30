@@ -31,6 +31,9 @@ class ProjectAccessPolicy:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Project not found")
         return row
 
+    async def get_project_or_none(self, project_id: str) -> ProjectRow | None:
+        return await self._session.get(ProjectRow, project_id)
+
     def _is_restricted(self, project: ProjectRow) -> bool:
         mode = getattr(project, "visibility_mode", None) or ProjectVisibilityMode.CABINET_SHARED
         return mode == ProjectVisibilityMode.RESTRICTED

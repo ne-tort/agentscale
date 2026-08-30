@@ -41,7 +41,7 @@ async def test_rematerialize_background_bumps_hydrate_for_live_pod(monkeypatch: 
         package_names=(),
     )
 
-    monkeypatch.setattr(cmd._access, "get_project", _get_project)
+    monkeypatch.setattr(cmd._access, "get_project_or_none", _get_project)
     monkeypatch.setattr(cmd, "_get_live_pod", _get_live)
     monkeypatch.setattr(cmd, "_sync_project_workspace", AsyncMock(return_value=mat))
     sync_desired = AsyncMock()
@@ -68,7 +68,7 @@ async def test_rematerialize_background_skips_hydrate_without_pod(monkeypatch: p
         package_names=(),
     )
 
-    monkeypatch.setattr(cmd._access, "get_project", AsyncMock(return_value=row))
+    monkeypatch.setattr(cmd._access, "get_project_or_none", AsyncMock(return_value=row))
     monkeypatch.setattr(cmd, "_get_live_pod", AsyncMock(return_value=None))
     monkeypatch.setattr(cmd, "_sync_project_workspace", AsyncMock(return_value=mat))
     sync_desired = AsyncMock()
@@ -77,7 +77,7 @@ async def test_rematerialize_background_skips_hydrate_without_pod(monkeypatch: p
     out = await cmd.rematerialize_background(project_id="proj_2")
 
     assert out["ok"] is True
-    assert out["hydrate_generation"] is None
+    assert "hydrate_generation" not in out
     sync_desired.assert_not_awaited()
 
 
@@ -87,10 +87,37 @@ async def test_stop_runtime_system_delegates_to_pods(monkeypatch: pytest.MonkeyP
     cmd = ProjectCommand(session)
     row = SimpleNamespace(id="proj_3")
     stop = AsyncMock()
-    monkeypatch.setattr(cmd._access, "get_project", AsyncMock(return_value=row))
+    monkeypatch.setattr(cmd._access, "get_project_or_none", AsyncMock(return_value=row))
     monkeypatch.setattr(cmd, "_stop_and_pause_runtime", stop)
 
     await cmd.stop_runtime_system(project_id="proj_3", reason="purge")
 
     stop.assert_awaited_once()
     assert stop.await_args.kwargs["reason"] == "purge"
+
+
+@pytest.mark.asyncio
+async def test_rematerialize_background_skips_deleted_project(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = AsyncMock()
+    cmd = ProjectCommand(session)
+    row = SimpleNamespace(id="proj_del", cabinet_id="cab_1", status=ProjectStatus.DELETED)
+    monkeypatch.setattr(cmd._access, "get_project_or_none", AsyncMock(return_value=row))
+    sync = AsyncMock()
+    monkeypatch.setattr(cmd, "_sync_project_workspace", sync)
+
+    out = await cmd.rematerialize_background(project_id="proj_del")
+
+    assert out["ok"] is False
+    assert out["reason"] == "deleted"
+    sync.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_rematerialize_background_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    session = AsyncMock()
+    cmd = ProjectCommand(session)
+    monkeypatch.setattr(cmd._access, "get_project_or_none", AsyncMock(return_value=None))
+
+    out = await cmd.rematerialize_background(project_id="missing")
+
+    assert out == {"ok": False, "reason": "not_found", "project_id": "missing"}
