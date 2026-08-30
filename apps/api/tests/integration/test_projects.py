@@ -1800,3 +1800,76 @@ def test_patch_project_modules_syncs_running_pod(client: TestClient) -> None:
 
     after = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
     assert after.json()["runtime"]["hydrate_generation"] == 1
+
+
+@requires_postgres
+def test_admin_cabinet_module_bind_syncs_running_pod(client: TestClient) -> None:
+    """Admin PATCH cabinet module_ids rebind rematerializes running projects (existing mod_files rows)."""
+    _, cabinet_id, owner_tok = _setup_cabinet(client)
+    owner_h = {"Authorization": f"Bearer {owner_tok}"}
+    admin_h = {"Authorization": f"Bearer {_token(sub='padmin-bind', platform_admin=True)}"}
+
+    file_payload = b"bind sync content"
+    file_up = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/content/upload",
+        headers=owner_h,
+        files={"file": ("bind-sync.txt", file_payload, "text/plain")},
+    )
+    assert file_up.status_code == 200, file_up.text
+
+    file_row = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/modules/mod_files/data/files",
+        headers=owner_h,
+        json={
+            "body": {
+                "name": "Bind sync",
+                "target_path": "assets/bind-sync.txt",
+                "file_ref": _file_ref_from_upload(file_up.json()),
+            }
+        },
+    )
+    assert file_row.status_code == 200, file_row.text
+
+    cab = client.get(f"/api/v1/admin/cabinets/{cabinet_id}", headers=admin_h)
+    assert cab.status_code == 200, cab.text
+    all_module_ids = list(cab.json()["module_ids"])
+    assert "mod_files" in all_module_ids
+    without_files = [m for m in all_module_ids if m != "mod_files"]
+
+    stripped = client.patch(
+        f"/api/v1/admin/cabinets/{cabinet_id}",
+        headers=admin_h,
+        json={"module_ids": without_files},
+    )
+    assert stripped.status_code == 200, stripped.text
+    assert "mod_files" not in stripped.json()["module_ids"]
+
+    created = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "Cabinet Bind Sync"},
+    )
+    assert created.status_code == 201, created.text
+    project_id = created.json()["id"]
+    launched = _configure_and_launch(client, owner_h, project_id)
+    ws_root = Path(launched["materialize"]["workspace_root"])
+
+    missing = ws_root / "assets" / "bind-sync.txt"
+    assert not missing.is_file(), list(ws_root.rglob("*"))
+
+    before = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
+    assert before.json()["runtime"]["hydrate_generation"] == 0
+
+    rebound = client.patch(
+        f"/api/v1/admin/cabinets/{cabinet_id}",
+        headers=admin_h,
+        json={"module_ids": all_module_ids},
+    )
+    assert rebound.status_code == 200, rebound.text
+    assert "mod_files" in rebound.json()["module_ids"]
+
+    assert missing.is_file(), list(ws_root.rglob("*"))
+    assert missing.read_bytes() == file_payload
+
+    after = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
+    assert after.json()["runtime"]["hydrate_generation"] >= 1

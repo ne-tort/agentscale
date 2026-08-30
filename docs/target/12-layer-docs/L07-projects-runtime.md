@@ -146,7 +146,7 @@ apps/api/.env.example
 | Module data change → project rematerialize | **done** | row CRUD + cabinet binding change + project module toggle → sync/hydrate |
 | Project module toggle → sync/hydrate | **done** | `PATCH /projects/{id}/modules` → `rematerialize_background` |
 | Admin module↔project MP bind/revoke → sync | **done** | `ModuleService.bind/revoke_project` → `rematerialize_background` |
-| Cabinet module bind/unbind → project rematerialize | **done** | `schedule_cabinet_binding_change_rematerialize` |
+| Cabinet module bind/unbind → project rematerialize | **done** | `schedule_cabinet_binding_change_rematerialize` + integration `test_admin_cabinet_module_bind_syncs_running_pod` |
 | Pod env lifecycle on rehydrate | **done** | `reason` → `project.sync`/`launch`/… in `ContainerEnvLoader` |
 | Dev k8s MinIO hydrate | **done** | `POD_SANDBOX_MINIO_SECRET` restored in dev overlay |
 | MCP zip + file_ref materialize E2E | **done** | integration `test_project_materialize_copy_blob_and_mcp_package` |
@@ -155,6 +155,7 @@ apps/api/.env.example
 | Kafka rematerialize event bus | **partial** | `KAFKA_REMATERIALIZE_VIA_BUS` publishes `project.rematerialize.requested`; platform consumer enqueues Celery; default off |
 | Flutter module save → rematerialize UX | **done** | API `rematerialize` in row CRUD response + SnackBar on cabinet module page |
 | «Обновить проект» (`POST /sync`) UI loading | **done** | spinner на management page |
+| Company/admin container reload | **done** | `POST .../containers/{id}/reload` → `ProjectCommand.reload_project`; Flutter tile on error/degraded |
 
 ## Проверка
 
