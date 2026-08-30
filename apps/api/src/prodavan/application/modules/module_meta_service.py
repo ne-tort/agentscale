@@ -9,6 +9,10 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.application.modules.module_meta_validator import (
+    validate_document_body,
+    validate_merged_slug_map,
+)
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.persistence.models.modules import ModuleMetaDocumentRow, ModuleRow
 
@@ -99,7 +103,14 @@ class ModuleMetaDocumentService:
     async def put_document(self, *, module_id: str, slug: str, body: Any) -> dict:
         slug = _check_slug(slug)
         body = _ensure_json_body(body)
+        validate_document_body(slug, body)
         await self._require_module(module_id)
+        q = await self._session.execute(
+            select(ModuleMetaDocumentRow).where(ModuleMetaDocumentRow.module_id == module_id)
+        )
+        slug_map = {row.slug: row.body for row in q.scalars().all()}
+        slug_map[slug] = body
+        validate_merged_slug_map(slug_map)
         q = await self._session.execute(
             select(ModuleMetaDocumentRow).where(
                 ModuleMetaDocumentRow.module_id == module_id,
