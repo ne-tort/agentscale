@@ -121,6 +121,87 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('entity collection rowActions show inline and tap deselects', (tester) async {
+    var opened = false;
+    var actionPressed = false;
+    await tester.binding.setSurfaceSize(const Size(900, 400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      themed(
+        AppScaffold(
+          body: AppEntityCollection(
+            mode: AppEntityCollectionMode.table,
+            rows: const [
+              AppEntityRow(id: 'file.txt', title: 'readme.txt', cells: {'size': '12 B'}),
+            ],
+            primaryColumnLabel: 'Name',
+            columns: const [AppEntityColumn(id: 'size', label: 'Size', width: 72)],
+            onOpen: (_) => opened = true,
+            rowActions: [
+              AppEntityRowAction(
+                icon: Icons.download_outlined,
+                tooltip: 'Download',
+                onPressed: (_) async {
+                  actionPressed = true;
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byIcon(Icons.download_outlined), findsNothing);
+
+    await tester.longPress(find.text('readme.txt'));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.download_outlined), findsOneWidget);
+    expect(opened, isFalse);
+
+    await tester.tap(find.text('readme.txt'));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.download_outlined), findsNothing);
+    expect(opened, isFalse);
+    expect(actionPressed, isFalse);
+  });
+
+  testWidgets('entity collection rowActions respect visible predicate', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(900, 400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      themed(
+        AppScaffold(
+          body: AppEntityCollection(
+            mode: AppEntityCollectionMode.table,
+            rows: const [
+              AppEntityRow(id: 'dir', title: 'docs', cells: {'size': '—'}),
+            ],
+            primaryColumnLabel: 'Name',
+            columns: const [AppEntityColumn(id: 'size', label: 'Size', width: 72)],
+            onOpen: (_) {},
+            rowActions: [
+              AppEntityRowAction(
+                icon: Icons.download_outlined,
+                tooltip: 'Download',
+                visible: (row) => row.id != 'dir',
+                onPressed: (_) async {},
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    await tester.longPress(find.text('docs'));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.download_outlined), findsNothing);
+  });
+
   testWidgets('catalog select page multi select', (tester) async {
     await tester.pumpWidget(
       themed(

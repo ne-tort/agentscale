@@ -1472,6 +1472,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get commonNameRequired => 'Name required';
 
   @override
+  String get commonSize => 'Size';
+
+  @override
   String get commonNone => 'None';
 
   @override

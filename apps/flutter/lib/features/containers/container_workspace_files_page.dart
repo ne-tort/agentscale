@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 
-import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
+import 'package:prodavan/core/widgets/app_path_breadcrumbs.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/features/containers/container_workspace_api.dart';
@@ -30,8 +31,7 @@ class _ContainerWorkspaceFilesPageState extends State<ContainerWorkspaceFilesPag
   bool _loading = true;
   String _path = '';
   List<Map<String, dynamic>> _entries = const [];
-  String? _selectedPath;
-  bool _downloading = false;
+  String? _downloadingPath;
 
   @override
   void initState() {
@@ -52,10 +52,6 @@ class _ContainerWorkspaceFilesPageState extends State<ContainerWorkspaceFilesPag
       setState(() {
         _entries = entries;
         _loading = false;
-        if (_selectedPath != null &&
-            !entries.any((e) => e['path'] == _selectedPath)) {
-          _selectedPath = null;
-        }
       });
     } catch (e) {
       if (!mounted) return;
@@ -66,32 +62,29 @@ class _ContainerWorkspaceFilesPageState extends State<ContainerWorkspaceFilesPag
 
   void _openDir(String name) {
     final next = _path.isEmpty ? name : '$_path/$name';
-    setState(() {
-      _path = next;
-      _selectedPath = null;
-    });
+    setState(() => _path = next);
     _load();
   }
 
   void _navigateToPath(String target) {
-    setState(() {
-      _path = target;
-      _selectedPath = null;
-    });
+    setState(() => _path = target);
     _load();
   }
 
-  List<String> get _segments {
-    if (_path.isEmpty) return const [];
-    return _path.split('/');
+  Map<String, dynamic>? _entryFor(String path) {
+    for (final entry in _entries) {
+      if (entry['path'] == path) return entry;
+    }
+    return null;
   }
 
-  Future<void> _downloadSelected() async {
-    final path = _selectedPath;
-    if (path == null || _downloading) return;
-    final entry = _entries.firstWhere((e) => e['path'] == path);
+  Future<void> _downloadFile(AppEntityRow row) async {
+    if (_downloadingPath != null) return;
+    final entry = _entryFor(row.id);
+    if (entry == null || entry['kind'] != 'file') return;
+    final path = row.id;
     final name = entry['name'] as String? ?? path.split('/').last;
-    setState(() => _downloading = true);
+    setState(() => _downloadingPath = path);
     try {
       final bytes = await widget.api.downloadWorkspaceFile(path: path);
       if (!mounted) return;
@@ -103,14 +96,14 @@ class _ContainerWorkspaceFilesPageState extends State<ContainerWorkspaceFilesPag
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     } finally {
-      if (mounted) setState(() => _downloading = false);
+      if (mounted) setState(() => _downloadingPath = null);
     }
   }
 
-  void _previewSelected() {
-    final path = _selectedPath;
-    if (path == null) return;
-    final entry = _entries.firstWhere((e) => e['path'] == path);
+  void _previewFile(AppEntityRow row) {
+    final entry = _entryFor(row.id);
+    if (entry == null || entry['kind'] != 'file') return;
+    final path = row.id;
     final name = entry['name'] as String? ?? path.split('/').last;
     Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -123,8 +116,9 @@ class _ContainerWorkspaceFilesPageState extends State<ContainerWorkspaceFilesPag
     );
   }
 
-  bool _isTextFile(Map<String, dynamic> entry) {
-    if (entry['kind'] != 'file') return false;
+  bool _isTextFile(AppEntityRow row) {
+    final entry = _entryFor(row.id);
+    if (entry == null || entry['kind'] != 'file') return false;
     final name = (entry['name'] as String? ?? '').toLowerCase();
     const textExt = {
       '.md',
@@ -150,19 +144,41 @@ class _ContainerWorkspaceFilesPageState extends State<ContainerWorkspaceFilesPag
     return false;
   }
 
+  bool _isFile(AppEntityRow row) {
+    final entry = _entryFor(row.id);
+    return entry?['kind'] == 'file';
+  }
+
+  List<AppEntityRow> _buildRows(BuildContext context) {
+    final theme = Theme.of(context);
+    final iconColor = theme.colorScheme.onSurfaceVariant;
+    return _entries.map((entry) {
+      final kind = entry['kind'] as String? ?? 'file';
+      final name = entry['name'] as String? ?? '';
+      final path = entry['path'] as String? ?? name;
+      final isDir = kind == 'dir';
+      final size = entry['size'];
+      final sizeLabel = isDir
+          ? '—'
+          : formatWorkspaceFileSize(size is int ? size : int.tryParse('$size'));
+
+      return AppEntityRow(
+        id: path,
+        title: name,
+        leading: Icon(
+          isDir ? Icons.folder_outlined : Icons.insert_drive_file_outlined,
+          size: 22,
+          color: iconColor,
+        ),
+        cells: {'size': sizeLabel},
+      );
+    }).toList();
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final theme = Theme.of(context);
-    Map<String, dynamic>? selected;
-    if (_selectedPath != null) {
-      for (final entry in _entries) {
-        if (entry['path'] == _selectedPath) {
-          selected = entry;
-          break;
-        }
-      }
-    }
 
     return AppScaffold(
       title: Text(widget.title),
@@ -175,159 +191,64 @@ class _ContainerWorkspaceFilesPageState extends State<ContainerWorkspaceFilesPag
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.md,
-              vertical: AppSpacing.sm,
-            ),
-            child: Row(
-              children: [
-                _BreadcrumbChip(
-                  label: '/',
-                  selected: _path.isEmpty,
-                  onTap: () => _navigateToPath(''),
+          AppPathBreadcrumbs(
+            path: _path,
+            onNavigate: _navigateToPath,
+          ),
+          Expanded(
+            child: AppEntityCollection(
+              loading: _loading,
+              rows: _buildRows(context),
+              primaryColumnLabel: l10n.commonName,
+              columns: [
+                AppEntityColumn(
+                  id: 'size',
+                  label: l10n.commonSize,
+                  width: 72,
+                  align: AppEntityColumnAlign.end,
                 ),
-                for (var i = 0; i < _segments.length; i++) ...[
-                  const Icon(Icons.chevron_right, size: 18),
-                  _BreadcrumbChip(
-                    label: _segments[i],
-                    selected: i == _segments.length - 1,
-                    onTap: () => _navigateToPath(_segments.sublist(0, i + 1).join('/')),
-                  ),
-                ],
+              ],
+              onOpen: (row) {
+                final entry = _entryFor(row.id);
+                if (entry?['kind'] == 'dir') {
+                  _openDir(entry!['name'] as String? ?? row.title);
+                }
+              },
+              rowActions: [
+                AppEntityRowAction(
+                  icon: Icons.visibility_outlined,
+                  tooltip: l10n.projectWorkspacePreview,
+                  visible: _isTextFile,
+                  onPressed: (row) async => _previewFile(row),
+                ),
+                AppEntityRowAction(
+                  icon: Icons.download_outlined,
+                  tooltip: l10n.projectWorkspaceDownload,
+                  visible: _isFile,
+                  iconBuilder: (context, row) {
+                    if (_downloadingPath == row.id) {
+                      return SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: theme.colorScheme.onSurface,
+                        ),
+                      );
+                    }
+                    return Icon(
+                      Icons.download_outlined,
+                      size: 20,
+                      color: theme.colorScheme.onSurface,
+                    );
+                  },
+                  onPressed: _downloadFile,
+                ),
               ],
             ),
           ),
-          Expanded(
-            child: _loading
-                ? const Center(child: CircularProgressIndicator())
-                : Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(
-                        child: ListView.separated(
-                          itemCount: _entries.length,
-                          separatorBuilder: (_, _) => const Divider(height: 1),
-                          itemBuilder: (context, index) {
-                            final entry = _entries[index];
-                            final kind = entry['kind'] as String? ?? 'file';
-                            final name = entry['name'] as String? ?? '';
-                            final path = entry['path'] as String? ?? name;
-                            final isDir = kind == 'dir';
-                            final isSelected = _selectedPath == path;
-                            final size = entry['size'];
-                            final sizeLabel = isDir
-                                ? '—'
-                                : formatWorkspaceFileSize(size is int ? size : int.tryParse('$size'));
-
-                            return Material(
-                              color: isSelected
-                                  ? theme.colorScheme.primaryContainer.withValues(alpha: 0.35)
-                                  : null,
-                              child: InkWell(
-                                onTap: () {
-                                  if (isDir) {
-                                    _openDir(name);
-                                  }
-                                },
-                                onLongPress: isDir
-                                    ? null
-                                    : () => setState(() => _selectedPath = path),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: AppSpacing.md,
-                                    vertical: AppSpacing.sm,
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Icon(
-                                        isDir ? Icons.folder_outlined : Icons.insert_drive_file_outlined,
-                                        size: 22,
-                                        color: theme.colorScheme.onSurfaceVariant,
-                                      ),
-                                      const SizedBox(width: AppSpacing.sm),
-                                      Expanded(
-                                        child: Text(
-                                          name,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                      ),
-                                      const SizedBox(width: AppSpacing.sm),
-                                      SizedBox(
-                                        width: 72,
-                                        child: Text(
-                                          sizeLabel,
-                                          textAlign: TextAlign.end,
-                                          style: theme.textTheme.bodySmall,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
-                      if (selected != null && selected['kind'] == 'file')
-                        Container(
-                          width: 56,
-                          decoration: BoxDecoration(
-                            border: Border(
-                              left: BorderSide(color: theme.dividerColor),
-                            ),
-                          ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              if (_isTextFile(selected))
-                                IconButton(
-                                  tooltip: l10n.projectWorkspacePreview,
-                                  icon: const Icon(Icons.visibility_outlined),
-                                  onPressed: _previewSelected,
-                                ),
-                              IconButton(
-                                tooltip: l10n.projectWorkspaceDownload,
-                                icon: _downloading
-                                    ? const SizedBox(
-                                        width: 20,
-                                        height: 20,
-                                        child: CircularProgressIndicator(strokeWidth: 2),
-                                      )
-                                    : const Icon(Icons.download_outlined),
-                                onPressed: _downloading ? null : _downloadSelected,
-                              ),
-                            ],
-                          ),
-                        ),
-                    ],
-                  ),
-          ),
         ],
       ),
-    );
-  }
-}
-
-class _BreadcrumbChip extends StatelessWidget {
-  const _BreadcrumbChip({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return ActionChip(
-      label: Text(label),
-      onPressed: onTap,
-      backgroundColor: selected ? theme.colorScheme.primaryContainer : null,
     );
   }
 }

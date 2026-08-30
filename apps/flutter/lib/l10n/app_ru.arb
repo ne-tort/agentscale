@@ -892,6 +892,7 @@
   "commonList": "Список",
   "commonName": "Название",
   "commonNameRequired": "Укажите название",
+  "commonSize": "Размер",
   "commonNone": "Нет",
   "commonNothingFound": "Ничего не найдено",
   "commonOverview": "Обзор",

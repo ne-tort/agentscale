@@ -1484,6 +1484,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get commonNameRequired => 'Укажите название';
 
   @override
+  String get commonSize => 'Размер';
+
+  @override
   String get commonNone => 'Нет';
 
   @override

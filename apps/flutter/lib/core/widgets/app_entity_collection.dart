@@ -69,10 +69,27 @@ class AppEntityRow {
   Color? get effectiveColor => rowColor ?? titleColor;
 }
 
+/// Custom icon action shown in edit mode (long-press) for a row.
+class AppEntityRowAction {
+  const AppEntityRowAction({
+    required this.tooltip,
+    required this.onPressed,
+    this.icon,
+    this.iconBuilder,
+    this.visible,
+  });
+
+  final IconData? icon;
+  final Widget Function(BuildContext context, AppEntityRow row)? iconBuilder;
+  final String tooltip;
+  final Future<void> Function(AppEntityRow row) onPressed;
+  final bool Function(AppEntityRow row)? visible;
+}
+
 /// Unified entity collection — table on wide, list on narrow (canon 07).
 ///
-/// Long-press enters mutate mode when [onCopy] / [onDelete] / [onEnabledChanged]
-/// are set (copy + delete icons; optional enable switch as rightmost).
+/// Long-press enters edit mode when [onCopy] / [onDelete] / [onEnabledChanged]
+/// or [rowActions] are set (inline icons in the last column / list trailing).
 class AppEntityCollection extends StatefulWidget {
   const AppEntityCollection({
     super.key,
@@ -91,6 +108,7 @@ class AppEntityCollection extends StatefulWidget {
     this.deletableOf,
     this.enabledOf,
     this.onEnabledChanged,
+    this.rowActions = const [],
   });
 
   final List<AppEntityRow> rows;
@@ -118,6 +136,9 @@ class AppEntityCollection extends StatefulWidget {
   final bool Function(AppEntityRow row)? enabledOf;
   final Future<void> Function(AppEntityRow row, bool enabled)? onEnabledChanged;
 
+  /// Custom row actions (preview, download, etc.) shown inline on long-press.
+  final List<AppEntityRowAction> rowActions;
+
   @override
   State<AppEntityCollection> createState() => _AppEntityCollectionState();
 }
@@ -134,7 +155,8 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
   bool get _mutateEnabled =>
       widget.onCopy != null ||
       widget.onDelete != null ||
-      widget.onEnabledChanged != null;
+      widget.onEnabledChanged != null ||
+      widget.rowActions.isNotEmpty;
 
   bool _canCopy(AppEntityRow row) {
     if (widget.onCopy == null) return false;
@@ -146,10 +168,21 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
     return widget.deletableOf?.call(row) ?? true;
   }
 
+  bool _rowActionVisible(AppEntityRowAction action, AppEntityRow row) =>
+      action.visible?.call(row) ?? true;
+
+  bool _rowHasRowActions(AppEntityRow row) {
+    for (final action in widget.rowActions) {
+      if (_rowActionVisible(action, row)) return true;
+    }
+    return false;
+  }
+
   bool _rowHasMutateActions(AppEntityRow row) =>
       _canCopy(row) ||
       _canDelete(row) ||
-      (widget.enabledOf != null && widget.onEnabledChanged != null);
+      (widget.enabledOf != null && widget.onEnabledChanged != null) ||
+      _rowHasRowActions(row);
 
   AppEntityCollectionMode _effectiveMode(BuildContext context) {
     if (widget.mode != null) return widget.mode!;
@@ -237,6 +270,40 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
               if (mounted) _clearEdit();
             },
           ),
+        for (final action in widget.rowActions)
+          if (_rowActionVisible(action, row))
+            IconButton(
+              tooltip: action.tooltip,
+              icon: action.iconBuilder?.call(context, row) ??
+                  Icon(action.icon, size: 20, color: onSurface),
+              padding: EdgeInsets.zero,
+              visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints(
+                minWidth: AppInsets.trailingIconExtent,
+                minHeight: AppInsets.trailingIconExtent,
+              ),
+              onPressed: () async {
+                await action.onPressed(row);
+                if (mounted) _clearEdit();
+              },
+            ),
+      ],
+    );
+  }
+
+  Widget _primaryCellContent(AppEntityRow row, TextStyle? bodyMedium) {
+    final title = Text(
+      row.title,
+      overflow: TextOverflow.ellipsis,
+      style: _titleStyle(row, bodyMedium),
+    );
+    if (row.leading == null) return title;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        row.leading!,
+        const SizedBox(width: AppSpacing.sm),
+        Flexible(child: title),
       ],
     );
   }
@@ -409,11 +476,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                     DataCell(
                       Align(
                         alignment: Alignment.centerLeft,
-                        child: Text(
-                          row.title,
-                          overflow: TextOverflow.ellipsis,
-                          style: _titleStyle(row, bodyMedium),
-                        ),
+                        child: _primaryCellContent(row, bodyMedium),
                       ),
                     ),
                     ...[

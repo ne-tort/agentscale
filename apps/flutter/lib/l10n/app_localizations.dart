@@ -2648,6 +2648,12 @@ abstract class AppLocalizations {
   /// **'Name required'**
   String get commonNameRequired;
 
+  /// No description provided for @commonSize.
+  ///
+  /// In en, this message translates to:
+  /// **'Size'**
+  String get commonSize;
+
   /// No description provided for @commonNone.
   ///
   /// In en, this message translates to:

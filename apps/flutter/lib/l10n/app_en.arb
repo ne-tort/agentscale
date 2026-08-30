@@ -890,6 +890,7 @@
   "commonList": "List",
   "commonName": "Name",
   "commonNameRequired": "Name required",
+  "commonSize": "Size",
   "commonNone": "None",
   "commonNothingFound": "Nothing found",
   "commonOverview": "Overview",
