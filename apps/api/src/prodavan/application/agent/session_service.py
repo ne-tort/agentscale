@@ -362,10 +362,14 @@ class AgentSessionService:
         if settings.pod_agent_runtime_enabled:
             bridge = OpenClawBridgeBootstrap(self._session)
             if row.resolved_key_id:
-                await AgentCredentialBroker(self._session).push_lease_to_runtime(
+                pushed = await AgentCredentialBroker(self._session).push_lease_to_runtime(
                     project_id=project_id,
                     key_id=row.resolved_key_id,
                 )
+                if not pushed:
+                    raise agent_runtime_unavailable(
+                        detail="failed to push AI key lease to pod agent-runtime",
+                    )
 
             async for event in bridge.iter_send_events(
                 project_id=project_id,

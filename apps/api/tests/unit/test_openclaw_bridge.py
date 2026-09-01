@@ -12,7 +12,9 @@ from prodavan.application.agent.openclaw_bridge import (
     BridgeSessionBootstrap,
     OpenClawBridgeBootstrap,
     api_kind_to_bridge_adapter,
+    bridge_envelope_is_stub,
     bridge_envelope_to_agent_event,
+    bridge_stub_error_event,
 )
 from prodavan.domain.agent import AgentEventType
 from prodavan.infrastructure.k8s.sandbox.client import PodSnapshot
@@ -29,6 +31,20 @@ def test_bridge_envelope_to_agent_event_skips_system_init() -> None:
     ev = bridge_envelope_to_agent_event({"type": "text_delta", "data": {"text": "hi"}})
     assert ev is not None
     assert ev.type == AgentEventType.TEXT_DELTA
+
+
+def test_bridge_envelope_is_stub() -> None:
+    assert bridge_envelope_is_stub({"type": "system_init", "data": {"stub": True}})
+    assert bridge_envelope_is_stub(
+        {"type": "text_delta", "data": {"text": "[cursor-sdk stub] hello"}}
+    )
+    assert not bridge_envelope_is_stub({"type": "text_delta", "data": {"text": "hello"}})
+
+
+def test_bridge_stub_error_event() -> None:
+    ev = bridge_stub_error_event()
+    assert ev.type == AgentEventType.ERROR
+    assert ev.data.get("code") == "AGENT_STUB_RESPONSE"
 
 
 @pytest.mark.asyncio

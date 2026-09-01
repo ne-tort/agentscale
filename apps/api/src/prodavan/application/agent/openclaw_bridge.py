@@ -32,6 +32,11 @@ _BRIDGE_ADAPTER_KINDS = frozenset(
 )
 
 _BRIDGE_SKIP_EVENT_TYPES = frozenset({"system_init", "ping"})
+_STUB_TEXT_PREFIXES = (
+    "[cursor-sdk stub]",
+    "[claude-agent-sdk stub]",
+    "[codex-sdk stub]",
+)
 PRODAVAN_EVENTS_OWNER_HEADER = "X-Prodavan-Events-Owner"
 PRODAVAN_EVENTS_OWNER_API = "api"
 
@@ -64,6 +69,29 @@ def bridge_envelope_to_agent_event(envelope: dict) -> AgentEvent | None:
         return None
     data = envelope.get("data")
     return AgentEvent.now(etype, data if isinstance(data, dict) else {})
+
+
+def bridge_envelope_is_stub(envelope: dict) -> bool:
+    """Detect legacy/test stub responses from agent-runtime adapters."""
+    etype = str(envelope.get("type") or "")
+    data = envelope.get("data") if isinstance(envelope.get("data"), dict) else {}
+    if etype == "system_init" and data.get("stub") is True:
+        return True
+    if etype == "text_delta":
+        text = str(data.get("text") or "")
+        return any(text.startswith(prefix) for prefix in _STUB_TEXT_PREFIXES)
+    return False
+
+
+def bridge_stub_error_event() -> AgentEvent:
+    return AgentEvent.now(
+        AgentEventType.ERROR,
+        {
+            "code": "AGENT_STUB_RESPONSE",
+            "message": "agent runtime returned a stub response; redeploy agent-runtime image",
+            "retryable": False,
+        },
+    )
 
 
 @dataclass(frozen=True)
@@ -195,6 +223,9 @@ class OpenClawBridgeBootstrap:
                             continue
                         if not isinstance(envelope, dict):
                             continue
+                        if bridge_envelope_is_stub(envelope):
+                            yield bridge_stub_error_event()
+                            return
                         event = bridge_envelope_to_agent_event(envelope)
                         if event is not None:
                             yielded = True
