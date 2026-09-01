@@ -152,6 +152,69 @@ def test_build_pod_body_agent_bridge_legacy_alias() -> None:
     assert runtime_env["OPENCLAW_SESSION_MAP_PATH"] == "/workspace/.openclaw-data/session-map.json"
 
 
+def test_build_pod_body_runtime_kwargs_override_bridge_alias() -> None:
+    """When both agent_runtime_* and agent_bridge_* are set, runtime wins for port/api."""
+    ctx = PodRuntimeContext(
+        pod_id="pod_abc",
+        project_id="prj_abc",
+        company_id="cmp_abc",
+        workspace_key="wk_demo",
+    )
+    body = build_pod_body(
+        runtime_ref="pod-wk-demo",
+        namespace="prodavan-sandboxes",
+        context=ctx,
+        image="sandbox:latest",
+        hydrate_image="hydrate:latest",
+        service_account="prodavan-sandbox",
+        cpu_request="100m",
+        cpu_limit="1",
+        memory_request="256Mi",
+        memory_limit="1Gi",
+        agent_runtime_image="prodavan-agent-runtime:v2",
+        agent_runtime_port=4000,
+        agent_runtime_api_base_url="http://api-runtime:8000/api/v1",
+        agent_runtime_auth_secret="runtime-secret",
+        agent_bridge_image="openclaw-bridge:legacy",
+        agent_bridge_port=3921,
+        agent_bridge_api_base_url="http://api-bridge:8000/api/v1",
+        agent_bridge_auth_secret="bridge-secret",
+    )
+    runtime = body["spec"]["containers"][0]
+    assert runtime["image"] == "prodavan-agent-runtime:v2"
+    runtime_env = {item["name"]: item.get("value") for item in runtime["env"]}
+    assert runtime_env["PRODAVAN_API_BASE_URL"] == "http://api-runtime:8000/api/v1"
+    assert runtime_env["PORT"] == "4000"
+    token_env = next(e for e in runtime["env"] if e["name"] == "PRODAVAN_AUTH_TOKEN")
+    assert token_env["valueFrom"]["secretKeyRef"]["name"] == "runtime-secret"
+    assert runtime["readinessProbe"]["httpGet"]["port"] == 4000
+
+
+def test_build_pod_body_bridge_auth_used_when_runtime_auth_missing() -> None:
+    ctx = PodRuntimeContext(
+        pod_id="pod_abc",
+        project_id="prj_abc",
+        company_id="cmp_abc",
+        workspace_key="wk_demo",
+    )
+    body = build_pod_body(
+        runtime_ref="pod-wk-demo",
+        namespace="prodavan-sandboxes",
+        context=ctx,
+        image="sandbox:latest",
+        hydrate_image="hydrate:latest",
+        service_account="prodavan-sandbox",
+        cpu_request="100m",
+        cpu_limit="1",
+        memory_request="256Mi",
+        memory_limit="1Gi",
+        agent_bridge_image="openclaw-bridge:latest",
+        agent_bridge_auth_secret="bridge-only-secret",
+    )
+    token_env = next(e for e in body["spec"]["containers"][0]["env"] if e["name"] == "PRODAVAN_AUTH_TOKEN")
+    assert token_env["valueFrom"]["secretKeyRef"]["name"] == "bridge-only-secret"
+
+
 def test_in_cluster_auth_available(tmp_path: Path) -> None:
     auth = InClusterAuth(token_dir=tmp_path, host="10.0.0.1")
     assert auth.available() is False
