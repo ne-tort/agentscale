@@ -119,7 +119,16 @@ class RuntimeObservationService:
             pod = await self._get_live_pod(project_id)
             if project is None or pod is None:
                 raise RuntimeError("project or pod missing while waiting for running")
-            return await self.observe(project=project, pod=pod)
+            obs = await self.observe(project=project, pod=pod)
+            if (
+                pod.status == PodStatus.PROVISIONING
+                and pod.desired_state == PodDesiredState.RUNNING.value
+            ):
+                pod.status = PodStatus.RUNNING
+                pod.last_error = None
+                pod.last_started_at = datetime.now(UTC)
+                await self._session.flush()
+            return obs
 
         deadline = datetime.now(UTC).timestamp() + float(
             timeout_sec or settings.pod_provisioning_timeout_sec
@@ -175,6 +184,15 @@ class RuntimeObservationService:
 
         mode = (settings.pod_runtime_mode or "stub").strip().lower()
         if mode != "k8s":
+            if (
+                pod.status == PodStatus.PROVISIONING
+                and pod.desired_state == PodDesiredState.RUNNING.value
+                and state in _TRANSITIONAL_OBSERVED
+            ):
+                pod.status = PodStatus.RUNNING
+                pod.last_error = None
+                pod.last_started_at = now
+                return "promoted"
             if (
                 pod.status == PodStatus.RUNNING
                 and pod.desired_state == PodDesiredState.RUNNING.value

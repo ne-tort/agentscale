@@ -164,6 +164,7 @@ jobs:
           AUTH_MODE: test
           AUTH_TEST_SECRET: dev-only-test-secret-change-me
           KEYCLOAK_INVITE_MODE: fake
+          POD_RUNTIME_MODE: stub
         run: pytest tests/integration -m integration -q
 
       - name: Stop Postgres
@@ -376,16 +377,18 @@ jobs:
 
   done:
     needs: [gate, integration, k8s, live]
-    if: always()
+    if: >-
+      always() && (
+      needs.gate.outputs.run_integration == 'true'
+      || needs.gate.outputs.run_k8s == 'true'
+      || needs.gate.outputs.run_live == 'true'
+      )
     runs-on: [self-hosted, linux, docker]
     steps:
       - name: E2E summary
         run: |
           python3 - <<'PY'
           import os, sys
-          if os.environ.get("RUN_INTEGRATION") == "false" and os.environ.get("RUN_K8S") == "false" and os.environ.get("RUN_LIVE") == "false":
-              print("CI E2E skipped (no trigger)")
-              sys.exit(0)
           jobs = {
               "integration": os.environ.get("INTEGRATION", "skipped"),
               "k8s": os.environ.get("K8S", "skipped"),

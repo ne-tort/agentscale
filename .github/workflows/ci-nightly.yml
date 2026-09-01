@@ -101,6 +101,7 @@ jobs:
           AUTH_MODE: test
           AUTH_TEST_SECRET: dev-only-test-secret-change-me
           KEYCLOAK_INVITE_MODE: fake
+          POD_RUNTIME_MODE: stub
         run: pytest tests/integration -m integration -q
 
       - name: Stop Postgres

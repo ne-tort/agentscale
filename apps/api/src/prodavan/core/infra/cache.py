@@ -6,6 +6,8 @@ import logging
 import uuid
 from typing import Any
 
+from prodavan.config.settings import settings
+
 logger = logging.getLogger(__name__)
 
 _RELEASE_LOCK_LUA = """
@@ -99,6 +101,8 @@ async def rate_limit_enforce(key: str, *, limit: int, window_sec: int, detail: s
 
     mgr = get_redis_manager()
     if mgr is None or not mgr.enabled:
+        if (settings.auth_mode or "").strip().lower() == "test":
+            return
         raise AppError(
             code="REDIS_UNAVAILABLE",
             title="Service Unavailable",

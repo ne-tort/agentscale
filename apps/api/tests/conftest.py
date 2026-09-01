@@ -17,6 +17,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from prodavan.config.settings import settings
 from prodavan.main import create_app
 
 DATABASE_URL = os.getenv(
@@ -273,6 +274,16 @@ def _test_needs_postgres_wipe(request: pytest.FixtureRequest) -> bool:
         if "PostgreSQL" in str(mark.kwargs.get("reason", "")):
             return True
     return False
+
+
+@pytest.fixture(autouse=True)
+def _integration_stub_runtime(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Integration tests use stub pod runtime (no k8s cluster required)."""
+    path = str(getattr(request, "fspath", "")).replace("\\", "/")
+    if "/tests/integration/" not in path:
+        return
+    monkeypatch.setenv("POD_RUNTIME_MODE", "stub")
+    monkeypatch.setattr(settings, "pod_runtime_mode", "stub")
 
 
 @pytest.fixture(autouse=True)

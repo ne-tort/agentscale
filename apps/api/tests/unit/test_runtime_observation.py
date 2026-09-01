@@ -164,6 +164,24 @@ async def test_promote_or_demote_stub_provisioning_timeout() -> None:
 
 
 @pytest.mark.asyncio
+async def test_promote_or_demote_stub_promotes_provisioning() -> None:
+    session = MagicMock()
+    svc = RuntimeObservationService(session)
+    project = _project()
+    pod = _pod(status=PodStatus.PROVISIONING)
+    svc.observe = AsyncMock(  # type: ignore[method-assign]
+        return_value={"observed_state": ObservedState.STARTING.value},
+    )
+    with patch("prodavan.application.pod_service.runtime_observation.settings") as mock_settings:
+        mock_settings.pod_runtime_mode = "stub"
+        mock_settings.pod_provisioning_timeout_sec = 300
+        action = await svc.promote_or_demote(project=project, pod=pod)
+    assert action == "promoted"
+    assert pod.status == PodStatus.RUNNING
+    assert pod.last_error is None
+
+
+@pytest.mark.asyncio
 async def test_promote_or_demote_k8s_unknown_with_error() -> None:
     session = MagicMock()
     svc = RuntimeObservationService(session)

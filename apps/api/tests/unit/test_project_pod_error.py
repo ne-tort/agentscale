@@ -230,10 +230,26 @@ async def test_reload_project_rate_limit_redis_unavailable() -> None:
 
 @pytest.mark.asyncio
 async def test_rate_limit_enforce_fail_closed_when_redis_disabled() -> None:
+    from prodavan.config.settings import settings
     from prodavan.core.infra.cache import rate_limit_enforce
 
-    with patch("prodavan.core.infra.redis_manager.get_redis_manager", return_value=None):
+    with (
+        patch("prodavan.core.infra.redis_manager.get_redis_manager", return_value=None),
+        patch.object(settings, "auth_mode", "oidc"),
+    ):
         with pytest.raises(AppError) as exc:
             await rate_limit_enforce("test:key", limit=1, window_sec=60)
 
     assert exc.value.code == "REDIS_UNAVAILABLE"
+
+
+@pytest.mark.asyncio
+async def test_rate_limit_enforce_allows_without_redis_in_test_mode() -> None:
+    from prodavan.config.settings import settings
+    from prodavan.core.infra.cache import rate_limit_enforce
+
+    with (
+        patch("prodavan.core.infra.redis_manager.get_redis_manager", return_value=None),
+        patch.object(settings, "auth_mode", "test"),
+    ):
+        await rate_limit_enforce("test:key", limit=1, window_sec=60)
