@@ -284,23 +284,26 @@ class RuntimeObservationService:
             if cached.get("restarts") is not None:
                 k8s_status["restarts"] = cached.get("restarts")
 
-        if not k8s_status and runtime_ref:
+        if runtime_ref:
             try:
                 runtime = build_pod_runtime()
-                k8s_status = await runtime.get_status(runtime_ref=runtime_ref) or {}
+                live = await runtime.get_status(runtime_ref=runtime_ref) or {}
+                k8s_status = {**k8s_status, **live}
             except Exception as exc:
                 logger.exception("observe k8s status failed runtime_ref=%s", runtime_ref)
-                return self._summary(
-                    ObservedState.UNKNOWN,
-                    orchestrator_status=pod.status,
-                    desired_state=pod.desired_state,
-                    last_error=str(exc)[:500],
-                )
+                if not k8s_status:
+                    return self._summary(
+                        ObservedState.UNKNOWN,
+                        orchestrator_status=pod.status,
+                        desired_state=pod.desired_state,
+                        last_error=str(exc)[:500],
+                    )
 
         phase = str(k8s_status.get("phase") or "Unknown")
         ready = bool(k8s_status.get("ready"))
         hydrating = bool(k8s_status.get("hydrating"))
         hydrate_failed = bool(k8s_status.get("hydrate_failed"))
+        fatal_failure = str(k8s_status.get("fatal_failure") or "").strip() or None
         timing: dict[str, Any] = {}
         if k8s_status.get("started_at"):
             timing["started_at"] = k8s_status["started_at"]
@@ -318,6 +321,17 @@ class RuntimeObservationService:
                 phase=phase,
                 ready=ready,
                 last_error="hydrate initContainer failed",
+                restarts=k8s_status.get("restarts"),
+            )
+
+        if fatal_failure:
+            return obs(
+                ObservedState.FAILED,
+                orchestrator_status=pod.status,
+                desired_state=pod.desired_state,
+                phase=phase,
+                ready=ready,
+                last_error=fatal_failure,
                 restarts=k8s_status.get("restarts"),
             )
 

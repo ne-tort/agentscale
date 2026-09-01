@@ -122,6 +122,7 @@ def build_pod_body(
     agent_bridge_port: int = 3921,
     agent_bridge_api_base_url: str = "http://prodavan-api.prodavan.svc:8000/api/v1",
     agent_bridge_auth_secret: str | None = None,
+    image_pull_secret: str | None = None,
 ) -> dict[str, Any]:
     runtime_image = agent_runtime_image or agent_bridge_image
     if agent_runtime_image is not None:
@@ -188,6 +189,15 @@ def build_pod_body(
             stub_holder=runtime_image is None,
         ),
     ]
+    spec: dict[str, Any] = {
+            "serviceAccountName": service_account,
+            "restartPolicy": "Never",
+            "initContainers": [init_container],
+            "containers": containers,
+            "volumes": [{"name": "workspace", "emptyDir": {}}],
+        }
+    if image_pull_secret:
+        spec["imagePullSecrets"] = [{"name": image_pull_secret}]
     return {
         "apiVersion": "v1",
         "kind": "Pod",
@@ -196,11 +206,5 @@ def build_pod_body(
             "namespace": namespace,
             "labels": labels,
         },
-        "spec": {
-            "serviceAccountName": service_account,
-            "restartPolicy": "Never",
-            "initContainers": [init_container],
-            "containers": containers,
-            "volumes": [{"name": "workspace", "emptyDir": {}}],
-        },
+        "spec": spec,
     }

@@ -97,7 +97,7 @@ Runner (outside k3s): [`infra/github-runner/README.md`](../../infra/github-runne
 | API pod Terminating, 502 | `prodavan-ops heal` (force-delete stuck); dev CronJob `prodavan-cluster-heal` |
 | kubectl connection refused | k3s running? `sudo systemctl status k3s` |
 | Argo OutOfSync | merge to `main`; check Application `prodavan-dev` |
-| ImagePullBackOff | SealedSecret `ghcr-pull` — [`SECRETS.md`](../../infra/k3s/overlays/dev/SECRETS.md) |
+| ImagePullBackOff (platform or project pod) | `ghcr-pull` в **`prodavan`** и **`prodavan-sandboxes`** — [`SECRETS.md`](../../infra/k3s/overlays/dev/SECRETS.md) |
 | Flutter: «metrics-server недоступен» на контейнере | См. [k8s metrics-server](#k8s-metrics-server) ниже |
 
 Legacy compose/k3d/bootstrap scripts **removed** — do not restore.

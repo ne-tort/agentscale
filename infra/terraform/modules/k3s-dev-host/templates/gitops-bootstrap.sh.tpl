@@ -31,9 +31,15 @@ fi
 "$${KCTL[@]}" -n kube-system wait --for=condition=Available deployment/sealed-secrets-controller --timeout=180s
 if [ -s /tmp/prodavan-ghcr.token ]; then
   "$${KCTL[@]}" create namespace prodavan --dry-run=client -o yaml | "$${KCTL[@]}" apply -f -
+  "$${KCTL[@]}" create namespace prodavan-sandboxes --dry-run=client -o yaml | "$${KCTL[@]}" apply -f -
   "$${KCTL[@]}" -n prodavan delete secret ghcr-pull --ignore-not-found
+  "$${KCTL[@]}" -n prodavan-sandboxes delete secret ghcr-pull --ignore-not-found
   GHCR_PASS="$(cat /tmp/prodavan-ghcr.token)"
   "$${KCTL[@]}" -n prodavan create secret docker-registry ghcr-pull \
+    --docker-server=ghcr.io \
+    --docker-username='${ghcr_username}' \
+    --docker-password="$GHCR_PASS"
+  "$${KCTL[@]}" -n prodavan-sandboxes create secret docker-registry ghcr-pull \
     --docker-server=ghcr.io \
     --docker-username='${ghcr_username}' \
     --docker-password="$GHCR_PASS"

@@ -9,7 +9,12 @@ import pytest
 
 from prodavan.domain.pods import PodRuntimeContext, runtime_ref_for, sanitize_dns
 from prodavan.infrastructure.k8s.auth import InClusterAuth
-from prodavan.infrastructure.k8s.sandbox.client import K8sSandboxClient
+from prodavan.infrastructure.k8s.errors import PermanentK8sError
+from prodavan.infrastructure.k8s.sandbox.client import (
+    K8sSandboxClient,
+    _parse_snapshot,
+    _pod_fatal_failure,
+)
 from prodavan.infrastructure.k8s.sandbox.pod_spec import build_pod_body
 
 
@@ -50,6 +55,106 @@ def test_build_pod_body_labels() -> None:
     runtime_env = {item["name"]: item.get("value") for item in runtime["env"]}
     assert runtime_env["LOG_LEVEL"] == "debug"
     assert runtime["command"] == ["sleep", "infinity"]
+
+
+def test_build_pod_body_image_pull_secret() -> None:
+    ctx = PodRuntimeContext(
+        pod_id="pod_abc",
+        project_id="prj_abc",
+        company_id="cmp_abc",
+        workspace_key="wk_demo",
+    )
+    body = build_pod_body(
+        runtime_ref="pod-wk-demo",
+        namespace="prodavan-sandboxes",
+        context=ctx,
+        image="sandbox:latest",
+        hydrate_image="hydrate:latest",
+        service_account="prodavan-sandbox",
+        cpu_request="100m",
+        cpu_limit="1",
+        memory_request="256Mi",
+        memory_limit="1Gi",
+        image_pull_secret="ghcr-pull",
+    )
+    assert body["spec"]["imagePullSecrets"] == [{"name": "ghcr-pull"}]
+
+
+def test_pod_fatal_failure_image_pull_backoff() -> None:
+    status = {
+        "initContainerStatuses": [
+            {
+                "name": "hydrate",
+                "state": {
+                    "waiting": {
+                        "reason": "ImagePullBackOff",
+                        "message": 'Back-off pulling image "ghcr.io/ne-tort/prodavan-api:latest"',
+                    }
+                },
+            }
+        ]
+    }
+    fatal = _pod_fatal_failure(status)
+    assert fatal is not None
+    assert "ImagePullBackOff" in fatal
+
+
+def test_parse_snapshot_includes_fatal_failure() -> None:
+    body = {
+        "metadata": {"name": "pod-wk-demo", "labels": {}},
+        "status": {
+            "phase": "Pending",
+            "initContainerStatuses": [
+                {
+                    "name": "hydrate",
+                    "state": {
+                        "waiting": {
+                            "reason": "ErrImagePull",
+                            "message": "pull access denied",
+                        }
+                    },
+                }
+            ],
+        },
+    }
+    snap = _parse_snapshot(body)
+    assert snap.fatal_failure is not None
+    assert "ErrImagePull" in snap.fatal_failure
+
+
+@pytest.mark.asyncio
+async def test_wait_ready_fails_fast_on_image_pull_backoff() -> None:
+    auth = MagicMock(spec=InClusterAuth)
+    auth.api_base.return_value = "https://k8s.example"
+    auth.headers.return_value = {"Authorization": "Bearer x"}
+    auth.client_kwargs.return_value = {"verify": False, "timeout": 1.0}
+    client = K8sSandboxClient(namespace="prodavan-sandboxes", auth=auth)
+
+    pod_body = {
+        "metadata": {"name": "pod-wk-demo", "labels": {}},
+        "status": {
+            "phase": "Pending",
+            "initContainerStatuses": [
+                {
+                    "name": "hydrate",
+                    "state": {
+                        "waiting": {
+                            "reason": "ImagePullBackOff",
+                            "message": "Back-off pulling image",
+                        }
+                    },
+                }
+            ],
+        },
+    }
+    mock_response = MagicMock()
+    mock_response.status_code = 200
+    mock_response.json.return_value = pod_body
+
+    with patch("prodavan.infrastructure.k8s.sandbox.client.httpx.AsyncClient") as ac:
+        ac.return_value.__aenter__.return_value.get = AsyncMock(return_value=mock_response)
+        with pytest.raises(PermanentK8sError, match="cannot start"):
+            await client.wait_ready("pod-wk-demo", timeout=30.0)
 
 
 def test_build_pod_body_agent_runtime() -> None:

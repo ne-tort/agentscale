@@ -103,11 +103,12 @@ class Settings(BaseSettings):
     pod_sandbox_hydrate_image: str = "ghcr.io/ne-tort/prodavan-api:local"
     pod_sandbox_sa: str = "prodavan-project-pod"
     pod_sandbox_minio_secret: str = ""  # e.g. prodavan-minio-hydrate; empty = stub hydrate tree
+    pod_sandbox_image_pull_secret: str = "ghcr-pull"
     pod_sandbox_cpu_request: str = "100m"
     pod_sandbox_cpu_limit: str = "1000m"
     pod_sandbox_memory_request: str = "256Mi"
     pod_sandbox_memory_limit: str = "1Gi"
-    pod_ready_timeout_sec: int = 120
+    pod_ready_timeout_sec: int = 45
     # L15 agent-runtime — single container Pod workload (Platform OpenClaw + SDK adapters).
     pod_agent_runtime_enabled: bool = Field(
         default=False,
@@ -220,7 +221,7 @@ class Settings(BaseSettings):
     def pod_agent_bridge_bootstrap_enabled(self, value: bool) -> None:
         self.pod_agent_runtime_bootstrap_enabled = value
     pod_metrics_grace_sec: int = 30
-    pod_provisioning_timeout_sec: int = 60
+    pod_provisioning_timeout_sec: int = 30
     pod_preparing_timeout_sec: int = 120
     pod_k8s_required: bool = False
     sandbox_k8s_pvc: str = "prodavan-api-storage"

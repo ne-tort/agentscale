@@ -7,7 +7,7 @@ from typing import Any
 
 from prodavan.config.settings import settings
 from prodavan.domain.pods.context import PodRuntimeContext
-from prodavan.infrastructure.k8s.errors import K8sNotFoundError
+from prodavan.infrastructure.k8s.errors import K8sNotFoundError, PermanentK8sError
 from prodavan.infrastructure.k8s.sandbox.client import K8sSandboxClient, PodSnapshot
 from prodavan.infrastructure.k8s.sandbox.pod_spec import build_pod_body
 
@@ -38,6 +38,10 @@ class K8sPodRuntimeAdapter:
                 await self._client.delete_pod(runtime_ref, grace_period=0)
                 existing = None
             elif existing.phase in _RUNNING_PHASES:
+                if existing.fatal_failure:
+                    raise PermanentK8sError(
+                        f"pod {runtime_ref} cannot start: {existing.fatal_failure}"
+                    )
                 await self._client.wait_ready(
                     runtime_ref,
                     timeout=float(settings.pod_ready_timeout_sec),
@@ -65,6 +69,7 @@ class K8sPodRuntimeAdapter:
             agent_runtime_port=settings.pod_agent_runtime_port,
             agent_runtime_api_base_url=settings.pod_agent_runtime_api_base_url,
             agent_runtime_auth_secret=settings.pod_agent_runtime_auth_secret or None,
+            image_pull_secret=settings.pod_sandbox_image_pull_secret or None,
         )
         await self._client.create_pod(body)
         await self._client.wait_ready(runtime_ref, timeout=float(settings.pod_ready_timeout_sec))

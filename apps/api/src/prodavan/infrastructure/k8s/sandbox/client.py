@@ -11,14 +11,32 @@ from typing import Any
 import httpx
 
 from prodavan.infrastructure.k8s.auth import InClusterAuth
-from prodavan.infrastructure.k8s.errors import K8sNotFoundError, classify_http_status
+from prodavan.infrastructure.k8s.errors import (
+    K8sNotFoundError,
+    PermanentK8sError,
+    classify_http_status,
+)
 
 logger = logging.getLogger(__name__)
 
 _MANAGED_BY_LABEL = "prodavan.io/managed-by"
 _MANAGED_BY_VALUE = "pod-service"
 _READY_PHASES = frozenset({"Running", "Succeeded"})
-_DISAPPEAR_RETRY_SEC = 10.0
+_DISAPPEAR_RETRY_SEC = 3.0
+_POLL_INTERVAL_SEC = 2.0
+_FATAL_WAITING_REASONS = frozenset(
+    {
+        "ImagePullBackOff",
+        "ErrImagePull",
+        "InvalidImageName",
+        "CreateContainerConfigError",
+        "CreateContainerError",
+        "CrashLoopBackOff",
+        "RunContainerError",
+        "ErrImageNeverPull",
+    }
+)
+_FATAL_TERMINATED_REASONS = frozenset({"Error", "OOMKilled", "ContainerCannotRun"})
 
 
 @dataclass(frozen=True)
@@ -32,6 +50,7 @@ class PodSnapshot:
     hydrate_generation: int | None = None
     hydrating: bool = False
     hydrate_failed: bool = False
+    fatal_failure: str | None = None
     created_at: str | None = None
     started_at: str | None = None
     pod_ip: str | None = None
@@ -53,6 +72,9 @@ class PodSnapshot:
             out["started_at"] = self.started_at
         if self.pod_ip:
             out["pod_ip"] = self.pod_ip
+        if self.fatal_failure:
+            out["fatal_failure"] = self.fatal_failure
+            out["last_error"] = self.fatal_failure
         return out
 
 
@@ -95,6 +117,33 @@ def _format_container_state(state: dict[str, Any] | None) -> str:
             base += f" ({msg})"
         return base
     return str(state)
+
+
+def _pod_fatal_failure(status: dict[str, Any]) -> str | None:
+    """Return a fatal container/init state that will not self-heal without intervention."""
+    for ics in status.get("initContainerStatuses") or []:
+        name = str(ics.get("name") or "init")
+        state = ics.get("state") or {}
+        waiting = state.get("waiting") or {}
+        reason = str(waiting.get("reason") or "")
+        if reason in _FATAL_WAITING_REASONS:
+            return f"init:{name}={_format_container_state(state)}"
+        terminated = state.get("terminated") or {}
+        treason = str(terminated.get("reason") or "")
+        if treason in _FATAL_TERMINATED_REASONS:
+            return f"init:{name}={_format_container_state(state)}"
+    for cs in status.get("containerStatuses") or []:
+        name = str(cs.get("name") or "container")
+        state = cs.get("state") or {}
+        waiting = state.get("waiting") or {}
+        reason = str(waiting.get("reason") or "")
+        if reason in _FATAL_WAITING_REASONS:
+            return f"{name}={_format_container_state(state)}"
+        terminated = state.get("terminated") or {}
+        treason = str(terminated.get("reason") or "")
+        if treason in _FATAL_TERMINATED_REASONS:
+            return f"{name}={_format_container_state(state)}"
+    return None
 
 
 def _pod_diagnostics(body: dict[str, Any]) -> str:
@@ -145,6 +194,7 @@ def _parse_snapshot(body: dict[str, Any]) -> PodSnapshot:
     gen_raw = labels.get("prodavan.io/hydrate-generation")
     hydrate_gen = int(gen_raw) if gen_raw is not None and str(gen_raw).isdigit() else None
     hydrating, hydrate_failed = _init_hydrate_state(status)
+    fatal_failure = _pod_fatal_failure(status)
     return PodSnapshot(
         name=str(meta.get("name") or ""),
         uid=meta.get("uid"),
@@ -155,6 +205,7 @@ def _parse_snapshot(body: dict[str, Any]) -> PodSnapshot:
         hydrate_generation=hydrate_gen,
         hydrating=hydrating,
         hydrate_failed=hydrate_failed,
+        fatal_failure=fatal_failure,
         created_at=meta.get("creationTimestamp"),
         started_at=_container_started_at(status),
         pod_ip=status.get("podIP") or None,
@@ -243,6 +294,10 @@ class K8sSandboxClient:
             body = response.json()
             return body if isinstance(body, dict) else None
 
+    def _raise_pod_failure(self, name: str, *, headline: str, body: dict[str, Any] | None) -> None:
+        detail = _pod_diagnostics(body) if body else headline
+        raise PermanentK8sError(f"pod {name} {headline}; {detail}")
+
     async def wait_ready(self, name: str, *, timeout: float) -> PodSnapshot:
         deadline = time.monotonic() + timeout
         last: PodSnapshot | None = None
@@ -254,23 +309,31 @@ class K8sSandboxClient:
                 if missing_since is None:
                     missing_since = now
                 if now - missing_since >= _DISAPPEAR_RETRY_SEC:
-                    raise K8sNotFoundError(f"pod {name} disappeared while waiting")
+                    raise K8sNotFoundError(
+                        f"pod {name} not found during startup "
+                        f"(deleted or not yet created; retry launch)"
+                    )
                 await asyncio.sleep(1.0)
                 continue
             missing_since = None
             last = snap
+            if snap.fatal_failure:
+                body = await self._get_pod_body(name)
+                self._raise_pod_failure(name, headline=f"cannot start: {snap.fatal_failure}", body=body)
             if snap.phase in _READY_PHASES and snap.ready:
                 return snap
             if snap.phase == "Failed":
                 body = await self._get_pod_body(name)
-                detail = _pod_diagnostics(body) if body else str(last)
-                raise classify_http_status(500, f"pod {name} failed; {detail}")
+                self._raise_pod_failure(name, headline="failed", body=body)
             if snap.hydrate_failed:
                 body = await self._get_pod_body(name)
-                detail = _pod_diagnostics(body) if body else str(last)
-                raise classify_http_status(500, f"pod {name} hydrate failed; {detail}")
-            await asyncio.sleep(2.0)
+                self._raise_pod_failure(name, headline="hydrate failed", body=body)
+            await asyncio.sleep(_POLL_INTERVAL_SEC)
         body = await self._get_pod_body(name)
+        if body:
+            fatal = _pod_fatal_failure(body.get("status") or {})
+            if fatal:
+                self._raise_pod_failure(name, headline=f"cannot start: {fatal}", body=body)
         detail = _pod_diagnostics(body) if body else str(last)
         raise classify_http_status(408, f"pod {name} not ready within {timeout}s; {detail}")
 
