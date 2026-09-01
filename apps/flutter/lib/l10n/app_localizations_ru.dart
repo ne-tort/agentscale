@@ -1748,8 +1748,27 @@ class AppLocalizationsRu extends AppLocalizations {
       'API-ключ не был доставлен агенту в контейнере. Проверьте ключ проекта.';
 
   @override
+  String get errorAgentInvalidApiKey =>
+      'Неверный API-ключ AI-провайдера. Обновите ключ проекта.';
+
+  @override
+  String get errorAgentProviderNetwork =>
+      'AI-провайдер недоступен из контейнера (сеть).';
+
+  @override
+  String get errorAgentProviderRateLimit =>
+      'Превышен лимит запросов к AI-провайдеру. Повторите позже.';
+
+  @override
+  String get errorAgentProviderUnavailable =>
+      'AI-провайдер временно недоступен. Повторите позже.';
+
+  @override
+  String get errorAgentRuntimeError => 'Ошибка агента при обработке запроса.';
+
+  @override
   String get errorAgentProvider =>
-      'AI provider request failed from the container (network or API).';
+      'Запрос к AI-провайдеру из контейнера не прошёл (сеть или API).';
 
   @override
   String get errorAgentBridge => 'Не удалось связаться с агентом в контейнере.';

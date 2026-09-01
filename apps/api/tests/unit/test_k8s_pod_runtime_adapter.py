@@ -49,3 +49,28 @@ async def test_pause_ignores_not_found() -> None:
     client.delete_pod = AsyncMock(side_effect=K8sNotFoundError("missing"))
     adapter = K8sPodRuntimeAdapter(client=client)
     await adapter.pause(runtime_ref="pod-wk")
+
+
+@pytest.mark.asyncio
+async def test_ensure_running_retries_on_transient_not_found() -> None:
+    from prodavan.infrastructure.k8s.errors import K8sNotFoundError
+
+    client = MagicMock()
+    client.namespace = "prodavan-sandboxes"
+    client.get_pod = AsyncMock(return_value=None)
+    client.create_pod = AsyncMock()
+    client.wait_exists = AsyncMock(side_effect=K8sNotFoundError("missing"))
+    client.wait_ready = AsyncMock()
+
+    adapter = K8sPodRuntimeAdapter(client=client)
+    ctx = PodRuntimeContext(
+        pod_id="pod_1",
+        project_id="prj_1",
+        company_id="cmp_1",
+        workspace_key="wk",
+    )
+
+    with pytest.raises(K8sNotFoundError):
+        await adapter.ensure_running(runtime_ref="pod-wk", context=ctx)
+
+    assert client.create_pod.await_count == 3

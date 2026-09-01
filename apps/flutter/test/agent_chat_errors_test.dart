@@ -71,7 +71,34 @@ void main() {
     expect(presented.diagnostic.toLowerCase(), isNot(contains('minified')));
   });
 
-  testWidgets('AGENT_ERROR maps to provider copy with network diagnostic', (tester) async {
+  testWidgets('AGENT_PROVIDER_NETWORK maps to localized network copy', (tester) async {
+    final l10n = await l10nFor(tester);
+    final presented = presentAgentChatError(
+      const AgentStreamError({
+        'code': 'AGENT_PROVIDER_NETWORK',
+        'message': 'Network request failed',
+      }),
+      l10n,
+    );
+    expect(presented.display, l10n.errorAgentProviderNetwork);
+    expect(presented.diagnostic, contains('Network request failed'));
+  });
+
+  testWidgets('AGENT_INVALID_API_KEY maps to localized invalid key copy', (tester) async {
+    final l10n = await l10nFor(tester);
+    final presented = presentAgentChatError(
+      const AgentStreamError({
+        'code': 'AGENT_INVALID_API_KEY',
+        'message': 'Invalid User API Key',
+      }),
+      l10n,
+    );
+    expect(presented.display, l10n.errorAgentInvalidApiKey);
+    expect(presented.display, isNot(l10n.errorGateway));
+    expect(presented.diagnostic, contains('Invalid User API Key'));
+  });
+
+  testWidgets('legacy AGENT_ERROR still maps to provider copy', (tester) async {
     final l10n = await l10nFor(tester);
     final presented = presentAgentChatError(
       const AgentStreamError({

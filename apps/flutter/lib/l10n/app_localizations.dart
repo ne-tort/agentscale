@@ -3134,6 +3134,36 @@ abstract class AppLocalizations {
   /// **'AI API key was not delivered to the agent in the container. Check the project key.'**
   String get errorAgentCredentialMissing;
 
+  /// No description provided for @errorAgentInvalidApiKey.
+  ///
+  /// In en, this message translates to:
+  /// **'Invalid AI provider API key. Update the project key.'**
+  String get errorAgentInvalidApiKey;
+
+  /// No description provided for @errorAgentProviderNetwork.
+  ///
+  /// In en, this message translates to:
+  /// **'AI provider is unreachable from the container (network).'**
+  String get errorAgentProviderNetwork;
+
+  /// No description provided for @errorAgentProviderRateLimit.
+  ///
+  /// In en, this message translates to:
+  /// **'AI provider rate limit exceeded. Try again later.'**
+  String get errorAgentProviderRateLimit;
+
+  /// No description provided for @errorAgentProviderUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'AI provider is temporarily unavailable. Try again later.'**
+  String get errorAgentProviderUnavailable;
+
+  /// No description provided for @errorAgentRuntimeError.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent runtime failed while processing the request.'**
+  String get errorAgentRuntimeError;
+
   /// No description provided for @errorAgentProvider.
   ///
   /// In en, this message translates to:

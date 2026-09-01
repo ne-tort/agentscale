@@ -1735,6 +1735,26 @@ class AppLocalizationsEn extends AppLocalizations {
       'AI API key was not delivered to the agent in the container. Check the project key.';
 
   @override
+  String get errorAgentInvalidApiKey =>
+      'Invalid AI provider API key. Update the project key.';
+
+  @override
+  String get errorAgentProviderNetwork =>
+      'AI provider is unreachable from the container (network).';
+
+  @override
+  String get errorAgentProviderRateLimit =>
+      'AI provider rate limit exceeded. Try again later.';
+
+  @override
+  String get errorAgentProviderUnavailable =>
+      'AI provider is temporarily unavailable. Try again later.';
+
+  @override
+  String get errorAgentRuntimeError =>
+      'Agent runtime failed while processing the request.';
+
+  @override
   String get errorAgentProvider =>
       'AI provider request failed from the container (network or API).';
 

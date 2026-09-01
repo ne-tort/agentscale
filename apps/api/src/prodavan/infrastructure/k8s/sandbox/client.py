@@ -306,14 +306,33 @@ class K8sSandboxClient:
             return
         raise PermanentK8sError(f"pod {name} still terminating after {timeout}s (phase={snap.phase})")
 
-    async def wait_exists(self, name: str, *, timeout: float = 15.0) -> PodSnapshot:
-        deadline = time.monotonic() + timeout
-        while time.monotonic() < deadline:
+    async def wait_exists(self, name: str, *, retries: int = _POD_MISSING_RETRY_COUNT) -> PodSnapshot:
+        snap = await self._await_pod_visible(
+            name,
+            retries=retries,
+            interval=_POD_MISSING_RETRY_INTERVAL_SEC,
+        )
+        if snap is None:
+            raise K8sNotFoundError(
+                f"pod {name} not created after {retries} retries "
+                f"({_POD_MISSING_RETRY_INTERVAL_SEC}s apart)"
+            )
+        return snap
+
+    async def _await_pod_visible(
+        self,
+        name: str,
+        *,
+        retries: int,
+        interval: float,
+    ) -> PodSnapshot | None:
+        for attempt in range(retries + 1):
             snap = await self.get_pod(name)
             if snap is not None:
                 return snap
-            await asyncio.sleep(0.5)
-        raise K8sNotFoundError(f"pod {name} not created within {timeout}s")
+            if attempt < retries:
+                await asyncio.sleep(interval)
+        return None
 
     def _raise_pod_failure(self, name: str, *, headline: str, body: dict[str, Any] | None) -> None:
         detail = _pod_diagnostics(body) if body else headline
@@ -322,20 +341,20 @@ class K8sSandboxClient:
     async def wait_ready(self, name: str, *, timeout: float) -> PodSnapshot:
         deadline = time.monotonic() + timeout
         last: PodSnapshot | None = None
-        missing_attempts = 0
         while time.monotonic() < deadline:
             snap = await self.get_pod(name)
             if snap is None:
-                missing_attempts += 1
-                if missing_attempts >= _POD_MISSING_RETRY_COUNT:
+                snap = await self._await_pod_visible(
+                    name,
+                    retries=_POD_MISSING_RETRY_COUNT,
+                    interval=_POD_MISSING_RETRY_INTERVAL_SEC,
+                )
+                if snap is None:
                     raise K8sNotFoundError(
                         f"pod {name} not found during startup after "
-                        f"{_POD_MISSING_RETRY_COUNT} checks "
+                        f"{_POD_MISSING_RETRY_COUNT} retries "
                         f"({_POD_MISSING_RETRY_INTERVAL_SEC}s apart)"
                     )
-                await asyncio.sleep(_POD_MISSING_RETRY_INTERVAL_SEC)
-                continue
-            missing_attempts = 0
             last = snap
             if snap.fatal_failure:
                 body = await self._get_pod_body(name)

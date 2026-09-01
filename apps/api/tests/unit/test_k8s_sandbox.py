@@ -218,7 +218,7 @@ async def test_wait_ready_fails_after_missing_retries_exhausted() -> None:
             "prodavan.infrastructure.k8s.sandbox.client.asyncio.sleep",
             new_callable=AsyncMock,
         ):
-            with pytest.raises(K8sNotFoundError, match="5 checks"):
+            with pytest.raises(K8sNotFoundError, match="5 retries"):
                 await client.wait_ready("pod-wk-demo", timeout=30.0)
 
 

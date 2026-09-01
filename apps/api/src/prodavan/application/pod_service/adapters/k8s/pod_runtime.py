@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -15,6 +16,8 @@ logger = logging.getLogger(__name__)
 
 _RUNNING_PHASES = frozenset({"Running", "Pending"})
 _GONE_PHASES = frozenset({"Terminating", "Succeeded"})
+_POD_START_ATTEMPTS = 3
+_POD_START_RETRY_DELAY_SEC = 3.0
 
 
 class K8sPodRuntimeAdapter:
@@ -22,6 +25,31 @@ class K8sPodRuntimeAdapter:
         self._client = client
 
     async def ensure_running(
+        self,
+        *,
+        runtime_ref: str,
+        context: PodRuntimeContext,
+    ) -> None:
+        last_exc: K8sNotFoundError | None = None
+        for attempt in range(1, _POD_START_ATTEMPTS + 1):
+            try:
+                await self._ensure_running_once(runtime_ref=runtime_ref, context=context)
+                return
+            except K8sNotFoundError as exc:
+                last_exc = exc
+                if attempt >= _POD_START_ATTEMPTS:
+                    raise
+                logger.warning(
+                    "k8s pod startup not-found retry runtime_ref=%s attempt=%s/%s",
+                    runtime_ref,
+                    attempt,
+                    _POD_START_ATTEMPTS,
+                )
+                await asyncio.sleep(_POD_START_RETRY_DELAY_SEC)
+        if last_exc is not None:
+            raise last_exc
+
+    async def _ensure_running_once(
         self,
         *,
         runtime_ref: str,
