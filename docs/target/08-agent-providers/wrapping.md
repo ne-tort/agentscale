@@ -1,6 +1,6 @@
 # Wrapping SDKs → AgentProviderPort
 
-Как правильно обернуть три SDK в единый порт Prodavan. Транспорт: **Node sidecar in project pod** (эталон Commerce bot без Telegram).
+Как обернуть **проприетарные SDK** и **Platform OpenClaw** в единый порт. Транспорт: **Node sidecar in project pod** (эталон Commerce bot без Telegram).
 
 ## Целевой порт
 
@@ -69,6 +69,25 @@ CreateOpts
 - `canUseTool` → platform approval channel (Employee UI page), never silent bypass in production.
 - Branding: UI «Claude Agent», не «Claude Code».
 
+## Platform OpenClaw (`PlatformOpenClawAdapter`)
+
+Универсальный runtime — **не** vendor SDK. Спека: [platform-openclaw-runtime.md](../../06-agent-runtime/platform-openclaw-runtime.md).
+
+| Порт | Реализация |
+|------|------------|
+| create | Session + LLM client из `ai.http_providers` entry (base_url, auth, dialect) |
+| send | Agent loop: LLM ↔ tool calls (MCP + platform tools) |
+| stream | Map loop events → `AgentEvent` |
+| cancel | Abort in-flight turn |
+| close | Drop session |
+
+**Prodavan defaults:**
+
+- Ingress **только** от platform API (нет messaging channels).
+- `settingSources: ["project"]`; cwd = `/workspace`.
+- Tool policy / HITL — те же, что у SDK-адапterов.
+- Upstream `openclaw/openclaw` **не** импортировать — свой код в `agent-bridge`.
+
 ## Stream normalization
 
 Все адаптеры → одни `AgentEvent` types. Tool names в UI показывать **канонические** (`fs.write`, `shell.exec`, `mcp.<server>.<tool>`), внутри адаптера маппить vendor ids.
@@ -86,7 +105,7 @@ CreateOpts
 ```text
 project pod
   /workspace/          # materialized
-  agent-bridge/        # Node: adapters + HTTP to platform API
+  agent-bridge/        # Node: SDK adapters + Platform OpenClaw + HTTP to platform API
 ```
 
 Python API оркестрирует; тяжёлые SDK (Cursor/Codex native bits) — в Node bridge.

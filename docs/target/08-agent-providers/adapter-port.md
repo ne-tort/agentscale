@@ -1,8 +1,9 @@
 # AgentProviderPort
 
-Целевой порт coding-agent backends. GLM / OpenClaw / personal CLI subscription — **вне runtime**.
+Целевой порт coding-agent backends. **Два класса:** проприетарные SDK + **Platform OpenClaw** (универсальный runtime).  
+GLM / upstream OpenClaw / personal CLI subscription — **вне runtime**.
 
-Детали по SDK: [capabilities-matrix](capabilities-matrix.md) · [wrapping](wrapping.md) · [permissions-policy](permissions-policy.md).
+Детали по SDK: [capabilities-matrix](capabilities-matrix.md) · [wrapping](wrapping.md) · Platform OpenClaw: [platform-openclaw-runtime](../../06-agent-runtime/platform-openclaw-runtime.md) · [permissions-policy](permissions-policy.md).
 
 ## Интерфейс
 
@@ -24,7 +25,7 @@ AgentProviderPort
 | `model` | Model id (+ params) from allowlist |
 | `mcpServers` | Из materialize ∩ policy |
 | `apiKey` | AiProviderKey resolve (**не** cli_subscription) |
-| `apiKind` | `cursor_sdk` / `codex_sdk` / `claude_agent_sdk` / … |
+| `apiKind` | `cursor_sdk` / `codex_sdk` / `claude_agent_sdk` / `platform_openclaw` / … |
 | `toolPolicy` | `AgentToolPolicy` ([permissions-policy](permissions-policy.md)) |
 | `budget` | Optional `{ maxUsd?, maxTokens? }` |
 | `settingSources` | SaaS default: `["project"]` only |
@@ -59,8 +60,8 @@ AgentProviderPort
 | `CursorSdkAdapter` | Primary — Node sidecar (эталон Commerce `CursorSdkRuntime`) |
 | `CodexSdkAdapter` | Secondary |
 | `ClaudeAgentSdkAdapter` | Alternative (API key only) |
+| `PlatformOpenClawAdapter` | Universal — agent loop + `ai.http_providers` ([spec](../../06-agent-runtime/platform-openclaw-runtime.md)) |
 | CLI adapters | Spike/dev only |
-| OpenAI-compatible | Extension LLM, не peer Cursor |
 
 Sessions: **persist** в platform DB.
 

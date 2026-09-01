@@ -2,7 +2,8 @@
 
 > **LEGACY.** Канон и актуальный анализ: [docs/target/08-agent-providers/](../target/08-agent-providers/). Ключи провайдеров: [02-ai-provider-keys](../target/02-ai-provider-keys/).
 
-Prodavan поддерживает несколько **backend-провайдеров** для выполнения LLM-сессий. Выбор провайдера — конфигурация deployment + per-tenant override; default — **Cursor SDK**.
+Prodavan поддерживает **два класса** agent backend: **проприетарные SDK** и **Platform OpenClaw** (унiversal).  
+Канон: [08-agent-providers](../target/08-agent-providers/) · [platform-openclaw-runtime](platform-openclaw-runtime.md).
 
 ---
 

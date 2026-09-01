@@ -21,9 +21,9 @@
 При любом SDK поле «Провайдер» скрыто. При **API key** — editable catalog picker (`AppCatalogSelectPage` + seed OpenAI / Anthropic / OpenRouter / Cursor).  
 `cli_subscription` в Type UI не показывается.
 
-**API key ≠ выбор runtime-агента в UI.** Каталог `ai.http_providers` описывает **HTTP endpoint** (OpenAPI-compatible / Clowbot).  
-`payload.agent_provider` пишется в ключ для resolve (`cursor` / `codex` / `claude_code`) и **выводится из seed / `api_kind`**, а не выбирается отдельно в форме HTTP-провайдера.  
-Clowbot в списке `agent_provider` нет: это будущий HTTP-клиент к любому OpenAPI-совместимому endpoint из каталога, а не ещё один SDK-runtime рядом с Cursor/Codex/Claude.
+**API key ≠ выбор runtime-агента в UI.** Каталог `ai.http_providers` описывает **HTTP endpoint** для **Platform OpenClaw** (OpenAPI-compatible / Anthropic Messages / custom).  
+Ключи с `api_kind` из каталога (`openai_api`, `openrouter`, `custom`, …) резолвятся в **Platform OpenClaw** runtime (`platform_openclaw`), не в проприетарные SDK.  
+Проприетарные SDK (`cursor_sdk`, `codex_sdk`, `claude_agent_sdk`) — отдельный класс адапterов; см. [platform-openclaw-runtime](../../06-agent-runtime/platform-openclaw-runtime.md).
 
 Resolve-контракт и adapters **не меняются** — UI только маппит в существующие enums.
 
@@ -63,10 +63,11 @@ Company UI показывает **один list** = local company keys ∪ Admin
 |------|----------|-------|
 | `cursor_sdk` | **Да** | `@cursor/sdk` / Cursor API key |
 | `codex_sdk` | **Да** | Codex SDK (обычно OpenAI API key) |
-| `openai_api` | Extension | Сырой OpenAI / Responses |
+| `platform_openclaw` | **Да** | Platform OpenClaw — universal agent loop + HTTP LLM из каталога |
+| `openai_api` | **Да** (via Platform OpenClaw) | OpenAI Chat/Responses endpoint |
 | `claude_agent_sdk` | **Да** | Anthropic API key для Agent SDK |
-| `anthropic_api` | Extension | Messages API без Agent SDK |
-| `openrouter` | Extension | OpenRouter |
+| `anthropic_api` | **Да** (via Platform OpenClaw) | Anthropic Messages endpoint |
+| `openrouter` | **Да** (via Platform OpenClaw) | OpenRouter |
 | `cli_subscription` | **Нет** | Только **учётная метка биллинга** (Max/Pro и т.п.). **Никогда** не передавать в AgentProviderPort как credential |
 | `custom` | По решению | |
 
@@ -131,7 +132,7 @@ UI Admin: multi `AppCatalogSelectPage` на detail platform-ключа.
 Таблица `reference_catalog_entries`, `catalog_id = ai.http_providers`.  
 Admin CRUD: `/admin/catalogs/{catalog_id}/entries`. Seed idempotent при первом list. Seeded entries редактируемы/удаляемы.
 
-### Payload (Clowbot / OpenAPI-compatible)
+### Payload (`ai.http_providers` / Platform OpenClaw)
 
 Платформа работает только с **OpenAPI-совместимыми** HTTP endpoints (Chat Completions / Models).  
 Отдельный UI-чекбокс `openai_compatible` не нужен: для seed-пресетов значение фиксировано; для `custom` всегда `true` (Anthropic seed — Messages API, `openai_compatible=false` только в payload seed).

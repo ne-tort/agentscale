@@ -11,7 +11,7 @@ import 'package:prodavan/l10n/app_localizations.dart';
 
 const kAiHttpProvidersCatalogId = 'ai.http_providers';
 
-/// Canonical payload keys for `ai.http_providers` (Clowbot / OpenAPI-compatible).
+/// Canonical payload keys for `ai.http_providers` (Platform OpenClaw / OpenAPI-compatible).
 abstract final class AiHttpProviderPayload {
   static const apiKind = 'api_kind';
   static const agentProvider = 'agent_provider';

@@ -354,7 +354,7 @@ Feature flag: `POD_RUNTIME_MODE=stub|k8s` (default stub in dev without sandboxes
 - Employee-facing `/pods/*` CRUD
 - Agent SDK / MCP inside pod_service
 - PVC probe Job как runtime ([README](../14-project-containers/README.md))
-- OpenClaw / GLM sidecars
+- Upstream OpenClaw / GLM sidecars (Platform OpenClaw — один адаптер в agent-bridge)
 - Multi-pod per project (sandbox/worker) — future; schema extensible but API 1:1
 
 ---

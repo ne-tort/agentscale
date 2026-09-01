@@ -8,9 +8,10 @@
 
 | В scope | Вне scope (пока) |
 |---------|------------------|
-| Cursor, Codex, Claude Agent SDK | **GLM / Z.ai**, произвольные LLM-only backends без первостороннего agent SDK |
+| Cursor, Codex, Claude Agent SDK | **GLM / Z.ai** |
+| **Platform OpenClaw** — наш universal runtime ([spec](../../06-agent-runtime/platform-openclaw-runtime.md)) | **Upstream** [openclaw/openclaw](https://github.com/openclaw/openclaw) as dependency |
 
-OpenRouter как HTTP LLM — опциональный extension (`openrouter`), не peer Cursor/Codex/Claude.
+HTTP LLM endpoints (OpenRouter, Ollama, custom) обслуживаются через **Platform OpenClaw**, не через отдельный «thin LLM extension».
 
 ## Краткие вердикты
 
@@ -19,7 +20,8 @@ OpenRouter как HTTP LLM — опциональный extension (`openrouter`)
 | **Cursor** | **Да** — `@cursor/sdk` | IDE/cloud | **Primary** (уже в bot) |
 | **Codex** | **Да** — Codex SDK (TS + Python) | `@openai/codex` | **Secondary** через SDK |
 | **Claude Code** | **Да** — Claude Agent SDK | `@anthropic-ai/claude-code` | **Alternative** через Agent SDK + API key |
-| **OpenClaw** | Не наш runtime | — | Не использовать |
+| **Platform OpenClaw** | **Да** — наш agent loop + HTTP LLM | — | **Universal** peer ([spec](../../06-agent-runtime/platform-openclaw-runtime.md)) |
+| **Upstream OpenClaw** | Не dependency | openclaw/openclaw | **Не деплоить**; только идеи |
 
 Подробности: [verdict-cursor](verdict-cursor.md) · [verdict-codex](verdict-codex.md) · [verdict-claude](verdict-claude.md).
 
@@ -32,7 +34,7 @@ OpenRouter как HTTP LLM — опциональный extension (`openrouter`)
 | Commerce Telegram bot | Боевой путь: **`@cursor/sdk`** (`cursor-claw` / `CursorSdkRuntime`) |
 | Prodavan `platform_agent` | Stub (echo), без LLM |
 | Legacy spikes | Codex CLI / Claude CLI subprocess в `docs/06-agent-runtime/*` (устарело относительно SDK-вердиктов ниже) |
-| OpenClaw | Только упоминания в legacy — **кода запуска нет** |
+| OpenClaw (upstream) | Не используется — **Platform OpenClaw** в разработке ([spec](../../06-agent-runtime/platform-openclaw-runtime.md)) |
 
 ---
 
@@ -40,10 +42,10 @@ OpenRouter как HTTP LLM — опциональный extension (`openrouter`)
 
 ```text
 AgentProviderPort
-  ├─ CursorSdkAdapter      ← SDK first-class
-  ├─ CodexSdkAdapter       ← Codex SDK (не только `codex exec`)
-  ├─ ClaudeAgentSdkAdapter ← Claude Agent SDK (не только `claude -p`)
-  └─ OpenAiCompatibleLlmAdapter ← OpenRouter / сырой OpenAI (extension, не peer)
+  ├─ CursorSdkAdapter           ← proprietary SDK
+  ├─ CodexSdkAdapter            ← proprietary SDK
+  ├─ ClaudeAgentSdkAdapter      ← proprietary SDK
+  └─ PlatformOpenClawAdapter    ← universal (ai.http_providers + agent loop)
 ```
 
 CLI subprocess остаётся **fallback** (CI, отладка), не канон для multi-tenant SaaS.

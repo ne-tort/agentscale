@@ -71,7 +71,8 @@
 | AI Provider Keys | partial | [02](02-ai-provider-keys/) |
 | Mobile UI, no modals | Theme + core; feature shells | [07](07-ui-mobile-core/) |
 | AgentProviderPort | stub / partial | [08](08-agent-providers/) |
-| OpenClaw / GLM | нет | **не внедрять** |
+| Platform OpenClaw runtime | нет | [platform-openclaw-runtime](../06-agent-runtime/platform-openclaw-runtime.md) |
+| GLM / upstream OpenClaw dep | нет | **не внедрять** (GLM; пакет openclaw/openclaw as-is) |
 
 ### Meta-syntax: files / env / Vault (spec in [12](06-modules/meta-syntax/12-content-file-pipeline.md) · [13](06-modules/meta-syntax/13-container-env-secrets.md))
 
@@ -152,7 +153,7 @@ flowchart TB
 | Admin + Keys | Companies (+KC), platform keys + bind, quotas, metrics, assign cabinets→company | Workspace files |
 | Cabinet Runtime | Registry + module data rows; Admin modules | Typed meta UI / MCP packages / Pod lifecycle |
 | Projects / Containers | Project, Pod port, triggers, materialize hydrate | Hardcoded domain packs |
-| Agent | Port + adapters in Pod | GLM, OpenClaw |
+| Agent | Port + adapters in Pod (SDK + Platform OpenClaw) | GLM; upstream OpenClaw package |
 | UI core | Primitives | Feature ListTile zoos |
 
 ### Волны (ориентир) — Company parity largely shipped
@@ -167,7 +168,7 @@ flowchart TB
 
 ### Явно не делать
 
-- OpenClaw; GLM; personal Max/Pro как tenant runtime credentials  
+- Upstream OpenClaw (`openclaw/openclaw`) as dependency; GLM; personal Max/Pro как tenant runtime credentials  
 - Канонизация `POST /auth/login`  
 - Static `profile_id` code-packs  
 - JWT reissue на switch/open  

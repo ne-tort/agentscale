@@ -38,7 +38,7 @@
 - [ ] Нет static `profile_id` modules как продукт
 - [ ] Нет raw SQL MCP
 - [ ] Нет `cli_subscription` → agent
-- [ ] Нет GLM / OpenClaw
+- [ ] Нет GLM / upstream OpenClaw dependency; Platform OpenClaw — по [spec](../06-agent-runtime/platform-openclaw-runtime.md)
 - [ ] Нет модалок выбора сущностей
 - [ ] Peer schema isolation держится под тестами
 

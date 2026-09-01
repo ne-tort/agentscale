@@ -2,7 +2,7 @@
 
 ## Цель
 
-Стабильный `AgentProviderPort`, нормализованные `AgentEvent`, adapters (Cursor primary), usage persistence, tool/policy wrapping. Без GLM/OpenClaw; без `cli_subscription` как credential.
+Стабильный `AgentProviderPort`, нормализованные `AgentEvent`, adapters (Cursor primary + Platform OpenClaw universal), usage persistence, tool/policy wrapping. Без GLM/upstream OpenClaw dep; без `cli_subscription` как credential.
 
 ## Канон
 
@@ -51,7 +51,8 @@
 - Прямой вызов SDK из Flutter.
 - События только `text` без schema.
 - Usage не пишется → Admin metrics пустые навсегда.
-- OpenClaw/GLM «временный» backend.
+- Platform OpenClaw adapter + bridge HTTP contract ([spec](../../06-agent-runtime/platform-openclaw-runtime.md)).
+- GLM / upstream OpenClaw npm package as runtime.
 - Один happy-path без cancel/error events.
 
 ## Exit gate

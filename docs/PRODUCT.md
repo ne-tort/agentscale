@@ -17,14 +17,25 @@ SaaS: **управление изолированными Pod'ами через 
 
 ```text
 Пользователь (UI)
-    → API (pod-service, projects, auth)
+    → API (pod-service, projects, auth, agent sessions, triggers)
     → Kubernetes Pod (prodavan-sandboxes)
-        → agent runtime: SDK (Cursor/Codex/…), workspace FS, MCP/tools, файлы проекта
+        → agent-bridge: proprietary SDK adapters + Platform OpenClaw (universal)
+        → workspace FS, MCP/tools, файлы проекта
 ```
+
+### Agent runtime (два класса)
+
+| Класс | Смысл |
+|-------|--------|
+| **Проприетарные SDK** | Cursor, Codex, Claude Agent SDK — vendor coding harness через `AgentProviderPort` |
+| **Platform OpenClaw** | **Наш** универсальный runtime: любой LLM из каталога `ai.http_providers`, полный tool loop, команды **только от приложения** |
+
+Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** dependency (без Telegram/WhatsApp/ bindings). Идеи gateway/session — да; их код — нет.  
+Подробно: [06-agent-runtime/platform-openclaw-runtime.md](06-agent-runtime/platform-openclaw-runtime.md).
 
 1. **Pod** — единица изоляции на Project (1:1). Реальный k8s Pod с volume, hydrate, initContainer.
 2. **UI** — список контейнеров/проектов, статус, pause/resume, вход в workspace агента (не модалка-чат).
-3. **Agent inside Pod** — провайдер через `AgentProviderPort`, работа с **файлами** (upload, read, edit, bundles), tool calls, HITL; не thin wrapper над completions API.
+3. **Agent inside Pod** — провайдер через `AgentProviderPort` (SDK **или** Platform OpenClaw), работа с **файлами**, tool calls, HITL; не thin wrapper над completions API.
 
 ## Observability
 

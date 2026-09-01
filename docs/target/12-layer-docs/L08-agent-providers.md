@@ -16,14 +16,15 @@
 
 AgentProviderPort + frozen AgentEvent; credentials только через L03 resolve; tool policy из L04 preset; cwd/mcp из L07 materialize.
 
-**Не** GLM/OpenClaw; **не** cli_subscription в runtime.
+**Два класса runtime:** проприетарные SDK + **Platform OpenClaw** ([spec](../../06-agent-runtime/platform-openclaw-runtime.md)).  
+**Не** upstream OpenClaw / GLM; **не** cli_subscription в runtime.
 
 ## Что сделано
 
 | Сделано | Gaps |
 |---------|------|
 | `AgentProviderPort` + frozen `AgentEvent` types | Node sidecar (real Cursor SDK) |
-| `FixtureCursorAdapter` (cursor_sdk) + `FakeAgentAdapter` | Codex/Claude real adapters |
+| `FixtureCursorAdapter` (cursor_sdk) + `FakeAgentAdapter` | Codex/Claude real adapters; **Platform OpenClaw** |
 | ORM agent_sessions / agent_events / agent_usage | Codex/Claude real adapters |
 | `agent_sessions.resolved_key_id` set on create; key disable cancels by snapshot | |
 | `POST /projects/{id}/chat` + `/chat/stream` (SSE) | Node sidecar (real Cursor SDK) |
