@@ -14,7 +14,7 @@ spec:
   policyTypes:
     - Egress
   egress:
-    # Hydrate initContainer → in-cluster MinIO (prodavan namespace).
+    # Hydrate initContainer → in-cluster MinIO + platform API.
     - to:
         - namespaceSelector:
             matchLabels:
@@ -24,13 +24,15 @@ spec:
           port: 9000
         - protocol: TCP
           port: 8000
-    # General egress (AI APIs, package registries).
-    - to:
-        - namespaceSelector: {}
-      ports:
+    # DNS (kube-dns + upstream resolvers).
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # AI provider APIs and public internet (Cursor, Anthropic, OpenAI, …).
+    - ports:
         - protocol: TCP
           port: 443
         - protocol: TCP
           port: 80
-        - protocol: UDP
-          port: 53

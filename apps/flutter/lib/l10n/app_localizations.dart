@@ -3134,6 +3134,12 @@ abstract class AppLocalizations {
   /// **'AI API key was not delivered to the agent in the container. Check the project key.'**
   String get errorAgentCredentialMissing;
 
+  /// No description provided for @errorAgentProvider.
+  ///
+  /// In en, this message translates to:
+  /// **'AI provider request failed from the container (network or API).'**
+  String get errorAgentProvider;
+
   /// No description provided for @errorAgentBridge.
   ///
   /// In en, this message translates to:

@@ -1735,6 +1735,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'AI API key was not delivered to the agent in the container. Check the project key.';
 
   @override
+  String get errorAgentProvider =>
+      'AI provider request failed from the container (network or API).';
+
+  @override
   String get errorAgentBridge => 'Could not reach the agent in the container.';
 
   @override

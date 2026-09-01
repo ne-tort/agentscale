@@ -180,7 +180,8 @@ abstract final class AppErrors {
         lower.contains('openclaw') ||
         lower.contains('pod agent-runtime') ||
         lower.contains('pod runtime') ||
-        lower.contains('lease');
+        lower.contains('lease') ||
+        lower.contains('network request failed');
   }
 
   static String? _messageForCode(AppLocalizations l10n, String? code) {
@@ -205,6 +206,7 @@ abstract final class AppErrors {
       'AGENT_RUNTIME_UNAVAILABLE' || 'AGENT_ADAPTER_DISABLED' => l10n.errorAgentRuntimeUnavailable,
       'AGENT_STUB_RESPONSE' => l10n.errorAgentStubResponse,
       'AGENT_CREDENTIAL_MISSING' => l10n.errorAgentCredentialMissing,
+      'AGENT_ERROR' || 'AGENT_PROVIDER_ERROR' => l10n.errorAgentProvider,
       'BRIDGE_SEND_FAILED' || 'BRIDGE_EMPTY_STREAM' || 'BRIDGE_UNREACHABLE' => l10n.errorAgentBridge,
       'CASCADE_INCOMPLETE' => l10n.errorCascadeIncomplete,
       'SCHEMA_DROP_FAILED' => l10n.errorServer,

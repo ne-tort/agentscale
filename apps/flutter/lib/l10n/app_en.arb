@@ -997,6 +997,7 @@
   "errorAgentRuntimeUnavailable": "Agent runtime is unavailable. Check the project container.",
   "errorAgentStubResponse": "Agent returned a stub instead of a real response. Redeploy the container image.",
   "errorAgentCredentialMissing": "AI API key was not delivered to the agent in the container. Check the project key.",
+  "errorAgentProvider": "AI provider request failed from the container (network or API).",
   "errorAgentBridge": "Could not reach the agent in the container.",
   "errorCascadeIncomplete": "Delete cascade is still in progress. Wait or retry later.",
   "companyCredentialsCreated": "Login: {companyId} · password: {password}",

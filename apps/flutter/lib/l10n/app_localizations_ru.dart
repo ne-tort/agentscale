@@ -1748,6 +1748,10 @@ class AppLocalizationsRu extends AppLocalizations {
       'API-ключ не был доставлен агенту в контейнере. Проверьте ключ проекта.';
 
   @override
+  String get errorAgentProvider =>
+      'AI provider request failed from the container (network or API).';
+
+  @override
   String get errorAgentBridge => 'Не удалось связаться с агентом в контейнере.';
 
   @override

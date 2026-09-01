@@ -70,4 +70,17 @@ void main() {
     expect(presented.diagnostic, contains('BRIDGE_UNREACHABLE'));
     expect(presented.diagnostic.toLowerCase(), isNot(contains('minified')));
   });
+
+  testWidgets('AGENT_ERROR maps to provider copy with network diagnostic', (tester) async {
+    final l10n = await l10nFor(tester);
+    final presented = presentAgentChatError(
+      const AgentStreamError({
+        'code': 'AGENT_ERROR',
+        'message': 'Network request failed',
+      }),
+      l10n,
+    );
+    expect(presented.display, l10n.errorAgentProvider);
+    expect(presented.diagnostic, contains('Network request failed'));
+  });
 }
