@@ -108,7 +108,7 @@ class Settings(BaseSettings):
     pod_sandbox_cpu_limit: str = "1000m"
     pod_sandbox_memory_request: str = "256Mi"
     pod_sandbox_memory_limit: str = "1Gi"
-    pod_ready_timeout_sec: int = 45
+    pod_ready_timeout_sec: int = 75
     # L15 agent-runtime — single container Pod workload (Platform OpenClaw + SDK adapters).
     pod_agent_runtime_enabled: bool = Field(
         default=False,

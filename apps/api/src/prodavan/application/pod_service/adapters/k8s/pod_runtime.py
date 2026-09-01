@@ -14,6 +14,7 @@ from prodavan.infrastructure.k8s.sandbox.pod_spec import build_pod_body
 logger = logging.getLogger(__name__)
 
 _RUNNING_PHASES = frozenset({"Running", "Pending"})
+_GONE_PHASES = frozenset({"Terminating", "Succeeded"})
 
 
 class K8sPodRuntimeAdapter:
@@ -28,14 +29,17 @@ class K8sPodRuntimeAdapter:
     ) -> None:
         existing = await self._client.get_pod(runtime_ref)
         if existing is not None:
-            if self._needs_recreate(existing, context):
+            if existing.phase in _GONE_PHASES:
+                await self._client.wait_absent(runtime_ref)
+                existing = None
+            elif self._needs_recreate(existing, context):
                 logger.info(
                     "k8s pod recreate runtime_ref=%s generation=%s->%s",
                     runtime_ref,
                     existing.hydrate_generation,
                     context.hydrate_generation,
                 )
-                await self._client.delete_pod(runtime_ref, grace_period=0)
+                await self._delete_and_wait(runtime_ref)
                 existing = None
             elif existing.phase in _RUNNING_PHASES:
                 if existing.fatal_failure:
@@ -48,7 +52,7 @@ class K8sPodRuntimeAdapter:
                 )
                 return
             elif existing.phase == "Failed":
-                await self._client.delete_pod(runtime_ref, grace_period=0)
+                await self._delete_and_wait(runtime_ref)
                 existing = None
 
         body = build_pod_body(
@@ -72,7 +76,15 @@ class K8sPodRuntimeAdapter:
             image_pull_secret=settings.pod_sandbox_image_pull_secret or None,
         )
         await self._client.create_pod(body)
+        await self._client.wait_exists(runtime_ref)
         await self._client.wait_ready(runtime_ref, timeout=float(settings.pod_ready_timeout_sec))
+
+    async def _delete_and_wait(self, runtime_ref: str) -> None:
+        try:
+            await self._client.delete_pod(runtime_ref, grace_period=0)
+        except K8sNotFoundError:
+            return
+        await self._client.wait_absent(runtime_ref)
 
     async def pause(self, *, runtime_ref: str) -> None:
         try:

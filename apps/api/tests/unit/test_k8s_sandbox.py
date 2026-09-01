@@ -52,6 +52,7 @@ def test_build_pod_body_labels() -> None:
     assert body["spec"]["initContainers"][0]["name"] == "hydrate"
     runtime = body["spec"]["containers"][0]
     assert runtime["name"] == "agent-runtime"
+    assert runtime.get("workingDir") == "/workspace"
     runtime_env = {item["name"]: item.get("value") for item in runtime["env"]}
     assert runtime_env["LOG_LEVEL"] == "debug"
     assert runtime["command"] == ["sleep", "infinity"]
@@ -185,6 +186,7 @@ def test_build_pod_body_agent_runtime() -> None:
     runtime = containers[0]
     assert runtime["name"] == "agent-runtime"
     assert runtime["image"] == "prodavan-agent-runtime:latest"
+    assert "workingDir" not in runtime
     runtime_env = {item["name"]: item.get("value") for item in runtime["env"]}
     assert runtime_env["PRODAVAN_PROJECT_ID"] == "prj_abc"
     assert runtime_env["PRODAVAN_POD_ID"] == "pod_abc"

@@ -67,7 +67,6 @@ def _build_agent_runtime_container(
         "name": _AGENT_RUNTIME_CONTAINER,
         "image": image,
         "imagePullPolicy": "Always",
-        "workingDir": _WORKSPACE_MOUNT,
         "env": env,
         "volumeMounts": [{"name": "workspace", "mountPath": _WORKSPACE_MOUNT}],
         "resources": {
@@ -76,6 +75,7 @@ def _build_agent_runtime_container(
         },
     }
     if stub_holder:
+        container["workingDir"] = _WORKSPACE_MOUNT
         container["command"] = ["sleep", "infinity"]
         container["readinessProbe"] = {
             "exec": {"command": ["test", "-d", _WORKSPACE_MOUNT]},

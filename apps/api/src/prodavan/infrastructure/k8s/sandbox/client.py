@@ -294,6 +294,26 @@ class K8sSandboxClient:
             body = response.json()
             return body if isinstance(body, dict) else None
 
+    async def wait_absent(self, name: str, *, timeout: float = 30.0) -> None:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            if await self.get_pod(name) is None:
+                return
+            await asyncio.sleep(0.5)
+        snap = await self.get_pod(name)
+        if snap is None:
+            return
+        raise PermanentK8sError(f"pod {name} still terminating after {timeout}s (phase={snap.phase})")
+
+    async def wait_exists(self, name: str, *, timeout: float = 15.0) -> PodSnapshot:
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            snap = await self.get_pod(name)
+            if snap is not None:
+                return snap
+            await asyncio.sleep(0.5)
+        raise K8sNotFoundError(f"pod {name} not created within {timeout}s")
+
     def _raise_pod_failure(self, name: str, *, headline: str, body: dict[str, Any] | None) -> None:
         detail = _pod_diagnostics(body) if body else headline
         raise PermanentK8sError(f"pod {name} {headline}; {detail}")
