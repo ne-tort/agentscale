@@ -418,7 +418,17 @@ class RuntimeObservationService:
         )
 
     async def _observe_stub(self, project: ProjectRow, pod: ProjectPodRow) -> dict[str, Any]:
-        """Stub mode — no k8s pod; never report verified running."""
+        """Stub mode — no k8s pod; promote DB RUNNING for in-process agent tests."""
+        if (
+            pod.status == PodStatus.RUNNING
+            and pod.desired_state == PodDesiredState.RUNNING.value
+        ):
+            return self._summary(
+                ObservedState.RUNNING,
+                orchestrator_status=pod.status,
+                desired_state=pod.desired_state,
+                stub=True,
+            )
         if pod.status == PodStatus.FAILED:
             return self._summary(
                 ObservedState.FAILED,

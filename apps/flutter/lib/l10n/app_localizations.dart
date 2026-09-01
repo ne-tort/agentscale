@@ -3110,6 +3110,15 @@ abstract class AppLocalizations {
   /// **'Agent token budget exhausted.'**
   String get errorAgentBudget;
 
+  /// No description provided for @errorPodNotRunning.
+  String get errorPodNotRunning;
+
+  /// No description provided for @errorAgentRuntimeUnavailable.
+  String get errorAgentRuntimeUnavailable;
+
+  /// No description provided for @errorAgentBridge.
+  String get errorAgentBridge;
+
   /// No description provided for @errorCascadeIncomplete.
   ///
   /// In en, this message translates to:

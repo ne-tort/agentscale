@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.config.settings import settings
 from prodavan.domain.agent import FROZEN_EVENT_TYPES, AgentEvent, AgentEventType
+from prodavan.domain.agent.errors import POD_NOT_RUNNING
 from prodavan.domain.ai_keys import ApiKind
 from prodavan.domain.pods import POD_TERMINAL_STATUSES
 from prodavan.infrastructure.k8s.sandbox.client import K8sSandboxClient
@@ -149,6 +150,14 @@ class OpenClawBridgeBootstrap:
         pod_ip = await self._resolve_pod_ip_for_project(project_id)
         if not pod_ip:
             logger.debug("openclaw send: no pod ip for project %s", project_id)
+            yield AgentEvent.now(
+                AgentEventType.ERROR,
+                {
+                    "code": POD_NOT_RUNNING,
+                    "message": "pod is not running or not ready",
+                    "retryable": False,
+                },
+            )
             return
 
         url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/sessions/{session_id}/send"

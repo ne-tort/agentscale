@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/containers/container_runtime_presenter.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
+import 'package:prodavan/features/employee/agent_chat_errors.dart';
 import 'package:prodavan/features/employee/cabinet_project_settings_page.dart';
 import 'package:prodavan/features/employee/project_chat_controller.dart';
 import 'package:prodavan/features/employee/tool_approve_page.dart';
@@ -31,6 +34,8 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   late final ProjectChatController _chat;
   final _scroll = ScrollController();
   bool _loading = true;
+  bool _chatAvailable = true;
+  Map<String, dynamic>? _project;
 
   @override
   void initState() {
@@ -45,12 +50,37 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
 
   Future<void> _bootstrap() async {
     try {
+      _project = await workContext.api.getProject(widget.projectId);
+      _chatAvailable = projectChatAvailable(_project);
+      if (!_chatAvailable) {
+        if (mounted) {
+          await _redirectToSettings();
+        }
+        return;
+      }
       await _chat.loadTranscript();
     } catch (e) {
-      _chat.error = e.toString();
+      if (mounted) _chat.error = e;
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  Future<void> _redirectToSettings() async {
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context);
+    await Navigator.of(context).pushReplacement(
+      MaterialPageRoute<void>(
+        builder: (_) => CabinetProjectSettingsPage(
+          cabinetId: widget.cabinetId,
+          projectId: widget.projectId,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(l10n.errorPodNotRunning)),
+    );
   }
 
   @override
@@ -69,7 +99,12 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         ),
       ),
     );
-    await _chat.loadTranscript();
+    _project = await workContext.api.getProject(widget.projectId);
+    _chatAvailable = projectChatAvailable(_project);
+    if (_chatAvailable) {
+      await _chat.loadTranscript();
+    }
+    if (mounted) setState(() {});
   }
 
   Future<void> _openApproval(Map<String, dynamic> approval) async {
@@ -93,6 +128,17 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    if (!_chatAvailable) {
+      return AppScaffold(
+        title: Text(widget.projectName),
+        body: Center(
+          child: AppStatusBanner(
+            severity: AppStatusSeverity.warning,
+            message: l10n.errorPodNotRunning,
+          ),
+        ),
+      );
+    }
     return AppScaffold(
       title: Text(widget.projectName),
       actions: [
@@ -132,12 +178,13 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
             Padding(
               padding: EdgeInsets.symmetric(horizontal: AppSpacing.md),
               child: Text(
-                _chat.error!,
+                localizeAgentChatError(_chat.error!, l10n),
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
               ),
             ),
           ChatComposer(
-            enabled: !_chat.streaming,
+            enabled: _chatAvailable && !_chat.streaming,
+            disabledHint: l10n.errorPodNotRunning,
             onSend: (text) => _chat.send(text),
             onCancel: _chat.streaming ? () => _chat.cancelStream() : null,
           ),

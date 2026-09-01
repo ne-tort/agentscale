@@ -199,6 +199,13 @@ bool projectShowsContainerError(Map<String, dynamic>? project) {
   return !ok.contains(observed);
 }
 
+bool projectChatAvailable(Map<String, dynamic>? project) {
+  if (project == null) return false;
+  if (project['status'] == 'paused') return false;
+  if (project['status'] != 'active') return false;
+  return containerRuntimeHealthy(project);
+}
+
 bool containerRuntimeHealthy(Map<String, dynamic>? item) {
   if (item?['runtime']?['stub'] == true) return false;
   return _observedState(item) == 'running';

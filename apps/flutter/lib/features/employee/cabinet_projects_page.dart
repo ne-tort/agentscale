@@ -103,7 +103,12 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
     }
   }
 
-  void _openWorkspace(AppEntityRow row) {
+  void _openProject(AppEntityRow row) {
+    final project = _projects.firstWhere((p) => p['id'] == row.id, orElse: () => const {});
+    if (!projectChatAvailable(project)) {
+      _openSettings(row);
+      return;
+    }
     Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => ProjectWorkspacePage(
@@ -220,7 +225,7 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
                     AppEntityColumn(id: 'creator', label: l10n.projectCreatorColumn),
                     AppEntityColumn(id: 'status', label: l10n.projectProjectStatus),
                   ],
-                  onOpen: _openWorkspace,
+                  onOpen: _openProject,
                   onDelete: _delete,
                   rowActions: [
                     AppEntityRowAction(

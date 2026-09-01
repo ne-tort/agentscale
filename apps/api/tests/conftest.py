@@ -299,6 +299,8 @@ def _integration_stub_runtime(request: pytest.FixtureRequest, monkeypatch: pytes
         return
     monkeypatch.setenv("POD_RUNTIME_MODE", "stub")
     monkeypatch.setattr(settings, "pod_runtime_mode", "stub")
+    monkeypatch.setattr(settings, "pod_agent_runtime_enabled", False)
+    monkeypatch.setattr(settings, "agent_inprocess_adapters_enabled", True)
 
 
 @pytest.fixture(autouse=True)

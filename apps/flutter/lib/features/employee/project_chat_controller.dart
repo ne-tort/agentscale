@@ -12,7 +12,7 @@ class ProjectChatController {
   String? sessionId;
   final List<Map<String, dynamic>> messages = [];
   bool streaming = false;
-  String? error;
+  Object? error;
   List<Map<String, dynamic>> pendingApprovals = const [];
 
   ProjectChatStreamHandle? _handle;
@@ -72,14 +72,20 @@ class ProjectChatController {
             pendingApprovals = pending.cast<Map<String, dynamic>>();
           }
         } else if (type == 'error') {
-          final payload = data is Map ? data : event;
-          error = payload['message']?.toString() ?? 'stream error';
+          if (data is Map<String, dynamic>) {
+            error = AgentStreamError(data);
+          } else {
+            error = event;
+          }
         }
         notify();
       }
       await loadTranscript();
+    } on ProdavanApiException catch (e) {
+      error = e;
+      notify();
     } catch (e) {
-      error = e.toString();
+      error = e;
       notify();
     } finally {
       streaming = false;
@@ -113,4 +119,9 @@ class ProjectChatController {
     _handle?.abort();
     _tick.close();
   }
+}
+
+class AgentStreamError {
+  const AgentStreamError(this.data);
+  final Map<String, dynamic> data;
 }

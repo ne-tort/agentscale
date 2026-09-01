@@ -20,6 +20,7 @@ from prodavan.application.agent.openclaw_bridge import (
     api_kind_to_bridge_adapter,
 )
 from prodavan.application.agent.policy_service import AgentPolicyService
+from prodavan.application.agent.runtime_guard import require_running_pod_runtime
 from prodavan.application.ai_keys.service import AiKeysService
 from prodavan.application.project_service import ProjectAccessPolicy
 from prodavan.application.projects.attachment_service import ProjectAttachmentService
@@ -33,6 +34,7 @@ from prodavan.domain.agent import (
     AgentSessionStatus,
     ChatMessage,
 )
+from prodavan.domain.agent.errors import agent_runtime_unavailable, app_error_from_bridge_event
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.infrastructure.persistence.models.agent import AgentEventRow, AgentSessionRow, AgentUsageRow
@@ -138,6 +140,16 @@ APPENDABLE_AGENT_EVENT_TYPES = frozenset(
 POD_AGENT_APPENDABLE_EVENT_TYPES = frozenset(FROZEN_EVENT_TYPES)
 
 
+def _raise_if_agent_error_events(events: list[dict]) -> None:
+    for event in reversed(events):
+        if event.get("type") != AgentEventType.ERROR:
+            continue
+        data = event.get("data")
+        if isinstance(data, dict):
+            raise app_error_from_bridge_event(data)
+        raise agent_runtime_unavailable()
+
+
 class AgentSessionService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -159,6 +171,13 @@ class AgentSessionService:
         project = await self._projects.require_access(
             project_id=project_id, principal=principal, employee=employee, write=True
         )
+        await require_running_pod_runtime(
+            self._session,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+        )
         await self._subscription.require_active(project.company_id)
         company_policy = await AdminCompanyService(self._session).get_agent_policy(project.company_id)
         await self._budget.enforce_before_turn(
@@ -175,19 +194,39 @@ class AgentSessionService:
         opts = await self._policy.build_create_opts(
             project=project, cwd=cwd, credential=credential, model_override=model
         )
-        adapter = get_agent_adapter(api_kind=credential.api_kind)
-        handle = await adapter.create(opts)
-        row = AgentSessionRow(
-            project_id=project_id,
-            resolved_key_id=credential.key_id,
-            provider=credential.provider,
-            api_kind=credential.api_kind,
-            vendor_agent_id=handle.id,
-            model=handle.model,
-            cwd=cwd,
-            status=AgentSessionStatus.ACTIVE,
-        )
-        self._session.add(row)
+        vendor_agent_id: str
+        model_name = opts.model
+        if settings.pod_agent_runtime_enabled:
+            row = AgentSessionRow(
+                project_id=project_id,
+                resolved_key_id=credential.key_id,
+                provider=credential.provider,
+                api_kind=credential.api_kind,
+                vendor_agent_id="pending",
+                model=model_name,
+                cwd=cwd,
+                status=AgentSessionStatus.ACTIVE,
+            )
+            self._session.add(row)
+            await self._session.flush()
+            row.vendor_agent_id = row.id
+            vendor_agent_id = row.id
+        else:
+            adapter = get_agent_adapter(api_kind=credential.api_kind)
+            handle = await adapter.create(opts)
+            vendor_agent_id = handle.id
+            model_name = handle.model
+            row = AgentSessionRow(
+                project_id=project_id,
+                resolved_key_id=credential.key_id,
+                provider=credential.provider,
+                api_kind=credential.api_kind,
+                vendor_agent_id=vendor_agent_id,
+                model=model_name,
+                cwd=cwd,
+                status=AgentSessionStatus.ACTIVE,
+            )
+            self._session.add(row)
         await self._session.commit()
         await self._session.refresh(row)
         await OpenClawBridgeBootstrap(self._session).register_session(
@@ -268,6 +307,13 @@ class AgentSessionService:
             project_id=project_id, principal=principal, employee=employee, write=True
         )
         await self._subscription.require_active(project.company_id)
+        await require_running_pod_runtime(
+            self._session,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+        )
         row = await self.get_session(session_id=session_id)
         if row.project_id != project_id:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
@@ -281,8 +327,10 @@ class AgentSessionService:
             policy=company_policy,
         )
 
-        adapter = get_agent_adapter(api_kind=row.api_kind)
         handle = AgentHandle(id=row.vendor_agent_id, provider=row.provider, cwd=row.cwd, model=row.model)
+        adapter = None
+        if not settings.pod_agent_runtime_enabled:
+            adapter = get_agent_adapter(api_kind=row.api_kind)
         normalized_refs = await ProjectAttachmentService(self._session).normalize_refs(
             project_id=project_id,
             refs=list(attachment_refs or ()),
@@ -355,7 +403,10 @@ class AgentSessionService:
 
             if used_bridge:
                 return
+            raise agent_runtime_unavailable(detail="pod agent-runtime did not respond")
 
+        if adapter is None:
+            raise agent_runtime_unavailable()
         async for event in adapter.send(handle, message):
             seq += 1
             self._session.add(
@@ -412,6 +463,7 @@ class AgentSessionService:
             principal=principal,
             employee=employee,
         )
+        _raise_if_agent_error_events(result.get("events") or [])
         result["assistant_text"] = _assistant_text_from_events(result.get("events") or [])
         result["pending_approvals"] = _pending_approvals_from_events(result.get("events") or [])
         return result

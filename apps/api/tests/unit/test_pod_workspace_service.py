@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from prodavan.application.pod_service.ports.workspace import WorkspaceEntry
 from prodavan.application.pod_service.workspace_service import PodWorkspaceService
+from prodavan.domain.agent.errors import pod_not_running
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 
@@ -55,16 +56,17 @@ class _FakeWorkspace:
 async def test_list_entries_requires_running_pod() -> None:
     session = MagicMock()
     svc = PodWorkspaceService(session, workspace=_FakeWorkspace())
-    svc._access.require_access = AsyncMock(return_value=MagicMock())  # noqa: SLF001
-    svc._pods.runtime_view = AsyncMock(return_value={"observed_state": "paused", "stub": False})  # noqa: SLF001
-
-    with pytest.raises(AppError) as exc:
-        await svc.list_entries(
-            project_id="proj_x",
-            path="",
-            principal=_principal(),
-            employee=None,
-        )
+    with patch(
+        "prodavan.application.pod_service.workspace_service.require_running_pod_runtime",
+        new=AsyncMock(side_effect=pod_not_running()),
+    ):
+        with pytest.raises(AppError) as exc:
+            await svc.list_entries(
+                project_id="proj_x",
+                path="",
+                principal=_principal(),
+                employee=None,
+            )
     assert exc.value.code == "POD_NOT_RUNNING"
 
 
@@ -72,21 +74,22 @@ async def test_list_entries_requires_running_pod() -> None:
 async def test_list_entries_when_running() -> None:
     session = MagicMock()
     svc = PodWorkspaceService(session, workspace=_FakeWorkspace())
-    svc._access.require_access = AsyncMock(return_value=MagicMock())  # noqa: SLF001
-    svc._pods.runtime_view = AsyncMock(  # noqa: SLF001
-        return_value={
-            "observed_state": "running",
-            "stub": False,
-            "k8s_pod_name": "pod-demo",
-        }
-    )
-
-    out = await svc.list_entries(
-        project_id="proj_x",
-        path="",
-        principal=_principal(),
-        employee=None,
-    )
+    with patch(
+        "prodavan.application.pod_service.workspace_service.require_running_pod_runtime",
+        new=AsyncMock(
+            return_value={
+                "observed_state": "running",
+                "stub": False,
+                "k8s_pod_name": "pod-demo",
+            }
+        ),
+    ):
+        out = await svc.list_entries(
+            project_id="proj_x",
+            path="",
+            principal=_principal(),
+            employee=None,
+        )
     assert out["path"] == ""
     assert out["entries"][0]["name"] == "AGENTS.md"
 
@@ -100,16 +103,17 @@ async def test_preview_text_rejects_binary() -> None:
             return b"\x00binary"
 
     svc = PodWorkspaceService(session, workspace=_BinWorkspace())
-    svc._access.require_access = AsyncMock(return_value=MagicMock())  # noqa: SLF001
-    svc._pods.runtime_view = AsyncMock(  # noqa: SLF001
-        return_value={"observed_state": "running", "stub": False, "runtime_ref": "pod-demo"}
-    )
-
-    with pytest.raises(AppError) as exc:
-        await svc.preview_text(
-            project_id="proj_x",
-            path="blob.bin",
-            principal=_principal(),
-            employee=None,
-        )
+    with patch(
+        "prodavan.application.pod_service.workspace_service.require_running_pod_runtime",
+        new=AsyncMock(
+            return_value={"observed_state": "running", "stub": False, "runtime_ref": "pod-demo"}
+        ),
+    ):
+        with pytest.raises(AppError) as exc:
+            await svc.preview_text(
+                project_id="proj_x",
+                path="blob.bin",
+                principal=_principal(),
+                employee=None,
+            )
     assert exc.value.status == 415

@@ -7,11 +7,10 @@ from dataclasses import asdict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.application.agent.runtime_guard import require_running_pod_runtime
 from prodavan.application.pod_service.factory import build_pod_workspace
 from prodavan.application.pod_service.ports.workspace import PodWorkspacePort, WorkspaceEntry
-from prodavan.application.pod_service.query import PodQuery
 from prodavan.application.pod_service.workspace_paths import normalize_workspace_path
-from prodavan.application.project_service.access import ProjectAccessPolicy
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
@@ -51,8 +50,6 @@ def _is_text_content(data: bytes, filename: str) -> bool:
 class PodWorkspaceService:
     def __init__(self, session: AsyncSession, *, workspace: PodWorkspacePort | None = None) -> None:
         self._session = session
-        self._access = ProjectAccessPolicy(session)
-        self._pods = PodQuery(session)
         self._workspace = workspace or build_pod_workspace()
 
     async def _require_running_runtime(
@@ -63,43 +60,14 @@ class PodWorkspaceService:
         employee: EmployeeRow | None,
         write: bool = False,
     ) -> tuple[str, str]:
-        await self._access.require_access(
+        runtime = await require_running_pod_runtime(
+            self._session,
             project_id=project_id,
             principal=principal,
             employee=employee,
             write=write,
-            allow_paused=True,
         )
-        runtime = await self._pods.runtime_view(project_id)
-        if runtime is None:
-            raise AppError(
-                code="POD_NOT_RUNNING",
-                title="Conflict",
-                status=409,
-                detail="pod is not running",
-            )
-        if runtime.get("stub"):
-            raise AppError(
-                code="POD_NOT_RUNNING",
-                title="Conflict",
-                status=409,
-                detail="pod is not running",
-            )
-        if runtime.get("observed_state") != "running":
-            raise AppError(
-                code="POD_NOT_RUNNING",
-                title="Conflict",
-                status=409,
-                detail="pod is not running",
-            )
         runtime_ref = str(runtime.get("k8s_pod_name") or runtime.get("runtime_ref") or "").strip()
-        if not runtime_ref:
-            raise AppError(
-                code="POD_NOT_RUNNING",
-                title="Conflict",
-                status=409,
-                detail="pod is not running",
-            )
         return runtime_ref, normalize_workspace_path("")
 
     async def list_entries(

@@ -153,6 +153,8 @@ class Settings(BaseSettings):
             "POD_AGENT_BRIDGE_BOOTSTRAP_ENABLED",
         ),
     )
+    # When True, allow FakeAgentAdapter / FixtureCursorAdapter in-process (pytest only).
+    agent_inprocess_adapters_enabled: bool = False
 
     @property
     def pod_agent_bridge_enabled(self) -> bool:

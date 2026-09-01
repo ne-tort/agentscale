@@ -107,7 +107,7 @@ async def test_observe_stub_running_without_metrics() -> None:
         mock_settings.pod_runtime_mode = "stub"
         mock_settings.pod_provisioning_timeout_sec = 300
         out = await svc.observe(project=project, pod=pod)
-    assert out["observed_state"] == ObservedState.STARTING.value
+    assert out["observed_state"] == ObservedState.RUNNING.value
     assert out.get("stub") is True
     assert "metrics" not in out
 

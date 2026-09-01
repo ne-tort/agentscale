@@ -1719,6 +1719,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String get errorAgentBudget => 'Agent token budget exhausted.';
 
   @override
+  String get errorPodNotRunning =>
+      'Container is not running — open project settings to launch or reload.';
+
+  @override
+  String get errorAgentRuntimeUnavailable =>
+      'Agent runtime is unavailable. Check the project container.';
+
+  @override
+  String get errorAgentBridge => 'Could not reach the agent in the container.';
+
+  @override
   String get errorCascadeIncomplete =>
       'Delete cascade is still in progress. Wait or retry later.';
 

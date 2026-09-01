@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from prodavan.config.settings import settings
+from prodavan.domain.agent.errors import agent_adapter_disabled
 from prodavan.domain.agent.port import AgentProviderPort
 from prodavan.domain.ai_keys import ApiKind
 from prodavan.domain.errors import AppError
@@ -19,18 +21,24 @@ _PLATFORM_RUNTIME_KINDS = frozenset(
 
 
 def get_agent_adapter(*, api_kind: str, force_fake: bool = False) -> AgentProviderPort:
-    if force_fake:
-        return FakeAgentAdapter()
-    if api_kind == ApiKind.CURSOR_SDK:
-        return FixtureCursorAdapter()
-    if api_kind in {ApiKind.CODEX_SDK, ApiKind.CLAUDE_AGENT_SDK}:
-        return FakeAgentAdapter()
-    if api_kind in _PLATFORM_RUNTIME_KINDS:
-        # In-process stub; real loop runs in agent-runtime when POD_AGENT_RUNTIME_ENABLED.
-        return FakeAgentAdapter()
+    if force_fake or settings.agent_inprocess_adapters_enabled:
+        if api_kind == ApiKind.CURSOR_SDK:
+            return FixtureCursorAdapter()
+        if api_kind in {ApiKind.CODEX_SDK, ApiKind.CLAUDE_AGENT_SDK}:
+            return FakeAgentAdapter()
+        if api_kind in _PLATFORM_RUNTIME_KINDS:
+            return FakeAgentAdapter()
+        raise AppError(
+            code="AGENT_ADAPTER",
+            title="Adapter not available",
+            status=501,
+            detail=f"no in-process adapter for api_kind={api_kind}",
+        )
+    if settings.pod_agent_runtime_enabled:
+        raise agent_adapter_disabled()
     raise AppError(
         code="AGENT_ADAPTER",
         title="Adapter not available",
         status=501,
-        detail=f"no adapter for api_kind={api_kind}",
+        detail=f"no adapter for api_kind={api_kind}; enable pod agent-runtime or test adapters",
     )

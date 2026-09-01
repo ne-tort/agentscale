@@ -91,6 +91,7 @@ def test_agent_session_send_persists_events(client: TestClient) -> None:
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
 
     sess = client.post(
         f"/api/v1/projects/{project_id}/agent/sessions",
@@ -189,6 +190,7 @@ def test_agent_session_send_via_bridge_proxy_persists_single_seq(
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
 
     sess = client.post(
         f"/api/v1/projects/{project_id}/agent/sessions",
@@ -260,6 +262,7 @@ def test_project_chat_turn_creates_and_reuses_session(client: TestClient) -> Non
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
 
     first = client.post(
         f"/api/v1/projects/{project_id}/chat",
@@ -291,6 +294,57 @@ def test_project_chat_turn_creates_and_reuses_session(client: TestClient) -> Non
     assert messages[0]["role"] == "user"
     assert messages[0]["text"] == "hello"
     assert any(m["role"] == "assistant" for m in messages)
+
+
+@requires_postgres
+def test_chat_blocked_when_pod_not_launched(client: TestClient) -> None:
+    admin_h = {"Authorization": f"Bearer {_token(sub='chat-block-admin', platform_admin=True)}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "BlockCo", "password": "test-company-pass", "admin_email": "block@co.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "Cursor",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-block",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = owner_auth_from_company(_token, co.json())
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "BlockCab", "company_id": company_id},
+    )
+    assert cab.status_code in (200, 201), cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "BlockProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    blocked = client.post(
+        f"/api/v1/projects/{project_id}/chat",
+        headers=owner_h,
+        json={"text": "hello"},
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["code"] == "POD_NOT_RUNNING"
 
 
 @requires_postgres
@@ -341,6 +395,7 @@ def test_agent_budget_per_run_blocks_followup(client: TestClient) -> None:
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
 
     first = client.post(
         f"/api/v1/projects/{project_id}/chat",
@@ -403,6 +458,7 @@ def test_chat_stream_sse(client: TestClient) -> None:
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
 
     events: list[dict] = []
     with client.stream(
@@ -478,6 +534,7 @@ def test_chat_with_attachment_refs_emits_tool_call(client: TestClient) -> None:
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
 
     note = b"hello attachment"
     uploaded = client.post(
@@ -562,6 +619,7 @@ def test_chat_rejects_unknown_attachment_ref(client: TestClient) -> None:
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
 
     bad = client.post(
         f"/api/v1/projects/{project_id}/chat",
@@ -616,6 +674,7 @@ def test_chat_accepts_attachment_id_ref(client: TestClient) -> None:
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
 
     uploaded = client.post(
         f"/api/v1/projects/{project_id}/attachments",
@@ -1174,6 +1233,7 @@ def test_append_agent_event_hybrid_write(client: TestClient) -> None:
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
 
     sess = client.post(
         f"/api/v1/projects/{project_id}/agent/sessions",
@@ -1257,6 +1317,7 @@ def test_pod_agent_service_token_append_and_list(client: TestClient, monkeypatch
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
 
     sess = client.post(
         f"/api/v1/projects/{project_id}/agent/sessions",
@@ -1342,6 +1403,7 @@ def test_fork_session_creates_new_active_session(client: TestClient, monkeypatch
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
 
     sess = client.post(f"/api/v1/projects/{project_id}/agent/sessions", headers=owner_h, json={})
     assert sess.status_code == 201, sess.text
@@ -1401,6 +1463,7 @@ def test_sidechain_transcript_unavailable_without_runtime(client: TestClient, mo
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
 
     sess = client.post(f"/api/v1/projects/{project_id}/agent/sessions", headers=owner_h, json={})
     assert sess.status_code == 201, sess.text

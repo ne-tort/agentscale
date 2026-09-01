@@ -1732,6 +1732,17 @@ class AppLocalizationsRu extends AppLocalizations {
   String get errorAgentBudget => 'Исчерпан лимит токенов агента.';
 
   @override
+  String get errorPodNotRunning =>
+      'Контейнер не запущен — откройте настройки проекта для запуска или перезагрузки.';
+
+  @override
+  String get errorAgentRuntimeUnavailable =>
+      'Агент недоступен. Проверьте контейнер проекта.';
+
+  @override
+  String get errorAgentBridge => 'Не удалось связаться с агентом в контейнере.';
+
+  @override
   String get errorCascadeIncomplete =>
       'Каскад удаления ещё не завершён. Подождите или повторите позже.';
 

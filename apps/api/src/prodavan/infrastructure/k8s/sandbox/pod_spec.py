@@ -66,7 +66,7 @@ def _build_agent_runtime_container(
     container: dict[str, Any] = {
         "name": _AGENT_RUNTIME_CONTAINER,
         "image": image,
-        "imagePullPolicy": "IfNotPresent",
+        "imagePullPolicy": "Always",
         "workingDir": _WORKSPACE_MOUNT,
         "env": env,
         "volumeMounts": [{"name": "workspace", "mountPath": _WORKSPACE_MOUNT}],
@@ -169,7 +169,7 @@ def build_pod_body(
     init_container = {
         "name": "hydrate",
         "image": hydrate_image,
-        "imagePullPolicy": "IfNotPresent",
+        "imagePullPolicy": "Always",
         "command": ["python", "-m", "prodavan.runtime.hydrate"],
         "env": init_env,
         "volumeMounts": [{"name": "workspace", "mountPath": _WORKSPACE_MOUNT}],

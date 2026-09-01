@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 _MANAGED_BY_LABEL = "prodavan.io/managed-by"
 _MANAGED_BY_VALUE = "pod-service"
 _READY_PHASES = frozenset({"Running", "Succeeded"})
+_DISAPPEAR_RETRY_SEC = 10.0
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,48 @@ def _init_hydrate_state(status: dict[str, Any]) -> tuple[bool, bool]:
             return False, True
         return False, False
     return False, False
+
+
+def _format_container_state(state: dict[str, Any] | None) -> str:
+    if not state:
+        return "unknown"
+    if state.get("waiting"):
+        w = state["waiting"]
+        reason = w.get("reason") or "Waiting"
+        msg = w.get("message") or ""
+        return f"waiting:{reason}" + (f" ({msg})" if msg else "")
+    if state.get("running"):
+        return "running"
+    if state.get("terminated"):
+        t = state["terminated"]
+        reason = t.get("reason") or "Terminated"
+        exit_code = t.get("exitCode")
+        msg = t.get("message") or ""
+        base = f"terminated:{reason}"
+        if exit_code is not None:
+            base += f" exit={exit_code}"
+        if msg:
+            base += f" ({msg})"
+        return base
+    return str(state)
+
+
+def _pod_diagnostics(body: dict[str, Any]) -> str:
+    status = body.get("status") or {}
+    parts: list[str] = [f"phase={status.get('phase') or 'Unknown'}"]
+    for ics in status.get("initContainerStatuses") or []:
+        name = ics.get("name") or "init"
+        state = ics.get("state") or {}
+        parts.append(f"init:{name}={_format_container_state(state)}")
+    for cs in status.get("containerStatuses") or []:
+        name = cs.get("name") or "container"
+        state = cs.get("state") or {}
+        restarts = cs.get("restartCount")
+        detail = _format_container_state(state)
+        if restarts:
+            detail += f" restarts={restarts}"
+        parts.append(f"{name}={detail}")
+    return "; ".join(parts)
 
 
 def _container_started_at(status: dict[str, Any], *, name: str = "agent-runtime") -> str | None:
@@ -189,20 +232,47 @@ class K8sSandboxClient:
     async def list_managed_pods(self) -> list[PodSnapshot]:
         return await self.list_pods(label_selector=f"{_MANAGED_BY_LABEL}={_MANAGED_BY_VALUE}")
 
+    async def _get_pod_body(self, name: str) -> dict[str, Any] | None:
+        url = f"{self._auth.api_base()}/api/v1/namespaces/{self._namespace}/pods/{name}"
+        async with httpx.AsyncClient(**self._auth.client_kwargs()) as client:
+            response = await client.get(url, headers=self._auth.headers())
+            if response.status_code == 404:
+                return None
+            if response.status_code >= 400:
+                raise classify_http_status(response.status_code, response.text[:500])
+            body = response.json()
+            return body if isinstance(body, dict) else None
+
     async def wait_ready(self, name: str, *, timeout: float) -> PodSnapshot:
         deadline = time.monotonic() + timeout
         last: PodSnapshot | None = None
+        missing_since: float | None = None
         while time.monotonic() < deadline:
             snap = await self.get_pod(name)
             if snap is None:
-                raise K8sNotFoundError(f"pod {name} disappeared while waiting")
+                now = time.monotonic()
+                if missing_since is None:
+                    missing_since = now
+                if now - missing_since >= _DISAPPEAR_RETRY_SEC:
+                    raise K8sNotFoundError(f"pod {name} disappeared while waiting")
+                await asyncio.sleep(1.0)
+                continue
+            missing_since = None
             last = snap
             if snap.phase in _READY_PHASES and snap.ready:
                 return snap
             if snap.phase == "Failed":
-                raise classify_http_status(500, f"pod {name} failed")
+                body = await self._get_pod_body(name)
+                detail = _pod_diagnostics(body) if body else str(last)
+                raise classify_http_status(500, f"pod {name} failed; {detail}")
+            if snap.hydrate_failed:
+                body = await self._get_pod_body(name)
+                detail = _pod_diagnostics(body) if body else str(last)
+                raise classify_http_status(500, f"pod {name} hydrate failed; {detail}")
             await asyncio.sleep(2.0)
-        raise classify_http_status(408, f"pod {name} not ready within {timeout}s; last={last}")
+        body = await self._get_pod_body(name)
+        detail = _pod_diagnostics(body) if body else str(last)
+        raise classify_http_status(408, f"pod {name} not ready within {timeout}s; {detail}")
 
     async def get_pod_metrics(self, name: str) -> dict[str, Any] | None:
         url = (

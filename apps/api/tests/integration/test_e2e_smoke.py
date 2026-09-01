@@ -92,6 +92,7 @@ def test_e2e_smoke_admin_to_agent_ping(client: TestClient) -> None:
     )
     assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
 
     sess = client.post(
         f"/api/v1/projects/{project_id}/agent/sessions",
@@ -199,6 +200,7 @@ def test_e2e_disabled_employee_cannot_chat(client: TestClient) -> None:
     )
     assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
 
     disable = client.post(f"/api/v1/employees/{emp_id}/disable", headers=admin_h)
     assert disable.status_code == 200
@@ -415,6 +417,7 @@ def test_e2e_agent_budget_blocks_followup(client: TestClient) -> None:
     )
     assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
 
     first = client.post(
         f"/api/v1/projects/{project_id}/chat",
@@ -483,6 +486,7 @@ def test_e2e_usd_cost_cap_blocks_followup(client: TestClient) -> None:
     )
     assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
 
     first = client.post(
         f"/api/v1/projects/{project_id}/chat",
@@ -543,6 +547,7 @@ def test_e2e_tool_approval_hitl(client: TestClient) -> None:
     )
     assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
 
     turn = client.post(
         f"/api/v1/projects/{project_id}/chat",
@@ -639,6 +644,7 @@ def test_e2e_company_suspend_blocks_chat_and_lists_subscription(client: TestClie
     )
     assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
     assert proj.json()["company_subscription"]["subscription_expired"] is False
 
     ok_chat = client.post(

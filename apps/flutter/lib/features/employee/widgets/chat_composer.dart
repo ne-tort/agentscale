@@ -8,11 +8,13 @@ class ChatComposer extends StatefulWidget {
     super.key,
     required this.onSend,
     this.enabled = true,
+    this.disabledHint,
     this.onCancel,
   });
 
   final ValueChanged<String> onSend;
   final bool enabled;
+  final String? disabledHint;
   final VoidCallback? onCancel;
 
   @override
@@ -51,7 +53,9 @@ class _ChatComposerState extends State<ChatComposer> {
                 minLines: 1,
                 maxLines: 6,
                 decoration: InputDecoration(
-                  hintText: l10n.projectMessageHint,
+                  hintText: widget.enabled
+                      ? l10n.projectMessageHint
+                      : (widget.disabledHint ?? l10n.projectMessageHint),
                   border: const OutlineInputBorder(),
                 ),
                 onSubmitted: widget.enabled ? (_) => _submit() : null,
