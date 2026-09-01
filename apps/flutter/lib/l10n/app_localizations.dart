@@ -3164,12 +3164,6 @@ abstract class AppLocalizations {
   /// **'Agent runtime failed while processing the request.'**
   String get errorAgentRuntimeError;
 
-  /// No description provided for @errorAgentProvider.
-  ///
-  /// In en, this message translates to:
-  /// **'AI provider request failed from the container (network or API).'**
-  String get errorAgentProvider;
-
   /// No description provided for @errorAgentBridge.
   ///
   /// In en, this message translates to:

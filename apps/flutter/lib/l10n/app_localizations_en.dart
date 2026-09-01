@@ -1755,10 +1755,6 @@ class AppLocalizationsEn extends AppLocalizations {
       'Agent runtime failed while processing the request.';
 
   @override
-  String get errorAgentProvider =>
-      'AI provider request failed from the container (network or API).';
-
-  @override
   String get errorAgentBridge => 'Could not reach the agent in the container.';
 
   @override

@@ -1004,7 +1004,6 @@
   "errorAgentProviderRateLimit": "Превышен лимит запросов к AI-провайдеру. Повторите позже.",
   "errorAgentProviderUnavailable": "AI-провайдер временно недоступен. Повторите позже.",
   "errorAgentRuntimeError": "Ошибка агента при обработке запроса.",
-  "errorAgentProvider": "Запрос к AI-провайдеру из контейнера не прошёл (сеть или API).",
   "errorAgentBridge": "Не удалось связаться с агентом в контейнере.",
   "errorCascadeIncomplete": "Каскад удаления ещё не завершён. Подождите или повторите позже.",
   "companyCredentialsCreated": "Логин: {companyId} · пароль: {password}",

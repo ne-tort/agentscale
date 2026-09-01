@@ -97,17 +97,4 @@ void main() {
     expect(presented.display, isNot(l10n.errorGateway));
     expect(presented.diagnostic, contains('Invalid User API Key'));
   });
-
-  testWidgets('legacy AGENT_ERROR still maps to provider copy', (tester) async {
-    final l10n = await l10nFor(tester);
-    final presented = presentAgentChatError(
-      const AgentStreamError({
-        'code': 'AGENT_ERROR',
-        'message': 'Network request failed',
-      }),
-      l10n,
-    );
-    expect(presented.display, l10n.errorAgentProvider);
-    expect(presented.diagnostic, contains('Network request failed'));
-  });
 }

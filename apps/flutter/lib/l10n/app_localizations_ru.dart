@@ -1767,10 +1767,6 @@ class AppLocalizationsRu extends AppLocalizations {
   String get errorAgentRuntimeError => 'Ошибка агента при обработке запроса.';
 
   @override
-  String get errorAgentProvider =>
-      'Запрос к AI-провайдеру из контейнера не прошёл (сеть или API).';
-
-  @override
   String get errorAgentBridge => 'Не удалось связаться с агентом в контейнере.';
 
   @override

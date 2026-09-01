@@ -145,7 +145,6 @@ abstract final class AppErrors {
     }
 
     final display = _messageForCode(l10n, code) ??
-        _agentRuntimeFallback(l10n, statusCode, detail ?? message) ??
         _statusMessage(l10n, statusCode);
     return AppErrorPresentation(
       display: display,
@@ -155,33 +154,6 @@ abstract final class AppErrors {
         detail: detail ?? message ?? oauthDescription ?? title ?? trimmed,
       ),
     );
-  }
-
-  static String? _agentRuntimeFallback(
-    AppLocalizations l10n,
-    int statusCode,
-    String? detail,
-  ) {
-    final hint = (detail ?? '').trim();
-    if (hint.isEmpty) return null;
-    if (!_looksLikeAgentRuntimeDetail(hint)) return null;
-    if (statusCode == 409) return l10n.errorPodNotRunning;
-    if (statusCode == 502) return l10n.errorAgentBridge;
-    if (statusCode >= 500) return l10n.errorAgentRuntimeUnavailable;
-    return null;
-  }
-
-  static bool _looksLikeAgentRuntimeDetail(String hint) {
-    final lower = hint.toLowerCase();
-    return lower.contains('agent') ||
-        lower.contains('bridge') ||
-        lower.contains('credential') ||
-        lower.contains('cursor_sdk') ||
-        lower.contains('openclaw') ||
-        lower.contains('pod agent-runtime') ||
-        lower.contains('pod runtime') ||
-        lower.contains('lease') ||
-        lower.contains('network request failed');
   }
 
   static String? _messageForCode(AppLocalizations l10n, String? code) {
@@ -211,7 +183,6 @@ abstract final class AppErrors {
       'AGENT_PROVIDER_RATE_LIMIT' => l10n.errorAgentProviderRateLimit,
       'AGENT_PROVIDER_UNAVAILABLE' => l10n.errorAgentProviderUnavailable,
       'AGENT_RUNTIME_ERROR' => l10n.errorAgentRuntimeError,
-      'AGENT_ERROR' || 'AGENT_PROVIDER_ERROR' => l10n.errorAgentProvider,
       'BRIDGE_SEND_FAILED' || 'BRIDGE_EMPTY_STREAM' || 'BRIDGE_UNREACHABLE' => l10n.errorAgentBridge,
       'CASCADE_INCOMPLETE' => l10n.errorCascadeIncomplete,
       'SCHEMA_DROP_FAILED' => l10n.errorServer,

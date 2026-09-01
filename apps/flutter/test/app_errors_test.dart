@@ -90,12 +90,12 @@ void main() {
     expect(presented.display, isNot(contains('project is paused')));
   });
 
-  testWidgets('agent runtime detail avoids generic gateway copy', (tester) async {
+  testWidgets('agent runtime unavailable maps by code not message', (tester) async {
     final l10n = await l10nFor(tester, const Locale('ru'));
     final presented = AppErrors.present(
       ProdavanApiException(
         503,
-        '{"code":"HTTP_ERROR","title":"Service Unavailable","detail":"failed to push AI key lease to pod agent-runtime"}',
+        '{"code":"AGENT_RUNTIME_UNAVAILABLE","title":"Service Unavailable","detail":"failed to push AI key lease to pod agent-runtime"}',
       ),
       l10n,
     );

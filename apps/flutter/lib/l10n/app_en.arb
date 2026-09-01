@@ -1002,7 +1002,6 @@
   "errorAgentProviderRateLimit": "AI provider rate limit exceeded. Try again later.",
   "errorAgentProviderUnavailable": "AI provider is temporarily unavailable. Try again later.",
   "errorAgentRuntimeError": "Agent runtime failed while processing the request.",
-  "errorAgentProvider": "AI provider request failed from the container (network or API).",
   "errorAgentBridge": "Could not reach the agent in the container.",
   "errorCascadeIncomplete": "Delete cascade is still in progress. Wait or retry later.",
   "companyCredentialsCreated": "Login: {companyId} · password: {password}",
