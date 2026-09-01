@@ -6,7 +6,7 @@
 | Quality | 7 |
 | Quality note | API E2E incl. pause/rematerialize/idle; Flutter thumbnails + widget subset; full Widget E2E — gap |
 | Plan | [L09](../11-implementation-plan/L09-vertical-integration.md) |
-| Last updated | 2026-08-24 — regenerate after cancel; release_gate Status=done⇒Q≥8 |
+| Last updated | 2026-09-01 — ProjectWorkspacePage + SSE chat; agent-runtime fork/sidechain API |
 | Owners | — |
 
 ---

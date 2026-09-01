@@ -12,6 +12,7 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/employee/cabinet_project_settings_page.dart';
+import 'package:prodavan/features/employee/project_workspace_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Projects table inside cabinet — inline add, long-press delete.
@@ -102,15 +103,28 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
     }
   }
 
-  void _openSettings(AppEntityRow row) {
+  void _openWorkspace(AppEntityRow row) {
     Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ProjectWorkspacePage(
+          cabinetId: widget.cabinetId,
+          projectId: row.id,
+          projectName: row.title,
+        ),
+      ),
+    ).then((_) => _reload());
+  }
+
+  Future<void> _openSettings(AppEntityRow row) async {
+    await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => CabinetProjectSettingsPage(
           cabinetId: widget.cabinetId,
           projectId: row.id,
         ),
       ),
-    ).then((_) => _reload());
+    );
+    await _reload();
   }
 
   String _truncateAbout(String? about) {
@@ -206,8 +220,15 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
                     AppEntityColumn(id: 'creator', label: l10n.projectCreatorColumn),
                     AppEntityColumn(id: 'status', label: l10n.projectProjectStatus),
                   ],
-                  onOpen: _openSettings,
+                  onOpen: _openWorkspace,
                   onDelete: _delete,
+                  rowActions: [
+                    AppEntityRowAction(
+                      tooltip: l10n.projectProjectSettings,
+                      icon: Icons.settings_outlined,
+                      onPressed: _openSettings,
+                    ),
+                  ],
                   empty: EmptyPlaceholder(
                     title: l10n.projectNoProjects,
                     icon: Icons.folder_outlined,

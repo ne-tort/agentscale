@@ -35,9 +35,9 @@ PRODAVAN_EVENTS_OWNER_HEADER = "X-Prodavan-Events-Owner"
 PRODAVAN_EVENTS_OWNER_API = "api"
 
 
-def _bridge_request_headers() -> dict[str, str]:
+def _runtime_request_headers() -> dict[str, str]:
     headers = {PRODAVAN_EVENTS_OWNER_HEADER: PRODAVAN_EVENTS_OWNER_API}
-    token = settings.pod_agent_bridge_token.strip()
+    token = settings.pod_agent_runtime_token.strip()
     if token:
         headers["Authorization"] = f"Bearer {token}"
     return headers
@@ -94,7 +94,7 @@ class OpenClawBridgeBootstrap:
         project_id: str,
         payload: BridgeSessionBootstrap,
     ) -> bool:
-        if not settings.pod_agent_bridge_enabled or not settings.pod_agent_bridge_bootstrap_enabled:
+        if not settings.pod_agent_runtime_enabled or not settings.pod_agent_runtime_bootstrap_enabled:
             return False
         if payload.adapter_kind not in _BRIDGE_ADAPTER_KINDS:
             return False
@@ -104,7 +104,7 @@ class OpenClawBridgeBootstrap:
             logger.debug("openclaw bootstrap: no pod ip for project %s", project_id)
             return False
 
-        url = f"http://{pod_ip}:{settings.pod_agent_bridge_port}/v1/sessions"
+        url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/sessions"
         body = {
             "session_id": payload.session_id,
             "prodavan_session_id": payload.prodavan_session_id,
@@ -117,7 +117,7 @@ class OpenClawBridgeBootstrap:
 
         try:
             async with self._http_client(timeout=5.0) as client:
-                response = await client.post(url, json=body, headers=_bridge_request_headers())
+                response = await client.post(url, json=body, headers=_runtime_request_headers())
             if response.status_code in (200, 201):
                 logger.info(
                     "openclaw bootstrap: registered session %s on pod %s",
@@ -141,10 +141,9 @@ class OpenClawBridgeBootstrap:
         project_id: str,
         session_id: str,
         message: str,
-        api_key: str | None = None,
     ) -> AsyncIterator[AgentEvent]:
-        """Proxy send to Pod sidecar bridge; yields normalized AgentEvent stream."""
-        if not settings.pod_agent_bridge_enabled:
+        """Proxy send to Pod agent-runtime; yields normalized AgentEvent stream."""
+        if not settings.pod_agent_runtime_enabled:
             return
 
         pod_ip = await self._resolve_pod_ip_for_project(project_id)
@@ -152,10 +151,8 @@ class OpenClawBridgeBootstrap:
             logger.debug("openclaw send: no pod ip for project %s", project_id)
             return
 
-        url = f"http://{pod_ip}:{settings.pod_agent_bridge_port}/v1/sessions/{session_id}/send"
+        url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/sessions/{session_id}/send"
         body: dict[str, str] = {"message": message}
-        if api_key:
-            body["api_key"] = api_key
 
         try:
             yielded = False
@@ -164,7 +161,7 @@ class OpenClawBridgeBootstrap:
                     "POST",
                     url,
                     json=body,
-                    headers=_bridge_request_headers(),
+                    headers=_runtime_request_headers(),
                 ) as response:
                     if response.status_code >= 400:
                         text = await response.aread()
@@ -238,3 +235,85 @@ class OpenClawBridgeBootstrap:
         if snap is None or not snap.ready or snap.phase != "Running":
             return None
         return snap.pod_ip
+
+    async def resolve_approval(
+        self,
+        *,
+        project_id: str,
+        approval_id: str,
+        decision: str,
+    ) -> bool:
+        """Forward HITL decision to agent-runtime."""
+        if not settings.pod_agent_runtime_enabled:
+            return False
+        pod_ip = await self._resolve_pod_ip_for_project(project_id)
+        if not pod_ip:
+            return False
+        bridge_decision = "allow" if decision == "approve" else "deny"
+        url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/approvals/{approval_id}"
+        try:
+            async with self._http_client(timeout=10.0) as client:
+                response = await client.post(
+                    url,
+                    json={"decision": bridge_decision},
+                    headers=_runtime_request_headers(),
+                )
+            return response.status_code in (200, 201)
+        except Exception as exc:
+            logger.debug("approval forward failed %s: %s", approval_id, exc)
+            return False
+
+    async def get_sidechain_transcript(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        tool_use_id: str,
+    ) -> dict | None:
+        if not settings.pod_agent_runtime_enabled:
+            return None
+        pod_ip = await self._resolve_pod_ip_for_project(project_id)
+        if not pod_ip:
+            return None
+        url = (
+            f"http://{pod_ip}:{settings.pod_agent_runtime_port}"
+            f"/v1/sessions/{session_id}/sidechains/{tool_use_id}/transcript"
+        )
+        try:
+            async with self._http_client(timeout=10.0) as client:
+                response = await client.get(url, headers=_runtime_request_headers())
+            if response.status_code >= 400:
+                return None
+            body = response.json()
+            return body if isinstance(body, dict) else None
+        except Exception as exc:
+            logger.debug("sidechain transcript failed session=%s: %s", session_id, exc)
+            return None
+
+    async def fork_session(
+        self,
+        *,
+        project_id: str,
+        source_session_id: str,
+        new_session_id: str,
+    ) -> dict | None:
+        if not settings.pod_agent_runtime_enabled:
+            return None
+        pod_ip = await self._resolve_pod_ip_for_project(project_id)
+        if not pod_ip:
+            return None
+        url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/sessions/{source_session_id}/fork"
+        try:
+            async with self._http_client(timeout=10.0) as client:
+                response = await client.post(
+                    url,
+                    json={"session_id": new_session_id},
+                    headers=_runtime_request_headers(),
+                )
+            if response.status_code >= 400:
+                return None
+            body = response.json()
+            return body if isinstance(body, dict) else None
+        except Exception as exc:
+            logger.debug("fork session failed %s: %s", source_session_id, exc)
+            return None

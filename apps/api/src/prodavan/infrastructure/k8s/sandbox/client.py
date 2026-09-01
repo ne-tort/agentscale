@@ -72,7 +72,7 @@ def _init_hydrate_state(status: dict[str, Any]) -> tuple[bool, bool]:
     return False, False
 
 
-def _container_started_at(status: dict[str, Any], *, name: str = "sandbox") -> str | None:
+def _container_started_at(status: dict[str, Any], *, name: str = "agent-runtime") -> str | None:
     for cs in status.get("containerStatuses") or []:
         if str(cs.get("name") or "") != name:
             continue
@@ -249,7 +249,7 @@ class K8sSandboxClient:
         name: str,
         command: list[str],
         *,
-        container: str = "sandbox",
+        container: str = "agent-runtime",
         timeout: float = 60.0,
     ):
         from prodavan.infrastructure.k8s.sandbox.exec import exec_in_pod

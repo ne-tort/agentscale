@@ -19,7 +19,7 @@ SaaS: **управление изолированными Pod'ами через 
 Пользователь (UI)
     → API (pod-service, projects, auth, agent sessions, triggers)
     → Kubernetes Pod (prodavan-sandboxes)
-        → agent-bridge: proprietary SDK adapters + Platform OpenClaw (universal)
+        → agent-runtime (single container): proprietary SDK adapters + Platform OpenClaw
         → workspace FS, MCP/tools, файлы проекта
 ```
 

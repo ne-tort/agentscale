@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from prodavan.api.internal import pods as internal_pods
 from prodavan.api.v1 import (
     admin_cabinets,
     admin_catalogs,
@@ -56,3 +57,4 @@ router.include_router(cabinets.router)
 router.include_router(projects.cabinet_projects_router)
 router.include_router(projects.router)
 router.include_router(agent.router)
+router.include_router(internal_pods.router)

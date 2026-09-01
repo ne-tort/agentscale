@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -107,15 +108,115 @@ class Settings(BaseSettings):
     pod_sandbox_memory_request: str = "256Mi"
     pod_sandbox_memory_limit: str = "1Gi"
     pod_ready_timeout_sec: int = 120
-    # L15 agent-bridge sidecar in project Pod (Platform OpenClaw). Off by default until image is published.
-    pod_agent_bridge_enabled: bool = False
-    pod_agent_bridge_image: str = "ghcr.io/ne-tort/openclaw-bridge:local"
-    pod_agent_bridge_port: int = 3921
-    pod_agent_bridge_api_base_url: str = "http://prodavan-api.prodavan.svc:8000/api/v1"
-    pod_agent_bridge_auth_secret: str = ""  # k8s Secret name; key token → PRODAVAN_AUTH_TOKEN
-    pod_agent_bridge_auth_token: str = ""  # expected Bearer for sidecar (dev/CI via env)
-    pod_agent_bridge_token: str = ""  # optional Bearer for API → bridge HTTP (BRIDGE_AUTH_TOKEN)
-    pod_agent_bridge_bootstrap_enabled: bool = True  # POST /v1/sessions on agent session create
+    # L15 agent-runtime — single container Pod workload (Platform OpenClaw + SDK adapters).
+    pod_agent_runtime_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("POD_AGENT_RUNTIME_ENABLED", "POD_AGENT_BRIDGE_ENABLED"),
+    )
+    pod_agent_runtime_image: str = Field(
+        default="ghcr.io/ne-tort/prodavan-agent-runtime:local",
+        validation_alias=AliasChoices("POD_AGENT_RUNTIME_IMAGE", "POD_AGENT_BRIDGE_IMAGE"),
+    )
+    pod_agent_runtime_port: int = Field(
+        default=3921,
+        validation_alias=AliasChoices("POD_AGENT_RUNTIME_PORT", "POD_AGENT_BRIDGE_PORT"),
+    )
+    pod_agent_runtime_api_base_url: str = Field(
+        default="http://prodavan-api.prodavan.svc:8000/api/v1",
+        validation_alias=AliasChoices(
+            "POD_AGENT_RUNTIME_API_BASE_URL",
+            "POD_AGENT_BRIDGE_API_BASE_URL",
+        ),
+    )
+    pod_agent_runtime_auth_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "POD_AGENT_RUNTIME_AUTH_SECRET",
+            "POD_AGENT_BRIDGE_AUTH_SECRET",
+        ),
+    )
+    pod_agent_runtime_auth_token: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "POD_AGENT_RUNTIME_AUTH_TOKEN",
+            "POD_AGENT_BRIDGE_AUTH_TOKEN",
+        ),
+    )
+    pod_agent_runtime_token: str = Field(
+        default="",
+        validation_alias=AliasChoices("POD_AGENT_RUNTIME_TOKEN", "POD_AGENT_BRIDGE_TOKEN"),
+    )
+    pod_agent_runtime_bootstrap_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "POD_AGENT_RUNTIME_BOOTSTRAP_ENABLED",
+            "POD_AGENT_BRIDGE_BOOTSTRAP_ENABLED",
+        ),
+    )
+
+    @property
+    def pod_agent_bridge_enabled(self) -> bool:
+        return self.pod_agent_runtime_enabled
+
+    @pod_agent_bridge_enabled.setter
+    def pod_agent_bridge_enabled(self, value: bool) -> None:
+        self.pod_agent_runtime_enabled = value
+
+    @property
+    def pod_agent_bridge_image(self) -> str:
+        return self.pod_agent_runtime_image
+
+    @pod_agent_bridge_image.setter
+    def pod_agent_bridge_image(self, value: str) -> None:
+        self.pod_agent_runtime_image = value
+
+    @property
+    def pod_agent_bridge_port(self) -> int:
+        return self.pod_agent_runtime_port
+
+    @pod_agent_bridge_port.setter
+    def pod_agent_bridge_port(self, value: int) -> None:
+        self.pod_agent_runtime_port = value
+
+    @property
+    def pod_agent_bridge_api_base_url(self) -> str:
+        return self.pod_agent_runtime_api_base_url
+
+    @pod_agent_bridge_api_base_url.setter
+    def pod_agent_bridge_api_base_url(self, value: str) -> None:
+        self.pod_agent_runtime_api_base_url = value
+
+    @property
+    def pod_agent_bridge_auth_secret(self) -> str:
+        return self.pod_agent_runtime_auth_secret
+
+    @pod_agent_bridge_auth_secret.setter
+    def pod_agent_bridge_auth_secret(self, value: str) -> None:
+        self.pod_agent_runtime_auth_secret = value
+
+    @property
+    def pod_agent_bridge_auth_token(self) -> str:
+        return self.pod_agent_runtime_auth_token
+
+    @pod_agent_bridge_auth_token.setter
+    def pod_agent_bridge_auth_token(self, value: str) -> None:
+        self.pod_agent_runtime_auth_token = value
+
+    @property
+    def pod_agent_bridge_token(self) -> str:
+        return self.pod_agent_runtime_token
+
+    @pod_agent_bridge_token.setter
+    def pod_agent_bridge_token(self, value: str) -> None:
+        self.pod_agent_runtime_token = value
+
+    @property
+    def pod_agent_bridge_bootstrap_enabled(self) -> bool:
+        return self.pod_agent_runtime_bootstrap_enabled
+
+    @pod_agent_bridge_bootstrap_enabled.setter
+    def pod_agent_bridge_bootstrap_enabled(self, value: bool) -> None:
+        self.pod_agent_runtime_bootstrap_enabled = value
     pod_metrics_grace_sec: int = 30
     pod_provisioning_timeout_sec: int = 60
     pod_preparing_timeout_sec: int = 120

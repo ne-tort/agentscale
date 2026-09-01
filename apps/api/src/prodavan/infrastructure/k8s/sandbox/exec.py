@@ -64,7 +64,7 @@ async def exec_in_pod(
     namespace: str,
     pod_name: str,
     command: list[str],
-    container: str = "sandbox",
+    container: str = "agent-runtime",
     timeout: float = 60.0,
 ) -> ExecResult:
     """Run command in pod container; collect stdout/stderr."""

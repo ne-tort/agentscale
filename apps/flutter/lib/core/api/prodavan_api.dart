@@ -944,6 +944,44 @@ class ProdavanApi {
     }
   }
 
+  Future<List<Map<String, dynamic>>> listAgentSessions({
+    required String projectId,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.get(_uri('/projects/$projectId/agent/sessions'), extraHeaders: _workHeaders);
+      _throwIfError(res);
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final items = body['items'];
+      if (items is List) {
+        return items.cast<Map<String, dynamic>>();
+      }
+      return const [];
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Map<String, dynamic>> getSidechainTranscript({
+    required String projectId,
+    required String sessionId,
+    required String toolUseId,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.get(
+        _uri('/projects/$projectId/agent/sessions/$sessionId/sidechains/$toolUseId/transcript'),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
   void _throwIfError(http.Response res) {
     if (res.statusCode >= 400) {
       throw ProdavanApiException(res.statusCode, res.body);

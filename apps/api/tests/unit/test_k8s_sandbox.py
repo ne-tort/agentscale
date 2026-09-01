@@ -45,12 +45,76 @@ def test_build_pod_body_labels() -> None:
     assert labels["prodavan.io/pod-id"] == "pod_abc"
     assert labels["prodavan.io/hydrate-generation"] == "2"
     assert body["spec"]["initContainers"][0]["name"] == "hydrate"
-    sandbox_env = {item["name"]: item.get("value") for item in body["spec"]["containers"][0]["env"]}
-    assert sandbox_env["LOG_LEVEL"] == "debug"
-    assert body["spec"]["containers"][0]["command"] == ["sleep", "infinity"]
+    runtime = body["spec"]["containers"][0]
+    assert runtime["name"] == "agent-runtime"
+    runtime_env = {item["name"]: item.get("value") for item in runtime["env"]}
+    assert runtime_env["LOG_LEVEL"] == "debug"
+    assert runtime["command"] == ["sleep", "infinity"]
 
 
-def test_build_pod_body_agent_bridge_sidecar() -> None:
+def test_build_pod_body_agent_runtime() -> None:
+    ctx = PodRuntimeContext(
+        pod_id="pod_abc",
+        project_id="prj_abc",
+        company_id="cmp_abc",
+        workspace_key="wk_demo",
+    )
+    body = build_pod_body(
+        runtime_ref="pod-wk-demo",
+        namespace="prodavan-sandboxes",
+        context=ctx,
+        image="sandbox:latest",
+        hydrate_image="hydrate:latest",
+        service_account="prodavan-sandbox",
+        cpu_request="100m",
+        cpu_limit="1",
+        memory_request="256Mi",
+        memory_limit="1Gi",
+        agent_runtime_image="prodavan-agent-runtime:latest",
+        agent_runtime_port=3921,
+        agent_runtime_api_base_url="http://prodavan-api.prodavan.svc:8000/api/v1",
+        agent_runtime_auth_secret="prodavan-agent-bridge",
+    )
+    containers = body["spec"]["containers"]
+    assert len(containers) == 1
+    runtime = containers[0]
+    assert runtime["name"] == "agent-runtime"
+    assert runtime["image"] == "prodavan-agent-runtime:latest"
+    runtime_env = {item["name"]: item.get("value") for item in runtime["env"]}
+    assert runtime_env["PRODAVAN_PROJECT_ID"] == "prj_abc"
+    assert runtime_env["PRODAVAN_POD_ID"] == "pod_abc"
+    assert runtime_env["PRODAVAN_EVENTS_WRITE"] == "1"
+    assert runtime_env["WORKSPACE_ROOT"] == "/workspace"
+    token_env = next(e for e in runtime["env"] if e["name"] == "PRODAVAN_AUTH_TOKEN")
+    assert token_env["valueFrom"]["secretKeyRef"]["name"] == "prodavan-agent-bridge"
+    assert runtime["readinessProbe"]["httpGet"]["path"] == "/health"
+    assert runtime_env["OPENCLAW_SESSION_MAP_PATH"] == "/workspace/.openclaw-data/session-map.json"
+
+
+def test_build_pod_body_without_agent_runtime() -> None:
+    ctx = PodRuntimeContext(
+        pod_id="pod_abc",
+        project_id="prj_abc",
+        company_id="cmp_abc",
+        workspace_key="wk_demo",
+    )
+    body = build_pod_body(
+        runtime_ref="pod-wk-demo",
+        namespace="prodavan-sandboxes",
+        context=ctx,
+        image="sandbox:latest",
+        hydrate_image="hydrate:latest",
+        service_account="prodavan-sandbox",
+        cpu_request="100m",
+        cpu_limit="1",
+        memory_request="256Mi",
+        memory_limit="1Gi",
+    )
+    assert len(body["spec"]["containers"]) == 1
+
+
+def test_build_pod_body_agent_bridge_legacy_alias() -> None:
+    """Legacy agent_bridge_* kwargs map to single agent-runtime container."""
     ctx = PodRuntimeContext(
         pod_id="pod_abc",
         project_id="prj_abc",
@@ -74,41 +138,18 @@ def test_build_pod_body_agent_bridge_sidecar() -> None:
         agent_bridge_auth_secret="prodavan-agent-bridge",
     )
     containers = body["spec"]["containers"]
-    assert len(containers) == 2
-    assert containers[0]["name"] == "sandbox"
-    bridge = containers[1]
-    assert bridge["name"] == "agent-bridge"
-    bridge_env = {item["name"]: item.get("value") for item in bridge["env"]}
-    assert bridge_env["PRODAVAN_PROJECT_ID"] == "prj_abc"
-    assert bridge_env["PRODAVAN_EVENTS_WRITE"] == "1"
-    assert bridge_env["WORKSPACE_ROOT"] == "/workspace"
-    token_env = next(e for e in bridge["env"] if e["name"] == "PRODAVAN_AUTH_TOKEN")
+    assert len(containers) == 1
+    runtime = containers[0]
+    assert runtime["name"] == "agent-runtime"
+    assert runtime["image"] == "openclaw-bridge:latest"
+    runtime_env = {item["name"]: item.get("value") for item in runtime["env"]}
+    assert runtime_env["PRODAVAN_PROJECT_ID"] == "prj_abc"
+    assert runtime_env["PRODAVAN_EVENTS_WRITE"] == "1"
+    assert runtime_env["WORKSPACE_ROOT"] == "/workspace"
+    token_env = next(e for e in runtime["env"] if e["name"] == "PRODAVAN_AUTH_TOKEN")
     assert token_env["valueFrom"]["secretKeyRef"]["name"] == "prodavan-agent-bridge"
-    assert bridge["readinessProbe"]["httpGet"]["path"] == "/health"
-    map_env = bridge_env["OPENCLAW_SESSION_MAP_PATH"]
-    assert map_env == "/workspace/.openclaw-data/session-map.json"
-
-
-def test_build_pod_body_without_agent_bridge() -> None:
-    ctx = PodRuntimeContext(
-        pod_id="pod_abc",
-        project_id="prj_abc",
-        company_id="cmp_abc",
-        workspace_key="wk_demo",
-    )
-    body = build_pod_body(
-        runtime_ref="pod-wk-demo",
-        namespace="prodavan-sandboxes",
-        context=ctx,
-        image="sandbox:latest",
-        hydrate_image="hydrate:latest",
-        service_account="prodavan-sandbox",
-        cpu_request="100m",
-        cpu_limit="1",
-        memory_request="256Mi",
-        memory_limit="1Gi",
-    )
-    assert len(body["spec"]["containers"]) == 1
+    assert runtime["readinessProbe"]["httpGet"]["path"] == "/health"
+    assert runtime_env["OPENCLAW_SESSION_MAP_PATH"] == "/workspace/.openclaw-data/session-map.json"
 
 
 def test_in_cluster_auth_available(tmp_path: Path) -> None:

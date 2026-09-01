@@ -13,6 +13,7 @@ from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.application.agent.adapter_registry import get_agent_adapter
 from prodavan.application.agent.budget_service import AgentBudgetService
+from prodavan.application.agent.credential_broker import AgentCredentialBroker
 from prodavan.application.agent.openclaw_bridge import (
     BridgeSessionBootstrap,
     OpenClawBridgeBootstrap,
@@ -199,6 +200,10 @@ class AgentSessionService:
                 provider_key_id=credential.key_id,
             ),
         )
+        await AgentCredentialBroker(self._session).push_lease_to_runtime(
+            project_id=project_id,
+            key_id=credential.key_id,
+        )
         return _session_public(row)
 
     async def get_session(self, *, session_id: str) -> AgentSessionRow:
@@ -306,20 +311,18 @@ class AgentSessionService:
         yield {"type": PLATFORM_EVENT_USER_MESSAGE, "data": user_payload}
 
         used_bridge = False
-        if settings.pod_agent_bridge_enabled:
+        if settings.pod_agent_runtime_enabled:
             bridge = OpenClawBridgeBootstrap(self._session)
-            api_key: str | None = None
             if row.resolved_key_id:
-                try:
-                    api_key = await self._keys.resolve_secret_for_key(row.resolved_key_id)
-                except Exception:
-                    api_key = None
+                await AgentCredentialBroker(self._session).push_lease_to_runtime(
+                    project_id=project_id,
+                    key_id=row.resolved_key_id,
+                )
 
             async for event in bridge.iter_send_events(
                 project_id=project_id,
                 session_id=session_id,
                 message=text,
-                api_key=api_key,
             ):
                 used_bridge = True
                 seq += 1
@@ -885,36 +888,44 @@ class AgentSessionService:
             {"id": approval_id, "decision": decision, "name": match["name"]},
         )
 
-        if decision == "approve":
-            _append(
-                AgentEventType.TOOL_RESULT,
-                {
-                    "id": approval_id,
-                    "name": match["name"],
-                    "output": {"ok": True, "approved": True},
-                    "is_error": False,
-                },
-            )
-            _append(
-                AgentEventType.TEXT_DELTA,
-                {"text": f"Approved {match['name']} and continued."},
-            )
-        else:
-            _append(
-                AgentEventType.TOOL_RESULT,
-                {
-                    "id": approval_id,
-                    "name": match["name"],
-                    "output": {"ok": False, "approved": False},
-                    "is_error": True,
-                },
-            )
-            _append(
-                AgentEventType.TEXT_DELTA,
-                {"text": f"Denied {match['name']}."},
+        forwarded = False
+        if settings.pod_agent_runtime_enabled:
+            forwarded = await OpenClawBridgeBootstrap(self._session).resolve_approval(
+                project_id=project_id,
+                approval_id=approval_id,
+                decision=decision,
             )
 
-        _append(AgentEventType.DONE, {"reason": f"approval_{decision}"})
+        if not forwarded:
+            if decision == "approve":
+                _append(
+                    AgentEventType.TOOL_RESULT,
+                    {
+                        "id": approval_id,
+                        "name": match["name"],
+                        "output": {"ok": True, "approved": True},
+                        "is_error": False,
+                    },
+                )
+                _append(
+                    AgentEventType.TEXT_DELTA,
+                    {"text": f"Approved {match['name']} and continued."},
+                )
+            else:
+                _append(
+                    AgentEventType.TOOL_RESULT,
+                    {
+                        "id": approval_id,
+                        "name": match["name"],
+                        "output": {"ok": False, "approved": False},
+                        "is_error": True,
+                    },
+                )
+                _append(
+                    AgentEventType.TEXT_DELTA,
+                    {"text": f"Denied {match['name']}."},
+                )
+            _append(AgentEventType.DONE, {"reason": f"approval_{decision}"})
         await self._session.commit()
         return {
             "session_id": session_id,
@@ -923,6 +934,90 @@ class AgentSessionService:
             "events": out_events,
             "assistant_text": _assistant_text_from_events(out_events),
         }
+
+    async def fork_session(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        if employee is None:
+            raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
+        await self._projects.require_access(
+            project_id=project_id, principal=principal, employee=employee, write=True
+        )
+        source = await self.get_session(session_id=session_id)
+        if source.project_id != project_id:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+        if source.status != AgentSessionStatus.ACTIVE:
+            raise AppError(code="SESSION_CLOSED", title="Session closed", status=409, detail="session not active")
+
+        row = AgentSessionRow(
+            project_id=project_id,
+            resolved_key_id=source.resolved_key_id,
+            provider=source.provider,
+            api_kind=source.api_kind,
+            vendor_agent_id=source.vendor_agent_id,
+            model=source.model,
+            cwd=source.cwd,
+            status=AgentSessionStatus.ACTIVE,
+        )
+        self._session.add(row)
+        await self._session.commit()
+        await self._session.refresh(row)
+
+        await OpenClawBridgeBootstrap(self._session).fork_session(
+            project_id=project_id,
+            source_session_id=session_id,
+            new_session_id=row.id,
+        )
+        await OpenClawBridgeBootstrap(self._session).register_session(
+            project_id=project_id,
+            payload=BridgeSessionBootstrap(
+                session_id=row.id,
+                prodavan_session_id=row.id,
+                adapter_kind=api_kind_to_bridge_adapter(source.api_kind),
+                model=row.model,
+                provider_key_id=source.resolved_key_id,
+            ),
+        )
+        if source.resolved_key_id:
+            await AgentCredentialBroker(self._session).push_lease_to_runtime(
+                project_id=project_id,
+                key_id=source.resolved_key_id,
+            )
+        return _session_public(row)
+
+    async def get_sidechain_transcript(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        tool_use_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        await self._projects.require_access(
+            project_id=project_id, principal=principal, employee=employee, write=False
+        )
+        row = await self.get_session(session_id=session_id)
+        if row.project_id != project_id:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+        body = await OpenClawBridgeBootstrap(self._session).get_sidechain_transcript(
+            project_id=project_id,
+            session_id=session_id,
+            tool_use_id=tool_use_id,
+        )
+        if body is None:
+            raise AppError(
+                code="RUNTIME_UNAVAILABLE",
+                title="Service Unavailable",
+                status=503,
+                detail="sidechain transcript unavailable",
+            )
+        return body
 
 
 def _pending_approvals_from_events(events: list[dict]) -> list[dict]:

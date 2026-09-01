@@ -4,10 +4,10 @@
 |------|----------|
 | Status | doing |
 | Quality | 8 |
-| Quality note | Port+events+fixture+budget+SSE+HITL; Node sidecar — gap |
+| Quality note | Port+events+fixture+budget+SSE+HITL; prodavan-agent-runtime in Pod (credential broker + workspace HTTP) |
 | Plan | [L08](../11-implementation-plan/L08-agent-providers.md) |
 | Canon | [08-agent-providers](../08-agent-providers/) |
-| Last updated | 2026-08-24 — MODEL_NOT_ALLOWED + model_allowlist enforce |
+| Last updated | 2026-09-01 — single-container agent-runtime, credential broker, workspace HTTP |
 | Owners | — |
 
 ---

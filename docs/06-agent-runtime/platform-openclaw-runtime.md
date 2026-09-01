@@ -27,9 +27,11 @@
 ## Архитектура в Pod
 
 ```text
-agent-bridge/                    # один процесс на Pod
+agent-runtime/                   # один контейнер на Pod (prodavan-agent-runtime)
   SessionManager
     session_id → { adapter_kind, handle, cwd }
+  InMemoryCredentialStore        # lease push от API, no read-back
+  /v1/workspace/*                # FS proxy (hydrate init → /workspace)
   CursorSdkAdapter               # proprietary
   CodexSdkAdapter                # proprietary
   ClaudeAgentSdkAdapter          # proprietary
@@ -38,6 +40,10 @@ agent-bridge/                    # один процесс на Pod
       mcp + platform tools
       llm client ← ai.http_providers entry
 ```
+
+Init container `hydrate` (prodavan-api image) материализует workspace до старта runtime.
+
+См. [adr-pod-agent-runtime.md](adr-pod-agent-runtime.md).
 
 Control plane (триггеры, очередь, HITL UI) живёт в **API**, не дублируется вторым «clawbot»-процессом в Pod.
 

@@ -69,12 +69,19 @@ def build_pod_metrics() -> PodMetricsPort | None:
 def build_pod_workspace():
     mode = (settings.pod_runtime_mode or "stub").strip().lower()
     if mode == "k8s":
-        from prodavan.application.pod_service.adapters.k8s.workspace_exec import K8sExecWorkspaceAdapter
         from prodavan.core.infra.k8s_manager import get_k8s_manager
 
         mgr = get_k8s_manager()
         if mgr is None or mgr.client is None:
             raise RuntimeError("pod_runtime_mode=k8s but K8sManager client is unavailable")
+        if settings.pod_agent_runtime_enabled:
+            from prodavan.application.pod_service.adapters.k8s.workspace_http import (
+                HttpAgentRuntimeWorkspaceAdapter,
+            )
+
+            return HttpAgentRuntimeWorkspaceAdapter(client=mgr.client)
+        from prodavan.application.pod_service.adapters.k8s.workspace_exec import K8sExecWorkspaceAdapter
+
         return K8sExecWorkspaceAdapter(client=mgr.client)
     from prodavan.application.pod_service.adapters.unavailable_workspace import UnavailableWorkspaceAdapter
 

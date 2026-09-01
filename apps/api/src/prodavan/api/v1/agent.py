@@ -305,6 +305,42 @@ async def resolve_tool_approval(
     )
 
 
+@router.post("/projects/{project_id}/agent/sessions/{session_id}/fork", status_code=201)
+async def fork_agent_session(
+    project_id: str,
+    session_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    if employee is None:
+        raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
+    return await AgentSessionService(session).fork_session(
+        project_id=project_id,
+        session_id=session_id,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.get("/projects/{project_id}/agent/sessions/{session_id}/sidechains/{tool_use_id}/transcript")
+async def get_sidechain_transcript(
+    project_id: str,
+    session_id: str,
+    tool_use_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await AgentSessionService(session).get_sidechain_transcript(
+        project_id=project_id,
+        session_id=session_id,
+        tool_use_id=tool_use_id,
+        principal=principal,
+        employee=employee,
+    )
+
+
 @router.post("/projects/{project_id}/triggers/dispatch")
 async def dispatch_project_triggers(
     project_id: str,

@@ -35,7 +35,7 @@ def test_bridge_envelope_to_agent_event_skips_system_init() -> None:
 async def test_register_session_skips_when_disabled() -> None:
     bootstrap = OpenClawBridgeBootstrap(MagicMock())
     with patch("prodavan.application.agent.openclaw_bridge.settings") as mock_settings:
-        mock_settings.pod_agent_bridge_enabled = False
+        mock_settings.pod_agent_runtime_enabled = False
         ok = await bootstrap.register_session(
             project_id="prj_1",
             payload=BridgeSessionBootstrap(
@@ -80,9 +80,9 @@ async def test_register_session_posts_to_bridge() -> None:
     bootstrap = OpenClawBridgeBootstrap(session, k8s_client=k8s, http_client=lambda **_: mock_http)
 
     with patch("prodavan.application.agent.openclaw_bridge.settings") as mock_settings:
-        mock_settings.pod_agent_bridge_enabled = True
-        mock_settings.pod_agent_bridge_bootstrap_enabled = True
-        mock_settings.pod_agent_bridge_port = 3921
+        mock_settings.pod_agent_runtime_enabled = True
+        mock_settings.pod_agent_runtime_bootstrap_enabled = True
+        mock_settings.pod_agent_runtime_port = 3921
         ok = await bootstrap.register_session(
             project_id="prj_1",
             payload=BridgeSessionBootstrap(
@@ -158,9 +158,9 @@ async def test_iter_send_events_parses_sse() -> None:
     bootstrap = OpenClawBridgeBootstrap(session, k8s_client=k8s, http_client=lambda **_: mock_http)
 
     with patch("prodavan.application.agent.openclaw_bridge.settings") as mock_settings:
-        mock_settings.pod_agent_bridge_enabled = True
-        mock_settings.pod_agent_bridge_port = 3921
-        mock_settings.pod_agent_bridge_token = "bridge-token"
+        mock_settings.pod_agent_runtime_enabled = True
+        mock_settings.pod_agent_runtime_port = 3921
+        mock_settings.pod_agent_runtime_token = "bridge-token"
         events = [
             event
             async for event in bootstrap.iter_send_events(
@@ -175,6 +175,7 @@ async def test_iter_send_events_parses_sse() -> None:
     stream_call = mock_http.stream.call_args
     assert stream_call.kwargs["headers"][PRODAVAN_EVENTS_OWNER_HEADER] == PRODAVAN_EVENTS_OWNER_API
     assert stream_call.kwargs["headers"]["Authorization"] == "Bearer bridge-token"
+    assert "api_key" not in stream_call.kwargs["json"]
 
 
 @pytest.mark.asyncio
@@ -226,9 +227,9 @@ async def test_iter_send_events_empty_stream_yields_error() -> None:
     bootstrap = OpenClawBridgeBootstrap(session, k8s_client=k8s, http_client=lambda **_: mock_http)
 
     with patch("prodavan.application.agent.openclaw_bridge.settings") as mock_settings:
-        mock_settings.pod_agent_bridge_enabled = True
-        mock_settings.pod_agent_bridge_port = 3921
-        mock_settings.pod_agent_bridge_token = ""
+        mock_settings.pod_agent_runtime_enabled = True
+        mock_settings.pod_agent_runtime_port = 3921
+        mock_settings.pod_agent_runtime_token = ""
         events = [
             event
             async for event in bootstrap.iter_send_events(

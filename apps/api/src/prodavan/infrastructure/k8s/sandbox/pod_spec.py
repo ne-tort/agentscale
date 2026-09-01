@@ -8,26 +8,36 @@ from prodavan.domain.pods.context import PodRuntimeContext
 
 _MANAGED_BY = "pod-service"
 _WORKSPACE_MOUNT = "/workspace"
-_AGENT_BRIDGE_CONTAINER = "agent-bridge"
+_AGENT_RUNTIME_CONTAINER = "agent-runtime"
 
 
-def _build_agent_bridge_container(
+def _build_agent_runtime_container(
     *,
     context: PodRuntimeContext,
     image: str,
     port: int,
     api_base_url: str,
     auth_secret_name: str | None,
+    cpu_request: str,
+    cpu_limit: str,
+    memory_request: str,
+    memory_limit: str,
+    stub_holder: bool = False,
 ) -> dict[str, Any]:
     env: list[dict[str, Any]] = [
         {"name": "WORKSPACE_ROOT", "value": _WORKSPACE_MOUNT},
         {"name": "OPENCLAW_DATA_DIR", "value": f"{_WORKSPACE_MOUNT}/.openclaw-data"},
         {"name": "PRODAVAN_API_BASE_URL", "value": api_base_url},
         {"name": "PRODAVAN_PROJECT_ID", "value": context.project_id},
+        {"name": "PRODAVAN_POD_ID", "value": context.pod_id},
         {"name": "PRODAVAN_EVENTS_WRITE", "value": "1"},
         {"name": "OPENCLAW_SESSION_MAP_PATH", "value": f"{_WORKSPACE_MOUNT}/.openclaw-data/session-map.json"},
         {"name": "PORT", "value": str(port)},
+        {"name": "WORKSPACE_KEY", "value": context.workspace_key},
+        {"name": "PROJECT_ID", "value": context.project_id},
     ]
+    for name, value in context.extra_env:
+        env.append({"name": name, "value": value})
     if auth_secret_name:
         env.append(
             {
@@ -53,31 +63,41 @@ def _build_agent_bridge_container(
                 },
             },
         )
-    return {
-        "name": _AGENT_BRIDGE_CONTAINER,
+    container: dict[str, Any] = {
+        "name": _AGENT_RUNTIME_CONTAINER,
         "image": image,
         "imagePullPolicy": "IfNotPresent",
         "workingDir": _WORKSPACE_MOUNT,
         "env": env,
-        "ports": [{"name": "http", "containerPort": port}],
         "volumeMounts": [{"name": "workspace", "mountPath": _WORKSPACE_MOUNT}],
         "resources": {
-            "requests": {"cpu": "50m", "memory": "128Mi"},
-            "limits": {"cpu": "500m", "memory": "512Mi"},
+            "requests": {"cpu": cpu_request, "memory": memory_request},
+            "limits": {"cpu": cpu_limit, "memory": memory_limit},
         },
-        "readinessProbe": {
+    }
+    if stub_holder:
+        container["command"] = ["sleep", "infinity"]
+        container["readinessProbe"] = {
+            "exec": {"command": ["test", "-d", _WORKSPACE_MOUNT]},
+            "initialDelaySeconds": 2,
+            "periodSeconds": 5,
+            "failureThreshold": 6,
+        }
+    else:
+        container["ports"] = [{"name": "http", "containerPort": port}]
+        container["readinessProbe"] = {
             "httpGet": {"path": "/health", "port": port},
             "initialDelaySeconds": 3,
             "periodSeconds": 5,
             "failureThreshold": 12,
-        },
-        "livenessProbe": {
+        }
+        container["livenessProbe"] = {
             "httpGet": {"path": "/health", "port": port},
             "initialDelaySeconds": 10,
             "periodSeconds": 20,
             "failureThreshold": 6,
-        },
-    }
+        }
+    return container
 
 
 def build_pod_body(
@@ -93,11 +113,20 @@ def build_pod_body(
     memory_request: str,
     memory_limit: str,
     minio_secret_name: str | None = None,
+    agent_runtime_image: str | None = None,
+    agent_runtime_port: int = 3921,
+    agent_runtime_api_base_url: str = "http://prodavan-api.prodavan.svc:8000/api/v1",
+    agent_runtime_auth_secret: str | None = None,
+    # Legacy aliases (deprecated)
     agent_bridge_image: str | None = None,
     agent_bridge_port: int = 3921,
     agent_bridge_api_base_url: str = "http://prodavan-api.prodavan.svc:8000/api/v1",
     agent_bridge_auth_secret: str | None = None,
 ) -> dict[str, Any]:
+    runtime_image = agent_runtime_image or agent_bridge_image
+    runtime_port = agent_runtime_port if agent_runtime_image else agent_bridge_port
+    runtime_api = agent_runtime_api_base_url if agent_runtime_image else agent_bridge_api_base_url
+    runtime_auth = agent_runtime_auth_secret or agent_bridge_auth_secret
     labels = {
         "app.kubernetes.io/part-of": "prodavan",
         "app.kubernetes.io/component": "project-pod",
@@ -141,43 +170,20 @@ def build_pod_body(
         "env": init_env,
         "volumeMounts": [{"name": "workspace", "mountPath": _WORKSPACE_MOUNT}],
     }
-    main_env: list[dict[str, Any]] = [
-        {"name": "WORKSPACE_KEY", "value": context.workspace_key},
-        {"name": "PROJECT_ID", "value": context.project_id},
+    containers: list[dict[str, Any]] = [
+        _build_agent_runtime_container(
+            context=context,
+            image=runtime_image or image,
+            port=runtime_port,
+            api_base_url=runtime_api,
+            auth_secret_name=runtime_auth,
+            cpu_request=cpu_request,
+            cpu_limit=cpu_limit,
+            memory_request=memory_request,
+            memory_limit=memory_limit,
+            stub_holder=runtime_image is None,
+        ),
     ]
-    for name, value in context.extra_env:
-        main_env.append({"name": name, "value": value})
-    main_container = {
-        "name": "sandbox",
-        "image": image,
-        "imagePullPolicy": "IfNotPresent",
-        # API image defaults to uvicorn; sandbox Pod is an agent workspace holder only.
-        "command": ["sleep", "infinity"],
-        "workingDir": _WORKSPACE_MOUNT,
-        "env": main_env,
-        "volumeMounts": [{"name": "workspace", "mountPath": _WORKSPACE_MOUNT}],
-        "resources": {
-            "requests": {"cpu": cpu_request, "memory": memory_request},
-            "limits": {"cpu": cpu_limit, "memory": memory_limit},
-        },
-        "readinessProbe": {
-            "exec": {"command": ["test", "-d", _WORKSPACE_MOUNT]},
-            "initialDelaySeconds": 2,
-            "periodSeconds": 5,
-            "failureThreshold": 6,
-        },
-    }
-    containers: list[dict[str, Any]] = [main_container]
-    if agent_bridge_image:
-        containers.append(
-            _build_agent_bridge_container(
-                context=context,
-                image=agent_bridge_image,
-                port=agent_bridge_port,
-                api_base_url=agent_bridge_api_base_url,
-                auth_secret_name=agent_bridge_auth_secret,
-            ),
-        )
     return {
         "apiVersion": "v1",
         "kind": "Pod",

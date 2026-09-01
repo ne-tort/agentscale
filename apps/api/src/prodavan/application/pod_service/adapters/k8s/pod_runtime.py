@@ -59,12 +59,12 @@ class K8sPodRuntimeAdapter:
             memory_request=settings.pod_sandbox_memory_request,
             memory_limit=settings.pod_sandbox_memory_limit,
             minio_secret_name=settings.pod_sandbox_minio_secret or None,
-            agent_bridge_image=(
-                settings.pod_agent_bridge_image if settings.pod_agent_bridge_enabled else None
+            agent_runtime_image=(
+                settings.pod_agent_runtime_image if settings.pod_agent_runtime_enabled else None
             ),
-            agent_bridge_port=settings.pod_agent_bridge_port,
-            agent_bridge_api_base_url=settings.pod_agent_bridge_api_base_url,
-            agent_bridge_auth_secret=settings.pod_agent_bridge_auth_secret or None,
+            agent_runtime_port=settings.pod_agent_runtime_port,
+            agent_runtime_api_base_url=settings.pod_agent_runtime_api_base_url,
+            agent_runtime_auth_secret=settings.pod_agent_runtime_auth_secret or None,
         )
         await self._client.create_pod(body)
         await self._client.wait_ready(runtime_ref, timeout=float(settings.pod_ready_timeout_sec))

@@ -8,6 +8,15 @@ from prodavan.domain.errors import AppError
 from prodavan.infrastructure.agent.fake_adapter import FakeAgentAdapter
 from prodavan.infrastructure.agent.fixture_cursor_adapter import FixtureCursorAdapter
 
+_PLATFORM_RUNTIME_KINDS = frozenset(
+    {
+        ApiKind.OPENAI_API,
+        ApiKind.ANTHROPIC_API,
+        ApiKind.OPENROUTER,
+        ApiKind.CUSTOM,
+    }
+)
+
 
 def get_agent_adapter(*, api_kind: str, force_fake: bool = False) -> AgentProviderPort:
     if force_fake:
@@ -15,7 +24,9 @@ def get_agent_adapter(*, api_kind: str, force_fake: bool = False) -> AgentProvid
     if api_kind == ApiKind.CURSOR_SDK:
         return FixtureCursorAdapter()
     if api_kind in {ApiKind.CODEX_SDK, ApiKind.CLAUDE_AGENT_SDK}:
-        # Stub: same fake with provider label via CreateOpts.provider at session layer
+        return FakeAgentAdapter()
+    if api_kind in _PLATFORM_RUNTIME_KINDS:
+        # In-process stub; real loop runs in agent-runtime when POD_AGENT_RUNTIME_ENABLED.
         return FakeAgentAdapter()
     raise AppError(
         code="AGENT_ADAPTER",
