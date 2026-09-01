@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:prodavan/core/api/agent_stream_error.dart';
 import 'package:prodavan/core/api/prodavan_api.dart';
 
 /// SSE chat state for [ProjectWorkspacePage].
@@ -84,8 +85,10 @@ class ProjectChatController {
         } else if (type == 'error') {
           if (data is Map<String, dynamic>) {
             error = AgentStreamError(data);
+          } else if (data is Map) {
+            error = AgentStreamError(Map<String, dynamic>.from(data));
           } else {
-            error = event;
+            error = AgentStreamError({'message': event.toString()});
           }
         }
         notify();
@@ -129,9 +132,4 @@ class ProjectChatController {
     _handle?.abort();
     _tick.close();
   }
-}
-
-class AgentStreamError {
-  const AgentStreamError(this.data);
-  final Map<String, dynamic> data;
 }

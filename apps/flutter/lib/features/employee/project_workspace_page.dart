@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/containers/container_runtime_presenter.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
-import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
+import 'package:prodavan/features/employee/agent_chat_errors.dart';
 import 'package:prodavan/features/employee/cabinet_project_settings_page.dart';
 import 'package:prodavan/features/employee/project_chat_controller.dart';
 import 'package:prodavan/features/employee/tool_approve_page.dart';
@@ -48,7 +48,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         final err = _chat.error;
         if (err != null && err != _lastSnackError) {
           _lastSnackError = err;
-          AppErrors.showSnack(context, err);
+          showAgentChatSnack(context, err);
           _chat.error = null;
         }
         setState(() {});
@@ -68,7 +68,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       }
       await _chat.loadTranscript();
     } catch (e) {
-      if (mounted) AppErrors.showSnack(context, e);
+      if (mounted) showAgentChatSnack(context, e);
     } finally {
       if (mounted) setState(() => _loading = false);
     }

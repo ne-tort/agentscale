@@ -1,7 +1,9 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 
+import 'package:prodavan/core/api/agent_stream_error.dart';
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -25,6 +27,15 @@ abstract final class AppErrors {
   static AppErrorPresentation present(Object error, AppLocalizations l10n) {
     if (error is ProdavanApiException) {
       return _fromApi(error.statusCode, error.body, l10n);
+    }
+    if (error is AgentStreamError) {
+      return _fromAgentStreamError(error, l10n);
+    }
+    if (error is http.ClientException) {
+      return AppErrorPresentation(
+        display: l10n.errorAgentBridge,
+        diagnostic: error.message,
+      );
     }
     if (error is FormatException) {
       return AppErrorPresentation(
@@ -52,10 +63,39 @@ abstract final class AppErrors {
     }
     return AppErrorPresentation(
       display: l10n.errorUnexpected,
-      diagnostic: asText.isEmpty
-          ? error.runtimeType.toString()
-          : (asText.length > 240 ? '${asText.substring(0, 240)}…' : asText),
+      diagnostic: _unknownDiagnostic(error, asText),
     );
+  }
+
+  static String _unknownDiagnostic(Object error, String asText) {
+    if (_looksLikeMinifiedInstance(asText)) {
+      return '${error.runtimeType}';
+    }
+    if (asText.isEmpty) return error.runtimeType.toString();
+    return asText.length > 240 ? '${asText.substring(0, 240)}…' : asText;
+  }
+
+  static bool _looksLikeMinifiedInstance(String text) {
+    return text.startsWith("Instance of '") &&
+        (text.contains('minified:') || text.contains('AgentStreamError'));
+  }
+
+  static AppErrorPresentation _fromAgentStreamError(
+    AgentStreamError error,
+    AppLocalizations l10n,
+  ) {
+    final code = error.code;
+    final message = error.message ?? '';
+    final status = switch (code) {
+      'POD_NOT_RUNNING' => 409,
+      'BRIDGE_SEND_FAILED' => 502,
+      _ => 503,
+    };
+    final body = jsonEncode({
+      if (code != null && code.isNotEmpty) 'code': code,
+      if (message.isNotEmpty) 'detail': message,
+    });
+    return _fromApi(status, body, l10n);
   }
 
   static String localize(BuildContext context, Object error) =>
@@ -104,7 +144,9 @@ abstract final class AppErrors {
       // Non-JSON body (proxy text, plain string).
     }
 
-    final display = _messageForCode(l10n, code) ?? _statusMessage(l10n, statusCode);
+    final display = _messageForCode(l10n, code) ??
+        _agentRuntimeFallback(l10n, statusCode, detail ?? message) ??
+        _statusMessage(l10n, statusCode);
     return AppErrorPresentation(
       display: display,
       diagnostic: _diagnostic(
@@ -113,6 +155,32 @@ abstract final class AppErrors {
         detail: detail ?? message ?? oauthDescription ?? title ?? trimmed,
       ),
     );
+  }
+
+  static String? _agentRuntimeFallback(
+    AppLocalizations l10n,
+    int statusCode,
+    String? detail,
+  ) {
+    final hint = (detail ?? '').trim();
+    if (hint.isEmpty) return null;
+    if (!_looksLikeAgentRuntimeDetail(hint)) return null;
+    if (statusCode == 409) return l10n.errorPodNotRunning;
+    if (statusCode == 502) return l10n.errorAgentBridge;
+    if (statusCode >= 500) return l10n.errorAgentRuntimeUnavailable;
+    return null;
+  }
+
+  static bool _looksLikeAgentRuntimeDetail(String hint) {
+    final lower = hint.toLowerCase();
+    return lower.contains('agent') ||
+        lower.contains('bridge') ||
+        lower.contains('credential') ||
+        lower.contains('cursor_sdk') ||
+        lower.contains('openclaw') ||
+        lower.contains('pod agent-runtime') ||
+        lower.contains('pod runtime') ||
+        lower.contains('lease');
   }
 
   static String? _messageForCode(AppLocalizations l10n, String? code) {
