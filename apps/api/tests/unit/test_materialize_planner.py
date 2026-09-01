@@ -1,11 +1,22 @@
 """Unit tests for MaterializePlanner helpers."""
 
 from prodavan.application.projects.materialize_planner import (
+    MaterializePlanner,
     _merge_materialize_rules,
     _row_applies_to_project,
     _row_matches_filter,
     _row_path_context,
 )
+
+
+def test_substitute_double_brace_before_single() -> None:
+    planner = MaterializePlanner(session=None)  # type: ignore[arg-type]
+    out = planner._substitute("{{target_path}}", {"target_path": "assets/hello.txt"})
+    assert out == "assets/hello.txt"
+    out2 = planner._substitute("packages/{{name}}", {"name": "demo"})
+    assert out2 == "packages/demo"
+    out3 = planner._substitute("{active_profile_id}/rules", {"active_profile_id": "prof_1"})
+    assert out3 == "prof_1/rules"
 
 
 def test_row_matches_filter_equality() -> None:
@@ -42,6 +53,17 @@ def test_merge_materialize_rules_prefers_explicit() -> None:
     assert len(merged) == 2
     assert merged[0]["id"] == "manual_rule"
     assert merged[1]["id"] == "auto_suppliers_spec"
+
+
+def test_substitute_double_brace_row_fields() -> None:
+    planner = MaterializePlanner(session=None)  # type: ignore[arg-type]
+    assert planner._substitute("{{target_path}}", {"target_path": "assets/hello.txt"}) == "assets/hello.txt"
+    assert planner._substitute("packages/{{name}}", {"name": "demo"}) == "packages/demo"
+
+
+def test_substitute_single_brace_placeholders() -> None:
+    planner = MaterializePlanner(session=None)  # type: ignore[arg-type]
+    assert planner._substitute("{active_profile_id}", {"active_profile_id": "profile_default"}) == "profile_default"
 
 
 def test_row_path_context_extracts_filename() -> None:

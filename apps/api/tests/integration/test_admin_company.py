@@ -19,7 +19,7 @@ from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.infrastructure.keycloak.invite import reset_invite_client
 from prodavan.main import create_app
 from tests.conftest import requires_postgres
-from tests.integration.support import owner_bearer_token
+from tests.integration.support import configure_and_launch, owner_bearer_token
 
 
 def _token(
@@ -348,6 +348,23 @@ def test_admin_company_description_and_running_cabinets(client: TestClient) -> N
         json={"name": "Active project"},
     )
     assert project.status_code == 201, project.text
+    project_id = project.json()["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={
+            "name": "DescCo Key",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-desc",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = {"Authorization": f"Bearer {boss_tok}"}
+    configure_and_launch(client, owner_h, project_id)
 
     listed_after = client.get(
         "/api/v1/admin/companies",

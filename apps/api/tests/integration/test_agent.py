@@ -20,7 +20,7 @@ from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.infrastructure.keycloak.invite import reset_invite_client
 from prodavan.main import create_app
 from tests.conftest import requires_postgres
-from tests.integration.support import owner_auth_from_company, owner_bearer_token
+from tests.integration.support import configure_and_launch, owner_auth_from_company, owner_bearer_token
 
 
 def _token(*, sub: str, email: str | None = None, platform_admin: bool = False) -> str:
@@ -119,6 +119,8 @@ def test_agent_session_send_persists_events(client: TestClient) -> None:
     )
     assert listed.status_code == 200
     assert len(listed.json()["items"]) >= 3
+
+    configure_and_launch(client, owner_h, project_id)
 
     trig = client.post(
         f"/api/v1/projects/{project_id}/triggers",
@@ -658,6 +660,14 @@ def test_agent_session_uses_platform_fallback_pool(client: TestClient) -> None:
         },
     )
     assert pool.status_code == 201, pool.text
+    pool_key_id = pool.json()["id"]
+
+    bound = client.put(
+        f"/api/v1/admin/ai-keys/{pool_key_id}/companies",
+        headers=admin_h,
+        json={"company_ids": [company_id]},
+    )
+    assert bound.status_code == 200, bound.text
 
     owner_h = owner_auth_from_company(_token, co.json())
     cab = client.post(
@@ -675,6 +685,8 @@ def test_agent_session_uses_platform_fallback_pool(client: TestClient) -> None:
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+
+    configure_and_launch(client, owner_h, project_id)
 
     sess = client.post(
         f"/api/v1/projects/{project_id}/agent/sessions",
@@ -727,7 +739,7 @@ def test_trigger_dispatch_runs_chat_message(client: TestClient) -> None:
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
 
-    # Drain project.prepare from create before asserting chat.message id.
+    configure_and_launch(client, owner_h, project_id)
     client.post(f"/api/v1/projects/{project_id}/triggers/dispatch?max=10", headers=owner_h)
 
     trig = client.post(
@@ -795,6 +807,9 @@ def test_trigger_dispatch_drain_batch(client: TestClient) -> None:
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+
+    configure_and_launch(client, owner_h, project_id)
+    client.post(f"/api/v1/projects/{project_id}/triggers/dispatch?max=10", headers=owner_h)
 
     for text in ("one", "two"):
         r = client.post(
@@ -864,6 +879,8 @@ def test_trigger_regenerate_and_webhook_ack(client: TestClient) -> None:
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+
+    configure_and_launch(client, owner_h, project_id)
     client.post(f"/api/v1/projects/{project_id}/triggers/dispatch?max=10", headers=owner_h)
 
     first = client.post(
@@ -944,6 +961,8 @@ def test_agent_session_create_blocked_cancel_allowed_when_paused(client: TestCli
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+
+    configure_and_launch(client, owner_h, project_id)
 
     sess = client.post(f"/api/v1/projects/{project_id}/agent/sessions", headers=owner_h, json={})
     assert sess.status_code == 201, sess.text
@@ -1081,6 +1100,8 @@ def test_ai_key_disable_cancels_session_and_pauses_project(client: TestClient) -
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+
+    configure_and_launch(client, owner_h, project_id)
 
     sess = client.post(
         f"/api/v1/projects/{project_id}/agent/sessions",

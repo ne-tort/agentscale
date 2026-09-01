@@ -92,14 +92,14 @@ class ProjectTriggerService:
         return [_trigger_public(r) for r in q.scalars().all()]
 
     async def list_active_project_ids_with_queued(self, *, limit: int = 50) -> list[str]:
-        """Distinct active projects with at least one claimable queued trigger."""
+        """Distinct non-deleted projects with at least one claimable queued trigger."""
         now = datetime.now(UTC)
         q = await self._session.execute(
             select(ProjectTriggerRow.project_id)
             .join(ProjectRow, ProjectRow.id == ProjectTriggerRow.project_id)
             .where(
                 ProjectTriggerRow.status == TriggerStatus.QUEUED,
-                ProjectRow.status == ProjectStatus.ACTIVE,
+                ProjectRow.status != ProjectStatus.DELETED,
                 or_(ProjectTriggerRow.available_at.is_(None), ProjectTriggerRow.available_at <= now),
                 or_(ProjectTriggerRow.lease_until.is_(None), ProjectTriggerRow.lease_until < now),
             )
@@ -107,6 +107,22 @@ class ProjectTriggerService:
             .limit(limit)
         )
         return list(q.scalars().all())
+
+    async def has_non_exempt_queued(self, *, project_id: str) -> bool:
+        """True when project has queued triggers that require an active launched project."""
+        now = datetime.now(UTC)
+        q = await self._session.execute(
+            select(ProjectTriggerRow.id)
+            .where(
+                ProjectTriggerRow.project_id == project_id,
+                ProjectTriggerRow.status == TriggerStatus.QUEUED,
+                ProjectTriggerRow.kind.notin_(tuple(PAUSE_EXEMPT_TRIGGER_KINDS)),
+                or_(ProjectTriggerRow.available_at.is_(None), ProjectTriggerRow.available_at <= now),
+                or_(ProjectTriggerRow.lease_until.is_(None), ProjectTriggerRow.lease_until < now),
+            )
+            .limit(1)
+        )
+        return q.scalar_one_or_none() is not None
 
     async def claim_next(
         self,
@@ -116,21 +132,31 @@ class ProjectTriggerService:
     ) -> ProjectTriggerRow | None:
         """Claim next claimable queued trigger (SKIP LOCKED + lease).
 
-        Refuses to claim when the project is not ACTIVE (paused/deleted backlog stays queued).
+        Refuses to claim when the project is deleted or has no eligible queued triggers.
         """
         now = datetime.now(UTC)
         project = await self._session.get(ProjectRow, project_id)
-        if project is None or project.status != ProjectStatus.ACTIVE:
+        if project is None or project.status == ProjectStatus.DELETED:
+            return None
+        kind_filter: tuple[str, ...] | None = None
+        if project.status == ProjectStatus.DRAFT:
+            kind_filter = tuple(PAUSE_EXEMPT_TRIGGER_KINDS)
+        elif project.status == ProjectStatus.PAUSED:
+            kind_filter = tuple(PAUSE_EXEMPT_TRIGGER_KINDS)
+        elif project.status != ProjectStatus.ACTIVE:
             return None
         lease_sec = max(15, int(settings.trigger_outbox_lease_sec))
+        where = [
+            ProjectTriggerRow.project_id == project_id,
+            ProjectTriggerRow.status == TriggerStatus.QUEUED,
+            or_(ProjectTriggerRow.available_at.is_(None), ProjectTriggerRow.available_at <= now),
+            or_(ProjectTriggerRow.lease_until.is_(None), ProjectTriggerRow.lease_until < now),
+        ]
+        if kind_filter is not None:
+            where.append(ProjectTriggerRow.kind.in_(kind_filter))
         q = await self._session.execute(
             select(ProjectTriggerRow)
-            .where(
-                ProjectTriggerRow.project_id == project_id,
-                ProjectTriggerRow.status == TriggerStatus.QUEUED,
-                or_(ProjectTriggerRow.available_at.is_(None), ProjectTriggerRow.available_at <= now),
-                or_(ProjectTriggerRow.lease_until.is_(None), ProjectTriggerRow.lease_until < now),
-            )
+            .where(*where)
             .order_by(ProjectTriggerRow.created_at)
             .limit(1)
             .with_for_update(skip_locked=True)
@@ -168,7 +194,17 @@ class ProjectTriggerService:
         if row is None:
             return None
         project = await self._session.get(ProjectRow, row.project_id)
-        if project is None or project.status != ProjectStatus.ACTIVE:
+        if project is None or project.status == ProjectStatus.DELETED:
+            return None
+        if project.status == ProjectStatus.DRAFT and row.kind not in PAUSE_EXEMPT_TRIGGER_KINDS:
+            return None
+        if project.status == ProjectStatus.PAUSED and row.kind not in PAUSE_EXEMPT_TRIGGER_KINDS:
+            return None
+        if project.status not in {
+            ProjectStatus.ACTIVE,
+            ProjectStatus.DRAFT,
+            ProjectStatus.PAUSED,
+        }:
             return None
         row.attempts = int(row.attempts or 0) + 1
         row.lease_until = now + timedelta(seconds=lease_sec)

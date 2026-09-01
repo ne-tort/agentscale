@@ -51,7 +51,9 @@ class AgentTriggerDispatcher:
         if project.status == ProjectStatus.PAUSED:
             return {"dispatched": False, "reason": "project_paused"}
         if project.status == ProjectStatus.DRAFT:
-            return {"dispatched": False, "reason": "project_not_launched"}
+            if await self._triggers.has_non_exempt_queued(project_id=project_id):
+                return {"dispatched": False, "reason": "project_not_launched"}
+            return await self._dispatch_one(project_id=project_id, principal=principal, employee=employee)
         return await self._dispatch_one(project_id=project_id, principal=principal, employee=employee)
 
     async def dispatch_batch(
@@ -72,10 +74,30 @@ class AgentTriggerDispatcher:
         )
         if project.status == ProjectStatus.PAUSED:
             return {"dispatched": False, "reason": "project_paused", "items": []}
-        if project.status == ProjectStatus.DRAFT:
-            return {"dispatched": False, "reason": "project_not_launched", "items": []}
         limit = max_n if 1 <= max_n <= _HARD_DRAIN_MAX else _DEFAULT_DRAIN_MAX
         results: list[dict] = []
+        if project.status == ProjectStatus.DRAFT:
+            for _ in range(limit):
+                one = await self._dispatch_one(
+                    project_id=project_id, principal=principal, employee=employee
+                )
+                if one.get("reason") == "no queued triggers":
+                    if await self._triggers.has_non_exempt_queued(project_id=project_id):
+                        results.append({"dispatched": False, "reason": "project_not_launched"})
+                    break
+                results.append(one)
+                if not one.get("dispatched"):
+                    break
+            return {
+                "dispatched": any(r.get("dispatched") for r in results),
+                "count": sum(1 for r in results if r.get("dispatched")),
+                "items": results,
+                **(
+                    {"reason": results[-1]["reason"]}
+                    if results and not any(r.get("dispatched") for r in results) and len(results) == 1
+                    else {}
+                ),
+            }
         for _ in range(limit):
             one = await self._dispatch_one(
                 project_id=project_id, principal=principal, employee=employee

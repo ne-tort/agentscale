@@ -53,6 +53,7 @@ class PodQuery:
             action = await self._observation.sync_runtime_health(project=project, pod=row)
             if action != "noop":
                 await self._session.commit()
+                await self._session.refresh(row)
         return await self._build_runtime_summary(row, project_id)
 
     async def _get_live_row(self, project_id: str) -> ProjectPodRow | None:

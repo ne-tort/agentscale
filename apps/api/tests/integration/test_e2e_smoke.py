@@ -19,7 +19,7 @@ from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.infrastructure.keycloak.invite import reset_invite_client
 from prodavan.main import create_app
 from tests.conftest import requires_postgres, sql_backdate_project
-from tests.integration.support import owner_auth_from_company
+from tests.integration.support import configure_and_launch, owner_auth_from_company
 
 
 def _owner_h(company_body: dict) -> dict[str, str]:
@@ -254,6 +254,8 @@ def test_e2e_disabled_ai_key_blocks_session(client: TestClient) -> None:
     assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
 
+    configure_and_launch(client, owner_h, project_id)
+
     disabled = client.patch(
         f"/api/v1/admin/ai-keys/{key_id}",
         headers=admin_h,
@@ -297,7 +299,6 @@ def test_e2e_expired_ai_key_by_date_blocks_chat(client: TestClient) -> None:
             "provider": "cursor",
             "api_kind": "cursor_sdk",
             "secret": "sk-past",
-            "next_renewal_at": past,
             "company_ids": [company_id],
         },
     )
@@ -320,6 +321,15 @@ def test_e2e_expired_ai_key_by_date_blocks_chat(client: TestClient) -> None:
     )
     assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
+
+    configure_and_launch(client, owner_h, project_id)
+
+    expired = client.patch(
+        f"/api/v1/admin/ai-keys/{key_id}",
+        headers=admin_h,
+        json={"next_renewal_at": past},
+    )
+    assert expired.status_code == 200, expired.text
 
     blocked = client.post(
         f"/api/v1/projects/{project_id}/chat",
@@ -708,7 +718,9 @@ def test_e2e_project_pause_blocks_chat(client: TestClient) -> None:
     )
     assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
-    assert proj.json()["status"] == "active"
+
+    configure_and_launch(client, owner_h, project_id)
+    assert client.get(f"/api/v1/projects/{project_id}", headers=owner_h).json()["status"] == "active"
 
     paused = client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
     assert paused.status_code == 200, paused.text
@@ -761,6 +773,19 @@ def test_e2e_idle_pause_sweep_vertical(client: TestClient) -> None:
     )
     assert policy.status_code == 200, policy.text
 
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "E2E Idle Key",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-e2e-idle",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
     owner_h = _owner_h(co.json())
     cab = client.post(
         "/api/v1/cabinets",
@@ -777,6 +802,8 @@ def test_e2e_idle_pause_sweep_vertical(client: TestClient) -> None:
     )
     assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
+
+    configure_and_launch(client, owner_h, project_id)
 
     stale = datetime.now(UTC) - timedelta(hours=48)
     sql_backdate_project(project_id, stale)
@@ -815,6 +842,19 @@ def test_e2e_attachment_content_download_and_paused_read(client: TestClient) -> 
     assert co.status_code == 201, co.text
     company_id = co.json()["company"]["id"]
 
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "E2E Att Key",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-e2e-att",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
     owner_h = _owner_h(co.json())
     cab = client.post(
         "/api/v1/cabinets",
@@ -831,6 +871,8 @@ def test_e2e_attachment_content_download_and_paused_read(client: TestClient) -> 
     )
     assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
+
+    configure_and_launch(client, owner_h, project_id)
 
     png = base64.b64decode(
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAD0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
@@ -970,6 +1012,19 @@ def test_e2e_platform_idle_pause_sweep_all(client: TestClient) -> None:
     )
     assert policy.status_code == 200, policy.text
 
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "E2E Idle Key",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-e2e-idle",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
     owner_h = _owner_h(co.json())
     cab = client.post(
         "/api/v1/cabinets",
@@ -986,6 +1041,8 @@ def test_e2e_platform_idle_pause_sweep_all(client: TestClient) -> None:
     )
     assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
+
+    configure_and_launch(client, owner_h, project_id)
 
     sql_backdate_project(project_id, datetime.now(UTC) - timedelta(hours=48))
 
@@ -1044,6 +1101,7 @@ def test_e2e_paused_blocks_triggers_allows_metadata(client: TestClient) -> None:
     assert proj.status_code in (200, 201), proj.text
     project_id = proj.json()["id"]
 
+    configure_and_launch(client, owner_h, project_id)
     client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
 
     blocked = client.post(

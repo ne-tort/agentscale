@@ -510,6 +510,7 @@ class AdminCompanyService:
                     "created_at": inst.created_at.isoformat() if inst.created_at else None,
                 }
             )
+        await self._session.commit()
         return out
 
     async def _require_company_employee(self, company_id: str, employee_id: str) -> EmployeeRow:

@@ -320,14 +320,16 @@ class MaterializePlanner:
         return out
 
     def _substitute(self, template: str, ctx: dict[str, str | None]) -> str:
+        # {{var}} row-field templates first — {var} would otherwise match the inner
+        # `{target_path}` inside `{{target_path}}` and leave stray braces.
+        out = re.sub(r"\{\{(\w+)\}\}", lambda m: ctx.get(m.group(1), "") or "", template)
+
         def repl(match: re.Match[str]) -> str:
             key = match.group(1)
             val = ctx.get(key)
             return val if val is not None else match.group(0)
 
-        out = _PLACEHOLDER_RE.sub(repl, template)
-        out = re.sub(r"\{\{(\w+)\}\}", lambda m: ctx.get(m.group(1), "") or "", out)
-        return out
+        return _PLACEHOLDER_RE.sub(repl, out)
 
     async def _plan_row_op(
         self,

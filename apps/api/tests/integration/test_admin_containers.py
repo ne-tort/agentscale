@@ -18,7 +18,7 @@ from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.infrastructure.keycloak.invite import reset_invite_client
 from prodavan.main import create_app
 from tests.conftest import requires_postgres
-from tests.integration.support import owner_bearer_token
+from tests.integration.support import configure_and_launch, owner_bearer_token
 
 
 def _token(*, sub: str, email: str | None = None, platform_admin: bool = False) -> str:
@@ -44,7 +44,7 @@ def client() -> TestClient:
         yield client
 
 
-def _setup_project(client: TestClient) -> tuple[str, str]:
+def _setup_project(client: TestClient) -> tuple[str, str, dict[str, str]]:
     admin = _token(sub="padmin-ctr", platform_admin=True)
     created = client.post(
         "/api/v1/companies",
@@ -78,12 +78,15 @@ def _setup_project(client: TestClient) -> tuple[str, str]:
         json={"name": "CtrProj"},
     )
     assert proj.status_code == 201, proj.text
-    return admin, proj.json()["id"]
+    owner_h = {"Authorization": f"Bearer {owner_tok}"}
+    project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
+    return admin, project_id, owner_h
 
 
 @requires_postgres
 def test_admin_containers_list_and_pause(client: TestClient) -> None:
-    admin, project_id = _setup_project(client)
+    admin, project_id, _owner_h = _setup_project(client)
     listed = client.get(
         "/api/v1/admin/containers",
         headers={"Authorization": f"Bearer {admin}"},

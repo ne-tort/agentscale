@@ -63,3 +63,25 @@ def employee_bearer_token(
 ) -> str:
     auth = employee_auth_from_record(token_fn, record, roles=roles)
     return auth["Authorization"].removeprefix("Bearer ")
+
+
+def configure_and_launch(
+    client,
+    owner_h: dict[str, str],
+    project_id: str,
+) -> dict:
+    """Resolve first available AI key, patch project, launch pod (integration helper)."""
+    keys = client.get(f"/api/v1/projects/{project_id}/ai-keys/available", headers=owner_h)
+    assert keys.status_code == 200, keys.text
+    items = keys.json().get("items") or []
+    assert items, keys.text
+    key_id = items[0]["id"]
+    patched = client.patch(
+        f"/api/v1/projects/{project_id}",
+        headers=owner_h,
+        json={"agent_provider": "cursor", "resolved_ai_key_id": key_id},
+    )
+    assert patched.status_code == 200, patched.text
+    launched = client.post(f"/api/v1/projects/{project_id}/launch", headers=owner_h)
+    assert launched.status_code == 200, launched.text
+    return launched.json()

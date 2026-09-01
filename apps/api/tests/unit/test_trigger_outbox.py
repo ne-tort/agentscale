@@ -122,6 +122,7 @@ async def test_claim_by_id_skips_paused_project() -> None:
     row = SimpleNamespace(
         id="trg_2",
         project_id="proj_2",
+        kind="chat.message",
         status=TriggerStatus.QUEUED,
         attempts=0,
         available_at=None,

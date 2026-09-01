@@ -142,6 +142,7 @@ class ProjectCommand:
             principal=principal,
             employee=employee,
         )
+        await self._triggers.enqueue(project_id=project_id, kind="project.prepare", payload={})
         await self._session.commit()
         await self._session.refresh(row)
         return await self._project_public(row)

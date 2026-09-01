@@ -232,6 +232,21 @@ def _seed_integration_catalog() -> None:
     _dispose_app_engine()
 
 
+def _seed_platform_bootstrap() -> None:
+    """Ensure cab_basic exists after TRUNCATE (mirrors API lifespan bootstrap)."""
+
+    async def _seed() -> None:
+        from prodavan.application.platform.bootstrap_service import PlatformBootstrapService
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        factory = get_session_factory()
+        async with factory() as session:
+            await PlatformBootstrapService(session).ensure_bootstrapped()
+
+    _run_async(_seed, timeout=90)
+    _dispose_app_engine()
+
+
 def pytest_collection_modifyitems(config, items) -> None:
     """Apply layer markers from test path (conftest pytestmark is not inherited)."""
     for item in items:
@@ -329,6 +344,17 @@ def clean_engine_cache(request: pytest.FixtureRequest):
                     _dispose_app_engine()
             if seed_err is not None:
                 raise seed_err
+            bootstrap_err: TimeoutError | None = None
+            for _ in (1, 2, 3):
+                try:
+                    _seed_platform_bootstrap()
+                    bootstrap_err = None
+                    break
+                except TimeoutError as exc:
+                    bootstrap_err = exc
+                    _dispose_app_engine()
+            if bootstrap_err is not None:
+                raise bootstrap_err
     yield
     _dispose_app_engine()
     if needs_wipe:

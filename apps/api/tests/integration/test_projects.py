@@ -20,7 +20,7 @@ from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.infrastructure.keycloak.invite import reset_invite_client
 from prodavan.main import create_app
 from tests.conftest import requires_postgres, sql_backdate_project
-from tests.integration.support import owner_bearer_token
+from tests.integration.support import configure_and_launch, owner_bearer_token
 from tests.unit.test_mcp_package_validator import _zip_with_manifest
 
 
@@ -923,10 +923,26 @@ def test_webhook_ingress_blocked_when_project_paused(client: TestClient) -> None
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+    owner_h = {"Authorization": f"Bearer {owner_tok}"}
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={
+            "name": "Hook Pause Key",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-hook-pause",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    configure_and_launch(client, owner_h, project_id)
 
     paused = client.post(
         f"/api/v1/projects/{project_id}/pause",
-        headers={"Authorization": f"Bearer {owner_tok}"},
+        headers=owner_h,
     )
     assert paused.status_code == 200
 
@@ -979,8 +995,24 @@ def test_telegram_webhook_blocked_when_project_paused(client: TestClient) -> Non
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+    owner_h = {"Authorization": f"Bearer {owner_tok}"}
 
-    client.post(f"/api/v1/projects/{project_id}/pause", headers={"Authorization": f"Bearer {owner_tok}"})
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={
+            "name": "Tg Pause Key",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-tg-pause",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    configure_and_launch(client, owner_h, project_id)
+
+    client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
 
     body = b'{"text":"tg while paused"}'
     blocked = client.post(
@@ -1038,6 +1070,7 @@ def test_queued_trigger_survives_pause_and_runs_after_resume(client: TestClient)
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
 
+    configure_and_launch(client, owner_h, project_id)
     # Drain create-time prepare so queue is clean.
     client.post(f"/api/v1/projects/{project_id}/triggers/dispatch?max=10", headers=owner_h)
 
@@ -1237,6 +1270,9 @@ def test_trigger_drain_fails_queued_when_company_suspended(client: TestClient) -
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+    owner_h = {"Authorization": f"Bearer {owner_tok}"}
+
+    configure_and_launch(client, owner_h, project_id)
 
     from prodavan.domain.projects import webhook_signature
 
@@ -1422,6 +1458,8 @@ def test_project_pause_blocks_chat_and_attachment(client: TestClient) -> None:
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
 
+    configure_and_launch(client, owner_h, project_id)
+
     paused = client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
     assert paused.status_code == 200, paused.text
     assert paused.json()["status"] == "paused"
@@ -1493,6 +1531,22 @@ def test_idle_pause_sweep_pauses_stale_project(client: TestClient) -> None:
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+    owner_h = {"Authorization": f"Bearer {owner_tok}"}
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={
+            "name": "Idle Sweep Key",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-idle-sweep",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    configure_and_launch(client, owner_h, project_id)
 
     noop = client.post(
         f"/api/v1/admin/companies/{company_id}/idle-pause/sweep",
@@ -1540,6 +1594,20 @@ def test_project_resume_requires_valid_ai_key(client: TestClient) -> None:
     owner_tok = owner_bearer_token(_token, created.json())
     owner_h = {"Authorization": f"Bearer {owner_tok}"}
 
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={
+            "name": "Resume Key",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-resume-key",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+    key_id = key.json()["id"]
+
     cab = client.post(
         "/api/v1/cabinets",
         headers=owner_h,
@@ -1554,7 +1622,20 @@ def test_project_resume_requires_valid_ai_key(client: TestClient) -> None:
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
 
+    configure_and_launch(client, owner_h, project_id)
     client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
+
+    client.patch(
+        f"/api/v1/projects/{project_id}",
+        headers=owner_h,
+        json={"resolved_ai_key_id": None},
+    )
+    client.patch(
+        f"/api/v1/admin/ai-keys/{key_id}",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={"status": "disabled"},
+    )
+
     blocked = client.post(f"/api/v1/projects/{project_id}/resume", headers=owner_h)
     assert blocked.status_code == 404, blocked.text
     assert blocked.json()["code"] == "NO_AI_KEY"
@@ -1643,10 +1724,58 @@ def _file_ref_from_upload(upload: dict) -> dict:
     }
 
 
+def _file_ref_from_content_asset(
+    client: TestClient,
+    owner_h: dict[str, str],
+    company_id: str,
+    *,
+    data: bytes,
+    filename: str,
+    mime: str,
+) -> dict:
+    """Company-scoped asset upload without cabinet link (avoids uq_content_asset_link_target)."""
+    from prodavan.infrastructure.files.manager import ensure_file_store
+
+    asset = client.post(
+        "/api/v1/content/assets",
+        headers=owner_h,
+        json={"owner_company_id": company_id, "title": filename, "mime": mime},
+    )
+    assert asset.status_code == 200, asset.text
+    asset_id = asset.json()["id"]
+
+    ver = client.post(
+        f"/api/v1/content/assets/{asset_id}/versions",
+        headers=owner_h,
+        json={"mime": mime},
+    )
+    assert ver.status_code == 200, ver.text
+    version_id = ver.json()["version"]["id"]
+    storage_key = ver.json()["version"]["storage_key"]
+
+    store = ensure_file_store()
+    store.put_bytes_sync(storage_key, data, content_type=mime)
+
+    fin = client.post(
+        f"/api/v1/content/assets/{asset_id}/versions/{version_id}/finalize",
+        headers=owner_h,
+    )
+    assert fin.status_code == 200, fin.text
+    import hashlib
+
+    return {
+        "asset_id": asset_id,
+        "version_id": version_id,
+        "storage_key": storage_key,
+        "filename": filename,
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
+
+
 @requires_postgres
 def test_project_materialize_copy_blob_and_mcp_package(client: TestClient) -> None:
     """L07: mod_files copy_blob + mod_mcp mcp_package land in workspace on launch."""
-    _, cabinet_id, owner_tok = _setup_cabinet(client)
+    company_id, cabinet_id, owner_tok = _setup_cabinet(client)
     owner_h = {"Authorization": f"Bearer {owner_tok}"}
 
     file_payload = b"hello workspace file"
@@ -1672,13 +1801,14 @@ def test_project_materialize_copy_blob_and_mcp_package(client: TestClient) -> No
     assert file_row.status_code == 200, file_row.text
 
     mcp_zip = _zip_with_manifest("demo")
-    mcp_up = client.post(
-        f"/api/v1/cabinets/{cabinet_id}/content/upload",
-        headers=owner_h,
-        files={"file": ("demo.zip", mcp_zip, "application/zip")},
+    mcp_ref = _file_ref_from_content_asset(
+        client,
+        owner_h,
+        company_id,
+        data=mcp_zip,
+        filename="demo.zip",
+        mime="application/zip",
     )
-    assert mcp_up.status_code == 200, mcp_up.text
-    mcp_ref = _file_ref_from_upload(mcp_up.json())
 
     mcp_row = client.post(
         f"/api/v1/cabinets/{cabinet_id}/modules/mod_mcp/data/mcp_packages",
@@ -1805,7 +1935,7 @@ def test_patch_project_modules_syncs_running_pod(client: TestClient) -> None:
 
 @requires_postgres
 def test_admin_cabinet_module_bind_syncs_running_pod(client: TestClient) -> None:
-    """Admin PATCH cabinet module_ids rebind rematerializes running projects (existing mod_files rows)."""
+    """Admin rebind mod_files enables row CRUD rematerialize on a running project pod."""
     _, cabinet_id, owner_tok = _setup_cabinet(client)
     owner_h = {"Authorization": f"Bearer {owner_tok}"}
     admin_h = {"Authorization": f"Bearer {_token(sub='padmin-bind', platform_admin=True)}"}
@@ -1817,19 +1947,6 @@ def test_admin_cabinet_module_bind_syncs_running_pod(client: TestClient) -> None
         files={"file": ("bind-sync.txt", file_payload, "text/plain")},
     )
     assert file_up.status_code == 200, file_up.text
-
-    file_row = client.post(
-        f"/api/v1/cabinets/{cabinet_id}/modules/mod_files/data/files",
-        headers=owner_h,
-        json={
-            "body": {
-                "name": "Bind sync",
-                "target_path": "assets/bind-sync.txt",
-                "file_ref": _file_ref_from_upload(file_up.json()),
-            }
-        },
-    )
-    assert file_row.status_code == 200, file_row.text
 
     cab = client.get(f"/api/v1/admin/cabinets/{cabinet_id}", headers=admin_h)
     assert cab.status_code == 200, cab.text
@@ -1868,6 +1985,21 @@ def test_admin_cabinet_module_bind_syncs_running_pod(client: TestClient) -> None
     )
     assert rebound.status_code == 200, rebound.text
     assert "mod_files" in rebound.json()["module_ids"]
+
+    file_row = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/modules/mod_files/data/files",
+        headers=owner_h,
+        json={
+            "body": {
+                "name": "Bind sync",
+                "target_path": "assets/bind-sync.txt",
+                "file_ref": _file_ref_from_upload(file_up.json()),
+            }
+        },
+    )
+    assert file_row.status_code == 200, file_row.text
+    remat_meta = file_row.json().get("rematerialize") or {}
+    assert int(remat_meta.get("scheduled") or 0) >= 1
 
     assert missing.is_file(), list(ws_root.rglob("*"))
     assert missing.read_bytes() == file_payload

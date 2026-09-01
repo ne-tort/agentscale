@@ -24,10 +24,17 @@ from prodavan.infrastructure.persistence.models.projects import ProjectRow
 from prodavan.infrastructure.secrets.file_store import FileSecretStore
 from prodavan.main import create_app
 from tests.conftest import DATABASE_URL, requires_postgres
-from tests.integration.support import owner_bearer_token
+from tests.integration.support import configure_and_launch, owner_bearer_token
 
 
-def _token(*, sub: str, platform_admin: bool = False, username: str | None = None, roles: list[str] | None = None) -> str:
+def _token(
+    *,
+    sub: str,
+    platform_admin: bool = False,
+    username: str | None = None,
+    roles: list[str] | None = None,
+    email: str | None = None,
+) -> str:
     now = datetime.now(UTC)
     payload = {
         "sub": sub,
@@ -38,6 +45,8 @@ def _token(*, sub: str, platform_admin: bool = False, username: str | None = Non
     }
     if username:
         payload["preferred_username"] = username
+    if email:
+        payload["email"] = email
     return jwt.encode(payload, settings.auth_test_secret, algorithm="HS256")
 
 
@@ -49,15 +58,17 @@ def client() -> TestClient:
         yield client
 
 
-def _run_ai_keys(coro_fn, tmp_path: Path) -> None:
+def _run_ai_keys(coro_fn, secrets_dir: Path | None = None) -> None:
     from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+    store_root = secrets_dir if secrets_dir is not None else Path(settings.secrets_dir)
 
     async def _go() -> None:
         engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
         factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         try:
             async with factory() as session:
-                svc = AiKeysService(session, FileSecretStore(tmp_path))
+                svc = AiKeysService(session, FileSecretStore(store_root))
                 await coro_fn(svc, session)
         finally:
             await engine.dispose()
@@ -185,7 +196,7 @@ def test_scope_cabinet_binding_filters_availability(client: TestClient, tmp_path
         unavailable = await svc.list_available_keys_for_project(project=out_scope)
         assert not any(k["id"] == ctx["key_id"] for k in unavailable)
 
-    _run_ai_keys(_check, tmp_path)
+    _run_ai_keys(_check)
 
 
 @requires_postgres
@@ -206,13 +217,15 @@ def test_resolve_for_project_respects_scope(client: TestClient, tmp_path: Path) 
         assert cred.key_id == ctx["key_id"]
         assert cred.secret == "scope-secret-1"
 
-    _run_ai_keys(_check, tmp_path)
+    _run_ai_keys(_check)
 
 
 @requires_postgres
 def test_cabinet_unbind_pauses_affected_project(client: TestClient, tmp_path: Path) -> None:
     ctx = _setup_company_cabinet_project(client)
     h = {"Authorization": f"Bearer {ctx['org_tok']}"}
+    owner_h = {"Authorization": f"Bearer {ctx['owner_tok']}"}
+    configure_and_launch(client, owner_h, ctx["project_id"])
 
     other_cab = client.post(
         "/api/v1/cabinets",
@@ -232,12 +245,6 @@ def test_cabinet_unbind_pauses_affected_project(client: TestClient, tmp_path: Pa
         },
     )
 
-    resume = client.post(
-        f"/api/v1/companies/{ctx['company_id']}/containers/{ctx['project_id']}/resume",
-        headers=h,
-    )
-    assert resume.status_code == 200, resume.text
-
     client.put(
         f"/api/v1/companies/{ctx['company_id']}/ai-keys/{ctx['key_id']}/scope-bindings",
         headers=h,
@@ -249,15 +256,17 @@ def test_cabinet_unbind_pauses_affected_project(client: TestClient, tmp_path: Pa
         assert project is not None
         assert project.status == ProjectStatus.PAUSED
 
-    _run_ai_keys(_check, tmp_path)
+    _run_ai_keys(_check)
 
 
 @requires_postgres
 def test_employee_unbind_does_not_pause_project(client: TestClient, tmp_path: Path) -> None:
     ctx = _setup_company_cabinet_project(client)
     h = {"Authorization": f"Bearer {ctx['org_tok']}"}
+    owner_h = {"Authorization": f"Bearer {ctx['owner_tok']}"}
+    configure_and_launch(client, owner_h, ctx["project_id"])
 
-    me = client.get("/api/v1/me", headers={"Authorization": f"Bearer {ctx['owner_tok']}"})
+    me = client.get("/api/v1/me", headers=owner_h)
     assert me.status_code == 200, me.text
     employee_id = me.json()["employee"]["id"]
 
@@ -273,7 +282,7 @@ def test_employee_unbind_does_not_pause_project(client: TestClient, tmp_path: Pa
         project.resolved_ai_key_id = ctx["key_id"]
         await session.commit()
 
-    _run_ai_keys(_set_resolved, tmp_path)
+    _run_ai_keys(_set_resolved)
 
     client.put(
         f"/api/v1/companies/{ctx['company_id']}/ai-keys/{ctx['key_id']}/scope-bindings",
@@ -287,7 +296,7 @@ def test_employee_unbind_does_not_pause_project(client: TestClient, tmp_path: Pa
         assert project.status == ProjectStatus.ACTIVE
         assert project.resolved_ai_key_id == ctx["key_id"]
 
-    _run_ai_keys(_check, tmp_path)
+    _run_ai_keys(_check)
 
 
 @requires_postgres
@@ -344,4 +353,4 @@ def test_admin_unbind_clears_scope(client: TestClient, tmp_path: Path) -> None:
         assert project is not None
         assert project.resolved_ai_key_id is None
 
-    _run_ai_keys(_check, tmp_path)
+    _run_ai_keys(_check)
