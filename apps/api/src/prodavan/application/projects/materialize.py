@@ -7,9 +7,17 @@ from typing import Any, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.projects.materialize_executor import MaterializeExecutor
 from prodavan.application.projects.materialize_planner import MaterializePlanner
+from prodavan.application.projects.openclaw_config_materializer import (
+    build_openclaw_config,
+    openclaw_config_relative_path,
+    provider_to_default_api_kind,
+    render_openclaw_config_yaml,
+)
 from prodavan.domain.projects import workspace_key_for
+from prodavan.infrastructure.persistence.models.ai_keys import AiProviderKeyRow
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
 from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
@@ -180,6 +188,18 @@ class ProjectMaterializeService:
         if not mcp_packages:
             writer.write_mcp_config(cabinet_id=cabinet_id, packages=[])
 
+        await self._write_openclaw_config(
+            session=session,
+            project_id=project_id,
+            writer=writer,
+            mcp_packages=mcp_packages,
+        )
+
+        config_rel = openclaw_config_relative_path()
+        all_written = list(written)
+        if config_rel not in all_written:
+            all_written.append(config_rel)
+
         pkg_names = tuple(p.get("name", "") for p in mcp_packages if p.get("name"))
         root = writer.workspace_root
         frozen_module_paths = {mid: tuple(paths) for mid, paths in module_paths.items()}
@@ -192,8 +212,40 @@ class ProjectMaterializeService:
             package_names=pkg_names,
             sandbox_packages=tuple(mcp_packages),
             agents_source=agents_source,
-            written_paths=tuple(written),
+            written_paths=tuple(all_written),
             module_paths=frozen_module_paths,
+        )
+
+    async def _write_openclaw_config(
+        self,
+        *,
+        session: AsyncSession,
+        project_id: str,
+        writer: WorkspaceLayoutWriter,
+        mcp_packages: list[dict],
+    ) -> None:
+        project = await session.get(ProjectRow, project_id)
+        if project is None:
+            return
+        company_policy = await AdminCompanyService(session).get_agent_policy(project.company_id)
+        api_kind: str | None = None
+        provider_key_id = getattr(project, "resolved_ai_key_id", None)
+        if provider_key_id:
+            key_row = await session.get(AiProviderKeyRow, provider_key_id)
+            if key_row is not None and (key_row.api_kind or "").strip():
+                api_kind = str(key_row.api_kind).strip()
+        if not api_kind:
+            api_kind = provider_to_default_api_kind(project.agent_provider)
+        cfg = build_openclaw_config(
+            company_policy=company_policy,
+            api_kind=api_kind,
+            provider_key_id=provider_key_id,
+            mcp_packages=mcp_packages,
+            max_turns=12,
+        )
+        writer.write_text_file(
+            relative_path=openclaw_config_relative_path(),
+            text=render_openclaw_config_yaml(cfg),
         )
 
 

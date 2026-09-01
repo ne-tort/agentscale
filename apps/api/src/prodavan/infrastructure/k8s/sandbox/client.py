@@ -33,6 +33,7 @@ class PodSnapshot:
     hydrate_failed: bool = False
     created_at: str | None = None
     started_at: str | None = None
+    pod_ip: str | None = None
 
     def as_status_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -49,6 +50,8 @@ class PodSnapshot:
             out["created_at"] = self.created_at
         if self.started_at:
             out["started_at"] = self.started_at
+        if self.pod_ip:
+            out["pod_ip"] = self.pod_ip
         return out
 
 
@@ -111,6 +114,7 @@ def _parse_snapshot(body: dict[str, Any]) -> PodSnapshot:
         hydrate_failed=hydrate_failed,
         created_at=meta.get("creationTimestamp"),
         started_at=_container_started_at(status),
+        pod_ip=status.get("podIP") or None,
     )
 
 

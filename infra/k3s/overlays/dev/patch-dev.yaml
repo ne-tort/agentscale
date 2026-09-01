@@ -127,3 +127,8 @@ data:
   # MinIO hydrate for real workspace sync into sandboxes (secret in dev/sandboxes/hydrate-secret.yaml).
   POD_SANDBOX_MINIO_SECRET: prodavan-minio-hydrate
   POD_RECONCILE_WORKER_ENABLED: "true"
+  # L15 agent-bridge sidecar — enabled when openclaw-bridge image is in GHCR
+  POD_AGENT_BRIDGE_ENABLED: "true"
+  POD_AGENT_BRIDGE_AUTH_SECRET: pod-agent-bridge-auth
+  POD_AGENT_BRIDGE_IMAGE: ghcr.io/ne-tort/openclaw-bridge:latest
+  POD_AGENT_BRIDGE_BOOTSTRAP_ENABLED: "true"

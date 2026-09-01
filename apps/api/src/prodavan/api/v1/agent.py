@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, model_validator
 
+from prodavan.api.agent_auth import AgentAuthDep
 from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
 from prodavan.application.agent import AgentSessionService, AgentTriggerDispatcher
 from prodavan.domain.errors import AppError
@@ -56,6 +57,14 @@ class ToolApprovalBody(BaseModel):
 
     id: str = Field(min_length=1, max_length=64)
     decision: str = Field(pattern="^(approve|deny)$")
+
+
+class AppendAgentEventBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    type: str = Field(min_length=1, max_length=64)
+    data: dict = Field(default_factory=dict)
+    at: str | None = Field(default=None, max_length=64)
 
 
 EmployeeDep = Annotated[EmployeeRow | None, Depends(get_current_employee)]
@@ -194,17 +203,38 @@ async def send_agent_message(
 async def list_agent_events(
     project_id: str,
     session_id: str,
-    principal: PrincipalDep,
+    auth: AgentAuthDep,
     session: SessionDep,
-    employee: EmployeeDep,
 ) -> dict:
     items = await AgentSessionService(session).list_events(
         session_id=session_id,
         project_id=project_id,
-        principal=principal,
-        employee=employee,
+        principal=auth.principal,
+        employee=auth.employee,
+        pod_agent=auth.pod_agent,
     )
     return {"items": items}
+
+
+@router.post("/projects/{project_id}/agent/sessions/{session_id}/events", status_code=201)
+async def append_agent_event(
+    project_id: str,
+    session_id: str,
+    body: AppendAgentEventBody,
+    auth: AgentAuthDep,
+    session: SessionDep,
+) -> dict:
+    """Hybrid transcript write from OpenClaw bridge (L03 dual-write)."""
+    return await AgentSessionService(session).append_event(
+        project_id=project_id,
+        session_id=session_id,
+        event_type=body.type,
+        data=body.data,
+        at=body.at,
+        principal=auth.principal,
+        employee=auth.employee,
+        pod_agent=auth.pod_agent,
+    )
 
 
 @router.get("/projects/{project_id}/agent/sessions/{session_id}/transcript")
@@ -243,15 +273,15 @@ async def cancel_agent_session(
 async def list_pending_tool_approvals(
     project_id: str,
     session_id: str,
-    principal: PrincipalDep,
+    auth: AgentAuthDep,
     session: SessionDep,
-    employee: EmployeeDep,
 ) -> dict:
     items = await AgentSessionService(session).list_pending_approvals(
         project_id=project_id,
         session_id=session_id,
-        principal=principal,
-        employee=employee,
+        principal=auth.principal,
+        employee=auth.employee,
+        pod_agent=auth.pod_agent,
     )
     return {"items": items}
 

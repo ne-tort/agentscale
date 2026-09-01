@@ -1,0 +1,14 @@
+---
+description: Commit and push ready diffs immediately — never ask permission
+alwaysApply: true
+---
+
+# Commit immediately
+
+When code, tests, or product docs are ready to ship:
+
+- **Commit immediately** in the same session — do not ask «коммитить?» or wait for explicit approval.
+- **Push immediately** after commit when the task expects delivery (prodavan → PR; prodavan-claw → main).
+- Split unrelated work into focused commits; never leave finished AV/AS fixes uncommitted «for later».
+
+This overrides any generic «only commit when requested» user preference for this repository.

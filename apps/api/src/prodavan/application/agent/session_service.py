@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -12,11 +13,18 @@ from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.application.agent.adapter_registry import get_agent_adapter
 from prodavan.application.agent.budget_service import AgentBudgetService
+from prodavan.application.agent.openclaw_bridge import (
+    BridgeSessionBootstrap,
+    OpenClawBridgeBootstrap,
+    api_kind_to_bridge_adapter,
+)
 from prodavan.application.agent.policy_service import AgentPolicyService
 from prodavan.application.ai_keys.service import AiKeysService
 from prodavan.application.project_service import ProjectAccessPolicy
 from prodavan.application.projects.attachment_service import ProjectAttachmentService
+from prodavan.config.settings import settings
 from prodavan.domain.agent import (
+    FROZEN_EVENT_TYPES,
     PLATFORM_EVENT_TOOL_APPROVAL_DECISION,
     PLATFORM_EVENT_USER_MESSAGE,
     AgentEventType,
@@ -119,6 +127,16 @@ def _event_public(row: AgentEventRow) -> dict:
     }
 
 
+APPENDABLE_AGENT_EVENT_TYPES = frozenset(
+    {
+        PLATFORM_EVENT_USER_MESSAGE,
+        *FROZEN_EVENT_TYPES,
+    }
+)
+
+POD_AGENT_APPENDABLE_EVENT_TYPES = frozenset(FROZEN_EVENT_TYPES)
+
+
 class AgentSessionService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -171,6 +189,16 @@ class AgentSessionService:
         self._session.add(row)
         await self._session.commit()
         await self._session.refresh(row)
+        await OpenClawBridgeBootstrap(self._session).register_session(
+            project_id=project_id,
+            payload=BridgeSessionBootstrap(
+                session_id=row.id,
+                prodavan_session_id=row.id,
+                adapter_kind=api_kind_to_bridge_adapter(credential.api_kind),
+                model=row.model,
+                provider_key_id=credential.key_id,
+            ),
+        )
         return _session_public(row)
 
     async def get_session(self, *, session_id: str) -> AgentSessionRow:
@@ -276,6 +304,54 @@ class AgentSessionService:
             )
         )
         yield {"type": PLATFORM_EVENT_USER_MESSAGE, "data": user_payload}
+
+        used_bridge = False
+        if settings.pod_agent_bridge_enabled:
+            bridge = OpenClawBridgeBootstrap(self._session)
+            api_key: str | None = None
+            if row.resolved_key_id:
+                try:
+                    api_key = await self._keys.resolve_secret_for_key(row.resolved_key_id)
+                except Exception:
+                    api_key = None
+
+            async for event in bridge.iter_send_events(
+                project_id=project_id,
+                session_id=session_id,
+                message=text,
+                api_key=api_key,
+            ):
+                used_bridge = True
+                seq += 1
+                self._session.add(
+                    AgentEventRow(
+                        session_id=session_id,
+                        seq=seq,
+                        event_type=event.type,
+                        payload=event.data,
+                        at=None,
+                    )
+                )
+                yield event.to_dict()
+                if event.type == AgentEventType.USAGE:
+                    self._session.add(
+                        AgentUsageRow(
+                            session_id=session_id,
+                            turn_id=f"turn_{seq}",
+                            provider=str(event.data.get("provider") or row.provider),
+                            model=event.data.get("model") or row.model,
+                            input_tokens=event.data.get("input_tokens"),
+                            output_tokens=event.data.get("output_tokens"),
+                            cost_usd=Decimal(str(event.data["cost_usd"]))
+                            if event.data.get("cost_usd") is not None
+                            else None,
+                        )
+                    )
+                if event.type in {AgentEventType.DONE, AgentEventType.ERROR}:
+                    return
+
+            if used_bridge:
+                return
 
         async for event in adapter.send(handle, message):
             seq += 1
@@ -444,16 +520,22 @@ class AgentSessionService:
         *,
         session_id: str,
         project_id: str,
-        principal: Principal,
+        principal: Principal | None,
         employee: EmployeeRow | None,
         limit: int = 200,
+        pod_agent: bool = False,
     ) -> list[dict]:
-        await self._projects.require_access(
-            project_id=project_id, principal=principal, employee=employee, write=False
-        )
-        row = await self.get_session(session_id=session_id)
-        if row.project_id != project_id:
-            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+        if pod_agent:
+            row = await self.get_session(session_id=session_id)
+            if row.project_id != project_id:
+                raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+        else:
+            await self._projects.require_access(
+                project_id=project_id, principal=principal, employee=employee, write=False
+            )
+            row = await self.get_session(session_id=session_id)
+            if row.project_id != project_id:
+                raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
         q = await self._session.execute(
             select(AgentEventRow)
             .where(AgentEventRow.session_id == session_id)
@@ -461,6 +543,90 @@ class AgentSessionService:
             .limit(limit)
         )
         return [_event_public(r) for r in q.scalars().all()]
+
+    async def append_event(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        event_type: str,
+        data: dict,
+        at: str | None,
+        principal: Principal | None,
+        employee: EmployeeRow | None,
+        pod_agent: bool = False,
+    ) -> dict:
+        """Append a single agent event (OpenClaw hybrid transcript write)."""
+        if not pod_agent and employee is None:
+            raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
+        allowed_types = POD_AGENT_APPENDABLE_EVENT_TYPES if pod_agent else APPENDABLE_AGENT_EVENT_TYPES
+        if event_type not in allowed_types:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail=f"unsupported event type: {event_type}",
+            )
+        if not isinstance(data, dict):
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="data must be an object",
+            )
+
+        if pod_agent:
+            row = await self.get_session(session_id=session_id)
+            if row.project_id != project_id:
+                raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+        else:
+            await self._projects.require_access(
+                project_id=project_id, principal=principal, employee=employee, write=True
+            )
+            row = await self.get_session(session_id=session_id)
+            if row.project_id != project_id:
+                raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+        if row.status != AgentSessionStatus.ACTIVE:
+            raise AppError(code="SESSION_CLOSED", title="Session closed", status=409, detail="session not active")
+
+        parsed_at: datetime | None = None
+        if at:
+            try:
+                parsed_at = datetime.fromisoformat(at.replace("Z", "+00:00"))
+                if parsed_at.tzinfo is None:
+                    parsed_at = parsed_at.replace(tzinfo=UTC)
+            except ValueError:
+                parsed_at = None
+
+        seq_q = await self._session.execute(
+            select(func.coalesce(func.max(AgentEventRow.seq), 0)).where(AgentEventRow.session_id == session_id)
+        )
+        seq = int(seq_q.scalar_one() or 0) + 1
+
+        ev_row = AgentEventRow(
+            session_id=session_id,
+            seq=seq,
+            event_type=event_type,
+            payload=data,
+            at=parsed_at,
+        )
+        self._session.add(ev_row)
+
+        if event_type == AgentEventType.USAGE:
+            self._session.add(
+                AgentUsageRow(
+                    session_id=session_id,
+                    turn_id=f"turn_{seq}",
+                    provider=str(data.get("provider") or row.provider),
+                    model=data.get("model") or row.model,
+                    input_tokens=data.get("input_tokens"),
+                    output_tokens=data.get("output_tokens"),
+                    cost_usd=Decimal(str(data["cost_usd"])) if data.get("cost_usd") is not None else None,
+                )
+            )
+
+        await self._session.commit()
+        return _event_public(ev_row)
 
     async def get_transcript(
         self,
@@ -635,8 +801,9 @@ class AgentSessionService:
         *,
         project_id: str,
         session_id: str,
-        principal: Principal,
+        principal: Principal | None,
         employee: EmployeeRow | None,
+        pod_agent: bool = False,
     ) -> list[dict]:
         events = await self.list_events(
             session_id=session_id,
@@ -644,6 +811,7 @@ class AgentSessionService:
             principal=principal,
             employee=employee,
             limit=500,
+            pod_agent=pod_agent,
         )
         return _pending_approvals_from_events(events)
 

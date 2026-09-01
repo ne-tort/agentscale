@@ -650,6 +650,13 @@ class AiKeysService:
             secret=secret,
         )
 
+    async def resolve_secret_for_key(self, key_id: str) -> str:
+        """Resolve stored secret for an existing key id (bridge send proxy)."""
+        row = await self._get_row(key_id)
+        if not (row.secret_ref or "").strip():
+            raise AppError(code="NO_SECRET", title="No secret", status=404, detail="key has no secret")
+        return self._secrets.get(row.secret_ref)
+
     def _validate_provider_kind(self, provider: str, api_kind: str) -> None:
         if provider not in PROVIDERS:
             raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="bad provider")

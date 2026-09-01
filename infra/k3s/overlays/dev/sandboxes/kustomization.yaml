@@ -5,3 +5,4 @@ resources:
   - networkpolicy.yaml
   - rbac-sandboxes.yaml
   - hydrate-secret.yaml
+  - pod-agent-bridge-auth-secret.yaml

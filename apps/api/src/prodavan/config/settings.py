@@ -107,6 +107,15 @@ class Settings(BaseSettings):
     pod_sandbox_memory_request: str = "256Mi"
     pod_sandbox_memory_limit: str = "1Gi"
     pod_ready_timeout_sec: int = 120
+    # L15 agent-bridge sidecar in project Pod (Platform OpenClaw). Off by default until image is published.
+    pod_agent_bridge_enabled: bool = False
+    pod_agent_bridge_image: str = "ghcr.io/ne-tort/openclaw-bridge:local"
+    pod_agent_bridge_port: int = 3921
+    pod_agent_bridge_api_base_url: str = "http://prodavan-api.prodavan.svc:8000/api/v1"
+    pod_agent_bridge_auth_secret: str = ""  # k8s Secret name; key token → PRODAVAN_AUTH_TOKEN
+    pod_agent_bridge_auth_token: str = ""  # expected Bearer for sidecar (dev/CI via env)
+    pod_agent_bridge_token: str = ""  # optional Bearer for API → bridge HTTP (BRIDGE_AUTH_TOKEN)
+    pod_agent_bridge_bootstrap_enabled: bool = True  # POST /v1/sessions on agent session create
     pod_metrics_grace_sec: int = 30
     pod_provisioning_timeout_sec: int = 60
     pod_preparing_timeout_sec: int = 120

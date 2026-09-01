@@ -13,7 +13,9 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("AUTH_MODE", "test")
 os.environ.setdefault("AUTH_TEST_SECRET", "dev-only-test-secret-change-me")
 
+from prodavan.application.agent.openclaw_bridge import OpenClawBridgeBootstrap
 from prodavan.config.settings import settings
+from prodavan.domain.agent import AgentEvent, AgentEventType
 from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.infrastructure.keycloak.invite import reset_invite_client
 from prodavan.main import create_app
@@ -131,6 +133,88 @@ def test_agent_session_send_persists_events(client: TestClient) -> None:
     )
     assert disp.status_code == 200, disp.text
     assert disp.json()["dispatched"] is True
+
+
+@requires_postgres
+def test_agent_session_send_via_bridge_proxy_persists_single_seq(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _mock_iter_send_events(self, **kwargs):
+        yield AgentEvent.now(AgentEventType.TEXT_DELTA, {"text": "from-bridge"})
+        yield AgentEvent.now(AgentEventType.DONE, {"reason": "completed"})
+
+    monkeypatch.setattr(settings, "pod_agent_bridge_enabled", True)
+    monkeypatch.setattr(OpenClawBridgeBootstrap, "iter_send_events", _mock_iter_send_events)
+
+    admin = _token(sub="adm-bridge", platform_admin=True)
+    admin_h = {"Authorization": f"Bearer {admin}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "BridgeCo", "password": "test-company-pass", "admin_email": "owner@bridgeco.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "Cursor",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-test-bridge",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = {"Authorization": f"Bearer {owner_bearer_token(_token, co.json())}"}
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "BridgeCab", "company_id": company_id},
+    )
+    assert cab.status_code in (200, 201), cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "Bridge Run"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    sess = client.post(
+        f"/api/v1/projects/{project_id}/agent/sessions",
+        headers=owner_h,
+        json={},
+    )
+    assert sess.status_code == 201, sess.text
+    session_id = sess.json()["id"]
+
+    sent = client.post(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/send",
+        headers=owner_h,
+        json={"text": "via bridge"},
+    )
+    assert sent.status_code == 200, sent.text
+    events = sent.json()["events"]
+    assert any(e["type"] == "text_delta" for e in events)
+    assert events[-1]["type"] == "done"
+
+    listed = client.get(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/events",
+        headers=owner_h,
+    )
+    assert listed.status_code == 200
+    items = listed.json()["items"]
+    seqs = [item["seq"] for item in items]
+    assert len(seqs) == len(set(seqs))
+    assert len(items) == 3  # user_message + text_delta + done
 
 
 @requires_postgres
@@ -1025,3 +1109,170 @@ def test_ai_key_disable_cancels_session_and_pauses_project(client: TestClient) -
     project = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
     assert project.status_code == 200
     assert project.json()["status"] == "paused"
+
+
+@requires_postgres
+def test_append_agent_event_hybrid_write(client: TestClient) -> None:
+    admin = _token(sub="append-admin", platform_admin=True)
+    admin_h = {"Authorization": f"Bearer {admin}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "AppendCo", "password": "test-company-pass", "admin_email": "append@co.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "Cursor",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-append",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = owner_auth_from_company(_token, co.json())
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "AppendCab", "company_id": company_id},
+    )
+    assert cab.status_code in (200, 201), cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "AppendProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    sess = client.post(
+        f"/api/v1/projects/{project_id}/agent/sessions",
+        headers=owner_h,
+        json={},
+    )
+    assert sess.status_code == 201, sess.text
+    session_id = sess.json()["id"]
+
+    appended = client.post(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/events",
+        headers=owner_h,
+        json={"type": "user_message", "data": {"text": "from openclaw"}},
+    )
+    assert appended.status_code == 201, appended.text
+    assert appended.json()["type"] == "user_message"
+    assert appended.json()["seq"] == 1
+
+    bad = client.post(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/events",
+        headers=owner_h,
+        json={"type": "not_a_real_type", "data": {}},
+    )
+    assert bad.status_code == 422
+
+    listed = client.get(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/events",
+        headers=owner_h,
+    )
+    assert listed.status_code == 200
+    assert any(e["type"] == "user_message" for e in listed.json()["items"])
+
+    transcript = client.get(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/transcript",
+        headers=owner_h,
+    )
+    assert transcript.status_code == 200
+    assert any(m.get("text") == "from openclaw" for m in transcript.json()["messages"])
+
+
+@requires_postgres
+def test_pod_agent_service_token_append_and_list(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "pod_agent_bridge_auth_token", "pod-test-secret")
+    admin = _token(sub="pod-agent-admin", platform_admin=True)
+    admin_h = {"Authorization": f"Bearer {admin}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "PodAgentCo", "password": "test-company-pass", "admin_email": "pod@co.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "Cursor",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-pod",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = owner_auth_from_company(_token, co.json())
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "PodCab", "company_id": company_id},
+    )
+    assert cab.status_code in (200, 201), cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "PodProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    sess = client.post(
+        f"/api/v1/projects/{project_id}/agent/sessions",
+        headers=owner_h,
+        json={},
+    )
+    assert sess.status_code == 201, sess.text
+    session_id = sess.json()["id"]
+
+    pod_h = {"Authorization": "Bearer pod-test-secret"}
+    appended = client.post(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/events",
+        headers=pod_h,
+        json={
+            "type": "tool_approval_request",
+            "data": {"id": "apr-1", "name": "shell.exec", "input": {"cmd": "ls"}},
+        },
+    )
+    assert appended.status_code == 201, appended.text
+    assert appended.json()["type"] == "tool_approval_request"
+
+    pending = client.get(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/pending-approvals",
+        headers=pod_h,
+    )
+    assert pending.status_code == 200, pending.text
+    assert any(p["id"] == "apr-1" for p in pending.json()["items"])
+
+    denied_user = client.post(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/events",
+        headers=pod_h,
+        json={"type": "user_message", "data": {"text": "blocked for pod"}},
+    )
+    assert denied_user.status_code == 422
+
+    bad_token = client.get(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/pending-approvals",
+        headers={"Authorization": "Bearer wrong"},
+    )
+    assert bad_token.status_code == 401
