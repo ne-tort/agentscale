@@ -9,6 +9,7 @@ from dataclasses import dataclass
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.application.agent.openclaw_bridge import OpenClawBridgeBootstrap
 from prodavan.application.ai_keys.service import AiKeysService
 from prodavan.config.settings import settings
 from prodavan.domain.errors import AppError
@@ -127,6 +128,13 @@ class AgentCredentialBroker:
             logger.debug("credential push unreachable project=%s: %s", project_id, exc)
         return False
 
+    async def revoke_lease_for_pod(self, *, pod_id: str, lease_id: str) -> bool:
+        """Revoke runtime lease; resolves project from pod row."""
+        pod = await self._session.get(ProjectPodRow, pod_id)
+        if pod is None or not pod.project_id:
+            return False
+        return await self.revoke_runtime_lease(project_id=pod.project_id, lease_id=lease_id)
+
     async def revoke_runtime_lease(self, *, project_id: str, lease_id: str) -> bool:
         if not settings.pod_agent_runtime_enabled:
             return False
@@ -151,8 +159,6 @@ class AgentCredentialBroker:
         return project
 
     async def _resolve_pod_ip_for_project(self, project_id: str) -> str | None:
-        from prodavan.application.agent.openclaw_bridge import OpenClawBridgeBootstrap
-
         bridge = OpenClawBridgeBootstrap(self._session, k8s_client=self._k8s)
         return await bridge._resolve_pod_ip_for_project(project_id)
 

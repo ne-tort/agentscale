@@ -1276,3 +1276,119 @@ def test_pod_agent_service_token_append_and_list(client: TestClient, monkeypatch
         headers={"Authorization": "Bearer wrong"},
     )
     assert bad_token.status_code == 401
+
+
+@requires_postgres
+def test_fork_session_creates_new_active_session(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "pod_agent_runtime_enabled", False)
+    admin = _token(sub="fork-admin", platform_admin=True)
+    admin_h = {"Authorization": f"Bearer {admin}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "ForkCo", "password": "test-company-pass", "admin_email": "fork@co.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "Cursor",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-fork",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = owner_auth_from_company(_token, co.json())
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "ForkCab", "company_id": company_id},
+    )
+    assert cab.status_code in (200, 201), cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "ForkProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    sess = client.post(f"/api/v1/projects/{project_id}/agent/sessions", headers=owner_h, json={})
+    assert sess.status_code == 201, sess.text
+    source_id = sess.json()["id"]
+
+    forked = client.post(
+        f"/api/v1/projects/{project_id}/agent/sessions/{source_id}/fork",
+        headers=owner_h,
+    )
+    assert forked.status_code == 201, forked.text
+    new_id = forked.json()["id"]
+    assert new_id != source_id
+    assert forked.json()["status"] == "active"
+    assert forked.json()["api_kind"] == "cursor_sdk"
+
+
+@requires_postgres
+def test_sidechain_transcript_unavailable_without_runtime(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "pod_agent_runtime_enabled", False)
+    admin = _token(sub="side-admin", platform_admin=True)
+    admin_h = {"Authorization": f"Bearer {admin}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "SideCo", "password": "test-company-pass", "admin_email": "side@co.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "Cursor",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-side",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = owner_auth_from_company(_token, co.json())
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "SideCab", "company_id": company_id},
+    )
+    assert cab.status_code in (200, 201), cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "SideProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+
+    sess = client.post(f"/api/v1/projects/{project_id}/agent/sessions", headers=owner_h, json={})
+    assert sess.status_code == 201, sess.text
+    session_id = sess.json()["id"]
+
+    resp = client.get(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/sidechains/toolu_abc/transcript",
+        headers=owner_h,
+    )
+    assert resp.status_code == 503, resp.text
+    assert resp.json()["code"] == "RUNTIME_UNAVAILABLE"
+

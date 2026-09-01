@@ -124,8 +124,12 @@ def build_pod_body(
     agent_bridge_auth_secret: str | None = None,
 ) -> dict[str, Any]:
     runtime_image = agent_runtime_image or agent_bridge_image
-    runtime_port = agent_runtime_port if agent_runtime_image else agent_bridge_port
-    runtime_api = agent_runtime_api_base_url if agent_runtime_image else agent_bridge_api_base_url
+    if agent_runtime_image is not None:
+        runtime_port = agent_runtime_port
+        runtime_api = agent_runtime_api_base_url
+    else:
+        runtime_port = agent_bridge_port
+        runtime_api = agent_bridge_api_base_url
     runtime_auth = agent_runtime_auth_secret or agent_bridge_auth_secret
     labels = {
         "app.kubernetes.io/part-of": "prodavan",

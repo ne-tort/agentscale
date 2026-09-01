@@ -65,7 +65,14 @@ async def revoke_pod_credential_lease(
     pod_id: str,
     lease_id: str,
     auth: Annotated[AgentAuth, Depends(get_agent_auth)],
+    session: Annotated[AsyncSession, Depends(get_db_session)],
 ) -> None:
     _require_pod_agent(auth)
-    _ = pod_id, lease_id
-    # Leases live in runtime memory; revocation is runtime-local (DELETE /v1/credentials/leases on pod).
+    broker = AgentCredentialBroker(session)
+    if not await broker.revoke_lease_for_pod(pod_id=pod_id, lease_id=lease_id):
+        raise AppError(
+            code="REVOKE_FAILED",
+            title="Bad Gateway",
+            status=502,
+            detail="could not revoke credential lease",
+        )
