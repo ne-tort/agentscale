@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
 
@@ -71,6 +72,15 @@ class ProjectChatController {
           if (pending is List) {
             pendingApprovals = pending.cast<Map<String, dynamic>>();
           }
+        } else if (type == '_error' && data is Map<String, dynamic>) {
+          error = ProdavanApiException(
+            data['status'] is int ? data['status'] as int : 503,
+            jsonEncode({
+              'code': data['code'],
+              'title': data['title'],
+              'detail': data['detail'],
+            }),
+          );
         } else if (type == 'error') {
           if (data is Map<String, dynamic>) {
             error = AgentStreamError(data);

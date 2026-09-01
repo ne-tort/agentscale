@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/containers/container_runtime_presenter.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
-import 'package:prodavan/features/employee/agent_chat_errors.dart';
 import 'package:prodavan/features/employee/cabinet_project_settings_page.dart';
 import 'package:prodavan/features/employee/project_chat_controller.dart';
 import 'package:prodavan/features/employee/tool_approve_page.dart';
@@ -36,6 +36,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   bool _loading = true;
   bool _chatAvailable = true;
   Map<String, dynamic>? _project;
+  Object? _lastSnackError;
 
   @override
   void initState() {
@@ -43,7 +44,14 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     workContext.enterProject(widget.projectId);
     _chat = ProjectChatController(api: workContext.api, projectId: widget.projectId)
       ..changes.listen((_) {
-        if (mounted) setState(() {});
+        if (!mounted) return;
+        final err = _chat.error;
+        if (err != null && err != _lastSnackError) {
+          _lastSnackError = err;
+          AppErrors.showSnack(context, err);
+          _chat.error = null;
+        }
+        setState(() {});
       });
     _bootstrap();
   }
@@ -60,7 +68,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       }
       await _chat.loadTranscript();
     } catch (e) {
-      if (mounted) _chat.error = e;
+      if (mounted) AppErrors.showSnack(context, e);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -174,14 +182,6 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                         },
                       ),
           ),
-          if (_chat.error != null)
-            Padding(
-              padding: EdgeInsets.symmetric(horizontal: AppSpacing.md),
-              child: Text(
-                localizeAgentChatError(_chat.error!, l10n),
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
-              ),
-            ),
           ChatComposer(
             enabled: _chatAvailable && !_chat.streaming,
             disabledHint: l10n.errorPodNotRunning,

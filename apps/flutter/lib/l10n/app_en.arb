@@ -995,6 +995,8 @@
   "errorAgentBudget": "Agent token budget exhausted.",
   "errorPodNotRunning": "Container is not running — open project settings to launch or reload.",
   "errorAgentRuntimeUnavailable": "Agent runtime is unavailable. Check the project container.",
+  "errorAgentStubResponse": "Agent returned a stub instead of a real response. Redeploy the container image.",
+  "errorAgentCredentialMissing": "AI API key was not delivered to the agent in the container. Check the project key.",
   "errorAgentBridge": "Could not reach the agent in the container.",
   "errorCascadeIncomplete": "Delete cascade is still in progress. Wait or retry later.",
   "companyCredentialsCreated": "Login: {companyId} · password: {password}",

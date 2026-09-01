@@ -158,6 +158,70 @@ async def test_wait_ready_fails_fast_on_image_pull_backoff() -> None:
             await client.wait_ready("pod-wk-demo", timeout=30.0)
 
 
+@pytest.mark.asyncio
+async def test_wait_ready_tolerates_transient_missing_pod() -> None:
+    auth = MagicMock(spec=InClusterAuth)
+    auth.api_base.return_value = "https://k8s.example"
+    auth.headers.return_value = {"Authorization": "Bearer x"}
+    auth.client_kwargs.return_value = {"verify": False, "timeout": 1.0}
+    client = K8sSandboxClient(namespace="prodavan-sandboxes", auth=auth)
+
+    missing = MagicMock()
+    missing.status_code = 404
+    ready_body = {
+        "metadata": {"name": "pod-wk-demo", "labels": {}},
+        "status": {
+            "phase": "Running",
+            "conditions": [{"type": "Ready", "status": "True"}],
+        },
+    }
+    ready = MagicMock()
+    ready.status_code = 200
+    ready.json.return_value = ready_body
+
+    calls = {"n": 0}
+
+    async def get_side_effect(*_args, **_kwargs):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            return missing
+        return ready
+
+    with patch("prodavan.infrastructure.k8s.sandbox.client.httpx.AsyncClient") as ac:
+        ac.return_value.__aenter__.return_value.get = AsyncMock(side_effect=get_side_effect)
+        with patch(
+            "prodavan.infrastructure.k8s.sandbox.client.asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            snap = await client.wait_ready("pod-wk-demo", timeout=30.0)
+
+    assert snap.ready is True
+    assert calls["n"] == 3
+
+
+@pytest.mark.asyncio
+async def test_wait_ready_fails_after_missing_retries_exhausted() -> None:
+    from prodavan.infrastructure.k8s.errors import K8sNotFoundError
+
+    auth = MagicMock(spec=InClusterAuth)
+    auth.api_base.return_value = "https://k8s.example"
+    auth.headers.return_value = {"Authorization": "Bearer x"}
+    auth.client_kwargs.return_value = {"verify": False, "timeout": 1.0}
+    client = K8sSandboxClient(namespace="prodavan-sandboxes", auth=auth)
+
+    missing = MagicMock()
+    missing.status_code = 404
+
+    with patch("prodavan.infrastructure.k8s.sandbox.client.httpx.AsyncClient") as ac:
+        ac.return_value.__aenter__.return_value.get = AsyncMock(return_value=missing)
+        with patch(
+            "prodavan.infrastructure.k8s.sandbox.client.asyncio.sleep",
+            new_callable=AsyncMock,
+        ):
+            with pytest.raises(K8sNotFoundError, match="5 checks"):
+                await client.wait_ready("pod-wk-demo", timeout=30.0)
+
+
 def test_build_pod_body_agent_runtime() -> None:
     ctx = PodRuntimeContext(
         pod_id="pod_abc",

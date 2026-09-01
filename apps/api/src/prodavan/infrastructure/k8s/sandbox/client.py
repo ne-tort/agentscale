@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 _MANAGED_BY_LABEL = "prodavan.io/managed-by"
 _MANAGED_BY_VALUE = "pod-service"
 _READY_PHASES = frozenset({"Running", "Succeeded"})
-_DISAPPEAR_RETRY_SEC = 3.0
+_POD_MISSING_RETRY_COUNT = 5
+_POD_MISSING_RETRY_INTERVAL_SEC = 3.0
 _POLL_INTERVAL_SEC = 2.0
 _FATAL_WAITING_REASONS = frozenset(
     {
@@ -321,21 +322,20 @@ class K8sSandboxClient:
     async def wait_ready(self, name: str, *, timeout: float) -> PodSnapshot:
         deadline = time.monotonic() + timeout
         last: PodSnapshot | None = None
-        missing_since: float | None = None
+        missing_attempts = 0
         while time.monotonic() < deadline:
             snap = await self.get_pod(name)
             if snap is None:
-                now = time.monotonic()
-                if missing_since is None:
-                    missing_since = now
-                if now - missing_since >= _DISAPPEAR_RETRY_SEC:
+                missing_attempts += 1
+                if missing_attempts >= _POD_MISSING_RETRY_COUNT:
                     raise K8sNotFoundError(
-                        f"pod {name} not found during startup "
-                        f"(deleted or not yet created; retry launch)"
+                        f"pod {name} not found during startup after "
+                        f"{_POD_MISSING_RETRY_COUNT} checks "
+                        f"({_POD_MISSING_RETRY_INTERVAL_SEC}s apart)"
                     )
-                await asyncio.sleep(1.0)
+                await asyncio.sleep(_POD_MISSING_RETRY_INTERVAL_SEC)
                 continue
-            missing_since = None
+            missing_attempts = 0
             last = snap
             if snap.fatal_failure:
                 body = await self._get_pod_body(name)

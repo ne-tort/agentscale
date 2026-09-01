@@ -135,6 +135,8 @@ abstract final class AppErrors {
       'AGENT_BUDGET' || 'AGENT_BUDGET_EXCEEDED' => l10n.errorAgentBudget,
       'POD_NOT_RUNNING' => l10n.errorPodNotRunning,
       'AGENT_RUNTIME_UNAVAILABLE' || 'AGENT_ADAPTER_DISABLED' => l10n.errorAgentRuntimeUnavailable,
+      'AGENT_STUB_RESPONSE' => l10n.errorAgentStubResponse,
+      'AGENT_CREDENTIAL_MISSING' => l10n.errorAgentCredentialMissing,
       'BRIDGE_SEND_FAILED' || 'BRIDGE_EMPTY_STREAM' || 'BRIDGE_UNREACHABLE' => l10n.errorAgentBridge,
       'CASCADE_INCOMPLETE' => l10n.errorCascadeIncomplete,
       'SCHEMA_DROP_FAILED' => l10n.errorServer,

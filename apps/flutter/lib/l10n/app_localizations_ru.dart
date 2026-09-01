@@ -1740,6 +1740,14 @@ class AppLocalizationsRu extends AppLocalizations {
       'Агент недоступен. Проверьте контейнер проекта.';
 
   @override
+  String get errorAgentStubResponse =>
+      'Агент вернул заглушку вместо реального ответа. Пересоберите образ контейнера.';
+
+  @override
+  String get errorAgentCredentialMissing =>
+      'API-ключ не был доставлен агенту в контейнере. Проверьте ключ проекта.';
+
+  @override
   String get errorAgentBridge => 'Не удалось связаться с агентом в контейнере.';
 
   @override

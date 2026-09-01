@@ -997,6 +997,8 @@
   "errorAgentBudget": "Исчерпан лимит токенов агента.",
   "errorPodNotRunning": "Контейнер не запущен — откройте настройки проекта для запуска или перезагрузки.",
   "errorAgentRuntimeUnavailable": "Агент недоступен. Проверьте контейнер проекта.",
+  "errorAgentStubResponse": "Агент вернул заглушку вместо реального ответа. Пересоберите образ контейнера.",
+  "errorAgentCredentialMissing": "API-ключ не был доставлен агенту в контейнере. Проверьте ключ проекта.",
   "errorAgentBridge": "Не удалось связаться с агентом в контейнере.",
   "errorCascadeIncomplete": "Каскад удаления ещё не завершён. Подождите или повторите позже.",
   "companyCredentialsCreated": "Логин: {companyId} · пароль: {password}",

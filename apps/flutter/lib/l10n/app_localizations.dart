@@ -3111,12 +3111,33 @@ abstract class AppLocalizations {
   String get errorAgentBudget;
 
   /// No description provided for @errorPodNotRunning.
+  ///
+  /// In en, this message translates to:
+  /// **'Container is not running — open project settings to launch or reload.'**
   String get errorPodNotRunning;
 
   /// No description provided for @errorAgentRuntimeUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent runtime is unavailable. Check the project container.'**
   String get errorAgentRuntimeUnavailable;
 
+  /// No description provided for @errorAgentStubResponse.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent returned a stub instead of a real response. Redeploy the container image.'**
+  String get errorAgentStubResponse;
+
+  /// No description provided for @errorAgentCredentialMissing.
+  ///
+  /// In en, this message translates to:
+  /// **'AI API key was not delivered to the agent in the container. Check the project key.'**
+  String get errorAgentCredentialMissing;
+
   /// No description provided for @errorAgentBridge.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not reach the agent in the container.'**
   String get errorAgentBridge;
 
   /// No description provided for @errorCascadeIncomplete.

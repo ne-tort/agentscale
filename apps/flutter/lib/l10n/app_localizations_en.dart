@@ -1727,6 +1727,14 @@ class AppLocalizationsEn extends AppLocalizations {
       'Agent runtime is unavailable. Check the project container.';
 
   @override
+  String get errorAgentStubResponse =>
+      'Agent returned a stub instead of a real response. Redeploy the container image.';
+
+  @override
+  String get errorAgentCredentialMissing =>
+      'AI API key was not delivered to the agent in the container. Check the project key.';
+
+  @override
   String get errorAgentBridge => 'Could not reach the agent in the container.';
 
   @override

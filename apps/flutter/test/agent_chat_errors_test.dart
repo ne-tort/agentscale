@@ -1,0 +1,57 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+
+import 'package:prodavan/features/employee/agent_chat_errors.dart';
+import 'package:prodavan/features/employee/project_chat_controller.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
+
+void main() {
+  Future<AppLocalizations> l10nFor(WidgetTester tester) async {
+    late AppLocalizations l10n;
+    await tester.pumpWidget(
+      MaterialApp(
+        locale: const Locale('ru'),
+        localizationsDelegates: const [
+          AppLocalizations.delegate,
+          ...GlobalMaterialLocalizations.delegates,
+        ],
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: Builder(
+          builder: (context) {
+            l10n = AppLocalizations.of(context);
+            return const SizedBox.shrink();
+          },
+        ),
+      ),
+    );
+    return l10n;
+  }
+
+  testWidgets('AGENT_CREDENTIAL_MISSING maps to localized copy, not gateway', (tester) async {
+    final l10n = await l10nFor(tester);
+    final presented = presentAgentChatError(
+      const AgentStreamError({
+        'code': 'AGENT_CREDENTIAL_MISSING',
+        'message': 'cursor_sdk: API key not available in pod runtime',
+      }),
+      l10n,
+    );
+    expect(presented.display, l10n.errorAgentCredentialMissing);
+    expect(presented.display, isNot(l10n.errorGateway));
+    expect(presented.diagnostic, contains('AGENT_CREDENTIAL_MISSING'));
+  });
+
+  testWidgets('AGENT_STUB_RESPONSE maps to localized copy, not gateway', (tester) async {
+    final l10n = await l10nFor(tester);
+    final presented = presentAgentChatError(
+      const AgentStreamError({
+        'code': 'AGENT_STUB_RESPONSE',
+        'message': 'agent runtime returned a stub response',
+      }),
+      l10n,
+    );
+    expect(presented.display, l10n.errorAgentStubResponse);
+    expect(presented.display, isNot(l10n.errorGateway));
+  });
+}
