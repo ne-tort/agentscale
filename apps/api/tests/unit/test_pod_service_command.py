@@ -70,6 +70,7 @@ async def test_sync_desired_running_creates_and_starts_pod() -> None:
     )
 
     runtime.ensure_running.assert_awaited_once()
+    session.commit.assert_awaited()
     hydrate.hydrate.assert_awaited_once()
     assert events.emit.await_count >= 2
     event_types = [c.kwargs["event_type"] for c in events.emit.await_args_list]

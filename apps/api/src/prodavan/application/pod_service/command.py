@@ -426,6 +426,8 @@ class PodCommand:
             project, lifecycle=lifecycle
         )
         ctx = self._runtime_context(project, pod, extra_env=extra_env)
+        # Commit before k8s create/wait so pod_reconcile zombie reaper sees the PG row.
+        await self._session.commit()
         await self._runtime.ensure_running(runtime_ref=ref, context=ctx)
         ws_key = pod.workspace_key or project.workspace_key
         await self._hydrate.hydrate(workspace_key=ws_key, runtime_ref=ref)

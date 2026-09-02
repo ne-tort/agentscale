@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +22,19 @@ from prodavan.infrastructure.persistence.models.projects import ProjectPodRow, P
 logger = logging.getLogger(__name__)
 
 _SYSTEM = Principal(sub="system:pod-reconcile", roles=frozenset({"platform.admin"}))
+# Do not reap pods still starting — launch may not have committed the PG row yet.
+_PROVISIONING_GRACE_SEC = 120.0
+
+
+def _managed_pod_age_sec(item: dict) -> float | None:
+    created = item.get("created_at")
+    if not created:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return max(0.0, (datetime.now(UTC) - dt).total_seconds())
 
 
 class PodReconcileService:
@@ -150,6 +164,15 @@ class PodReconcileService:
             if ref in live_refs:
                 continue
             if pod_id and pod_id in live_ids:
+                continue
+            age = _managed_pod_age_sec(item)
+            if age is not None and age < _PROVISIONING_GRACE_SEC:
+                logger.debug(
+                    "pod reconcile: skip young managed pod runtime_ref=%s pod_id=%s age=%.0fs",
+                    ref,
+                    pod_id,
+                    age,
+                )
                 continue
             logger.info("pod reconcile: delete zombie runtime_ref=%s pod_id=%s", ref, pod_id)
             await self._runtime.terminate(runtime_ref=str(ref))
