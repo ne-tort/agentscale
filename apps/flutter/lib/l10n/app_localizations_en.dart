@@ -1776,6 +1776,21 @@ class AppLocalizationsEn extends AppLocalizations {
   String get aiModelSdkLabel => 'SDK bindings';
 
   @override
+  String get aiModelInputPriceLabel => 'Input price (\$/1M tokens)';
+
+  @override
+  String get aiModelOutputPriceLabel => 'Output price (\$/1M tokens)';
+
+  @override
+  String get aiModelMaxTokensLabel => 'Max tokens';
+
+  @override
+  String get aiModelPublisherLabel => 'Publisher';
+
+  @override
+  String get aiModelReleasedAtLabel => 'Release date';
+
+  @override
   String get projectChatModelLabel => 'Model';
 
   @override
@@ -1783,6 +1798,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get projectChatReasoningStreaming => 'Reasoning…';
+
+  @override
+  String projectChatReasonedPast(String duration) {
+    return 'Reasoned for $duration';
+  }
 
   @override
   String get projectChatUsage => 'Usage';
@@ -1801,6 +1821,21 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get projectChatSettingsTitle => 'Chat settings';
+
+  @override
+  String get projectChatModelSelectTitle => 'Select model';
+
+  @override
+  String get projectChatModelColumnPrice => 'In/out price';
+
+  @override
+  String get projectChatModelColumnMaxTokens => 'Max tokens';
+
+  @override
+  String get projectChatModelColumnPublisher => 'Publisher';
+
+  @override
+  String get projectChatModelColumnReleased => 'Released';
 
   @override
   String get projectChatAddAction => 'Chat settings';

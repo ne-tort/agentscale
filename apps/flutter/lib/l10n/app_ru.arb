@@ -1016,15 +1016,33 @@
   "aiKeyModelDefault": "По умолчанию",
   "aiModelNameLabel": "ID модели",
   "aiModelSdkLabel": "Привязка к SDK",
+  "aiModelInputPriceLabel": "Цена вход ($/1M tokens)",
+  "aiModelOutputPriceLabel": "Цена выход ($/1M tokens)",
+  "aiModelMaxTokensLabel": "Max tokens",
+  "aiModelPublisherLabel": "Издатель",
+  "aiModelReleasedAtLabel": "Дата выпуска",
   "projectChatModelLabel": "Модель",
   "projectChatReasoning": "Размышление",
   "projectChatReasoningStreaming": "Размышление…",
+  "projectChatReasonedPast": "Размышлял {duration}",
+  "@projectChatReasonedPast": {
+    "placeholders": {
+      "duration": {
+        "type": "String"
+      }
+    }
+  },
   "projectChatUsage": "Расход",
   "projectChatUsageInputTokens": "Входные токены",
   "projectChatUsageOutputTokens": "Выходные токены",
   "projectChatUsageTotalTokens": "Всего токенов",
   "projectChatUsageCost": "Стоимость",
   "projectChatSettingsTitle": "Настройки чата",
+  "projectChatModelSelectTitle": "Выбор модели",
+  "projectChatModelColumnPrice": "Цена вх/вых",
+  "projectChatModelColumnMaxTokens": "Max tokens",
+  "projectChatModelColumnPublisher": "Издатель",
+  "projectChatModelColumnReleased": "Дата выпуска",
   "projectChatAddAction": "Настройки чата",
   "projectChatCancelled": "Отменено",
   "errorAgentProviderNetwork": "AI-провайдер недоступен из контейнера (сеть).",

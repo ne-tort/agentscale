@@ -1789,6 +1789,21 @@ class AppLocalizationsRu extends AppLocalizations {
   String get aiModelSdkLabel => 'Привязка к SDK';
 
   @override
+  String get aiModelInputPriceLabel => 'Цена вход (\$/1M tokens)';
+
+  @override
+  String get aiModelOutputPriceLabel => 'Цена выход (\$/1M tokens)';
+
+  @override
+  String get aiModelMaxTokensLabel => 'Max tokens';
+
+  @override
+  String get aiModelPublisherLabel => 'Издатель';
+
+  @override
+  String get aiModelReleasedAtLabel => 'Дата выпуска';
+
+  @override
   String get projectChatModelLabel => 'Модель';
 
   @override
@@ -1796,6 +1811,11 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get projectChatReasoningStreaming => 'Размышление…';
+
+  @override
+  String projectChatReasonedPast(String duration) {
+    return 'Размышлял $duration';
+  }
 
   @override
   String get projectChatUsage => 'Расход';
@@ -1814,6 +1834,21 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get projectChatSettingsTitle => 'Настройки чата';
+
+  @override
+  String get projectChatModelSelectTitle => 'Выбор модели';
+
+  @override
+  String get projectChatModelColumnPrice => 'Цена вх/вых';
+
+  @override
+  String get projectChatModelColumnMaxTokens => 'Max tokens';
+
+  @override
+  String get projectChatModelColumnPublisher => 'Издатель';
+
+  @override
+  String get projectChatModelColumnReleased => 'Дата выпуска';
 
   @override
   String get projectChatAddAction => 'Настройки чата';

@@ -23,6 +23,53 @@ from prodavan.infrastructure.persistence.models.projects import ProjectPodRow, P
 
 logger = logging.getLogger(__name__)
 
+_METADATA_KEYS = (
+    "input_price_usd_per_mtok",
+    "output_price_usd_per_mtok",
+    "max_context_tokens",
+    "publisher",
+    "released_at",
+)
+
+
+def filter_effective_live_ids(
+    live_ids: list[str],
+    catalog: list[dict[str, Any]],
+    ceiling: list[str],
+) -> list[str]:
+    enabled_names_lower = {str(m["name"]).lower() for m in catalog if m.get("enabled")}
+    if enabled_names_lower:
+        effective = [mid for mid in live_ids if mid.lower() in enabled_names_lower]
+    else:
+        effective = list(live_ids)
+
+    trimmed_ceiling = [str(m).strip() for m in ceiling if str(m).strip()]
+    if trimmed_ceiling:
+        ceiling_lower = {m.lower() for m in trimmed_ceiling}
+        effective = [m for m in effective if m.lower() in ceiling_lower]
+    return effective
+
+
+def catalog_by_model_name(catalog: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for item in catalog:
+        name = str(item.get("name") or "").strip()
+        if name:
+            out[name.lower()] = item
+    return out
+
+
+def enrich_live_model(live_id: str, catalog_lookup: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    cat = catalog_lookup.get(live_id.lower())
+    item: dict[str, Any] = {
+        "id": live_id,
+        "label": live_id,
+        "catalog_matched": cat is not None,
+    }
+    for key in _METADATA_KEYS:
+        item[key] = cat.get(key) if cat else None
+    return item
+
 
 class AiModelsLiveService:
     def __init__(self, session: AsyncSession) -> None:
@@ -39,8 +86,6 @@ class AiModelsLiveService:
         key_row = await models_svc.require_company_key(key_id, company_id)
         company_policy = await AdminCompanyService(self._session).get_agent_policy(company_id)
         catalog = await AiModelsService(self._session).list_key_models(company_id=company_id, key_id=key_id)
-        enabled_names = {str(m["name"]) for m in catalog if m.get("enabled")}
-
         live_ids = await self._fetch_live_model_ids(
             company_id=company_id,
             key_id=key_id,
@@ -55,15 +100,8 @@ class AiModelsLiveService:
                 detail="live model list unavailable — ensure project container is running and AI key is valid",
             )
 
-        if enabled_names:
-            effective = [mid for mid in live_ids if mid in enabled_names]
-        else:
-            effective = list(live_ids)
-
         ceiling = [m for m in (company_policy.model_allowlist or []) if str(m).strip()]
-        if ceiling:
-            ceiling_set = set(ceiling)
-            effective = [m for m in effective if m in ceiling_set]
+        effective = filter_effective_live_ids(live_ids, catalog, ceiling)
 
         if not effective:
             raise AppError(
@@ -73,13 +111,14 @@ class AiModelsLiveService:
                 detail="no models remain after key/company filters",
             )
 
+        lookup = catalog_by_model_name(catalog)
         ui_default = next((str(m["name"]) for m in catalog if m.get("is_default")), None)
-        if ui_default and ui_default not in effective:
+        if ui_default and ui_default not in effective and ui_default.lower() not in {m.lower() for m in effective}:
             ui_default = None
         ui_default = resolve_ui_default(effective, ui_default)
 
         return {
-            "models": [{"id": name, "label": name} for name in effective],
+            "models": [enrich_live_model(name, lookup) for name in effective],
             "default_model": ui_default,
             "source": "live",
         }

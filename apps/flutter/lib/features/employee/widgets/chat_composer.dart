@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
+import 'package:prodavan/core/preferences/app_value_preference.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -146,11 +147,10 @@ class _ChatComposerState extends State<ChatComposer> {
 
   InputDecoration _fieldDecoration(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    return InputDecoration(
+    return kBorderlessInputDecoration.copyWith(
       hintText: widget.enabled
           ? l10n.projectMessageHint
           : (widget.disabledHint ?? l10n.projectMessageHint),
-      border: InputBorder.none,
       filled: false,
       isDense: true,
       contentPadding: EdgeInsets.symmetric(

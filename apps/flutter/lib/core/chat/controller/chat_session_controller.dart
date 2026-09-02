@@ -22,6 +22,16 @@ class ChatSessionController {
   List<Map<String, dynamic>> availableModels = const [];
   String? defaultModel;
 
+  String get selectedModelLabel {
+    final id = selectedModel ?? defaultModel;
+    if (id == null || id.isEmpty) return id ?? '';
+    for (final m in availableModels) {
+      final mid = m['id'] as String? ?? m['label'] as String? ?? '';
+      if (mid == id) return m['label'] as String? ?? mid;
+    }
+    return id;
+  }
+
   ProjectChatStreamHandle? _handle;
   List<ChatBlock> _liveTurnBlocks = const [];
   final _tick = StreamController<void>.broadcast();

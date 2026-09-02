@@ -10,8 +10,9 @@ Admin (и при делегировании Company) задаёт **какие �
 |---------|------------|
 | **Модель только через API** | `POST /chat/stream`, `POST .../agent/sessions`, bridge `POST /v1/sessions` и `.../send` — optional `model`. **Не** в `.prodavan/config.yaml`. |
 | **Live list = UI** | `GET /projects/{id}/models/live` → pod bridge `GET /v1/models` → `Cursor.models.list()` (cursor_sdk). |
-| **Allowed list = фильтр** | Key bindings `enabled` ∩ live list; пустой enabled = без ограничений. Company `model_allowlist` — optional ceiling. |
-| **`is_default` = UI only** | `AiKeyModelBindingRow.is_default` → `default_model` в live response для preselect dropdown. **Не** подставляется в runtime без явного выбора пользователя. |
+| **Allowed list = фильтр** | Key bindings `enabled` ∩ live list (**case-insensitive** on model name); пустой enabled = без ограничений. Company `model_allowlist` — optional ceiling. |
+| **`is_default` = UI only** | `AiKeyModelBindingRow.is_default` → `default_model` в live response для preselect. **Не** подставляется в runtime без явного выбора пользователя. |
+| **Catalog metadata** | `ai_models`: `input_price_usd_per_mtok`, `output_price_usd_per_mtok`, `max_context_tokens`, `publisher`, `released_at` — enrich live response when catalog `name` matches live id case-insensitively. |
 | **`"default"` passthrough** | Валидный model id для Cursor SDK передаётся как есть. |
 | **Pod required** | Live list и chat send требуют running pod (`require_running_pod_runtime`). |
 
@@ -19,7 +20,7 @@ Admin (и при делегировании Company) задаёт **какие �
 
 | Сущность | Описание |
 |----------|----------|
-| `ModelCatalogEntry` | Seed в `ai_models` — admin reference; **не** primary UI source для employee |
+| `AiModelRow` | Catalog entry: `name` + SDK bindings + optional metadata (price, tokens, publisher, release date) |
 | `AiKeyModelBindingRow` | per key: `enabled`, `is_default` — фильтр + UI preselect |
 | `ModelAllowlist` | `companies.model_allowlist` — optional company ceiling |
 
@@ -38,8 +39,7 @@ Admin (и при делегировании Company) задаёт **какие �
 
 | Contour | Поведение |
 |---------|-----------|
-| Admin | Key model bindings (enabled/default) поверх live catalog |
-| Company | Optional narrow allowlist ⊆ platform |
-| Employee / Project | Dropdown из `/models/live`; send с `selectedModel` каждый turn |
+| Admin / Company | `AiModelDetailPage` — name, SDK bindings, metadata fields |
+| Employee / Project | `AppPreferenceTile` → `ProjectChatModelSelectPage` (`AppEntityCollection` table); send с `selectedModel` каждый turn |
 
 См. [admin-control-plane.md](admin-control-plane.md).

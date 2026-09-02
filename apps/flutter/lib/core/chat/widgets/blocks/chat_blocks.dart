@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:markdown/markdown.dart' as md;
 
+import 'package:prodavan/core/chat/thinking_duration.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -9,8 +10,6 @@ TextStyle _mutedTextStyle(BuildContext context) {
   final base = Theme.of(context).textTheme.bodyMedium ?? const TextStyle();
   return base.copyWith(
     color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
-    decoration: TextDecoration.underline,
-    decorationColor: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.45),
   );
 }
 
@@ -61,16 +60,10 @@ class ChatInsetPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Container(
       width: double.infinity,
       margin: EdgeInsets.only(top: AppSpacing.xs / 2),
-      padding: EdgeInsets.all(AppSpacing.sm),
-      decoration: BoxDecoration(
-        border: Border.all(color: scheme.outlineVariant),
-        borderRadius: BorderRadius.circular(8),
-        color: scheme.surface,
-      ),
+      padding: EdgeInsets.symmetric(vertical: AppSpacing.xs),
       child: child,
     );
   }
@@ -491,11 +484,11 @@ class _ThinkingBlockState extends State<ThinkingBlock> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final title = widget.streaming
-        ? l10n.projectChatReasoningStreaming
-        : widget.durationMs != null
-            ? '${l10n.projectChatReasoning} (${widget.durationMs}ms)'
-            : l10n.projectChatReasoning;
+    final title = formatThinkingDurationLabel(
+      l10n,
+      durationMs: widget.durationMs,
+      streaming: widget.streaming,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

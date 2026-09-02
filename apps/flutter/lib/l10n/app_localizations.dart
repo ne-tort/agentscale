@@ -3206,6 +3206,36 @@ abstract class AppLocalizations {
   /// **'SDK bindings'**
   String get aiModelSdkLabel;
 
+  /// No description provided for @aiModelInputPriceLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Input price (\$/1M tokens)'**
+  String get aiModelInputPriceLabel;
+
+  /// No description provided for @aiModelOutputPriceLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Output price (\$/1M tokens)'**
+  String get aiModelOutputPriceLabel;
+
+  /// No description provided for @aiModelMaxTokensLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Max tokens'**
+  String get aiModelMaxTokensLabel;
+
+  /// No description provided for @aiModelPublisherLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Publisher'**
+  String get aiModelPublisherLabel;
+
+  /// No description provided for @aiModelReleasedAtLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Release date'**
+  String get aiModelReleasedAtLabel;
+
   /// No description provided for @projectChatModelLabel.
   ///
   /// In en, this message translates to:
@@ -3223,6 +3253,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Reasoning…'**
   String get projectChatReasoningStreaming;
+
+  /// No description provided for @projectChatReasonedPast.
+  ///
+  /// In en, this message translates to:
+  /// **'Reasoned for {duration}'**
+  String projectChatReasonedPast(String duration);
 
   /// No description provided for @projectChatUsage.
   ///
@@ -3259,6 +3295,36 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Chat settings'**
   String get projectChatSettingsTitle;
+
+  /// No description provided for @projectChatModelSelectTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Select model'**
+  String get projectChatModelSelectTitle;
+
+  /// No description provided for @projectChatModelColumnPrice.
+  ///
+  /// In en, this message translates to:
+  /// **'In/out price'**
+  String get projectChatModelColumnPrice;
+
+  /// No description provided for @projectChatModelColumnMaxTokens.
+  ///
+  /// In en, this message translates to:
+  /// **'Max tokens'**
+  String get projectChatModelColumnMaxTokens;
+
+  /// No description provided for @projectChatModelColumnPublisher.
+  ///
+  /// In en, this message translates to:
+  /// **'Publisher'**
+  String get projectChatModelColumnPublisher;
+
+  /// No description provided for @projectChatModelColumnReleased.
+  ///
+  /// In en, this message translates to:
+  /// **'Released'**
+  String get projectChatModelColumnReleased;
 
   /// No description provided for @projectChatAddAction.
   ///

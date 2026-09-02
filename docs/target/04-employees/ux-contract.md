@@ -48,7 +48,17 @@ OIDC Login
 
 ### Composer
 
-Cursor-style field: **+** (chat settings) → attach → text → send/stop; единый фон без border. **Enter** отправляет, **Shift+Enter** — новая строка. Model picker в chat settings (`+`), не в message list.
+Cursor-style field: **+** (chat settings) → attach → text → send/stop; единый фон без border (idle + focus). **Enter** отправляет, **Shift+Enter** — новая строка. Model picker: `AppPreferenceTile` → table page (`AppEntityCollection`), не dropdown.
+
+### Thinking duration
+
+- Streaming: «Размышление…»
+- `< 5s`: «Размышление» без времени
+- `≥ 5s`: «Размышлял {minutes/seconds}» (human-readable, ru plural)
+
+### Model picker (chat settings)
+
+`AppPreferenceTile` + `ProjectChatModelSelectPage` — table columns: model, in/out price, max tokens, publisher, release date. Catalog metadata matched to live model id **case-insensitive** on name.
 
 ### Responsive
 

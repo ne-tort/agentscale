@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import delete, select, update
@@ -41,6 +43,11 @@ class AiModelsService:
         company_id: str,
         name: str,
         api_kinds: list[str] | None = None,
+        input_price_usd_per_mtok: Decimal | None = None,
+        output_price_usd_per_mtok: Decimal | None = None,
+        max_context_tokens: int | None = None,
+        publisher: str | None = None,
+        released_at: date | None = None,
     ) -> dict[str, Any]:
         model_name = name.strip()
         if not model_name:
@@ -49,6 +56,11 @@ class AiModelsService:
             name=model_name,
             owner_scope="company",
             owner_company_id=company_id,
+            input_price_usd_per_mtok=input_price_usd_per_mtok,
+            output_price_usd_per_mtok=output_price_usd_per_mtok,
+            max_context_tokens=max_context_tokens,
+            publisher=publisher.strip() if publisher else None,
+            released_at=released_at,
         )
         self._session.add(row)
         await self._session.flush()
@@ -65,6 +77,11 @@ class AiModelsService:
         model_id: str,
         name: str | None = None,
         api_kinds: list[str] | None = None,
+        input_price_usd_per_mtok: Decimal | None = None,
+        output_price_usd_per_mtok: Decimal | None = None,
+        max_context_tokens: int | None = None,
+        publisher: str | None = None,
+        released_at: date | None = None,
     ) -> dict[str, Any]:
         row = await self._require_company_model(model_id, company_id)
         if name is not None:
@@ -77,6 +94,16 @@ class AiModelsService:
                     detail="model name required",
                 )
             row.name = cleaned
+        if input_price_usd_per_mtok is not None:
+            row.input_price_usd_per_mtok = input_price_usd_per_mtok
+        if output_price_usd_per_mtok is not None:
+            row.output_price_usd_per_mtok = output_price_usd_per_mtok
+        if max_context_tokens is not None:
+            row.max_context_tokens = max_context_tokens
+        if publisher is not None:
+            row.publisher = publisher.strip() or None
+        if released_at is not None:
+            row.released_at = released_at
         if api_kinds is not None:
             await self._session.execute(delete(AiModelSdkBindingRow).where(AiModelSdkBindingRow.model_id == model_id))
             for api_kind in api_kinds:
@@ -185,6 +212,15 @@ class AiModelsService:
             "owner_scope": row.owner_scope,
             "owner_company_id": row.owner_company_id,
             "api_kinds": list(sdk_q.scalars().all()),
+            "input_price_usd_per_mtok": float(row.input_price_usd_per_mtok)
+            if row.input_price_usd_per_mtok is not None
+            else None,
+            "output_price_usd_per_mtok": float(row.output_price_usd_per_mtok)
+            if row.output_price_usd_per_mtok is not None
+            else None,
+            "max_context_tokens": row.max_context_tokens,
+            "publisher": row.publisher,
+            "released_at": row.released_at.isoformat() if row.released_at else None,
         }
 
     async def _require_company_model(self, model_id: str, company_id: str) -> AiModelRow:

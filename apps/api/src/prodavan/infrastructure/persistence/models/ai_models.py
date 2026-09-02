@@ -1,11 +1,12 @@
-"""AI model catalog + SDK/key bindings (L03/L08)."""
+"""AI model catalog metadata columns."""
 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from prodavan.infrastructure.persistence.models.base import Base
@@ -25,6 +26,11 @@ class AiModelRow(Base):
         ForeignKey("companies.id", ondelete="CASCADE"),
         nullable=True,
     )
+    input_price_usd_per_mtok: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
+    output_price_usd_per_mtok: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
+    max_context_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    publisher: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    released_at: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

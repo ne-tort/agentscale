@@ -1014,15 +1014,33 @@
   "aiKeyModelDefault": "Default",
   "aiModelNameLabel": "Model id",
   "aiModelSdkLabel": "SDK bindings",
+  "aiModelInputPriceLabel": "Input price ($/1M tokens)",
+  "aiModelOutputPriceLabel": "Output price ($/1M tokens)",
+  "aiModelMaxTokensLabel": "Max tokens",
+  "aiModelPublisherLabel": "Publisher",
+  "aiModelReleasedAtLabel": "Release date",
   "projectChatModelLabel": "Model",
   "projectChatReasoning": "Reasoning",
   "projectChatReasoningStreaming": "Reasoning…",
+  "projectChatReasonedPast": "Reasoned for {duration}",
+  "@projectChatReasonedPast": {
+    "placeholders": {
+      "duration": {
+        "type": "String"
+      }
+    }
+  },
   "projectChatUsage": "Usage",
   "projectChatUsageInputTokens": "Input tokens",
   "projectChatUsageOutputTokens": "Output tokens",
   "projectChatUsageTotalTokens": "Total tokens",
   "projectChatUsageCost": "Cost",
   "projectChatSettingsTitle": "Chat settings",
+  "projectChatModelSelectTitle": "Select model",
+  "projectChatModelColumnPrice": "In/out price",
+  "projectChatModelColumnMaxTokens": "Max tokens",
+  "projectChatModelColumnPublisher": "Publisher",
+  "projectChatModelColumnReleased": "Released",
   "projectChatAddAction": "Chat settings",
   "projectChatCancelled": "Cancelled",
   "errorAgentProviderNetwork": "AI provider is unreachable from the container (network).",

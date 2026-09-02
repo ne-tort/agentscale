@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import date
+from decimal import Decimal
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
@@ -20,6 +22,11 @@ class CreateModelBody(BaseModel):
 
     name: str = Field(min_length=1, max_length=128)
     api_kinds: list[str] = Field(default_factory=list)
+    input_price_usd_per_mtok: Decimal | None = None
+    output_price_usd_per_mtok: Decimal | None = None
+    max_context_tokens: int | None = Field(default=None, ge=1)
+    publisher: str | None = Field(default=None, max_length=128)
+    released_at: date | None = None
 
 
 class PatchModelBody(BaseModel):
@@ -27,6 +34,11 @@ class PatchModelBody(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=128)
     api_kinds: list[str] | None = None
+    input_price_usd_per_mtok: Decimal | None = None
+    output_price_usd_per_mtok: Decimal | None = None
+    max_context_tokens: int | None = Field(default=None, ge=1)
+    publisher: str | None = Field(default=None, max_length=128)
+    released_at: date | None = None
 
 
 class KeyModelSelectionBody(BaseModel):
@@ -59,6 +71,11 @@ async def create_model(
         company_id=company_id,
         name=body.name,
         api_kinds=body.api_kinds,
+        input_price_usd_per_mtok=body.input_price_usd_per_mtok,
+        output_price_usd_per_mtok=body.output_price_usd_per_mtok,
+        max_context_tokens=body.max_context_tokens,
+        publisher=body.publisher,
+        released_at=body.released_at,
     )
     await session.commit()
     return out
@@ -79,6 +96,11 @@ async def patch_model(
         model_id=model_id,
         name=body.name,
         api_kinds=body.api_kinds,
+        input_price_usd_per_mtok=body.input_price_usd_per_mtok,
+        output_price_usd_per_mtok=body.output_price_usd_per_mtok,
+        max_context_tokens=body.max_context_tokens,
+        publisher=body.publisher,
+        released_at=body.released_at,
     )
     await session.commit()
     return out

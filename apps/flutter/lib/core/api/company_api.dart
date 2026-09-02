@@ -555,12 +555,22 @@ class CompanyApi {
     required String companyId,
     required String name,
     List<String> apiKinds = const [],
+    double? inputPriceUsdPerMtok,
+    double? outputPriceUsdPerMtok,
+    int? maxContextTokens,
+    String? publisher,
+    String? releasedAt,
   }) async {
     final res = await AuthHttp.post(
       _uri('/companies/$companyId/ai-models'),
       body: jsonEncode({
         'name': name,
         'api_kinds': apiKinds,
+        if (inputPriceUsdPerMtok != null) 'input_price_usd_per_mtok': inputPriceUsdPerMtok,
+        if (outputPriceUsdPerMtok != null) 'output_price_usd_per_mtok': outputPriceUsdPerMtok,
+        if (maxContextTokens != null) 'max_context_tokens': maxContextTokens,
+        if (publisher != null) 'publisher': publisher,
+        if (releasedAt != null) 'released_at': releasedAt,
       }),
     );
     _throwIfError(res);
@@ -572,12 +582,22 @@ class CompanyApi {
     required String modelId,
     String? name,
     List<String>? apiKinds,
+    double? inputPriceUsdPerMtok,
+    double? outputPriceUsdPerMtok,
+    int? maxContextTokens,
+    String? publisher,
+    String? releasedAt,
   }) async {
     final res = await AuthHttp.patch(
       _uri('/companies/$companyId/ai-models/$modelId'),
       body: jsonEncode({
         if (name != null) 'name': name,
         if (apiKinds != null) 'api_kinds': apiKinds,
+        if (inputPriceUsdPerMtok != null) 'input_price_usd_per_mtok': inputPriceUsdPerMtok,
+        if (outputPriceUsdPerMtok != null) 'output_price_usd_per_mtok': outputPriceUsdPerMtok,
+        if (maxContextTokens != null) 'max_context_tokens': maxContextTokens,
+        if (publisher != null) 'publisher': publisher,
+        if (releasedAt != null) 'released_at': releasedAt,
       }),
     );
     _throwIfError(res);

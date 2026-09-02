@@ -1,7 +1,11 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/chat/controller/chat_session_controller.dart';
+import 'package:prodavan/core/preferences/preferences.dart';
+import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
+import 'package:prodavan/features/employee/project_chat_model_select_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Chat settings — model selection for the current project session.
@@ -26,15 +30,18 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
     });
   }
 
-  String? _selectedValue() {
-    final selected = widget.controller.selectedModel ?? widget.controller.defaultModel;
-    if (selected == null || selected.isEmpty) return null;
-    final ids = widget.controller.availableModels
-        .map((m) => m['id'] as String? ?? m['label'] as String? ?? '')
-        .where((id) => id.isNotEmpty)
-        .toList();
-    if (ids.contains(selected)) return selected;
-    return ids.isEmpty ? null : ids.first;
+  Future<void> _pickModel() async {
+    if (widget.controller.streaming) return;
+    final picked = await ProjectChatModelSelectPage.push(
+      context,
+      models: widget.controller.availableModels,
+      selectedModelId: widget.controller.selectedModel ?? widget.controller.defaultModel,
+      enabled: !widget.controller.streaming,
+    );
+    if (picked == null || !mounted) return;
+    widget.controller.selectedModel = picked;
+    widget.controller.notifyImmediate();
+    setState(() {});
   }
 
   @override
@@ -43,36 +50,14 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
     return AppScaffold(
       title: Text(l10n.projectChatSettingsTitle),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(AppSpacing.md),
         children: [
-          InputDecorator(
-            decoration: InputDecoration(
-              labelText: l10n.projectChatModelLabel,
-              border: const OutlineInputBorder(),
-            ),
-            child: DropdownButtonHideUnderline(
-              child: DropdownButton<String>(
-                isExpanded: true,
-                value: _selectedValue(),
-                items: widget.controller.availableModels
-                    .map((m) {
-                      final id = m['id'] as String? ?? m['label'] as String? ?? '';
-                      return DropdownMenuItem<String>(
-                        value: id,
-                        child: Text(m['label'] as String? ?? id),
-                      );
-                    })
-                    .where((item) => item.value != null && item.value!.isNotEmpty)
-                    .toList(),
-                onChanged: widget.controller.streaming
-                    ? null
-                    : (v) {
-                        widget.controller.selectedModel = v;
-                        widget.controller.notifyImmediate();
-                        setState(() {});
-                      },
-              ),
-            ),
+          AppPreferenceTile(
+            title: l10n.projectChatModelLabel,
+            subtitle: Text(widget.controller.selectedModelLabel),
+            trailing: const AppTrailingChevron(),
+            enabled: !widget.controller.streaming,
+            onTap: _pickModel,
           ),
         ],
       ),
