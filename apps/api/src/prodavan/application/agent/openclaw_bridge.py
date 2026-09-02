@@ -69,8 +69,12 @@ def bridge_envelope_to_agent_event(envelope: dict) -> AgentEvent | None:
         return None
     if etype not in FROZEN_EVENT_TYPES and etype not in PLATFORM_STREAM_EVENT_TYPES:
         return None
-    data = envelope.get("data")
-    return AgentEvent.now(etype, data if isinstance(data, dict) else {})
+    raw_data = envelope.get("data")
+    data = dict(raw_data) if isinstance(raw_data, dict) else {}
+    parent_id = envelope.get("parent_tool_use_id")
+    if parent_id is not None and "parent_tool_use_id" not in data:
+        data["parent_tool_use_id"] = parent_id
+    return AgentEvent.now(etype, data)
 
 
 def bridge_envelope_is_stub(envelope: dict) -> bool:

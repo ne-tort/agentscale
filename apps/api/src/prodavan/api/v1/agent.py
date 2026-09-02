@@ -172,7 +172,7 @@ async def project_chat_transcript(
     employee: EmployeeDep,
     session_id: str | None = None,
 ) -> dict:
-    """Reload chat bubbles for workspace (L05)."""
+    """Reload typed chat blocks for workspace (L05)."""
     return await AgentSessionService(session).get_transcript(
         project_id=project_id,
         principal=principal,

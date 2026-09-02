@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:markdown/markdown.dart' as md;
 
 import 'package:prodavan/core/theme/app_spacing.dart';
 
@@ -16,6 +17,7 @@ class ChatMarkdownBody extends StatelessWidget {
     return MarkdownBody(
       data: text,
       selectable: selectable,
+      extensionSet: md.ExtensionSet.gitHubWeb,
       styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
         p: Theme.of(context).textTheme.bodyMedium,
         code: TextStyle(

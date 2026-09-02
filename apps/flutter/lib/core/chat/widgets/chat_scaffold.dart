@@ -177,9 +177,11 @@ class ChatScaffold extends StatelessWidget {
                             ),
                 ),
                 ChatComposer(
+                  projectId: controller.projectId,
+                  api: api,
                   enabled: chatAvailable && !controller.streaming,
                   disabledHint: l10n.errorPodNotRunning,
-                  onSend: (text) => controller.send(text),
+                  onSend: (text, refs) => controller.send(text, attachmentRefs: refs),
                   onCancel: controller.streaming ? () => controller.cancelStream() : null,
                 ),
               ],

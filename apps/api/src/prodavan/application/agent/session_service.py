@@ -134,7 +134,7 @@ def events_to_chat_blocks(events: list[dict]) -> list[dict]:
     for event in events:
         etype = event.get("type")
         data = event.get("data") or {}
-        parent_id = event.get("parent_tool_use_id")
+        parent_id = data.get("parent_tool_use_id") or event.get("parent_tool_use_id")
 
         if etype == PLATFORM_EVENT_USER_MESSAGE:
             flush_assistant()

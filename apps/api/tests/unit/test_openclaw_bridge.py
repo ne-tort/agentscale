@@ -62,6 +62,19 @@ def test_bridge_envelope_to_agent_event_skips_ping() -> None:
     assert sub.type == "subagent_start"
 
 
+def test_bridge_envelope_merges_parent_tool_use_id_into_data() -> None:
+    ev = bridge_envelope_to_agent_event(
+        {
+            "type": "subagent_event",
+            "parent_tool_use_id": "sub-1",
+            "data": {"child_event": {"type": "text_delta", "data": {"text": "hi"}}},
+        }
+    )
+    assert ev is not None
+    assert ev.data["parent_tool_use_id"] == "sub-1"
+    assert ev.data["child_event"]["type"] == "text_delta"
+
+
 def test_bridge_envelope_is_stub() -> None:
     assert bridge_envelope_is_stub({"type": "system_init", "data": {"stub": True}})
     assert bridge_envelope_is_stub(

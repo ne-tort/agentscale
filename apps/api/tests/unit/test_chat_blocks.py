@@ -65,6 +65,35 @@ def test_events_to_chat_blocks_subagent_tree() -> None:
     assert blocks[1]["events"][0]["type"] == "text_delta"
 
 
+def test_events_to_chat_blocks_subagent_tree_from_persisted_payload() -> None:
+    """Events as stored in PG (_event_public shape) — parent_tool_use_id lives in data."""
+    events = [
+        {
+            "seq": 1,
+            "type": AgentEventType.SUBAGENT_START,
+            "data": {"agent_id": "sub-1", "type": "explore", "parent_tool_use_id": "toolu_1"},
+        },
+        {
+            "seq": 2,
+            "type": AgentEventType.SUBAGENT_EVENT,
+            "data": {
+                "parent_tool_use_id": "sub-1",
+                "child_event": {"type": "text_delta", "data": {"text": "nested"}},
+            },
+        },
+        {
+            "seq": 3,
+            "type": AgentEventType.SUBAGENT_STOP,
+            "data": {"agent_id": "sub-1", "result_summary": "done"},
+        },
+    ]
+    blocks = events_to_chat_blocks(events)
+    assert len(blocks) == 1
+    assert blocks[0]["kind"] == "subagent"
+    assert blocks[0]["status"] == "completed"
+    assert blocks[0]["events"][0]["data"]["text"] == "nested"
+
+
 def test_events_to_chat_blocks_plan_progress() -> None:
     events = [
         {
