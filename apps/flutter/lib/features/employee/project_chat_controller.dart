@@ -45,11 +45,13 @@ class ProjectChatController {
   }
 
   Future<void> loadTranscript() async {
+    final previousSessionId = sessionId;
     final body = await api.projectChatTranscript(
       projectId: projectId,
       sessionId: sessionId,
     );
-    sessionId = body['session_id'] as String?;
+    final resolved = body['session_id'] as String?;
+    sessionId = resolved ?? previousSessionId;
     final raw = body['messages'];
     messages
       ..clear()
@@ -85,9 +87,15 @@ class ProjectChatController {
         final type = event['type'] as String?;
         final data = event['data'];
         if (type == '_session' && data is Map<String, dynamic>) {
-          sessionId = data['session_id'] as String? ?? sessionId;
+          final next = data['session_id'] as String?;
+          if (next != null && next.isNotEmpty) {
+            sessionId = next;
+          }
         } else if (type == '_turn_complete' && data is Map<String, dynamic>) {
-          sessionId = data['session_id'] as String? ?? sessionId;
+          final next = data['session_id'] as String?;
+          if (next != null && next.isNotEmpty) {
+            sessionId = next;
+          }
           final pending = data['pending_approvals'];
           if (pending is List) {
             pendingApprovals = pending.cast<Map<String, dynamic>>();

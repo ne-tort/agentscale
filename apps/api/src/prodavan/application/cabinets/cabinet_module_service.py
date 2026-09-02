@@ -36,10 +36,30 @@ def _check_table_slug(table_slug: str) -> str:
 
 
 def _attach_rematerialize(row: dict[str, Any], remat: dict[str, Any]) -> dict[str, Any]:
-    out = dict(row)
-    if int(remat.get("scheduled") or 0) > 0:
-        out["rematerialize"] = remat
-    return out
+    from prodavan.application.projects.workspace_sync_policy import WorkspaceSyncNotification, attach_workspace_sync
+
+    mode = remat.get("mode")
+    if mode not in ("deferred", "scheduled"):
+        mode = "deferred" if int(remat.get("marked_outdated") or 0) > 0 else "scheduled"
+    notification = WorkspaceSyncNotification(
+        mode=mode,
+        marked_outdated=int(remat.get("marked_outdated") or 0),
+        scheduled=int(remat.get("scheduled") or 0),
+        cabinet_id=remat.get("cabinet_id"),
+        module_id=remat.get("module_id"),
+        source=remat.get("source"),
+        enqueued=tuple(remat.get("enqueued") or ()),
+        sync=tuple(remat.get("sync") or ()),
+        skipped=bool(remat.get("skipped")),
+        reason=remat.get("reason"),
+    )
+    if (
+        notification.scheduled <= 0
+        and notification.marked_outdated <= 0
+        and not notification.skipped
+    ):
+        return dict(row)
+    return attach_workspace_sync(row, notification)
 
 
 def _ensure_row_body(body: Any) -> dict:

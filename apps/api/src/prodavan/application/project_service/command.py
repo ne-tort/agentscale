@@ -19,6 +19,11 @@ from prodavan.application.project_service.public import normalize_agent_provider
 from prodavan.application.project_service.query import ProjectQuery
 from prodavan.application.projects.materialize import get_materialize_service
 from prodavan.application.projects.pause_runtime import stop_project_runtime
+from prodavan.application.projects.runtime_side_effects import (
+    bootstrap_project_sessions,
+    op_from_reason,
+    schedule_bootstrap_background,
+)
 from prodavan.application.projects.trigger_service import ProjectTriggerService
 from prodavan.application.relations.commands import RelationsCommand
 from prodavan.domain.errors import AppError
@@ -272,9 +277,19 @@ class ProjectCommand:
         return out
 
     async def _stop_and_pause_runtime(
-        self, row: ProjectRow, *, principal: Principal, reason: str | None = None
+        self,
+        row: ProjectRow,
+        *,
+        principal: Principal,
+        reason: str | None = None,
+        purge_workspace: bool = False,
     ) -> None:
-        await stop_project_runtime(self._session, project_id=row.id)
+        await stop_project_runtime(
+            self._session,
+            project_id=row.id,
+            reason=reason,
+            purge_workspace=purge_workspace,
+        )
         await self._pods.sync_desired(
             row.id,
             PodDesiredState.ABSENT,
@@ -444,7 +459,16 @@ class ProjectCommand:
             await self._apply_post_rematerialize(
                 row, live_pod, principal=_SYSTEM_JOB, reason="rematerialize"
             )
+        from prodavan.application.projects.workspace_outdated import clear_workspace_outdated
+
+        clear_workspace_outdated(row)
         await self._session.commit()
+        if live_pod is not None and row.status == ProjectStatus.ACTIVE:
+            try:
+                await bootstrap_project_sessions(self._session, project_id=row.id)
+                await self._session.commit()
+            except Exception:
+                logger.exception("rematerialize bootstrap failed project_id=%s", row.id)
         return self._rematerialize_result(row, mat, live_pod, ok=True)
 
     async def stop_runtime_system(self, *, project_id: str, reason: str = "purge") -> None:
@@ -546,7 +570,12 @@ class ProjectCommand:
 
         await self._apply_post_rematerialize(row, live_pod, principal=principal, reason="sync")
 
+        from prodavan.application.projects.workspace_outdated import clear_workspace_outdated
+
+        clear_workspace_outdated(row)
         await self._session.commit()
+        if row.status == ProjectStatus.ACTIVE:
+            schedule_bootstrap_background(project_id=row.id, op=op_from_reason("sync"))
 
         return self._rematerialize_result(row, mat, live_pod)
 
@@ -683,6 +712,8 @@ class ProjectCommand:
                     from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
                     from prodavan.core.jobs.enqueue import enqueue_trigger_drain
 
+                    await bootstrap_project_sessions(session, project_id=row.id)
+                    await session.commit()
                     await AgentTriggerDispatcher(session).dispatch_batch(
                         project_id=row.id,
                         principal=principal,
@@ -691,7 +722,7 @@ class ProjectCommand:
                     )
                     enqueue_trigger_drain()
                 except Exception:
-                    pass
+                    logger.exception("resume post-bootstrap failed project_id=%s", project_id)
 
     async def reload_project(
         self,
@@ -737,6 +768,8 @@ class ProjectCommand:
             row.status = ProjectStatus.ERROR
         await self._session.commit()
         await self._session.refresh(row)
+        if row.status == ProjectStatus.ACTIVE:
+            schedule_bootstrap_background(project_id=row.id, op=op_from_reason("reload"))
         return await self._project_public(row, include_runtime=True)
 
     async def complete(
@@ -796,7 +829,12 @@ class ProjectCommand:
         principal: Principal,
         purge_workspace: bool,
     ) -> dict:
-        await self._stop_and_pause_runtime(row, principal=principal, reason="delete")
+        await self._stop_and_pause_runtime(
+            row,
+            principal=principal,
+            reason="delete",
+            purge_workspace=purge_workspace,
+        )
         row.status = ProjectStatus.DELETED
         await self._events.emit(
             event_type="project.deleted",
@@ -956,8 +994,18 @@ class ProjectCommand:
         for mid in unique:
             self._session.add(ProjectModuleBindingRow(project_id=row.id, module_id=mid))
         await self._session.commit()
-        sync = await self.rematerialize_background(project_id=row.id)
-        return {"module_ids": unique, "sync": sync}
+        from prodavan.application.projects.workspace_sync_policy import (
+            attach_workspace_sync,
+            defer_or_schedule_project_sync,
+        )
+
+        notification = await defer_or_schedule_project_sync(
+            self._session,
+            project_id=row.id,
+            source="project_modules",
+        )
+        await self._session.commit()
+        return attach_workspace_sync({"module_ids": unique}, notification)
 
     async def _wipe_workspace(self, row: ProjectRow) -> dict:
         try:

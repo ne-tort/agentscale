@@ -97,6 +97,12 @@ def _configure_and_launch(client: TestClient, owner_h: dict[str, str], project_i
     return launched.json()
 
 
+def _sync_project_workspace(client: TestClient, owner_h: dict[str, str], project_id: str) -> dict:
+    synced = client.post(f"/api/v1/projects/{project_id}/sync", headers=owner_h)
+    assert synced.status_code == 200, synced.text
+    return synced.json()
+
+
 @requires_postgres
 def test_project_create_materialize_lifecycle(client: TestClient) -> None:
     _, cabinet_id, owner_tok = _setup_cabinet(client)
@@ -1885,8 +1891,10 @@ def test_project_materialize_after_mod_files_row_on_running_pod(client: TestClie
         },
     )
     assert file_row.status_code == 200, file_row.text
-    remat_meta = file_row.json().get("rematerialize") or {}
-    assert int(remat_meta.get("scheduled") or 0) >= 1
+    remat_meta = file_row.json().get("rematerialize") or file_row.json().get("workspace_sync") or {}
+    assert int(remat_meta.get("marked_outdated") or 0) >= 1
+
+    _sync_project_workspace(client, owner_h, project_id)
 
     copied = ws_root / "assets" / "sync.txt"
     assert copied.is_file()
@@ -1927,7 +1935,10 @@ def test_patch_project_modules_syncs_running_pod(client: TestClient) -> None:
     assert patched.status_code == 200, patched.text
     body = patched.json()
     assert body["module_ids"] == ["mod_files"]
-    assert body["sync"]["ok"] is True
+    ws_meta = body.get("workspace_sync") or body.get("rematerialize") or {}
+    assert ws_meta.get("mode") == "deferred" or int(ws_meta.get("marked_outdated") or 0) >= 1
+
+    _sync_project_workspace(client, owner_h, project_id)
 
     after = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
     assert after.json()["runtime"]["hydrate_generation"] == 1
@@ -1998,8 +2009,10 @@ def test_admin_cabinet_module_bind_syncs_running_pod(client: TestClient) -> None
         },
     )
     assert file_row.status_code == 200, file_row.text
-    remat_meta = file_row.json().get("rematerialize") or {}
-    assert int(remat_meta.get("scheduled") or 0) >= 1
+    remat_meta = file_row.json().get("rematerialize") or file_row.json().get("workspace_sync") or {}
+    assert int(remat_meta.get("marked_outdated") or 0) >= 1
+
+    _sync_project_workspace(client, owner_h, project_id)
 
     assert missing.is_file(), list(ws_root.rglob("*"))
     assert missing.read_bytes() == file_payload

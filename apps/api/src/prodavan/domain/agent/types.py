@@ -27,8 +27,17 @@ PLATFORM_EVENT_TOOL_APPROVAL_DECISION = "tool_approval_decision"
 
 class AgentSessionStatus(StrEnum):
     ACTIVE = "active"
+    SUSPENDED = "suspended"
     CLOSED = "closed"
     CANCELLED = "cancelled"
+
+
+RESUMABLE_SESSION_STATUSES = frozenset(
+    {
+        AgentSessionStatus.ACTIVE,
+        AgentSessionStatus.SUSPENDED,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)

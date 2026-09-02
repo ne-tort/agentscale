@@ -10,16 +10,28 @@ Admin / key disable / idle
 
 ## Операции
 
-| Op | Project | Container |
-|----|---------|-----------|
-| **create** | insert, materialize workspace → MinIO | `ensure` + `start` (Pod + hydrate) |
-| **pause** | status=paused; cancel sessions | sync workspace → MinIO; **delete Pod**; status=`paused` |
-| **resume** | AI key gate; status=active | **new Pod** + hydrate from MinIO; status=`running` |
-| **soft_delete** | status=deleted; cancel sessions; **blobs keep** | **delete Pod**; no MinIO wipe |
-| **purge** | after soft_delete | wipe MinIO + ensure Pod gone |
-| **force-kill** | опционально paused/failed | grace=0 Pod delete |
+| Op | Project | Container | Agent sessions |
+|----|---------|-----------|----------------|
+| **create** | insert, materialize workspace → MinIO | `ensure` + `start` (Pod + hydrate) | — |
+| **pause** | status=paused | **delete Pod** (grace=30); workspace blobs in MinIO unchanged | **SUSPENDED** (reactivate on resume) |
+| **complete** | status=completed | delete Pod | **SUSPENDED** |
+| **resume** | AI key gate; status=active | **new Pod** + hydrate from MinIO | reactivate + bridge bootstrap |
+| **reload** | status=active | terminate + recreate Pod (no rematerialize) | reactivate + bridge bootstrap |
+| **sync** («Обновить проект») | clears `workspace_outdated_at` | materialize workspace; bump hydrate_generation | bridge bootstrap if running |
+| **soft_delete** (archive) | status=deleted; **blobs keep** | **delete Pod** | **SUSPENDED** |
+| **soft_delete** + `purge_workspace` | wipe MinIO | delete Pod | **CANCELLED** |
+| **purge** | after soft_delete; wipe MinIO | ensure Pod gone | **CANCELLED** (ACTIVE + SUSPENDED) |
+| **force-kill** | опционально paused/failed | grace=0 Pod delete | — |
 
 `inert` (paused **или** soft_deleted) ⇒ desired Pod = absent. См. [00-lifecycle.md](../00-lifecycle.md).
+
+## Deferred workspace sync
+
+По умолчанию `projects_auto_rematerialize_on_cabinet_change=false`.
+
+Изменения модулей кабинета (CRUD строк, bind/unbind) **не** rematerialize Pod сразу — выставляют `workspace_outdated_at` на затронутых проектах. Пользователь применяет изменения явно через **«Обновить проект»** (`POST /projects/{id}/sync`).
+
+API ответы содержат `workspace_sync` (`mode: deferred|scheduled`, `marked_outdated`, `scheduled`); ключ `rematerialize` сохранён как alias.
 
 ## Почему pause ≠ «замороженный Pod»
 

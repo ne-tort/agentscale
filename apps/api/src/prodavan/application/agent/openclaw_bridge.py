@@ -101,6 +101,7 @@ class BridgeSessionBootstrap:
     adapter_kind: str
     model: str | None = None
     provider_key_id: str | None = None
+    adapter_state: dict | None = None
 
 
 class OpenClawBridgeBootstrap:
@@ -148,6 +149,12 @@ class OpenClawBridgeBootstrap:
             async with self._http_client(timeout=5.0) as client:
                 response = await client.post(url, json=body, headers=_runtime_request_headers())
             if response.status_code in (200, 201):
+                if payload.adapter_state:
+                    await self._patch_adapter_state(
+                        pod_ip=pod_ip,
+                        session_id=payload.session_id,
+                        adapter_state=payload.adapter_state,
+                    )
                 logger.info(
                     "openclaw bootstrap: registered session %s on pod %s",
                     payload.session_id,
@@ -164,6 +171,60 @@ class OpenClawBridgeBootstrap:
             logger.debug("openclaw bootstrap failed for %s: %s", payload.session_id, exc)
         return False
 
+    async def _patch_adapter_state(
+        self,
+        *,
+        pod_ip: str,
+        session_id: str,
+        adapter_state: dict,
+    ) -> bool:
+        url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/sessions/{session_id}"
+        try:
+            async with self._http_client(timeout=5.0) as client:
+                response = await client.patch(
+                    url,
+                    json={"adapter_state": adapter_state},
+                    headers=_runtime_request_headers(),
+                )
+            return response.status_code in (200, 204)
+        except Exception as exc:
+            logger.debug("openclaw adapter_state patch failed session=%s: %s", session_id, exc)
+            return False
+
+    async def sync_adapter_state_for_session(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+    ) -> dict | None:
+        """Best-effort pull adapterState from bridge list after send."""
+        if not settings.pod_agent_runtime_enabled:
+            return None
+        pod_ip = await self._resolve_pod_ip_for_project(project_id)
+        if not pod_ip:
+            return None
+        url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/sessions"
+        try:
+            async with self._http_client(timeout=5.0) as client:
+                response = await client.get(url, headers=_runtime_request_headers())
+            if response.status_code >= 400:
+                return None
+            payload = response.json()
+            sessions = payload.get("sessions") if isinstance(payload, dict) else None
+            if not isinstance(sessions, list):
+                return None
+            for item in sessions:
+                if not isinstance(item, dict):
+                    continue
+                sid = str(item.get("sessionId") or item.get("session_id") or "")
+                if sid != session_id:
+                    continue
+                state = item.get("adapterState") or item.get("adapter_state")
+                return state if isinstance(state, dict) else None
+        except Exception as exc:
+            logger.debug("openclaw sync adapter_state failed session=%s: %s", session_id, exc)
+        return None
+
     async def iter_send_events(
         self,
         *,
@@ -171,6 +232,7 @@ class OpenClawBridgeBootstrap:
         session_id: str,
         message: str,
         model: str | None = None,
+        bootstrap: BridgeSessionBootstrap | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """Proxy send to Pod agent-runtime; yields normalized AgentEvent stream."""
         if not settings.pod_agent_runtime_enabled:
@@ -189,6 +251,49 @@ class OpenClawBridgeBootstrap:
             )
             return
 
+        retried = False
+        while True:
+            session_missing = False
+            async for event in self._stream_send(
+                pod_ip=pod_ip,
+                session_id=session_id,
+                message=message,
+                model=model,
+            ):
+                if (
+                    not retried
+                    and bootstrap is not None
+                    and event.type == AgentEventType.ERROR
+                    and isinstance(event.data, dict)
+                    and event.data.get("code") == "BRIDGE_SESSION_NOT_FOUND"
+                ):
+                    session_missing = True
+                    break
+                yield event
+                if event.type in {AgentEventType.ERROR, AgentEventType.DONE}:
+                    return
+            if session_missing and not retried and bootstrap is not None:
+                retried = True
+                if await self.register_session(project_id=project_id, payload=bootstrap):
+                    continue
+                yield AgentEvent.now(
+                    AgentEventType.ERROR,
+                    {
+                        "code": "BRIDGE_SESSION_NOT_FOUND",
+                        "message": "agent session missing in pod after restart",
+                        "retryable": False,
+                    },
+                )
+            return
+
+    async def _stream_send(
+        self,
+        *,
+        pod_ip: str,
+        session_id: str,
+        message: str,
+        model: str | None,
+    ) -> AsyncIterator[AgentEvent]:
         url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/sessions/{session_id}/send"
         body: dict[str, str] = {"message": message}
         if model and str(model).strip():
@@ -205,11 +310,15 @@ class OpenClawBridgeBootstrap:
                 ) as response:
                     if response.status_code >= 400:
                         text = await response.aread()
+                        body_text = text.decode("utf-8", errors="replace")
+                        code = "BRIDGE_SEND_FAILED"
+                        if response.status_code == 404 and "session not found" in body_text.lower():
+                            code = "BRIDGE_SESSION_NOT_FOUND"
                         yield AgentEvent.now(
                             AgentEventType.ERROR,
                             {
-                                "code": "BRIDGE_SEND_FAILED",
-                                "message": text.decode("utf-8", errors="replace")[:500],
+                                "code": code,
+                                "message": body_text[:500],
                                 "retryable": response.status_code >= 500,
                             },
                         )

@@ -46,6 +46,10 @@ async def test_rematerialize_background_bumps_hydrate_for_live_pod(monkeypatch: 
     monkeypatch.setattr(cmd, "_sync_project_workspace", AsyncMock(return_value=mat))
     sync_desired = AsyncMock()
     monkeypatch.setattr(cmd._pods, "sync_desired", sync_desired)
+    monkeypatch.setattr(
+        "prodavan.application.project_service.command.bootstrap_project_sessions",
+        AsyncMock(return_value={"registered": 0}),
+    )
 
     out = await cmd.rematerialize_background(project_id="proj_1")
 
@@ -53,7 +57,7 @@ async def test_rematerialize_background_bumps_hydrate_for_live_pod(monkeypatch: 
     assert out["hydrate_generation"] == 1
     assert live_pod.hydrate_generation == 1
     sync_desired.assert_awaited_once()
-    session.commit.assert_awaited_once()
+    assert session.commit.await_count == 2
 
 
 @pytest.mark.asyncio

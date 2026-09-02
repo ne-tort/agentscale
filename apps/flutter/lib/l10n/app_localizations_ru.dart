@@ -1042,6 +1042,10 @@ class AppLocalizationsRu extends AppLocalizations {
   }
 
   @override
+  String get cabinetModuleWorkspaceOutdated =>
+      'Изменения модуля сохранены — нажмите «Обновить проект» на каждом запущенном проекте';
+
+  @override
   String get cabinetArchiveTable => 'В архив';
 
   @override
@@ -2206,6 +2210,10 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get projectUpdateSuccess => 'Проект обновлён';
+
+  @override
+  String get projectWorkspaceOutdated =>
+      'Workspace устарел — нажмите «Обновить проект», чтобы применить изменения модулей';
 
   @override
   String get projectResetSuccess => 'Агент сброшен';

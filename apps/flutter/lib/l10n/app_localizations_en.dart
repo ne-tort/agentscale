@@ -1032,6 +1032,10 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String get cabinetModuleWorkspaceOutdated =>
+      'Module changes saved — use Update project on each running project to apply';
+
+  @override
   String get cabinetArchiveTable => 'Archive table';
 
   @override
@@ -2194,6 +2198,10 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get projectUpdateSuccess => 'Project updated';
+
+  @override
+  String get projectWorkspaceOutdated =>
+      'Workspace is outdated — use Update project to apply module changes';
 
   @override
   String get projectResetSuccess => 'Agent reset';

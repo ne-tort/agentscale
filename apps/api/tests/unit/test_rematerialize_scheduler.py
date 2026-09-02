@@ -11,6 +11,7 @@ from prodavan.application.projects.rematerialize_scheduler import (
     schedule_cabinet_binding_change_rematerialize,
     schedule_cabinet_rematerialize,
 )
+from prodavan.application.projects.workspace_sync_policy import WorkspaceSyncNotification
 
 
 @pytest.mark.asyncio
@@ -23,23 +24,24 @@ async def test_module_has_materialize_rules_product_modules() -> None:
 @pytest.mark.asyncio
 async def test_schedule_cabinet_rematerialize_enqueues_projects() -> None:
     session = AsyncMock()
-    with (
-        patch(
-            "prodavan.application.projects.rematerialize_scheduler.ProjectQuery"
-        ) as query_cls,
-        patch(
-            "prodavan.application.projects.rematerialize_scheduler.request_rematerialize_project",
-            AsyncMock(return_value={"enqueued": True}),
-        ) as request,
-    ):
-        query_cls.return_value.list_ids = AsyncMock(return_value=["proj_a", "proj_b"])
-
+    notification = WorkspaceSyncNotification(
+        mode="scheduled",
+        scheduled=2,
+        cabinet_id="cab_1",
+        module_id="mod_files",
+        source="cabinet_module",
+        enqueued=("proj_a", "proj_b"),
+    )
+    with patch(
+        "prodavan.application.projects.rematerialize_scheduler.defer_or_schedule_cabinet_sync",
+        AsyncMock(return_value=notification),
+    ) as defer:
         out = await schedule_cabinet_rematerialize(
             session, cabinet_id="cab_1", module_id="mod_files"
         )
 
     assert out["scheduled"] == 2
-    assert request.await_count == 2
+    defer.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -57,49 +59,71 @@ async def test_schedule_skips_modules_without_materialize() -> None:
 
 
 @pytest.mark.asyncio
+async def test_schedule_cabinet_rematerialize_marks_outdated_when_auto_off() -> None:
+    session = AsyncMock()
+    notification = WorkspaceSyncNotification(
+        mode="deferred",
+        marked_outdated=2,
+        cabinet_id="cab_1",
+        module_id="mod_files",
+        source="cabinet_module",
+    )
+    with patch(
+        "prodavan.application.projects.rematerialize_scheduler.defer_or_schedule_cabinet_sync",
+        AsyncMock(return_value=notification),
+    ) as defer:
+        out = await schedule_cabinet_rematerialize(
+            session, cabinet_id="cab_1", module_id="mod_files"
+        )
+    assert out["marked_outdated"] == 2
+    assert out["mode"] == "deferred"
+    defer.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_schedule_binding_change_rematerializes_all_projects() -> None:
     session = AsyncMock()
-    with (
-        patch(
-            "prodavan.application.projects.rematerialize_scheduler.ProjectQuery"
-        ) as query_cls,
-        patch(
-            "prodavan.application.projects.rematerialize_scheduler.request_rematerialize_project",
-            AsyncMock(return_value={"enqueued": True}),
-        ) as request,
-    ):
-        query_cls.return_value.list_ids = AsyncMock(return_value=["proj_a"])
+    notification = WorkspaceSyncNotification(
+        mode="scheduled",
+        scheduled=1,
+        cabinet_id="cab_1",
+        source="cabinet_binding",
+        enqueued=("proj_a",),
+    )
+    with patch(
+        "prodavan.application.projects.rematerialize_scheduler.defer_or_schedule_cabinet_sync",
+        AsyncMock(return_value=notification),
+    ) as defer:
         out = await schedule_cabinet_binding_change_rematerialize(
             session, cabinet_id="cab_1"
         )
 
     assert out["scheduled"] == 1
-    request.assert_awaited_once()
-    assert request.await_args.kwargs["source"] == "cabinet_binding"
+    defer.assert_awaited_once_with(
+        session,
+        cabinet_id="cab_1",
+        module_id=None,
+        source="cabinet_binding",
+    )
 
 
 @pytest.mark.asyncio
 async def test_schedule_binding_change_via_bus_when_enabled() -> None:
     session = AsyncMock()
-    with (
-        patch(
-            "prodavan.application.projects.rematerialize_scheduler.ProjectQuery"
-        ) as query_cls,
-        patch(
-            "prodavan.application.projects.rematerialize_scheduler.request_rematerialize_project",
-            AsyncMock(return_value={"enqueued": True, "via_bus": True, "project_id": "proj_a"}),
-        ) as request,
+    notification = WorkspaceSyncNotification(
+        mode="scheduled",
+        scheduled=1,
+        cabinet_id="cab_1",
+        source="cabinet_binding",
+        enqueued=("proj_a",),
+    )
+    with patch(
+        "prodavan.application.projects.rematerialize_scheduler.defer_or_schedule_cabinet_sync",
+        AsyncMock(return_value=notification),
     ):
-        query_cls.return_value.list_ids = AsyncMock(return_value=["proj_a"])
         out = await schedule_cabinet_binding_change_rematerialize(
             session, cabinet_id="cab_1"
         )
 
     assert out["scheduled"] == 1
     assert out["enqueued"] == ["proj_a"]
-    request.assert_awaited_once_with(
-        "proj_a",
-        cabinet_id="cab_1",
-        module_id=None,
-        source="cabinet_binding",
-    )

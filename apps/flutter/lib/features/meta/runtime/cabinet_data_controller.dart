@@ -5,6 +5,7 @@ import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 
 typedef ProjectsRematerializeCallback = void Function(int scheduled, {required bool inline});
+typedef WorkspaceOutdatedCallback = void Function();
 
 /// Live cabinet module data — mirrors SeedDataController API for interpreters.
 class CabinetDataController extends ChangeNotifier {
@@ -22,6 +23,7 @@ class CabinetDataController extends ChangeNotifier {
   final List<Map<String, dynamic>> _items = [];
 
   ProjectsRematerializeCallback? onProjectsRematerialize;
+  WorkspaceOutdatedCallback? onWorkspaceOutdated;
 
   ModuleMetaManifest get manifest => _manifest;
 
@@ -69,13 +71,29 @@ class CabinetDataController extends ChangeNotifier {
   }
 
   void _emitRematerialize(Map<String, dynamic>? payload) {
-    final remat = payload?['rematerialize'];
-    if (remat is! Map) return;
-    final scheduled = remat['scheduled'];
-    if (scheduled is! int || scheduled <= 0) return;
-    final sync = remat['sync'];
-    final inline = sync is List && sync.isNotEmpty;
-    onProjectsRematerialize?.call(scheduled, inline: inline);
+    final remat = payload?['rematerialize'] ?? payload?['workspace_sync'];
+    if (remat is Map) {
+      final marked = remat['marked_outdated'];
+      if (marked is int && marked > 0) {
+        onWorkspaceOutdated?.call();
+        return;
+      }
+      final scheduled = remat['scheduled'];
+      if (scheduled is int && scheduled > 0) {
+        final sync = remat['sync'];
+        final inline = sync is List && sync.isNotEmpty;
+        onProjectsRematerialize?.call(scheduled, inline: inline);
+        return;
+      }
+      if (remat['mode'] == 'deferred') {
+        onWorkspaceOutdated?.call();
+        return;
+      }
+    }
+    final outdated = payload?['workspace_outdated'];
+    if (outdated is Map && (outdated['marked_outdated'] as int? ?? 0) > 0) {
+      onWorkspaceOutdated?.call();
+    }
   }
 
   Future<String> createRow(String tableSlug, {Map<String, dynamic>? initial}) async {

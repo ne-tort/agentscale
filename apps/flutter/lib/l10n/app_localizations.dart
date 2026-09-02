@@ -1844,6 +1844,12 @@ abstract class AppLocalizations {
   /// **'Updated {count, plural, =1{1 project workspace} other{{count} project workspaces}}'**
   String cabinetModuleRematerializeDone(int count);
 
+  /// No description provided for @cabinetModuleWorkspaceOutdated.
+  ///
+  /// In en, this message translates to:
+  /// **'Module changes saved — use Update project on each running project to apply'**
+  String get cabinetModuleWorkspaceOutdated;
+
   /// No description provided for @cabinetArchiveTable.
   ///
   /// In en, this message translates to:
@@ -3979,6 +3985,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Project updated'**
   String get projectUpdateSuccess;
+
+  /// No description provided for @projectWorkspaceOutdated.
+  ///
+  /// In en, this message translates to:
+  /// **'Workspace is outdated — use Update project to apply module changes'**
+  String get projectWorkspaceOutdated;
 
   /// No description provided for @projectResetSuccess.
   ///

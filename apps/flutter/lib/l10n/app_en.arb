@@ -639,6 +639,7 @@
       }
     }
   },
+  "cabinetModuleWorkspaceOutdated": "Module changes saved — use Update project on each running project to apply",
   "cabinetArchiveTable": "Archive table",
   "cabinetArchiveTableConfirm": "Archive table?",
   "cabinetArchiveTableMessage": "Archive \"{tableSlug}\". Rows stay in DB but table hides from lists. Remove views referencing this table first.",
@@ -1204,6 +1205,7 @@
   "projectPauseConfirmMessage": "While paused, the agent will be unavailable.",
   "projectReloadSuccess": "Project reloaded",
   "projectUpdateSuccess": "Project updated",
+  "projectWorkspaceOutdated": "Workspace is outdated — use Update project to apply module changes",
   "projectResetSuccess": "Agent reset",
   "projectAiKeyLabel": "AI key",
   "projectModulesLabel": "Modules",

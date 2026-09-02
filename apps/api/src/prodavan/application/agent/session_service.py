@@ -376,6 +376,14 @@ class AgentSessionService:
                 session_id=session_id,
                 message=text,
                 model=row.model,
+                bootstrap=BridgeSessionBootstrap(
+                    session_id=row.id,
+                    prodavan_session_id=row.id,
+                    adapter_kind=api_kind_to_bridge_adapter(row.api_kind),
+                    model=row.model,
+                    provider_key_id=row.resolved_key_id,
+                    adapter_state=row.adapter_state if isinstance(row.adapter_state, dict) else None,
+                ),
             ):
                 used_bridge = True
                 seq += 1
@@ -404,9 +412,22 @@ class AgentSessionService:
                         )
                     )
                 if event.type in {AgentEventType.DONE, AgentEventType.ERROR}:
+                    if event.type == AgentEventType.DONE:
+                        state = await bridge.sync_adapter_state_for_session(
+                            project_id=project_id,
+                            session_id=session_id,
+                        )
+                        if isinstance(state, dict):
+                            row.adapter_state = state
                     return
 
             if used_bridge:
+                state = await bridge.sync_adapter_state_for_session(
+                    project_id=project_id,
+                    session_id=session_id,
+                )
+                if isinstance(state, dict):
+                    row.adapter_state = state
                 return
             raise agent_runtime_unavailable(detail="pod agent-runtime did not respond")
 
@@ -530,7 +551,7 @@ class AgentSessionService:
         employee: EmployeeRow,
         model: str | None,
     ) -> str:
-        """Use ACTIVE session_id if valid; ignore cancelled/closed leftovers from UI after pause."""
+        """Reuse ACTIVE session; reactivate SUSPENDED session from UI after pause/resume."""
         if session_id:
             row = await self.get_session(session_id=session_id)
             if row.project_id != project_id:
@@ -541,6 +562,10 @@ class AgentSessionService:
                     detail="Agent session not found",
                 )
             if row.status == AgentSessionStatus.ACTIVE:
+                return row.id
+            if row.status == AgentSessionStatus.SUSPENDED:
+                self._reactivate_session_row(row)
+                await self._session.flush()
                 return row.id
         return await self._resolve_active_session_id(
             project_id=project_id,
@@ -567,6 +592,18 @@ class AgentSessionService:
         row = q.scalar_one_or_none()
         if row is not None:
             return row.id
+        suspended_q = await self._session.execute(
+            select(AgentSessionRow)
+            .where(AgentSessionRow.project_id == project_id)
+            .where(AgentSessionRow.status == AgentSessionStatus.SUSPENDED)
+            .order_by(AgentSessionRow.created_at.desc())
+            .limit(1)
+        )
+        suspended = suspended_q.scalar_one_or_none()
+        if suspended is not None:
+            self._reactivate_session_row(suspended)
+            await self._session.flush()
+            return suspended.id
         created = await self.create_session(
             project_id=project_id,
             principal=principal,
@@ -714,17 +751,27 @@ class AgentSessionService:
             if active is not None:
                 sid = active.id
             else:
-                # After pause auto-cancel, fall back to latest session so history remains.
-                latest_q = await self._session.execute(
+                suspended_q = await self._session.execute(
                     select(AgentSessionRow)
                     .where(AgentSessionRow.project_id == project_id)
+                    .where(AgentSessionRow.status == AgentSessionStatus.SUSPENDED)
                     .order_by(AgentSessionRow.created_at.desc())
                     .limit(1)
                 )
-                latest = latest_q.scalar_one_or_none()
-                if latest is None:
-                    return {"session_id": None, "messages": []}
-                sid = latest.id
+                suspended = suspended_q.scalar_one_or_none()
+                if suspended is not None:
+                    sid = suspended.id
+                else:
+                    latest_q = await self._session.execute(
+                        select(AgentSessionRow)
+                        .where(AgentSessionRow.project_id == project_id)
+                        .order_by(AgentSessionRow.created_at.desc())
+                        .limit(1)
+                    )
+                    latest = latest_q.scalar_one_or_none()
+                    if latest is None:
+                        return {"session_id": None, "session_status": None, "messages": []}
+                    sid = latest.id
         else:
             row = await self.get_session(session_id=sid)
             if row.project_id != project_id:
@@ -774,13 +821,55 @@ class AgentSessionService:
         return _session_public(row)
 
     async def cancel_active_for_project(self, *, project_id: str) -> int:
-        """Best-effort cancel of ACTIVE sessions (project pause). Caller already authorized."""
+        """Best-effort cancel of ACTIVE sessions (reset prelude / hard stop). Caller owns commit."""
         result = await self._session.execute(
             select(AgentSessionRow)
             .where(AgentSessionRow.project_id == project_id)
             .where(AgentSessionRow.status == AgentSessionStatus.ACTIVE)
         )
         return await self._cancel_session_rows(list(result.scalars().all()))
+
+    async def cancel_resumable_for_project(self, *, project_id: str) -> int:
+        """Cancel ACTIVE and SUSPENDED sessions (delete with wipe / purge). Caller owns commit."""
+        result = await self._session.execute(
+            select(AgentSessionRow)
+            .where(AgentSessionRow.project_id == project_id)
+            .where(
+                AgentSessionRow.status.in_(
+                    (AgentSessionStatus.ACTIVE, AgentSessionStatus.SUSPENDED)
+                )
+            )
+        )
+        return await self._cancel_session_rows(list(result.scalars().all()))
+
+    async def suspend_active_for_project(self, *, project_id: str) -> int:
+        """Suspend ACTIVE sessions before project pod teardown (recoverable on resume)."""
+        result = await self._session.execute(
+            select(AgentSessionRow)
+            .where(AgentSessionRow.project_id == project_id)
+            .where(AgentSessionRow.status == AgentSessionStatus.ACTIVE)
+        )
+        rows = list(result.scalars().all())
+        for row in rows:
+            row.status = AgentSessionStatus.SUSPENDED
+        return len(rows)
+
+    async def reactivate_resumable_for_project(self, *, project_id: str) -> list[str]:
+        """Reactivate SUSPENDED sessions after project pod is back."""
+        result = await self._session.execute(
+            select(AgentSessionRow)
+            .where(AgentSessionRow.project_id == project_id)
+            .where(AgentSessionRow.status == AgentSessionStatus.SUSPENDED)
+            .order_by(AgentSessionRow.created_at.asc())
+        )
+        rows = list(result.scalars().all())
+        for row in rows:
+            self._reactivate_session_row(row)
+        return [row.id for row in rows]
+
+    @staticmethod
+    def _reactivate_session_row(row: AgentSessionRow) -> None:
+        row.status = AgentSessionStatus.ACTIVE
 
     async def reset_for_project(self, *, project_id: str) -> dict:
         """Stop agent sessions and purge chat history for a launched project."""

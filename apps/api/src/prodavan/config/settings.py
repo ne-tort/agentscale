@@ -156,6 +156,12 @@ class Settings(BaseSettings):
     )
     # When True, allow FakeAgentAdapter / FixtureCursorAdapter in-process (pytest only).
     agent_inprocess_adapters_enabled: bool = False
+    projects_auto_rematerialize_on_cabinet_change: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "PROJECTS_AUTO_REMATERIALIZE_ON_CABINET_CHANGE",
+        ),
+    )
 
     @property
     def pod_agent_bridge_enabled(self) -> bool:

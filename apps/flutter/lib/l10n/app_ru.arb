@@ -641,6 +641,7 @@
       }
     }
   },
+  "cabinetModuleWorkspaceOutdated": "Изменения модуля сохранены — нажмите «Обновить проект» на каждом запущенном проекте",
   "cabinetArchiveTable": "В архив",
   "cabinetArchiveTableConfirm": "Отправить таблицу в архив?",
   "cabinetArchiveTableMessage": "Архивировать «{tableSlug}». Строки останутся в БД, таблица скрывается из списков. Сначала уберите представления с этой таблицей.",
@@ -1206,6 +1207,7 @@
   "projectPauseConfirmMessage": "При приостановке проекта агент будет недоступен.",
   "projectReloadSuccess": "Проект перезагружен",
   "projectUpdateSuccess": "Проект обновлён",
+  "projectWorkspaceOutdated": "Workspace устарел — нажмите «Обновить проект», чтобы применить изменения модулей",
   "projectResetSuccess": "Агент сброшен",
   "projectAiKeyLabel": "AI-ключ",
   "projectModulesLabel": "Модули",

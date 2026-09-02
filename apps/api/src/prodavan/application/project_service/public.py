@@ -60,6 +60,9 @@ def project_public(
         "about": getattr(row, "about", None),
         "resolved_ai_key_id": getattr(row, "resolved_ai_key_id", None),
         "budget_tokens": getattr(row, "budget_tokens", None),
+        "workspace_outdated_at": (
+            row.workspace_outdated_at.isoformat() if row.workspace_outdated_at else None
+        ),
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }

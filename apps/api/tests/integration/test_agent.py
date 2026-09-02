@@ -1029,11 +1029,11 @@ def test_agent_session_create_blocked_cancel_allowed_when_paused(client: TestCli
 
     client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
 
-    # Pause auto-cancels ACTIVE sessions.
+    # Pause auto-suspends ACTIVE sessions (recoverable on resume).
     listed = client.get(f"/api/v1/projects/{project_id}/agent/sessions", headers=owner_h)
     assert listed.status_code == 200, listed.text
     sess_row = next(s for s in listed.json()["items"] if s["id"] == session_id)
-    assert sess_row["status"] == "cancelled"
+    assert sess_row["status"] == "suspended"
 
     blocked = client.post(f"/api/v1/projects/{project_id}/agent/sessions", headers=owner_h, json={})
     assert blocked.status_code == 409, blocked.text
@@ -1056,22 +1056,22 @@ def test_agent_session_create_blocked_cancel_allowed_when_paused(client: TestCli
     assert cancelled.status_code == 200, cancelled.text
     assert cancelled.json()["status"] == "cancelled"
 
-    # Transcript without session_id still returns history after auto-cancel.
+    # Transcript without session_id still returns history after auto-suspend.
     transcript = client.get(f"/api/v1/projects/{project_id}/chat/transcript", headers=owner_h)
     assert transcript.status_code == 200, transcript.text
     assert transcript.json()["session_id"] == session_id
-    assert transcript.json().get("session_status") == "cancelled"
+    assert transcript.json().get("session_status") == "suspended"
 
     client.post(f"/api/v1/projects/{project_id}/resume", headers=owner_h)
 
-    # Stale cancelled session_id must not block chat after resume.
+    # Suspended session_id is reactivated and reused after resume.
     after = client.post(
         f"/api/v1/projects/{project_id}/chat",
         headers=owner_h,
         json={"text": "after resume", "session_id": session_id},
     )
     assert after.status_code == 200, after.text
-    assert after.json()["session_id"] != session_id
+    assert after.json()["session_id"] == session_id
 
 
 @requires_postgres

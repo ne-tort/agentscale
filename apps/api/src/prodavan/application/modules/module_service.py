@@ -129,19 +129,41 @@ class ModuleService:
         await self._get_row(module_id)
         await self._bindings.bind_project(module_id, project_id)
         await self._session.commit()
-        from prodavan.application.project_service.command import ProjectCommand
+        from prodavan.application.projects.workspace_sync_policy import (
+            attach_workspace_sync,
+            defer_or_schedule_project_sync,
+        )
 
-        sync = await ProjectCommand(self._session).rematerialize_background(project_id=project_id)
-        return {"module_id": module_id, "project_id": project_id, "status": "active", "sync": sync}
+        notification = await defer_or_schedule_project_sync(
+            self._session,
+            project_id=project_id,
+            source="module_bind",
+        )
+        await self._session.commit()
+        return attach_workspace_sync(
+            {"module_id": module_id, "project_id": project_id, "status": "active"},
+            notification,
+        )
 
     async def revoke_project(self, *, module_id: str, project_id: str) -> dict:
         await self._get_row(module_id)
         await self._bindings.revoke_project(module_id, project_id)
         await self._session.commit()
-        from prodavan.application.project_service.command import ProjectCommand
+        from prodavan.application.projects.workspace_sync_policy import (
+            attach_workspace_sync,
+            defer_or_schedule_project_sync,
+        )
 
-        sync = await ProjectCommand(self._session).rematerialize_background(project_id=project_id)
-        return {"module_id": module_id, "project_id": project_id, "status": "revoked", "sync": sync}
+        notification = await defer_or_schedule_project_sync(
+            self._session,
+            project_id=project_id,
+            source="module_revoke",
+        )
+        await self._session.commit()
+        return attach_workspace_sync(
+            {"module_id": module_id, "project_id": project_id, "status": "revoked"},
+            notification,
+        )
 
     async def _get_row(self, module_id: str) -> ModuleRow:
         row = await self._session.get(ModuleRow, module_id)

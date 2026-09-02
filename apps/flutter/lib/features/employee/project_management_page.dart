@@ -34,6 +34,7 @@ class _ProjectManagementPageState extends State<ProjectManagementPage> {
   bool _syncing = false;
   bool _loading = true;
   String? _status;
+  String? _workspaceOutdatedAt;
 
   @override
   void initState() {
@@ -47,6 +48,7 @@ class _ProjectManagementPageState extends State<ProjectManagementPage> {
       if (!mounted) return;
       setState(() {
         _status = project['status'] as String?;
+        _workspaceOutdatedAt = project['workspace_outdated_at'] as String?;
         _loading = false;
       });
     } catch (e) {
@@ -141,6 +143,7 @@ class _ProjectManagementPageState extends State<ProjectManagementPage> {
     final l10n = AppLocalizations.of(context);
     final warning = context.appColors.warning;
     final paused = _status == 'paused';
+    final workspaceOutdated = _workspaceOutdatedAt != null && _workspaceOutdatedAt!.isNotEmpty;
     final actionBusy = _pausing || _resuming || _syncing || _busy;
     final enabled = !actionBusy && !_loading;
 
@@ -151,6 +154,11 @@ class _ProjectManagementPageState extends State<ProjectManagementPage> {
           : ListView(
               padding: EdgeInsets.all(AppSpacing.md),
               children: [
+                if (workspaceOutdated && !paused)
+                  AppStatusBanner(
+                    message: l10n.projectWorkspaceOutdated,
+                    severity: AppStatusSeverity.warning,
+                  ),
                 if (paused)
                   AppNavPreference(
                     title: l10n.projectResumeProject,
