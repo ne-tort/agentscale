@@ -10,6 +10,11 @@ from prodavan.infrastructure.persistence.models.ai_keys import (
     AiProviderKeyRow,
     CompanyAiKeyBindingRow,
 )
+from prodavan.infrastructure.persistence.models.ai_models import (
+    AiKeyModelBindingRow,
+    AiModelRow,
+    AiModelSdkBindingRow,
+)
 from prodavan.infrastructure.persistence.models.base import Base
 from prodavan.infrastructure.persistence.models.cabinets import (
     CabinetCompanyGrantRow,
@@ -51,6 +56,9 @@ __all__ = [
     "AgentSessionRow",
     "AgentUsageRow",
     "AiKeyAuditEventRow",
+    "AiKeyModelBindingRow",
+    "AiModelRow",
+    "AiModelSdkBindingRow",
     "AiProviderKeyRow",
     "Base",
     "CabinetCompanyGrantRow",

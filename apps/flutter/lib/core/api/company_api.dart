@@ -543,6 +543,82 @@ class CompanyApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<List<Map<String, dynamic>>> listAiModels(String companyId) async {
+    final res = await AuthHttp.get(_uri('/companies/$companyId/ai-models'));
+    _throwIfError(res);
+    final body = jsonDecode(res.body);
+    if (body is List) return body.cast<Map<String, dynamic>>();
+    return const [];
+  }
+
+  Future<Map<String, dynamic>> createAiModel({
+    required String companyId,
+    required String name,
+    List<String> apiKinds = const [],
+  }) async {
+    final res = await AuthHttp.post(
+      _uri('/companies/$companyId/ai-models'),
+      body: jsonEncode({
+        'name': name,
+        'api_kinds': apiKinds,
+      }),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> patchAiModel({
+    required String companyId,
+    required String modelId,
+    String? name,
+    List<String>? apiKinds,
+  }) async {
+    final res = await AuthHttp.patch(
+      _uri('/companies/$companyId/ai-models/$modelId'),
+      body: jsonEncode({
+        if (name != null) 'name': name,
+        if (apiKinds != null) 'api_kinds': apiKinds,
+      }),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> listAiKeyModels({
+    required String companyId,
+    required String keyId,
+  }) async {
+    final res = await AuthHttp.get(_uri('/companies/$companyId/ai-keys/$keyId/models'));
+    _throwIfError(res);
+    final body = jsonDecode(res.body);
+    if (body is List) return body.cast<Map<String, dynamic>>();
+    return const [];
+  }
+
+  Future<List<Map<String, dynamic>>> updateAiKeyModels({
+    required String companyId,
+    required String keyId,
+    required List<Map<String, dynamic>> selections,
+  }) async {
+    final res = await AuthHttp.put(
+      _uri('/companies/$companyId/ai-keys/$keyId/models'),
+      body: jsonEncode({'selections': selections}),
+    );
+    _throwIfError(res);
+    final body = jsonDecode(res.body);
+    if (body is List) return body.cast<Map<String, dynamic>>();
+    return const [];
+  }
+
+  Future<Map<String, dynamic>> listAiKeyModelsLive({
+    required String companyId,
+    required String keyId,
+  }) async {
+    final res = await AuthHttp.get(_uri('/companies/$companyId/ai-keys/$keyId/models/live'));
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   void _throwIfError(http.Response res) {
     if (res.statusCode >= 400) {
       throw ProdavanApiException(res.statusCode, res.body);

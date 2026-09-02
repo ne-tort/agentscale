@@ -3140,6 +3140,72 @@ abstract class AppLocalizations {
   /// **'Invalid AI provider API key. Update the project key.'**
   String get errorAgentInvalidApiKey;
 
+  /// No description provided for @errorAgentInvalidModel.
+  ///
+  /// In en, this message translates to:
+  /// **'Selected AI model is not available for this provider. Choose another model.'**
+  String get errorAgentInvalidModel;
+
+  /// No description provided for @aiKeyModelsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Models'**
+  String get aiKeyModelsTitle;
+
+  /// No description provided for @aiKeyModelsNone.
+  ///
+  /// In en, this message translates to:
+  /// **'Not set'**
+  String get aiKeyModelsNone;
+
+  /// No description provided for @aiKeyModelsSelected.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} selected'**
+  String aiKeyModelsSelected(String count);
+
+  /// No description provided for @aiKeyModelsAddHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Add model id'**
+  String get aiKeyModelsAddHint;
+
+  /// No description provided for @aiKeyModelsEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No models for this SDK yet'**
+  String get aiKeyModelsEmpty;
+
+  /// No description provided for @aiKeyModelEnabled.
+  ///
+  /// In en, this message translates to:
+  /// **'On'**
+  String get aiKeyModelEnabled;
+
+  /// No description provided for @aiKeyModelDefault.
+  ///
+  /// In en, this message translates to:
+  /// **'Default'**
+  String get aiKeyModelDefault;
+
+  /// No description provided for @aiModelNameLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Model id'**
+  String get aiModelNameLabel;
+
+  /// No description provided for @aiModelSdkLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'SDK bindings'**
+  String get aiModelSdkLabel;
+
+  /// No description provided for @projectChatModelLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Model'**
+  String get projectChatModelLabel;
+
   /// No description provided for @errorAgentProviderNetwork.
   ///
   /// In en, this message translates to:

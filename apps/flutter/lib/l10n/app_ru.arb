@@ -1000,6 +1000,22 @@
   "errorAgentStubResponse": "Агент вернул заглушку вместо реального ответа. Пересоберите образ контейнера.",
   "errorAgentCredentialMissing": "API-ключ не был доставлен агенту в контейнере. Проверьте ключ проекта.",
   "errorAgentInvalidApiKey": "Неверный API-ключ AI-провайдера. Обновите ключ проекта.",
+  "errorAgentInvalidModel": "Выбранная модель недоступна для этого провайдера. Выберите другую модель.",
+  "aiKeyModelsTitle": "Модели",
+  "aiKeyModelsNone": "Не задано",
+  "aiKeyModelsSelected": "Выбрано: {count}",
+  "@aiKeyModelsSelected": {
+    "placeholders": {
+      "count": { "type": "String" }
+    }
+  },
+  "aiKeyModelsAddHint": "ID модели",
+  "aiKeyModelsEmpty": "Нет моделей для этого SDK",
+  "aiKeyModelEnabled": "Вкл",
+  "aiKeyModelDefault": "По умолчанию",
+  "aiModelNameLabel": "ID модели",
+  "aiModelSdkLabel": "Привязка к SDK",
+  "projectChatModelLabel": "Модель",
   "errorAgentProviderNetwork": "AI-провайдер недоступен из контейнера (сеть).",
   "errorAgentProviderRateLimit": "Превышен лимит запросов к AI-провайдеру. Повторите позже.",
   "errorAgentProviderUnavailable": "AI-провайдер временно недоступен. Повторите позже.",

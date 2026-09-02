@@ -403,6 +403,28 @@ async def list_project_ai_keys(
     return {"items": items}
 
 
+@router.get("/projects/{project_id}/models/live")
+async def list_project_models_live(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.ai_models.live_service import AiModelsLiveService
+    from prodavan.application.project_service import ProjectAccessPolicy
+
+    row = await ProjectAccessPolicy(session).require_access(
+        project_id=project_id, principal=principal, employee=employee, write=False, allow_paused=True
+    )
+    key_id = getattr(row, "resolved_ai_key_id", None)
+    if not key_id:
+        return {"models": [], "default_model": None, "source": "catalog"}
+    return await AiModelsLiveService(session).list_live_for_key(
+        company_id=row.company_id,
+        key_id=str(key_id),
+    )
+
+
 @router.post("/projects/{project_id}/launch")
 async def launch_project(
     project_id: str,

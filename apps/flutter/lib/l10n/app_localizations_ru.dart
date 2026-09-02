@@ -1752,6 +1752,42 @@ class AppLocalizationsRu extends AppLocalizations {
       'Неверный API-ключ AI-провайдера. Обновите ключ проекта.';
 
   @override
+  String get errorAgentInvalidModel =>
+      'Выбранная модель недоступна для этого провайдера. Выберите другую модель.';
+
+  @override
+  String get aiKeyModelsTitle => 'Модели';
+
+  @override
+  String get aiKeyModelsNone => 'Не задано';
+
+  @override
+  String aiKeyModelsSelected(String count) {
+    return 'Выбрано: $count';
+  }
+
+  @override
+  String get aiKeyModelsAddHint => 'ID модели';
+
+  @override
+  String get aiKeyModelsEmpty => 'Нет моделей для этого SDK';
+
+  @override
+  String get aiKeyModelEnabled => 'Вкл';
+
+  @override
+  String get aiKeyModelDefault => 'По умолчанию';
+
+  @override
+  String get aiModelNameLabel => 'ID модели';
+
+  @override
+  String get aiModelSdkLabel => 'Привязка к SDK';
+
+  @override
+  String get projectChatModelLabel => 'Модель';
+
+  @override
   String get errorAgentProviderNetwork =>
       'AI-провайдер недоступен из контейнера (сеть).';
 

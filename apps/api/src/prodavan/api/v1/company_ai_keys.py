@@ -200,3 +200,58 @@ async def set_key_scope_bindings(
         cabinet_ids=body.cabinet_ids,
         project_ids=body.project_ids,
     )
+
+
+class KeyModelSelectionBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    selections: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@router.get("/{key_id}/models")
+async def list_key_models(
+    company_id: str,
+    key_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> list[dict]:
+    from prodavan.application.ai_models.service import AiModelsService
+
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    return await AiModelsService(session).list_key_models(company_id=company_id, key_id=key_id)
+
+
+@router.put("/{key_id}/models")
+async def update_key_models(
+    company_id: str,
+    key_id: str,
+    body: KeyModelSelectionBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> list[dict]:
+    from prodavan.application.ai_models.service import AiModelsService
+
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    out = await AiModelsService(session).update_key_models(
+        company_id=company_id,
+        key_id=key_id,
+        selections=body.selections,
+    )
+    await session.commit()
+    return out
+
+
+@router.get("/{key_id}/models/live")
+async def list_key_models_live(
+    company_id: str,
+    key_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    from prodavan.application.ai_models.live_service import AiModelsLiveService
+
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    return await AiModelsLiveService(session).list_live_for_key(company_id=company_id, key_id=key_id)

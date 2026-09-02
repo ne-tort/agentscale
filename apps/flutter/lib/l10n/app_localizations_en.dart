@@ -1739,6 +1739,42 @@ class AppLocalizationsEn extends AppLocalizations {
       'Invalid AI provider API key. Update the project key.';
 
   @override
+  String get errorAgentInvalidModel =>
+      'Selected AI model is not available for this provider. Choose another model.';
+
+  @override
+  String get aiKeyModelsTitle => 'Models';
+
+  @override
+  String get aiKeyModelsNone => 'Not set';
+
+  @override
+  String aiKeyModelsSelected(String count) {
+    return '$count selected';
+  }
+
+  @override
+  String get aiKeyModelsAddHint => 'Add model id';
+
+  @override
+  String get aiKeyModelsEmpty => 'No models for this SDK yet';
+
+  @override
+  String get aiKeyModelEnabled => 'On';
+
+  @override
+  String get aiKeyModelDefault => 'Default';
+
+  @override
+  String get aiModelNameLabel => 'Model id';
+
+  @override
+  String get aiModelSdkLabel => 'SDK bindings';
+
+  @override
+  String get projectChatModelLabel => 'Model';
+
+  @override
   String get errorAgentProviderNetwork =>
       'AI provider is unreachable from the container (network).';
 

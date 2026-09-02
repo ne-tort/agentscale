@@ -170,6 +170,7 @@ class OpenClawBridgeBootstrap:
         project_id: str,
         session_id: str,
         message: str,
+        model: str | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """Proxy send to Pod agent-runtime; yields normalized AgentEvent stream."""
         if not settings.pod_agent_runtime_enabled:
@@ -190,6 +191,8 @@ class OpenClawBridgeBootstrap:
 
         url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/sessions/{session_id}/send"
         body: dict[str, str] = {"message": message}
+        if model and str(model).strip():
+            body["model"] = str(model).strip()
 
         try:
             yielded = False

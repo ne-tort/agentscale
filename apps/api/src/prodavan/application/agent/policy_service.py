@@ -9,6 +9,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.company_service import AdminCompanyService
+from prodavan.application.ai_models.policy_service import AiModelPolicyService
 from prodavan.domain.agent import AgentToolPolicy, CreateOpts, default_tool_policy
 from prodavan.domain.ai_keys import ResolvedCredential
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
@@ -58,19 +59,19 @@ class AgentPolicyService:
         raw_mcp = load_mcp_servers_from_workspace(cwd)
         mcp_filtered = filter_mcp_servers(raw_mcp, tool_policy)
 
-        model = model_override
-        allow = [m for m in (company_policy.model_allowlist or []) if str(m).strip()]
-        if model is None and allow:
-            model = allow[0]
-        elif model is not None and allow and model not in allow:
-            from prodavan.domain.errors import AppError
-
-            raise AppError(
-                code="MODEL_NOT_ALLOWED",
-                title="Model not allowed",
-                status=403,
-                detail=f"model {model!r} not in company model_allowlist",
-            )
+        model_policy = await AiModelPolicyService(self._session).resolve_for_key(
+            company_id=project.company_id,
+            key_id=getattr(project, "resolved_ai_key_id", None),
+            api_kind=credential.api_kind,
+            company_policy=company_policy,
+        )
+        model = AiModelPolicyService(self._session).assert_model_allowed(
+            model=model_override,
+            policy=model_policy,
+            company_policy=company_policy,
+        )
+        if model is None:
+            model = model_policy.default_model
 
         budget: dict[str, int] | None = None
         if company_policy.max_tokens_per_run is not None:
@@ -78,7 +79,7 @@ class AgentPolicyService:
 
         return CreateOpts(
             cwd=cwd,
-            model=model or project.agent_provider,
+            model=model,
             mcp_servers=mcp_filtered,
             api_key=credential.secret,
             api_kind=credential.api_kind,

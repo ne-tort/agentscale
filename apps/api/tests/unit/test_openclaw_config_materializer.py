@@ -44,6 +44,15 @@ def test_workspace_dev_preset_permissions() -> None:
     assert "shell.exec" in perms.get("ask", [])
 
 
+def test_build_openclaw_config_cursor_omits_model_when_unset() -> None:
+    cfg = build_openclaw_config(
+        company_policy=CompanyAgentRuntimePolicy(tool_preset="workspace_dev"),
+        api_kind="cursor_sdk",
+    )
+    assert cfg["runtime"]["adapter"] == "cursor_sdk"
+    assert "model" not in cfg
+
+
 def test_build_openclaw_config_golden_shape() -> None:
     company = CompanyAgentRuntimePolicy(
         tool_preset="workspace_dev",

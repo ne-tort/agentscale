@@ -375,6 +375,7 @@ class AgentSessionService:
                 project_id=project_id,
                 session_id=session_id,
                 message=text,
+                model=row.model,
             ):
                 used_bridge = True
                 seq += 1

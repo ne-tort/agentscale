@@ -719,6 +719,18 @@ class ProdavanApi {
     }
   }
 
+  Future<Map<String, dynamic>> listProjectModelsLive(String projectId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.get(_uri('/projects/$projectId/models/live'), extraHeaders: _workHeaders);
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
   Future<Map<String, dynamic>> projectChat({
     required String projectId,
     required String text,
@@ -812,6 +824,7 @@ class ProdavanApi {
     required String projectId,
     required String text,
     String? sessionId,
+    String? model,
     List<String> attachmentRefs = const [],
   }) {
     final prevProj = this.projectId;
@@ -826,6 +839,7 @@ class ProdavanApi {
           ..body = jsonEncode({
             'text': text,
             if (sessionId != null) 'session_id': sessionId,
+            if (model != null && model.isNotEmpty) 'model': model,
             if (attachmentRefs.isNotEmpty) 'attachment_refs': attachmentRefs,
           });
         final response = await client.send(request);

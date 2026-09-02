@@ -179,6 +179,7 @@ abstract final class AppErrors {
       'AGENT_STUB_RESPONSE' => l10n.errorAgentStubResponse,
       'AGENT_CREDENTIAL_MISSING' => l10n.errorAgentCredentialMissing,
       'AGENT_INVALID_API_KEY' => l10n.errorAgentInvalidApiKey,
+      'AGENT_INVALID_MODEL' => l10n.errorAgentInvalidModel,
       'AGENT_PROVIDER_NETWORK' => l10n.errorAgentProviderNetwork,
       'AGENT_PROVIDER_RATE_LIMIT' => l10n.errorAgentProviderRateLimit,
       'AGENT_PROVIDER_UNAVAILABLE' => l10n.errorAgentProviderUnavailable,

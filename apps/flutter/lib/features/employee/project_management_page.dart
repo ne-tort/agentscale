@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/containers/project_container_poll.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
@@ -83,7 +84,15 @@ class _ProjectManagementPageState extends State<ProjectManagementPage> {
     setState(() => _resuming = true);
     try {
       await workContext.api.resumeProject(widget.projectId);
+      final container = await pollProjectContainerUntilSettled(
+        api: workContext.api,
+        projectId: widget.projectId,
+      );
       if (!mounted) return;
+      final failure = containerObservedFailureMessage(container);
+      if (failure != null) {
+        AppErrors.showSnack(context, failure);
+      }
       await _load();
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);

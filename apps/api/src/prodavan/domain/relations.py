@@ -26,6 +26,7 @@ class EntityKind(StrEnum):
     PROJECT = "project"
     POD = "pod"
     AI_KEY = "ai_key"
+    AI_MODEL = "ai_model"
     MODULE = "module"
 
 

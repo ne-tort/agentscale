@@ -9,8 +9,9 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
-import 'package:prodavan/features/company/company_entity_source.dart';
 import 'package:prodavan/features/admin/ai_key_integration_type.dart';
+import 'package:prodavan/features/company/ai_key_models_page.dart';
+import 'package:prodavan/features/company/company_entity_source.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Company AI key detail — full edit for local keys; RO for platform-bound.
@@ -38,6 +39,7 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
   List<Map<String, dynamic>> _employees = const [];
   List<Map<String, dynamic>> _cabinets = const [];
   List<Map<String, dynamic>> _projects = const [];
+  List<Map<String, dynamic>> _keyModels = const [];
   Set<String> _boundEmployeeIds = const {};
   Set<String> _boundCabinetIds = const {};
   Set<String> _boundProjectIds = const {};
@@ -79,8 +81,15 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
       final cabinets = await companyContext.api.listOrgCabinets(widget.companyId);
       final containers = await companyContext.api.listContainers(companyId: widget.companyId);
       Map<String, dynamic> bindings = const {};
+      List<Map<String, dynamic>> keyModels = const [];
       try {
         bindings = await companyContext.api.getAiKeyScopeBindings(
+          companyId: widget.companyId,
+          keyId: widget.keyId,
+        );
+      } catch (_) {}
+      try {
+        keyModels = await companyContext.api.listAiKeyModels(
           companyId: widget.companyId,
           keyId: widget.keyId,
         );
@@ -93,6 +102,7 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
         _employees = employees;
         _cabinets = cabinets;
         _projects = containers;
+        _keyModels = keyModels;
         _boundEmployeeIds = (bindings['employee_ids'] as List?)?.cast<String>().toSet() ?? {};
         _boundCabinetIds = (bindings['cabinet_ids'] as List?)?.cast<String>().toSet() ?? {};
         _boundProjectIds = (bindings['project_ids'] as List?)?.cast<String>().toSet() ?? {};
@@ -202,6 +212,23 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     }
+  }
+
+  String _modelsSubtitle(AppLocalizations l10n) {
+    final enabled = _keyModels.where((m) => m['enabled'] == true).length;
+    if (enabled == 0) return l10n.aiKeyModelsNone;
+    return l10n.aiKeyModelsSelected('$enabled');
+  }
+
+  void _openModels() {
+    final apiKind = _key?['api_kind'] as String? ?? 'cursor_sdk';
+    AiKeyModelsPage.push(
+      context,
+      companyId: widget.companyId,
+      keyId: widget.keyId,
+      keyName: _displayName,
+      apiKind: apiKind,
+    ).then((_) => _load());
   }
 
   @override
@@ -321,6 +348,13 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
               title: l10n.adminDisableKey,
               icon: Icons.pause_circle_outline_rounded,
               onTap: _pauseKey,
+            ),
+          if (AiKeyIntegrationType.sdkApiKinds.contains(_key?['api_kind']))
+            AppNavPreference(
+              title: l10n.aiKeyModelsTitle,
+              icon: Icons.model_training_outlined,
+              subtitle: Text(_modelsSubtitle(l10n)),
+              onTap: _openModels,
             ),
           if (hasSecret && _scopeEditable && _employees.isNotEmpty)
             AppMultiChoicePreference<String>(

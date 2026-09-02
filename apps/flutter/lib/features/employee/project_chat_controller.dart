@@ -12,10 +12,13 @@ class ProjectChatController {
   final String projectId;
 
   String? sessionId;
+  String? selectedModel;
   final List<Map<String, dynamic>> messages = [];
   bool streaming = false;
   Object? error;
   List<Map<String, dynamic>> pendingApprovals = const [];
+  List<Map<String, dynamic>> availableModels = const [];
+  String? defaultModel;
 
   ProjectChatStreamHandle? _handle;
   final _tick = StreamController<void>.broadcast();
@@ -24,6 +27,21 @@ class ProjectChatController {
 
   void notify() {
     if (!_tick.isClosed) _tick.add(null);
+  }
+
+  Future<void> loadModels() async {
+    try {
+      final body = await api.listProjectModelsLive(projectId);
+      final raw = body['models'];
+      availableModels = raw is List ? raw.cast<Map<String, dynamic>>() : const [];
+      defaultModel = body['default_model'] as String?;
+      if ((selectedModel == null || selectedModel!.isEmpty) && defaultModel != null) {
+        selectedModel = defaultModel;
+      }
+      notify();
+    } catch (_) {
+      availableModels = const [];
+    }
   }
 
   Future<void> loadTranscript() async {
@@ -58,6 +76,7 @@ class ProjectChatController {
       projectId: projectId,
       text: trimmed.isEmpty ? '(attachment)' : trimmed,
       sessionId: sessionId,
+      model: selectedModel,
       attachmentRefs: attachmentRefs,
     );
 

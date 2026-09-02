@@ -139,20 +139,24 @@ def build_openclaw_config(
     else:
         runtime_adapter = adapter
 
-    default_model = model
+    default_model = model.strip() if model and str(model).strip() else None
     if default_model is None:
         allow = [m for m in (company_policy.model_allowlist or []) if str(m).strip()]
-        default_model = allow[0] if allow else "gpt-4o-mini"
+        if allow:
+            default_model = allow[0]
+        elif runtime_adapter == "platform_openclaw":
+            default_model = "gpt-4o-mini"
 
     cfg: dict[str, Any] = {
         "version": 1,
         "runtime": {
             "adapter": runtime_adapter,
         },
-        "model": {"default": default_model},
         "permissions": tool_policy_to_permissions(policy),
         "tools": {"built_in": True, "mcp": policy.mcp != "deny"},
     }
+    if default_model is not None:
+        cfg["model"] = {"default": default_model}
 
     turns = max_turns
     if turns is not None:

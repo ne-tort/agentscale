@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from sqlalchemy import select
@@ -245,9 +246,6 @@ class ProjectCommand:
                 principal=principal,
                 reason="launch",
             )
-            from prodavan.application.pod_service.runtime_observation import RuntimeObservationService
-
-            await RuntimeObservationService(self._session).wait_for_running(project_id=row.id)
             row.status = ProjectStatus.ACTIVE
             await self._events.emit(
                 event_type="project.started",
@@ -631,44 +629,69 @@ class ProjectCommand:
             preferred_provider=row.agent_provider or company_policy.preferred_provider,
             platform_fallback=company_policy.platform_fallback,
         )
-        try:
-            await self._pods.sync_desired(
-                row.id,
-                PodDesiredState.RUNNING,
-                principal=principal,
-                reason="resume",
-            )
-            from prodavan.application.pod_service.runtime_observation import RuntimeObservationService
-
-            await RuntimeObservationService(self._session).wait_for_running(project_id=row.id)
-            row.status = ProjectStatus.ACTIVE
-            await self._events.emit(
-                event_type="project.resumed",
-                company_id=row.company_id,
-                project_id=row.id,
-                cabinet_id=row.cabinet_id,
-                principal=principal,
-            )
-        except Exception:
-            row.status = ProjectStatus.ERROR
+        row.launch_phase = "resuming"
         await self._session.commit()
         await self._session.refresh(row)
-        if row.status != ProjectStatus.ACTIVE:
-            return await self._project_public(row, include_runtime=True)
-        try:
-            from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
-            from prodavan.core.jobs.enqueue import enqueue_trigger_drain
-
-            await AgentTriggerDispatcher(self._session).dispatch_batch(
+        asyncio.create_task(
+            self._resume_background(
                 project_id=row.id,
                 principal=principal,
                 employee=employee,
-                max_n=10,
-            )
-            enqueue_trigger_drain()
-        except Exception:
-            pass
-        return await self._project_public(row)
+            ),
+            name=f"resume-{row.id}",
+        )
+        return await self._project_public(row, include_runtime=True)
+
+    async def _resume_background(
+        self,
+        *,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> None:
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        factory = get_session_factory()
+        async with factory() as session:
+            cmd = ProjectCommand(session)
+            row = await cmd._access.get_project_or_none(project_id)
+            if row is None:
+                return
+            try:
+                await cmd._pods.sync_desired(
+                    row.id,
+                    PodDesiredState.RUNNING,
+                    principal=principal,
+                    reason="resume",
+                )
+                row.status = ProjectStatus.ACTIVE
+                row.launch_phase = None
+                await cmd._events.emit(
+                    event_type="project.resumed",
+                    company_id=row.company_id,
+                    project_id=row.id,
+                    cabinet_id=row.cabinet_id,
+                    principal=principal,
+                )
+            except Exception as exc:
+                logger.warning("resume background failed project_id=%s: %s", project_id, exc)
+                row.status = ProjectStatus.ERROR
+                row.launch_phase = None
+            await session.commit()
+            if row.status == ProjectStatus.ACTIVE:
+                try:
+                    from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
+                    from prodavan.core.jobs.enqueue import enqueue_trigger_drain
+
+                    await AgentTriggerDispatcher(session).dispatch_batch(
+                        project_id=row.id,
+                        principal=principal,
+                        employee=employee,
+                        max_n=10,
+                    )
+                    enqueue_trigger_drain()
+                except Exception:
+                    pass
 
     async def reload_project(
         self,
@@ -709,9 +732,6 @@ class ProjectCommand:
                 principal=principal,
                 reason="reload",
             )
-            from prodavan.application.pod_service.runtime_observation import RuntimeObservationService
-
-            await RuntimeObservationService(self._session).wait_for_running(project_id=row.id)
             row.status = ProjectStatus.ACTIVE
         except Exception:
             row.status = ProjectStatus.ERROR

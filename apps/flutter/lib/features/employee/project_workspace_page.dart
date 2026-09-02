@@ -67,6 +67,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         return;
       }
       await _chat.loadTranscript();
+      await _chat.loadModels();
     } catch (e) {
       if (mounted) showAgentChatSnack(context, e);
     } finally {
@@ -111,6 +112,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     _chatAvailable = projectChatAvailable(_project);
     if (_chatAvailable) {
       await _chat.loadTranscript();
+      await _chat.loadModels();
     }
     if (mounted) setState(() {});
   }
@@ -167,6 +169,40 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
                   child: Text(l10n.projectApproveTool),
                 ),
               ],
+            ),
+          if (_chat.availableModels.isNotEmpty)
+            Padding(
+              padding: EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, 0),
+              child: InputDecorator(
+                decoration: InputDecoration(
+                  labelText: l10n.projectChatModelLabel,
+                  border: const OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    isExpanded: true,
+                    value: _chat.selectedModel ?? _chat.defaultModel,
+                    items: _chat.availableModels
+                        .map((m) {
+                          final id = m['id'] as String? ?? m['label'] as String? ?? '';
+                          return DropdownMenuItem<String>(
+                            value: id,
+                            child: Text(m['label'] as String? ?? id),
+                          );
+                        })
+                        .where((item) => item.value != null && item.value!.isNotEmpty)
+                        .toList(),
+                    onChanged: _chat.streaming
+                        ? null
+                        : (v) {
+                            _chat.selectedModel = v;
+                            _chat.notify();
+                            setState(() {});
+                          },
+                  ),
+                ),
+              ),
             ),
           Expanded(
             child: _loading

@@ -998,6 +998,22 @@
   "errorAgentStubResponse": "Agent returned a stub instead of a real response. Redeploy the container image.",
   "errorAgentCredentialMissing": "AI API key was not delivered to the agent in the container. Check the project key.",
   "errorAgentInvalidApiKey": "Invalid AI provider API key. Update the project key.",
+  "errorAgentInvalidModel": "Selected AI model is not available for this provider. Choose another model.",
+  "aiKeyModelsTitle": "Models",
+  "aiKeyModelsNone": "Not set",
+  "aiKeyModelsSelected": "{count} selected",
+  "@aiKeyModelsSelected": {
+    "placeholders": {
+      "count": { "type": "String" }
+    }
+  },
+  "aiKeyModelsAddHint": "Add model id",
+  "aiKeyModelsEmpty": "No models for this SDK yet",
+  "aiKeyModelEnabled": "On",
+  "aiKeyModelDefault": "Default",
+  "aiModelNameLabel": "Model id",
+  "aiModelSdkLabel": "SDK bindings",
+  "projectChatModelLabel": "Model",
   "errorAgentProviderNetwork": "AI provider is unreachable from the container (network).",
   "errorAgentProviderRateLimit": "AI provider rate limit exceeded. Try again later.",
   "errorAgentProviderUnavailable": "AI provider is temporarily unavailable. Try again later.",

@@ -21,6 +21,7 @@ from prodavan.api.v1 import (
     auth,
     cabinets,
     company_ai_keys,
+    company_ai_models,
     company_containers,
     company_modules,
     content,
@@ -36,6 +37,7 @@ router.include_router(stub.router)
 router.include_router(auth.router)
 router.include_router(identity.router)
 router.include_router(company_ai_keys.router)
+router.include_router(company_ai_models.router)
 router.include_router(company_containers.router)
 router.include_router(company_modules.router)
 router.include_router(content.router)
