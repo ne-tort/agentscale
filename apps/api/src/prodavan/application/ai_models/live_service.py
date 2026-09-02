@@ -10,7 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.agent.credential_broker import AgentCredentialBroker
-from prodavan.application.agent.openclaw_bridge import OpenClawBridgeBootstrap, _runtime_request_headers
+from prodavan.application.agent.openclaw_bridge import (
+    OpenClawBridgeBootstrap,
+    _runtime_request_headers,
+    api_kind_to_bridge_adapter,
+)
 from prodavan.application.ai_models.service import AiModelsService
 from prodavan.config.settings import settings
 from prodavan.domain.errors import AppError
@@ -39,7 +43,7 @@ class AiModelsLiveService:
         live_ids = await self._fetch_live_model_ids(
             company_id=company_id,
             key_id=key_id,
-            api_kind=key_row.api_kind,
+            api_kind=api_kind_to_bridge_adapter(key_row.api_kind),
             project_id=project_id,
         )
         if not live_ids:
@@ -110,6 +114,11 @@ class AiModelsLiveService:
                     headers=_runtime_request_headers(),
                 )
                 if response.status_code >= 400:
+                    logger.warning(
+                        "live models bridge status=%s body=%s",
+                        response.status_code,
+                        response.text[:200],
+                    )
                     return []
                 body = response.json()
                 models = body.get("models") if isinstance(body, dict) else None

@@ -21,6 +21,7 @@ from prodavan.application.agent.openclaw_bridge import (
 )
 from prodavan.application.agent.policy_service import AgentPolicyService
 from prodavan.application.agent.runtime_guard import require_running_pod_runtime
+from prodavan.application.agent.runtime_model import sanitize_runtime_model, sdk_fallback_model
 from prodavan.application.ai_keys.service import AiKeysService
 from prodavan.application.project_service import ProjectAccessPolicy
 from prodavan.application.projects.attachment_service import ProjectAttachmentService
@@ -196,7 +197,7 @@ class AgentSessionService:
             project=project, cwd=cwd, credential=credential, model_override=model
         )
         vendor_agent_id: str
-        model_name = opts.model
+        model_name = sanitize_runtime_model(opts.model)
         if settings.pod_agent_runtime_enabled:
             row = AgentSessionRow(
                 project_id=project_id,
@@ -259,15 +260,31 @@ class AgentSessionService:
         row: AgentSessionRow,
         model: str | None,
     ) -> str | None:
+        explicit = sanitize_runtime_model(model)
+        if explicit is not None:
+            validated = await self._policy.validate_send_model(
+                project=project,
+                credential_api_kind=row.api_kind,
+                model=explicit,
+            )
+            row.model = validated
+            return validated
+
+        stored = sanitize_runtime_model(row.model)
+        if stored is not None:
+            row.model = stored
+            return stored
+
+        fallback = sdk_fallback_model(row.api_kind)
+        if fallback is None:
+            return None
         validated = await self._policy.validate_send_model(
             project=project,
             credential_api_kind=row.api_kind,
-            model=model,
+            model=fallback,
         )
-        if validated is not None:
-            row.model = validated
-            return validated
-        return row.model
+        row.model = validated
+        return validated
 
     async def list_sessions(
         self,

@@ -11,6 +11,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.application.agent.runtime_model import sanitize_runtime_model
 from prodavan.config.settings import settings
 from prodavan.domain.agent import FROZEN_EVENT_TYPES, AgentEvent, AgentEventType
 from prodavan.domain.agent.errors import POD_NOT_RUNNING
@@ -42,9 +43,7 @@ PRODAVAN_EVENTS_OWNER_API = "api"
 
 
 def _explicit_bridge_model(model: str | None) -> str | None:
-    if model and str(model).strip():
-        return str(model).strip()
-    return None
+    return sanitize_runtime_model(model)
 
 
 def _runtime_request_headers() -> dict[str, str]:
@@ -303,8 +302,9 @@ class OpenClawBridgeBootstrap:
     ) -> AsyncIterator[AgentEvent]:
         url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/sessions/{session_id}/send"
         body: dict[str, str] = {"message": message}
-        if model and str(model).strip():
-            body["model"] = str(model).strip()
+        bridge_model = sanitize_runtime_model(model)
+        if bridge_model:
+            body["model"] = bridge_model
 
         try:
             yielded = False
