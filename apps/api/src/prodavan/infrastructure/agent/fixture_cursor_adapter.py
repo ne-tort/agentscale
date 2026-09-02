@@ -43,6 +43,13 @@ class FixtureCursorAdapter:
             )
             return
 
+        if message.text.startswith("cumulative:"):
+            payload = message.text.removeprefix("cumulative:").strip() or "OK"
+            for i in range(1, len(payload) + 1):
+                yield AgentEvent.now(AgentEventType.TEXT_DELTA, {"text": payload[:i]})
+            yield AgentEvent.now(AgentEventType.DONE, {"reason": "completed"})
+            return
+
         reply = f"Cursor fixture: {message.text}"
         for i, word in enumerate(reply.split()):
             chunk = word if i == 0 else f" {word}"

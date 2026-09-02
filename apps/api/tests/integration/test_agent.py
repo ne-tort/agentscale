@@ -492,6 +492,85 @@ def test_chat_stream_sse(client: TestClient) -> None:
 
 
 @requires_postgres
+def test_chat_stream_sse_cumulative_deltas_normalized(client: TestClient) -> None:
+    import json
+
+    admin = _token(sub="cumul-admin", platform_admin=True)
+    admin_h = {"Authorization": f"Bearer {admin}"}
+
+    co = client.post(
+        "/api/v1/companies",
+        headers=admin_h,
+        json={"name": "CumulCo", "password": "test-company-pass", "admin_email": "cumul@agentco.test"},
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers=admin_h,
+        json={
+            "name": "Cursor",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-cumul",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = owner_auth_from_company(_token, co.json())
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "CumulCab", "company_id": company_id},
+    )
+    assert cab.status_code in (200, 201), cab.text
+    cabinet_id = cab.json()["id"]
+
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "CumulProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
+
+    events: list[dict] = []
+    with client.stream(
+        "POST",
+        f"/api/v1/projects/{project_id}/chat/stream",
+        headers=owner_h,
+        json={"text": "cumulative:stream ok"},
+    ) as resp:
+        assert resp.status_code == 200, resp.text
+        for line in resp.iter_lines():
+            if not line or not line.startswith("data: "):
+                continue
+            events.append(json.loads(line.removeprefix("data: ")))
+
+    deltas = [e for e in events if e.get("type") == "text_delta"]
+    streamed = "".join(str(d["data"]["text"]) for d in deltas)
+    assert streamed == "stream ok"
+    assert "stream okstream" not in streamed
+
+    complete = next(e for e in events if e.get("type") == "_turn_complete")
+    assert complete["data"]["assistant_text"] == "stream ok"
+
+    session_id = events[0]["data"]["session_id"]
+    transcript = client.get(
+        f"/api/v1/projects/{project_id}/chat/transcript?session_id={session_id}",
+        headers=owner_h,
+    )
+    assert transcript.status_code == 200
+    assistant_blocks = [
+        b for b in transcript.json()["blocks"] if b.get("kind") == "assistant_markdown"
+    ]
+    assert assistant_blocks and assistant_blocks[-1]["text"] == "stream ok"
+
+
+@requires_postgres
 def test_chat_with_attachment_refs_emits_tool_call(client: TestClient) -> None:
     import base64
 

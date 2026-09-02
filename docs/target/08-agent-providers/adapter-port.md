@@ -42,7 +42,7 @@ AgentProviderPort
 
 | `type` | `data` (минимум) | UI |
 |--------|------------------|-----|
-| `text_delta` | `{ text: string }` | Stream в bubble |
+| `text_delta` | `{ text: string }` — **incremental** on platform wire after ingress; SDK may emit cumulative, normalized via [`text_delta.py`](../../apps/api/src/prodavan/application/agent/text_delta.py) | Stream в bubble |
 | `tool_call` | `{ id, name, input }` | Collapsed disclosure |
 | `tool_result` | `{ id, name, output, is_error? }` | Disclosure |
 | `tool_approval_request` | `{ id, name, input }` | Full-page approve (HITL) |
@@ -63,7 +63,7 @@ Platform API и bridge **forward + persist** (не отбрасывают):
 | `task_progress` | plan checklist |
 | `status` / `compact_boundary` / `permission_denial` | system notices |
 
-Transcript projection: `events_to_chat_blocks()` → `{ blocks: [...] }` для Flutter `core/chat`.
+Transcript projection: [`chat_projection.py`](../../apps/api/src/prodavan/application/agent/chat_projection.py) `events_to_chat_blocks()` → `{ blocks: [...] }` для Flutter `core/chat`.
 
 Каждый event: опционально `at` (ISO timestamp).  
 Адаптеры **обязаны** эмитить `usage` когда провайдер отдаёт counts.

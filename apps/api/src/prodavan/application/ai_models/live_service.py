@@ -15,21 +15,13 @@ from prodavan.application.agent.openclaw_bridge import (
     _runtime_request_headers,
     api_kind_to_bridge_adapter,
 )
+from prodavan.application.ai_models.resolution import resolve_ui_default
 from prodavan.application.ai_models.service import AiModelsService
 from prodavan.config.settings import settings
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.persistence.models.projects import ProjectPodRow, ProjectRow
 
 logger = logging.getLogger(__name__)
-
-
-def resolve_ui_default(effective: list[str], catalog_default: str | None) -> str | None:
-    """Pick chat default: catalog flag, SDK ``default`` id, else first live model."""
-    if catalog_default and catalog_default in effective:
-        return catalog_default
-    if "default" in effective:
-        return "default"
-    return effective[0] if effective else None
 
 
 class AiModelsLiveService:

@@ -22,18 +22,18 @@ def test_extended_event_type_allowed() -> None:
 
 
 def test_assistant_text_from_events() -> None:
-    from prodavan.application.agent.session_service import _assistant_text_from_events
+    from prodavan.application.agent.chat_projection import assistant_text_from_events
 
     events = [
         {"type": "text_delta", "data": {"text": "Hello "}},
         {"type": "usage", "data": {"input_tokens": 1}},
         {"type": "text_delta", "data": {"text": "world"}},
     ]
-    assert _assistant_text_from_events(events) == "Hello world"
+    assert assistant_text_from_events(events) == "Hello world"
 
 
 def test_events_to_transcript() -> None:
-    from prodavan.application.agent.session_service import events_to_transcript
+    from prodavan.application.agent.chat_projection import events_to_transcript
 
     events = [
         {"type": "user_message", "data": {"text": "hi"}},

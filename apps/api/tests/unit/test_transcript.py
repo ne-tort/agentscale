@@ -1,6 +1,6 @@
 """Unit tests — chat transcript collapse (L05/L08)."""
 
-from prodavan.application.agent.session_service import events_to_transcript
+from prodavan.application.agent.chat_projection import events_to_transcript
 from prodavan.domain.agent import PLATFORM_EVENT_USER_MESSAGE, AgentEventType
 
 
