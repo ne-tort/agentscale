@@ -15,8 +15,10 @@ _LEGACY_HTTP_DEFAULT_MODELS = frozenset(
     }
 )
 
-_SDK_FALLBACK_MODELS: dict[str, str] = {
-    ApiKind.CURSOR_SDK: "default",
+_PSEUDO_SDK_MODELS = frozenset({"default"})
+
+_SDK_FALLBACK_MODELS: dict[str, str | None] = {
+    ApiKind.CURSOR_SDK: None,
     ApiKind.CODEX_SDK: "gpt-5.3-codex",
     ApiKind.CLAUDE_AGENT_SDK: "claude-sonnet-4-6",
 }
@@ -27,7 +29,7 @@ def sanitize_runtime_model(model: str | None) -> str | None:
     if model is None:
         return None
     cleaned = str(model).strip()
-    if not cleaned or cleaned in _LEGACY_HTTP_DEFAULT_MODELS:
+    if not cleaned or cleaned in _LEGACY_HTTP_DEFAULT_MODELS or cleaned in _PSEUDO_SDK_MODELS:
         return None
     return cleaned
 

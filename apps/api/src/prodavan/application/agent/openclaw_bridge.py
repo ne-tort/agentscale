@@ -8,7 +8,6 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 import httpx
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.agent.runtime_model import sanitize_runtime_model
@@ -16,9 +15,7 @@ from prodavan.config.settings import settings
 from prodavan.domain.agent import FROZEN_EVENT_TYPES, AgentEvent, AgentEventType
 from prodavan.domain.agent.errors import POD_NOT_RUNNING
 from prodavan.domain.ai_keys import ApiKind
-from prodavan.domain.pods import POD_TERMINAL_STATUSES
 from prodavan.infrastructure.k8s.sandbox.client import K8sSandboxClient
-from prodavan.infrastructure.persistence.models.projects import ProjectPodRow, ProjectRow
 
 logger = logging.getLogger(__name__)
 
@@ -244,22 +241,22 @@ class OpenClawBridgeBootstrap:
         if not settings.pod_agent_runtime_enabled:
             return
 
-        pod_ip = await self._resolve_pod_ip_for_project(project_id)
-        if not pod_ip:
-            logger.debug("openclaw send: no pod ip for project %s", project_id)
-            yield AgentEvent.now(
-                AgentEventType.ERROR,
-                {
-                    "code": POD_NOT_RUNNING,
-                    "message": "pod is not running or not ready",
-                    "retryable": False,
-                },
-            )
-            return
-
         retried = False
         while True:
-            session_missing = False
+            recoverable = False
+            pod_ip = await self._resolve_pod_ip_for_project(project_id)
+            if not pod_ip:
+                logger.debug("openclaw send: no pod ip for project %s", project_id)
+                yield AgentEvent.now(
+                    AgentEventType.ERROR,
+                    {
+                        "code": POD_NOT_RUNNING,
+                        "message": "pod is not running or not ready",
+                        "retryable": False,
+                    },
+                )
+                return
+
             async for event in self._stream_send(
                 pod_ip=pod_ip,
                 session_id=session_id,
@@ -271,14 +268,15 @@ class OpenClawBridgeBootstrap:
                     and bootstrap is not None
                     and event.type == AgentEventType.ERROR
                     and isinstance(event.data, dict)
-                    and event.data.get("code") == "BRIDGE_SESSION_NOT_FOUND"
+                    and event.data.get("code")
+                    in {"BRIDGE_SESSION_NOT_FOUND", "BRIDGE_UNREACHABLE", "BRIDGE_EMPTY_STREAM"}
                 ):
-                    session_missing = True
+                    recoverable = True
                     break
                 yield event
                 if event.type in {AgentEventType.ERROR, AgentEventType.DONE}:
                     return
-            if session_missing and not retried and bootstrap is not None:
+            if recoverable and not retried and bootstrap is not None:
                 retried = True
                 if await self.register_session(project_id=project_id, payload=bootstrap):
                     continue
@@ -372,19 +370,17 @@ class OpenClawBridgeBootstrap:
         return await self._resolve_pod_ip(runtime_ref)
 
     async def _resolve_runtime_ref(self, project_id: str) -> str | None:
-        q = await self._session.execute(
-            select(ProjectPodRow.runtime_ref, ProjectRow.container_ref)
-            .join(ProjectRow, ProjectRow.id == ProjectPodRow.project_id)
-            .where(ProjectPodRow.project_id == project_id)
-            .where(ProjectPodRow.status.notin_(tuple(POD_TERMINAL_STATUSES)))
-            .order_by(ProjectPodRow.updated_at.desc())
-            .limit(1)
-        )
-        row = q.first()
-        if row is None:
+        from prodavan.application.pod_service.query import PodQuery
+
+        view = await PodQuery(self._session).runtime_view(project_id)
+        if view is None:
             return None
-        runtime_ref, container_ref = row
-        return (runtime_ref or container_ref or "").strip() or None
+        if str(view.get("observed_state") or "") != "running":
+            return None
+        ref = str(view.get("k8s_pod_name") or view.get("runtime_ref") or "").strip()
+        if not ref or ref.startswith("object-ws:"):
+            return None
+        return ref
 
     async def _resolve_pod_ip(self, runtime_ref: str) -> str | None:
         client = self._k8s or K8sSandboxClient(namespace=settings.pod_sandbox_namespace)

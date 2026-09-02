@@ -26,15 +26,12 @@ async def test_push_lease_posts_to_runtime() -> None:
     project = MagicMock()
     session.get = AsyncMock(return_value=project)
 
-    q = MagicMock()
-    q.first.return_value = ("pod-wk-demo", None)
-    session.execute = AsyncMock(return_value=q)
-
     keys = MagicMock()
     keys.require_key_available_for_project = AsyncMock()
     keys.resolve_secret_for_key = AsyncMock(return_value="sk-test")
 
     k8s = MagicMock()
+    k8s.available.return_value = True
     k8s.get_pod = AsyncMock(
         return_value=PodSnapshot(
             name="pod-wk-demo",
@@ -59,7 +56,19 @@ async def test_push_lease_posts_to_runtime() -> None:
     broker = AgentCredentialBroker(session, k8s_client=k8s, http_client=lambda **_: mock_http)
     broker._keys = keys
 
-    with patch("prodavan.application.agent.credential_broker.settings") as mock_settings:
+    runtime_view = {
+        "observed_state": "running",
+        "k8s_pod_name": "pod-wk-demo",
+        "runtime_ref": "pod-wk-demo",
+    }
+
+    with (
+        patch("prodavan.application.agent.credential_broker.settings") as mock_settings,
+        patch(
+            "prodavan.application.pod_service.query.PodQuery.runtime_view",
+            new=AsyncMock(return_value=runtime_view),
+        ),
+    ):
         mock_settings.pod_agent_runtime_enabled = True
         mock_settings.pod_agent_runtime_port = 3921
         mock_settings.pod_agent_runtime_token = "rt-token"

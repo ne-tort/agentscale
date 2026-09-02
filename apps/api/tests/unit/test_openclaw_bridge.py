@@ -20,6 +20,29 @@ from prodavan.domain.agent import AgentEventType
 from prodavan.infrastructure.k8s.sandbox.client import PodSnapshot
 
 
+def _running_runtime_view(*, runtime_ref: str = "pod-wk-demo") -> dict:
+    return {
+        "observed_state": "running",
+        "k8s_pod_name": runtime_ref,
+        "runtime_ref": runtime_ref,
+    }
+
+
+def _mock_running_pod(k8s: MagicMock, *, pod_ip: str = "10.42.0.99", name: str = "pod-wk-demo") -> None:
+    k8s.available.return_value = True
+    k8s.get_pod = AsyncMock(
+        return_value=PodSnapshot(
+            name=name,
+            uid="u1",
+            phase="Running",
+            restarts=0,
+            ready=True,
+            labels={},
+            pod_ip=pod_ip,
+        ),
+    )
+
+
 def test_api_kind_to_bridge_adapter() -> None:
     assert api_kind_to_bridge_adapter("cursor_sdk") == "cursor_sdk"
     assert api_kind_to_bridge_adapter("openrouter") == "platform_openclaw"
@@ -66,23 +89,8 @@ async def test_register_session_skips_when_disabled() -> None:
 @pytest.mark.asyncio
 async def test_register_session_posts_to_bridge() -> None:
     session = MagicMock()
-    q = MagicMock()
-    q.first.return_value = ("pod-wk-demo", None)
-    session.execute = AsyncMock(return_value=q)
-
     k8s = MagicMock()
-    k8s.available.return_value = True
-    k8s.get_pod = AsyncMock(
-        return_value=PodSnapshot(
-            name="pod-wk-demo",
-            uid="u1",
-            phase="Running",
-            restarts=0,
-            ready=True,
-            labels={},
-            pod_ip="10.42.0.99",
-        ),
-    )
+    _mock_running_pod(k8s)
 
     mock_response = MagicMock()
     mock_response.status_code = 201
@@ -95,7 +103,13 @@ async def test_register_session_posts_to_bridge() -> None:
 
     bootstrap = OpenClawBridgeBootstrap(session, k8s_client=k8s, http_client=lambda **_: mock_http)
 
-    with patch("prodavan.application.agent.openclaw_bridge.settings") as mock_settings:
+    with (
+        patch("prodavan.application.agent.openclaw_bridge.settings") as mock_settings,
+        patch(
+            "prodavan.application.pod_service.query.PodQuery.runtime_view",
+            new=AsyncMock(return_value=_running_runtime_view()),
+        ),
+    ):
         mock_settings.pod_agent_runtime_enabled = True
         mock_settings.pod_agent_runtime_bootstrap_enabled = True
         mock_settings.pod_agent_runtime_port = 3921
@@ -120,23 +134,8 @@ async def test_register_session_posts_to_bridge() -> None:
 @pytest.mark.asyncio
 async def test_iter_send_events_parses_sse() -> None:
     session = MagicMock()
-    q = MagicMock()
-    q.first.return_value = ("pod-wk-demo", None)
-    session.execute = AsyncMock(return_value=q)
-
     k8s = MagicMock()
-    k8s.available.return_value = True
-    k8s.get_pod = AsyncMock(
-        return_value=PodSnapshot(
-            name="pod-wk-demo",
-            uid="u1",
-            phase="Running",
-            restarts=0,
-            ready=True,
-            labels={},
-            pod_ip="10.42.0.99",
-        ),
-    )
+    _mock_running_pod(k8s)
 
     sse_lines = [
         'data: {"type":"text_delta","data":{"text":"hi"}}',
@@ -173,7 +172,13 @@ async def test_iter_send_events_parses_sse() -> None:
 
     bootstrap = OpenClawBridgeBootstrap(session, k8s_client=k8s, http_client=lambda **_: mock_http)
 
-    with patch("prodavan.application.agent.openclaw_bridge.settings") as mock_settings:
+    with (
+        patch("prodavan.application.agent.openclaw_bridge.settings") as mock_settings,
+        patch(
+            "prodavan.application.pod_service.query.PodQuery.runtime_view",
+            new=AsyncMock(return_value=_running_runtime_view()),
+        ),
+    ):
         mock_settings.pod_agent_runtime_enabled = True
         mock_settings.pod_agent_runtime_port = 3921
         mock_settings.pod_agent_runtime_token = "bridge-token"
@@ -197,23 +202,8 @@ async def test_iter_send_events_parses_sse() -> None:
 @pytest.mark.asyncio
 async def test_iter_send_events_empty_stream_yields_error() -> None:
     session = MagicMock()
-    q = MagicMock()
-    q.first.return_value = ("pod-wk-demo", None)
-    session.execute = AsyncMock(return_value=q)
-
     k8s = MagicMock()
-    k8s.available.return_value = True
-    k8s.get_pod = AsyncMock(
-        return_value=PodSnapshot(
-            name="pod-wk-demo",
-            uid="u1",
-            phase="Running",
-            restarts=0,
-            ready=True,
-            labels={},
-            pod_ip="10.42.0.99",
-        ),
-    )
+    _mock_running_pod(k8s)
 
     class _StreamResponse:
         status_code = 200
@@ -242,7 +232,13 @@ async def test_iter_send_events_empty_stream_yields_error() -> None:
 
     bootstrap = OpenClawBridgeBootstrap(session, k8s_client=k8s, http_client=lambda **_: mock_http)
 
-    with patch("prodavan.application.agent.openclaw_bridge.settings") as mock_settings:
+    with (
+        patch("prodavan.application.agent.openclaw_bridge.settings") as mock_settings,
+        patch(
+            "prodavan.application.pod_service.query.PodQuery.runtime_view",
+            new=AsyncMock(return_value=_running_runtime_view()),
+        ),
+    ):
         mock_settings.pod_agent_runtime_enabled = True
         mock_settings.pod_agent_runtime_port = 3921
         mock_settings.pod_agent_runtime_token = ""
