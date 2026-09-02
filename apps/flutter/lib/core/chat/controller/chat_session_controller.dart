@@ -47,7 +47,7 @@ class ChatSessionController {
       final raw = body['models'];
       availableModels = raw is List ? raw.cast<Map<String, dynamic>>() : const [];
       defaultModel = body['default_model'] as String?;
-      if ((selectedModel == null || selectedModel!.isEmpty) && defaultModel != null) {
+      if (selectedModel == null || selectedModel!.isEmpty) {
         selectedModel = defaultModel;
       }
       error = null;
@@ -139,6 +139,12 @@ class ChatSessionController {
           }
         } else {
           _liveTurnBlocks = applyStreamEvent(_liveTurnBlocks, event);
+          if (type == 'text_delta' || type == 'thinking_delta') {
+            notifyImmediate();
+          } else {
+            notify();
+          }
+          continue;
         }
         notify();
       }

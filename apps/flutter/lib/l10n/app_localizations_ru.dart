@@ -1792,6 +1792,36 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectChatModelLabel => 'Модель';
 
   @override
+  String get projectChatReasoning => 'Размышление';
+
+  @override
+  String get projectChatReasoningStreaming => 'Размышление…';
+
+  @override
+  String get projectChatUsage => 'Расход';
+
+  @override
+  String get projectChatUsageInputTokens => 'Входные токены';
+
+  @override
+  String get projectChatUsageOutputTokens => 'Выходные токены';
+
+  @override
+  String get projectChatUsageTotalTokens => 'Всего токенов';
+
+  @override
+  String get projectChatUsageCost => 'Стоимость';
+
+  @override
+  String get projectChatSettingsTitle => 'Настройки чата';
+
+  @override
+  String get projectChatAddAction => 'Настройки чата';
+
+  @override
+  String get projectChatCancelled => 'Отменено';
+
+  @override
   String get errorAgentProviderNetwork =>
       'AI-провайдер недоступен из контейнера (сеть).';
 

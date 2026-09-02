@@ -19,16 +19,20 @@ class ChatComposer extends StatefulWidget {
     super.key,
     required this.onSend,
     this.enabled = true,
+    this.streaming = false,
     this.disabledHint,
     this.onCancel,
+    this.onOpenSettings,
     this.projectId,
     this.api,
   });
 
   final ChatComposerSend onSend;
   final bool enabled;
+  final bool streaming;
   final String? disabledHint;
   final VoidCallback? onCancel;
+  final VoidCallback? onOpenSettings;
   final String? projectId;
   final ProdavanApi? api;
 
@@ -40,17 +44,48 @@ class _ChatComposerState extends State<ChatComposer> {
   final _controller = TextEditingController();
   final List<_PendingAttachment> _attachments = [];
   bool _uploading = false;
+  bool _multiline = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_onTextChanged);
+  }
 
   @override
   void dispose() {
+    _controller.removeListener(_onTextChanged);
     _controller.dispose();
     super.dispose();
   }
 
   bool get _canSend =>
       widget.enabled &&
+      !widget.streaming &&
       !_uploading &&
       (_controller.text.trim().isNotEmpty || _attachments.isNotEmpty);
+
+  bool _computeMultiline(BuildContext context) {
+    final text = _controller.text;
+    if (text.contains('\n')) return true;
+    if (text.isEmpty) return false;
+    final style = Theme.of(context).textTheme.bodyMedium ?? const TextStyle(fontSize: 16);
+    final inset = AppSpacing.md * 2 + 120;
+    final maxWidth = MediaQuery.sizeOf(context).width - inset;
+    if (maxWidth <= 0) return false;
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: Directionality.of(context),
+      maxLines: null,
+    )..layout(maxWidth: maxWidth);
+    final lineHeight = style.fontSize! * (style.height ?? 1.2);
+    return painter.height > lineHeight * 1.4;
+  }
+
+  void _onTextChanged() {
+    if (!mounted) return;
+    setState(() {});
+  }
 
   void _submit() {
     if (!_canSend) return;
@@ -97,14 +132,86 @@ class _ChatComposerState extends State<ChatComposer> {
     }
   }
 
+  InputDecoration _fieldDecoration(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    return InputDecoration(
+      hintText: widget.enabled
+          ? l10n.projectMessageHint
+          : (widget.disabledHint ?? l10n.projectMessageHint),
+      border: InputBorder.none,
+      isDense: true,
+      contentPadding: EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.sm,
+      ),
+    );
+  }
+
+  Widget _attachButton(AppLocalizations l10n) {
+    final canAttach = widget.enabled && widget.projectId != null && widget.api != null;
+    if (!canAttach) return const SizedBox.shrink();
+    return IconButton(
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+      tooltip: l10n.projectAttachmentFallback,
+      onPressed: _uploading ? null : _pickFile,
+      icon: _uploading
+          ? const SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.attach_file),
+    );
+  }
+
+  Widget _plusButton(AppLocalizations l10n) {
+    if (widget.onOpenSettings == null) return const SizedBox.shrink();
+    return IconButton(
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+      tooltip: l10n.projectChatAddAction,
+      onPressed: widget.enabled ? widget.onOpenSettings : null,
+      icon: const Icon(Icons.add),
+    );
+  }
+
+  Widget _sendButton(AppLocalizations l10n) {
+    if (widget.onCancel != null) {
+      return IconButton(
+        visualDensity: VisualDensity.compact,
+        padding: EdgeInsets.zero,
+        constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+        tooltip: l10n.commonCancel,
+        onPressed: widget.onCancel,
+        icon: const Icon(Icons.stop_circle_outlined),
+      );
+    }
+    return IconButton(
+      visualDensity: VisualDensity.compact,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+      tooltip: l10n.commonContinueAction,
+      onPressed: _canSend ? _submit : null,
+      icon: const Icon(Icons.send),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final canAttach = widget.enabled && widget.projectId != null && widget.api != null;
+    final scheme = Theme.of(context).colorScheme;
+    final multiline = _computeMultiline(context);
+    if (multiline != _multiline) {
+      _multiline = multiline;
+    }
+
     return SafeArea(
       top: false,
       child: Padding(
-        padding: EdgeInsets.all(AppSpacing.md),
+        padding: EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.md),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -119,57 +226,62 @@ class _ChatComposerState extends State<ChatComposer> {
                     for (final att in _attachments)
                       InputChip(
                         label: Text(att.filename, overflow: TextOverflow.ellipsis),
-                        onDeleted: widget.enabled
+                        onDeleted: widget.enabled && !widget.streaming
                             ? () => setState(() => _attachments.remove(att))
                             : null,
                       ),
                   ],
                 ),
               ),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                if (canAttach)
-                  IconButton(
-                    tooltip: l10n.projectAttachmentFallback,
-                    onPressed: _uploading ? null : _pickFile,
-                    icon: _uploading
-                        ? SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.attach_file),
-                  ),
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    enabled: widget.enabled && !_uploading,
-                    minLines: 1,
-                    maxLines: 6,
-                    decoration: InputDecoration(
-                      hintText: widget.enabled
-                          ? l10n.projectMessageHint
-                          : (widget.disabledHint ?? l10n.projectMessageHint),
-                      border: const OutlineInputBorder(),
+            Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: scheme.outlineVariant),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: EdgeInsets.symmetric(
+                horizontal: AppSpacing.xs,
+                vertical: AppSpacing.xs,
+              ),
+              child: multiline
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        TextField(
+                          controller: _controller,
+                          enabled: widget.enabled && !_uploading,
+                          minLines: 1,
+                          maxLines: 6,
+                          decoration: _fieldDecoration(context),
+                          onSubmitted: widget.enabled && !widget.streaming ? (_) => _submit() : null,
+                        ),
+                        Row(
+                          children: [
+                            _attachButton(l10n),
+                            _plusButton(l10n),
+                            const Spacer(),
+                            _sendButton(l10n),
+                          ],
+                        ),
+                      ],
+                    )
+                  : Row(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        _attachButton(l10n),
+                        _plusButton(l10n),
+                        Expanded(
+                          child: TextField(
+                            controller: _controller,
+                            enabled: widget.enabled && !_uploading,
+                            minLines: 1,
+                            maxLines: 6,
+                            decoration: _fieldDecoration(context),
+                            onSubmitted: widget.enabled && !widget.streaming ? (_) => _submit() : null,
+                          ),
+                        ),
+                        _sendButton(l10n),
+                      ],
                     ),
-                    onSubmitted: widget.enabled ? (_) => _submit() : null,
-                  ),
-                ),
-                SizedBox(width: AppSpacing.sm),
-                if (widget.onCancel != null)
-                  IconButton(
-                    tooltip: l10n.commonCancel,
-                    onPressed: widget.onCancel,
-                    icon: const Icon(Icons.stop_circle_outlined),
-                  )
-                else
-                  IconButton(
-                    tooltip: l10n.commonContinueAction,
-                    onPressed: _canSend ? _submit : null,
-                    icon: const Icon(Icons.send),
-                  ),
-              ],
             ),
           ],
         ),

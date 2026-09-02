@@ -8,7 +8,7 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/employee/agent_chat_errors.dart';
 import 'package:prodavan/features/employee/cabinet_project_settings_page.dart';
-import 'package:prodavan/features/employee/tool_approve_page.dart';
+import 'package:prodavan/features/employee/project_chat_settings_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Project agent workspace — SSE chat + HITL approvals (block-based UI).
@@ -95,6 +95,14 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     super.dispose();
   }
 
+  Future<void> _openChatSettings() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ProjectChatSettingsPage(controller: _chat),
+      ),
+    );
+  }
+
   Future<void> _openSettings() async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
@@ -111,24 +119,6 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       await _chat.loadModels();
     }
     if (mounted) setState(() {});
-  }
-
-  Future<void> _openApproval(Map<String, dynamic> approval) async {
-    final sid = _chat.sessionId;
-    if (sid == null) return;
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => ToolApprovePage(
-          projectId: widget.projectId,
-          sessionId: sid,
-          approval: approval,
-          onDecision: (decision) => _chat.resolveApproval(
-            (approval['id'] ?? approval['approval_id']) as String,
-            decision,
-          ),
-        ),
-      ),
-    );
   }
 
   @override
@@ -160,8 +150,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         chatAvailable: _chatAvailable,
         loading: _loading,
         title: Text(widget.projectName),
-        onOpenSettings: _openSettings,
-        onOpenApproval: _openApproval,
+        onOpenChatSettings: _openChatSettings,
       ),
     );
   }

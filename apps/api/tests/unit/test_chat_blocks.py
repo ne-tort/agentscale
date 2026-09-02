@@ -4,6 +4,18 @@ from prodavan.application.agent.session_service import events_to_chat_blocks
 from prodavan.domain.agent import PLATFORM_EVENT_USER_MESSAGE, AgentEventType
 
 
+def test_events_to_chat_blocks_cumulative_text_delta() -> None:
+    events = [
+        {"type": PLATFORM_EVENT_USER_MESSAGE, "data": {"text": "hi"}},
+        {"type": AgentEventType.TEXT_DELTA, "data": {"text": "При"}},
+        {"type": AgentEventType.TEXT_DELTA, "data": {"text": "Привет"}},
+        {"type": AgentEventType.TEXT_DELTA, "data": {"text": "Привет!"}},
+        {"type": AgentEventType.DONE, "data": {"reason": "completed"}},
+    ]
+    blocks = events_to_chat_blocks(events)
+    assert blocks[1]["text"] == "Привет!"
+
+
 def test_events_to_chat_blocks_user_and_assistant() -> None:
     events = [
         {"type": PLATFORM_EVENT_USER_MESSAGE, "data": {"text": "hi"}},

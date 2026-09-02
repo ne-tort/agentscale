@@ -3212,6 +3212,66 @@ abstract class AppLocalizations {
   /// **'Model'**
   String get projectChatModelLabel;
 
+  /// No description provided for @projectChatReasoning.
+  ///
+  /// In en, this message translates to:
+  /// **'Reasoning'**
+  String get projectChatReasoning;
+
+  /// No description provided for @projectChatReasoningStreaming.
+  ///
+  /// In en, this message translates to:
+  /// **'Reasoning…'**
+  String get projectChatReasoningStreaming;
+
+  /// No description provided for @projectChatUsage.
+  ///
+  /// In en, this message translates to:
+  /// **'Usage'**
+  String get projectChatUsage;
+
+  /// No description provided for @projectChatUsageInputTokens.
+  ///
+  /// In en, this message translates to:
+  /// **'Input tokens'**
+  String get projectChatUsageInputTokens;
+
+  /// No description provided for @projectChatUsageOutputTokens.
+  ///
+  /// In en, this message translates to:
+  /// **'Output tokens'**
+  String get projectChatUsageOutputTokens;
+
+  /// No description provided for @projectChatUsageTotalTokens.
+  ///
+  /// In en, this message translates to:
+  /// **'Total tokens'**
+  String get projectChatUsageTotalTokens;
+
+  /// No description provided for @projectChatUsageCost.
+  ///
+  /// In en, this message translates to:
+  /// **'Cost'**
+  String get projectChatUsageCost;
+
+  /// No description provided for @projectChatSettingsTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat settings'**
+  String get projectChatSettingsTitle;
+
+  /// No description provided for @projectChatAddAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat settings'**
+  String get projectChatAddAction;
+
+  /// No description provided for @projectChatCancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancelled'**
+  String get projectChatCancelled;
+
   /// No description provided for @errorAgentProviderNetwork.
   ///
   /// In en, this message translates to:

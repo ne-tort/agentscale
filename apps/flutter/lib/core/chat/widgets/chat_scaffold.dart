@@ -6,7 +6,12 @@ import 'package:prodavan/core/chat/models/chat_block.dart';
 import 'package:prodavan/core/chat/widgets/blocks/chat_block_renderer.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/features/employee/widgets/chat_composer.dart';
-import 'package:prodavan/l10n/app_localizations.dart';
+
+int _blocksScrollFingerprint(List<ChatBlock> blocks) {
+  if (blocks.isEmpty) return 0;
+  final last = blocks.last;
+  return Object.hash(blocks.length, last.kind, last.text.length, last.isStreaming);
+}
 
 class ChatMessageList extends StatefulWidget {
   const ChatMessageList({
@@ -31,20 +36,27 @@ class ChatMessageList extends StatefulWidget {
 class ChatMessageListState extends State<ChatMessageList> {
   final _scroll = ScrollController();
   bool _stickToBottom = true;
+  int _lastFingerprint = 0;
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scroll.hasClients) {
+        _scroll.animateTo(
+          _scroll.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
 
   @override
   void didUpdateWidget(covariant ChatMessageList oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (_stickToBottom && widget.blocks.length != oldWidget.blocks.length) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scroll.hasClients) {
-          _scroll.animateTo(
-            _scroll.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 120),
-            curve: Curves.easeOut,
-          );
-        }
-      });
+    final fp = _blocksScrollFingerprint(widget.blocks);
+    if (_stickToBottom && fp != _lastFingerprint) {
+      _lastFingerprint = fp;
+      _scrollToBottom();
     }
   }
 
@@ -56,6 +68,7 @@ class ChatMessageListState extends State<ChatMessageList> {
 
   @override
   Widget build(BuildContext context) {
+    _lastFingerprint = _blocksScrollFingerprint(widget.blocks);
     return NotificationListener<ScrollNotification>(
       onNotification: (n) {
         if (n is UserScrollNotification) {
@@ -68,8 +81,10 @@ class ChatMessageListState extends State<ChatMessageList> {
         padding: EdgeInsets.all(AppSpacing.md),
         itemCount: widget.blocks.length,
         itemBuilder: (context, index) {
+          final block = widget.blocks[index];
           return ChatBlockRenderer(
-            block: widget.blocks[index],
+            key: ValueKey('${block.kind}-${block.id}-$index-${block.text.length}-${block.isStreaming}'),
+            block: block,
             projectId: widget.projectId,
             sessionId: widget.sessionId,
             api: widget.api,
@@ -88,8 +103,7 @@ class ChatScaffold extends StatelessWidget {
     required this.api,
     required this.chatAvailable,
     required this.loading,
-    required this.onOpenSettings,
-    required this.onOpenApproval,
+    required this.onOpenChatSettings,
     required this.title,
   });
 
@@ -97,8 +111,7 @@ class ChatScaffold extends StatelessWidget {
   final ProdavanApi api;
   final bool chatAvailable;
   final bool loading;
-  final VoidCallback onOpenSettings;
-  final void Function(Map<String, dynamic> approval) onOpenApproval;
+  final VoidCallback onOpenChatSettings;
   final Widget title;
 
   double _columnMaxWidth(double width) {
@@ -109,7 +122,6 @@ class ChatScaffold extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
     return LayoutBuilder(
       builder: (context, constraints) {
         final maxW = _columnMaxWidth(constraints.maxWidth);
@@ -118,54 +130,11 @@ class ChatScaffold extends StatelessWidget {
             constraints: BoxConstraints(maxWidth: maxW),
             child: Column(
               children: [
-                if (controller.pendingApprovals.isNotEmpty)
-                  MaterialBanner(
-                    content: Text('${l10n.projectToolApprovalHint} (${controller.pendingApprovals.length})'),
-                    actions: [
-                      TextButton(
-                        onPressed: () => onOpenApproval(controller.pendingApprovals.first),
-                        child: Text(l10n.projectApproveTool),
-                      ),
-                    ],
-                  ),
-                if (controller.availableModels.isNotEmpty)
-                  Padding(
-                    padding: EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, 0),
-                    child: InputDecorator(
-                      decoration: InputDecoration(
-                        labelText: l10n.projectChatModelLabel,
-                        border: const OutlineInputBorder(),
-                        contentPadding: EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.xs),
-                      ),
-                      child: DropdownButtonHideUnderline(
-                        child: DropdownButton<String>(
-                          isExpanded: true,
-                          value: controller.selectedModel ?? controller.defaultModel,
-                          items: controller.availableModels
-                              .map((m) {
-                                final id = m['id'] as String? ?? m['label'] as String? ?? '';
-                                return DropdownMenuItem<String>(
-                                  value: id,
-                                  child: Text(m['label'] as String? ?? id),
-                                );
-                              })
-                              .where((item) => item.value != null && item.value!.isNotEmpty)
-                              .toList(),
-                          onChanged: controller.streaming
-                              ? null
-                              : (v) {
-                                  controller.selectedModel = v;
-                                  controller.notifyImmediate();
-                                },
-                        ),
-                      ),
-                    ),
-                  ),
                 Expanded(
                   child: loading
                       ? const Center(child: CircularProgressIndicator())
                       : controller.visibleBlocks.isEmpty
-                          ? Center(child: Text(l10n.projectEmptyChatHint))
+                          ? const SizedBox.shrink()
                           : ChatMessageList(
                               blocks: controller.visibleBlocks,
                               projectId: controller.projectId,
@@ -179,10 +148,12 @@ class ChatScaffold extends StatelessWidget {
                 ChatComposer(
                   projectId: controller.projectId,
                   api: api,
-                  enabled: chatAvailable && !controller.streaming,
-                  disabledHint: l10n.errorPodNotRunning,
+                  enabled: chatAvailable,
+                  streaming: controller.streaming,
+                  disabledHint: null,
                   onSend: (text, refs) => controller.send(text, attachmentRefs: refs),
                   onCancel: controller.streaming ? () => controller.cancelStream() : null,
+                  onOpenSettings: onOpenChatSettings,
                 ),
               ],
             ),

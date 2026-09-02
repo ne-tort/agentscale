@@ -22,7 +22,9 @@ from prodavan.application.agent.openclaw_bridge import (
 from prodavan.application.agent.policy_service import AgentPolicyService
 from prodavan.application.agent.runtime_guard import require_running_pod_runtime
 from prodavan.application.agent.runtime_model import sanitize_runtime_model, sdk_fallback_model
+from prodavan.application.agent.text_delta import normalize_text_delta
 from prodavan.application.ai_keys.service import AiKeysService
+from prodavan.application.ai_models.live_service import AiModelsLiveService
 from prodavan.application.project_service import ProjectAccessPolicy
 from prodavan.application.projects.attachment_service import ProjectAttachmentService
 from prodavan.config.settings import settings
@@ -46,27 +48,28 @@ from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
 
 
 def _assistant_text_from_events(events: list[dict]) -> str:
-    parts: list[str] = []
+    cumulative = ""
     for event in events:
         if event.get("type") != AgentEventType.TEXT_DELTA:
             continue
         data = event.get("data") or {}
         chunk = data.get("text")
         if chunk:
-            parts.append(str(chunk))
-    return "".join(parts)
+            _, cumulative = normalize_text_delta(cumulative, str(chunk))
+    return cumulative
 
 
 def events_to_transcript(events: list[dict]) -> list[dict]:
     """Collapse platform user_message + text_delta turns into chat bubbles."""
     messages: list[dict] = []
-    assistant_parts: list[str] = []
+    assistant_cumulative = ""
 
     def flush_assistant() -> None:
-        if not assistant_parts:
+        nonlocal assistant_cumulative
+        if not assistant_cumulative:
             return
-        messages.append({"role": "assistant", "text": "".join(assistant_parts)})
-        assistant_parts.clear()
+        messages.append({"role": "assistant", "text": assistant_cumulative})
+        assistant_cumulative = ""
 
     for event in events:
         etype = event.get("type")
@@ -101,7 +104,7 @@ def events_to_transcript(events: list[dict]) -> list[dict]:
         elif etype == AgentEventType.TEXT_DELTA:
             chunk = data.get("text")
             if chunk:
-                assistant_parts.append(str(chunk))
+                _, assistant_cumulative = normalize_text_delta(assistant_cumulative, str(chunk))
         elif etype in {AgentEventType.DONE, AgentEventType.ERROR}:
             flush_assistant()
 
@@ -112,24 +115,26 @@ def events_to_transcript(events: list[dict]) -> list[dict]:
 def events_to_chat_blocks(events: list[dict]) -> list[dict]:
     """Project persisted agent events into typed chat blocks for Flutter UI."""
     blocks: list[dict] = []
-    assistant_parts: list[str] = []
-    thinking_parts: list[str] = []
+    assistant_cumulative = ""
+    thinking_cumulative = ""
     open_subagents: dict[str, dict] = {}
 
     def flush_assistant() -> None:
-        if not assistant_parts:
+        nonlocal assistant_cumulative
+        if not assistant_cumulative:
             return
-        blocks.append({"kind": "assistant_markdown", "text": "".join(assistant_parts)})
-        assistant_parts.clear()
+        blocks.append({"kind": "assistant_markdown", "text": assistant_cumulative})
+        assistant_cumulative = ""
 
     def flush_thinking(duration_ms: int | None = None) -> None:
-        if not thinking_parts:
+        nonlocal thinking_cumulative
+        if not thinking_cumulative:
             return
-        block: dict = {"kind": "thinking", "text": "".join(thinking_parts)}
+        block: dict = {"kind": "thinking", "text": thinking_cumulative}
         if duration_ms is not None:
             block["duration_ms"] = duration_ms
         blocks.append(block)
-        thinking_parts.clear()
+        thinking_cumulative = ""
 
     for event in events:
         etype = event.get("type")
@@ -151,14 +156,14 @@ def events_to_chat_blocks(events: list[dict]) -> list[dict]:
         if etype == AgentEventType.TEXT_DELTA:
             chunk = data.get("text")
             if chunk:
-                assistant_parts.append(str(chunk))
+                _, assistant_cumulative = normalize_text_delta(assistant_cumulative, str(chunk))
             continue
 
         if etype == AgentEventType.THINKING_DELTA:
             flush_assistant()
             chunk = data.get("text")
             if chunk:
-                thinking_parts.append(str(chunk))
+                _, thinking_cumulative = normalize_text_delta(thinking_cumulative, str(chunk))
             continue
 
         if etype == AgentEventType.THINKING_COMPLETE:
@@ -479,6 +484,15 @@ class AgentSessionService:
 
         fallback = sdk_fallback_model(row.api_kind)
         if fallback is None:
+            live_default = await self._resolve_live_default_model(project=project, row=row)
+            if live_default is not None:
+                validated = await self._policy.validate_send_model(
+                    project=project,
+                    credential_api_kind=row.api_kind,
+                    model=live_default,
+                )
+                row.model = validated
+                return validated
             return None
         validated = await self._policy.validate_send_model(
             project=project,
@@ -487,6 +501,26 @@ class AgentSessionService:
         )
         row.model = validated
         return validated
+
+    async def _resolve_live_default_model(
+        self,
+        *,
+        project: ProjectRow,
+        row: AgentSessionRow,
+    ) -> str | None:
+        key_id = row.resolved_key_id or getattr(project, "resolved_ai_key_id", None)
+        if not key_id:
+            return None
+        try:
+            body = await AiModelsLiveService(self._session).list_live_for_key(
+                company_id=project.company_id,
+                key_id=str(key_id),
+                project_id=project.id,
+            )
+        except AppError:
+            return None
+        default = body.get("default_model")
+        return str(default) if default else None
 
     async def list_sessions(
         self,

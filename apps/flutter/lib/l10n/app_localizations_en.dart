@@ -1779,6 +1779,36 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectChatModelLabel => 'Model';
 
   @override
+  String get projectChatReasoning => 'Reasoning';
+
+  @override
+  String get projectChatReasoningStreaming => 'Reasoning…';
+
+  @override
+  String get projectChatUsage => 'Usage';
+
+  @override
+  String get projectChatUsageInputTokens => 'Input tokens';
+
+  @override
+  String get projectChatUsageOutputTokens => 'Output tokens';
+
+  @override
+  String get projectChatUsageTotalTokens => 'Total tokens';
+
+  @override
+  String get projectChatUsageCost => 'Cost';
+
+  @override
+  String get projectChatSettingsTitle => 'Chat settings';
+
+  @override
+  String get projectChatAddAction => 'Chat settings';
+
+  @override
+  String get projectChatCancelled => 'Cancelled';
+
+  @override
   String get errorAgentProviderNetwork =>
       'AI provider is unreachable from the container (network).';
 

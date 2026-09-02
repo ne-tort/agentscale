@@ -3,6 +3,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:markdown/markdown.dart' as md;
 
 import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/l10n/app_localizations.dart';
 
 class ChatMarkdownBody extends StatelessWidget {
   const ChatMarkdownBody({super.key, required this.text, this.selectable = true});
@@ -43,6 +44,7 @@ class AssistantStreamBlock extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final l10n = AppLocalizations.of(context);
     return Container(
       margin: EdgeInsets.only(bottom: AppSpacing.sm),
       padding: EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
@@ -53,20 +55,14 @@ class AssistantStreamBlock extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          ChatMarkdownBody(text: text),
           if (streaming)
-            Padding(
-              padding: EdgeInsets.only(top: AppSpacing.xs),
-              child: SizedBox(
-                width: 12,
-                height: 12,
-                child: CircularProgressIndicator(strokeWidth: 2, color: scheme.primary),
-              ),
-            ),
+            SelectableText(text, style: Theme.of(context).textTheme.bodyMedium)
+          else
+            ChatMarkdownBody(text: text),
           if (cancelled)
             Padding(
               padding: EdgeInsets.only(top: AppSpacing.xs),
-              child: Text('Cancelled', style: Theme.of(context).textTheme.labelSmall),
+              child: Text(l10n.projectChatCancelled, style: Theme.of(context).textTheme.labelSmall),
             ),
         ],
       ),
@@ -120,16 +116,12 @@ class ToolCallBlock extends StatefulWidget {
 }
 
 class _ToolCallBlockState extends State<ToolCallBlock> {
-  bool _open = false;
-
   @override
   Widget build(BuildContext context) {
     return Card(
       margin: EdgeInsets.only(bottom: AppSpacing.sm),
       child: ExpansionTile(
-        initiallyExpanded: _open,
-        onExpansionChanged: (v) => setState(() => _open = v),
-        title: Text('Running `${widget.name}`'),
+        title: Text(widget.name),
         children: [
           Padding(
             padding: EdgeInsets.all(AppSpacing.md),
@@ -153,8 +145,6 @@ class ToolResultBlock extends StatefulWidget {
 }
 
 class _ToolResultBlockState extends State<ToolResultBlock> {
-  bool _open = false;
-
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -162,9 +152,7 @@ class _ToolResultBlockState extends State<ToolResultBlock> {
       margin: EdgeInsets.only(bottom: AppSpacing.sm),
       color: widget.isError ? scheme.errorContainer : null,
       child: ExpansionTile(
-        initiallyExpanded: _open,
-        onExpansionChanged: (v) => setState(() => _open = v),
-        title: Text('Result: ${widget.name}'),
+        title: Text(widget.name),
         children: [
           Padding(
             padding: EdgeInsets.all(AppSpacing.md),
@@ -194,6 +182,7 @@ class ApprovalBlock extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Card(
       margin: EdgeInsets.only(bottom: AppSpacing.sm),
       child: Padding(
@@ -201,15 +190,15 @@ class ApprovalBlock extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Approve tool: $name', style: Theme.of(context).textTheme.titleSmall),
+            Text(name, style: Theme.of(context).textTheme.titleSmall),
             SizedBox(height: AppSpacing.sm),
             SelectableText(input.toString()),
             SizedBox(height: AppSpacing.sm),
             Row(
               children: [
-                FilledButton(onPressed: onAllow, child: const Text('Allow')),
+                FilledButton(onPressed: onAllow, child: Text(l10n.projectApproveAndContinue)),
                 SizedBox(width: AppSpacing.sm),
-                OutlinedButton(onPressed: onDeny, child: const Text('Deny')),
+                OutlinedButton(onPressed: onDeny, child: Text(l10n.projectDeny)),
               ],
             ),
           ],
@@ -223,13 +212,11 @@ class SubagentBlock extends StatefulWidget {
   const SubagentBlock({
     super.key,
     required this.title,
-    this.status = 'running',
     this.events = const [],
     this.onFetchSidechain,
   });
 
   final String title;
-  final String status;
   final List<dynamic> events;
   final Future<List<Map<String, dynamic>>> Function()? onFetchSidechain;
 
@@ -256,20 +243,7 @@ class _SubagentBlockState extends State<SubagentBlock> {
     return Card(
       margin: EdgeInsets.only(bottom: AppSpacing.sm),
       child: ExpansionTile(
-        title: Row(
-          children: [
-            if (widget.status == 'running')
-              Padding(
-                padding: EdgeInsets.only(right: AppSpacing.sm),
-                child: SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                ),
-              ),
-            Expanded(child: Text(widget.title)),
-          ],
-        ),
+        title: Text(widget.title),
         onExpansionChanged: (open) {
           if (open) _load();
         },
@@ -287,13 +261,17 @@ class _SubagentBlockState extends State<SubagentBlock> {
 }
 
 class PlanProgressBlock extends StatelessWidget {
-  const PlanProgressBlock({super.key, required this.tasks, this.message});
+  const PlanProgressBlock({super.key, required this.tasks});
 
   final List<dynamic> tasks;
-  final String? message;
 
   @override
   Widget build(BuildContext context) {
+    final visible = tasks.whereType<Map>().where((t) {
+      final title = t['title'] ?? t['id'];
+      return title != null && '$title'.trim().isNotEmpty;
+    }).toList();
+    if (visible.isEmpty) return const SizedBox.shrink();
     return Card(
       margin: EdgeInsets.only(bottom: AppSpacing.sm),
       child: Padding(
@@ -301,15 +279,13 @@ class PlanProgressBlock extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (message != null) Text(message!, style: Theme.of(context).textTheme.titleSmall),
-            for (final task in tasks)
-              if (task is Map)
-                CheckboxListTile(
-                  value: task['status'] == 'done' || task['status'] == 'completed',
-                  onChanged: null,
-                  title: Text('${task['title'] ?? task['id'] ?? 'Task'}'),
-                  controlAffinity: ListTileControlAffinity.leading,
-                ),
+            for (final task in visible)
+              CheckboxListTile(
+                value: task['status'] == 'done' || task['status'] == 'completed',
+                onChanged: null,
+                title: Text('${task['title'] ?? task['id']}'),
+                controlAffinity: ListTileControlAffinity.leading,
+              ),
           ],
         ),
       ),
@@ -332,17 +308,107 @@ class _ThinkingBlockState extends State<ThinkingBlock> {
   bool _open = false;
 
   @override
+  void initState() {
+    super.initState();
+    _open = widget.streaming;
+  }
+
+  @override
+  void didUpdateWidget(covariant ThinkingBlock oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.streaming && !_open) {
+      setState(() => _open = true);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final title = widget.streaming
+        ? l10n.projectChatReasoningStreaming
+        : widget.durationMs != null
+            ? '${l10n.projectChatReasoning} (${widget.durationMs}ms)'
+            : l10n.projectChatReasoning;
     return Card(
       margin: EdgeInsets.only(bottom: AppSpacing.sm),
       child: ExpansionTile(
         initiallyExpanded: _open,
         onExpansionChanged: (v) => setState(() => _open = v),
-        title: Text(widget.streaming ? 'Thinking…' : 'Reasoning${widget.durationMs != null ? ' (${widget.durationMs}ms)' : ''}'),
+        title: Text(title),
         children: [
           Padding(
             padding: EdgeInsets.all(AppSpacing.md),
             child: SelectableText(widget.text),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class UsageBlock extends StatefulWidget {
+  const UsageBlock({super.key, required this.raw});
+
+  final Map<String, dynamic> raw;
+
+  @override
+  State<UsageBlock> createState() => _UsageBlockState();
+}
+
+class _UsageBlockState extends State<UsageBlock> {
+  bool _open = false;
+
+  String? _formatNum(Object? value) {
+    if (value == null) return null;
+    if (value is num) return value.toString();
+    return value.toString();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final rows = <Widget>[];
+    void addRow(String label, Object? value) {
+      final formatted = _formatNum(value);
+      if (formatted == null) return;
+      rows.add(Padding(
+        padding: EdgeInsets.only(bottom: AppSpacing.xs),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(
+              width: 140,
+              child: Text(label, style: Theme.of(context).textTheme.bodySmall),
+            ),
+            Expanded(child: Text(formatted)),
+          ],
+        ),
+      ));
+    }
+
+    addRow(l10n.projectChatUsageInputTokens, widget.raw['input_tokens']);
+    addRow(l10n.projectChatUsageOutputTokens, widget.raw['output_tokens']);
+    addRow(l10n.projectChatUsageTotalTokens, widget.raw['total_tokens']);
+    addRow(l10n.projectChatUsageCost, widget.raw['total_cost_usd'] ?? widget.raw['cost_usd']);
+    if (widget.raw['model'] != null) {
+      addRow(l10n.projectChatModelLabel, widget.raw['model']);
+    }
+
+    if (rows.isEmpty) return const SizedBox.shrink();
+
+    return Card(
+      margin: EdgeInsets.only(bottom: AppSpacing.sm),
+      child: ExpansionTile(
+        initiallyExpanded: _open,
+        onExpansionChanged: (v) => setState(() => _open = v),
+        title: Text(l10n.projectChatUsage),
+        children: [
+          Padding(
+            padding: EdgeInsets.all(AppSpacing.md),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: rows,
+            ),
           ),
         ],
       ),

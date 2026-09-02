@@ -23,6 +23,15 @@ from prodavan.infrastructure.persistence.models.projects import ProjectPodRow, P
 logger = logging.getLogger(__name__)
 
 
+def resolve_ui_default(effective: list[str], catalog_default: str | None) -> str | None:
+    """Pick chat default: catalog flag, SDK ``default`` id, else first live model."""
+    if catalog_default and catalog_default in effective:
+        return catalog_default
+    if "default" in effective:
+        return "default"
+    return effective[0] if effective else None
+
+
 class AiModelsLiveService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -75,6 +84,7 @@ class AiModelsLiveService:
         ui_default = next((str(m["name"]) for m in catalog if m.get("is_default")), None)
         if ui_default and ui_default not in effective:
             ui_default = None
+        ui_default = resolve_ui_default(effective, ui_default)
 
         return {
             "models": [{"id": name, "label": name} for name in effective],

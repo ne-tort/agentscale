@@ -3,7 +3,7 @@ import 'package:prodavan/core/chat/models/chat_block.dart';
 import 'package:prodavan/core/chat/models/chat_projection.dart';
 
 void main() {
-  test('applyStreamEvent accumulates text_delta into streaming assistant block', () {
+  test('applyStreamEvent accumulates incremental text_delta into streaming assistant block', () {
     var blocks = <ChatBlock>[];
     blocks = applyStreamEvent(blocks, {'type': 'text_delta', 'data': {'text': 'Hel'}});
     blocks = applyStreamEvent(blocks, {'type': 'text_delta', 'data': {'text': 'lo'}});
@@ -11,6 +11,22 @@ void main() {
     expect(blocks.first.kind, 'assistant_markdown');
     expect(blocks.first.text, 'Hello');
     expect(blocks.first.isStreaming, isTrue);
+  });
+
+  test('applyStreamEvent dedupes cumulative text_delta', () {
+    var blocks = <ChatBlock>[];
+    blocks = applyStreamEvent(blocks, {'type': 'text_delta', 'data': {'text': 'При'}});
+    blocks = applyStreamEvent(blocks, {'type': 'text_delta', 'data': {'text': 'Привет'}});
+    blocks = applyStreamEvent(blocks, {'type': 'text_delta', 'data': {'text': 'Привет!'}});
+    expect(blocks.single.text, 'Привет!');
+  });
+
+  test('normalizeTextDelta appends incremental chunks', () {
+    var cum = '';
+    var r = normalizeTextDelta(cum, 'Hel');
+    cum = r.cumulative;
+    r = normalizeTextDelta(cum, 'lo');
+    expect(r.cumulative, 'Hello');
   });
 
   test('finalizeTurnBlocks clears streaming flag', () {
@@ -28,5 +44,20 @@ void main() {
     });
     expect(blocks.single.kind, 'tool_call');
     expect(blocks.single.raw['name'], 'Read');
+  });
+
+  test('applyStreamEvent merges usage blocks', () {
+    var blocks = applyStreamEvent([], {
+      'type': 'usage',
+      'data': {'input_tokens': 10},
+    });
+    blocks = applyStreamEvent(blocks, {
+      'type': 'usage',
+      'data': {'output_tokens': 5},
+    });
+    expect(blocks.length, 1);
+    expect(blocks.single.kind, 'usage');
+    expect(blocks.single.raw['input_tokens'], 10);
+    expect(blocks.single.raw['output_tokens'], 5);
   });
 }

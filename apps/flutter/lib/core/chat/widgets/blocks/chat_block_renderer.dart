@@ -65,7 +65,6 @@ class ChatBlockRenderer extends StatelessWidget {
         final subId = block.raw['id'] as String? ?? block.raw['agent_id'] as String? ?? '';
         return SubagentBlock(
           title: block.raw['agent_type'] as String? ?? block.raw['agent_id'] as String? ?? 'Subagent',
-          status: block.raw['status'] as String? ?? 'running',
           events: block.raw['events'] as List? ?? const [],
           onFetchSidechain: api != null && projectId != null && sessionId != null && subId.isNotEmpty
               ? () async {
@@ -83,8 +82,9 @@ class ChatBlockRenderer extends StatelessWidget {
       case 'plan':
         return PlanProgressBlock(
           tasks: block.raw['tasks'] as List? ?? const [],
-          message: block.raw['message'] as String?,
         );
+      case 'usage':
+        return UsageBlock(raw: block.raw);
       case 'error':
         return Card(
           color: Theme.of(context).colorScheme.errorContainer,
@@ -95,15 +95,11 @@ class ChatBlockRenderer extends StatelessWidget {
         );
       case 'status':
       case 'system_notice':
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Text(
-            block.raw['message'] as String? ?? block.raw['phase'] as String? ?? block.raw['reason'] as String? ?? '',
-            style: Theme.of(context).textTheme.labelSmall,
-          ),
-        );
+      case 'tool_progress':
+      case 'tool_call_delta':
+        return const SizedBox.shrink();
       default:
-        return ListTile(title: Text(block.kind), subtitle: Text(block.raw.toString()));
+        return const SizedBox.shrink();
     }
   }
 }
