@@ -9,17 +9,33 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.domain.admin.types import CompanyAgentRuntimePolicy
+from prodavan.domain.ai_keys import ApiKind
 from prodavan.infrastructure.persistence.models.ai_models import (
     AiKeyModelBindingRow,
     AiModelRow,
     AiModelSdkBindingRow,
 )
 
+_SDK_KINDS = frozenset(
+    {
+        ApiKind.CURSOR_SDK,
+        ApiKind.CODEX_SDK,
+        ApiKind.CLAUDE_AGENT_SDK,
+    }
+)
+
 
 @dataclass(frozen=True)
 class EffectiveModelPolicy:
+    """Runtime filter + UI-only default (never auto-injected into agent config)."""
+
     allowed_models: list[str]
-    default_model: str | None
+    ui_default_model: str | None
+
+    @property
+    def default_model(self) -> str | None:
+        """Backward-compatible alias for UI preselection."""
+        return self.ui_default_model
 
 
 class AiModelPolicyService:
@@ -38,9 +54,9 @@ class AiModelPolicyService:
         ceiling = [m for m in (policy.model_allowlist or []) if str(m).strip()]
 
         if not key_id:
-            if ceiling:
-                return EffectiveModelPolicy(allowed_models=ceiling, default_model=ceiling[0])
-            return EffectiveModelPolicy(allowed_models=[], default_model=None)
+            if ceiling and api_kind not in _SDK_KINDS:
+                return EffectiveModelPolicy(allowed_models=ceiling, ui_default_model=None)
+            return EffectiveModelPolicy(allowed_models=[], ui_default_model=None)
 
         q = await self._session.execute(
             select(AiModelRow.name, AiKeyModelBindingRow.enabled, AiKeyModelBindingRow.is_default)
@@ -58,16 +74,16 @@ class AiModelPolicyService:
         if ceiling:
             ceiling_set = set(ceiling)
             allowed = [m for m in allowed if m in ceiling_set]
-        default_model = None
+        ui_default_model = None
         for name, _, is_default in rows:
             if is_default and (not ceiling or name in ceiling):
-                default_model = str(name)
+                ui_default_model = str(name)
                 break
-        if default_model is None and allowed:
-            default_model = allowed[0]
         if not allowed and ceiling:
-            return EffectiveModelPolicy(allowed_models=ceiling, default_model=ceiling[0])
-        return EffectiveModelPolicy(allowed_models=allowed, default_model=default_model)
+            if api_kind in _SDK_KINDS:
+                return EffectiveModelPolicy(allowed_models=[], ui_default_model=None)
+            return EffectiveModelPolicy(allowed_models=ceiling, ui_default_model=None)
+        return EffectiveModelPolicy(allowed_models=allowed, ui_default_model=ui_default_model)
 
     def assert_model_allowed(
         self,
@@ -77,24 +93,27 @@ class AiModelPolicyService:
         company_policy: CompanyAgentRuntimePolicy,
     ) -> str | None:
         if model is None:
-            return policy.default_model
+            return None
+        explicit = str(model).strip()
+        if not explicit:
+            return None
         ceiling = [m for m in (company_policy.model_allowlist or []) if str(m).strip()]
-        if ceiling and model not in ceiling:
+        if ceiling and explicit not in ceiling:
             from prodavan.domain.errors import AppError
 
             raise AppError(
                 code="MODEL_NOT_ALLOWED",
                 title="Model not allowed",
                 status=403,
-                detail=f"model {model!r} not in company model_allowlist",
+                detail=f"model {explicit!r} not in company model_allowlist",
             )
-        if policy.allowed_models and model not in policy.allowed_models:
+        if policy.allowed_models and explicit not in policy.allowed_models:
             from prodavan.domain.errors import AppError
 
             raise AppError(
                 code="MODEL_NOT_ALLOWED",
                 title="Model not allowed",
                 status=403,
-                detail=f"model {model!r} not enabled for AI key",
+                detail=f"model {explicit!r} not enabled for AI key",
             )
-        return model
+        return explicit

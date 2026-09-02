@@ -23,6 +23,7 @@ class SendMessageBody(BaseModel):
 
     text: str = Field(default="")
     attachment_refs: list[str] = Field(default_factory=list)
+    model: str | None = Field(default=None, max_length=128)
 
     @model_validator(mode="after")
     def require_text_or_attachments(self) -> SendMessageBody:
@@ -196,6 +197,7 @@ async def send_agent_message(
         attachment_refs=body.attachment_refs,
         principal=principal,
         employee=employee,
+        model=body.model,
     )
 
 

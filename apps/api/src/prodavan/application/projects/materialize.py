@@ -8,7 +8,6 @@ from typing import Any, Protocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.company_service import AdminCompanyService
-from prodavan.application.ai_models.policy_service import AiModelPolicyService
 from prodavan.application.projects.materialize_executor import MaterializeExecutor
 from prodavan.application.projects.materialize_planner import MaterializePlanner
 from prodavan.application.projects.openclaw_config_materializer import (
@@ -237,16 +236,9 @@ class ProjectMaterializeService:
                 api_kind = str(key_row.api_kind).strip()
         if not api_kind:
             api_kind = provider_to_default_api_kind(project.agent_provider)
-        model_policy = await AiModelPolicyService(session).resolve_for_key(
-            company_id=project.company_id,
-            key_id=provider_key_id,
-            api_kind=api_kind or "cursor_sdk",
-            company_policy=company_policy,
-        )
         cfg = build_openclaw_config(
             company_policy=company_policy,
             api_kind=api_kind,
-            model=model_policy.default_model,
             provider_key_id=provider_key_id,
             mcp_packages=mcp_packages,
             max_turns=12,

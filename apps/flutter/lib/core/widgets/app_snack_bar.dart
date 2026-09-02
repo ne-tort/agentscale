@@ -42,13 +42,12 @@ class AppSnackStyle {
     AppSnackSeverity severity,
   ) {
     final tokens = context.appColors;
-    final scheme = Theme.of(context).colorScheme;
     return switch (severity) {
       AppSnackSeverity.info => AppSnackStyle(
-          backgroundColor: scheme.inverseSurface,
-          foregroundColor: scheme.onInverseSurface,
+          backgroundColor: tokens.primaryContainer,
+          foregroundColor: tokens.onPrimaryContainer,
           icon: Icons.info_outline_rounded,
-          iconColor: scheme.onInverseSurface,
+          iconColor: tokens.onPrimaryContainer,
         ),
       AppSnackSeverity.success => AppSnackStyle(
           backgroundColor: tokens.success,
@@ -154,9 +153,13 @@ abstract final class AppSnackBar {
     final resolved =
         AppSnackStyle.forSeverity(context, severity).merge(style);
     final fg = resolved.foregroundColor ??
-        Theme.of(context).colorScheme.onInverseSurface;
+        (severity == AppSnackSeverity.info
+            ? context.appColors.onPrimaryContainer
+            : Theme.of(context).colorScheme.onInverseSurface);
     final bg = resolved.backgroundColor ??
-        Theme.of(context).colorScheme.inverseSurface;
+        (severity == AppSnackSeverity.info
+            ? context.appColors.primaryContainer
+            : Theme.of(context).colorScheme.inverseSurface);
     final copyText = rawMessage ?? message;
 
     if (clearOthers) messenger.clearSnackBars();

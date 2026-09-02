@@ -44,13 +44,16 @@ def test_workspace_dev_preset_permissions() -> None:
     assert "shell.exec" in perms.get("ask", [])
 
 
-def test_build_openclaw_config_cursor_omits_model_when_unset() -> None:
-    cfg = build_openclaw_config(
-        company_policy=CompanyAgentRuntimePolicy(tool_preset="workspace_dev"),
-        api_kind="cursor_sdk",
-    )
-    assert cfg["runtime"]["adapter"] == "cursor_sdk"
-    assert "model" not in cfg
+def test_build_openclaw_config_never_writes_model_block() -> None:
+    for api_kind in ("cursor_sdk", "openrouter", "codex_sdk"):
+        cfg = build_openclaw_config(
+            company_policy=CompanyAgentRuntimePolicy(
+                tool_preset="workspace_dev",
+                model_allowlist=["gpt-4o-mini"],
+            ),
+            api_kind=api_kind,
+        )
+        assert "model" not in cfg
 
 
 def test_build_openclaw_config_golden_shape() -> None:
@@ -67,7 +70,7 @@ def test_build_openclaw_config_golden_shape() -> None:
         provider_key_id="key_abc",
     )
     assert cfg["runtime"]["adapter"] == "cursor_sdk"
-    assert cfg["model"]["default"] == "gpt-4o-mini"
+    assert "model" not in cfg
     assert cfg["runtime"]["max_turns"] == 12
     assert cfg["provider"]["key_ref"] == "key_abc"
     assert "echo" in cfg["mcp"]["servers"]
@@ -84,6 +87,7 @@ def test_platform_openclaw_adapter_for_http_providers() -> None:
         api_kind="openrouter",
     )
     assert cfg["runtime"]["adapter"] == "platform_openclaw"
+    assert "model" not in cfg
 
 
 def test_mcp_allowlist_on_config() -> None:
@@ -117,3 +121,4 @@ def test_openrouter_config_includes_dialect() -> None:
     )
     assert cfg["runtime"]["adapter"] == "platform_openclaw"
     assert cfg["provider"]["dialect"] == "openai_compat"
+    assert "model" not in cfg

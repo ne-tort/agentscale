@@ -41,6 +41,12 @@ PRODAVAN_EVENTS_OWNER_HEADER = "X-Prodavan-Events-Owner"
 PRODAVAN_EVENTS_OWNER_API = "api"
 
 
+def _explicit_bridge_model(model: str | None) -> str | None:
+    if model and str(model).strip():
+        return str(model).strip()
+    return None
+
+
 def _runtime_request_headers() -> dict[str, str]:
     headers = {PRODAVAN_EVENTS_OWNER_HEADER: PRODAVAN_EVENTS_OWNER_API}
     token = settings.pod_agent_runtime_token.strip()
@@ -140,8 +146,9 @@ class OpenClawBridgeBootstrap:
             "prodavan_session_id": payload.prodavan_session_id,
             "adapter_kind": payload.adapter_kind,
         }
-        if payload.model:
-            body["model"] = payload.model
+        bridge_model = _explicit_bridge_model(payload.model)
+        if bridge_model:
+            body["model"] = bridge_model
         if payload.provider_key_id:
             body["provider_key_id"] = payload.provider_key_id
 

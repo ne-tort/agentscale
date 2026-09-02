@@ -38,9 +38,13 @@ class ProjectChatController {
       if ((selectedModel == null || selectedModel!.isEmpty) && defaultModel != null) {
         selectedModel = defaultModel;
       }
+      error = null;
       notify();
-    } catch (_) {
+    } catch (e) {
       availableModels = const [];
+      defaultModel = null;
+      error = e;
+      notify();
     }
   }
 

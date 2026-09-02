@@ -39,6 +39,7 @@ from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.infrastructure.persistence.models.agent import AgentEventRow, AgentSessionRow, AgentUsageRow
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
+from prodavan.infrastructure.persistence.models.projects import ProjectRow
 from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
 
 
@@ -251,6 +252,23 @@ class AgentSessionService:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
         return row
 
+    async def _resolve_send_model(
+        self,
+        *,
+        project: ProjectRow,
+        row: AgentSessionRow,
+        model: str | None,
+    ) -> str | None:
+        validated = await self._policy.validate_send_model(
+            project=project,
+            credential_api_kind=row.api_kind,
+            model=model,
+        )
+        if validated is not None:
+            row.model = validated
+            return validated
+        return row.model
+
     async def list_sessions(
         self,
         *,
@@ -279,6 +297,7 @@ class AgentSessionService:
         attachment_refs: list[str] | None,
         principal: Principal,
         employee: EmployeeRow | None,
+        model: str | None = None,
     ) -> dict:
         events_out: list[dict] = []
         async for event in self._iter_send_events(
@@ -288,6 +307,7 @@ class AgentSessionService:
             attachment_refs=attachment_refs,
             principal=principal,
             employee=employee,
+            model=model,
         ):
             events_out.append(event)
         await self._session.commit()
@@ -302,6 +322,7 @@ class AgentSessionService:
         attachment_refs: list[str] | None,
         principal: Principal,
         employee: EmployeeRow | None,
+        model: str | None = None,
     ) -> AsyncIterator[dict]:
         project = await self._projects.require_access(
             project_id=project_id, principal=principal, employee=employee, write=True
@@ -320,6 +341,8 @@ class AgentSessionService:
         if row.status != AgentSessionStatus.ACTIVE:
             raise AppError(code="SESSION_CLOSED", title="Session closed", status=409, detail="session not active")
 
+        send_model = await self._resolve_send_model(project=project, row=row, model=model)
+
         company_policy = await AdminCompanyService(self._session).get_agent_policy(project.company_id)
         await self._budget.enforce_before_turn(
             company_id=project.company_id,
@@ -327,7 +350,7 @@ class AgentSessionService:
             policy=company_policy,
         )
 
-        handle = AgentHandle(id=row.vendor_agent_id, provider=row.provider, cwd=row.cwd, model=row.model)
+        handle = AgentHandle(id=row.vendor_agent_id, provider=row.provider, cwd=row.cwd, model=send_model)
         adapter = None
         if not settings.pod_agent_runtime_enabled:
             adapter = get_agent_adapter(api_kind=row.api_kind)
@@ -375,12 +398,12 @@ class AgentSessionService:
                 project_id=project_id,
                 session_id=session_id,
                 message=text,
-                model=row.model,
+                model=send_model,
                 bootstrap=BridgeSessionBootstrap(
                     session_id=row.id,
                     prodavan_session_id=row.id,
                     adapter_kind=api_kind_to_bridge_adapter(row.api_kind),
-                    model=row.model,
+                    model=send_model,
                     provider_key_id=row.resolved_key_id,
                     adapter_state=row.adapter_state if isinstance(row.adapter_state, dict) else None,
                 ),
@@ -488,6 +511,7 @@ class AgentSessionService:
             attachment_refs=attachment_refs,
             principal=principal,
             employee=employee,
+            model=model,
         )
         _raise_if_agent_error_events(result.get("events") or [])
         result["assistant_text"] = _assistant_text_from_events(result.get("events") or [])
@@ -525,6 +549,7 @@ class AgentSessionService:
                 attachment_refs=attachment_refs,
                 principal=principal,
                 employee=employee,
+                model=model,
             ):
                 events.append(event)
                 yield event

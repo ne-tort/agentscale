@@ -70,8 +70,6 @@ class AgentPolicyService:
             policy=model_policy,
             company_policy=company_policy,
         )
-        if model is None:
-            model = model_policy.default_model
 
         budget: dict[str, int] | None = None
         if company_policy.max_tokens_per_run is not None:
@@ -86,4 +84,26 @@ class AgentPolicyService:
             provider=credential.provider,
             tool_policy=tool_policy,
             budget=budget,
+        )
+
+    async def validate_send_model(
+        self,
+        *,
+        project: ProjectRow,
+        credential_api_kind: str,
+        model: str | None,
+    ) -> str | None:
+        if model is None or not str(model).strip():
+            return None
+        company_policy = await AdminCompanyService(self._session).get_agent_policy(project.company_id)
+        model_policy = await AiModelPolicyService(self._session).resolve_for_key(
+            company_id=project.company_id,
+            key_id=getattr(project, "resolved_ai_key_id", None),
+            api_kind=credential_api_kind,
+            company_policy=company_policy,
+        )
+        return AiModelPolicyService(self._session).assert_model_allowed(
+            model=model,
+            policy=model_policy,
+            company_policy=company_policy,
         )

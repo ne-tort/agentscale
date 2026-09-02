@@ -11,9 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.agent.credential_broker import AgentCredentialBroker
 from prodavan.application.agent.openclaw_bridge import OpenClawBridgeBootstrap, _runtime_request_headers
-from prodavan.application.ai_models.policy_service import AiModelPolicyService
 from prodavan.application.ai_models.service import AiModelsService
 from prodavan.config.settings import settings
+from prodavan.domain.errors import AppError
 from prodavan.infrastructure.persistence.models.projects import ProjectPodRow, ProjectRow
 
 logger = logging.getLogger(__name__)
@@ -23,38 +23,59 @@ class AiModelsLiveService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def list_live_for_key(self, *, company_id: str, key_id: str) -> dict[str, Any]:
+    async def list_live_for_key(
+        self,
+        *,
+        company_id: str,
+        key_id: str,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
         models_svc = AiModelsService(self._session)
         key_row = await models_svc.require_company_key(key_id, company_id)
         company_policy = await AdminCompanyService(self._session).get_agent_policy(company_id)
-        model_policy = await AiModelPolicyService(self._session).resolve_for_key(
+        catalog = await AiModelsService(self._session).list_key_models(company_id=company_id, key_id=key_id)
+        enabled_names = {str(m["name"]) for m in catalog if m.get("enabled")}
+
+        live_ids = await self._fetch_live_model_ids(
             company_id=company_id,
             key_id=key_id,
             api_kind=key_row.api_kind,
-            company_policy=company_policy,
+            project_id=project_id,
         )
-        catalog = await AiModelsService(self._session).list_key_models(company_id=company_id, key_id=key_id)
-        enabled_names = {str(m["name"]) for m in catalog if m.get("enabled")}
-        live_ids = await self._fetch_live_model_ids(
-            company_id=company_id, key_id=key_id, api_kind=key_row.api_kind
-        )
-        if live_ids:
-            effective = [mid for mid in live_ids if not enabled_names or mid in enabled_names]
-            source = "live"
+        if not live_ids:
+            raise AppError(
+                code="MODELS_UNAVAILABLE",
+                title="Models unavailable",
+                status=503,
+                detail="live model list unavailable — ensure project container is running and AI key is valid",
+            )
+
+        if enabled_names:
+            effective = [mid for mid in live_ids if mid in enabled_names]
         else:
-            effective = [m["name"] for m in catalog if m.get("enabled")] or model_policy.allowed_models
-            source = "catalog"
+            effective = list(live_ids)
+
         ceiling = [m for m in (company_policy.model_allowlist or []) if str(m).strip()]
         if ceiling:
             ceiling_set = set(ceiling)
             effective = [m for m in effective if m in ceiling_set]
-        default_model = next((m["name"] for m in catalog if m.get("is_default")), None) or model_policy.default_model
-        if default_model and default_model not in effective:
-            default_model = effective[0] if effective else None
+
+        if not effective:
+            raise AppError(
+                code="MODELS_UNAVAILABLE",
+                title="Models unavailable",
+                status=503,
+                detail="no models remain after key/company filters",
+            )
+
+        ui_default = next((str(m["name"]) for m in catalog if m.get("is_default")), None)
+        if ui_default and ui_default not in effective:
+            ui_default = None
+
         return {
             "models": [{"id": name, "label": name} for name in effective],
-            "default_model": default_model,
-            "source": source,
+            "default_model": ui_default,
+            "source": "live",
         }
 
     async def _fetch_live_model_ids(
@@ -63,18 +84,19 @@ class AiModelsLiveService:
         company_id: str,
         key_id: str,
         api_kind: str,
+        project_id: str | None = None,
     ) -> list[str]:
         if not settings.pod_agent_runtime_enabled:
             return []
-        project_id = await self._any_running_project_for_company(company_id)
-        if not project_id:
+        resolved_project_id = project_id or await self._any_running_project_for_company(company_id)
+        if not resolved_project_id:
             return []
         bridge = OpenClawBridgeBootstrap(self._session)
-        pod_ip = await bridge._resolve_pod_ip_for_project(project_id)  # noqa: SLF001
+        pod_ip = await bridge._resolve_pod_ip_for_project(resolved_project_id)  # noqa: SLF001
         if not pod_ip:
             return []
         pushed = await AgentCredentialBroker(self._session).push_lease_to_runtime(
-            project_id=project_id,
+            project_id=resolved_project_id,
             key_id=key_id,
         )
         if not pushed:

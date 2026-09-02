@@ -6,7 +6,6 @@ from typing import Any
 
 import yaml
 
-from prodavan.application.agent.openclaw_bridge import api_kind_to_bridge_adapter
 from prodavan.domain.admin.types import CompanyAgentRuntimePolicy
 from prodavan.domain.agent import AgentToolPolicy, default_tool_policy
 from prodavan.domain.ai_keys import ApiKind
@@ -23,6 +22,16 @@ _PROVIDER_DEFAULT_API_KIND: dict[str, str] = {
 _READ_TOOLS = ("fs.read", "fs.list", "search.grep", "search.glob")
 _WRITE_TOOLS = ("fs.write", "fs.edit")
 _SHELL_TOOLS = ("shell.exec",)
+
+
+def _api_kind_to_bridge_adapter(api_kind: str | None) -> str:
+    if api_kind == ApiKind.CURSOR_SDK:
+        return "cursor_sdk"
+    if api_kind == ApiKind.CODEX_SDK:
+        return "codex_sdk"
+    if api_kind == ApiKind.CLAUDE_AGENT_SDK:
+        return "claude_agent_sdk"
+    return "platform_openclaw"
 
 
 def mcp_packages_to_openclaw_servers(packages: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -126,26 +135,17 @@ def build_openclaw_config(
     company_policy: CompanyAgentRuntimePolicy,
     tool_policy: AgentToolPolicy | None = None,
     api_kind: str | None = None,
-    model: str | None = None,
     provider_key_id: str | None = None,
     mcp_packages: list[dict[str, Any]] | None = None,
     max_turns: int | None = None,
 ) -> dict[str, Any]:
-    """Build OpenClaw YAML config dict from platform policy + materialized MCP."""
-    policy = tool_policy or default_tool_policy(company_policy.tool_preset)
-    adapter = api_kind_to_bridge_adapter(api_kind or "openrouter")
-    if adapter == "platform_openclaw":
-        runtime_adapter = "platform_openclaw"
-    else:
-        runtime_adapter = adapter
+    """Build OpenClaw YAML config dict from platform policy + materialized MCP.
 
-    default_model = model.strip() if model and str(model).strip() else None
-    if default_model is None:
-        allow = [m for m in (company_policy.model_allowlist or []) if str(m).strip()]
-        if allow:
-            default_model = allow[0]
-        elif runtime_adapter == "platform_openclaw":
-            default_model = "gpt-4o-mini"
+    Model selection is API-only — never written into config.yaml.
+    """
+    policy = tool_policy or default_tool_policy(company_policy.tool_preset)
+    adapter = _api_kind_to_bridge_adapter(api_kind)
+    runtime_adapter = adapter if adapter != "platform_openclaw" else "platform_openclaw"
 
     cfg: dict[str, Any] = {
         "version": 1,
@@ -155,8 +155,6 @@ def build_openclaw_config(
         "permissions": tool_policy_to_permissions(policy),
         "tools": {"built_in": True, "mcp": policy.mcp != "deny"},
     }
-    if default_model is not None:
-        cfg["model"] = {"default": default_model}
 
     turns = max_turns
     if turns is not None:

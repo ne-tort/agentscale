@@ -2,44 +2,44 @@
 
 ## Цель
 
-Admin (и при делегировании Company) задаёт **какие модели** можно выбирать Employee / Project, и default на провайдера.
+Admin (и при делегировании Company) задаёт **какие модели** можно выбирать Employee / Project, и UI default на провайдера.
+
+## As-built (Prodavan)
+
+| Правило | Реализация |
+|---------|------------|
+| **Модель только через API** | `POST /chat/stream`, `POST .../agent/sessions`, bridge `POST /v1/sessions` и `.../send` — optional `model`. **Не** в `.prodavan/config.yaml`. |
+| **Live list = UI** | `GET /projects/{id}/models/live` → pod bridge `GET /v1/models` → `Cursor.models.list()` (cursor_sdk). |
+| **Allowed list = фильтр** | Key bindings `enabled` ∩ live list; пустой enabled = без ограничений. Company `model_allowlist` — optional ceiling. |
+| **`is_default` = UI only** | `AiKeyModelBindingRow.is_default` → `default_model` в live response для preselect dropdown. **Не** подставляется в runtime без явного выбора пользователя. |
+| **`"default"` passthrough** | Валидный model id для Cursor SDK передаётся как есть. |
+| **Pod required** | Live list и chat send требуют running pod (`require_running_pod_runtime`). |
 
 ## Сущности
 
 | Сущность | Описание |
 |----------|----------|
-| `ModelCatalogEntry` | `{ provider, model_id, label, params_schema?, active }` — кэш/снимок |
-| `ModelAllowlist` | Разрешённые `model_id` per provider (platform → company → project ⊆) |
-| `ModelDefault` | Default model per provider / company |
-
-Синхронизация catalog:
-
-| Provider | Как обновлять |
-|----------|----------------|
-| Cursor | Периодический job: `Cursor.models.list({ apiKey })` под platform key → upsert catalog |
-| Codex | Ручной/semiauto список актуальных API models + проверка ключом |
-| Claude | Anthropic model list / documented ids; validate on session start |
+| `ModelCatalogEntry` | Seed в `ai_models` — admin reference; **не** primary UI source для employee |
+| `AiKeyModelBindingRow` | per key: `enabled`, `is_default` — фильтр + UI preselect |
+| `ModelAllowlist` | `companies.model_allowlist` — optional company ceiling |
 
 ## Cursor specifics
 
-- Local agents: **model required**.
-- Prefer ids from `Cursor.models.list()` — не хардкодить экзотику.
-- `composer-2.5` — типичный default на момент research.
-- Commerce bot: fallback `{ id: "default" }` (не `"auto"` — ConfigurationError в части версий).
-- Router: model id `auto-smart` + param `optimize_for` (`balance` / `intelligence` …) — Teams/Enterprise; Admin может **запретить** Router в allowlist.
-- Per-run override sticky on agent until next override.
+- Prefer ids from live `Cursor.models.list()` — не хардкодить в config.
+- `"default"` — валидный id для Cursor SDK (account default).
+- Per-turn override: `model` в каждом `POST /chat/stream` обновляет session + bridge send.
 
 ## Codex / Claude
 
-- Явный model id в CreateOpts.
-- Allowlist режет UI selector и server-side session start (`MODEL_NOT_ALLOWED`).
+- Live list через bridge adapter (when wired); до этого — empty live → `MODELS_UNAVAILABLE`.
+- Allowlist режет UI selector и server-side validation (`MODEL_NOT_ALLOWED`).
 
 ## UI
 
 | Contour | Поведение |
 |---------|-----------|
-| Admin | Catalog refresh, allowlist per key/provider, platform defaults |
+| Admin | Key model bindings (enabled/default) поверх live catalog |
 | Company | Optional narrow allowlist ⊆ platform |
-| Employee / Project | Selector только из effective allowlist; laconic |
+| Employee / Project | Dropdown из `/models/live`; send с `selectedModel` каждый turn |
 
 См. [admin-control-plane.md](admin-control-plane.md).
