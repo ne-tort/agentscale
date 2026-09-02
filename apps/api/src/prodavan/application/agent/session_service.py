@@ -30,6 +30,7 @@ from prodavan.domain.agent import (
     FROZEN_EVENT_TYPES,
     PLATFORM_EVENT_TOOL_APPROVAL_DECISION,
     PLATFORM_EVENT_USER_MESSAGE,
+    PLATFORM_STREAM_EVENT_TYPES,
     AgentEventType,
     AgentHandle,
     AgentSessionStatus,
@@ -108,6 +109,206 @@ def events_to_transcript(events: list[dict]) -> list[dict]:
     return messages
 
 
+def events_to_chat_blocks(events: list[dict]) -> list[dict]:
+    """Project persisted agent events into typed chat blocks for Flutter UI."""
+    blocks: list[dict] = []
+    assistant_parts: list[str] = []
+    thinking_parts: list[str] = []
+    open_subagents: dict[str, dict] = {}
+
+    def flush_assistant() -> None:
+        if not assistant_parts:
+            return
+        blocks.append({"kind": "assistant_markdown", "text": "".join(assistant_parts)})
+        assistant_parts.clear()
+
+    def flush_thinking(duration_ms: int | None = None) -> None:
+        if not thinking_parts:
+            return
+        block: dict = {"kind": "thinking", "text": "".join(thinking_parts)}
+        if duration_ms is not None:
+            block["duration_ms"] = duration_ms
+        blocks.append(block)
+        thinking_parts.clear()
+
+    for event in events:
+        etype = event.get("type")
+        data = event.get("data") or {}
+        parent_id = event.get("parent_tool_use_id")
+
+        if etype == PLATFORM_EVENT_USER_MESSAGE:
+            flush_assistant()
+            flush_thinking()
+            text = data.get("text")
+            refs = data.get("attachment_refs") or []
+            if text or refs:
+                block: dict = {"kind": "user", "text": str(text or "")}
+                if isinstance(refs, list) and refs:
+                    block["attachment_refs"] = [str(r) for r in refs]
+                blocks.append(block)
+            continue
+
+        if etype == AgentEventType.TEXT_DELTA:
+            chunk = data.get("text")
+            if chunk:
+                assistant_parts.append(str(chunk))
+            continue
+
+        if etype == AgentEventType.THINKING_DELTA:
+            flush_assistant()
+            chunk = data.get("text")
+            if chunk:
+                thinking_parts.append(str(chunk))
+            continue
+
+        if etype == AgentEventType.THINKING_COMPLETE:
+            flush_assistant()
+            duration = data.get("duration_ms")
+            flush_thinking(int(duration) if isinstance(duration, (int, float)) else None)
+            continue
+
+        if etype in {AgentEventType.DONE, AgentEventType.ERROR}:
+            flush_assistant()
+            flush_thinking()
+            if etype == AgentEventType.ERROR:
+                blocks.append(
+                    {
+                        "kind": "error",
+                        "code": data.get("code"),
+                        "message": data.get("message") or "Agent error",
+                        "retryable": bool(data.get("retryable")),
+                    }
+                )
+            continue
+
+        flush_assistant()
+        flush_thinking()
+
+        if etype == AgentEventType.TOOL_CALL:
+            blocks.append(
+                {
+                    "kind": "tool_call",
+                    "id": data.get("id"),
+                    "name": data.get("name"),
+                    "input": data.get("input") or {},
+                    "parent_tool_use_id": parent_id or data.get("parent_tool_use_id"),
+                }
+            )
+        elif etype == AgentEventType.TOOL_CALL_DELTA:
+            blocks.append(
+                {
+                    "kind": "tool_call_delta",
+                    "id": data.get("id"),
+                    "name": data.get("name"),
+                    "partial": data.get("partial") or data.get("partial_json") or {},
+                }
+            )
+        elif etype == AgentEventType.TOOL_RESULT:
+            blocks.append(
+                {
+                    "kind": "tool_result",
+                    "id": data.get("id"),
+                    "name": data.get("name"),
+                    "output": data.get("output"),
+                    "is_error": bool(data.get("is_error")),
+                }
+            )
+        elif etype == AgentEventType.TOOL_PROGRESS:
+            blocks.append(
+                {
+                    "kind": "tool_progress",
+                    "id": data.get("id"),
+                    "message": data.get("message") or "",
+                }
+            )
+        elif etype == AgentEventType.TOOL_APPROVAL_REQUEST:
+            blocks.append(
+                {
+                    "kind": "approval",
+                    "id": data.get("id") or "",
+                    "name": data.get("name") or "tool",
+                    "input": data.get("input") or {},
+                    "reason": data.get("reason"),
+                }
+            )
+        elif etype == AgentEventType.SUBAGENT_START:
+            sub_id = str(data.get("agent_id") or data.get("parent_tool_use_id") or parent_id or "")
+            block = {
+                "kind": "subagent",
+                "id": sub_id,
+                "agent_id": data.get("agent_id"),
+                "agent_type": data.get("type") or data.get("agent_type"),
+                "parent_tool_use_id": data.get("parent_tool_use_id") or parent_id,
+                "status": "running",
+                "events": [],
+            }
+            open_subagents[sub_id] = block
+            blocks.append(block)
+        elif etype == AgentEventType.SUBAGENT_EVENT:
+            sub_id = str(data.get("parent_tool_use_id") or parent_id or "")
+            child = data.get("child_event") or data.get("event")
+            target = open_subagents.get(sub_id)
+            if target is not None and isinstance(child, dict):
+                target.setdefault("events", []).append(child)
+            else:
+                blocks.append(
+                    {
+                        "kind": "subagent_event",
+                        "parent_tool_use_id": sub_id,
+                        "event": child,
+                    }
+                )
+        elif etype == AgentEventType.SUBAGENT_STOP:
+            sub_id = str(data.get("agent_id") or data.get("parent_tool_use_id") or parent_id or "")
+            target = open_subagents.pop(sub_id, None)
+            if target is not None:
+                target["status"] = "completed"
+                target["result_summary"] = data.get("result_summary")
+            else:
+                blocks.append(
+                    {
+                        "kind": "subagent",
+                        "id": sub_id,
+                        "status": "completed",
+                        "result_summary": data.get("result_summary"),
+                        "events": [],
+                    }
+                )
+        elif etype == AgentEventType.TASK_PROGRESS:
+            blocks.append(
+                {
+                    "kind": "plan",
+                    "tasks": data.get("tasks") or data.get("items") or [],
+                    "message": data.get("message"),
+                }
+            )
+        elif etype == AgentEventType.STATUS:
+            blocks.append(
+                {
+                    "kind": "status",
+                    "phase": data.get("phase"),
+                    "message": data.get("message") or data.get("detail"),
+                }
+            )
+        elif etype == AgentEventType.COMPACT_BOUNDARY:
+            blocks.append({"kind": "system_notice", "reason": data.get("reason") or "compact_boundary"})
+        elif etype == AgentEventType.PERMISSION_DENIAL:
+            blocks.append(
+                {
+                    "kind": "permission_denial",
+                    "tool_use_id": data.get("tool_use_id"),
+                    "name": data.get("name"),
+                    "reason": data.get("reason"),
+                }
+            )
+        elif etype == AgentEventType.USAGE:
+            blocks.append({"kind": "usage", **{k: v for k, v in data.items() if v is not None}})
+
+    flush_assistant()
+    flush_thinking()
+    return blocks
+
+
 def _session_public(row: AgentSessionRow) -> dict:
     return {
         "id": row.id,
@@ -136,10 +337,11 @@ APPENDABLE_AGENT_EVENT_TYPES = frozenset(
     {
         PLATFORM_EVENT_USER_MESSAGE,
         *FROZEN_EVENT_TYPES,
+        *PLATFORM_STREAM_EVENT_TYPES,
     }
 )
 
-POD_AGENT_APPENDABLE_EVENT_TYPES = frozenset(FROZEN_EVENT_TYPES)
+POD_AGENT_APPENDABLE_EVENT_TYPES = frozenset({*FROZEN_EVENT_TYPES, *PLATFORM_STREAM_EVENT_TYPES})
 
 
 def _raise_if_agent_error_events(events: list[dict]) -> None:
@@ -812,7 +1014,7 @@ class AgentSessionService:
                     )
                     latest = latest_q.scalar_one_or_none()
                     if latest is None:
-                        return {"session_id": None, "session_status": None, "messages": []}
+                        return {"session_id": None, "session_status": None, "blocks": []}
                     sid = latest.id
         else:
             row = await self.get_session(session_id=sid)
@@ -830,7 +1032,7 @@ class AgentSessionService:
         return {
             "session_id": sid,
             "session_status": row.status,
-            "messages": events_to_transcript(events),
+            "blocks": events_to_chat_blocks(events),
         }
 
     async def cancel_session(

@@ -33,6 +33,26 @@ OIDC Login
 3. Агент может добавить tab/table → UI refresh.  
 4. Secondary tabs = EntityCollection from `ui_json`.
 
+## Project chat (blocks)
+
+| Block kind | Источник | UI |
+|------------|----------|-----|
+| `user` | persisted user_message | bubble справа + attachment chips |
+| `assistant_markdown` | text_delta (live + reload) | GFM markdown, streaming cursor |
+| `thinking` | thinking_delta/complete | collapsible reasoning |
+| `tool_call` / `tool_result` | tool events | collapsible disclosure |
+| `approval` | tool_approval_request | inline Allow/Deny + full-page HITL |
+| `subagent` | subagent_* | card + nested events / sidechain |
+| `plan` | task_progress | checklist |
+
+### Responsive
+
+| Width | Layout |
+|-------|--------|
+| `<600px` | full-width, composer pinned bottom |
+| `600–1024px` | center column max 768px |
+| `>1024px` | center column max 900px |
+
 ## Empty / loading
 
 - Нет кабинетов: «Нет кабинетов» + «Создать» / «Импорт».  

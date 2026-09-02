@@ -16,11 +16,53 @@ class AgentEventType(StrEnum):
     USAGE = "usage"
     ERROR = "error"
     DONE = "done"
+    # Extended v2 stream types (SDK parity — persisted + SSE)
+    SYSTEM_INIT = "system_init"
+    THINKING_DELTA = "thinking_delta"
+    THINKING_COMPLETE = "thinking_complete"
+    TOOL_CALL_DELTA = "tool_call_delta"
+    TOOL_PROGRESS = "tool_progress"
+    SUBAGENT_START = "subagent_start"
+    SUBAGENT_EVENT = "subagent_event"
+    SUBAGENT_STOP = "subagent_stop"
+    TASK_PROGRESS = "task_progress"
+    STATUS = "status"
+    COMPACT_BOUNDARY = "compact_boundary"
+    PERMISSION_DENIAL = "permission_denial"
 
 
-# Frozen adapter stream types (canon adapter-port). Platform may also persist
-# USER_MESSAGE for chat transcript — not emitted by AgentProviderPort adapters.
-FROZEN_EVENT_TYPES = frozenset(AgentEventType)
+# Frozen adapter stream types (canon adapter-port v1).
+FROZEN_EVENT_TYPES = frozenset(
+    {
+        AgentEventType.TEXT_DELTA,
+        AgentEventType.TOOL_CALL,
+        AgentEventType.TOOL_RESULT,
+        AgentEventType.TOOL_APPROVAL_REQUEST,
+        AgentEventType.USAGE,
+        AgentEventType.ERROR,
+        AgentEventType.DONE,
+    }
+)
+
+# Extended platform stream types (v2 — bridge normalizers emit these).
+PLATFORM_STREAM_EVENT_TYPES = frozenset(
+    {
+        AgentEventType.SYSTEM_INIT,
+        AgentEventType.THINKING_DELTA,
+        AgentEventType.THINKING_COMPLETE,
+        AgentEventType.TOOL_CALL_DELTA,
+        AgentEventType.TOOL_PROGRESS,
+        AgentEventType.SUBAGENT_START,
+        AgentEventType.SUBAGENT_EVENT,
+        AgentEventType.SUBAGENT_STOP,
+        AgentEventType.TASK_PROGRESS,
+        AgentEventType.STATUS,
+        AgentEventType.COMPACT_BOUNDARY,
+        AgentEventType.PERMISSION_DENIAL,
+    }
+)
+
+PERSISTABLE_EVENT_TYPES = FROZEN_EVENT_TYPES | PLATFORM_STREAM_EVENT_TYPES
 PLATFORM_EVENT_USER_MESSAGE = "user_message"
 PLATFORM_EVENT_TOOL_APPROVAL_DECISION = "tool_approval_decision"
 
@@ -47,7 +89,10 @@ class AgentEvent:
     at: str | None = None
 
     def __post_init__(self) -> None:
-        if self.type not in FROZEN_EVENT_TYPES:
+        if self.type not in PERSISTABLE_EVENT_TYPES and self.type not in {
+            PLATFORM_EVENT_USER_MESSAGE,
+            PLATFORM_EVENT_TOOL_APPROVAL_DECISION,
+        }:
             raise ValueError(f"unknown AgentEvent type: {self.type}")
 
     @staticmethod

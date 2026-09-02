@@ -16,6 +16,11 @@ def test_unknown_event_type_rejected() -> None:
         AgentEvent(type="unknown", data={})
 
 
+def test_extended_event_type_allowed() -> None:
+    ev = AgentEvent.now(AgentEventType.SUBAGENT_START, {"agent_id": "sub-1"})
+    assert ev.type == "subagent_start"
+
+
 def test_assistant_text_from_events() -> None:
     from prodavan.application.agent.session_service import _assistant_text_from_events
 

@@ -49,11 +49,17 @@ def test_api_kind_to_bridge_adapter() -> None:
     assert api_kind_to_bridge_adapter("anthropic_api") == "platform_openclaw"
 
 
-def test_bridge_envelope_to_agent_event_skips_system_init() -> None:
-    assert bridge_envelope_to_agent_event({"type": "system_init", "data": {}}) is None
+def test_bridge_envelope_to_agent_event_skips_ping() -> None:
+    assert bridge_envelope_to_agent_event({"type": "ping", "data": {}}) is None
+    ev = bridge_envelope_to_agent_event({"type": "system_init", "data": {"adapter": "cursor_sdk"}})
+    assert ev is not None
+    assert ev.type == "system_init"
     ev = bridge_envelope_to_agent_event({"type": "text_delta", "data": {"text": "hi"}})
     assert ev is not None
     assert ev.type == AgentEventType.TEXT_DELTA
+    sub = bridge_envelope_to_agent_event({"type": "subagent_start", "data": {"agent_id": "a1"}})
+    assert sub is not None
+    assert sub.type == "subagent_start"
 
 
 def test_bridge_envelope_is_stub() -> None:

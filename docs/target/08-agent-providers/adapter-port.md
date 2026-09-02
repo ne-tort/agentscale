@@ -38,7 +38,7 @@ AgentProviderPort
 | `attachment_refs` | Ids из attachments pipeline |
 | `images` | Optional inline images (Cursor send shape) |
 
-## AgentEvent schema (frozen)
+## AgentEvent schema (frozen v1)
 
 | `type` | `data` (минимум) | UI |
 |--------|------------------|-----|
@@ -49,6 +49,21 @@ AgentProviderPort
 | `usage` | `{ input_tokens?, output_tokens?, provider, model? }` | Metrics → Admin |
 | `error` | `{ code, message, retryable? }` | Inline / snack |
 | `done` | `{ reason?: string }` | Finalize turn |
+
+## Extended stream types (v2 — persisted + SSE)
+
+Platform API и bridge **forward + persist** (не отбрасывают):
+
+| `type` | UI block |
+|--------|----------|
+| `system_init` | session debug header |
+| `thinking_delta` / `thinking_complete` | collapsible reasoning |
+| `tool_call_delta` / `tool_progress` | live tool args / spinner |
+| `subagent_start` / `subagent_event` / `subagent_stop` | nested subagent card |
+| `task_progress` | plan checklist |
+| `status` / `compact_boundary` / `permission_denial` | system notices |
+
+Transcript projection: `events_to_chat_blocks()` → `{ blocks: [...] }` для Flutter `core/chat`.
 
 Каждый event: опционально `at` (ISO timestamp).  
 Адаптеры **обязаны** эмитить `usage` когда провайдер отдаёт counts.

@@ -289,11 +289,11 @@ def test_project_chat_turn_creates_and_reuses_session(client: TestClient) -> Non
 
     transcript = client.get(f"/api/v1/projects/{project_id}/chat/transcript", headers=owner_h)
     assert transcript.status_code == 200, transcript.text
-    messages = transcript.json()["messages"]
+    blocks = transcript.json()["blocks"]
     assert transcript.json()["session_id"] == session_id
-    assert messages[0]["role"] == "user"
-    assert messages[0]["text"] == "hello"
-    assert any(m["role"] == "assistant" for m in messages)
+    assert blocks[0]["kind"] == "user"
+    assert blocks[0]["text"] == "hello"
+    assert any(b["kind"] == "assistant_markdown" for b in blocks)
 
 
 @requires_postgres
@@ -487,7 +487,8 @@ def test_chat_stream_sse(client: TestClient) -> None:
         headers=owner_h,
     )
     assert transcript.status_code == 200
-    assert any("stream me" in m.get("text", "") for m in transcript.json()["messages"])
+    blocks = transcript.json()["blocks"]
+    assert any("stream me" in b.get("text", "") for b in blocks if b.get("kind") == "assistant_markdown")
 
 
 @requires_postgres
@@ -572,9 +573,9 @@ def test_chat_with_attachment_refs_emits_tool_call(client: TestClient) -> None:
         headers=owner_h,
     )
     assert transcript.status_code == 200, transcript.text
-    msgs = transcript.json()["messages"]
-    assert any(m.get("role") == "user" and "process file" in m.get("text", "") for m in msgs)
-    assert any(m.get("role") == "tool" and "mcp.cabinet.info" in m.get("text", "") for m in msgs)
+    blocks = transcript.json()["blocks"]
+    assert any(b.get("kind") == "user" and "process file" in b.get("text", "") for b in blocks)
+    assert any(b.get("kind") == "tool_call" and "mcp.cabinet.info" in b.get("name", "") for b in blocks)
 
 
 @requires_postgres
@@ -1271,7 +1272,8 @@ def test_append_agent_event_hybrid_write(client: TestClient) -> None:
         headers=owner_h,
     )
     assert transcript.status_code == 200
-    assert any(m.get("text") == "from openclaw" for m in transcript.json()["messages"])
+    blocks = transcript.json()["blocks"]
+    assert any(b.get("text") == "from openclaw" for b in blocks if b.get("kind") == "assistant_markdown")
 
 
 @requires_postgres

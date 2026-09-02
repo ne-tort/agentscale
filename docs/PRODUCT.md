@@ -37,6 +37,14 @@ Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** depe
 2. **UI** — список контейнеров/проектов, статус, pause/resume, вход в workspace агента (не модалка-чат).
 3. **Agent inside Pod** — провайдер через `AgentProviderPort` (SDK **или** Platform OpenClaw), работа с **файлами**, tool calls, HITL; не thin wrapper над completions API.
 
+### Chat UX (project workspace)
+
+- **Live streaming** — assistant text из SSE `text_delta` без full reload после turn.
+- **Block-based transcript** — `GET /chat/transcript` → `{ blocks: [...] }` (user, assistant_markdown, tool_*, subagent, plan, thinking).
+- **Markdown** — GFM в assistant blocks (tables, lists, code fences).
+- **Responsive** — mobile full-width; tablet/desktop center column (768–900px).
+- **Subagents** — `subagent_*` events + sidechain transcript API.
+
 ## Observability
 
 - **k8s metrics-server** — cluster addon для CPU/RAM sandbox pod'ов; Prodavan не деплоит отдельный metrics microservice.

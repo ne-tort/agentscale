@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.agent.runtime_model import sanitize_runtime_model
 from prodavan.config.settings import settings
-from prodavan.domain.agent import FROZEN_EVENT_TYPES, AgentEvent, AgentEventType
+from prodavan.domain.agent import FROZEN_EVENT_TYPES, PLATFORM_STREAM_EVENT_TYPES, AgentEvent, AgentEventType
 from prodavan.domain.agent.errors import POD_NOT_RUNNING
 from prodavan.domain.ai_keys import ApiKind
 from prodavan.infrastructure.k8s.sandbox.client import K8sSandboxClient
@@ -29,7 +29,7 @@ _BRIDGE_ADAPTER_KINDS = frozenset(
     }
 )
 
-_BRIDGE_SKIP_EVENT_TYPES = frozenset({"system_init", "ping"})
+_BRIDGE_SKIP_EVENT_TYPES = frozenset({"ping"})
 _STUB_TEXT_PREFIXES = (
     "[cursor-sdk stub]",
     "[claude-agent-sdk stub]",
@@ -67,7 +67,7 @@ def bridge_envelope_to_agent_event(envelope: dict) -> AgentEvent | None:
     etype = str(envelope.get("type") or "")
     if etype in _BRIDGE_SKIP_EVENT_TYPES:
         return None
-    if etype not in FROZEN_EVENT_TYPES:
+    if etype not in FROZEN_EVENT_TYPES and etype not in PLATFORM_STREAM_EVENT_TYPES:
         return None
     data = envelope.get("data")
     return AgentEvent.now(etype, data if isinstance(data, dict) else {})
