@@ -39,10 +39,11 @@ Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** depe
 
 ### Chat UX (project workspace)
 
-- **Live streaming** — assistant text из SSE `text_delta` без full reload после turn; ingress нормализует cumulative SDK deltas в incremental.
+- **Live streaming** — assistant text из SSE `text_delta` без full reload после turn; ingress нормализует cumulative/overlap SDK deltas в incremental.
 - **Block-based transcript** — `GET /chat/transcript` → `{ blocks: [...] }` (user, assistant_markdown, tool_*, subagent, plan, thinking, usage).
+- **Cursor-style rendering** — assistant inline без bubble; reasoning/tools — muted underlined lines + inset panel; tool activity с `+N −M` при diff.
 - **Markdown** — GFM в assistant blocks после завершения turn; plain text во время stream.
-- **Chat settings** — model picker в composer «+»; usage collapsed по умолчанию.
+- **Chat settings** — model picker в composer «+» (слева от attach); Enter отправляет, Shift+Enter — новая строка; usage collapsed по умолчанию.
 - **Responsive** — mobile full-width; tablet/desktop center column (768–900px).
 - **Subagents** — `subagent_*` events + sidechain transcript API.
 

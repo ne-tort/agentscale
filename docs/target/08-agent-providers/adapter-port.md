@@ -42,7 +42,7 @@ AgentProviderPort
 
 | `type` | `data` (минимум) | UI |
 |--------|------------------|-----|
-| `text_delta` | `{ text: string }` — **incremental** on platform wire after ingress; SDK may emit cumulative, normalized via [`text_delta.py`](../../apps/api/src/prodavan/application/agent/text_delta.py) | Stream в bubble |
+| `text_delta` | `{ text: string }` — **incremental** on platform wire after ingress; SDK may emit cumulative or partial-overlap chunks, normalized via [`text_delta.py`](../../apps/api/src/prodavan/application/agent/text_delta.py) (prefix + suffix/prefix overlap merge) | Stream inline в chat column |
 | `tool_call` | `{ id, name, input }` | Collapsed disclosure |
 | `tool_result` | `{ id, name, output, is_error? }` | Disclosure |
 | `tool_approval_request` | `{ id, name, input }` | Full-page approve (HITL) |

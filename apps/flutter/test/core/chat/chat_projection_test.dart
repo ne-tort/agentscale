@@ -29,6 +29,13 @@ void main() {
     expect(r.cumulative, 'Hello');
   });
 
+  test('normalizeTextDelta merges suffix/prefix overlap', () {
+    var r = normalizeTextDelta('Проверка', 'роверка прошла');
+    expect(r.cumulative, 'Проверка прошла');
+    r = normalizeTextDelta(r.cumulative, ' успешно');
+    expect(r.cumulative, 'Проверка прошла успешно');
+  });
+
   test('finalizeTurnBlocks clears streaming flag', () {
     final blocks = [
       ChatBlock(kind: 'assistant_markdown', raw: {'text': 'Hi', '_streaming': true}),

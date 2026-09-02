@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
@@ -42,6 +43,7 @@ class ChatComposer extends StatefulWidget {
 
 class _ChatComposerState extends State<ChatComposer> {
   final _controller = TextEditingController();
+  final _focusNode = FocusNode();
   final List<_PendingAttachment> _attachments = [];
   bool _uploading = false;
   bool _multiline = false;
@@ -55,6 +57,7 @@ class _ChatComposerState extends State<ChatComposer> {
   @override
   void dispose() {
     _controller.removeListener(_onTextChanged);
+    _focusNode.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -95,6 +98,15 @@ class _ChatComposerState extends State<ChatComposer> {
     );
     _controller.clear();
     setState(_attachments.clear);
+  }
+
+  KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event.logicalKey != LogicalKeyboardKey.enter) return KeyEventResult.ignored;
+    if (HardwareKeyboard.instance.isShiftPressed) return KeyEventResult.ignored;
+    if (!widget.enabled || widget.streaming) return KeyEventResult.handled;
+    _submit();
+    return KeyEventResult.handled;
   }
 
   Future<void> _pickFile() async {
@@ -139,6 +151,7 @@ class _ChatComposerState extends State<ChatComposer> {
           ? l10n.projectMessageHint
           : (widget.disabledHint ?? l10n.projectMessageHint),
       border: InputBorder.none,
+      filled: false,
       isDense: true,
       contentPadding: EdgeInsets.symmetric(
         horizontal: AppSpacing.sm,
@@ -199,6 +212,20 @@ class _ChatComposerState extends State<ChatComposer> {
     );
   }
 
+  Widget _textField(BuildContext context) {
+    return Focus(
+      onKeyEvent: _handleKeyEvent,
+      child: TextField(
+        controller: _controller,
+        focusNode: _focusNode,
+        enabled: widget.enabled && !_uploading,
+        minLines: 1,
+        maxLines: 6,
+        decoration: _fieldDecoration(context),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -235,7 +262,7 @@ class _ChatComposerState extends State<ChatComposer> {
               ),
             Container(
               decoration: BoxDecoration(
-                border: Border.all(color: scheme.outlineVariant),
+                color: scheme.surfaceContainerHighest,
                 borderRadius: BorderRadius.circular(12),
               ),
               padding: EdgeInsets.symmetric(
@@ -246,18 +273,11 @@ class _ChatComposerState extends State<ChatComposer> {
                   ? Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        TextField(
-                          controller: _controller,
-                          enabled: widget.enabled && !_uploading,
-                          minLines: 1,
-                          maxLines: 6,
-                          decoration: _fieldDecoration(context),
-                          onSubmitted: widget.enabled && !widget.streaming ? (_) => _submit() : null,
-                        ),
+                        _textField(context),
                         Row(
                           children: [
-                            _attachButton(l10n),
                             _plusButton(l10n),
+                            _attachButton(l10n),
                             const Spacer(),
                             _sendButton(l10n),
                           ],
@@ -267,18 +287,9 @@ class _ChatComposerState extends State<ChatComposer> {
                   : Row(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        _attachButton(l10n),
                         _plusButton(l10n),
-                        Expanded(
-                          child: TextField(
-                            controller: _controller,
-                            enabled: widget.enabled && !_uploading,
-                            minLines: 1,
-                            maxLines: 6,
-                            decoration: _fieldDecoration(context),
-                            onSubmitted: widget.enabled && !widget.streaming ? (_) => _submit() : null,
-                          ),
-                        ),
+                        _attachButton(l10n),
+                        Expanded(child: _textField(context)),
                         _sendButton(l10n),
                       ],
                     ),

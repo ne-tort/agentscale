@@ -38,6 +38,26 @@ class ChatMessageListState extends State<ChatMessageList> {
   bool _stickToBottom = true;
   int _lastFingerprint = 0;
 
+  List<({ChatBlock block, ChatBlock? paired})> _displayBlocks(List<ChatBlock> blocks) {
+    final out = <({ChatBlock block, ChatBlock? paired})>[];
+    var i = 0;
+    while (i < blocks.length) {
+      final paired = pairedToolResultFor(blocks, i);
+      if (paired != null) {
+        out.add((block: blocks[i], paired: paired));
+        i += 2;
+        continue;
+      }
+      if (isMergedToolResult(blocks, i)) {
+        i++;
+        continue;
+      }
+      out.add((block: blocks[i], paired: null));
+      i++;
+    }
+    return out;
+  }
+
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
@@ -69,6 +89,7 @@ class ChatMessageListState extends State<ChatMessageList> {
   @override
   Widget build(BuildContext context) {
     _lastFingerprint = _blocksScrollFingerprint(widget.blocks);
+    final display = _displayBlocks(widget.blocks);
     return NotificationListener<ScrollNotification>(
       onNotification: (n) {
         if (n is UserScrollNotification) {
@@ -79,12 +100,14 @@ class ChatMessageListState extends State<ChatMessageList> {
       child: ListView.builder(
         controller: _scroll,
         padding: EdgeInsets.all(AppSpacing.md),
-        itemCount: widget.blocks.length,
+        itemCount: display.length,
         itemBuilder: (context, index) {
-          final block = widget.blocks[index];
+          final item = display[index];
+          final block = item.block;
           return ChatBlockRenderer(
             key: ValueKey('${block.kind}-${block.id}-$index-${block.text.length}-${block.isStreaming}'),
             block: block,
+            pairedToolResult: item.paired,
             projectId: widget.projectId,
             sessionId: widget.sessionId,
             api: widget.api,

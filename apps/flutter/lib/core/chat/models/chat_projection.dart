@@ -17,6 +17,13 @@ List<ChatBlock> chatBlocksFromTranscript(List<dynamic>? raw) {
   if (previous.startsWith(chunk)) {
     return (incremental: '', cumulative: previous);
   }
+  final maxK = previous.length < chunk.length ? previous.length : chunk.length;
+  for (var k = maxK; k > 1; k--) {
+    if (previous.substring(previous.length - k) == chunk.substring(0, k)) {
+      final incremental = chunk.substring(k);
+      return (incremental: incremental, cumulative: previous + incremental);
+    }
+  }
   return (incremental: chunk, cumulative: previous + chunk);
 }
 

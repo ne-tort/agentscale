@@ -8,6 +8,7 @@ class ChatBlockRenderer extends StatelessWidget {
   const ChatBlockRenderer({
     super.key,
     required this.block,
+    this.pairedToolResult,
     this.projectId,
     this.sessionId,
     this.api,
@@ -15,6 +16,7 @@ class ChatBlockRenderer extends StatelessWidget {
   });
 
   final ChatBlock block;
+  final ChatBlock? pairedToolResult;
   final String? projectId;
   final String? sessionId;
   final ProdavanApi? api;
@@ -42,6 +44,17 @@ class ChatBlockRenderer extends StatelessWidget {
           streaming: block.isStreaming,
         );
       case 'tool_call':
+        if (pairedToolResult != null && pairedToolResult!.kind == 'tool_result') {
+          final input = block.raw['input'] is Map
+              ? Map<String, dynamic>.from(block.raw['input'] as Map)
+              : const <String, dynamic>{};
+          return ToolActivityBlock(
+            name: block.raw['name'] as String? ?? pairedToolResult!.raw['name'] as String? ?? 'tool',
+            input: input,
+            output: pairedToolResult!.raw['output'],
+            isError: pairedToolResult!.raw['is_error'] == true,
+          );
+        }
         return ToolCallBlock(
           name: block.raw['name'] as String? ?? 'tool',
           input: block.raw['input'] is Map ? Map<String, dynamic>.from(block.raw['input'] as Map) : const {},
@@ -86,11 +99,20 @@ class ChatBlockRenderer extends StatelessWidget {
       case 'usage':
         return UsageBlock(raw: block.raw);
       case 'error':
-        return Card(
-          color: Theme.of(context).colorScheme.errorContainer,
-          child: ListTile(
-            title: Text(block.raw['message'] as String? ?? 'Error'),
-            subtitle: Text(block.raw['code'] as String? ?? ''),
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: ChatInsetPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  block.raw['message'] as String? ?? 'Error',
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+                if (block.raw['code'] != null)
+                  Text('${block.raw['code']}', style: Theme.of(context).textTheme.bodySmall),
+              ],
+            ),
           ),
         );
       case 'status':
@@ -102,4 +124,23 @@ class ChatBlockRenderer extends StatelessWidget {
         return const SizedBox.shrink();
     }
   }
+}
+
+ChatBlock? pairedToolResultFor(List<ChatBlock> blocks, int index) {
+  final block = blocks[index];
+  if (block.kind != 'tool_call' || index + 1 >= blocks.length) return null;
+  final next = blocks[index + 1];
+  if (next.kind != 'tool_result') return null;
+  final callId = block.raw['id'];
+  final resultId = next.raw['id'];
+  if (callId != null && resultId != null && callId == resultId) return next;
+  if (callId == null && resultId == null) return next;
+  return null;
+}
+
+bool isMergedToolResult(List<ChatBlock> blocks, int index) {
+  if (index <= 0) return false;
+  final block = blocks[index];
+  if (block.kind != 'tool_result') return false;
+  return pairedToolResultFor(blocks, index - 1) != null;
 }

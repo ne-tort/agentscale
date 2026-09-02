@@ -27,3 +27,24 @@ def test_normalizer_passes_through_non_delta_events() -> None:
     done = normalizer.normalize_event(AgentEvent.now(AgentEventType.DONE, {"reason": "completed"}))
     assert done is not None
     assert done.type == AgentEventType.DONE
+
+
+def test_normalizer_overlap_merge() -> None:
+    normalizer = TurnStreamNormalizer()
+    out: list[str] = []
+    for chunk in ["Проверка", "роверка прошла", " успешно"]:
+        event = normalizer.normalize_event(AgentEvent.now(AgentEventType.TEXT_DELTA, {"text": chunk}))
+        if event is not None:
+            out.append(str(event.data["text"]))
+    assert "".join(out) == "Проверка прошла успешно"
+
+
+def test_normalizer_resets_text_on_tool_call() -> None:
+    normalizer = TurnStreamNormalizer()
+    normalizer.normalize_event(AgentEvent.now(AgentEventType.TEXT_DELTA, {"text": "Hello"}))
+    normalizer.normalize_event(
+        AgentEvent.now(AgentEventType.TOOL_CALL, {"id": "t1", "name": "Read", "input": {}})
+    )
+    event = normalizer.normalize_event(AgentEvent.now(AgentEventType.TEXT_DELTA, {"text": "World"}))
+    assert event is not None
+    assert event.data["text"] == "World"

@@ -30,6 +30,7 @@ class TurnStreamNormalizer:
                 at=event.at,
             )
         if event.type == AgentEventType.THINKING_DELTA:
+            self._text_cumulative = ""
             chunk = str(event.data.get("text") or "")
             incremental, self._thinking_cumulative = normalize_text_delta(
                 self._thinking_cumulative, chunk
@@ -41,4 +42,11 @@ class TurnStreamNormalizer:
                 data={**event.data, "text": incremental},
                 at=event.at,
             )
+        if event.type in (
+            AgentEventType.TOOL_CALL,
+            AgentEventType.DONE,
+        ):
+            self._text_cumulative = ""
+        if event.type == AgentEventType.THINKING_COMPLETE:
+            self._thinking_cumulative = ""
         return event

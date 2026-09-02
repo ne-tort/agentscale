@@ -38,17 +38,17 @@ OIDC Login
 | Block kind | Источник | UI |
 |------------|----------|-----|
 | `user` | persisted user_message | bubble справа + attachment chips |
-| `assistant_markdown` | text_delta (live + reload) | plain text while streaming, GFM after done |
-| `thinking` | thinking_delta/complete | collapsible reasoning, auto-expand while streaming |
-| `tool_call` / `tool_result` | tool events | collapsible disclosure (tool name only) |
+| `assistant_markdown` | text_delta (live + reload) | inline в колонке чата (без bubble); plain text while streaming, GFM after done |
+| `thinking` | thinking_delta/complete | muted underlined line + inset panel on tap; auto-expand while streaming |
+| `tool_call` / `tool_result` | tool events | merged activity line («Изменён file.py», `+N −M`) + inset panel |
 | `approval` | tool_approval_request | inline Allow/Deny + full-page HITL |
-| `subagent` | subagent_* | card + nested events / sidechain |
+| `subagent` | subagent_* | muted line + inset sidechain |
 | `plan` | task_progress | checklist (tasks with titles only) |
-| `usage` | usage | collapsed column (tokens/cost), l10n |
+| `usage` | usage | muted collapsed line (tokens/cost), l10n |
 
 ### Composer
 
-Cursor-style container: attach + **+** (chat settings) + send/stop. Single-line: buttons inline; multiline: field above, buttons below. Model picker lives in chat settings (`+`), not in message list.
+Cursor-style field: **+** (chat settings) → attach → text → send/stop; единый фон без border. **Enter** отправляет, **Shift+Enter** — новая строка. Model picker в chat settings (`+`), не в message list.
 
 ### Responsive
 
