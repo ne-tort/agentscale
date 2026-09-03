@@ -67,6 +67,9 @@ bool _isActivityPair(ChatDisplayPair item) {
 
 bool _isThinkingBlock(ChatBlock block) => block.kind == 'thinking';
 
+bool _isWorkSegmentItem(ChatDisplayPair item) =>
+    _isThinkingBlock(item.block) || _isActivityPair(item);
+
 bool _isHardBoundary(ChatBlock block) {
   return switch (block.kind) {
     'user' || 'approval' || 'plan' || 'usage' || 'error' || 'subagent' => true,
@@ -77,13 +80,15 @@ bool _isHardBoundary(ChatBlock block) {
 
 bool _pairIsPending(ChatDisplayPair item) {
   if (item.block.kind == 'tool_call' && item.paired == null) return true;
-  if (item.paired == null && item.block.kind == 'tool_call') return true;
   return false;
 }
 
+bool _thinkingIsStreaming(ChatDisplayPair item) =>
+    item.block.kind == 'thinking' && item.block.isStreaming;
+
 bool _workSessionStreaming(List<ChatDisplayPair> items, bool turnStreaming) {
   if (!turnStreaming) return false;
-  return items.any(_pairIsPending);
+  return items.any(_pairIsPending) || items.any(_thinkingIsStreaming);
 }
 
 List<ChatDisplayPair> mergeToolPairs(List<ChatBlock> blocks) {
@@ -137,6 +142,18 @@ List<ChatDisplayEntry> _groupSameKindRun(List<ChatDisplayPair> items) {
   return items.map((i) => ChatDisplaySingle(item: i)).toList();
 }
 
+List<ChatDisplayEntry> _emitWorkSegmentRun(List<ChatDisplayPair> run, bool turnStreaming) {
+  if (run.length >= 2) {
+    return [
+      ChatDisplayWorkSession(
+        items: run,
+        streaming: _workSessionStreaming(run, turnStreaming),
+      ),
+    ];
+  }
+  return [ChatDisplaySingle(item: run.first)];
+}
+
 List<ChatDisplayEntry> groupDisplayEntries(List<ChatBlock> blocks, {bool turnStreaming = false}) {
   final merged = mergeToolPairs(blocks);
   final out = <ChatDisplayEntry>[];
@@ -144,36 +161,18 @@ List<ChatDisplayEntry> groupDisplayEntries(List<ChatBlock> blocks, {bool turnStr
   while (i < merged.length) {
     final block = merged[i].block;
 
-    if (_isThinkingBlock(block)) {
-      var j = i + 1;
-      while (j < merged.length && _isThinkingBlock(merged[j].block)) {
-        j++;
-      }
-      out.addAll(_groupThinkingRun(merged, i, j));
-      i = j;
-      continue;
-    }
-
-    if (_isHardBoundary(block) || (!_isActivityPair(merged[i]) && block.kind != 'tool_call')) {
+    if (_isHardBoundary(block) || (!_isWorkSegmentItem(merged[i]) && block.kind != 'tool_call')) {
       out.add(ChatDisplaySingle(item: merged[i]));
       i++;
       continue;
     }
 
-    if (_isActivityPair(merged[i])) {
+    if (_isWorkSegmentItem(merged[i])) {
       var j = i;
-      while (j < merged.length && _isActivityPair(merged[j])) {
+      while (j < merged.length && _isWorkSegmentItem(merged[j])) {
         j++;
       }
-      final run = merged.sublist(i, j);
-      if (run.length >= 2) {
-        out.add(ChatDisplayWorkSession(
-          items: run,
-          streaming: _workSessionStreaming(run, turnStreaming),
-        ));
-      } else {
-        out.add(ChatDisplaySingle(item: run.first));
-      }
+      out.addAll(_emitWorkSegmentRun(merged.sublist(i, j), turnStreaming));
       i = j;
       continue;
     }
@@ -190,7 +189,16 @@ List<ChatDisplayEntry> groupInnerWorkItems(List<ChatDisplayPair> items) {
   var i = 0;
   while (i < items.length) {
     final kind = activityGroupKind(items[i]);
-    if (kind == null || kind == ActivityGroupKind.thinking) {
+    if (kind == ActivityGroupKind.thinking) {
+      var j = i + 1;
+      while (j < items.length && activityGroupKind(items[j]) == ActivityGroupKind.thinking) {
+        j++;
+      }
+      out.addAll(_groupThinkingRun(items, i, j));
+      i = j;
+      continue;
+    }
+    if (kind == null) {
       out.add(ChatDisplaySingle(item: items[i]));
       i++;
       continue;

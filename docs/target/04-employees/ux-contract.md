@@ -37,10 +37,10 @@ OIDC Login
 
 | Block kind | Источник | UI |
 |------------|----------|-----|
-| `user` | persisted user_message | bubble справа + attachment chips |
+| `user` | persisted user_message | bubble справа + attachment chips; **16px top margin** от предыдущего bot-контента |
 | `assistant_markdown` | text_delta (live + reload) | inline в колонке чата (без bubble); plain text while streaming, GFM after done |
-| `thinking` | thinking_delta/complete | muted line + chevron (hover `>`, expanded `∨`) + inset panel on tap; auto-expand while streaming |
-| `tool_call` / `tool_result` | tool events | merged activity line with **semantic RU labels** (not raw SDK names: «Удалён path», «Поиск файлов pattern», «Запущена команда»); `+N −M` diff badge; inset panel on tap. ≥2 consecutive tools → **WorkSession** spoiler («Работаю…» while streaming / «Работал · N действий» when done); expand shows inner same-kind sub-groups |
+| `thinking` | thinking_delta/complete | muted line; **входит в WorkSession** (считается действием); chevron **справа** (hover `>`, expanded `∨`) + inset panel on tap |
+| `tool_call` / `tool_result` | tool events | merged activity line with **semantic RU labels**; chevron **справа**; `+N −M` diff badge. **WorkSession** («Работаю…» / «Работал · N действий») для ≥2 подряд **thinking + tools**; inner same-kind sub-groups on expand |
 | `approval` | tool_approval_request | inline Allow/Deny + full-page HITL |
 | `subagent` | subagent_* | muted line + inset sidechain |
 | `plan` | task_progress | checklist (tasks with titles only) |
@@ -73,6 +73,8 @@ Cursor-style field: **+** (chat settings) → attach → text → send/stop; е�
 - **Source:** PostgreSQL `agent_sessions` + `agent_events` via `GET /chat/transcript` — not MinIO, not pod polling.
 - **Read when pod down:** transcript loads from DB; composer disabled with hint until `observed_state == running`.
 - **Pagination:** tail load (`limit`, default 100) + `before_seq` cursor on scroll-up; skeleton bubbles on initial load (no spinner).
+- **Load perf:** `getProject` ∥ `loadTranscript` on bootstrap; `loadModels` deferred (non-blocking); `pending_approvals` embedded in transcript response (no second HTTP); in-memory **stale-while-revalidate** cache per project for instant re-enter.
+- **Scroll:** auto-scroll to bottom only when user is already at bottom; wheel/trackpad scroll-up during streaming must not jump.
 
 ## Empty / loading
 

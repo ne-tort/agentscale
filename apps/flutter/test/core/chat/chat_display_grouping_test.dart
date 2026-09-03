@@ -71,7 +71,7 @@ void main() {
     expect(entries[2], isA<ChatDisplayWorkSession>());
   });
 
-  test('groupDisplayEntries does not mix thinking with tools', () {
+  test('groupDisplayEntries includes thinking in WorkSession', () {
     final blocks = [
       ChatBlock(kind: 'thinking', raw: {'text': 'a'}),
       ChatBlock(kind: 'thinking', raw: {'text': 'b'}),
@@ -79,9 +79,19 @@ void main() {
       _toolResult('edit'),
     ];
     final entries = groupDisplayEntries(blocks);
+    expect(entries.length, 1);
+    expect(entries.first, isA<ChatDisplayWorkSession>());
+    expect((entries.first as ChatDisplayWorkSession).items.length, 3);
+  });
+
+  test('groupDisplayEntries thinking plus one tool stays singles', () {
+    final blocks = [
+      ChatBlock(kind: 'thinking', raw: {'text': 'solo'}),
+      ChatBlock(kind: 'user', raw: {'text': 'hi'}),
+    ];
+    final entries = groupDisplayEntries(blocks);
     expect(entries.length, 2);
-    expect((entries[0] as ChatDisplayGroup).kind, ActivityGroupKind.thinking);
-    expect(entries[1], isA<ChatDisplaySingle>());
+    expect(entries.every((e) => e is ChatDisplaySingle), isTrue);
   });
 
   test('groupInnerWorkItems groups same-kind deletes', () {
@@ -93,6 +103,18 @@ void main() {
     expect(inner.length, 1);
     expect(inner.first, isA<ChatDisplayGroup>());
     expect((inner.first as ChatDisplayGroup).kind, ActivityGroupKind.fileDelete);
+  });
+
+  test('groupInnerWorkItems groups thinking inside work session', () {
+    final items = [
+      (block: ChatBlock(kind: 'thinking', raw: {'text': 'a'}), paired: null),
+      (block: ChatBlock(kind: 'thinking', raw: {'text': 'b'}), paired: null),
+      (block: _toolCall('edit'), paired: _toolResult('edit')),
+    ];
+    final inner = groupInnerWorkItems(items);
+    expect(inner.length, 2);
+    expect(inner.first, isA<ChatDisplayGroup>());
+    expect((inner.first as ChatDisplayGroup).kind, ActivityGroupKind.thinking);
   });
 
   test('aggregateDiffStats sums +/- across group items', () {

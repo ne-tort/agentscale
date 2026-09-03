@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/chat/controller/chat_session_controller.dart';
@@ -54,15 +56,20 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   }
 
   Future<void> _bootstrap() async {
+    final hadCache = _chat.hasCachedTranscript;
+    if (hadCache && mounted) {
+      setState(() => _loading = false);
+    }
     try {
-      _project = await workContext.api.getProject(widget.projectId);
+      final results = await Future.wait([
+        workContext.api.getProject(widget.projectId),
+        _chat.loadTranscript(background: hadCache),
+      ]);
+      _project = results[0] as Map<String, dynamic>;
       _chatReadable = projectChatReadable(_project);
       _chatSendable = projectChatSendable(_project);
-      if (_chatReadable) {
-        await Future.wait([
-          _chat.loadTranscript(),
-          if (_chatSendable) _chat.loadModels(),
-        ]);
+      if (_chatSendable) {
+        unawaited(_chat.loadModels());
       }
     } catch (e) {
       if (mounted) showAgentChatSnack(context, e);
@@ -98,10 +105,10 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     _chatReadable = projectChatReadable(_project);
     _chatSendable = projectChatSendable(_project);
     if (_chatReadable) {
-      await Future.wait([
-        _chat.loadTranscript(),
-        if (_chatSendable) _chat.loadModels(),
-      ]);
+      await _chat.loadTranscript();
+      if (_chatSendable) {
+        unawaited(_chat.loadModels());
+      }
     }
     if (mounted) setState(() {});
   }

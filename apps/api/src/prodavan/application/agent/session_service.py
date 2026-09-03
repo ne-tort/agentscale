@@ -664,15 +664,23 @@ class AgentSessionService:
         before_seq: int | None = None,
         tail: bool = False,
         pod_agent: bool = False,
+        session_row: AgentSessionRow | None = None,
+        skip_access: bool = False,
+        include_total_count: bool = True,
     ) -> tuple[list[dict], dict]:
-        if pod_agent:
+        if session_row is not None:
+            row = session_row
+            if row.project_id != project_id:
+                raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+        elif pod_agent:
             row = await self.get_session(session_id=session_id)
             if row.project_id != project_id:
                 raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
         else:
-            await self._projects.require_access(
-                project_id=project_id, principal=principal, employee=employee, write=False
-            )
+            if not skip_access:
+                await self._projects.require_access(
+                    project_id=project_id, principal=principal, employee=employee, write=False
+                )
             row = await self.get_session(session_id=session_id)
             if row.project_id != project_id:
                 raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
@@ -703,16 +711,16 @@ class AgentSessionService:
             rows = rows[:limit]
 
         events = [_event_public(r) for r in rows]
-        count_q = await self._session.execute(
-            select(func.count()).select_from(AgentEventRow).where(AgentEventRow.session_id == session_id)
-        )
-        total_events = int(count_q.scalar_one() or 0)
-        meta = {
+        meta: dict = {
             "oldest_seq": rows[0].seq if rows else None,
             "newest_seq": rows[-1].seq if rows else None,
             "has_more": has_more,
-            "total_events": total_events,
         }
+        if include_total_count:
+            count_q = await self._session.execute(
+                select(func.count()).select_from(AgentEventRow).where(AgentEventRow.session_id == session_id)
+            )
+            meta["total_events"] = int(count_q.scalar_one() or 0)
         return events, meta
 
     async def append_event(
@@ -814,6 +822,7 @@ class AgentSessionService:
             project_id=project_id, principal=principal, employee=employee, write=False
         )
         sid = session_id
+        session_row: AgentSessionRow | None = None
         if sid is None:
             q = await self._session.execute(
                 select(AgentSessionRow)
@@ -825,6 +834,7 @@ class AgentSessionService:
             active = q.scalar_one_or_none()
             if active is not None:
                 sid = active.id
+                session_row = active
             else:
                 suspended_q = await self._session.execute(
                     select(AgentSessionRow)
@@ -836,6 +846,7 @@ class AgentSessionService:
                 suspended = suspended_q.scalar_one_or_none()
                 if suspended is not None:
                     sid = suspended.id
+                    session_row = suspended
                 else:
                     latest_q = await self._session.execute(
                         select(AgentSessionRow)
@@ -845,11 +856,17 @@ class AgentSessionService:
                     )
                     latest = latest_q.scalar_one_or_none()
                     if latest is None:
-                        return {"session_id": None, "session_status": None, "blocks": []}
+                        return {
+                            "session_id": None,
+                            "session_status": None,
+                            "blocks": [],
+                            "pending_approvals": [],
+                        }
                     sid = latest.id
+                    session_row = latest
         else:
-            row = await self.get_session(session_id=sid)
-            if row.project_id != project_id:
+            session_row = await self.get_session(session_id=sid)
+            if session_row.project_id != project_id:
                 raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
 
         events, meta = await self._list_events_page(
@@ -860,12 +877,33 @@ class AgentSessionService:
             limit=limit,
             before_seq=before_seq,
             tail=before_seq is None,
+            session_row=session_row,
+            skip_access=True,
+            include_total_count=before_seq is None,
         )
-        row = await self.get_session(session_id=sid)
+
+        pending_approvals: list[dict] = []
+        if before_seq is None:
+            pending_approvals = _pending_approvals_from_events(events)
+            if meta.get("has_more"):
+                scan_events, _ = await self._list_events_page(
+                    session_id=sid,
+                    project_id=project_id,
+                    principal=principal,
+                    employee=employee,
+                    limit=500,
+                    tail=True,
+                    session_row=session_row,
+                    skip_access=True,
+                    include_total_count=False,
+                )
+                pending_approvals = _pending_approvals_from_events(scan_events)
+
         return {
             "session_id": sid,
-            "session_status": row.status,
+            "session_status": session_row.status,
             "blocks": events_to_chat_blocks(events),
+            "pending_approvals": pending_approvals,
             **meta,
         }
 

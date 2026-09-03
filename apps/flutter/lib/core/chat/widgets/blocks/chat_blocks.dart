@@ -59,17 +59,15 @@ class _ChatMutedLineState extends State<ChatMutedLine> {
           padding: EdgeInsets.symmetric(vertical: AppSpacing.xs / 2),
           child: Row(
             children: [
-              if (widget.onTap != null)
-                SizedBox(
-                  width: 20,
-                  child: showChevron
-                      ? Icon(chevron, size: 16, color: scheme.onSurfaceVariant.withValues(alpha: 0.72))
-                      : null,
-                ),
               Expanded(
                 child: Text(widget.label, style: _mutedTextStyle(context)),
               ),
               if (widget.trailing != null) widget.trailing!,
+              if (widget.onTap != null && showChevron)
+                Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: Icon(chevron, size: 16, color: scheme.onSurfaceVariant.withValues(alpha: 0.72)),
+                ),
             ],
           ),
         ),
@@ -163,7 +161,7 @@ class UserMessageBlock extends StatelessWidget {
     return Align(
       alignment: Alignment.centerRight,
       child: Container(
-        margin: EdgeInsets.only(bottom: AppSpacing.sm),
+        margin: EdgeInsets.only(top: AppSpacing.md, bottom: AppSpacing.sm),
         padding: EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
         constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.85),
         decoration: BoxDecoration(

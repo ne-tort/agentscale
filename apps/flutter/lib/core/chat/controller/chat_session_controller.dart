@@ -5,10 +5,13 @@ import 'package:prodavan/core/api/agent_stream_error.dart';
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/chat/models/chat_block.dart';
 import 'package:prodavan/core/chat/models/chat_projection.dart';
+import 'package:prodavan/core/chat/transcript_cache.dart';
 
 /// Live SSE chat session — blocks projection with optimistic user + streaming assistant.
 class ChatSessionController {
-  ChatSessionController({required this.api, required this.projectId});
+  ChatSessionController({required this.api, required this.projectId}) {
+    _restoreFromCache();
+  }
 
   final ProdavanApi api;
   final String projectId;
@@ -26,6 +29,8 @@ class ChatSessionController {
   int? newestSeq;
   int? totalEvents;
   bool loadingHistory = false;
+  bool refreshingTranscript = false;
+  bool hasCachedTranscript = false;
 
   String get selectedModelLabel {
     final id = selectedModel ?? defaultModel;
@@ -56,6 +61,37 @@ class ChatSessionController {
     if (!_tick.isClosed) _tick.add(null);
   }
 
+  void _restoreFromCache() {
+    final cached = TranscriptCache.getForProject(projectId);
+    if (cached == null || cached.blocks.isEmpty) return;
+    sessionId = cached.sessionId;
+    blocks
+      ..clear()
+      ..addAll(cached.blocks);
+    hasMoreHistory = cached.hasMoreHistory;
+    oldestSeq = cached.oldestSeq;
+    newestSeq = cached.newestSeq;
+    totalEvents = cached.totalEvents;
+    pendingApprovals = cached.pendingApprovals;
+    hasCachedTranscript = true;
+  }
+
+  void _saveToCache() {
+    TranscriptCache.put(
+      projectId,
+      TranscriptCacheEntry(
+        sessionId: sessionId,
+        blocks: List<ChatBlock>.from(blocks),
+        hasMoreHistory: hasMoreHistory,
+        oldestSeq: oldestSeq,
+        newestSeq: newestSeq,
+        totalEvents: totalEvents,
+        pendingApprovals: List<Map<String, dynamic>>.from(pendingApprovals),
+      ),
+    );
+    hasCachedTranscript = blocks.isNotEmpty;
+  }
+
   Future<void> loadModels() async {
     try {
       final body = await api.listProjectModelsLive(projectId);
@@ -75,32 +111,48 @@ class ChatSessionController {
     }
   }
 
-  Future<void> loadTranscript({int? beforeSeq}) async {
-    final previousSessionId = sessionId;
-    final body = await api.projectChatTranscript(
-      projectId: projectId,
-      sessionId: sessionId,
-      beforeSeq: beforeSeq,
-    );
-    final resolved = body['session_id'] as String?;
-    sessionId = resolved ?? previousSessionId;
-    final newBlocks = chatBlocksFromTranscript(body['blocks'] as List?);
-    if (beforeSeq == null) {
-      blocks
-        ..clear()
-        ..addAll(newBlocks);
-      _liveTurnBlocks = const [];
-    } else {
-      blocks.insertAll(0, newBlocks);
+  Future<void> loadTranscript({int? beforeSeq, bool background = false}) async {
+    if (background) {
+      refreshingTranscript = true;
+      notifyImmediate();
     }
-    hasMoreHistory = body['has_more'] == true;
-    oldestSeq = body['oldest_seq'] as int?;
-    newestSeq = body['newest_seq'] as int?;
-    totalEvents = body['total_events'] as int?;
-    if (beforeSeq == null) {
-      pendingApprovals = await _fetchPending();
+    try {
+      final previousSessionId = sessionId;
+      final body = await api.projectChatTranscript(
+        projectId: projectId,
+        sessionId: sessionId,
+        beforeSeq: beforeSeq,
+      );
+      final resolved = body['session_id'] as String?;
+      sessionId = resolved ?? previousSessionId;
+      final newBlocks = chatBlocksFromTranscript(body['blocks'] as List?);
+      if (beforeSeq == null) {
+        blocks
+          ..clear()
+          ..addAll(newBlocks);
+        _liveTurnBlocks = const [];
+        final pending = body['pending_approvals'];
+        pendingApprovals = pending is List ? pending.cast<Map<String, dynamic>>() : const [];
+      } else {
+        blocks.insertAll(0, newBlocks);
+      }
+      hasMoreHistory = body['has_more'] == true;
+      oldestSeq = body['oldest_seq'] as int?;
+      newestSeq = body['newest_seq'] as int?;
+      final total = body['total_events'];
+      if (total is int) {
+        totalEvents = total;
+      }
+      if (beforeSeq == null) {
+        _saveToCache();
+      }
+      notifyImmediate();
+    } finally {
+      if (background) {
+        refreshingTranscript = false;
+        notifyImmediate();
+      }
     }
-    notifyImmediate();
   }
 
   Future<void> loadOlderTranscript() async {
@@ -192,6 +244,7 @@ class ChatSessionController {
       if (pendingApprovals.isEmpty) {
         pendingApprovals = await _fetchPending();
       }
+      _saveToCache();
     } on ProdavanApiException catch (e) {
       error = e;
       notifyImmediate();
@@ -216,6 +269,7 @@ class ChatSessionController {
     if (sid != null) {
       await api.cancelAgentSession(projectId: projectId, sessionId: sid);
     }
+    _saveToCache();
     notifyImmediate();
   }
 

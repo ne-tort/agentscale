@@ -102,3 +102,42 @@ async def test_list_events_page_before_seq_returns_older_window() -> None:
     assert meta["newest_seq"] == 4
     assert meta["has_more"] is True
     assert meta["total_events"] == 10
+
+
+@pytest.mark.asyncio
+async def test_list_events_page_skips_total_count_when_disabled() -> None:
+    session = AsyncMock()
+    svc = AgentSessionService(session)
+    svc._projects.require_access = AsyncMock()  # type: ignore[method-assign]
+    svc.get_session = AsyncMock(  # type: ignore[method-assign]
+        return_value=AgentSessionRow(
+            id="ags_1",
+            project_id="proj_1",
+            resolved_key_id=None,
+            provider="cursor",
+            api_kind="cursor_sdk",
+            vendor_agent_id="ags_1",
+            model=None,
+            cwd="/workspace",
+            status="active",
+        )
+    )
+    rows = [_event_row("ags_1", seq) for seq in (4, 3)]
+    page_mock = MagicMock()
+    page_mock.scalars.return_value.all.return_value = rows
+    session.execute = AsyncMock(return_value=page_mock)
+
+    _events, meta = await svc._list_events_page(
+        session_id="ags_1",
+        project_id="proj_1",
+        principal=MagicMock(),
+        employee=MagicMock(),
+        limit=2,
+        before_seq=5,
+        include_total_count=False,
+    )
+
+    assert meta["oldest_seq"] == 3
+    assert meta["newest_seq"] == 4
+    assert "total_events" not in meta
+    assert session.execute.await_count == 1
