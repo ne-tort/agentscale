@@ -164,6 +164,29 @@ String? _listPathsFrom(Object? value) {
   return null;
 }
 
+({int added, int removed})? parseDiffStats(Object? output) {
+  if (output == null) return null;
+  final unwrapped = unwrapToolPayload(output);
+  if (unwrapped is Map) {
+    final add = unwrapped['lines_added'] ?? unwrapped['added_lines'] ?? unwrapped['additions'];
+    final rem = unwrapped['lines_removed'] ?? unwrapped['removed_lines'] ?? unwrapped['deletions'];
+    if (add is num || rem is num) {
+      return (added: (add as num?)?.toInt() ?? 0, removed: (rem as num?)?.toInt() ?? 0);
+    }
+  }
+  final text = (unwrapped ?? output).toString();
+  if (text.isEmpty) return null;
+  var added = 0;
+  var removed = 0;
+  for (final line in text.split('\n')) {
+    if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@')) continue;
+    if (line.startsWith('+')) added++;
+    if (line.startsWith('-')) removed++;
+  }
+  if (added == 0 && removed == 0) return null;
+  return (added: added, removed: removed);
+}
+
 /// Human-readable panel body for tool expand (not raw Map.toString()).
 String formatToolPanelBody({
   required ToolKind kind,
@@ -175,11 +198,14 @@ String formatToolPanelBody({
 
   switch (kind) {
     case ToolKind.fileDelete:
+      final path = extractToolContextPath(inMap, output);
       if (unwrapped is Map) {
         final size = unwrapped['fileSize'] ?? unwrapped['file_size'];
+        if (size != null && path != null) return '$path\nfileSize: $size';
         if (size != null) return 'fileSize: $size';
       }
-      return '';
+      if (path != null) return path;
+      return unwrapped == null ? '' : _prettyJson(unwrapped);
     case ToolKind.fileRead:
       if (unwrapped is Map) {
         final content = unwrapped['content'] ?? unwrapped['text'];
@@ -189,7 +215,24 @@ String formatToolPanelBody({
       return unwrapped == null ? '' : _prettyJson(unwrapped);
     case ToolKind.fileWrite:
     case ToolKind.fileEdit:
-      return '';
+      final path = extractToolContextPath(inMap, output);
+      final stats = parseDiffStats(output);
+      final buf = StringBuffer();
+      if (path != null) buf.writeln(path);
+      if (stats != null && (stats.added > 0 || stats.removed > 0)) {
+        buf.writeln('+${stats.added} −${stats.removed}');
+      }
+      if (unwrapped is Map) {
+        final content = unwrapped['content'] ?? unwrapped['diff'] ?? unwrapped['patch'];
+        if (content != null && content.toString().trim().isNotEmpty) {
+          buf.writeln(content.toString().trimRight());
+        }
+      } else if (unwrapped is String && unwrapped.trim().isNotEmpty) {
+        buf.writeln(unwrapped.trimRight());
+      }
+      final text = buf.toString().trim();
+      if (text.isNotEmpty) return text;
+      return unwrapped == null ? (path ?? '') : _prettyJson(unwrapped);
     case ToolKind.searchGlob:
       final paths = _listPathsFrom(unwrapped);
       if (paths != null) return paths;

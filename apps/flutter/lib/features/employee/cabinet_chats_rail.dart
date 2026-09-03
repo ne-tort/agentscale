@@ -4,7 +4,7 @@ import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Compact chats block for the cabinet NavigationRail (under logo / before destinations).
+/// Peer nav block for chats — same geometry as [AppLayout] destinations.
 class CabinetChatsRail extends StatelessWidget {
   const CabinetChatsRail({
     super.key,
@@ -25,12 +25,13 @@ class CabinetChatsRail extends StatelessWidget {
   final VoidCallback? onNewChat;
   final void Function(Map<String, dynamic> chat) onOpenChat;
 
+  static const double _railMinWidth = 80;
+  static const double _iconLabelGap = 8;
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final colors = context.appColors;
     final items = <Widget>[
-      _sectionLabel(context, l10n.navChats, extended: extended),
       _row(
         context,
         icon: Icons.add_comment_outlined,
@@ -38,38 +39,17 @@ class CabinetChatsRail extends StatelessWidget {
         selected: false,
         enabled: newChatEnabled && onNewChat != null,
         onTap: onNewChat,
-        extended: extended,
       ),
       for (final chat in pinned)
-        _chatRow(context, chat, pinned: true, colors: colors, l10n: l10n, extended: extended),
+        _chatRow(context, chat, pinned: true, l10n: l10n),
       for (final chat in projectChats)
-        _chatRow(context, chat, pinned: false, colors: colors, l10n: l10n, extended: extended),
+        _chatRow(context, chat, pinned: false, l10n: l10n),
     ];
 
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxHeight: 280),
-      child: ListView(
-        shrinkWrap: true,
-        padding: EdgeInsets.zero,
-        children: items,
-      ),
-    );
-  }
-
-  Widget _sectionLabel(BuildContext context, String text, {required bool extended}) {
-    if (!extended) return const SizedBox.shrink();
-    final colors = context.appColors;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(AppSpacing.md, AppSpacing.sm, AppSpacing.md, AppSpacing.xs),
-      child: Text(
-        text.toUpperCase(),
-        style: TextStyle(
-          color: colors.muted,
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          letterSpacing: 0.6,
-        ),
-      ),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: items,
     );
   }
 
@@ -77,9 +57,7 @@ class CabinetChatsRail extends StatelessWidget {
     BuildContext context,
     Map<String, dynamic> chat, {
     required bool pinned,
-    required AppColorTokens colors,
     required AppLocalizations l10n,
-    required bool extended,
   }) {
     final sid = chat['session_id'] as String? ?? '';
     final title = (chat['title'] as String?)?.trim();
@@ -91,7 +69,28 @@ class CabinetChatsRail extends StatelessWidget {
       selected: sid == activeSessionId,
       enabled: true,
       onTap: () => onOpenChat(chat),
-      extended: extended,
+    );
+  }
+
+  Widget _railIconLabel({required Widget icon, required Widget label}) {
+    if (!extended) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            icon,
+            const SizedBox(height: AppSpacing.xs),
+            label,
+          ],
+        ),
+      );
+    }
+    return Row(
+      children: [
+        SizedBox(width: _railMinWidth, child: Center(child: icon)),
+        Expanded(child: label),
+        const SizedBox(width: _iconLabelGap),
+      ],
     );
   }
 
@@ -102,46 +101,31 @@ class CabinetChatsRail extends StatelessWidget {
     required bool selected,
     required bool enabled,
     required VoidCallback? onTap,
-    required bool extended,
   }) {
     final colors = context.appColors;
     final color = !enabled
         ? colors.muted.withValues(alpha: 0.45)
         : selected
             ? colors.primary
-            : colors.onSurface;
-    final child = extended
-        ? Padding(
-            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 6),
-            child: Row(
-              children: [
-                Icon(icon, size: 18, color: color),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: color,
-                      fontSize: 13,
-                      fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          )
-        : Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
-            child: Icon(icon, size: 20, color: color),
-          );
+            : (extended ? colors.onSurface : colors.muted);
+    final iconWidget = Icon(icon, size: 24, color: color);
+    final labelWidget = Text(
+      label,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: color,
+        fontSize: extended ? 14 : 12,
+        fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+      ),
+    );
 
-    return Material(
-      color: selected ? colors.primary.withValues(alpha: 0.08) : Colors.transparent,
-      child: InkWell(
-        onTap: enabled ? onTap : null,
-        child: child,
+    return InkWell(
+      onTap: enabled ? onTap : null,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+        child: _railIconLabel(icon: iconWidget, label: labelWidget),
       ),
     );
   }

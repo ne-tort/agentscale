@@ -105,16 +105,67 @@ void main() {
     expect((inner.first as ChatDisplayGroup).kind, ActivityGroupKind.fileDelete);
   });
 
-  test('groupInnerWorkItems groups thinking inside work session', () {
+  test('groupInnerWorkItems merges consecutive thinking into one Single', () {
     final items = [
-      (block: ChatBlock(kind: 'thinking', raw: {'text': 'a'}), paired: null),
-      (block: ChatBlock(kind: 'thinking', raw: {'text': 'b'}), paired: null),
+      (block: ChatBlock(kind: 'thinking', raw: {'text': 'a', 'duration_ms': 100}), paired: null),
+      (block: ChatBlock(kind: 'thinking', raw: {'text': 'b', 'duration_ms': 2500}), paired: null),
       (block: _toolCall('edit'), paired: _toolResult('edit')),
     ];
     final inner = groupInnerWorkItems(items);
     expect(inner.length, 2);
-    expect(inner.first, isA<ChatDisplayGroup>());
-    expect((inner.first as ChatDisplayGroup).kind, ActivityGroupKind.thinking);
+    expect(inner.first, isA<ChatDisplaySingle>());
+    final merged = (inner.first as ChatDisplaySingle).item.block;
+    expect(merged.kind, 'thinking');
+    expect(merged.text, 'a\nb');
+    expect(merged.raw['duration_ms'], 2500);
+  });
+
+  test('mergeToolPairs matches result by id across a gap', () {
+    final blocks = [
+      _toolCall('edit', id: 't1', input: {'path': 'a.py'}),
+      ChatBlock(kind: 'thinking', raw: {'text': 'mid'}),
+      _toolResult('edit', id: 't1', output: '+1'),
+    ];
+    final merged = mergeToolPairs(blocks);
+    expect(merged.length, 2);
+    expect(merged.first.paired?.raw['id'], 't1');
+    expect(merged.every((p) => p.block.kind != 'tool_result' || p.paired != null), isTrue);
+  });
+
+  test('streaming empty assistant does not cut WorkSession', () {
+    final blocks = [
+      _toolCall('edit', input: {'path': 'a.py'}),
+      _toolResult('edit'),
+      ChatBlock(kind: 'assistant_markdown', raw: {'text': '', '_streaming': true}),
+      _toolCall('glob', input: {'globPattern': '*.dart'}),
+      _toolResult('glob'),
+    ];
+    final entries = groupDisplayEntries(blocks, turnStreaming: true);
+    expect(entries.length, 1);
+    expect(entries.first, isA<ChatDisplayWorkSession>());
+    expect(workActionCount((entries.first as ChatDisplayWorkSession).items), 2);
+  });
+
+  test('empty assistant markdown does not cut WorkSession', () {
+    final blocks = [
+      _toolCall('edit', input: {'path': 'a.py'}),
+      _toolResult('edit'),
+      ChatBlock(kind: 'assistant_markdown', raw: {'text': '   '}),
+      _toolCall('glob', input: {'globPattern': '*.dart'}),
+      _toolResult('glob'),
+    ];
+    final entries = groupDisplayEntries(blocks);
+    expect(entries.length, 1);
+    expect(entries.first, isA<ChatDisplayWorkSession>());
+  });
+
+  test('mergeThinkingPairs concatenates text and takes max duration', () {
+    final merged = mergeThinkingPairs([
+      (block: ChatBlock(kind: 'thinking', raw: {'text': 'one', 'duration_ms': 10}), paired: null),
+      (block: ChatBlock(kind: 'thinking', raw: {'text': 'two', 'duration_ms': 99}), paired: null),
+    ]);
+    expect(merged.block.text, 'one\ntwo');
+    expect(merged.block.raw['duration_ms'], 99);
   });
 
   test('aggregateDiffStats sums +/- across group items', () {

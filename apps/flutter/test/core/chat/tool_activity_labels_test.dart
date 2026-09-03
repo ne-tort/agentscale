@@ -54,7 +54,7 @@ void main() {
   });
 
   group('formatToolPanelBody', () {
-    test('delete shows fileSize only, not raw JSON', () {
+    test('delete shows path and fileSize, not raw JSON', () {
       final body = formatToolPanelBody(
         kind: ToolKind.fileDelete,
         input: {'path': 'old.txt'},
@@ -63,8 +63,41 @@ void main() {
           'value': {'fileSize': 304},
         },
       );
-      expect(body, 'fileSize: 304');
+      expect(body, 'old.txt\nfileSize: 304');
       expect(body.contains('{'), isFalse);
+    });
+
+    test('write shows path and diff stats', () {
+      final body = formatToolPanelBody(
+        kind: ToolKind.fileWrite,
+        input: {'path': 'a.py'},
+        output: {
+          'status': 'success',
+          'value': {'lines_added': 3, 'lines_removed': 1},
+        },
+      );
+      expect(body, contains('a.py'));
+      expect(body, contains('+3 −1'));
+      expect(body.trim().isNotEmpty, isTrue);
+    });
+
+    test('edit with empty output still shows path', () {
+      final body = formatToolPanelBody(
+        kind: ToolKind.fileEdit,
+        input: {'path': 'b.py'},
+        output: null,
+      );
+      expect(body, 'b.py');
+    });
+
+    test('generic falls back to pretty JSON when body empty', () {
+      final body = formatToolPanelBody(
+        kind: ToolKind.generic,
+        input: const {},
+        output: {'status': 'success', 'value': {'ok': true}},
+      );
+      expect(body.contains('ok'), isTrue);
+      expect(body.trim().isNotEmpty, isTrue);
     });
 
     test('glob lists files from value', () {

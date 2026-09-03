@@ -2325,7 +2325,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get navNewChat => 'New chat';
 
   @override
-  String get chatUntitled => 'Untitled chat';
+  String get chatUntitled => 'Chat';
+
+  @override
+  String chatDialogN(int n) {
+    return 'Chat $n';
+  }
 
   @override
   String get chatPin => 'Pin chat';

@@ -28,10 +28,11 @@ OIDC Login
 
 ## Внутри кабинета
 
-1. System: Overview / Projects / **Chats** (rail) / modules / Management / Settings.  
-2. Tap project = **select only** (highlight); open chat via «Новый чат» или item в Chats.  
+1. System: Overview / Projects / modules / Management; **Chats** — peer `railExtra` block **after** all destinations (not nested under Projects); Settings trailing.  
+2. Tap project = **select + open settings**; selected **active** row uses green (`success`) text; pause/error/draft keep status colors. Visiting settings/workspace auto-selects the project. Delete selected → clear selection.  
 3. Workspace требует `sessionId`; attachments OK.  
 4. Агент может добавить tab/table → UI refresh. Secondary tabs = EntityCollection from `ui_json`.
+5. New chat titles: «Новый диалог» / default session «Диалог» then «Диалог {n}» (API ordinal); UI null title → «Диалог».
 
 ## Project chat (blocks)
 
@@ -39,8 +40,8 @@ OIDC Login
 |------------|----------|-----|
 | `user` | persisted user_message | bubble справа + attachment chips; **16px top margin** от предыдущего bot-контента |
 | `assistant_markdown` | text_delta (live + reload) | inline в колонке чата (без bubble); plain text while streaming, GFM after done |
-| `thinking` | thinking_delta/complete | muted line; **входит в WorkSession** (считается действием); chevron **справа** (hover `>`, expanded `∨`) + inset panel on tap |
-| `tool_call` / `tool_result` | tool events | merged activity line with **semantic RU labels**; chevron **справа**; `+N −M` diff badge. **WorkSession** («Работаю…» / «Работал · N действий») для ≥2 подряд **thinking + tools**; inner same-kind sub-groups on expand |
+| `thinking` | thinking_delta/complete | muted line; **входит в WorkSession**; consecutive thinking → **один** spoiler; chevron **справа** + inset panel |
+| `tool_call` / `tool_result` | tool events | paired by `id` (window, not only adjacent); semantic RU labels; chevron **справа**; expand body path/`+N −M`/fileSize (not empty). **WorkSession** for ≥2 work items; streaming/empty assistant **не** рвёт сессию |
 | `approval` | tool_approval_request | inline Allow/Deny + full-page HITL |
 | `subagent` | subagent_* | muted line + inset sidechain |
 | `plan` | task_progress | checklist (tasks with titles only) |
@@ -74,7 +75,7 @@ Cursor-style field: **+** (chat settings) → attach → text → send/stop; е�
 - **Read when pod down / error:** transcript loads from DB for `status=active|error`; composer disabled with hint until `status=active` and `observed_state == running`.
 - **Pagination:** tail load (`limit`, default 100) + `before_seq` cursor on scroll-up; skeleton bubbles on initial load (no spinner).
 - **Load perf:** `getProject` ∥ `loadTranscript(sessionId)` on bootstrap; `loadModels` deferred; `pending_approvals` in transcript; cache key `(projectId, sessionId)`.
-- **Scroll:** chronological `ListView` (not reverse); `jumpTo(max)` / pin near bottom; `loadOlder` near top; auto-`loadOlder` while `hasMore && maxScrollExtent` small.
+- **Scroll:** classic `ListView(reverse: true)`; pin near offset 0; `loadOlder` near `maxScrollExtent`; no auto-fill / prepend-anchor.
 - **Settings:** «Чат» tile hints to open from sidebar (no auto-open latest).
 - **Sidebar API:** `GET/PUT …/me/selection`, `GET …/chats/sidebar`, `PATCH …/sessions/{id}` (`title`, `pin`).
 - **Tool panels:** semantic labels from input; expand body is code-style panel (not raw Map dump); unwrap `{status,value}` / `{success}` payloads.

@@ -39,10 +39,11 @@ Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** depe
 
 ### Chat UX (project workspace)
 
-- **Multi-chat** — несколько agent sessions на project; selected project и pin — **per employee**. Rail: «Новый чат» → закреплённые → чаты выбранного проекта. Workspace открывается только с явным `sessionId` (без silent latest).
+- **Multi-chat** — несколько agent sessions на project; selected project и pin — **per employee**. Rail: peer блок чатов после destinations («Новый диалог» → pins → чаты проекта). Titles: «Диалог» / «Диалог n». Tap project → settings + select (зелёный текст для active). Workspace только с явным `sessionId`.
 - **Live streaming** — assistant text из SSE `text_delta` без full reload после turn; ingress нормализует cumulative/overlap SDK deltas в incremental.
 - **Block-based transcript** — `GET /chat/transcript?session_id=` → `{ blocks: [...] }` (user, assistant_markdown, tool_*, subagent, plan, thinking, usage).
-- **Cursor-style rendering** — assistant inline без bubble; reasoning/tools — muted underlined lines + inset panel; tool activity с `+N −M` при diff.
+- **Cursor-style rendering** — assistant inline без bubble; reasoning/tools — muted underlined lines + inset panel; tools paired by id; consecutive thinking → один spoiler; tool expand с path/`+N −M`.
+- **Scroll** — classic reverse `ListView` (newest at visual bottom).
 - **Markdown** — GFM в assistant blocks после завершения turn; plain text во время stream.
 - **Chat settings** — model picker + title rename + pin (preference pages, no modal dialogs); Enter отправляет, Shift+Enter — новая строка; usage collapsed по умолчанию.
 - **Responsive** — mobile full-width; tablet/desktop center column (768–900px); на узком shell чаты — отдельная страница (не bottom sheet).

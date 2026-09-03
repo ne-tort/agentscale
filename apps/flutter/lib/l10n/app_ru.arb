@@ -1313,8 +1313,16 @@
   "projectWorkspaceRematerializedNoPackages": "Workspace пересоздан (без MCP-пакетов)",
   "navProjects": "Проекты",
   "navChats": "Чаты",
-  "navNewChat": "Новый чат",
-  "chatUntitled": "Без названия",
+  "navNewChat": "Новый диалог",
+  "chatUntitled": "Диалог",
+  "chatDialogN": "Диалог {n}",
+  "@chatDialogN": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
   "chatPin": "Закрепить чат",
   "chatUnpin": "Открепить чат",
   "chatRenameTitle": "Переименовать чат",

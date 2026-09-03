@@ -1312,7 +1312,15 @@
   "navProjects": "Projects",
   "navChats": "Chats",
   "navNewChat": "New chat",
-  "chatUntitled": "Untitled chat",
+  "chatUntitled": "Chat",
+  "chatDialogN": "Chat {n}",
+  "@chatDialogN": {
+    "placeholders": {
+      "n": {
+        "type": "int"
+      }
+    }
+  },
   "chatPin": "Pin chat",
   "chatUnpin": "Unpin chat",
   "chatRenameTitle": "Rename chat",

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/containers/container_runtime_presenter.dart';
@@ -53,6 +55,12 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
   @override
   void initState() {
     super.initState();
+    unawaited(
+      workContext.selectProject(
+        cabinetId: widget.cabinetId,
+        projectId: widget.projectId,
+      ),
+    );
     _load();
   }
 

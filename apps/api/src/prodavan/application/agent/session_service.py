@@ -71,14 +71,22 @@ def _session_public(row: AgentSessionRow) -> dict:
 def _default_chat_title(text: str) -> str:
     cleaned = " ".join((text or "").strip().split())
     if not cleaned:
-        return "Chat"
+        return "Диалог"
     if len(cleaned) <= 60:
         return cleaned
     return cleaned[:57].rstrip() + "…"
 
 
+def _dialog_title_for_ordinal(ordinal: int) -> str:
+    """First chat on a project is «Диалог»; later ones «Диалог {n}» (1-based ordinal)."""
+    if ordinal <= 1:
+        return "Диалог"
+    return f"Диалог {ordinal}"
+
+
 def _touch_session_activity(row: AgentSessionRow, *, text: str | None = None) -> None:
     row.last_message_at = datetime.now(tz=UTC)
+    # Do not overwrite explicit create titles («Диалог» / «Диалог N»).
     if text and not row.title:
         row.title = _default_chat_title(text)
 
@@ -157,6 +165,13 @@ class AgentSessionService:
         opts = await self._policy.build_create_opts(
             project=project, cwd=cwd, credential=credential, model_override=model
         )
+        existing_q = await self._session.execute(
+            select(func.count())
+            .select_from(AgentSessionRow)
+            .where(AgentSessionRow.project_id == project_id)
+        )
+        existing_count = int(existing_q.scalar_one() or 0)
+        default_title = _dialog_title_for_ordinal(existing_count + 1)
         vendor_agent_id: str
         model_name = sanitize_runtime_model(opts.model)
         if settings.pod_agent_runtime_enabled:
@@ -169,6 +184,7 @@ class AgentSessionService:
                 model=model_name,
                 cwd=cwd,
                 status=AgentSessionStatus.ACTIVE,
+                title=default_title,
             )
             self._session.add(row)
             await self._session.flush()
@@ -188,6 +204,7 @@ class AgentSessionService:
                 model=model_name,
                 cwd=cwd,
                 status=AgentSessionStatus.ACTIVE,
+                title=default_title,
             )
             self._session.add(row)
         await self._session.commit()

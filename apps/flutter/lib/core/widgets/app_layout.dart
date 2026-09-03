@@ -306,7 +306,7 @@ class AppLayout extends StatelessWidget {
                 child: ListView(
                   padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
                   children: [
-                    for (var i = 0; i < destinations.length; i++) ...[
+                    for (var i = 0; i < destinations.length; i++)
                       _destinationControl(
                         context,
                         destination: destinations[i],
@@ -314,12 +314,9 @@ class AppLayout extends StatelessWidget {
                         selected: mainSelected == i,
                         onTap: () => onDestinationSelected(i),
                       ),
-                      if (i == 0) ...[
-                        const SizedBox(height: AppSpacing.sm),
-                        railExtra!,
-                        const SizedBox(height: AppSpacing.sm),
-                      ],
-                    ],
+                    const SizedBox(height: AppSpacing.md),
+                    railExtra!,
+                    const SizedBox(height: AppSpacing.sm),
                   ],
                 ),
               ),

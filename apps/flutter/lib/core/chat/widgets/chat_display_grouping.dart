@@ -1,7 +1,6 @@
 import 'package:prodavan/core/chat/models/chat_block.dart';
 import 'package:prodavan/core/chat/tool_activity_labels.dart';
-import 'package:prodavan/core/chat/widgets/blocks/chat_block_renderer.dart';
-import 'package:prodavan/core/chat/widgets/blocks/chat_blocks.dart';
+import 'package:prodavan/core/chat/widgets/blocks/chat_blocks.dart' show ActivityGroupKind;
 
 typedef ChatDisplayPair = ({ChatBlock block, ChatBlock? paired});
 
@@ -70,6 +69,15 @@ bool _isThinkingBlock(ChatBlock block) => block.kind == 'thinking';
 bool _isWorkSegmentItem(ChatDisplayPair item) =>
     _isThinkingBlock(item.block) || _isActivityPair(item);
 
+/// Streaming / empty assistant must not split a WorkSession mid-turn.
+bool _isSoftPassthrough(ChatBlock block) {
+  if (block.kind != 'assistant_markdown') return false;
+  return block.isStreaming || block.text.trim().isEmpty;
+}
+
+bool _continuesWorkRun(ChatDisplayPair item) =>
+    _isWorkSegmentItem(item) || _isSoftPassthrough(item.block);
+
 bool _isHardBoundary(ChatBlock block) {
   return switch (block.kind) {
     'user' || 'approval' || 'plan' || 'usage' || 'error' || 'subagent' => true,
@@ -91,36 +99,85 @@ bool _workSessionStreaming(List<ChatDisplayPair> items, bool turnStreaming) {
   return items.any(_pairIsPending) || items.any(_thinkingIsStreaming);
 }
 
+int? _findToolResultIndex(List<ChatBlock> blocks, int callIndex, Set<int> usedResults) {
+  final call = blocks[callIndex];
+  if (call.kind != 'tool_call') return null;
+  final callId = call.raw['id'];
+
+  if (callIndex + 1 < blocks.length && !usedResults.contains(callIndex + 1)) {
+    final next = blocks[callIndex + 1];
+    if (next.kind == 'tool_result') {
+      final resultId = next.raw['id'];
+      if (callId != null && resultId != null && callId == resultId) return callIndex + 1;
+      if (callId == null && resultId == null) return callIndex + 1;
+    }
+  }
+
+  if (callId == null) return null;
+  final limit = blocks.length < callIndex + 25 ? blocks.length : callIndex + 25;
+  for (var j = callIndex + 1; j < limit; j++) {
+    if (usedResults.contains(j)) continue;
+    final b = blocks[j];
+    if (b.kind == 'tool_result' && b.raw['id'] == callId) return j;
+  }
+  return null;
+}
+
 List<ChatDisplayPair> mergeToolPairs(List<ChatBlock> blocks) {
+  final usedResults = <int>{};
   final out = <ChatDisplayPair>[];
-  var i = 0;
-  while (i < blocks.length) {
-    final paired = pairedToolResultFor(blocks, i);
-    if (paired != null) {
-      out.add((block: blocks[i], paired: paired));
-      i += 2;
-      continue;
+  for (var i = 0; i < blocks.length; i++) {
+    if (usedResults.contains(i)) continue;
+    final block = blocks[i];
+    if (block.kind == 'tool_call') {
+      final j = _findToolResultIndex(blocks, i, usedResults);
+      if (j != null) {
+        usedResults.add(j);
+        out.add((block: block, paired: blocks[j]));
+        continue;
+      }
     }
-    if (isMergedToolResult(blocks, i)) {
-      i++;
-      continue;
-    }
-    out.add((block: blocks[i], paired: null));
-    i++;
+    out.add((block: block, paired: null));
   }
   return out;
 }
 
-List<ChatDisplayEntry> _groupThinkingRun(List<ChatDisplayPair> merged, int start, int end) {
-  if (end - start >= 2) {
-    return [
-      ChatDisplayGroup(
-        kind: ActivityGroupKind.thinking,
-        items: merged.sublist(start, end),
-      ),
-    ];
+/// Merge consecutive thinking blocks into one spoiler (single text + duration).
+ChatDisplayPair mergeThinkingPairs(List<ChatDisplayPair> items) {
+  if (items.isEmpty) {
+    return (block: ChatBlock(kind: 'thinking', raw: const {'text': ''}), paired: null);
   }
-  return [ChatDisplaySingle(item: merged[start])];
+  if (items.length == 1) return items.first;
+
+  final buf = StringBuffer();
+  var duration = 0;
+  var streaming = false;
+  for (final item in items) {
+    final t = item.block.text.trim();
+    if (t.isNotEmpty) {
+      if (buf.isNotEmpty) buf.writeln();
+      buf.write(t);
+    }
+    final d = item.block.raw['duration_ms'];
+    if (d is int && d > duration) duration = d;
+    if (item.block.isStreaming) streaming = true;
+  }
+  return (
+    block: ChatBlock(
+      kind: 'thinking',
+      raw: {
+        'text': buf.toString(),
+        if (duration > 0) 'duration_ms': duration,
+        if (streaming) '_streaming': true,
+      },
+    ),
+    paired: null,
+  );
+}
+
+List<ChatDisplayEntry> _groupThinkingRun(List<ChatDisplayPair> merged, int start, int end) {
+  final slice = merged.sublist(start, end);
+  return [ChatDisplaySingle(item: mergeThinkingPairs(slice))];
 }
 
 List<ChatDisplayEntry> _groupSameKindRun(List<ChatDisplayPair> items) {
@@ -143,15 +200,18 @@ List<ChatDisplayEntry> _groupSameKindRun(List<ChatDisplayPair> items) {
 }
 
 List<ChatDisplayEntry> _emitWorkSegmentRun(List<ChatDisplayPair> run, bool turnStreaming) {
-  if (run.length >= 2) {
+  final workItems = run.where(_isWorkSegmentItem).toList();
+  if (workItems.length >= 2) {
     return [
       ChatDisplayWorkSession(
         items: run,
-        streaming: _workSessionStreaming(run, turnStreaming),
+        streaming: _workSessionStreaming(workItems, turnStreaming),
       ),
     ];
   }
-  return [ChatDisplaySingle(item: run.first)];
+  if (run.isEmpty) return const [];
+  if (run.length == 1) return [ChatDisplaySingle(item: run.first)];
+  return run.map((i) => ChatDisplaySingle(item: i)).toList();
 }
 
 List<ChatDisplayEntry> groupDisplayEntries(List<ChatBlock> blocks, {bool turnStreaming = false}) {
@@ -161,15 +221,15 @@ List<ChatDisplayEntry> groupDisplayEntries(List<ChatBlock> blocks, {bool turnStr
   while (i < merged.length) {
     final block = merged[i].block;
 
-    if (_isHardBoundary(block) || (!_isWorkSegmentItem(merged[i]) && block.kind != 'tool_call')) {
+    if (_isHardBoundary(block)) {
       out.add(ChatDisplaySingle(item: merged[i]));
       i++;
       continue;
     }
 
-    if (_isWorkSegmentItem(merged[i])) {
+    if (_continuesWorkRun(merged[i])) {
       var j = i;
-      while (j < merged.length && _isWorkSegmentItem(merged[j])) {
+      while (j < merged.length && _continuesWorkRun(merged[j])) {
         j++;
       }
       out.addAll(_emitWorkSegmentRun(merged.sublist(i, j), turnStreaming));
@@ -235,3 +295,6 @@ List<ChatDisplayEntry> groupInnerWorkItems(List<ChatDisplayPair> items) {
 }
 
 bool pairIsPending(ChatDisplayPair item) => _pairIsPending(item);
+
+int workActionCount(List<ChatDisplayPair> items) =>
+    items.where(_isWorkSegmentItem).length;

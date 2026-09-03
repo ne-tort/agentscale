@@ -2333,10 +2333,15 @@ class AppLocalizationsRu extends AppLocalizations {
   String get navChats => 'Чаты';
 
   @override
-  String get navNewChat => 'Новый чат';
+  String get navNewChat => 'Новый диалог';
 
   @override
-  String get chatUntitled => 'Без названия';
+  String get chatUntitled => 'Диалог';
+
+  @override
+  String chatDialogN(int n) {
+    return 'Диалог $n';
+  }
 
   @override
   String get chatPin => 'Закрепить чат';

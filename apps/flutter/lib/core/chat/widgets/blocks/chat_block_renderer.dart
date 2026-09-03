@@ -128,13 +128,24 @@ class ChatBlockRenderer extends StatelessWidget {
 
 ChatBlock? pairedToolResultFor(List<ChatBlock> blocks, int index) {
   final block = blocks[index];
-  if (block.kind != 'tool_call' || index + 1 >= blocks.length) return null;
-  final next = blocks[index + 1];
-  if (next.kind != 'tool_result') return null;
+  if (block.kind != 'tool_call') return null;
   final callId = block.raw['id'];
-  final resultId = next.raw['id'];
-  if (callId != null && resultId != null && callId == resultId) return next;
-  if (callId == null && resultId == null) return next;
+
+  if (index + 1 < blocks.length) {
+    final next = blocks[index + 1];
+    if (next.kind == 'tool_result') {
+      final resultId = next.raw['id'];
+      if (callId != null && resultId != null && callId == resultId) return next;
+      if (callId == null && resultId == null) return next;
+    }
+  }
+
+  if (callId == null) return null;
+  final limit = blocks.length < index + 25 ? blocks.length : index + 25;
+  for (var j = index + 1; j < limit; j++) {
+    final b = blocks[j];
+    if (b.kind == 'tool_result' && b.raw['id'] == callId) return b;
+  }
   return null;
 }
 
@@ -142,5 +153,13 @@ bool isMergedToolResult(List<ChatBlock> blocks, int index) {
   if (index <= 0) return false;
   final block = blocks[index];
   if (block.kind != 'tool_result') return false;
-  return pairedToolResultFor(blocks, index - 1) != null;
+  final resultId = block.raw['id'];
+  for (var i = 0; i < index; i++) {
+    if (blocks[i].kind != 'tool_call') continue;
+    final paired = pairedToolResultFor(blocks, i);
+    if (paired == null) continue;
+    if (identical(paired, block)) return true;
+    if (resultId != null && paired.raw['id'] == resultId) return true;
+  }
+  return false;
 }

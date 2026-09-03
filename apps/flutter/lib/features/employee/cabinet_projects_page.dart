@@ -14,7 +14,7 @@ import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/employee/cabinet_project_settings_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Projects table inside cabinet — tap selects project for chat sidebar (no auto-open).
+/// Projects table — tap opens settings and selects project for chat sidebar.
 class CabinetProjectsPage extends StatefulWidget {
   const CabinetProjectsPage({
     super.key,
@@ -123,7 +123,7 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
     }
   }
 
-  Future<void> _selectProject(AppEntityRow row) async {
+  Future<void> _openProject(AppEntityRow row) async {
     try {
       await workContext.selectProject(cabinetId: widget.cabinetId, projectId: row.id);
       widget.onSelectionChanged?.call();
@@ -131,6 +131,8 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
       if (!mounted) return;
       AppErrors.showSnack(context, e);
     }
+    if (!mounted) return;
+    await _openSettings(row);
   }
 
   Future<void> _openSettings(AppEntityRow row) async {
@@ -179,10 +181,14 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
 
   Color? _rowColor(BuildContext context, Map<String, dynamic> project) {
     final id = project['id'] as String?;
-    if (id != null && id == workContext.selectedProjectId) {
-      return context.appColors.primary.withValues(alpha: 0.12);
-    }
     final status = project['status'] as String?;
+    final selected = id != null && id == workContext.selectedProjectId;
+    if (selected &&
+        status == 'active' &&
+        !projectShowsContainerError(project) &&
+        projectChatReadable(project)) {
+      return context.appColors.success;
+    }
     if (status == 'draft' || status == 'paused') return context.appColors.warning;
     return null;
   }
@@ -243,7 +249,7 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
                     AppEntityColumn(id: 'creator', label: l10n.projectCreatorColumn),
                     AppEntityColumn(id: 'status', label: l10n.projectProjectStatus),
                   ],
-                  onOpen: _selectProject,
+                  onOpen: _openProject,
                   onDelete: _delete,
                   rowActions: [
                     AppEntityRowAction(

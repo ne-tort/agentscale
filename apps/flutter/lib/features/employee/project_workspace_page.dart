@@ -49,6 +49,12 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   void initState() {
     super.initState();
     workContext.enterProject(widget.projectId);
+    unawaited(
+      workContext.selectProject(
+        cabinetId: widget.cabinetId,
+        projectId: widget.projectId,
+      ),
+    );
     _title = (widget.initialTitle ?? '').trim();
     _pinned = widget.initiallyPinned;
     _chat = ChatSessionController(

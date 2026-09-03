@@ -4151,8 +4151,14 @@ abstract class AppLocalizations {
   /// No description provided for @chatUntitled.
   ///
   /// In en, this message translates to:
-  /// **'Untitled chat'**
+  /// **'Chat'**
   String get chatUntitled;
+
+  /// No description provided for @chatDialogN.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat {n}'**
+  String chatDialogN(int n);
 
   /// No description provided for @chatPin.
   ///

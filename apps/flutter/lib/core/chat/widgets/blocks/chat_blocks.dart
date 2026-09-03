@@ -234,28 +234,6 @@ class UserMessageBlock extends StatelessWidget {
   };
 }
 
-({int added, int removed})? parseDiffStats(Object? output) {
-  if (output == null) return null;
-  if (output is Map) {
-    final add = output['lines_added'] ?? output['added_lines'] ?? output['additions'];
-    final rem = output['lines_removed'] ?? output['removed_lines'] ?? output['deletions'];
-    if (add is num || rem is num) {
-      return (added: (add as num?)?.toInt() ?? 0, removed: (rem as num?)?.toInt() ?? 0);
-    }
-  }
-  final text = output.toString();
-  if (text.isEmpty) return null;
-  var added = 0;
-  var removed = 0;
-  for (final line in text.split('\n')) {
-    if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('@@')) continue;
-    if (line.startsWith('+')) added++;
-    if (line.startsWith('-')) removed++;
-  }
-  if (added == 0 && removed == 0) return null;
-  return (added: added, removed: removed);
-}
-
 class ToolActivityBlock extends StatefulWidget {
   const ToolActivityBlock({
     super.key,
