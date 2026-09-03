@@ -1279,6 +1279,7 @@
   "projectPreviewTruncated": "Превью обрезано до первых 200k символов",
   "projectProject": "Проект",
   "projectProjectName": "Название проекта",
+  "projectOpenChat": "Чат",
   "projectProjectPaused": "Проект на паузе",
   "projectProjectResumed": "Проект возобновлён",
   "projectProjectSettings": "Настройки проекта",

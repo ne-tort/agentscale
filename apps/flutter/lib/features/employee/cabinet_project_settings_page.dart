@@ -15,6 +15,7 @@ import 'package:prodavan/features/employee/project_ai_key_select_page.dart';
 import 'package:prodavan/features/employee/project_container_page.dart';
 import 'package:prodavan/features/employee/project_management_page.dart';
 import 'package:prodavan/features/employee/project_modules_list_page.dart';
+import 'package:prodavan/features/employee/project_workspace_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Project settings — name, about, launch/pause/resume, AI provider, modules nav.
@@ -319,6 +320,28 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
             value: _name,
             onSave: _saveName,
           ),
+          if (_launched &&
+              projectChatReadable({
+                'status': _status,
+                'runtime': _runtime,
+                'observed_state': _runtime?['observed_state'],
+              }))
+            AppPreferenceTile(
+              title: l10n.projectOpenChat,
+              icon: Icons.chat_bubble_outline,
+              trailing: const AppTrailingChevron(),
+              onTap: () {
+                Navigator.of(context).push<void>(
+                  MaterialPageRoute<void>(
+                    builder: (_) => ProjectWorkspacePage(
+                      cabinetId: widget.cabinetId,
+                      projectId: widget.projectId,
+                      projectName: _name,
+                    ),
+                  ),
+                );
+              },
+            ),
           AppValuePreference<String>(
             title: l10n.projectAboutLabel,
             icon: Icons.notes_outlined,

@@ -11,7 +11,6 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/features/employee/widgets/chat_composer.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-const _kEstimatedRowHeight = 48.0;
 const _kScrollCacheExtent = 700.0;
 const _kStickThreshold = 48.0;
 
@@ -123,9 +122,6 @@ class ChatMessageList extends StatefulWidget {
     this.loadingHistory = false,
     this.onLoadOlder,
     this.turnStreaming = false,
-    this.totalEvents,
-    this.oldestSeq,
-    this.newestSeq,
   });
 
   final List<ChatBlock> blocks;
@@ -137,9 +133,6 @@ class ChatMessageList extends StatefulWidget {
   final bool loadingHistory;
   final VoidCallback? onLoadOlder;
   final bool turnStreaming;
-  final int? totalEvents;
-  final int? oldestSeq;
-  final int? newestSeq;
 
   @override
   State<ChatMessageList> createState() => ChatMessageListState();
@@ -147,66 +140,32 @@ class ChatMessageList extends StatefulWidget {
 
 class ChatMessageListState extends State<ChatMessageList> {
   final _scroll = ScrollController();
+  bool _pinnedToBottom = true;
   int _lastFingerprint = 0;
-  int _lastBlockCount = 0;
-  double? _anchorPixels;
-  double? _anchorMaxExtent;
 
   @override
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
+    _lastFingerprint = _blocksScrollFingerprint(widget.blocks);
   }
 
-  bool _isAtBottom([ScrollMetrics? metrics]) {
+  /// In reverse ListView: pixels ≈ 0 is the visual bottom (newest).
+  bool _isPinnedToBottom([ScrollMetrics? metrics]) {
     final m = metrics ?? (_scroll.hasClients ? _scroll.position : null);
     if (m == null) return true;
-    return m.pixels >= m.maxScrollExtent - _kStickThreshold;
-  }
-
-  double _estimatedTopExtentFor({
-    required bool hasMoreHistory,
-    int? totalEvents,
-    int? oldestSeq,
-    int? newestSeq,
-  }) {
-    if (!hasMoreHistory || totalEvents == null || oldestSeq == null) {
-      return 0;
-    }
-    final loaded = newestSeq != null ? newestSeq - oldestSeq + 1 : 0;
-    final unloaded = (totalEvents - loaded).clamp(0, totalEvents);
-    return unloaded * _kEstimatedRowHeight;
-  }
-
-  double _estimatedTopExtent() => _estimatedTopExtentFor(
-        hasMoreHistory: widget.hasMoreHistory,
-        totalEvents: widget.totalEvents,
-        oldestSeq: widget.oldestSeq,
-        newestSeq: widget.newestSeq,
-      );
-
-  void _restoreScrollAnchor(double anchor, double oldMax) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) {
-        final extentDelta = _scroll.position.maxScrollExtent - oldMax;
-        _scroll.jumpTo(anchor + extentDelta);
-      }
-    });
-  }
-
-  void _captureScrollAnchor() {
-    if (!_scroll.hasClients) return;
-    _anchorPixels = _scroll.offset;
-    _anchorMaxExtent = _scroll.position.maxScrollExtent;
+    return m.pixels <= _kStickThreshold;
   }
 
   void _onScroll() {
     if (!_scroll.hasClients) return;
-    if (_scroll.position.pixels <= _estimatedTopExtent() + _kStickThreshold &&
+    final pos = _scroll.position;
+    _pinnedToBottom = _isPinnedToBottom(pos);
+    // Visual top = maxScrollExtent in reverse list.
+    if (pos.pixels >= pos.maxScrollExtent - _kStickThreshold &&
         widget.hasMoreHistory &&
         !widget.loadingHistory &&
         widget.onLoadOlder != null) {
-      _captureScrollAnchor();
       widget.onLoadOlder!();
     }
   }
@@ -248,13 +207,12 @@ class ChatMessageListState extends State<ChatMessageList> {
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) {
-        _scroll.animateTo(
-          _scroll.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 120),
-          curve: Curves.easeOut,
-        );
-      }
+      if (!_scroll.hasClients) return;
+      _scroll.animateTo(
+        0,
+        duration: const Duration(milliseconds: 120),
+        curve: Curves.easeOut,
+      );
     });
   }
 
@@ -262,35 +220,15 @@ class ChatMessageListState extends State<ChatMessageList> {
   void didUpdateWidget(covariant ChatMessageList oldWidget) {
     super.didUpdateWidget(oldWidget);
     final fp = _blocksScrollFingerprint(widget.blocks);
-    final prepended = widget.blocks.length > _lastBlockCount && _anchorPixels != null;
-    final topSpacerChanged = _estimatedTopExtentFor(
-          hasMoreHistory: oldWidget.hasMoreHistory,
-          totalEvents: oldWidget.totalEvents,
-          oldestSeq: oldWidget.oldestSeq,
-          newestSeq: oldWidget.newestSeq,
-        ) !=
-        _estimatedTopExtent();
-    final metaChanged = oldWidget.loadingHistory != widget.loadingHistory || topSpacerChanged;
-
-    if (!oldWidget.loadingHistory && widget.loadingHistory && _scroll.hasClients) {
-      _captureScrollAnchor();
-    }
-
-    if (prepended) {
-      final anchor = _anchorPixels!;
-      final oldMax = _anchorMaxExtent ?? anchor;
-      _restoreScrollAnchor(anchor, oldMax);
-      _anchorPixels = null;
-      _anchorMaxExtent = null;
-    } else if (metaChanged && _scroll.hasClients && !_isAtBottom()) {
-      final anchor = _scroll.offset;
-      final oldMax = _scroll.position.maxScrollExtent;
-      _restoreScrollAnchor(anchor, oldMax);
-    } else if (fp != _lastFingerprint && _isAtBottom()) {
+    if (fp != _lastFingerprint) {
       _lastFingerprint = fp;
-      _scrollToBottom();
+      // Re-check live position: reverse list keeps bottom at pixels≈0.
+      final pinned = _scroll.hasClients ? _isPinnedToBottom() : _pinnedToBottom;
+      _pinnedToBottom = pinned;
+      if (pinned) {
+        _scrollToBottom();
+      }
     }
-    _lastBlockCount = widget.blocks.length;
   }
 
   @override
@@ -302,40 +240,43 @@ class ChatMessageListState extends State<ChatMessageList> {
 
   @override
   Widget build(BuildContext context) {
-    _lastFingerprint = _blocksScrollFingerprint(widget.blocks);
-    _lastBlockCount = widget.blocks.length;
     final l10n = AppLocalizations.of(context);
     final entries = groupDisplayEntries(widget.blocks, turnStreaming: widget.turnStreaming);
-    final topSpacer = _estimatedTopExtent();
-    final headerCount = (topSpacer > 0 ? 1 : 0) + (widget.loadingHistory ? 1 : 0);
+    // reverse: index 0 = newest (visual bottom).
+    final reversed = entries.reversed.toList(growable: false);
 
-    return NotificationListener<ScrollNotification>(
-      onNotification: (_) => false,
-      child: ListView.builder(
-        controller: _scroll,
-        padding: EdgeInsets.all(AppSpacing.md),
-        cacheExtent: _kScrollCacheExtent,
-        itemCount: headerCount + entries.length,
-        itemBuilder: (context, index) {
-          var cursor = index;
-          if (topSpacer > 0) {
-            if (cursor == 0) return SizedBox(height: topSpacer);
-            cursor--;
-          }
-          if (widget.loadingHistory) {
-            if (cursor == 0) {
-              return const Padding(
-                padding: EdgeInsets.only(bottom: AppSpacing.sm),
-                child: Center(
-                  child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
-                ),
-              );
+    return Stack(
+      children: [
+        NotificationListener<ScrollNotification>(
+          onNotification: (n) {
+            if (n is ScrollUpdateNotification || n is UserScrollNotification) {
+              _pinnedToBottom = _isPinnedToBottom(n.metrics);
             }
-            cursor--;
-          }
-          return _renderEntry(l10n, entries[cursor]);
-        },
-      ),
+            return false;
+          },
+          child: ListView.builder(
+            controller: _scroll,
+            reverse: true,
+            padding: EdgeInsets.all(AppSpacing.md),
+            cacheExtent: _kScrollCacheExtent,
+            itemCount: reversed.length,
+            itemBuilder: (context, index) => _renderEntry(l10n, reversed[index]),
+          ),
+        ),
+        if (widget.loadingHistory)
+          const Positioned(
+            top: 8,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: SizedBox(
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -390,9 +331,6 @@ class ChatScaffold extends StatelessWidget {
                               loadingHistory: controller.loadingHistory,
                               onLoadOlder: controller.hasMoreHistory ? controller.loadOlderTranscript : null,
                               turnStreaming: controller.streaming,
-                              totalEvents: controller.totalEvents,
-                              oldestSeq: controller.oldestSeq,
-                              newestSeq: controller.newestSeq,
                               onResolveApproval: controller.sessionId == null
                                   ? null
                                   : (id, decision) => controller.resolveApproval(id, decision),

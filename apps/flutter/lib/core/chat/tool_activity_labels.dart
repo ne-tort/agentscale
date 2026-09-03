@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Normalized tool categories for grouping and labels.
@@ -62,14 +64,50 @@ String? _stringFrom(dynamic value) {
   return s.isEmpty ? null : s;
 }
 
+Map<String, dynamic> _asStringKeyedMap(Object? value) {
+  if (value is Map<String, dynamic>) return value;
+  if (value is Map) {
+    return value.map((k, v) => MapEntry(k.toString(), v));
+  }
+  return const {};
+}
+
+/// Flatten Cursor SDK wrappers: `{status, value}`, `{success: …}`, `{error: …}`.
+Object? unwrapToolPayload(Object? output) {
+  if (output == null) return null;
+  if (output is! Map) return output;
+  final map = _asStringKeyedMap(output);
+
+  if (map.containsKey('value')) return unwrapToolPayload(map['value']);
+  if (map.containsKey('success')) return unwrapToolPayload(map['success']);
+  if (map.containsKey('error')) return unwrapToolPayload(map['error']);
+  if (map.containsKey('rejected')) return unwrapToolPayload(map['rejected']);
+
+  // Nested args-style envelope.
+  if (map.length == 1 && map.containsKey('result')) {
+    return unwrapToolPayload(map['result']);
+  }
+  return map;
+}
+
+Map<String, dynamic> normalizeToolInput(Map<String, dynamic> input) {
+  if (input.containsKey('args') && input['args'] is Map) {
+    return {...input, ..._asStringKeyedMap(input['args'])};
+  }
+  return input;
+}
+
 String? extractToolContextPath(Map<String, dynamic> input, [Object? output]) {
+  final inMap = normalizeToolInput(input);
   for (final key in ['path', 'file_path', 'target_file', 'relative_path', 'target']) {
-    final v = _stringFrom(input[key]);
+    final v = _stringFrom(inMap[key]);
     if (v != null) return v;
   }
-  if (output is Map) {
+  final unwrapped = unwrapToolPayload(output);
+  if (unwrapped is Map) {
+    final out = _asStringKeyedMap(unwrapped);
     for (final key in ['path', 'file_path', 'target_file']) {
-      final v = _stringFrom(output[key]);
+      final v = _stringFrom(out[key]);
       if (v != null) return v;
     }
   }
@@ -77,13 +115,16 @@ String? extractToolContextPath(Map<String, dynamic> input, [Object? output]) {
 }
 
 String? extractToolContextPattern(Map<String, dynamic> input, [Object? output]) {
+  final inMap = normalizeToolInput(input);
   for (final key in ['globPattern', 'glob_pattern', 'pattern', 'query', 'glob']) {
-    final v = _stringFrom(input[key]);
+    final v = _stringFrom(inMap[key]);
     if (v != null) return v;
   }
-  if (output is Map) {
+  final unwrapped = unwrapToolPayload(output);
+  if (unwrapped is Map) {
+    final out = _asStringKeyedMap(unwrapped);
     for (final key in ['globPattern', 'pattern', 'query']) {
-      final v = _stringFrom(output[key]);
+      final v = _stringFrom(out[key]);
       if (v != null) return v;
     }
   }
@@ -91,21 +132,138 @@ String? extractToolContextPattern(Map<String, dynamic> input, [Object? output]) 
 }
 
 String? extractToolContextCommand(Map<String, dynamic> input) {
+  final inMap = normalizeToolInput(input);
   for (final key in ['command', 'cmd']) {
-    final v = _stringFrom(input[key]);
+    final v = _stringFrom(inMap[key]);
     if (v != null) return v;
   }
   return null;
 }
 
-String? summarizeToolOutput(Object? output) {
-  if (output == null) return null;
-  if (output is! Map) return null;
-  final status = _stringFrom(output['status']);
-  if (status != null) return status;
-  final message = _stringFrom(output['message']);
-  if (message != null) return message;
+String _prettyJson(Object? value) {
+  try {
+    return const JsonEncoder.withIndent('  ').convert(value);
+  } catch (_) {
+    return value.toString();
+  }
+}
+
+String? _listPathsFrom(Object? value) {
+  if (value is List) {
+    final paths = value.map(_stringFrom).whereType<String>().toList();
+    if (paths.isEmpty) return null;
+    return paths.join('\n');
+  }
+  if (value is Map) {
+    final map = _asStringKeyedMap(value);
+    for (final key in ['files', 'paths', 'matches', 'results']) {
+      final nested = _listPathsFrom(map[key]);
+      if (nested != null) return nested;
+    }
+  }
   return null;
+}
+
+/// Human-readable panel body for tool expand (not raw Map.toString()).
+String formatToolPanelBody({
+  required ToolKind kind,
+  Map<String, dynamic> input = const {},
+  Object? output,
+}) {
+  final inMap = normalizeToolInput(input);
+  final unwrapped = unwrapToolPayload(output);
+
+  switch (kind) {
+    case ToolKind.fileDelete:
+      if (unwrapped is Map) {
+        final size = unwrapped['fileSize'] ?? unwrapped['file_size'];
+        if (size != null) return 'fileSize: $size';
+      }
+      return '';
+    case ToolKind.fileRead:
+      if (unwrapped is Map) {
+        final content = unwrapped['content'] ?? unwrapped['text'];
+        if (content != null) return content.toString();
+      }
+      if (unwrapped is String) return unwrapped;
+      return unwrapped == null ? '' : _prettyJson(unwrapped);
+    case ToolKind.fileWrite:
+    case ToolKind.fileEdit:
+      return '';
+    case ToolKind.searchGlob:
+      final paths = _listPathsFrom(unwrapped);
+      if (paths != null) return paths;
+      if (unwrapped is Map) {
+        final total = unwrapped['totalFiles'] ?? unwrapped['total_files'] ?? unwrapped['count'];
+        if (total != null) return '$total files';
+      }
+      return unwrapped == null ? '' : _prettyJson(unwrapped);
+    case ToolKind.searchGrep:
+      if (unwrapped is Map) {
+        final workspace = unwrapped['workspaceResults'] ?? unwrapped['workspace_results'];
+        if (workspace is Map) {
+          final buf = StringBuffer();
+          for (final entry in workspace.entries) {
+            buf.writeln(entry.key);
+            final content = entry.value;
+            if (content is Map) {
+              final inner = content['content'] ?? content;
+              if (inner is Map) {
+                final lines = inner['matchedLines'] ??
+                    inner['matched_lines'] ??
+                    inner['totalMatchedLines'] ??
+                    inner['total_matched_lines'];
+                if (lines is List) {
+                  for (final line in lines) {
+                    buf.writeln('  $line');
+                  }
+                } else if (lines != null) {
+                  buf.writeln('  matches: $lines');
+                }
+              } else {
+                buf.writeln('  $inner');
+              }
+            } else {
+              buf.writeln('  $content');
+            }
+          }
+          final text = buf.toString().trim();
+          if (text.isNotEmpty) return text;
+        }
+        final paths = _listPathsFrom(unwrapped);
+        if (paths != null) return paths;
+      }
+      return unwrapped == null ? '' : _prettyJson(unwrapped);
+    case ToolKind.listDir:
+      final paths = _listPathsFrom(unwrapped);
+      if (paths != null) return paths;
+      return unwrapped == null ? '' : _prettyJson(unwrapped);
+    case ToolKind.shell:
+      final cmd = extractToolContextCommand(inMap);
+      final buf = StringBuffer();
+      if (cmd != null) buf.writeln('\$ $cmd');
+      if (unwrapped is Map) {
+        final code = unwrapped['exitCode'] ?? unwrapped['exit_code'];
+        if (code != null) buf.writeln('exit $code');
+        final stdout = unwrapped['stdout'] ?? unwrapped['output'];
+        final stderr = unwrapped['stderr'];
+        if (stdout != null && stdout.toString().trim().isNotEmpty) {
+          buf.writeln(stdout.toString().trimRight());
+        }
+        if (stderr != null && stderr.toString().trim().isNotEmpty) {
+          buf.writeln(stderr.toString().trimRight());
+        }
+      } else if (unwrapped is String) {
+        buf.writeln(unwrapped);
+      }
+      return buf.toString().trim();
+    case ToolKind.mcp:
+    case ToolKind.subagent:
+    case ToolKind.generic:
+      if (unwrapped == null) return '';
+      if (unwrapped is String) return unwrapped;
+      return _prettyJson(unwrapped);
+  }
 }
 
 ({String label, String? detail}) formatToolActivityLabel(
@@ -116,10 +274,10 @@ String? summarizeToolOutput(Object? output) {
   bool pending = false,
 }) {
   final kind = normalizeToolKind(name);
-  final path = extractToolContextPath(input, output);
-  final pattern = extractToolContextPattern(input, output);
-  final command = extractToolContextCommand(input);
-  final outputSummary = summarizeToolOutput(output);
+  final inMap = normalizeToolInput(input);
+  final path = extractToolContextPath(inMap, output);
+  final pattern = extractToolContextPattern(inMap, output);
+  final command = extractToolContextCommand(inMap);
 
   String label;
   String? detail;
@@ -148,11 +306,7 @@ String? summarizeToolOutput(Object? output) {
       label = l10n.projectChatToolSubagent(name);
     case ToolKind.generic:
       label = l10n.projectChatToolGeneric(name);
-      detail = outputSummary ?? command ?? pattern ?? path;
-  }
-
-  if (detail == null && outputSummary != null && kind != ToolKind.shell && kind != ToolKind.generic) {
-    detail = outputSummary;
+      detail = command ?? pattern ?? path;
   }
 
   if (pending) {

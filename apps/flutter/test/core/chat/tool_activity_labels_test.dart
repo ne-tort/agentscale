@@ -34,6 +34,65 @@ void main() {
     });
   });
 
+  group('unwrapToolPayload', () {
+    test('unwraps status/value envelope', () {
+      final unwrapped = unwrapToolPayload({
+        'status': 'success',
+        'value': {'fileSize': 304},
+      });
+      expect(unwrapped, isA<Map>());
+      expect((unwrapped as Map)['fileSize'], 304);
+    });
+
+    test('unwraps success envelope', () {
+      final unwrapped = unwrapToolPayload({
+        'success': {'content': 'hello', 'path': 'a.txt'},
+      });
+      expect(unwrapped, isA<Map>());
+      expect((unwrapped as Map)['content'], 'hello');
+    });
+  });
+
+  group('formatToolPanelBody', () {
+    test('delete shows fileSize only, not raw JSON', () {
+      final body = formatToolPanelBody(
+        kind: ToolKind.fileDelete,
+        input: {'path': 'old.txt'},
+        output: {
+          'status': 'success',
+          'value': {'fileSize': 304},
+        },
+      );
+      expect(body, 'fileSize: 304');
+      expect(body.contains('{'), isFalse);
+    });
+
+    test('glob lists files from value', () {
+      final body = formatToolPanelBody(
+        kind: ToolKind.searchGlob,
+        input: {'globPattern': '*.dart'},
+        output: {
+          'status': 'success',
+          'value': {
+            'files': ['a.dart', 'b.dart'],
+          },
+        },
+      );
+      expect(body, 'a.dart\nb.dart');
+    });
+
+    test('read returns content', () {
+      final body = formatToolPanelBody(
+        kind: ToolKind.fileRead,
+        input: {'path': 'a.txt'},
+        output: {
+          'success': {'content': 'line1\nline2'},
+        },
+      );
+      expect(body, 'line1\nline2');
+    });
+  });
+
   group('formatToolActivityLabel', () {
     late AppLocalizations l10n;
 
@@ -48,6 +107,20 @@ void main() {
         input: {'path': 'old.txt'},
       );
       expect(result.label, 'Удалён old.txt');
+    });
+
+    test('delete label uses path even when output has no path', () {
+      final result = formatToolActivityLabel(
+        l10n,
+        name: 'delete',
+        input: {'path': 'gone.txt'},
+        output: {
+          'status': 'success',
+          'value': {'fileSize': 10},
+        },
+      );
+      expect(result.label, 'Удалён gone.txt');
+      expect(result.detail, isNull);
     });
 
     test('glob with pattern', () {

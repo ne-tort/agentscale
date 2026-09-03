@@ -2255,6 +2255,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectProjectName => 'Project name';
 
   @override
+  String get projectOpenChat => 'Chat';
+
+  @override
   String get projectProjectPaused => 'Project paused';
 
   @override

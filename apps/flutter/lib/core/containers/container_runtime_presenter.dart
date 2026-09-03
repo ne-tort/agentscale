@@ -199,16 +199,16 @@ bool projectShowsContainerError(Map<String, dynamic>? project) {
   return !ok.contains(observed);
 }
 
-/// Active project — transcript readable from DB even if pod is down.
+/// Active or errored project — transcript readable from DB even if pod is down.
 bool projectChatReadable(Map<String, dynamic>? project) {
   if (project == null) return false;
-  if (project['status'] == 'paused') return false;
-  return project['status'] == 'active';
+  final status = project['status'];
+  return status == 'active' || status == 'error';
 }
 
 /// Pod running — required to send messages / stream SSE.
 bool projectChatSendable(Map<String, dynamic>? project) {
-  if (!projectChatReadable(project)) return false;
+  if (project == null || project['status'] != 'active') return false;
   return containerRuntimeHealthy(project);
 }
 

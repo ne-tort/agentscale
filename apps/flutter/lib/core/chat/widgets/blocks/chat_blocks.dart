@@ -92,6 +92,35 @@ class ChatInsetPanel extends StatelessWidget {
   }
 }
 
+/// Monospace panel matching assistant markdown codeblock look.
+class ChatCodePanel extends StatelessWidget {
+  const ChatCodePanel({super.key, required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    if (text.trim().isEmpty) return const SizedBox.shrink();
+    return Container(
+      width: double.infinity,
+      margin: EdgeInsets.only(top: AppSpacing.xs / 2),
+      padding: EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: SelectableText(
+        text,
+        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              fontFamily: 'monospace',
+              color: scheme.onSurface.withValues(alpha: 0.88),
+            ),
+      ),
+    );
+  }
+}
+
 class ChatMarkdownBody extends StatelessWidget {
   const ChatMarkdownBody({super.key, required this.text, this.selectable = true});
 
@@ -227,12 +256,6 @@ class UserMessageBlock extends StatelessWidget {
   return (added: added, removed: removed);
 }
 
-String _formatPanelContent(Object? value) {
-  if (value == null) return '';
-  if (value is Map || value is List) return value.toString();
-  return value.toString();
-}
-
 class ToolActivityBlock extends StatefulWidget {
   const ToolActivityBlock({
     super.key,
@@ -260,6 +283,7 @@ class _ToolActivityBlockState extends State<ToolActivityBlock> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final scheme = Theme.of(context).colorScheme;
+    final kind = normalizeToolKind(widget.name);
     final presentation = formatToolActivityLabel(
       l10n,
       name: widget.name,
@@ -268,8 +292,17 @@ class _ToolActivityBlockState extends State<ToolActivityBlock> {
       pending: widget.pending,
     );
     final stats = parseDiffStats(widget.output);
-    final detail = presentation.detail ?? _formatPanelContent(widget.input);
-    final outputText = _formatPanelContent(widget.output);
+    final panelBody = formatToolPanelBody(
+      kind: kind,
+      input: widget.input,
+      output: widget.output,
+    );
+    // Shell: show command as panel fallback when no stdout yet.
+    final body = panelBody.isNotEmpty
+        ? panelBody
+        : (kind == ToolKind.shell && (presentation.detail?.isNotEmpty ?? false)
+            ? presentation.detail!
+            : '');
 
     Widget? badge;
     if (stats != null && (stats.added > 0 || stats.removed > 0)) {
@@ -291,7 +324,7 @@ class _ToolActivityBlockState extends State<ToolActivityBlock> {
       );
     }
 
-    final hasPanel = detail.isNotEmpty || outputText.isNotEmpty;
+    final hasPanel = body.trim().isNotEmpty;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -302,15 +335,7 @@ class _ToolActivityBlockState extends State<ToolActivityBlock> {
           expanded: _open,
           onTap: hasPanel ? () => setState(() => _open = !_open) : null,
         ),
-        if (_open && hasPanel)
-          ChatInsetPanel(
-            child: SelectableText(
-              outputText.isNotEmpty ? outputText : detail,
-              style: _mutedBodyStyle(context).copyWith(
-                fontFamily: widget.name.toLowerCase().contains('shell') ? 'monospace' : null,
-              ),
-            ),
-          ),
+        if (_open && hasPanel) ChatCodePanel(text: body),
       ],
     );
   }

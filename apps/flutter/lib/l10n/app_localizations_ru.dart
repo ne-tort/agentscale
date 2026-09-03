@@ -2266,6 +2266,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectProjectName => 'Название проекта';
 
   @override
+  String get projectOpenChat => 'Чат';
+
+  @override
   String get projectProjectPaused => 'Проект на паузе';
 
   @override

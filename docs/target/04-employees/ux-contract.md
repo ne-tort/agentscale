@@ -71,10 +71,12 @@ Cursor-style field: **+** (chat settings) → attach → text → send/stop; е�
 ### Chat history
 
 - **Source:** PostgreSQL `agent_sessions` + `agent_events` via `GET /chat/transcript` — not MinIO, not pod polling.
-- **Read when pod down:** transcript loads from DB; composer disabled with hint until `observed_state == running`.
+- **Read when pod down / error:** transcript loads from DB for `status=active|error`; composer disabled with hint until `status=active` and `observed_state == running`.
 - **Pagination:** tail load (`limit`, default 100) + `before_seq` cursor on scroll-up; skeleton bubbles on initial load (no spinner).
 - **Load perf:** `getProject` ∥ `loadTranscript` on bootstrap; `loadModels` deferred (non-blocking); `pending_approvals` embedded in transcript response (no second HTTP); in-memory **stale-while-revalidate** cache per project for instant re-enter.
-- **Scroll:** auto-scroll to bottom only when user is already at bottom; wheel/trackpad scroll-up during streaming must not jump.
+- **Scroll:** `ListView(reverse: true)` — newest at visual bottom; pin-to-bottom only when near offset 0; load older near maxScrollExtent; no fake top spacer.
+- **Settings:** «Чат» tile after project name when launched (`active|error`); opens `ProjectWorkspacePage`.
+- **Tool panels:** semantic labels from input; expand body is code-style panel (not raw Map dump); unwrap `{status,value}` / `{success}` payloads.
 
 ## Empty / loading
 

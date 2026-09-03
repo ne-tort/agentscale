@@ -4022,6 +4022,12 @@ abstract class AppLocalizations {
   /// **'Project name'**
   String get projectProjectName;
 
+  /// No description provided for @projectOpenChat.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat'**
+  String get projectOpenChat;
+
   /// No description provided for @projectProjectPaused.
   ///
   /// In en, this message translates to:

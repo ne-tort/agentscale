@@ -1277,6 +1277,7 @@
   "projectPreviewTruncated": "Preview truncated to first 200k characters",
   "projectProject": "Project",
   "projectProjectName": "Project name",
+  "projectOpenChat": "Chat",
   "projectProjectPaused": "Project paused",
   "projectProjectResumed": "Project resumed",
   "projectProjectSettings": "Project settings",
