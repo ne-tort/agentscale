@@ -1043,6 +1043,37 @@
   "projectChatModelColumnReleased": "Released",
   "projectChatAddAction": "Chat settings",
   "projectChatCancelled": "Cancelled",
+  "projectChatSidechainOffline": "Sidechain unavailable — container is not running",
+  "projectChatGroupThinking": "Reasoning ({count})",
+  "@projectChatGroupThinking": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "projectChatGroupFilesEdited": "Edited {count} files",
+  "@projectChatGroupFilesEdited": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "projectChatGroupFilesRead": "Read {count} files",
+  "@projectChatGroupFilesRead": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "projectChatGroupCommands": "Ran {count} commands",
+  "@projectChatGroupCommands": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "projectChatGroupMcp": "MCP: {count} calls",
+  "@projectChatGroupMcp": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
   "errorAgentProviderNetwork": "AI provider is unreachable from the container (network).",
   "errorAgentProviderRateLimit": "AI provider rate limit exceeded. Try again later.",
   "errorAgentProviderUnavailable": "AI provider is temporarily unavailable. Try again later.",

@@ -1857,6 +1857,35 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectChatCancelled => 'Отменено';
 
   @override
+  String get projectChatSidechainOffline =>
+      'Sidechain недоступен — контейнер не запущен';
+
+  @override
+  String projectChatGroupThinking(int count) {
+    return 'Размышление ($count)';
+  }
+
+  @override
+  String projectChatGroupFilesEdited(int count) {
+    return 'Изменено $count файлов';
+  }
+
+  @override
+  String projectChatGroupFilesRead(int count) {
+    return 'Прочитано $count файлов';
+  }
+
+  @override
+  String projectChatGroupCommands(int count) {
+    return 'Запущено $count команд';
+  }
+
+  @override
+  String projectChatGroupMcp(int count) {
+    return 'MCP: $count вызовов';
+  }
+
+  @override
   String get errorAgentProviderNetwork =>
       'AI-провайдер недоступен из контейнера (сеть).';
 

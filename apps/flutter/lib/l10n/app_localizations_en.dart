@@ -1844,6 +1844,35 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectChatCancelled => 'Cancelled';
 
   @override
+  String get projectChatSidechainOffline =>
+      'Sidechain unavailable — container is not running';
+
+  @override
+  String projectChatGroupThinking(int count) {
+    return 'Reasoning ($count)';
+  }
+
+  @override
+  String projectChatGroupFilesEdited(int count) {
+    return 'Edited $count files';
+  }
+
+  @override
+  String projectChatGroupFilesRead(int count) {
+    return 'Read $count files';
+  }
+
+  @override
+  String projectChatGroupCommands(int count) {
+    return 'Ran $count commands';
+  }
+
+  @override
+  String projectChatGroupMcp(int count) {
+    return 'MCP: $count calls';
+  }
+
+  @override
   String get errorAgentProviderNetwork =>
       'AI provider is unreachable from the container (network).';
 

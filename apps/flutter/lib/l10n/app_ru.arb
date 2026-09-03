@@ -1045,6 +1045,37 @@
   "projectChatModelColumnReleased": "Дата выпуска",
   "projectChatAddAction": "Настройки чата",
   "projectChatCancelled": "Отменено",
+  "projectChatSidechainOffline": "Sidechain недоступен — контейнер не запущен",
+  "projectChatGroupThinking": "Размышление ({count})",
+  "@projectChatGroupThinking": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "projectChatGroupFilesEdited": "Изменено {count} файлов",
+  "@projectChatGroupFilesEdited": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "projectChatGroupFilesRead": "Прочитано {count} файлов",
+  "@projectChatGroupFilesRead": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "projectChatGroupCommands": "Запущено {count} команд",
+  "@projectChatGroupCommands": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "projectChatGroupMcp": "MCP: {count} вызовов",
+  "@projectChatGroupMcp": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
   "errorAgentProviderNetwork": "AI-провайдер недоступен из контейнера (сеть).",
   "errorAgentProviderRateLimit": "Превышен лимит запросов к AI-провайдеру. Повторите позже.",
   "errorAgentProviderUnavailable": "AI-провайдер временно недоступен. Повторите позже.",

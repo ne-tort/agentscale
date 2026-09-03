@@ -98,6 +98,7 @@ Runner (outside k3s): [`infra/github-runner/README.md`](../../infra/github-runne
 | kubectl connection refused | k3s running? `sudo systemctl status k3s` |
 | Argo OutOfSync | merge to `main`; check Application `prodavan-dev` |
 | ImagePullBackOff (platform or project pod) | `ghcr-pull` в **`prodavan`** и **`prodavan-sandboxes`** — [`SECRETS.md`](../../infra/k3s/overlays/dev/SECRETS.md) |
+| `ErrImagePull` / `lookup ghcr.io: Try again` на `init:hydrate` | Transient DNS в k3s после reboot WSL: `kubectl -n kube-system get pods -l k8s-app=kube-dns`; `prodavan-ops heal`; pod сам recover'ится когда DNS вернётся. Образ `prodavan-api` на hydrate — **by design** (не sandbox image). |
 | Flutter: «metrics-server недоступен» на контейнере | См. [k8s metrics-server](#k8s-metrics-server) ниже |
 
 Legacy compose/k3d/bootstrap scripts **removed** — do not restore.

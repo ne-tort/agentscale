@@ -21,6 +21,9 @@ class ChatSessionController {
   List<Map<String, dynamic>> pendingApprovals = const [];
   List<Map<String, dynamic>> availableModels = const [];
   String? defaultModel;
+  bool hasMoreHistory = false;
+  int? oldestSeq;
+  bool loadingHistory = false;
 
   String get selectedModelLabel {
     final id = selectedModel ?? defaultModel;
@@ -70,20 +73,42 @@ class ChatSessionController {
     }
   }
 
-  Future<void> loadTranscript() async {
+  Future<void> loadTranscript({int? beforeSeq}) async {
     final previousSessionId = sessionId;
     final body = await api.projectChatTranscript(
       projectId: projectId,
       sessionId: sessionId,
+      beforeSeq: beforeSeq,
     );
     final resolved = body['session_id'] as String?;
     sessionId = resolved ?? previousSessionId;
-    blocks
-      ..clear()
-      ..addAll(chatBlocksFromTranscript(body['blocks'] as List?));
-    _liveTurnBlocks = const [];
-    pendingApprovals = await _fetchPending();
+    final newBlocks = chatBlocksFromTranscript(body['blocks'] as List?);
+    if (beforeSeq == null) {
+      blocks
+        ..clear()
+        ..addAll(newBlocks);
+      _liveTurnBlocks = const [];
+    } else {
+      blocks.insertAll(0, newBlocks);
+    }
+    hasMoreHistory = body['has_more'] == true;
+    oldestSeq = body['oldest_seq'] as int?;
+    if (beforeSeq == null) {
+      pendingApprovals = await _fetchPending();
+    }
     notifyImmediate();
+  }
+
+  Future<void> loadOlderTranscript() async {
+    if (!hasMoreHistory || loadingHistory || oldestSeq == null) return;
+    loadingHistory = true;
+    notifyImmediate();
+    try {
+      await loadTranscript(beforeSeq: oldestSeq);
+    } finally {
+      loadingHistory = false;
+      notifyImmediate();
+    }
   }
 
   Future<List<Map<String, dynamic>>> _fetchPending() async {

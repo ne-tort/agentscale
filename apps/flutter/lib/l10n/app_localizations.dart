@@ -3338,6 +3338,42 @@ abstract class AppLocalizations {
   /// **'Cancelled'**
   String get projectChatCancelled;
 
+  /// No description provided for @projectChatSidechainOffline.
+  ///
+  /// In en, this message translates to:
+  /// **'Sidechain unavailable — container is not running'**
+  String get projectChatSidechainOffline;
+
+  /// No description provided for @projectChatGroupThinking.
+  ///
+  /// In en, this message translates to:
+  /// **'Reasoning ({count})'**
+  String projectChatGroupThinking(int count);
+
+  /// No description provided for @projectChatGroupFilesEdited.
+  ///
+  /// In en, this message translates to:
+  /// **'Edited {count} files'**
+  String projectChatGroupFilesEdited(int count);
+
+  /// No description provided for @projectChatGroupFilesRead.
+  ///
+  /// In en, this message translates to:
+  /// **'Read {count} files'**
+  String projectChatGroupFilesRead(int count);
+
+  /// No description provided for @projectChatGroupCommands.
+  ///
+  /// In en, this message translates to:
+  /// **'Ran {count} commands'**
+  String projectChatGroupCommands(int count);
+
+  /// No description provided for @projectChatGroupMcp.
+  ///
+  /// In en, this message translates to:
+  /// **'MCP: {count} calls'**
+  String projectChatGroupMcp(int count);
+
   /// No description provided for @errorAgentProviderNetwork.
   ///
   /// In en, this message translates to:

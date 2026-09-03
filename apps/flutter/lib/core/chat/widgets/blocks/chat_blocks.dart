@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:markdown/markdown.dart' as md;
 
+import 'package:prodavan/core/chat/models/chat_block.dart';
 import 'package:prodavan/core/chat/thinking_duration.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -20,7 +21,7 @@ TextStyle _mutedBodyStyle(BuildContext context) {
   );
 }
 
-class ChatMutedLine extends StatelessWidget {
+class ChatMutedLine extends StatefulWidget {
   const ChatMutedLine({
     super.key,
     required this.label,
@@ -35,18 +36,41 @@ class ChatMutedLine extends StatelessWidget {
   final VoidCallback? onTap;
 
   @override
+  State<ChatMutedLine> createState() => _ChatMutedLineState();
+}
+
+class _ChatMutedLineState extends State<ChatMutedLine> {
+  bool _hover = false;
+
+  @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: EdgeInsets.symmetric(vertical: AppSpacing.xs / 2),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(label, style: _mutedTextStyle(context)),
-            ),
-            if (trailing != null) trailing!,
-          ],
+    final scheme = Theme.of(context).colorScheme;
+    final showChevron = widget.onTap != null && (widget.expanded || _hover);
+    final chevron = widget.expanded ? Icons.expand_more : Icons.chevron_right;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: AppSpacing.xs / 2),
+          child: Row(
+            children: [
+              if (widget.onTap != null)
+                SizedBox(
+                  width: 20,
+                  child: showChevron
+                      ? Icon(chevron, size: 16, color: scheme.onSurfaceVariant.withValues(alpha: 0.72))
+                      : null,
+                ),
+              Expanded(
+                child: Text(widget.label, style: _mutedTextStyle(context)),
+              ),
+              if (widget.trailing != null) widget.trailing!,
+            ],
+          ),
         ),
       ),
     );
@@ -377,12 +401,18 @@ class _SubagentBlockState extends State<SubagentBlock> {
   List<Map<String, dynamic>>? _sidechain;
   bool _loading = false;
   bool _open = false;
+  bool _offline = false;
 
   Future<void> _load() async {
     if (widget.onFetchSidechain == null || _loading) return;
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _offline = false;
+    });
     try {
       _sidechain = await widget.onFetchSidechain!();
+    } catch (_) {
+      if (mounted) setState(() => _offline = true);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -390,6 +420,7 @@ class _SubagentBlockState extends State<SubagentBlock> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -403,18 +434,23 @@ class _SubagentBlockState extends State<SubagentBlock> {
         ),
         if (_open) ...[
           if (_loading) const LinearProgressIndicator(),
-          ChatInsetPanel(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                for (final ev in _sidechain ?? widget.events)
-                  Padding(
-                    padding: EdgeInsets.only(bottom: AppSpacing.xs),
-                    child: Text(ev.toString(), style: _mutedBodyStyle(context)),
-                  ),
-              ],
+          if (_offline)
+            ChatInsetPanel(
+              child: Text(l10n.projectChatSidechainOffline, style: _mutedBodyStyle(context)),
+            )
+          else
+            ChatInsetPanel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final ev in _sidechain ?? widget.events)
+                    Padding(
+                      padding: EdgeInsets.only(bottom: AppSpacing.xs),
+                      child: Text(ev.toString(), style: _mutedBodyStyle(context)),
+                    ),
+                ],
+              ),
             ),
-          ),
         ],
       ],
     );
@@ -568,6 +604,79 @@ class _UsageBlockState extends State<UsageBlock> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: rows,
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// Activity bucket for consecutive block grouping.
+enum ActivityGroupKind {
+  thinking,
+  fileEdit,
+  fileRead,
+  command,
+  mcp,
+}
+
+class GroupedActivityBlock extends StatefulWidget {
+  const GroupedActivityBlock({
+    super.key,
+    required this.kind,
+    required this.items,
+    required this.label,
+    this.diffStats,
+    required this.childBuilder,
+  });
+
+  final ActivityGroupKind kind;
+  final List<({ChatBlock block, ChatBlock? paired})> items;
+  final String label;
+  final ({int added, int removed})? diffStats;
+  final Widget Function(({ChatBlock block, ChatBlock? paired}) item) childBuilder;
+
+  @override
+  State<GroupedActivityBlock> createState() => _GroupedActivityBlockState();
+}
+
+class _GroupedActivityBlockState extends State<GroupedActivityBlock> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final stats = widget.diffStats;
+    Widget? badge;
+    if (stats != null && (stats.added > 0 || stats.removed > 0)) {
+      badge = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (stats.added > 0)
+            Text('+${stats.added}', style: TextStyle(color: scheme.primary, fontSize: 12)),
+          if (stats.added > 0 && stats.removed > 0) const SizedBox(width: 4),
+          if (stats.removed > 0)
+            Text('-${stats.removed}', style: TextStyle(color: scheme.error, fontSize: 12)),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ChatMutedLine(
+          label: widget.label,
+          trailing: badge,
+          expanded: _open,
+          onTap: () => setState(() => _open = !_open),
+        ),
+        if (_open)
+          ChatInsetPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final item in widget.items) widget.childBuilder(item),
+              ],
             ),
           ),
       ],

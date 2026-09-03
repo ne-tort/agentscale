@@ -39,8 +39,8 @@ OIDC Login
 |------------|----------|-----|
 | `user` | persisted user_message | bubble справа + attachment chips |
 | `assistant_markdown` | text_delta (live + reload) | inline в колонке чата (без bubble); plain text while streaming, GFM after done |
-| `thinking` | thinking_delta/complete | muted underlined line + inset panel on tap; auto-expand while streaming |
-| `tool_call` / `tool_result` | tool events | merged activity line («Изменён file.py», `+N −M`) + inset panel |
+| `thinking` | thinking_delta/complete | muted line + chevron (hover `>`, expanded `∨`) + inset panel on tap; auto-expand while streaming |
+| `tool_call` / `tool_result` | tool events | merged activity line («Изменён file.py», `+N −M`) + inset panel; consecutive same-type blocks grouped under spoiler |
 | `approval` | tool_approval_request | inline Allow/Deny + full-page HITL |
 | `subagent` | subagent_* | muted line + inset sidechain |
 | `plan` | task_progress | checklist (tasks with titles only) |
@@ -67,6 +67,12 @@ Cursor-style field: **+** (chat settings) → attach → text → send/stop; е�
 | `<600px` | full-width, composer pinned bottom |
 | `600–1024px` | center column max 768px |
 | `>1024px` | center column max 900px |
+
+### Chat history
+
+- **Source:** PostgreSQL `agent_sessions` + `agent_events` via `GET /chat/transcript` — not MinIO, not pod polling.
+- **Read when pod down:** transcript loads from DB; composer disabled with hint until `observed_state == running`.
+- **Pagination:** tail load (`limit`, default 100) + `before_seq` cursor on scroll-up; skeleton bubbles on initial load (no spinner).
 
 ## Empty / loading
 

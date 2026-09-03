@@ -171,6 +171,8 @@ async def project_chat_transcript(
     session: SessionDep,
     employee: EmployeeDep,
     session_id: str | None = None,
+    limit: int = 100,
+    before_seq: int | None = None,
 ) -> dict:
     """Reload typed chat blocks for workspace (L05)."""
     return await AgentSessionService(session).get_transcript(
@@ -178,6 +180,8 @@ async def project_chat_transcript(
         principal=principal,
         employee=employee,
         session_id=session_id,
+        limit=limit,
+        before_seq=before_seq,
     )
 
 

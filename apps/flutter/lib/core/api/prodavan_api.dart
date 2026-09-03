@@ -894,11 +894,17 @@ class ProdavanApi {
   Future<Map<String, dynamic>> projectChatTranscript({
     required String projectId,
     String? sessionId,
+    int limit = 100,
+    int? beforeSeq,
   }) async {
     final prevProj = this.projectId;
     this.projectId = projectId;
     try {
-      final query = sessionId == null ? '' : '?session_id=$sessionId';
+      final params = <String, String>{};
+      if (sessionId != null) params['session_id'] = sessionId;
+      if (limit != 100) params['limit'] = '$limit';
+      if (beforeSeq != null) params['before_seq'] = '$beforeSeq';
+      final query = params.isEmpty ? '' : '?${params.entries.map((e) => '${e.key}=${Uri.encodeComponent(e.value)}').join('&')}';
       final res = await AuthHttp.get(_uri('/projects/$projectId/chat/transcript$query'), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;

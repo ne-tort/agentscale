@@ -637,8 +637,34 @@ class AgentSessionService:
         principal: Principal | None,
         employee: EmployeeRow | None,
         limit: int = 200,
+        before_seq: int | None = None,
+        tail: bool = False,
         pod_agent: bool = False,
     ) -> list[dict]:
+        events, _meta = await self._list_events_page(
+            session_id=session_id,
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            limit=limit,
+            before_seq=before_seq,
+            tail=tail,
+            pod_agent=pod_agent,
+        )
+        return events
+
+    async def _list_events_page(
+        self,
+        *,
+        session_id: str,
+        project_id: str,
+        principal: Principal | None,
+        employee: EmployeeRow | None,
+        limit: int = 200,
+        before_seq: int | None = None,
+        tail: bool = False,
+        pod_agent: bool = False,
+    ) -> tuple[list[dict], dict]:
         if pod_agent:
             row = await self.get_session(session_id=session_id)
             if row.project_id != project_id:
@@ -650,13 +676,39 @@ class AgentSessionService:
             row = await self.get_session(session_id=session_id)
             if row.project_id != project_id:
                 raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
-        q = await self._session.execute(
-            select(AgentEventRow)
-            .where(AgentEventRow.session_id == session_id)
-            .order_by(AgentEventRow.seq)
-            .limit(limit)
-        )
-        return [_event_public(r) for r in q.scalars().all()]
+
+        base = select(AgentEventRow).where(AgentEventRow.session_id == session_id)
+        fetch_limit = limit + 1
+
+        if before_seq is not None:
+            q = await self._session.execute(
+                base.where(AgentEventRow.seq < before_seq)
+                .order_by(AgentEventRow.seq.desc())
+                .limit(fetch_limit)
+            )
+            rows = list(q.scalars().all())
+            has_more = len(rows) > limit
+            rows = rows[:limit]
+            rows.reverse()
+        elif tail:
+            q = await self._session.execute(base.order_by(AgentEventRow.seq.desc()).limit(fetch_limit))
+            rows = list(q.scalars().all())
+            has_more = len(rows) > limit
+            rows = rows[:limit]
+            rows.reverse()
+        else:
+            q = await self._session.execute(base.order_by(AgentEventRow.seq.asc()).limit(fetch_limit))
+            rows = list(q.scalars().all())
+            has_more = len(rows) > limit
+            rows = rows[:limit]
+
+        events = [_event_public(r) for r in rows]
+        meta = {
+            "oldest_seq": rows[0].seq if rows else None,
+            "newest_seq": rows[-1].seq if rows else None,
+            "has_more": has_more,
+        }
+        return events, meta
 
     async def append_event(
         self,
@@ -749,7 +801,8 @@ class AgentSessionService:
         principal: Principal,
         employee: EmployeeRow | None,
         session_id: str | None = None,
-        limit: int = 500,
+        limit: int = 100,
+        before_seq: int | None = None,
     ) -> dict:
         """Chat bubbles for active (or given) session — L05 workspace reload."""
         await self._projects.require_access(
@@ -794,18 +847,21 @@ class AgentSessionService:
             if row.project_id != project_id:
                 raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
 
-        events = await self.list_events(
+        events, meta = await self._list_events_page(
             session_id=sid,
             project_id=project_id,
             principal=principal,
             employee=employee,
             limit=limit,
+            before_seq=before_seq,
+            tail=before_seq is None,
         )
         row = await self.get_session(session_id=sid)
         return {
             "session_id": sid,
             "session_status": row.status,
             "blocks": events_to_chat_blocks(events),
+            **meta,
         }
 
     async def cancel_session(
@@ -977,6 +1033,7 @@ class AgentSessionService:
             principal=principal,
             employee=employee,
             limit=500,
+            tail=True,
             pod_agent=pod_agent,
         )
         return _pending_approvals_from_events(events)
@@ -1015,6 +1072,7 @@ class AgentSessionService:
             principal=principal,
             employee=employee,
             limit=500,
+            tail=True,
         )
         pending = _pending_approvals_from_events(events)
         match = next((p for p in pending if p["id"] == approval_id), None)

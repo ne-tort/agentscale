@@ -199,12 +199,21 @@ bool projectShowsContainerError(Map<String, dynamic>? project) {
   return !ok.contains(observed);
 }
 
-bool projectChatAvailable(Map<String, dynamic>? project) {
+/// Active project — transcript readable from DB even if pod is down.
+bool projectChatReadable(Map<String, dynamic>? project) {
   if (project == null) return false;
   if (project['status'] == 'paused') return false;
-  if (project['status'] != 'active') return false;
+  return project['status'] == 'active';
+}
+
+/// Pod running — required to send messages / stream SSE.
+bool projectChatSendable(Map<String, dynamic>? project) {
+  if (!projectChatReadable(project)) return false;
   return containerRuntimeHealthy(project);
 }
+
+@Deprecated('Use projectChatSendable')
+bool projectChatAvailable(Map<String, dynamic>? project) => projectChatSendable(project);
 
 bool containerRuntimeHealthy(Map<String, dynamic>? item) {
   if (item?['runtime']?['stub'] == true) return false;

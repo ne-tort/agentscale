@@ -5,7 +5,6 @@ import 'package:prodavan/core/chat/widgets/chat_scaffold.dart';
 import 'package:prodavan/core/containers/container_runtime_presenter.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/employee/agent_chat_errors.dart';
 import 'package:prodavan/features/employee/cabinet_project_settings_page.dart';
 import 'package:prodavan/features/employee/project_chat_settings_page.dart';
@@ -31,7 +30,8 @@ class ProjectWorkspacePage extends StatefulWidget {
 class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   late final ChatSessionController _chat;
   bool _loading = true;
-  bool _chatAvailable = true;
+  bool _chatReadable = true;
+  bool _chatSendable = true;
   Map<String, dynamic>? _project;
   Object? _lastSnackError;
 
@@ -56,37 +56,19 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   Future<void> _bootstrap() async {
     try {
       _project = await workContext.api.getProject(widget.projectId);
-      _chatAvailable = projectChatAvailable(_project);
-      if (!_chatAvailable) {
-        if (mounted) {
-          await _redirectToSettings();
-        }
-        return;
+      _chatReadable = projectChatReadable(_project);
+      _chatSendable = projectChatSendable(_project);
+      if (_chatReadable) {
+        await Future.wait([
+          _chat.loadTranscript(),
+          if (_chatSendable) _chat.loadModels(),
+        ]);
       }
-      await _chat.loadTranscript();
-      await _chat.loadModels();
     } catch (e) {
       if (mounted) showAgentChatSnack(context, e);
     } finally {
       if (mounted) setState(() => _loading = false);
     }
-  }
-
-  Future<void> _redirectToSettings() async {
-    if (!mounted) return;
-    final l10n = AppLocalizations.of(context);
-    await Navigator.of(context).pushReplacement(
-      MaterialPageRoute<void>(
-        builder: (_) => CabinetProjectSettingsPage(
-          cabinetId: widget.cabinetId,
-          projectId: widget.projectId,
-        ),
-      ),
-    );
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(l10n.errorPodNotRunning)),
-    );
   }
 
   @override
@@ -113,10 +95,13 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       ),
     );
     _project = await workContext.api.getProject(widget.projectId);
-    _chatAvailable = projectChatAvailable(_project);
-    if (_chatAvailable) {
-      await _chat.loadTranscript();
-      await _chat.loadModels();
+    _chatReadable = projectChatReadable(_project);
+    _chatSendable = projectChatSendable(_project);
+    if (_chatReadable) {
+      await Future.wait([
+        _chat.loadTranscript(),
+        if (_chatSendable) _chat.loadModels(),
+      ]);
     }
     if (mounted) setState(() {});
   }
@@ -124,15 +109,10 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    if (!_chatAvailable) {
+    if (!_chatReadable) {
       return AppScaffold(
         title: Text(widget.projectName),
-        body: Center(
-          child: AppStatusBanner(
-            severity: AppStatusSeverity.warning,
-            message: l10n.errorPodNotRunning,
-          ),
-        ),
+        body: Center(child: Text(l10n.projectProjectPaused)),
       );
     }
     return AppScaffold(
@@ -147,8 +127,9 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       body: ChatScaffold(
         controller: _chat,
         api: workContext.api,
-        chatAvailable: _chatAvailable,
+        chatSendable: _chatSendable,
         loading: _loading,
+        disabledHint: _chatSendable ? null : l10n.errorPodNotRunning,
         title: Text(widget.projectName),
         onOpenChatSettings: _openChatSettings,
       ),

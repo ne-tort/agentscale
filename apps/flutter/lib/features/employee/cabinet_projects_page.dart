@@ -105,7 +105,7 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
 
   void _openProject(AppEntityRow row) {
     final project = _projects.firstWhere((p) => p['id'] == row.id, orElse: () => const {});
-    if (!projectChatAvailable(project)) {
+    if (!projectChatReadable(project)) {
       _openSettings(row);
       return;
     }
