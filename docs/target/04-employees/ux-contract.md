@@ -75,7 +75,7 @@ Cursor-style field: **+** (chat settings) → attach → text → send/stop; е�
 - **Read when pod down / error:** transcript loads from DB for `status=active|error`; composer disabled with hint until `status=active` and `observed_state == running`.
 - **Pagination:** tail load (`limit`, default 100) + `before_seq` cursor on scroll-up; skeleton bubbles on initial load (no spinner).
 - **Load perf:** `getProject` ∥ `loadTranscript(sessionId)` on bootstrap; `loadModels` deferred; `pending_approvals` in transcript; cache key `(projectId, sessionId)`.
-- **Scroll:** classic `ListView(reverse: true)`; pin near offset 0; `loadOlder` near `maxScrollExtent`; no auto-fill / prepend-anchor.
+- **Scroll:** chronological `ListView` (not reverse); `jumpTo(max)` / pin near bottom; `loadOlder` near top; auto-`loadOlder` while `hasMore && maxScrollExtent` small; prepend-anchor on history load.
 - **Settings:** «Чат» tile hints to open from sidebar (no auto-open latest).
 - **Sidebar API:** `GET/PUT …/me/selection`, `GET …/chats/sidebar`, `PATCH …/sessions/{id}` (`title`, `pin`).
 - **Tool panels:** semantic labels from input; expand body is code-style panel (not raw Map dump); unwrap `{status,value}` / `{success}` payloads.
