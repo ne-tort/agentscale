@@ -141,31 +141,82 @@ class ChatMessageList extends StatefulWidget {
 class ChatMessageListState extends State<ChatMessageList> {
   final _scroll = ScrollController();
   bool _pinnedToBottom = true;
+  bool _didInitialJump = false;
   int _lastFingerprint = 0;
+  int _lastBlockCount = 0;
+  double? _anchorPixels;
+  double? _anchorMaxExtent;
 
   @override
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
     _lastFingerprint = _blocksScrollFingerprint(widget.blocks);
+    _lastBlockCount = widget.blocks.length;
   }
 
-  /// In reverse ListView: pixels ≈ 0 is the visual bottom (newest).
   bool _isPinnedToBottom([ScrollMetrics? metrics]) {
     final m = metrics ?? (_scroll.hasClients ? _scroll.position : null);
     if (m == null) return true;
-    return m.pixels <= _kStickThreshold;
+    return m.pixels >= m.maxScrollExtent - _kStickThreshold;
+  }
+
+  void _captureAnchor() {
+    if (!_scroll.hasClients) return;
+    _anchorPixels = _scroll.offset;
+    _anchorMaxExtent = _scroll.position.maxScrollExtent;
+  }
+
+  void _restoreAnchor() {
+    final anchor = _anchorPixels;
+    final oldMax = _anchorMaxExtent;
+    if (anchor == null || oldMax == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scroll.hasClients) return;
+      final delta = _scroll.position.maxScrollExtent - oldMax;
+      _scroll.jumpTo(anchor + delta);
+      _anchorPixels = null;
+      _anchorMaxExtent = null;
+      _maybeAutoloadOlder();
+    });
+  }
+
+  void _scrollToBottom({bool animate = false}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scroll.hasClients) return;
+      final target = _scroll.position.maxScrollExtent;
+      if (animate) {
+        _scroll.animateTo(
+          target,
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+        );
+      } else {
+        _scroll.jumpTo(target);
+      }
+      _maybeAutoloadOlder();
+    });
+  }
+
+  void _maybeAutoloadOlder() {
+    if (!_scroll.hasClients) return;
+    if (!widget.hasMoreHistory || widget.loadingHistory || widget.onLoadOlder == null) return;
+    // Content shorter than viewport — must load older without waiting for user scroll.
+    if (_scroll.position.maxScrollExtent < _kStickThreshold) {
+      _captureAnchor();
+      widget.onLoadOlder!();
+    }
   }
 
   void _onScroll() {
     if (!_scroll.hasClients) return;
     final pos = _scroll.position;
     _pinnedToBottom = _isPinnedToBottom(pos);
-    // Visual top = maxScrollExtent in reverse list.
-    if (pos.pixels >= pos.maxScrollExtent - _kStickThreshold &&
+    if (pos.pixels <= _kStickThreshold &&
         widget.hasMoreHistory &&
         !widget.loadingHistory &&
         widget.onLoadOlder != null) {
+      _captureAnchor();
       widget.onLoadOlder!();
     }
   }
@@ -205,30 +256,30 @@ class ChatMessageListState extends State<ChatMessageList> {
     };
   }
 
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scroll.hasClients) return;
-      _scroll.animateTo(
-        0,
-        duration: const Duration(milliseconds: 120),
-        curve: Curves.easeOut,
-      );
-    });
-  }
-
   @override
   void didUpdateWidget(covariant ChatMessageList oldWidget) {
     super.didUpdateWidget(oldWidget);
     final fp = _blocksScrollFingerprint(widget.blocks);
-    if (fp != _lastFingerprint) {
+    final prepended = widget.blocks.length > _lastBlockCount && _anchorPixels != null;
+
+    if (!oldWidget.loadingHistory && widget.loadingHistory) {
+      _captureAnchor();
+    }
+
+    if (prepended) {
+      _restoreAnchor();
+    } else if (fp != _lastFingerprint) {
       _lastFingerprint = fp;
-      // Re-check live position: reverse list keeps bottom at pixels≈0.
       final pinned = _scroll.hasClients ? _isPinnedToBottom() : _pinnedToBottom;
       _pinnedToBottom = pinned;
       if (pinned) {
-        _scrollToBottom();
+        _scrollToBottom(animate: _didInitialJump);
       }
+    } else if (oldWidget.loadingHistory && !widget.loadingHistory) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _maybeAutoloadOlder());
     }
+
+    _lastBlockCount = widget.blocks.length;
   }
 
   @override
@@ -242,8 +293,11 @@ class ChatMessageListState extends State<ChatMessageList> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final entries = groupDisplayEntries(widget.blocks, turnStreaming: widget.turnStreaming);
-    // reverse: index 0 = newest (visual bottom).
-    final reversed = entries.reversed.toList(growable: false);
+
+    if (!_didInitialJump && widget.blocks.isNotEmpty) {
+      _didInitialJump = true;
+      _scrollToBottom();
+    }
 
     return Stack(
       children: [
@@ -256,11 +310,10 @@ class ChatMessageListState extends State<ChatMessageList> {
           },
           child: ListView.builder(
             controller: _scroll,
-            reverse: true,
             padding: EdgeInsets.all(AppSpacing.md),
             cacheExtent: _kScrollCacheExtent,
-            itemCount: reversed.length,
-            itemBuilder: (context, index) => _renderEntry(l10n, reversed[index]),
+            itemCount: entries.length,
+            itemBuilder: (context, index) => _renderEntry(l10n, entries[index]),
           ),
         ),
         if (widget.loadingHistory)
