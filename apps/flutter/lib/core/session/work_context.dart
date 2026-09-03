@@ -13,6 +13,8 @@ class WorkContext extends ChangeNotifier {
   String? cabinetId;
   String? projectId;
   String? companyId;
+  /// Per-employee selected project in the current cabinet (sidebar context).
+  String? selectedProjectId;
 
   bool get isAuthenticated => bearerToken.isNotEmpty;
 
@@ -35,6 +37,7 @@ class WorkContext extends ChangeNotifier {
   void enterCabinet(String id) {
     cabinetId = id;
     projectId = null;
+    selectedProjectId = null;
     notifyListeners();
   }
 
@@ -43,11 +46,31 @@ class WorkContext extends ChangeNotifier {
     notifyListeners();
   }
 
+  void setSelectedProjectId(String? id) {
+    if (selectedProjectId == id) return;
+    selectedProjectId = id;
+    notifyListeners();
+  }
+
+  Future<void> loadProjectSelection(String cabinetId) async {
+    final body = await api.getProjectSelection(cabinetId);
+    setSelectedProjectId(body['project_id'] as String?);
+  }
+
+  Future<void> selectProject({
+    required String cabinetId,
+    required String? projectId,
+  }) async {
+    setSelectedProjectId(projectId);
+    await api.putProjectSelection(cabinetId: cabinetId, projectId: projectId);
+  }
+
   void clear() {
     bearerToken = '';
     cabinetId = null;
     projectId = null;
     companyId = null;
+    selectedProjectId = null;
     notifyListeners();
   }
 }

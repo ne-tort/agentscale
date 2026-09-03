@@ -111,6 +111,32 @@ async def list_agent_sessions(
     return {"items": items}
 
 
+class PatchSessionBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    title: str | None = Field(default=None, max_length=200)
+    pin: bool | None = None
+
+
+@router.patch("/projects/{project_id}/agent/sessions/{session_id}")
+async def patch_agent_session(
+    project_id: str,
+    session_id: str,
+    body: PatchSessionBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await AgentSessionService(session).patch_session(
+        project_id=project_id,
+        session_id=session_id,
+        principal=principal,
+        employee=employee,
+        title=body.title,
+        pin=body.pin,
+    )
+
+
 @router.post("/projects/{project_id}/chat")
 async def project_chat_turn(
     project_id: str,
@@ -170,11 +196,11 @@ async def project_chat_transcript(
     principal: PrincipalDep,
     session: SessionDep,
     employee: EmployeeDep,
-    session_id: str | None = None,
+    session_id: str,
     limit: int = 100,
     before_seq: int | None = None,
 ) -> dict:
-    """Reload typed chat blocks for workspace (L05)."""
+    """Reload typed chat blocks for an explicit session (multi-chat)."""
     return await AgentSessionService(session).get_transcript(
         project_id=project_id,
         principal=principal,

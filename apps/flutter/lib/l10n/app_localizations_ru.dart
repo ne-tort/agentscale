@@ -2330,6 +2330,34 @@ class AppLocalizationsRu extends AppLocalizations {
   String get navProjects => 'Проекты';
 
   @override
+  String get navChats => 'Чаты';
+
+  @override
+  String get navNewChat => 'Новый чат';
+
+  @override
+  String get chatUntitled => 'Без названия';
+
+  @override
+  String get chatPin => 'Закрепить чат';
+
+  @override
+  String get chatUnpin => 'Открепить чат';
+
+  @override
+  String get chatRenameTitle => 'Переименовать чат';
+
+  @override
+  String get chatOpenFromSidebarHint =>
+      'Откройте «Новый чат» или чат в боковой панели';
+
+  @override
+  String get chatSelectProjectHint => 'Выберите проект';
+
+  @override
+  String get chatCreateChatHint => 'Создайте чат';
+
+  @override
   String get projectAddHint => 'Добавить проект';
 
   @override

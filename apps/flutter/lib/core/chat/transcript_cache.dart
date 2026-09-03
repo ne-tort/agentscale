@@ -12,7 +12,7 @@ class TranscriptCacheEntry {
     required this.pendingApprovals,
   });
 
-  final String? sessionId;
+  final String sessionId;
   final List<ChatBlock> blocks;
   final bool hasMoreHistory;
   final int? oldestSeq;
@@ -26,26 +26,21 @@ class TranscriptCache {
 
   static final Map<String, TranscriptCacheEntry> _store = {};
 
-  static String _key(String projectId, {String? sessionId}) => '$projectId:${sessionId ?? ''}';
+  static String _key(String projectId, String sessionId) => '$projectId:$sessionId';
 
-  static TranscriptCacheEntry? get(String projectId, {String? sessionId}) {
-    return _store[_key(projectId, sessionId: sessionId)];
-  }
-
-  static TranscriptCacheEntry? getForProject(String projectId) {
-    final prefix = '$projectId:';
-    for (final entry in _store.entries) {
-      if (entry.key.startsWith(prefix)) return entry.value;
-    }
-    return null;
+  static TranscriptCacheEntry? get(String projectId, String sessionId) {
+    return _store[_key(projectId, sessionId)];
   }
 
   static void put(String projectId, TranscriptCacheEntry entry) {
-    _store[_key(projectId, sessionId: entry.sessionId)] = entry;
-    _store[_key(projectId)] = entry;
+    _store[_key(projectId, entry.sessionId)] = entry;
   }
 
   static void clearProject(String projectId) {
     _store.removeWhere((key, _) => key.startsWith('$projectId:'));
+  }
+
+  static void clearSession(String projectId, String sessionId) {
+    _store.remove(_key(projectId, sessionId));
   }
 }

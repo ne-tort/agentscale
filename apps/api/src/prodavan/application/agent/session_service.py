@@ -62,8 +62,25 @@ def _session_public(row: AgentSessionRow) -> dict:
         "model": row.model,
         "cwd": row.cwd,
         "status": row.status,
+        "title": row.title,
+        "last_message_at": row.last_message_at.isoformat() if row.last_message_at else None,
         "created_at": row.created_at.isoformat() if row.created_at else None,
     }
+
+
+def _default_chat_title(text: str) -> str:
+    cleaned = " ".join((text or "").strip().split())
+    if not cleaned:
+        return "Chat"
+    if len(cleaned) <= 60:
+        return cleaned
+    return cleaned[:57].rstrip() + "…"
+
+
+def _touch_session_activity(row: AgentSessionRow, *, text: str | None = None) -> None:
+    row.last_message_at = datetime.now(tz=UTC)
+    if text and not row.title:
+        row.title = _default_chat_title(text)
 
 
 def _event_public(row: AgentEventRow) -> dict:
@@ -273,6 +290,45 @@ class AgentSessionService:
         )
         return [_session_public(r) for r in q.scalars().all()]
 
+    async def patch_session(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        title: str | None = None,
+        pin: bool | None = None,
+    ) -> dict:
+        from prodavan.application.agent.chat_sidebar_service import ChatSidebarService
+
+        await self._projects.require_access(
+            project_id=project_id, principal=principal, employee=employee, write=False
+        )
+        row = await self.get_session(session_id=session_id)
+        if row.project_id != project_id:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+        if title is not None:
+            cleaned = title.strip()
+            row.title = cleaned[:200] if cleaned else None
+            await self._session.commit()
+            await self._session.refresh(row)
+        pinned = None
+        if pin is not None:
+            if employee is None:
+                raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
+            result = await ChatSidebarService(self._session).set_pin(
+                session_id=session_id,
+                pinned=pin,
+                principal=principal,
+                employee=employee,
+            )
+            pinned = result["pinned"]
+        out = _session_public(row)
+        if pinned is not None:
+            out["pinned"] = pinned
+        return out
+
     async def send_message(
         self,
         *,
@@ -364,6 +420,7 @@ class AgentSessionService:
                 at=None,
             )
         )
+        _touch_session_activity(row, text=text)
         yield {"type": PLATFORM_EVENT_USER_MESSAGE, "data": user_payload}
 
         stream_normalizer = TurnStreamNormalizer()
@@ -791,6 +848,11 @@ class AgentSessionService:
         )
         self._session.add(ev_row)
 
+        if event_type == PLATFORM_EVENT_USER_MESSAGE:
+            _touch_session_activity(row, text=str(data.get("text") or ""))
+        elif event_type in {AgentEventType.TEXT_DELTA, AgentEventType.DONE, AgentEventType.TOOL_CALL}:
+            _touch_session_activity(row)
+
         if event_type == AgentEventType.USAGE:
             self._session.add(
                 AgentUsageRow(
@@ -813,61 +875,25 @@ class AgentSessionService:
         project_id: str,
         principal: Principal,
         employee: EmployeeRow | None,
-        session_id: str | None = None,
+        session_id: str,
         limit: int = 100,
         before_seq: int | None = None,
     ) -> dict:
-        """Chat bubbles for active (or given) session — L05 workspace reload."""
+        """Chat bubbles for an explicit session — UI must pass session_id (multi-chat)."""
         await self._projects.require_access(
             project_id=project_id, principal=principal, employee=employee, write=False
         )
-        sid = session_id
-        session_row: AgentSessionRow | None = None
-        if sid is None:
-            q = await self._session.execute(
-                select(AgentSessionRow)
-                .where(AgentSessionRow.project_id == project_id)
-                .where(AgentSessionRow.status == AgentSessionStatus.ACTIVE)
-                .order_by(AgentSessionRow.created_at.desc())
-                .limit(1)
+        if not session_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=400,
+                detail="session_id is required",
             )
-            active = q.scalar_one_or_none()
-            if active is not None:
-                sid = active.id
-                session_row = active
-            else:
-                suspended_q = await self._session.execute(
-                    select(AgentSessionRow)
-                    .where(AgentSessionRow.project_id == project_id)
-                    .where(AgentSessionRow.status == AgentSessionStatus.SUSPENDED)
-                    .order_by(AgentSessionRow.created_at.desc())
-                    .limit(1)
-                )
-                suspended = suspended_q.scalar_one_or_none()
-                if suspended is not None:
-                    sid = suspended.id
-                    session_row = suspended
-                else:
-                    latest_q = await self._session.execute(
-                        select(AgentSessionRow)
-                        .where(AgentSessionRow.project_id == project_id)
-                        .order_by(AgentSessionRow.created_at.desc())
-                        .limit(1)
-                    )
-                    latest = latest_q.scalar_one_or_none()
-                    if latest is None:
-                        return {
-                            "session_id": None,
-                            "session_status": None,
-                            "blocks": [],
-                            "pending_approvals": [],
-                        }
-                    sid = latest.id
-                    session_row = latest
-        else:
-            session_row = await self.get_session(session_id=sid)
-            if session_row.project_id != project_id:
-                raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+        sid = session_id
+        session_row = await self.get_session(session_id=sid)
+        if session_row.project_id != project_id:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
 
         events, meta = await self._list_events_page(
             session_id=sid,

@@ -4,7 +4,13 @@ from prodavan.infrastructure.persistence.models.admin import (
     CompanyAgentRuntimePolicyRow,
     CompanyCabinetQuotaRow,
 )
-from prodavan.infrastructure.persistence.models.agent import AgentEventRow, AgentSessionRow, AgentUsageRow
+from prodavan.infrastructure.persistence.models.agent import (
+    AgentEventRow,
+    AgentSessionRow,
+    AgentUsageRow,
+    EmployeeChatPinRow,
+    EmployeeProjectSelectionRow,
+)
 from prodavan.infrastructure.persistence.models.ai_keys import (
     AiKeyAuditEventRow,
     AiProviderKeyRow,
@@ -55,6 +61,8 @@ __all__ = [
     "AgentEventRow",
     "AgentSessionRow",
     "AgentUsageRow",
+    "EmployeeChatPinRow",
+    "EmployeeProjectSelectionRow",
     "AiKeyAuditEventRow",
     "AiKeyModelBindingRow",
     "AiModelRow",

@@ -4136,6 +4136,60 @@ abstract class AppLocalizations {
   /// **'Projects'**
   String get navProjects;
 
+  /// No description provided for @navChats.
+  ///
+  /// In en, this message translates to:
+  /// **'Chats'**
+  String get navChats;
+
+  /// No description provided for @navNewChat.
+  ///
+  /// In en, this message translates to:
+  /// **'New chat'**
+  String get navNewChat;
+
+  /// No description provided for @chatUntitled.
+  ///
+  /// In en, this message translates to:
+  /// **'Untitled chat'**
+  String get chatUntitled;
+
+  /// No description provided for @chatPin.
+  ///
+  /// In en, this message translates to:
+  /// **'Pin chat'**
+  String get chatPin;
+
+  /// No description provided for @chatUnpin.
+  ///
+  /// In en, this message translates to:
+  /// **'Unpin chat'**
+  String get chatUnpin;
+
+  /// No description provided for @chatRenameTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Rename chat'**
+  String get chatRenameTitle;
+
+  /// No description provided for @chatOpenFromSidebarHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Use New chat or a chat in the sidebar'**
+  String get chatOpenFromSidebarHint;
+
+  /// No description provided for @chatSelectProjectHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Select a project'**
+  String get chatSelectProjectHint;
+
+  /// No description provided for @chatCreateChatHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Create a chat'**
+  String get chatCreateChatHint;
+
   /// No description provided for @projectAddHint.
   ///
   /// In en, this message translates to:

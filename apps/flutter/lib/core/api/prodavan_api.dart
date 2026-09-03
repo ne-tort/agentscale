@@ -891,20 +891,114 @@ class ProdavanApi {
     );
   }
 
+  Future<Map<String, dynamic>> getProjectSelection(String cabinetId) async {
+    final prevCab = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await AuthHttp.get(
+        _uri('/cabinets/$cabinetId/me/selection'),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prevCab;
+    }
+  }
+
+  Future<Map<String, dynamic>> putProjectSelection({
+    required String cabinetId,
+    String? projectId,
+  }) async {
+    final prevCab = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await AuthHttp.put(
+        _uri('/cabinets/$cabinetId/me/selection'),
+        body: jsonEncode({'project_id': projectId}),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prevCab;
+    }
+  }
+
+  Future<Map<String, dynamic>> getChatsSidebar(String cabinetId) async {
+    final prevCab = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await AuthHttp.get(
+        _uri('/cabinets/$cabinetId/chats/sidebar'),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.cabinetId = prevCab;
+    }
+  }
+
+  Future<Map<String, dynamic>> createAgentSession({
+    required String projectId,
+    String? model,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.post(
+        _uri('/projects/$projectId/agent/sessions'),
+        body: jsonEncode({
+          if (model != null && model.isNotEmpty) 'model': model,
+        }),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Map<String, dynamic>> patchAgentSession({
+    required String projectId,
+    required String sessionId,
+    String? title,
+    bool? pin,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final body = <String, dynamic>{};
+      if (title != null) body['title'] = title;
+      if (pin != null) body['pin'] = pin;
+      final res = await AuthHttp.patch(
+        _uri('/projects/$projectId/agent/sessions/$sessionId'),
+        body: jsonEncode(body),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
   Future<Map<String, dynamic>> projectChatTranscript({
     required String projectId,
-    String? sessionId,
+    required String sessionId,
     int limit = 100,
     int? beforeSeq,
   }) async {
     final prevProj = this.projectId;
     this.projectId = projectId;
     try {
-      final params = <String, String>{};
-      if (sessionId != null) params['session_id'] = sessionId;
+      final params = <String, String>{'session_id': sessionId};
       if (limit != 100) params['limit'] = '$limit';
       if (beforeSeq != null) params['before_seq'] = '$beforeSeq';
-      final query = params.isEmpty ? '' : '?${params.entries.map((e) => '${e.key}=${Uri.encodeComponent(e.value)}').join('&')}';
+      final query =
+          '?${params.entries.map((e) => '${e.key}=${Uri.encodeComponent(e.value)}').join('&')}';
       final res = await AuthHttp.get(_uri('/projects/$projectId/chat/transcript$query'), extraHeaders: _workHeaders);
       _throwIfError(res);
       return jsonDecode(res.body) as Map<String, dynamic>;

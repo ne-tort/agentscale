@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, UploadFile
 from pydantic import BaseModel, Field
 
 from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
+from prodavan.application.agent.chat_sidebar_service import ChatSidebarService
 from prodavan.application.cabinets.cabinet_module_secret_service import CabinetModuleSecretService
 from prodavan.application.cabinets.cabinet_module_service import CabinetModuleService
 from prodavan.application.cabinets.instance_service import CabinetInstanceService
@@ -56,6 +57,64 @@ class SecretUploadBody(BaseModel):
 
     secret: str = Field(min_length=1, max_length=8192)
     label: str | None = Field(default=None, max_length=200)
+
+
+class ProjectSelectionBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    project_id: str | None = Field(default=None, max_length=40)
+
+
+@router.get("/{cabinet_id}/me/selection")
+async def get_project_selection(
+    cabinet_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+) -> dict:
+    if employee is None:
+        from prodavan.domain.errors import AppError
+
+        raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
+    return await ChatSidebarService(session).get_selection(
+        cabinet_id=cabinet_id, principal=principal, employee=employee
+    )
+
+
+@router.put("/{cabinet_id}/me/selection")
+async def put_project_selection(
+    cabinet_id: str,
+    body: ProjectSelectionBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+) -> dict:
+    if employee is None:
+        from prodavan.domain.errors import AppError
+
+        raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
+    return await ChatSidebarService(session).set_selection(
+        cabinet_id=cabinet_id,
+        project_id=body.project_id,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.get("/{cabinet_id}/chats/sidebar")
+async def get_chats_sidebar(
+    cabinet_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+) -> dict:
+    if employee is None:
+        from prodavan.domain.errors import AppError
+
+        raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="employee required")
+    return await ChatSidebarService(session).sidebar(
+        cabinet_id=cabinet_id, principal=principal, employee=employee
+    )
 
 
 @router.post("")

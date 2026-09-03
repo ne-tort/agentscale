@@ -2319,6 +2319,33 @@ class AppLocalizationsEn extends AppLocalizations {
   String get navProjects => 'Projects';
 
   @override
+  String get navChats => 'Chats';
+
+  @override
+  String get navNewChat => 'New chat';
+
+  @override
+  String get chatUntitled => 'Untitled chat';
+
+  @override
+  String get chatPin => 'Pin chat';
+
+  @override
+  String get chatUnpin => 'Unpin chat';
+
+  @override
+  String get chatRenameTitle => 'Rename chat';
+
+  @override
+  String get chatOpenFromSidebarHint => 'Use New chat or a chat in the sidebar';
+
+  @override
+  String get chatSelectProjectHint => 'Select a project';
+
+  @override
+  String get chatCreateChatHint => 'Create a chat';
+
+  @override
   String get projectAddHint => 'Add project';
 
   @override

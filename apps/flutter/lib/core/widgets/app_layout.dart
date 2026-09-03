@@ -43,6 +43,7 @@ class AppLayout extends StatelessWidget {
     this.trailingDestination,
     this.trailingSelected = false,
     this.onTrailingSelected,
+    this.railExtra,
   });
 
   final Widget body;
@@ -59,6 +60,9 @@ class AppLayout extends StatelessWidget {
   final AppNavDestination? trailingDestination;
   final bool trailingSelected;
   final VoidCallback? onTrailingSelected;
+
+  /// Optional block under the first destination (e.g. Chats under Projects).
+  final Widget? railExtra;
 
   /// True when a nested shell route (detail, …) is open in the content pane.
   final bool subpageOpen;
@@ -242,47 +246,105 @@ class AppLayout extends StatelessWidget {
       );
     }
 
-    final rail = NavigationRail(
-      selectedIndex: mainSelected,
-      onDestinationSelected: onDestinationSelected,
-      extended: expanded,
-      minWidth: _kRailMinWidth,
-      minExtendedWidth: _kExtendedRailWidth,
-      labelType: expanded ? NavigationRailLabelType.none : NavigationRailLabelType.all,
-      trailingAtBottom: trailingDestination != null,
-      leading: expanded
-          ? SizedBox(
-              width: _kExtendedRailWidth,
-              child: _logo(context, extended: true),
-            )
-          : _logo(context, extended: false),
-      trailing: trailingDestination == null
-          ? null
-          : expanded
-              ? SizedBox(
-                  width: _kExtendedRailWidth,
-                  child: _trailingControl(
+    final railWidth = expanded ? _kExtendedRailWidth : _kRailMinWidth;
+    final Widget rail;
+    if (railExtra == null) {
+      rail = NavigationRail(
+        selectedIndex: mainSelected,
+        onDestinationSelected: onDestinationSelected,
+        extended: expanded,
+        minWidth: _kRailMinWidth,
+        minExtendedWidth: _kExtendedRailWidth,
+        labelType: expanded ? NavigationRailLabelType.none : NavigationRailLabelType.all,
+        trailingAtBottom: trailingDestination != null,
+        leading: expanded
+            ? SizedBox(
+                width: _kExtendedRailWidth,
+                child: _logo(context, extended: true),
+              )
+            : _logo(context, extended: false),
+        trailing: trailingDestination == null
+            ? null
+            : expanded
+                ? SizedBox(
+                    width: _kExtendedRailWidth,
+                    child: _trailingControl(
+                      context,
+                      destination: trailingDestination!,
+                      extended: true,
+                      selected: trailingSelected,
+                    ),
+                  )
+                : _trailingControl(
                     context,
                     destination: trailingDestination!,
-                    extended: true,
+                    extended: false,
                     selected: trailingSelected,
                   ),
-                )
-              : _trailingControl(
-                  context,
-                  destination: trailingDestination!,
-                  extended: false,
-                  selected: trailingSelected,
+        destinations: [
+          for (final d in destinations)
+            NavigationRailDestination(
+              icon: Icon(d.icon),
+              selectedIcon: Icon(d.selectedIcon ?? d.icon),
+              label: Text(d.label),
+            ),
+        ],
+      );
+    } else {
+      rail = SizedBox(
+        width: railWidth,
+        child: Material(
+          color: Theme.of(context).navigationRailTheme.backgroundColor
+              ?? Theme.of(context).colorScheme.surface,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              expanded
+                  ? SizedBox(width: railWidth, child: _logo(context, extended: true))
+                  : _logo(context, extended: false),
+              Expanded(
+                child: ListView(
+                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
+                  children: [
+                    for (var i = 0; i < destinations.length; i++) ...[
+                      _destinationControl(
+                        context,
+                        destination: destinations[i],
+                        extended: expanded,
+                        selected: mainSelected == i,
+                        onTap: () => onDestinationSelected(i),
+                      ),
+                      if (i == 0) ...[
+                        const SizedBox(height: AppSpacing.sm),
+                        railExtra!,
+                        const SizedBox(height: AppSpacing.sm),
+                      ],
+                    ],
+                  ],
                 ),
-      destinations: [
-        for (final d in destinations)
-          NavigationRailDestination(
-            icon: Icon(d.icon),
-            selectedIcon: Icon(d.selectedIcon ?? d.icon),
-            label: Text(d.label),
+              ),
+              if (trailingDestination != null)
+                expanded
+                    ? SizedBox(
+                        width: railWidth,
+                        child: _trailingControl(
+                          context,
+                          destination: trailingDestination!,
+                          extended: true,
+                          selected: trailingSelected,
+                        ),
+                      )
+                    : _trailingControl(
+                        context,
+                        destination: trailingDestination!,
+                        extended: false,
+                        selected: trailingSelected,
+                      ),
+            ],
           ),
-      ],
-    );
+        ),
+      );
+    }
 
     return Scaffold(
       body: Row(
@@ -291,6 +353,42 @@ class AppLayout extends StatelessWidget {
           const VerticalDivider(width: 1, thickness: 1),
           Expanded(child: content),
         ],
+      ),
+    );
+  }
+
+  Widget _destinationControl(
+    BuildContext context, {
+    required AppNavDestination destination,
+    required bool extended,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    final colors = context.appColors;
+    final icon = Icon(
+      selected ? (destination.selectedIcon ?? destination.icon) : destination.icon,
+      color: selected ? colors.primary : colors.muted,
+      size: 24,
+    );
+    final label = Text(
+      destination.label,
+      style: TextStyle(
+        color: selected
+            ? colors.primary
+            : (extended ? colors.onSurface : colors.muted),
+        fontSize: extended ? 14 : 12,
+        fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
+
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+        child: _railIconLabel(extended: extended, icon: icon, label: label),
       ),
     );
   }

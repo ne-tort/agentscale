@@ -12,14 +12,18 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/employee/cabinet_project_settings_page.dart';
-import 'package:prodavan/features/employee/project_workspace_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Projects table inside cabinet — inline add, long-press delete.
+/// Projects table inside cabinet — tap selects project for chat sidebar (no auto-open).
 class CabinetProjectsPage extends StatefulWidget {
-  const CabinetProjectsPage({super.key, required this.cabinetId});
+  const CabinetProjectsPage({
+    super.key,
+    required this.cabinetId,
+    this.onSelectionChanged,
+  });
 
   final String cabinetId;
+  final VoidCallback? onSelectionChanged;
 
   @override
   State<CabinetProjectsPage> createState() => _CabinetProjectsPageState();
@@ -35,7 +39,18 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
   @override
   void initState() {
     super.initState();
+    workContext.addListener(_onCtx);
     _reload();
+  }
+
+  @override
+  void dispose() {
+    workContext.removeListener(_onCtx);
+    super.dispose();
+  }
+
+  void _onCtx() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _reload() async {
@@ -78,6 +93,7 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
         ),
       );
       await _reload();
+      widget.onSelectionChanged?.call();
     } catch (e) {
       if (!mounted) return;
       AppErrors.showSnack(context, e);
@@ -96,28 +112,25 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
     if (!ok) return;
     try {
       await workContext.api.deleteProject(row.id);
+      if (workContext.selectedProjectId == row.id) {
+        await workContext.selectProject(cabinetId: widget.cabinetId, projectId: null);
+      }
       await _reload();
+      widget.onSelectionChanged?.call();
     } catch (e) {
       if (!mounted) return;
       AppErrors.showSnack(context, e);
     }
   }
 
-  void _openProject(AppEntityRow row) {
-    final project = _projects.firstWhere((p) => p['id'] == row.id, orElse: () => const {});
-    if (!projectChatReadable(project)) {
-      _openSettings(row);
-      return;
+  Future<void> _selectProject(AppEntityRow row) async {
+    try {
+      await workContext.selectProject(cabinetId: widget.cabinetId, projectId: row.id);
+      widget.onSelectionChanged?.call();
+    } catch (e) {
+      if (!mounted) return;
+      AppErrors.showSnack(context, e);
     }
-    Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => ProjectWorkspacePage(
-          cabinetId: widget.cabinetId,
-          projectId: row.id,
-          projectName: row.title,
-        ),
-      ),
-    ).then((_) => _reload());
   }
 
   Future<void> _openSettings(AppEntityRow row) async {
@@ -130,6 +143,7 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
       ),
     );
     await _reload();
+    widget.onSelectionChanged?.call();
   }
 
   String _truncateAbout(String? about) {
@@ -164,6 +178,10 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
   }
 
   Color? _rowColor(BuildContext context, Map<String, dynamic> project) {
+    final id = project['id'] as String?;
+    if (id != null && id == workContext.selectedProjectId) {
+      return context.appColors.primary.withValues(alpha: 0.12);
+    }
     final status = project['status'] as String?;
     if (status == 'draft' || status == 'paused') return context.appColors.warning;
     return null;
@@ -225,7 +243,7 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
                     AppEntityColumn(id: 'creator', label: l10n.projectCreatorColumn),
                     AppEntityColumn(id: 'status', label: l10n.projectProjectStatus),
                   ],
-                  onOpen: _openProject,
+                  onOpen: _selectProject,
                   onDelete: _delete,
                   rowActions: [
                     AppEntityRowAction(

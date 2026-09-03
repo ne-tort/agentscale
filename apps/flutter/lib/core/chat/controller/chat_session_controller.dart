@@ -9,14 +9,17 @@ import 'package:prodavan/core/chat/transcript_cache.dart';
 
 /// Live SSE chat session — blocks projection with optimistic user + streaming assistant.
 class ChatSessionController {
-  ChatSessionController({required this.api, required this.projectId}) {
+  ChatSessionController({
+    required this.api,
+    required this.projectId,
+    required this.sessionId,
+  }) {
     _restoreFromCache();
   }
 
   final ProdavanApi api;
   final String projectId;
-
-  String? sessionId;
+  String sessionId;
   String? selectedModel;
   final List<ChatBlock> blocks = [];
   bool streaming = false;
@@ -62,9 +65,8 @@ class ChatSessionController {
   }
 
   void _restoreFromCache() {
-    final cached = TranscriptCache.getForProject(projectId);
+    final cached = TranscriptCache.get(projectId, sessionId);
     if (cached == null || cached.blocks.isEmpty) return;
-    sessionId = cached.sessionId;
     blocks
       ..clear()
       ..addAll(cached.blocks);
@@ -117,14 +119,13 @@ class ChatSessionController {
       notifyImmediate();
     }
     try {
-      final previousSessionId = sessionId;
       final body = await api.projectChatTranscript(
         projectId: projectId,
         sessionId: sessionId,
         beforeSeq: beforeSeq,
       );
       final resolved = body['session_id'] as String?;
-      sessionId = resolved ?? previousSessionId;
+      if (resolved != null && resolved.isNotEmpty) sessionId = resolved;
       final newBlocks = chatBlocksFromTranscript(body['blocks'] as List?);
       if (beforeSeq == null) {
         blocks
@@ -168,9 +169,7 @@ class ChatSessionController {
   }
 
   Future<List<Map<String, dynamic>>> _fetchPending() async {
-    final sid = sessionId;
-    if (sid == null) return const [];
-    return api.listPendingApprovals(projectId: projectId, sessionId: sid);
+    return api.listPendingApprovals(projectId: projectId, sessionId: sessionId);
   }
 
   Future<void> send(String text, {List<String> attachmentRefs = const []}) async {
@@ -265,20 +264,15 @@ class ChatSessionController {
     blocks.addAll(_liveTurnBlocks);
     _liveTurnBlocks = const [];
     streaming = false;
-    final sid = sessionId;
-    if (sid != null) {
-      await api.cancelAgentSession(projectId: projectId, sessionId: sid);
-    }
+    await api.cancelAgentSession(projectId: projectId, sessionId: sessionId);
     _saveToCache();
     notifyImmediate();
   }
 
   Future<void> resolveApproval(String approvalId, String decision) async {
-    final sid = sessionId;
-    if (sid == null) return;
     await api.resolveToolApproval(
       projectId: projectId,
-      sessionId: sid,
+      sessionId: sessionId,
       approvalId: approvalId,
       decision: decision,
     );

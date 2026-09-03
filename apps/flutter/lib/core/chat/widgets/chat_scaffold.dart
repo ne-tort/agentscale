@@ -384,9 +384,8 @@ class ChatScaffold extends StatelessWidget {
                               loadingHistory: controller.loadingHistory,
                               onLoadOlder: controller.hasMoreHistory ? controller.loadOlderTranscript : null,
                               turnStreaming: controller.streaming,
-                              onResolveApproval: controller.sessionId == null
-                                  ? null
-                                  : (id, decision) => controller.resolveApproval(id, decision),
+                              onResolveApproval: (id, decision) =>
+                                  controller.resolveApproval(id, decision),
                             ),
                 ),
                 ChatComposer(

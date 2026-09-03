@@ -12,18 +12,24 @@ import 'package:prodavan/features/employee/cabinet_project_settings_page.dart';
 import 'package:prodavan/features/employee/project_chat_settings_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Project agent workspace — SSE chat + HITL approvals (block-based UI).
+/// Project agent workspace — requires explicit [sessionId] (multi-chat).
 class ProjectWorkspacePage extends StatefulWidget {
   const ProjectWorkspacePage({
     super.key,
     required this.cabinetId,
     required this.projectId,
     required this.projectName,
+    required this.sessionId,
+    this.initialTitle,
+    this.initiallyPinned = false,
   });
 
   final String cabinetId;
   final String projectId;
   final String projectName;
+  final String sessionId;
+  final String? initialTitle;
+  final bool initiallyPinned;
 
   @override
   State<ProjectWorkspacePage> createState() => _ProjectWorkspacePageState();
@@ -36,13 +42,20 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   bool _chatSendable = true;
   Map<String, dynamic>? _project;
   Object? _lastSnackError;
+  late String _title;
+  late bool _pinned;
 
   @override
   void initState() {
     super.initState();
     workContext.enterProject(widget.projectId);
-    _chat = ChatSessionController(api: workContext.api, projectId: widget.projectId)
-      ..changes.listen((_) {
+    _title = (widget.initialTitle ?? '').trim();
+    _pinned = widget.initiallyPinned;
+    _chat = ChatSessionController(
+      api: workContext.api,
+      projectId: widget.projectId,
+      sessionId: widget.sessionId,
+    )..changes.listen((_) {
         if (!mounted) return;
         final err = _chat.error;
         if (err != null && err != _lastSnackError) {
@@ -87,7 +100,19 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   Future<void> _openChatSettings() async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
-        builder: (_) => ProjectChatSettingsPage(controller: _chat),
+        builder: (_) => ProjectChatSettingsPage(
+          controller: _chat,
+          projectId: widget.projectId,
+          sessionId: widget.sessionId,
+          title: _title,
+          pinned: _pinned,
+          onTitleChanged: (v) {
+            if (mounted) setState(() => _title = v);
+          },
+          onPinnedChanged: (v) {
+            if (mounted) setState(() => _pinned = v);
+          },
+        ),
       ),
     );
   }
@@ -113,6 +138,12 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     if (mounted) setState(() {});
   }
 
+  String get _displayTitle {
+    final l10n = AppLocalizations.of(context);
+    if (_title.isNotEmpty) return _title;
+    return l10n.chatUntitled;
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -123,8 +154,26 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       );
     }
     return AppScaffold(
-      title: Text(widget.projectName),
+      title: Text(_displayTitle),
       actions: [
+        IconButton(
+          icon: Icon(_pinned ? Icons.push_pin : Icons.push_pin_outlined),
+          tooltip: _pinned ? l10n.chatUnpin : l10n.chatPin,
+          onPressed: () async {
+            // Quick pin without leaving workspace; settings page also toggles.
+            try {
+              final body = await workContext.api.patchAgentSession(
+                projectId: widget.projectId,
+                sessionId: widget.sessionId,
+                pin: !_pinned,
+              );
+              if (!mounted) return;
+              setState(() => _pinned = body['pinned'] == true);
+            } catch (e) {
+              if (mounted) showAgentChatSnack(context, e);
+            }
+          },
+        ),
         IconButton(
           icon: const Icon(Icons.settings_outlined),
           tooltip: l10n.projectProjectSettings,
@@ -137,7 +186,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         chatSendable: _chatSendable,
         loading: _loading,
         disabledHint: _chatSendable ? null : l10n.errorPodNotRunning,
-        title: Text(widget.projectName),
+        title: Text(_displayTitle),
         onOpenChatSettings: _openChatSettings,
       ),
     );

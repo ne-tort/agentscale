@@ -13,7 +13,7 @@ OIDC Login
        list EntityCollection (мои кабинеты)
        actions: Создать | Импорт
   → enter Cabinet → DynamicShell (meta tabs)
-  → ProjectList → ProjectWorkspace (chat-first)
+  → ProjectList (select project) → rail Chats → ProjectWorkspace(sessionId)
 ```
 
 ## Chrome
@@ -28,10 +28,10 @@ OIDC Login
 
 ## Внутри кабинета
 
-1. System tabs (Projects, Chat, Context, Tables, Tools) + **dynamic tabs** из meta.  
-2. Chat-first в project workspace; attachments OK.  
-3. Агент может добавить tab/table → UI refresh.  
-4. Secondary tabs = EntityCollection from `ui_json`.
+1. System: Overview / Projects / **Chats** (rail) / modules / Management / Settings.  
+2. Tap project = **select only** (highlight); open chat via «Новый чат» или item в Chats.  
+3. Workspace требует `sessionId`; attachments OK.  
+4. Агент может добавить tab/table → UI refresh. Secondary tabs = EntityCollection from `ui_json`.
 
 ## Project chat (blocks)
 
@@ -73,9 +73,10 @@ Cursor-style field: **+** (chat settings) → attach → text → send/stop; е�
 - **Source:** PostgreSQL `agent_sessions` + `agent_events` via `GET /chat/transcript` — not MinIO, not pod polling.
 - **Read when pod down / error:** transcript loads from DB for `status=active|error`; composer disabled with hint until `status=active` and `observed_state == running`.
 - **Pagination:** tail load (`limit`, default 100) + `before_seq` cursor on scroll-up; skeleton bubbles on initial load (no spinner).
-- **Load perf:** `getProject` ∥ `loadTranscript` on bootstrap; `loadModels` deferred (non-blocking); `pending_approvals` embedded in transcript response (no second HTTP); in-memory **stale-while-revalidate** cache per project for instant re-enter.
-- **Scroll:** `ListView(reverse: true)` — newest at visual bottom; pin-to-bottom only when near offset 0; load older near maxScrollExtent; no fake top spacer.
-- **Settings:** «Чат» tile after project name when launched (`active|error`); opens `ProjectWorkspacePage`.
+- **Load perf:** `getProject` ∥ `loadTranscript(sessionId)` on bootstrap; `loadModels` deferred; `pending_approvals` in transcript; cache key `(projectId, sessionId)`.
+- **Scroll:** chronological `ListView` (not reverse); `jumpTo(max)` / pin near bottom; `loadOlder` near top; auto-`loadOlder` while `hasMore && maxScrollExtent` small.
+- **Settings:** «Чат» tile hints to open from sidebar (no auto-open latest).
+- **Sidebar API:** `GET/PUT …/me/selection`, `GET …/chats/sidebar`, `PATCH …/sessions/{id}` (`title`, `pin`).
 - **Tool panels:** semantic labels from input; expand body is code-style panel (not raw Map dump); unwrap `{status,value}` / `{success}` payloads.
 
 ## Empty / loading
