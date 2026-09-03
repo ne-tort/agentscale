@@ -1873,6 +1873,116 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String projectChatGroupDeleted(int count) {
+    return 'Deleted $count files';
+  }
+
+  @override
+  String projectChatGroupGlob(int count) {
+    return 'File search ($count)';
+  }
+
+  @override
+  String projectChatGroupGrep(int count) {
+    return 'Search ($count)';
+  }
+
+  @override
+  String projectChatGroupListDir(int count) {
+    return 'List ($count)';
+  }
+
+  @override
+  String projectChatGroupGeneric(int count) {
+    return 'Tools ($count)';
+  }
+
+  @override
+  String get projectChatWorking => 'Working…';
+
+  @override
+  String projectChatWorked(int count) {
+    return 'Worked · $count actions';
+  }
+
+  @override
+  String get projectChatToolReadFile => 'Read file';
+
+  @override
+  String projectChatToolReadPath(String path) {
+    return 'Read $path';
+  }
+
+  @override
+  String get projectChatToolWriteFile => 'Wrote file';
+
+  @override
+  String projectChatToolWritePath(String path) {
+    return 'Wrote $path';
+  }
+
+  @override
+  String get projectChatToolEditFile => 'Edited file';
+
+  @override
+  String projectChatToolEditPath(String path) {
+    return 'Edited $path';
+  }
+
+  @override
+  String get projectChatToolDeleteFile => 'Deleted file';
+
+  @override
+  String projectChatToolDeletePath(String path) {
+    return 'Deleted $path';
+  }
+
+  @override
+  String get projectChatToolGlob => 'File search';
+
+  @override
+  String projectChatToolGlobPattern(String pattern) {
+    return 'File search $pattern';
+  }
+
+  @override
+  String get projectChatToolGrep => 'Search';
+
+  @override
+  String projectChatToolGrepPattern(String pattern) {
+    return 'Search $pattern';
+  }
+
+  @override
+  String get projectChatToolListDir => 'List files';
+
+  @override
+  String projectChatToolListDirPath(String path) {
+    return 'List $path';
+  }
+
+  @override
+  String get projectChatToolShell => 'Ran command';
+
+  @override
+  String get projectChatToolMcpGeneric => 'MCP';
+
+  @override
+  String projectChatToolMcp(String tool) {
+    return 'MCP: $tool';
+  }
+
+  @override
+  String projectChatToolSubagent(String name) {
+    return 'Subagent $name';
+  }
+
+  @override
+  String projectChatToolGeneric(String name) {
+    return 'Tool $name';
+  }
+
+  @override
   String get errorAgentProviderNetwork =>
       'AI provider is unreachable from the container (network).';
 

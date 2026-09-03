@@ -11,6 +11,9 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/features/employee/widgets/chat_composer.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
+const _kEstimatedRowHeight = 48.0;
+const _kScrollCacheExtent = 700.0;
+
 int _blocksScrollFingerprint(List<ChatBlock> blocks) {
   if (blocks.isEmpty) return 0;
   final last = blocks.last;
@@ -22,9 +25,89 @@ String _groupLabel(AppLocalizations l10n, ActivityGroupKind kind, int count) {
     ActivityGroupKind.thinking => l10n.projectChatGroupThinking(count),
     ActivityGroupKind.fileEdit => l10n.projectChatGroupFilesEdited(count),
     ActivityGroupKind.fileRead => l10n.projectChatGroupFilesRead(count),
+    ActivityGroupKind.fileDelete => l10n.projectChatGroupDeleted(count),
+    ActivityGroupKind.searchGlob => l10n.projectChatGroupGlob(count),
+    ActivityGroupKind.searchGrep => l10n.projectChatGroupGrep(count),
+    ActivityGroupKind.listDir => l10n.projectChatGroupListDir(count),
     ActivityGroupKind.command => l10n.projectChatGroupCommands(count),
     ActivityGroupKind.mcp => l10n.projectChatGroupMcp(count),
+    ActivityGroupKind.generic => l10n.projectChatGroupGeneric(count),
   };
+}
+
+class _WorkSessionBlock extends StatefulWidget {
+  const _WorkSessionBlock({
+    required this.label,
+    required this.items,
+    required this.innerEntries,
+    required this.childBuilder,
+    this.diffStats,
+  });
+
+  final String label;
+  final List<ChatDisplayPair> items;
+  final List<ChatDisplayEntry> innerEntries;
+  final Widget Function(ChatDisplayPair item) childBuilder;
+  final ({int added, int removed})? diffStats;
+
+  @override
+  State<_WorkSessionBlock> createState() => _WorkSessionBlockState();
+}
+
+class _WorkSessionBlockState extends State<_WorkSessionBlock> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final stats = widget.diffStats;
+    Widget? badge;
+    if (stats != null && (stats.added > 0 || stats.removed > 0)) {
+      badge = Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (stats.added > 0)
+            Text('+${stats.added}', style: TextStyle(color: scheme.primary, fontSize: 12)),
+          if (stats.added > 0 && stats.removed > 0) const SizedBox(width: 4),
+          if (stats.removed > 0)
+            Text('-${stats.removed}', style: TextStyle(color: scheme.error, fontSize: 12)),
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        ChatMutedLine(
+          label: widget.label,
+          trailing: badge,
+          expanded: _open,
+          onTap: () => setState(() => _open = !_open),
+        ),
+        if (_open)
+          ChatInsetPanel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (final inner in widget.innerEntries)
+                  switch (inner) {
+                    ChatDisplaySingle(:final item) => widget.childBuilder(item),
+                    ChatDisplayGroup(:final kind, :final items) => GroupedActivityBlock(
+                        kind: kind,
+                        items: items,
+                        label: _groupLabel(l10n, kind, items.length),
+                        diffStats: aggregateDiffStats(items),
+                        childBuilder: widget.childBuilder,
+                      ),
+                    ChatDisplayWorkSession() => const SizedBox.shrink(),
+                  },
+              ],
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 class ChatMessageList extends StatefulWidget {
@@ -38,7 +121,10 @@ class ChatMessageList extends StatefulWidget {
     this.hasMoreHistory = false,
     this.loadingHistory = false,
     this.onLoadOlder,
-    this.groupBlocks = true,
+    this.turnStreaming = false,
+    this.totalEvents,
+    this.oldestSeq,
+    this.newestSeq,
   });
 
   final List<ChatBlock> blocks;
@@ -49,7 +135,10 @@ class ChatMessageList extends StatefulWidget {
   final bool hasMoreHistory;
   final bool loadingHistory;
   final VoidCallback? onLoadOlder;
-  final bool groupBlocks;
+  final bool turnStreaming;
+  final int? totalEvents;
+  final int? oldestSeq;
+  final int? newestSeq;
 
   @override
   State<ChatMessageList> createState() => ChatMessageListState();
@@ -60,7 +149,8 @@ class ChatMessageListState extends State<ChatMessageList> {
   bool _stickToBottom = true;
   int _lastFingerprint = 0;
   int _lastBlockCount = 0;
-  double? _anchorExtent;
+  double? _anchorPixels;
+  double? _anchorMaxExtent;
 
   @override
   void initState() {
@@ -68,18 +158,28 @@ class ChatMessageListState extends State<ChatMessageList> {
     _scroll.addListener(_onScroll);
   }
 
+  double _estimatedTopExtent() {
+    if (!widget.hasMoreHistory || widget.totalEvents == null || widget.oldestSeq == null) {
+      return 0;
+    }
+    final loaded = widget.newestSeq != null ? widget.newestSeq! - widget.oldestSeq! + 1 : 0;
+    final unloaded = (widget.totalEvents! - loaded).clamp(0, widget.totalEvents!);
+    return unloaded * _kEstimatedRowHeight;
+  }
+
   void _onScroll() {
     if (!_scroll.hasClients) return;
-    if (_scroll.position.pixels <= 48 &&
+    if (_scroll.position.pixels <= _estimatedTopExtent() + 48 &&
         widget.hasMoreHistory &&
         !widget.loadingHistory &&
         widget.onLoadOlder != null) {
-      _anchorExtent = _scroll.position.maxScrollExtent;
+      _anchorPixels = _scroll.offset;
+      _anchorMaxExtent = _scroll.position.maxScrollExtent;
       widget.onLoadOlder!();
     }
   }
 
-  Widget _renderPair(({ChatBlock block, ChatBlock? paired}) item) {
+  Widget _renderPair(ChatDisplayPair item) {
     final block = item.block;
     return ChatBlockRenderer(
       key: ValueKey('${block.kind}-${block.id}-${block.text.length}-${block.isStreaming}'),
@@ -90,6 +190,28 @@ class ChatMessageListState extends State<ChatMessageList> {
       api: widget.api,
       onResolveApproval: widget.onResolveApproval,
     );
+  }
+
+  Widget _renderEntry(AppLocalizations l10n, ChatDisplayEntry entry) {
+    return switch (entry) {
+      ChatDisplaySingle(:final item) => _renderPair(item),
+      ChatDisplayGroup(:final kind, :final items) => GroupedActivityBlock(
+          kind: kind,
+          items: items,
+          label: _groupLabel(l10n, kind, items.length),
+          diffStats: aggregateDiffStats(items),
+          childBuilder: _renderPair,
+        ),
+      ChatDisplayWorkSession(:final items, :final streaming) => _WorkSessionBlock(
+          label: streaming
+              ? l10n.projectChatWorking
+              : l10n.projectChatWorked(items.length),
+          items: items,
+          innerEntries: groupInnerWorkItems(items),
+          diffStats: aggregateDiffStats(items),
+          childBuilder: _renderPair,
+        ),
+    };
   }
 
   void _scrollToBottom() {
@@ -108,15 +230,17 @@ class ChatMessageListState extends State<ChatMessageList> {
   void didUpdateWidget(covariant ChatMessageList oldWidget) {
     super.didUpdateWidget(oldWidget);
     final fp = _blocksScrollFingerprint(widget.blocks);
-    final prepended = widget.blocks.length > _lastBlockCount && _anchorExtent != null;
+    final prepended = widget.blocks.length > _lastBlockCount && _anchorPixels != null;
     if (prepended) {
-      final anchor = _anchorExtent!;
+      final anchor = _anchorPixels!;
+      final oldMax = _anchorMaxExtent ?? anchor;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_scroll.hasClients) {
-          final delta = _scroll.position.maxScrollExtent - anchor;
-          _scroll.jumpTo(_scroll.offset + delta);
+          final extentDelta = _scroll.position.maxScrollExtent - oldMax;
+          _scroll.jumpTo(anchor + extentDelta);
         }
-        _anchorExtent = null;
+        _anchorPixels = null;
+        _anchorMaxExtent = null;
       });
     } else if (_stickToBottom && fp != _lastFingerprint) {
       _lastFingerprint = fp;
@@ -137,9 +261,9 @@ class ChatMessageListState extends State<ChatMessageList> {
     _lastFingerprint = _blocksScrollFingerprint(widget.blocks);
     _lastBlockCount = widget.blocks.length;
     final l10n = AppLocalizations.of(context);
-    final entries = widget.groupBlocks ? groupDisplayEntries(widget.blocks) : [
-      for (final item in mergeToolPairs(widget.blocks)) ChatDisplaySingle(item: item),
-    ];
+    final entries = groupDisplayEntries(widget.blocks, turnStreaming: widget.turnStreaming);
+    final topSpacer = _estimatedTopExtent();
+    final headerCount = (topSpacer > 0 ? 1 : 0) + (widget.loadingHistory ? 1 : 0);
 
     return NotificationListener<ScrollNotification>(
       onNotification: (n) {
@@ -151,26 +275,26 @@ class ChatMessageListState extends State<ChatMessageList> {
       child: ListView.builder(
         controller: _scroll,
         padding: EdgeInsets.all(AppSpacing.md),
-        itemCount: entries.length + (widget.loadingHistory ? 1 : 0),
+        cacheExtent: _kScrollCacheExtent,
+        itemCount: headerCount + entries.length,
         itemBuilder: (context, index) {
-          if (widget.loadingHistory && index == 0) {
-            return const Padding(
-              padding: EdgeInsets.only(bottom: AppSpacing.sm),
-              child: Center(child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))),
-            );
+          var cursor = index;
+          if (topSpacer > 0) {
+            if (cursor == 0) return SizedBox(height: topSpacer);
+            cursor--;
           }
-          final entryIndex = widget.loadingHistory ? index - 1 : index;
-          final entry = entries[entryIndex];
-          return switch (entry) {
-            ChatDisplaySingle(:final item) => _renderPair(item),
-            ChatDisplayGroup(:final kind, :final items) => GroupedActivityBlock(
-                kind: kind,
-                items: items,
-                label: _groupLabel(l10n, kind, items.length),
-                diffStats: aggregateDiffStats(items),
-                childBuilder: _renderPair,
-              ),
-          };
+          if (widget.loadingHistory) {
+            if (cursor == 0) {
+              return const Padding(
+                padding: EdgeInsets.only(bottom: AppSpacing.sm),
+                child: Center(
+                  child: SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)),
+                ),
+              );
+            }
+            cursor--;
+          }
+          return _renderEntry(l10n, entries[cursor]);
         },
       ),
     );
@@ -226,7 +350,10 @@ class ChatScaffold extends StatelessWidget {
                               hasMoreHistory: controller.hasMoreHistory,
                               loadingHistory: controller.loadingHistory,
                               onLoadOlder: controller.hasMoreHistory ? controller.loadOlderTranscript : null,
-                              groupBlocks: !controller.streaming,
+                              turnStreaming: controller.streaming,
+                              totalEvents: controller.totalEvents,
+                              oldestSeq: controller.oldestSeq,
+                              newestSeq: controller.newestSeq,
                               onResolveApproval: controller.sessionId == null
                                   ? null
                                   : (id, decision) => controller.resolveApproval(id, decision),

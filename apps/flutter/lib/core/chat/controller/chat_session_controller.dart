@@ -23,6 +23,8 @@ class ChatSessionController {
   String? defaultModel;
   bool hasMoreHistory = false;
   int? oldestSeq;
+  int? newestSeq;
+  int? totalEvents;
   bool loadingHistory = false;
 
   String get selectedModelLabel {
@@ -93,6 +95,8 @@ class ChatSessionController {
     }
     hasMoreHistory = body['has_more'] == true;
     oldestSeq = body['oldest_seq'] as int?;
+    newestSeq = body['newest_seq'] as int?;
+    totalEvents = body['total_events'] as int?;
     if (beforeSeq == null) {
       pendingApprovals = await _fetchPending();
     }

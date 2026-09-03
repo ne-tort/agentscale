@@ -4,6 +4,7 @@ import 'package:markdown/markdown.dart' as md;
 
 import 'package:prodavan/core/chat/models/chat_block.dart';
 import 'package:prodavan/core/chat/thinking_duration.dart';
+import 'package:prodavan/core/chat/tool_activity_labels.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -186,29 +187,24 @@ class UserMessageBlock extends StatelessWidget {
 }
 
 ({String label, String? detail}) toolActivityPresentation(String name, Map<String, dynamic> input) {
-  final lower = name.toLowerCase();
-  if (lower.startsWith('mcp') || lower.contains('mcp__')) {
-    final tool = name.replaceFirst(RegExp(r'^mcp[_-]*', caseSensitive: false), '');
-    return (label: 'mcp $tool'.trim(), detail: null);
-  }
-  final path = input['path'] ?? input['file_path'] ?? input['target_file'] ?? input['relative_path'];
-  final pathStr = path?.toString();
-  switch (lower) {
-    case 'edit':
-    case 'write':
-    case 'strreplace':
-      return (label: pathStr != null ? 'Изменён $pathStr' : 'Изменён файл', detail: null);
-    case 'read':
-    case 'read_file':
-      return (label: pathStr != null ? 'Прочитан $pathStr' : 'Прочитан файл', detail: null);
-    case 'shell':
-    case 'bash':
-    case 'run_terminal_cmd':
-      final cmd = input['command'] ?? input['cmd'];
-      return (label: 'Запущена команда', detail: cmd?.toString());
-    default:
-      return (label: name, detail: null);
-  }
+  // Legacy non-l10n fallback — prefer formatToolActivityLabel in widgets.
+  final kind = normalizeToolKind(name);
+  final path = extractToolContextPath(input);
+  final pattern = extractToolContextPattern(input);
+  final command = extractToolContextCommand(input);
+  return switch (kind) {
+    ToolKind.fileRead => (label: path != null ? 'Прочитан $path' : 'Прочитан файл', detail: null),
+    ToolKind.fileWrite => (label: path != null ? 'Записан $path' : 'Записан файл', detail: null),
+    ToolKind.fileEdit => (label: path != null ? 'Изменён $path' : 'Изменён файл', detail: null),
+    ToolKind.fileDelete => (label: path != null ? 'Удалён $path' : 'Удалён файл', detail: null),
+    ToolKind.searchGlob => (label: pattern != null ? 'Поиск файлов $pattern' : 'Поиск файлов', detail: null),
+    ToolKind.searchGrep => (label: pattern != null ? 'Поиск $pattern' : 'Поиск', detail: null),
+    ToolKind.listDir => (label: path != null ? 'Список $path' : 'Список файлов', detail: null),
+    ToolKind.shell => (label: 'Запущена команда', detail: command),
+    ToolKind.mcp => (label: 'mcp ${name.replaceFirst(RegExp(r'^mcp[_-]*', caseSensitive: false), '').trim()}'.trim(), detail: null),
+    ToolKind.subagent => (label: 'Подагент $name', detail: null),
+    ToolKind.generic => (label: 'Инструмент $name', detail: null),
+  };
 }
 
 ({int added, int removed})? parseDiffStats(Object? output) {
@@ -264,8 +260,15 @@ class _ToolActivityBlockState extends State<ToolActivityBlock> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final scheme = Theme.of(context).colorScheme;
-    final presentation = toolActivityPresentation(widget.name, widget.input);
+    final presentation = formatToolActivityLabel(
+      l10n,
+      name: widget.name,
+      input: widget.input,
+      output: widget.output,
+      pending: widget.pending,
+    );
     final stats = parseDiffStats(widget.output);
     final detail = presentation.detail ?? _formatPanelContent(widget.input);
     final outputText = _formatPanelContent(widget.output);
@@ -296,7 +299,7 @@ class _ToolActivityBlockState extends State<ToolActivityBlock> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ChatMutedLine(
-          label: widget.pending ? '${presentation.label}…' : presentation.label,
+          label: presentation.label,
           trailing: badge,
           expanded: _open,
           onTap: hasPanel ? () => setState(() => _open = !_open) : null,
@@ -616,8 +619,13 @@ enum ActivityGroupKind {
   thinking,
   fileEdit,
   fileRead,
+  fileDelete,
+  searchGlob,
+  searchGrep,
+  listDir,
   command,
   mcp,
+  generic,
 }
 
 class GroupedActivityBlock extends StatefulWidget {

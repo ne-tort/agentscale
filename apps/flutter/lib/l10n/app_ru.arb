@@ -1076,6 +1076,80 @@
       "count": { "type": "int" }
     }
   },
+  "projectChatGroupDeleted": "Удалено {count} файлов",
+  "@projectChatGroupDeleted": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "projectChatGroupGlob": "Поиск файлов ({count})",
+  "@projectChatGroupGlob": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "projectChatGroupGrep": "Поиск ({count})",
+  "@projectChatGroupGrep": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "projectChatGroupListDir": "Список ({count})",
+  "@projectChatGroupListDir": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "projectChatGroupGeneric": "Инструменты ({count})",
+  "@projectChatGroupGeneric": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "projectChatWorking": "Работаю…",
+  "projectChatWorked": "Работал · {count} действий",
+  "@projectChatWorked": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "projectChatToolReadFile": "Прочитан файл",
+  "projectChatToolReadPath": "Прочитан {path}",
+  "@projectChatToolReadPath": {
+    "placeholders": { "path": { "type": "String" } }
+  },
+  "projectChatToolWriteFile": "Записан файл",
+  "projectChatToolWritePath": "Записан {path}",
+  "@projectChatToolWritePath": {
+    "placeholders": { "path": { "type": "String" } }
+  },
+  "projectChatToolEditFile": "Изменён файл",
+  "projectChatToolEditPath": "Изменён {path}",
+  "@projectChatToolEditPath": {
+    "placeholders": { "path": { "type": "String" } }
+  },
+  "projectChatToolDeleteFile": "Удалён файл",
+  "projectChatToolDeletePath": "Удалён {path}",
+  "@projectChatToolDeletePath": {
+    "placeholders": { "path": { "type": "String" } }
+  },
+  "projectChatToolGlob": "Поиск файлов",
+  "projectChatToolGlobPattern": "Поиск файлов {pattern}",
+  "@projectChatToolGlobPattern": {
+    "placeholders": { "pattern": { "type": "String" } }
+  },
+  "projectChatToolGrep": "Поиск",
+  "projectChatToolGrepPattern": "Поиск {pattern}",
+  "@projectChatToolGrepPattern": {
+    "placeholders": { "pattern": { "type": "String" } }
+  },
+  "projectChatToolListDir": "Список файлов",
+  "projectChatToolListDirPath": "Список {path}",
+  "@projectChatToolListDirPath": {
+    "placeholders": { "path": { "type": "String" } }
+  },
+  "projectChatToolShell": "Запущена команда",
+  "projectChatToolMcpGeneric": "MCP",
+  "projectChatToolMcp": "MCP: {tool}",
+  "@projectChatToolMcp": {
+    "placeholders": { "tool": { "type": "String" } }
+  },
+  "projectChatToolSubagent": "Подагент {name}",
+  "@projectChatToolSubagent": {
+    "placeholders": { "name": { "type": "String" } }
+  },
+  "projectChatToolGeneric": "Инструмент {name}",
+  "@projectChatToolGeneric": {
+    "placeholders": { "name": { "type": "String" } }
+  },
   "errorAgentProviderNetwork": "AI-провайдер недоступен из контейнера (сеть).",
   "errorAgentProviderRateLimit": "Превышен лимит запросов к AI-провайдеру. Повторите позже.",
   "errorAgentProviderUnavailable": "AI-провайдер временно недоступен. Повторите позже.",

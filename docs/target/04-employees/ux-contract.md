@@ -40,7 +40,7 @@ OIDC Login
 | `user` | persisted user_message | bubble справа + attachment chips |
 | `assistant_markdown` | text_delta (live + reload) | inline в колонке чата (без bubble); plain text while streaming, GFM after done |
 | `thinking` | thinking_delta/complete | muted line + chevron (hover `>`, expanded `∨`) + inset panel on tap; auto-expand while streaming |
-| `tool_call` / `tool_result` | tool events | merged activity line («Изменён file.py», `+N −M`) + inset panel; consecutive same-type blocks grouped under spoiler |
+| `tool_call` / `tool_result` | tool events | merged activity line with **semantic RU labels** (not raw SDK names: «Удалён path», «Поиск файлов pattern», «Запущена команда»); `+N −M` diff badge; inset panel on tap. ≥2 consecutive tools → **WorkSession** spoiler («Работаю…» while streaming / «Работал · N действий» when done); expand shows inner same-kind sub-groups |
 | `approval` | tool_approval_request | inline Allow/Deny + full-page HITL |
 | `subagent` | subagent_* | muted line + inset sidechain |
 | `plan` | task_progress | checklist (tasks with titles only) |

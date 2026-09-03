@@ -3,17 +3,17 @@ import 'package:prodavan/core/chat/models/chat_block.dart';
 import 'package:prodavan/core/chat/widgets/blocks/chat_blocks.dart';
 import 'package:prodavan/core/chat/widgets/chat_display_grouping.dart';
 
-ChatBlock _toolCall(String name, {Map<String, dynamic>? input}) {
+ChatBlock _toolCall(String name, {Map<String, dynamic>? input, String? id}) {
   return ChatBlock(
     kind: 'tool_call',
-    raw: {'id': name, 'name': name, 'input': input ?? const {}},
+    raw: {'id': id ?? name, 'name': name, 'input': input ?? const {}},
   );
 }
 
-ChatBlock _toolResult(String name, {Object? output}) {
+ChatBlock _toolResult(String name, {Object? output, String? id}) {
   return ChatBlock(
     kind: 'tool_result',
-    raw: {'id': name, 'name': name, 'output': output},
+    raw: {'id': id ?? name, 'name': name, 'output': output},
   );
 }
 
@@ -28,21 +28,47 @@ void main() {
     expect(merged.first.paired?.kind, 'tool_result');
   });
 
-  test('groupDisplayEntries groups consecutive file edits', () {
+  test('groupDisplayEntries wraps mixed tools in WorkSession', () {
     final blocks = [
       _toolCall('edit', input: {'path': 'a.py'}),
       _toolResult('edit'),
-      _toolCall('write', input: {'path': 'b.py'}),
-      _toolResult('write'),
+      _toolCall('delete', input: {'path': 'b.py'}),
+      _toolResult('delete'),
       ChatBlock(kind: 'user', raw: {'text': 'hi'}),
     ];
     final entries = groupDisplayEntries(blocks);
     expect(entries.length, 2);
-    expect(entries.first, isA<ChatDisplayGroup>());
-    final group = entries.first as ChatDisplayGroup;
-    expect(group.kind, ActivityGroupKind.fileEdit);
-    expect(group.items.length, 2);
+    expect(entries.first, isA<ChatDisplayWorkSession>());
+    final session = entries.first as ChatDisplayWorkSession;
+    expect(session.items.length, 2);
     expect(entries.last, isA<ChatDisplaySingle>());
+  });
+
+  test('groupDisplayEntries single tool stays single', () {
+    final blocks = [
+      _toolCall('glob', input: {'globPattern': '*.dart'}),
+      _toolResult('glob'),
+    ];
+    final entries = groupDisplayEntries(blocks);
+    expect(entries.length, 1);
+    expect(entries.first, isA<ChatDisplaySingle>());
+  });
+
+  test('groupDisplayEntries assistant text breaks work session', () {
+    final blocks = [
+      _toolCall('edit', input: {'path': 'a.py'}),
+      _toolResult('edit'),
+      ChatBlock(kind: 'assistant_markdown', raw: {'text': 'Done.'}),
+      _toolCall('glob', input: {'globPattern': '*.dart'}),
+      _toolResult('glob'),
+      _toolCall('grep', input: {'pattern': 'foo'}),
+      _toolResult('grep'),
+    ];
+    final entries = groupDisplayEntries(blocks);
+    expect(entries.length, 3);
+    expect(entries[0], isA<ChatDisplaySingle>());
+    expect(entries[1], isA<ChatDisplaySingle>());
+    expect(entries[2], isA<ChatDisplayWorkSession>());
   });
 
   test('groupDisplayEntries does not mix thinking with tools', () {
@@ -56,6 +82,17 @@ void main() {
     expect(entries.length, 2);
     expect((entries[0] as ChatDisplayGroup).kind, ActivityGroupKind.thinking);
     expect(entries[1], isA<ChatDisplaySingle>());
+  });
+
+  test('groupInnerWorkItems groups same-kind deletes', () {
+    final items = [
+      (block: _toolCall('delete', input: {'path': 'a.py'}), paired: _toolResult('delete')),
+      (block: _toolCall('delete', input: {'path': 'b.py'}), paired: _toolResult('delete')),
+    ];
+    final inner = groupInnerWorkItems(items);
+    expect(inner.length, 1);
+    expect(inner.first, isA<ChatDisplayGroup>());
+    expect((inner.first as ChatDisplayGroup).kind, ActivityGroupKind.fileDelete);
   });
 
   test('aggregateDiffStats sums +/- across group items', () {

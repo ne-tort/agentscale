@@ -1074,6 +1074,80 @@
       "count": { "type": "int" }
     }
   },
+  "projectChatGroupDeleted": "Deleted {count} files",
+  "@projectChatGroupDeleted": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "projectChatGroupGlob": "File search ({count})",
+  "@projectChatGroupGlob": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "projectChatGroupGrep": "Search ({count})",
+  "@projectChatGroupGrep": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "projectChatGroupListDir": "List ({count})",
+  "@projectChatGroupListDir": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "projectChatGroupGeneric": "Tools ({count})",
+  "@projectChatGroupGeneric": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "projectChatWorking": "Working…",
+  "projectChatWorked": "Worked · {count} actions",
+  "@projectChatWorked": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "projectChatToolReadFile": "Read file",
+  "projectChatToolReadPath": "Read {path}",
+  "@projectChatToolReadPath": {
+    "placeholders": { "path": { "type": "String" } }
+  },
+  "projectChatToolWriteFile": "Wrote file",
+  "projectChatToolWritePath": "Wrote {path}",
+  "@projectChatToolWritePath": {
+    "placeholders": { "path": { "type": "String" } }
+  },
+  "projectChatToolEditFile": "Edited file",
+  "projectChatToolEditPath": "Edited {path}",
+  "@projectChatToolEditPath": {
+    "placeholders": { "path": { "type": "String" } }
+  },
+  "projectChatToolDeleteFile": "Deleted file",
+  "projectChatToolDeletePath": "Deleted {path}",
+  "@projectChatToolDeletePath": {
+    "placeholders": { "path": { "type": "String" } }
+  },
+  "projectChatToolGlob": "File search",
+  "projectChatToolGlobPattern": "File search {pattern}",
+  "@projectChatToolGlobPattern": {
+    "placeholders": { "pattern": { "type": "String" } }
+  },
+  "projectChatToolGrep": "Search",
+  "projectChatToolGrepPattern": "Search {pattern}",
+  "@projectChatToolGrepPattern": {
+    "placeholders": { "pattern": { "type": "String" } }
+  },
+  "projectChatToolListDir": "List files",
+  "projectChatToolListDirPath": "List {path}",
+  "@projectChatToolListDirPath": {
+    "placeholders": { "path": { "type": "String" } }
+  },
+  "projectChatToolShell": "Ran command",
+  "projectChatToolMcpGeneric": "MCP",
+  "projectChatToolMcp": "MCP: {tool}",
+  "@projectChatToolMcp": {
+    "placeholders": { "tool": { "type": "String" } }
+  },
+  "projectChatToolSubagent": "Subagent {name}",
+  "@projectChatToolSubagent": {
+    "placeholders": { "name": { "type": "String" } }
+  },
+  "projectChatToolGeneric": "Tool {name}",
+  "@projectChatToolGeneric": {
+    "placeholders": { "name": { "type": "String" } }
+  },
   "errorAgentProviderNetwork": "AI provider is unreachable from the container (network).",
   "errorAgentProviderRateLimit": "AI provider rate limit exceeded. Try again later.",
   "errorAgentProviderUnavailable": "AI provider is temporarily unavailable. Try again later.",

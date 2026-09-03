@@ -703,10 +703,15 @@ class AgentSessionService:
             rows = rows[:limit]
 
         events = [_event_public(r) for r in rows]
+        count_q = await self._session.execute(
+            select(func.count()).select_from(AgentEventRow).where(AgentEventRow.session_id == session_id)
+        )
+        total_events = int(count_q.scalar_one() or 0)
         meta = {
             "oldest_seq": rows[0].seq if rows else None,
             "newest_seq": rows[-1].seq if rows else None,
             "has_more": has_more,
+            "total_events": total_events,
         }
         return events, meta
 

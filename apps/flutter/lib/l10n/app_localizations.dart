@@ -3374,6 +3374,162 @@ abstract class AppLocalizations {
   /// **'MCP: {count} calls'**
   String projectChatGroupMcp(int count);
 
+  /// No description provided for @projectChatGroupDeleted.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted {count} files'**
+  String projectChatGroupDeleted(int count);
+
+  /// No description provided for @projectChatGroupGlob.
+  ///
+  /// In en, this message translates to:
+  /// **'File search ({count})'**
+  String projectChatGroupGlob(int count);
+
+  /// No description provided for @projectChatGroupGrep.
+  ///
+  /// In en, this message translates to:
+  /// **'Search ({count})'**
+  String projectChatGroupGrep(int count);
+
+  /// No description provided for @projectChatGroupListDir.
+  ///
+  /// In en, this message translates to:
+  /// **'List ({count})'**
+  String projectChatGroupListDir(int count);
+
+  /// No description provided for @projectChatGroupGeneric.
+  ///
+  /// In en, this message translates to:
+  /// **'Tools ({count})'**
+  String projectChatGroupGeneric(int count);
+
+  /// No description provided for @projectChatWorking.
+  ///
+  /// In en, this message translates to:
+  /// **'Working…'**
+  String get projectChatWorking;
+
+  /// No description provided for @projectChatWorked.
+  ///
+  /// In en, this message translates to:
+  /// **'Worked · {count} actions'**
+  String projectChatWorked(int count);
+
+  /// No description provided for @projectChatToolReadFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Read file'**
+  String get projectChatToolReadFile;
+
+  /// No description provided for @projectChatToolReadPath.
+  ///
+  /// In en, this message translates to:
+  /// **'Read {path}'**
+  String projectChatToolReadPath(String path);
+
+  /// No description provided for @projectChatToolWriteFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Wrote file'**
+  String get projectChatToolWriteFile;
+
+  /// No description provided for @projectChatToolWritePath.
+  ///
+  /// In en, this message translates to:
+  /// **'Wrote {path}'**
+  String projectChatToolWritePath(String path);
+
+  /// No description provided for @projectChatToolEditFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Edited file'**
+  String get projectChatToolEditFile;
+
+  /// No description provided for @projectChatToolEditPath.
+  ///
+  /// In en, this message translates to:
+  /// **'Edited {path}'**
+  String projectChatToolEditPath(String path);
+
+  /// No description provided for @projectChatToolDeleteFile.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted file'**
+  String get projectChatToolDeleteFile;
+
+  /// No description provided for @projectChatToolDeletePath.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted {path}'**
+  String projectChatToolDeletePath(String path);
+
+  /// No description provided for @projectChatToolGlob.
+  ///
+  /// In en, this message translates to:
+  /// **'File search'**
+  String get projectChatToolGlob;
+
+  /// No description provided for @projectChatToolGlobPattern.
+  ///
+  /// In en, this message translates to:
+  /// **'File search {pattern}'**
+  String projectChatToolGlobPattern(String pattern);
+
+  /// No description provided for @projectChatToolGrep.
+  ///
+  /// In en, this message translates to:
+  /// **'Search'**
+  String get projectChatToolGrep;
+
+  /// No description provided for @projectChatToolGrepPattern.
+  ///
+  /// In en, this message translates to:
+  /// **'Search {pattern}'**
+  String projectChatToolGrepPattern(String pattern);
+
+  /// No description provided for @projectChatToolListDir.
+  ///
+  /// In en, this message translates to:
+  /// **'List files'**
+  String get projectChatToolListDir;
+
+  /// No description provided for @projectChatToolListDirPath.
+  ///
+  /// In en, this message translates to:
+  /// **'List {path}'**
+  String projectChatToolListDirPath(String path);
+
+  /// No description provided for @projectChatToolShell.
+  ///
+  /// In en, this message translates to:
+  /// **'Ran command'**
+  String get projectChatToolShell;
+
+  /// No description provided for @projectChatToolMcpGeneric.
+  ///
+  /// In en, this message translates to:
+  /// **'MCP'**
+  String get projectChatToolMcpGeneric;
+
+  /// No description provided for @projectChatToolMcp.
+  ///
+  /// In en, this message translates to:
+  /// **'MCP: {tool}'**
+  String projectChatToolMcp(String tool);
+
+  /// No description provided for @projectChatToolSubagent.
+  ///
+  /// In en, this message translates to:
+  /// **'Subagent {name}'**
+  String projectChatToolSubagent(String name);
+
+  /// No description provided for @projectChatToolGeneric.
+  ///
+  /// In en, this message translates to:
+  /// **'Tool {name}'**
+  String projectChatToolGeneric(String name);
+
   /// No description provided for @errorAgentProviderNetwork.
   ///
   /// In en, this message translates to:

@@ -41,9 +41,11 @@ async def test_list_events_page_tail_returns_last_n_in_order() -> None:
         )
     )
     rows = [_event_row("ags_1", seq) for seq in (7, 6, 5, 4)]
-    result_mock = MagicMock()
-    result_mock.scalars.return_value.all.return_value = rows
-    session.execute = AsyncMock(return_value=result_mock)
+    page_mock = MagicMock()
+    page_mock.scalars.return_value.all.return_value = rows
+    count_mock = MagicMock()
+    count_mock.scalar_one.return_value = 42
+    session.execute = AsyncMock(side_effect=[page_mock, count_mock])
 
     events, meta = await svc._list_events_page(
         session_id="ags_1",
@@ -58,6 +60,7 @@ async def test_list_events_page_tail_returns_last_n_in_order() -> None:
     assert meta["oldest_seq"] == 5
     assert meta["newest_seq"] == 7
     assert meta["has_more"] is True
+    assert meta["total_events"] == 42
 
 
 @pytest.mark.asyncio
@@ -79,9 +82,11 @@ async def test_list_events_page_before_seq_returns_older_window() -> None:
         )
     )
     rows = [_event_row("ags_1", seq) for seq in (4, 3, 2)]
-    result_mock = MagicMock()
-    result_mock.scalars.return_value.all.return_value = rows
-    session.execute = AsyncMock(return_value=result_mock)
+    page_mock = MagicMock()
+    page_mock.scalars.return_value.all.return_value = rows
+    count_mock = MagicMock()
+    count_mock.scalar_one.return_value = 10
+    session.execute = AsyncMock(side_effect=[page_mock, count_mock])
 
     events, meta = await svc._list_events_page(
         session_id="ags_1",
@@ -96,3 +101,4 @@ async def test_list_events_page_before_seq_returns_older_window() -> None:
     assert meta["oldest_seq"] == 3
     assert meta["newest_seq"] == 4
     assert meta["has_more"] is True
+    assert meta["total_events"] == 10
