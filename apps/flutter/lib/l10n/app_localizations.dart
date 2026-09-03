@@ -4214,6 +4214,24 @@ abstract class AppLocalizations {
   /// **'About'**
   String get projectAboutColumn;
 
+  /// No description provided for @projectChatsColumn.
+  ///
+  /// In en, this message translates to:
+  /// **'Chats'**
+  String get projectChatsColumn;
+
+  /// No description provided for @projectBudgetColumn.
+  ///
+  /// In en, this message translates to:
+  /// **'Budget'**
+  String get projectBudgetColumn;
+
+  /// No description provided for @projectBudgetStub.
+  ///
+  /// In en, this message translates to:
+  /// **'—'**
+  String get projectBudgetStub;
+
   /// No description provided for @projectCreatorColumn.
   ///
   /// In en, this message translates to:

@@ -2372,6 +2372,15 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectAboutColumn => 'О проекте';
 
   @override
+  String get projectChatsColumn => 'Чаты';
+
+  @override
+  String get projectBudgetColumn => 'Бюджет';
+
+  @override
+  String get projectBudgetStub => '—';
+
+  @override
   String get projectCreatorColumn => 'Создатель';
 
   @override

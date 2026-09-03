@@ -29,7 +29,7 @@ OIDC Login
 ## Внутри кабинета
 
 1. System: Overview / Projects / modules / Management; **Chats** — peer `railExtra` block **after** all destinations (not nested under Projects); Settings trailing.  
-2. Tap project = **select + open settings**; selected **active** row uses green (`success`) text; pause/error/draft keep status colors. Visiting settings/workspace auto-selects the project. Delete selected → clear selection.  
+2. Tap project = **select + open settings**; columns: about / chats / budget (stub «—»); selected **active** row uses green (`success`) text. Settings «Чат» (no subtitle) → create session + open workspace. Delete selected → clear selection.  
 3. Workspace требует `sessionId`; attachments OK.  
 4. Агент может добавить tab/table → UI refresh. Secondary tabs = EntityCollection from `ui_json`.
 5. New chat titles: «Новый диалог» / default session «Диалог» then «Диалог {n}» (API ordinal); UI null title → «Диалог».
@@ -75,9 +75,9 @@ Cursor-style field: **+** (chat settings) → attach → text → send/stop; е�
 - **Read when pod down / error:** transcript loads from DB for `status=active|error`; composer disabled with hint until `status=active` and `observed_state == running`.
 - **Pagination:** tail load (`limit`, default 100) + `before_seq` cursor on scroll-up; skeleton bubbles on initial load (no spinner).
 - **Load perf:** `getProject` ∥ `loadTranscript(sessionId)` on bootstrap; `loadModels` deferred; `pending_approvals` in transcript; cache key `(projectId, sessionId)`.
-- **Scroll:** `ListView(reverse: true)`; pin near offset 0; `loadOlder` near `maxScrollExtent`; auto-`loadOlder` when content shorter than viewport; **no** scroll-to-bottom on history prepend.
+- **Scroll:** plain chronological `ListView` (no reverse); no auto pin/jump on stream or prepend; `loadOlder` when user scrolls near top.
 - **Selection:** single `SelectionArea` over the message list; markdown/`Text` participate in one selection (Ctrl+C = rendered plain text).
-- **Settings:** «Чат» tile hints to open from sidebar (no auto-open latest).
+- **Settings:** «Чат» (no subtitle) → create session + open workspace.
 - **Sidebar API:** `GET/PUT …/me/selection`, `GET …/chats/sidebar`, `PATCH …/sessions/{id}` (`title`, `pin`).
 - **Tool panels:** semantic labels from input; expand body is code-style panel (not raw Map dump); unwrap `{status,value}` / `{success}` payloads.
 - **Tables:** GFM `TableSyntax` + `normalizeChatMarkdownTables` for glued/`||` LLM output before render.

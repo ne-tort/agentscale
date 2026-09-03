@@ -17,6 +17,7 @@ import 'package:prodavan/features/employee/project_ai_key_select_page.dart';
 import 'package:prodavan/features/employee/project_container_page.dart';
 import 'package:prodavan/features/employee/project_management_page.dart';
 import 'package:prodavan/features/employee/project_modules_list_page.dart';
+import 'package:prodavan/features/employee/project_workspace_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Project settings — name, about, launch/pause/resume, AI provider, modules nav.
@@ -336,20 +337,34 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
             AppPreferenceTile(
               title: l10n.projectOpenChat,
               icon: Icons.chat_bubble_outline,
-              subtitle: Text(l10n.chatOpenFromSidebarHint),
               trailing: const AppTrailingChevron(),
               onTap: () async {
-                // Multi-chat: select this project for the rail, then return to shell.
                 try {
                   await workContext.selectProject(
                     cabinetId: widget.cabinetId,
                     projectId: widget.projectId,
                   );
-                } catch (_) {
-                  /* selection is best-effort */
+                  final created = await workContext.api.createAgentSession(
+                    projectId: widget.projectId,
+                  );
+                  final sessionId = created['id'] as String?;
+                  if (sessionId == null) return;
+                  if (!mounted) return;
+                  await Navigator.of(context).push<void>(
+                    MaterialPageRoute<void>(
+                      builder: (_) => ProjectWorkspacePage(
+                        cabinetId: widget.cabinetId,
+                        projectId: widget.projectId,
+                        projectName: _name.isNotEmpty ? _name : widget.projectId,
+                        sessionId: sessionId,
+                        initialTitle: created['title'] as String?,
+                      ),
+                    ),
+                  );
+                } catch (e) {
+                  if (!mounted) return;
+                  AppErrors.showSnack(context, e);
                 }
-                if (!mounted) return;
-                Navigator.of(context).pop();
               },
             ),
           AppValuePreference<String>(

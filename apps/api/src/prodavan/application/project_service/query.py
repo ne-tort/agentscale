@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.company_service import AdminCompanyService
@@ -14,6 +14,7 @@ from prodavan.application.project_service.public import project_public
 from prodavan.domain.admin import attachment_max_bytes
 from prodavan.domain.identity import Principal
 from prodavan.domain.projects import ProjectStatus
+from prodavan.infrastructure.persistence.models.agent import AgentSessionRow
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
 
@@ -113,6 +114,14 @@ class ProjectQuery:
                 select(EmployeeRow.id, EmployeeRow.login).where(EmployeeRow.id.in_(owner_ids))
             )
             logins = {eid: login for eid, login in eq.all()}
+        chat_counts: dict[str, int] = {}
+        if rows:
+            cq = await self._session.execute(
+                select(AgentSessionRow.project_id, func.count())
+                .where(AgentSessionRow.project_id.in_([r.id for r in rows]))
+                .group_by(AgentSessionRow.project_id)
+            )
+            chat_counts = {pid: int(n) for pid, n in cq.all()}
         items: list[dict] = []
         for row in rows:
             if not await self._access.can_view_project(
@@ -133,6 +142,7 @@ class ProjectQuery:
                 company_subscription=subscription,
                 created_by_login=login,
             )
+            item["chat_count"] = chat_counts.get(row.id, 0)
             if runtime:
                 item["observed_state"] = runtime.get("observed_state")
                 item["container_last_error"] = runtime.get("last_error")

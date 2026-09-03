@@ -155,30 +155,6 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
     return '${text.substring(0, _aboutMaxLen)}…';
   }
 
-  String _statusLabel(Map<String, dynamic> project, AppLocalizations l10n) {
-    final status = project['status'] as String?;
-    if (projectShowsContainerError(project)) {
-      return l10n.containerObservedFailed;
-    }
-    return switch (status) {
-      'active' => l10n.adminContainerStatusActive,
-      'paused' => l10n.adminContainerStatusPaused,
-      'error' => l10n.containerObservedFailed,
-      'draft' => l10n.adminContainerStatusDraft,
-      _ => status ?? l10n.commonEmDash,
-    };
-  }
-
-  Color? _statusColor(BuildContext context, Map<String, dynamic> project) {
-    if (projectShowsContainerError(project)) {
-      return context.appColors.danger;
-    }
-    final status = project['status'] as String?;
-    if (status == 'error') return context.appColors.danger;
-    if (status == 'draft' || status == 'paused') return context.appColors.warning;
-    return null;
-  }
-
   Color? _rowColor(BuildContext context, Map<String, dynamic> project) {
     final id = project['id'] as String?;
     final status = project['status'] as String?;
@@ -202,16 +178,10 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
             id: p['id'] as String,
             title: p['name'] as String? ?? p['id'] as String,
             rowColor: _rowColor(context, p),
-            cellWidgets: {
-              'status': Text(
-                _statusLabel(p, l10n),
-                style: TextStyle(color: _statusColor(context, p)),
-              ),
-            },
             cells: {
               'about': _truncateAbout(p['about'] as String?),
-              'creator': p['created_by_login'] as String? ?? '—',
-              'status': _statusLabel(p, l10n),
+              'chats': '${p['chat_count'] ?? 0}',
+              'budget': l10n.projectBudgetStub,
             },
           ),
         )
@@ -246,8 +216,8 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
                   rows: rows,
                   columns: [
                     AppEntityColumn(id: 'about', label: l10n.projectAboutColumn),
-                    AppEntityColumn(id: 'creator', label: l10n.projectCreatorColumn),
-                    AppEntityColumn(id: 'status', label: l10n.projectProjectStatus),
+                    AppEntityColumn(id: 'chats', label: l10n.projectChatsColumn),
+                    AppEntityColumn(id: 'budget', label: l10n.projectBudgetColumn),
                   ],
                   onOpen: _openProject,
                   onDelete: _delete,

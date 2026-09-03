@@ -2360,6 +2360,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectAboutColumn => 'About';
 
   @override
+  String get projectChatsColumn => 'Chats';
+
+  @override
+  String get projectBudgetColumn => 'Budget';
+
+  @override
+  String get projectBudgetStub => '—';
+
+  @override
   String get projectCreatorColumn => 'Creator';
 
   @override

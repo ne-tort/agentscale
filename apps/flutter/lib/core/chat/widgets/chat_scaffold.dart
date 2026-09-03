@@ -14,12 +14,6 @@ import 'package:prodavan/l10n/app_localizations.dart';
 const _kScrollCacheExtent = 700.0;
 const _kStickThreshold = 48.0;
 
-int _blocksScrollFingerprint(List<ChatBlock> blocks) {
-  if (blocks.isEmpty) return 0;
-  final last = blocks.last;
-  return Object.hash(blocks.length, last.kind, last.text.length, last.isStreaming);
-}
-
 /// Stable across stream text growth (prefix-based); prefers explicit tool/call ids.
 String _stableBlockKey(ChatBlock block) {
   if (block.id.isNotEmpty) return '${block.kind}-${block.id}';
@@ -148,60 +142,24 @@ class ChatMessageList extends StatefulWidget {
 
 class ChatMessageListState extends State<ChatMessageList> {
   final _scroll = ScrollController();
-  bool _pinnedToBottom = true;
-  bool _didInitialJump = false;
-  int _lastFingerprint = 0;
-  int _lastBlockCount = 0;
+  bool _loadingOlder = false;
 
   @override
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
-    _lastFingerprint = _blocksScrollFingerprint(widget.blocks);
-    _lastBlockCount = widget.blocks.length;
-  }
-
-  /// reverse:true — visual bottom is offset 0.
-  bool _isPinnedToBottom([ScrollMetrics? metrics]) {
-    final m = metrics ?? (_scroll.hasClients ? _scroll.position : null);
-    if (m == null) return true;
-    return m.pixels <= _kStickThreshold;
-  }
-
-  void _scrollToBottom({bool animate = false}) {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scroll.hasClients) return;
-      if (animate) {
-        _scroll.animateTo(
-          0,
-          duration: const Duration(milliseconds: 120),
-          curve: Curves.easeOut,
-        );
-      } else {
-        _scroll.jumpTo(0);
-      }
-    });
-  }
-
-  void _maybeAutoloadOlder() {
-    if (!_scroll.hasClients) return;
-    if (!widget.hasMoreHistory || widget.loadingHistory || widget.onLoadOlder == null) {
-      return;
-    }
-    // Content shorter than viewport — load older without waiting for user scroll.
-    if (_scroll.position.maxScrollExtent < _kStickThreshold) {
-      widget.onLoadOlder!();
-    }
   }
 
   void _onScroll() {
     if (!_scroll.hasClients) return;
     final pos = _scroll.position;
-    _pinnedToBottom = _isPinnedToBottom(pos);
-    if (pos.pixels >= pos.maxScrollExtent - _kStickThreshold &&
+    // Chronological list: older history is near offset 0.
+    if (pos.pixels <= _kStickThreshold &&
         widget.hasMoreHistory &&
         !widget.loadingHistory &&
+        !_loadingOlder &&
         widget.onLoadOlder != null) {
+      _loadingOlder = true;
       widget.onLoadOlder!();
     }
   }
@@ -244,38 +202,9 @@ class ChatMessageListState extends State<ChatMessageList> {
   @override
   void didUpdateWidget(covariant ChatMessageList oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final fp = _blocksScrollFingerprint(widget.blocks);
-    final countGrew = widget.blocks.length > _lastBlockCount;
-    final prepended = countGrew &&
-        (widget.loadingHistory ||
-            oldWidget.loadingHistory ||
-            (widget.blocks.isNotEmpty &&
-                oldWidget.blocks.isNotEmpty &&
-                widget.blocks.first.id != oldWidget.blocks.first.id &&
-                widget.blocks.last.id == oldWidget.blocks.last.id));
-
-    if (prepended || widget.loadingHistory || oldWidget.loadingHistory) {
-      // History load: never yank to bottom; reverse list keeps visual bottom stable.
-      _lastFingerprint = fp;
-      _lastBlockCount = widget.blocks.length;
-      if (oldWidget.loadingHistory && !widget.loadingHistory) {
-        WidgetsBinding.instance.addPostFrameCallback((_) => _maybeAutoloadOlder());
-      }
-      return;
+    if (oldWidget.loadingHistory && !widget.loadingHistory) {
+      _loadingOlder = false;
     }
-
-    if (fp != _lastFingerprint) {
-      final wasPinned = _scroll.hasClients ? _isPinnedToBottom() : _pinnedToBottom;
-      _lastFingerprint = fp;
-      _lastBlockCount = widget.blocks.length;
-      _pinnedToBottom = wasPinned;
-      if (wasPinned) {
-        _scrollToBottom(animate: _didInitialJump);
-      }
-      return;
-    }
-
-    _lastBlockCount = widget.blocks.length;
   }
 
   @override
@@ -289,33 +218,16 @@ class ChatMessageListState extends State<ChatMessageList> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final entries = groupDisplayEntries(widget.blocks, turnStreaming: widget.turnStreaming);
-    // reverse:true — index 0 is visual bottom (newest).
-    final visual = entries.reversed.toList();
-
-    if (!_didInitialJump && widget.blocks.isNotEmpty) {
-      _didInitialJump = true;
-      _scrollToBottom();
-      WidgetsBinding.instance.addPostFrameCallback((_) => _maybeAutoloadOlder());
-    }
 
     return Stack(
       children: [
         SelectionArea(
-          child: NotificationListener<ScrollNotification>(
-            onNotification: (n) {
-              if (n is ScrollUpdateNotification || n is UserScrollNotification) {
-                _pinnedToBottom = _isPinnedToBottom(n.metrics);
-              }
-              return false;
-            },
-            child: ListView.builder(
-              controller: _scroll,
-              reverse: true,
-              padding: EdgeInsets.all(AppSpacing.md),
-              cacheExtent: _kScrollCacheExtent,
-              itemCount: visual.length,
-              itemBuilder: (context, index) => _renderEntry(l10n, visual[index]),
-            ),
+          child: ListView.builder(
+            controller: _scroll,
+            padding: EdgeInsets.all(AppSpacing.md),
+            cacheExtent: _kScrollCacheExtent,
+            itemCount: entries.length,
+            itemBuilder: (context, index) => _renderEntry(l10n, entries[index]),
           ),
         ),
         if (widget.loadingHistory)
