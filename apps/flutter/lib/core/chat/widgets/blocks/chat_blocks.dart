@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:markdown/markdown.dart' as md;
 
+import 'package:prodavan/core/chat/markdown_table_normalize.dart';
 import 'package:prodavan/core/chat/models/chat_block.dart';
 import 'package:prodavan/core/chat/thinking_duration.dart';
 import 'package:prodavan/core/chat/tool_activity_labels.dart';
@@ -110,7 +111,7 @@ class ChatCodePanel extends StatelessWidget {
         color: scheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(8),
       ),
-      child: SelectableText(
+      child: Text(
         text,
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
               fontFamily: 'monospace',
@@ -122,20 +123,21 @@ class ChatCodePanel extends StatelessWidget {
 }
 
 class ChatMarkdownBody extends StatelessWidget {
-  const ChatMarkdownBody({super.key, required this.text, this.selectable = true});
+  const ChatMarkdownBody({super.key, required this.text});
 
   final String text;
-  final bool selectable;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     if (text.isEmpty) return const SizedBox.shrink();
+    final data = normalizeChatMarkdownTables(text);
+    final base = MarkdownStyleSheet.fromTheme(Theme.of(context));
     return MarkdownBody(
-      data: text,
-      selectable: selectable,
+      data: data,
+      selectable: false,
       extensionSet: md.ExtensionSet.gitHubWeb,
-      styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context)).copyWith(
+      styleSheet: base.copyWith(
         p: Theme.of(context).textTheme.bodyMedium,
         code: TextStyle(
           fontFamily: 'monospace',
@@ -145,6 +147,16 @@ class ChatMarkdownBody extends StatelessWidget {
           color: scheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(8),
         ),
+        tableHead: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+        tableBody: Theme.of(context).textTheme.bodyMedium,
+        tableBorder: TableBorder.all(
+          color: scheme.outlineVariant.withValues(alpha: 0.55),
+          width: 1,
+        ),
+        tableHeadAlign: TextAlign.start,
+        tableCellsPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        tableColumnWidth: const IntrinsicColumnWidth(),
+        tableScrollbarThumbVisibility: true,
       ),
     );
   }
@@ -165,7 +177,7 @@ class AssistantStreamBlock extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (streaming)
-          SelectableText(text, style: Theme.of(context).textTheme.bodyMedium)
+          Text(text, style: Theme.of(context).textTheme.bodyMedium)
         else if (text.isNotEmpty)
           ChatMarkdownBody(text: text),
         if (cancelled)
@@ -200,7 +212,7 @@ class UserMessageBlock extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            SelectableText(text),
+            Text(text),
             for (final ref in attachmentRefs)
               Padding(
                 padding: EdgeInsets.only(top: AppSpacing.xs),
@@ -370,7 +382,7 @@ class ApprovalBlock extends StatelessWidget {
         children: [
           Text(name, style: Theme.of(context).textTheme.titleSmall),
           SizedBox(height: AppSpacing.xs),
-          ChatInsetPanel(child: SelectableText(input.toString())),
+          ChatInsetPanel(child: Text(input.toString())),
           SizedBox(height: AppSpacing.sm),
           Row(
             children: [
@@ -539,7 +551,7 @@ class _ThinkingBlockState extends State<ThinkingBlock> {
         ),
         if (_open && widget.text.isNotEmpty)
           ChatInsetPanel(
-            child: SelectableText(widget.text, style: _mutedBodyStyle(context)),
+            child: Text(widget.text, style: _mutedBodyStyle(context)),
           ),
       ],
     );

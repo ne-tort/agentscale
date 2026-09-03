@@ -1,0 +1,152 @@
+/// Normalize LLM / non-GFM pipe tables so [MarkdownBody] TableSyntax can parse them.
+///
+/// Handles:
+/// - rows glued into one line (`|| a | b || |---| || c | d ||`)
+/// - double-pipe row wrappers (`|| … ||` → `| … |`)
+/// - missing separator row after a header
+String normalizeChatMarkdownTables(String source) {
+  if (!source.contains('|')) return source;
+
+  final lines = <String>[];
+  for (final line in source.split('\n')) {
+    lines.addAll(_expandPossiblyGluedTableLine(line));
+  }
+  return _ensureTableSeparators(lines).join('\n');
+}
+
+final _separatorRowRe = RegExp(
+  r'^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$',
+);
+
+bool _looksLikeSeparator(String line) => _separatorRowRe.hasMatch(line.trim());
+
+bool _looksLikeTableRow(String line) {
+  final t = line.trim();
+  if (!t.contains('|')) return false;
+  if (_looksLikeSeparator(t)) return true;
+  return RegExp(r'\|').allMatches(t).length >= 2;
+}
+
+List<String> _expandPossiblyGluedTableLine(String line) {
+  final trimmed = line.trim();
+  if (!trimmed.contains('|')) return [line];
+
+  final hasDoublePipe = trimmed.contains('||');
+  final hasSep = RegExp(r'\|[\t ]*:?-+:?[\t ]*\|').hasMatch(trimmed);
+  final gluedBoundary = RegExp(r'\|\s+\|').hasMatch(trimmed);
+
+  // Ordinary single markdown table row (or prose) — leave unchanged.
+  if (!hasDoublePipe && !gluedBoundary) {
+    return [line];
+  }
+
+  if (hasDoublePipe) {
+    final rows = _splitDoublePipeRows(trimmed);
+    if (rows.isNotEmpty) return rows;
+  }
+
+  // Glued `| a | b | |---| | c | d |` → break before next row / separator.
+  var work = trimmed;
+  work = work.replaceAllMapped(
+    RegExp(r'\|\s+(\|(?:[\t ]*:?-+:?[\t ]*\|)+)'),
+    (m) => '|\n${m.group(1)}',
+  );
+  work = work.replaceAllMapped(
+    RegExp(r'\|\s+\|(?=\s*[^|\s-])'),
+    (_) => '|\n|',
+  );
+
+  // If separator was mid-line without the glued-boundary pattern above.
+  if (hasSep && !work.contains('\n')) {
+    work = work.replaceAllMapped(
+      RegExp(r'\|(\s*\|[\t ]*:?-+:?[\t ]*(?:\|[\t ]*:?-+:?[\t ]*)*\|?)'),
+      (m) {
+        final frag = m.group(1)!;
+        if (_looksLikeSeparator(frag) || _looksLikeSeparator(frag.startsWith('|') ? frag : '|$frag')) {
+          return '|\n${frag.startsWith('|') ? frag : '|$frag'}';
+        }
+        return m.group(0)!;
+      },
+    );
+  }
+
+  final parts = work
+      .split('\n')
+      .map(_normalizeTableRow)
+      .where((s) => s.trim().isNotEmpty)
+      .toList();
+  return parts.isEmpty ? [line] : parts;
+}
+
+List<String> _splitDoublePipeRows(String line) {
+  final rows = <String>[];
+  final re = RegExp(r'\|\|(.+?)\|\|');
+  var last = 0;
+  var matched = false;
+  for (final m in re.allMatches(line)) {
+    matched = true;
+    final between = line.substring(last, m.start).trim();
+    if (between.isNotEmpty) {
+      rows.add(_normalizeTableRow(between));
+    }
+    rows.add(_normalizeTableRow('|${m.group(1)!.trim()}|'));
+    last = m.end;
+  }
+  if (!matched) return const [];
+  final rest = line.substring(last).trim();
+  if (rest.isNotEmpty) rows.add(_normalizeTableRow(rest));
+  return rows.where((s) => s.trim().isNotEmpty).toList();
+}
+
+String _normalizeTableRow(String row) {
+  var r = row.trim();
+  while (r.startsWith('||')) {
+    r = r.substring(1).trimLeft();
+  }
+  while (r.endsWith('||')) {
+    r = r.substring(0, r.length - 1).trimRight();
+  }
+  r = r.replaceAll('||', '|');
+  if (!_looksLikeTableRow(r) && !_looksLikeSeparator(r)) {
+    return r;
+  }
+  if (!r.startsWith('|')) r = '| $r';
+  if (!r.endsWith('|')) r = '$r |';
+  if (_looksLikeSeparator(r)) {
+    return r.replaceAll(RegExp(r'\s+'), '');
+  }
+  return r;
+}
+
+List<String> _ensureTableSeparators(List<String> lines) {
+  if (lines.length < 2) return lines;
+  final out = <String>[];
+  for (var i = 0; i < lines.length; i++) {
+    final cur = lines[i];
+    out.add(cur);
+    if (!_looksLikeTableRow(cur) || _looksLikeSeparator(cur)) continue;
+    if (i + 1 >= lines.length) continue;
+    final next = lines[i + 1];
+    if (!_looksLikeTableRow(next) || _looksLikeSeparator(next)) continue;
+    // Only between first header row and following body when separator is missing.
+    final prev = out.length >= 2 ? out[out.length - 2] : null;
+    final startOfTable = prev == null || !_looksLikeTableRow(prev);
+    if (!startOfTable) continue;
+    final cols = _columnCount(cur);
+    if (cols < 2) continue;
+    out.add(_separatorForColumns(cols));
+  }
+  return out;
+}
+
+int _columnCount(String row) {
+  var inner = row.trim();
+  if (inner.startsWith('|')) inner = inner.substring(1);
+  if (inner.endsWith('|')) inner = inner.substring(0, inner.length - 1);
+  return inner.split('|').length;
+}
+
+String _separatorForColumns(int cols) {
+  final cells = List.filled(cols, '---');
+  return '|${cells.join('|')}|';
+}
