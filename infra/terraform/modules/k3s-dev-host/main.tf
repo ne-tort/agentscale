@@ -77,7 +77,8 @@ resource "null_resource" "k3s_server" {
   triggers = {
     # k3s_version intentionally NOT in triggers: already-running path skips
     # reinstall; changing the var alone must not churn SSH provisioners.
-    rev       = "v7-wsl-boot-heal"
+    # v8: fix remote-exec quoting — bash -lc '… tr -d '\r' …' became tr -d r (stripped all r).
+    rev       = "v8-heal-crlf-quote"
     http_port = tostring(var.http_port)
     cluster   = var.cluster_name
     traefik_tpl = filesha256("${path.module}/templates/traefik-port.yaml.tpl")
@@ -157,13 +158,17 @@ resource "null_resource" "k3s_server" {
       timeout     = "10m"
     }
     inline = [
-      "bash -lc 'set -euo pipefail",
+      # Do NOT wrap this block in bash -lc '...': nested tr -d '\r' breaks the outer
+      # single quotes and becomes `tr -d r`, which strips every letter r from scripts.
+      "set -euo pipefail",
       "export PATH=\"$HOME/.local/bin:/usr/sbin:/usr/bin:$PATH\"",
       "sudo -n mkdir -p /var/lib/rancher/k3s/server/manifests /etc/rancher/k3s /etc/systemd/system/k3s.service.d /usr/local/lib/prodavan",
       "sudo -n cp /tmp/prodavan-traefik-port.yaml /var/lib/rancher/k3s/server/manifests/prodavan-traefik-port.yaml",
       "sudo -n cp /tmp/prodavan-boot-heal.conf /etc/systemd/system/k3s.service.d/prodavan-boot-heal.conf",
-      "tr -d '\\r' < /tmp/prodavan-k3s-preflight.sh | sudo -n tee /usr/local/lib/prodavan/k3s-preflight.sh >/dev/null",
-      "tr -d '\\r' < /tmp/prodavan-post-k3s-heal.sh | sudo -n tee /usr/local/lib/prodavan/post-k3s-heal.sh >/dev/null",
+      "python3 -c \"from pathlib import Path; p=Path('/tmp/prodavan-k3s-preflight.sh'); Path('/tmp/prodavan-k3s-preflight.lf').write_bytes(p.read_bytes().replace(b'\\r', b''))\"",
+      "python3 -c \"from pathlib import Path; p=Path('/tmp/prodavan-post-k3s-heal.sh'); Path('/tmp/prodavan-post-k3s-heal.lf').write_bytes(p.read_bytes().replace(b'\\r', b''))\"",
+      "sudo -n cp /tmp/prodavan-k3s-preflight.lf /usr/local/lib/prodavan/k3s-preflight.sh",
+      "sudo -n cp /tmp/prodavan-post-k3s-heal.lf /usr/local/lib/prodavan/post-k3s-heal.sh",
       "sudo -n chmod 755 /usr/local/lib/prodavan/k3s-preflight.sh /usr/local/lib/prodavan/post-k3s-heal.sh",
       "sudo -n rm -f /etc/systemd/system/k3s.service.d/prodavan-wsl-stop.conf",
       # Docker Engine inside WSL fights k3s CNI; runners use Docker Desktop on Windows.
@@ -184,7 +189,7 @@ resource "null_resource" "k3s_server" {
       "mkdir -p /home/${var.ssh_user}/.kube",
       "sudo -n cp /etc/rancher/k3s/k3s.yaml ${local.kubeconfig_path}",
       "sudo -n chown ${var.ssh_user}:${var.ssh_user} ${local.kubeconfig_path}",
-      "chmod 600 ${local.kubeconfig_path}'",
+      "chmod 600 ${local.kubeconfig_path}",
     ]
   }
 }

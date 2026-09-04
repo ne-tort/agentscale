@@ -84,7 +84,8 @@ spec:
           restartPolicy: Never
           containers:
             - name: heal
-              image: bitnami/kubectl:1.31.4
+              # bitnami/* public tags removed (→ bitnamilegacy); keep bash for this script.
+              image: bitnamilegacy/kubectl:1.31.4
               imagePullPolicy: IfNotPresent
               command:
                 - /bin/bash

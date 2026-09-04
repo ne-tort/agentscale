@@ -10,6 +10,7 @@ import pytest
 from prodavan_ops.k8s import FIRST_PARTY_DEPLOYMENTS, assert_kubeconfig_docker_ready
 from prodavan_ops.validate import (
     FIRST_PARTY_LATEST,
+    REQUIRED_SNIPPETS,
     assert_no_compose_or_k3d,
     assert_no_shell_scripts,
     verify_image_pins,
@@ -119,6 +120,7 @@ redis:7.4.11-alpine
 minio/minio:RELEASE.2024-10-02T17-50-41Z
 redpanda:v24.2.4
 quay.io/keycloak/keycloak:26.0
+bitnamilegacy/kubectl:1.31.4
 """
     verify_image_pins(manifest)
 
@@ -228,4 +230,35 @@ def test_boot_heal_templates_present() -> None:
     assert "%%{http_code}" in post
     assert "ExecStartPost" in dropin
     assert "TimeoutStopSec=30" in dropin
+    assert "post-k3s-heal.sh" in dropin
+    assert ">>/var/log/prodavan-post-k3s-heal.log" in dropin
+
+
+def test_k3s_dev_host_crlf_strip_not_nested_in_bash_lc_quotes() -> None:
+    """Regression: bash -lc '… tr -d '\\r' …' → tr -d r and strips every letter r."""
+    main_tf = (
+        Path(__file__).resolve().parents[2]
+        / "terraform"
+        / "modules"
+        / "k3s-dev-host"
+        / "main.tf"
+    ).read_text(encoding="utf-8")
+    assert 'rev       = "v8-heal-crlf-quote"' in main_tf
+    assert "prodavan-k3s-preflight.lf" in main_tf
+    assert "read_bytes().replace" in main_tf
+    assert "tr -d '\\r' < /tmp/prodavan-k3s-preflight.sh" not in main_tf
+    assert "tr -d '\\r' < /tmp/prodavan-post-k3s-heal.sh" not in main_tf
+
+
+def test_cluster_heal_uses_bitnamilegacy_kubectl() -> None:
+    cron = (
+        Path(__file__).resolve().parents[2]
+        / "k3s"
+        / "overlays"
+        / "dev"
+        / "cluster-heal-cronjob.yaml"
+    ).read_text(encoding="utf-8")
+    assert "bitnamilegacy/kubectl:1.31.4" in cron
+    assert "bitnami/kubectl:" not in cron
+    assert "bitnamilegacy/kubectl:1.31.4" in REQUIRED_SNIPPETS
 

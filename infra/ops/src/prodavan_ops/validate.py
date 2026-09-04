@@ -25,7 +25,9 @@ REQUIRED_SNIPPETS = (
     "minio/minio:RELEASE.2024-10-02T17-50-41Z",
     "redpanda:v24.2.4",
     "quay.io/keycloak/keycloak:26.0",
+    "bitnamilegacy/kubectl:1.31.4",
 )
+FORBIDDEN_BITNAMI_PUBLIC = re.compile(r"^bitnami/")
 
 
 def _run(cmd: list[str], *, cwd: Path | None = None, env: dict | None = None, timeout: float = 120.0) -> str:
@@ -131,6 +133,10 @@ def verify_image_pins(manifest: str) -> None:
             raise RuntimeError(f"first-party image must be :latest (got {img})")
         if FORBIDDEN_INFRA_LATEST.match(img):
             raise RuntimeError(f"infra image must be a frozen version tag (got {img})")
+        if FORBIDDEN_BITNAMI_PUBLIC.match(img):
+            raise RuntimeError(
+                f"public docker.io/bitnami/* catalog removed; use bitnamilegacy/… (got {img})"
+            )
         if img.endswith(":latest"):
             raise RuntimeError(f"third-party must not use :latest (got {img})")
     if first_party < 2:

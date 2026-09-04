@@ -94,7 +94,10 @@ Runner (outside k3s): [`infra/github-runner/README.md`](../../infra/github-runne
 |-------|-----|
 | Windows: `localhost:8088` connection refused | `tools/win-wsl-keepalive.ps1`; подожди до 6 мин; Admin `.\tools\win-wsl-portforward.ps1`; WSL `prodavan-ops heal` |
 | k3s flaps / NodeNotReady after reboot | `terraform apply` (boot-heal drop-in); mask docker in WSL; `prodavan-ops heal` |
+| WSL `InitTerminate` / k3s dies when agent exits | Win10 tears down distro after last `wsl.exe` — run `tools/win-wsl-keepalive.ps1` |
 | API pod Terminating, 502 | `prodavan-ops heal` (force-delete stuck); dev CronJob `prodavan-cluster-heal` |
+| cluster-heal `ErrImagePull` bitnami/kubectl | public `docker.io/bitnami/*` removed — overlay pin is `bitnamilegacy/kubectl:1.31.4` |
+| boot-heal scripts `#!/us/bin/env` / status=203 | terraform remote-exec quoting bug (fixed v8); restore via `terraform apply` |
 | kubectl connection refused | k3s running? `sudo systemctl status k3s` |
 | Argo OutOfSync | merge to `main`; check Application `prodavan-dev` |
 | ImagePullBackOff (platform or project pod) | `ghcr-pull` в **`prodavan`** и **`prodavan-sandboxes`** — [`SECRETS.md`](../../infra/k3s/overlays/dev/SECRETS.md) |
