@@ -39,7 +39,7 @@ Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** depe
 
 ### Chat UX (project workspace)
 
-- **Multi-chat** — несколько agent sessions на project; selected project и pin — **per employee**. Rail: peer блок чатов («Новый диалог» → pins → чаты проекта). Settings «Чат» → create session + workspace. Таблица проектов: about / chats / budget (stub). Workspace только с явным `sessionId`.
+- **Multi-chat** — несколько agent sessions на project; selected project и pin — **per employee**. Rail: peer блок чатов («Новый диалог» → pins → чаты проекта). «Новый диалог» enabled когда selected project `active`/`error` (`new_chat_enabled`); после launch/resume/reload UI сразу обновляет rail (без ухода со страницы settings), дожидаясь settled container. Settings «Чат» → create session + workspace. Таблица проектов: about / chats / budget (stub). Workspace только с явным `sessionId`.
 - **Live streaming** — assistant text из SSE `text_delta` без full reload после turn; ingress нормализует cumulative/overlap SDK deltas в incremental.
 - **Block-based transcript** — `GET /chat/transcript?session_id=` → `{ blocks: [...] }` (user, assistant_markdown, tool_*, subagent, plan, thinking, usage).
 - **Cursor-style rendering** — assistant inline без bubble; reasoning/tools — muted underlined lines + inset panel; tools paired by id; consecutive thinking → один spoiler; tool expand с path/`+N −M`.

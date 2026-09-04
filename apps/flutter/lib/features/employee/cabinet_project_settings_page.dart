@@ -227,10 +227,22 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
       if (!mounted) return;
       if (result['status'] == 'error') {
         await _load();
+        workContext.notifyProjectLifecycleChanged();
         return;
       }
-      AppSnackBar.success(context, l10n.projectLaunchSuccess);
+      final container = await pollProjectContainerUntilSettled(
+        api: workContext.api,
+        projectId: widget.projectId,
+      );
+      if (!mounted) return;
+      final failure = containerObservedFailureMessage(container);
+      if (failure != null) {
+        AppErrors.showSnack(context, failure);
+      } else {
+        AppSnackBar.success(context, l10n.projectLaunchSuccess);
+      }
       await _load();
+      workContext.notifyProjectLifecycleChanged();
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     } finally {
@@ -244,7 +256,17 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
       await workContext.api.reloadProject(widget.projectId);
       if (!mounted) return;
       AppSnackBar.success(context, AppLocalizations.of(context).projectReloadSuccess);
+      final container = await pollProjectContainerUntilSettled(
+        api: workContext.api,
+        projectId: widget.projectId,
+      );
+      if (!mounted) return;
+      final failure = containerObservedFailureMessage(container);
+      if (failure != null) {
+        AppErrors.showSnack(context, failure);
+      }
       await _load();
+      workContext.notifyProjectLifecycleChanged();
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     } finally {
@@ -290,6 +312,7 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
         AppErrors.showSnack(context, failure);
       }
       await _load();
+      workContext.notifyProjectLifecycleChanged();
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     } finally {
@@ -361,6 +384,7 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
                       ),
                     ),
                   );
+                  workContext.notifyProjectLifecycleChanged();
                 } catch (e) {
                   if (!mounted) return;
                   AppErrors.showSnack(context, e);

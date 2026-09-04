@@ -68,12 +68,20 @@ class _CabinetShellState extends State<CabinetShell> {
   }
 
   String? _lastKnownSelectedProjectId;
+  int _lastProjectLifecycleEpoch = 0;
 
   void _onWorkContext() {
     if (!mounted) return;
     final selected = workContext.selectedProjectId;
+    final lifecycle = workContext.projectLifecycleEpoch;
     if (selected != _lastKnownSelectedProjectId) {
       _lastKnownSelectedProjectId = selected;
+      _lastProjectLifecycleEpoch = lifecycle;
+      _reloadSidebar();
+      return;
+    }
+    if (lifecycle != _lastProjectLifecycleEpoch) {
+      _lastProjectLifecycleEpoch = lifecycle;
       _reloadSidebar();
       return;
     }
@@ -103,6 +111,8 @@ class _CabinetShellState extends State<CabinetShell> {
   Future<void> _loadSelectionAndSidebar() async {
     try {
       await workContext.loadProjectSelection(widget.cabinetId);
+      _lastKnownSelectedProjectId = workContext.selectedProjectId;
+      _lastProjectLifecycleEpoch = workContext.projectLifecycleEpoch;
       await _reloadSidebar();
     } catch (_) {
       // Sidebar is best-effort; projects page still works.

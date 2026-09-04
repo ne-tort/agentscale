@@ -16,6 +16,10 @@ class WorkContext extends ChangeNotifier {
   /// Per-employee selected project in the current cabinet (sidebar context).
   String? selectedProjectId;
 
+  /// Bumped when project launch/pause/resume/reload changes chat availability
+  /// so [CabinetShell] can refresh `new_chat_enabled` without leaving the page.
+  int projectLifecycleEpoch = 0;
+
   bool get isAuthenticated => bearerToken.isNotEmpty;
 
   ProdavanApi get api => ProdavanApi(
@@ -65,12 +69,19 @@ class WorkContext extends ChangeNotifier {
     await api.putProjectSelection(cabinetId: cabinetId, projectId: projectId);
   }
 
+  /// Project status / container settled — refresh chats rail enablement.
+  void notifyProjectLifecycleChanged() {
+    projectLifecycleEpoch++;
+    notifyListeners();
+  }
+
   void clear() {
     bearerToken = '';
     cabinetId = null;
     projectId = null;
     companyId = null;
     selectedProjectId = null;
+    projectLifecycleEpoch = 0;
     notifyListeners();
   }
 }
