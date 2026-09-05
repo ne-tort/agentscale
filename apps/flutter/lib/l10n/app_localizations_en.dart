@@ -1841,6 +1841,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectChatAddAction => 'Chat settings';
 
   @override
+  String get projectChatWakePaused => 'Project paused. Resume?';
+
+  @override
+  String get projectChatWakeUnresponsive => 'Project not responding. Reload?';
+
+  @override
   String get projectChatCancelled => 'Cancelled';
 
   @override

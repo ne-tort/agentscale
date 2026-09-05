@@ -29,6 +29,7 @@ class ChatComposer extends StatefulWidget {
     this.projectId,
     this.api,
     this.wakeMode = false,
+    this.waking = false,
     this.onWake,
   });
 
@@ -42,6 +43,8 @@ class ChatComposer extends StatefulWidget {
   final ProdavanApi? api;
   /// When true, field is not sendable but tappable — [onWake] resumes/reloads.
   final bool wakeMode;
+  /// In-progress resume/reload — spinner on wake panel, ignore further taps.
+  final bool waking;
   final VoidCallback? onWake;
 
   @override
@@ -153,12 +156,10 @@ class _ChatComposerState extends State<ChatComposer> {
 
   InputDecoration _fieldDecoration(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    final warning = context.appColors.warning;
     return kBorderlessInputDecoration.copyWith(
       hintText: widget.enabled
           ? l10n.projectMessageHint
           : (widget.disabledHint ?? l10n.projectMessageHint),
-      hintStyle: widget.wakeMode ? TextStyle(color: warning) : null,
       filled: false,
       isDense: true,
       contentPadding: EdgeInsets.symmetric(
@@ -220,20 +221,57 @@ class _ChatComposerState extends State<ChatComposer> {
     );
   }
 
-  Widget _textField(BuildContext context) {
+  /// Wake mode: not a TextField (I-beam) — clickable warning row + optional spinner.
+  Widget _wakePanel(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final warning = context.appColors.warning;
+    final label = widget.disabledHint ?? l10n.projectMessageHint;
+    final canTap = !widget.waking && widget.onWake != null;
+    return MouseRegion(
+      cursor: canTap ? SystemMouseCursors.click : SystemMouseCursors.basic,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: canTap ? widget.onWake : null,
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.sm,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(color: warning),
+                ),
+              ),
+              if (widget.waking)
+                SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: warning,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _textField(BuildContext context) {
     return Focus(
       onKeyEvent: _handleKeyEvent,
       child: TextField(
         controller: _controller,
         focusNode: _focusNode,
-        enabled: !_uploading && (widget.enabled || widget.wakeMode),
-        readOnly: widget.wakeMode || !widget.enabled,
-        style: widget.wakeMode ? TextStyle(color: warning) : null,
+        enabled: !_uploading && widget.enabled,
+        readOnly: !widget.enabled,
         minLines: 1,
         maxLines: 6,
         decoration: _fieldDecoration(context),
-        onTap: widget.wakeMode ? widget.onWake : null,
       ),
     );
   }
@@ -242,10 +280,12 @@ class _ChatComposerState extends State<ChatComposer> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final scheme = Theme.of(context).colorScheme;
-    final multiline = _computeMultiline(context);
+    final multiline = !widget.wakeMode && _computeMultiline(context);
     if (multiline != _multiline) {
       _multiline = multiline;
     }
+
+    final field = widget.wakeMode ? _wakePanel(context) : _textField(context);
 
     return SafeArea(
       top: false,
@@ -281,30 +321,32 @@ class _ChatComposerState extends State<ChatComposer> {
                 horizontal: AppSpacing.xs,
                 vertical: AppSpacing.xs,
               ),
-              child: multiline
-                  ? Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _textField(context),
-                        Row(
+              child: widget.wakeMode
+                  ? field
+                  : multiline
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            field,
+                            Row(
+                              children: [
+                                _plusButton(l10n),
+                                _attachButton(l10n),
+                                const Spacer(),
+                                _sendButton(l10n),
+                              ],
+                            ),
+                          ],
+                        )
+                      : Row(
+                          crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
                             _plusButton(l10n),
                             _attachButton(l10n),
-                            const Spacer(),
+                            Expanded(child: field),
                             _sendButton(l10n),
                           ],
                         ),
-                      ],
-                    )
-                  : Row(
-                      crossAxisAlignment: CrossAxisAlignment.end,
-                      children: [
-                        _plusButton(l10n),
-                        _attachButton(l10n),
-                        Expanded(child: _textField(context)),
-                        _sendButton(l10n),
-                      ],
-                    ),
             ),
           ],
         ),

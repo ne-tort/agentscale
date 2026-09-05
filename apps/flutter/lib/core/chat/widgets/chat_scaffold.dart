@@ -355,6 +355,7 @@ class ChatScaffold extends StatelessWidget {
     required this.title,
     this.disabledHint,
     this.wakeMode = false,
+    this.waking = false,
     this.onWake,
   });
 
@@ -366,6 +367,7 @@ class ChatScaffold extends StatelessWidget {
   final Widget title;
   final String? disabledHint;
   final bool wakeMode;
+  final bool waking;
   final VoidCallback? onWake;
 
   double _columnMaxWidth(double width) {
@@ -411,6 +413,7 @@ class ChatScaffold extends StatelessWidget {
                   streaming: controller.streaming,
                   disabledHint: disabledHint,
                   wakeMode: wakeMode,
+                  waking: waking,
                   onWake: onWake,
                   onSend: (text, refs) => controller.send(text, attachmentRefs: refs),
                   onCancel: controller.streaming ? () => controller.cancelStream() : null,

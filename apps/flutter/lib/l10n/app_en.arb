@@ -1042,6 +1042,8 @@
   "projectChatModelColumnPublisher": "Publisher",
   "projectChatModelColumnReleased": "Released",
   "projectChatAddAction": "Chat settings",
+  "projectChatWakePaused": "Project paused. Resume?",
+  "projectChatWakeUnresponsive": "Project not responding. Reload?",
   "projectChatCancelled": "Cancelled",
   "projectChatSidechainOffline": "Sidechain unavailable — container is not running",
   "projectChatGroupThinking": "Reasoning ({count})",

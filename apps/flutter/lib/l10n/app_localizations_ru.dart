@@ -1854,6 +1854,13 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectChatAddAction => 'Настройки чата';
 
   @override
+  String get projectChatWakePaused => 'Проект приостановлен. Возобновить?';
+
+  @override
+  String get projectChatWakeUnresponsive =>
+      'Проект не отвечает. Перезагрузить?';
+
+  @override
   String get projectChatCancelled => 'Отменено';
 
   @override

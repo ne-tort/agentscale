@@ -3332,6 +3332,18 @@ abstract class AppLocalizations {
   /// **'Chat settings'**
   String get projectChatAddAction;
 
+  /// No description provided for @projectChatWakePaused.
+  ///
+  /// In en, this message translates to:
+  /// **'Project paused. Resume?'**
+  String get projectChatWakePaused;
+
+  /// No description provided for @projectChatWakeUnresponsive.
+  ///
+  /// In en, this message translates to:
+  /// **'Project not responding. Reload?'**
+  String get projectChatWakeUnresponsive;
+
   /// No description provided for @projectChatCancelled.
   ///
   /// In en, this message translates to:

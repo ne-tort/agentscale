@@ -1044,6 +1044,8 @@
   "projectChatModelColumnPublisher": "Издатель",
   "projectChatModelColumnReleased": "Дата выпуска",
   "projectChatAddAction": "Настройки чата",
+  "projectChatWakePaused": "Проект приостановлен. Возобновить?",
+  "projectChatWakeUnresponsive": "Проект не отвечает. Перезагрузить?",
   "projectChatCancelled": "Отменено",
   "projectChatSidechainOffline": "Sidechain недоступен — контейнер не запущен",
   "projectChatGroupThinking": "Размышление ({count})",

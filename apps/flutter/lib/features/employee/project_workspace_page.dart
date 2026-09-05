@@ -5,8 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/chat/controller/chat_session_controller.dart';
 import 'package:prodavan/core/chat/widgets/chat_scaffold.dart';
 import 'package:prodavan/core/containers/container_runtime_presenter.dart';
+import 'package:prodavan/core/containers/project_container_poll.dart';
 import 'package:prodavan/core/session/work_context.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/features/employee/agent_chat_errors.dart';
 import 'package:prodavan/features/employee/cabinet_project_settings_page.dart';
 import 'package:prodavan/features/employee/project_chat_settings_page.dart';
@@ -110,17 +113,32 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     super.dispose();
   }
 
+  /// Same resume/reload + poll + snack flow as project settings; stay on chat.
   Future<void> _wakeProject() async {
     if (_waking || _chatSendable) return;
+    final l10n = AppLocalizations.of(context);
+    final paused = (_project?['status'] as String?) == 'paused';
     setState(() => _waking = true);
     try {
-      final status = _project?['status'] as String?;
-      if (status == 'paused') {
+      if (paused) {
+        AppSnackBar.info(context, l10n.projectResumeStartingSnack);
         await workContext.api.resumeProject(widget.projectId);
       } else {
         await workContext.api.reloadProject(widget.projectId);
+        if (!mounted) return;
+        AppSnackBar.success(context, l10n.projectReloadSuccess);
+      }
+      final container = await pollProjectContainerUntilSettled(
+        api: workContext.api,
+        projectId: widget.projectId,
+      );
+      if (!mounted) return;
+      final failure = containerObservedFailureMessage(container);
+      if (failure != null) {
+        AppErrors.showSnack(context, failure);
       }
       await _refreshProjectFlags();
+      if (!mounted) return;
       if (_chatReadable) {
         await _chat.loadTranscript();
         if (_chatSendable) {
@@ -129,7 +147,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       }
       workContext.notifyProjectLifecycleChanged();
     } catch (e) {
-      if (mounted) showAgentChatSnack(context, e);
+      if (mounted) AppErrors.showSnack(context, e);
     } finally {
       if (mounted) setState(() => _waking = false);
     }
@@ -180,14 +198,21 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     return l10n.chatUntitled;
   }
 
+  String? _wakeHint(AppLocalizations l10n) {
+    if (_chatSendable) return null;
+    final paused = (_project?['status'] as String?) == 'paused';
+    return paused ? l10n.projectChatWakePaused : l10n.projectChatWakeUnresponsive;
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final needsWake = projectChatNeedsWake(_project) || (!_chatSendable && _chatReadable);
+    final showChat = _chatReadable || _waking;
     return AppScaffold(
-      title: Text(_chatReadable ? _displayTitle : widget.projectName),
+      title: Text(showChat ? _displayTitle : widget.projectName),
       actions: [
-        if (_chatReadable) ...[
+        if (showChat) ...[
           IconButton(
             icon: Icon(_pinned ? Icons.push_pin : Icons.push_pin_outlined),
             tooltip: _pinned ? l10n.chatUnpin : l10n.chatPin,
@@ -212,15 +237,16 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
           ),
         ],
       ],
-      body: !_chatReadable
+      body: !showChat
           ? Center(child: Text(l10n.projectProjectPaused))
           : ChatScaffold(
               controller: _chat,
               api: workContext.api,
               chatSendable: _chatSendable,
               loading: _loading,
-              disabledHint: _chatSendable ? null : l10n.errorPodNotRunning,
-              wakeMode: needsWake,
+              disabledHint: _wakeHint(l10n),
+              wakeMode: needsWake || _waking,
+              waking: _waking,
               onWake: needsWake && !_waking ? _wakeProject : null,
               title: Text(_displayTitle),
               onOpenChatSettings: _openChatSettings,
