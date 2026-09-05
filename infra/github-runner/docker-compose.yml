@@ -8,6 +8,11 @@
 #   .\Start-Runners.ps1
 #   docker compose down      # keeps volumes
 #   docker compose down -v   # WIPES caches
+#
+# DNS:
+#   - Runner containers: explicit dns below (never rely on Docker Desktop default alone).
+#   - docker build / sibling containers via docker.sock use the *engine* DNS — see
+#     Ensure-DockerDns.ps1 / daemon.json "dns" (Start-Runners applies this).
 
 name: prodavan-runners
 
@@ -44,16 +49,31 @@ services:
       RUNNER_SCOPE: repo
       LABELS: ${LABELS:-self-hosted,linux,docker,docker-desktop}
       DISABLE_AUTO_UPDATE: "true"
-      EPHEMERAL: ${EPHEMERAL:-false}
+      # myoung34 entrypoint: ANY non-empty EPHEMERAL enables --ephemeral
+      # (EPHEMERAL=false still counts!). Leave empty for persistent pack; set 1 only for one-shot.
+      EPHEMERAL: ${EPHEMERAL:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${USERPROFILE}/.kube:/home/runner/.kube:ro
       - prodavan-ci-cache:/cache
     extra_hosts:
+      # Force IPv4 gateway — avoid AAAA-first flakiness for host.docker.internal
       - "host.docker.internal:host-gateway"
+    # Explicit upstream resolvers (compose → ExtServers). Do not omit.
     dns:
       - 8.8.8.8
       - 1.1.1.1
+    dns_opt:
+      - timeout:2
+      - attempts:3
+      - use-vc
+    networks:
+      - runners
+
+networks:
+  runners:
+    name: prodavan-runners
+    driver: bridge
 
 volumes:
   # Survives `docker compose down` (use down -v to wipe)
