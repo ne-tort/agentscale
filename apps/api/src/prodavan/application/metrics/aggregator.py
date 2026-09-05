@@ -1,4 +1,4 @@
-"""Company-level SQL metrics aggregates (PG) — extracted from AdminCompanyService."""
+"""Company/cabinet/project overview aggregates — SQL baseline + Metrics BC store overlay."""
 
 from __future__ import annotations
 
@@ -9,12 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.quota_service import CompanyQuotaService
 from prodavan.application.ai_keys.service import AiKeysService
+from prodavan.application.metrics.overview_merge import overlay_store_counters
 from prodavan.application.metrics.read_service import MetricsReadService
 from prodavan.config.settings import settings
 from prodavan.domain.admin import subscription_read_model
 from prodavan.domain.cabinets import CabinetStatus
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import EmployeeStatus
+from prodavan.domain.metrics.types import ENTITY_CABINET, ENTITY_COMPANY, ENTITY_PROJECT
 from prodavan.domain.projects import ProjectStatus
 from prodavan.infrastructure.persistence.models.agent import AgentEventRow, AgentSessionRow, AgentUsageRow
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
@@ -68,31 +70,9 @@ class CompanyMetricsAggregator:
         times = [t for t in candidates if t is not None]
         return max(times) if times else None
 
-    async def _storage_bytes(self, company_id: str) -> int:
-        from prodavan.application.admin.storage_metrics import company_blob_storage_bytes
-
-        keys_q = await self._session.execute(
-            select(ProjectRow.workspace_key).where(
-                ProjectRow.company_id == company_id,
-                ProjectRow.status != ProjectStatus.DELETED,
-            )
-        )
-        cabinet_q = await self._session.execute(
-            select(CabinetInstanceRow.id).where(
-                CabinetInstanceRow.company_id == company_id,
-                CabinetInstanceRow.status == CabinetStatus.ACTIVE,
-            )
-        )
-        return company_blob_storage_bytes(
-            workspace_keys=list(keys_q.scalars().all()),
-            cabinet_ids=list(cabinet_q.scalars().all()),
-        )
-
     async def membership_employee_ids(self, company_id: str) -> list[str]:
         q = await self._session.execute(
-            select(func.distinct(MembershipRow.employee_id)).where(
-                MembershipRow.company_id == company_id
-            )
+            select(func.distinct(MembershipRow.employee_id)).where(MembershipRow.company_id == company_id)
         )
         return [str(eid) for eid in q.scalars().all() if eid]
 
@@ -138,6 +118,7 @@ class CompanyMetricsAggregator:
         usage_row = usage_q.one()
         input_tok = int(usage_row[0] or 0)
         output_tok = int(usage_row[1] or 0)
+        # user_message = one AI request; never text_delta SSE chunks
         msg_q = await self._session.execute(
             select(func.count())
             .select_from(AgentEventRow)
@@ -145,7 +126,7 @@ class CompanyMetricsAggregator:
             .join(ProjectRow, ProjectRow.id == AgentSessionRow.project_id)
             .where(
                 ProjectRow.company_id == company_id,
-                AgentEventRow.event_type == "text_delta",
+                AgentEventRow.event_type == "user_message",
             )
         )
         quota = await self._quotas.get_quota(company_id)
@@ -154,10 +135,9 @@ class CompanyMetricsAggregator:
         employees_total = int(emp_q.scalar_one() or 0)
         employees_active = int(emp_active_q.scalar_one() or 0)
         projects_total = int(proj_q.scalar_one() or 0)
-        agent_messages = int(msg_q.scalar_one() or 0)
+        agent_requests = int(msg_q.scalar_one() or 0)
         key_metrics = await AiKeysService(self._session).company_key_metrics(company_id)
         last_activity = await self._last_activity_at(company_id)
-        storage_bytes = await self._storage_bytes(company_id)
         tokens_used = input_tok + output_tok
         threshold = settings.admin_metrics_token_alert_threshold
         high_usage = threshold > 0 and tokens_used >= threshold
@@ -179,12 +159,13 @@ class CompanyMetricsAggregator:
             )
         )
         employees_keycloak_unbound = int(unbound_emp_q.scalar_one() or 0)
-        return {
+        metrics = {
             "employees_total": employees_total,
             "employees_active": employees_active,
             "employees": employees_total,
             "active_cabinets": active_cabinets,
             "cabinets_active": active_cabinets,
+            "cabinets_total": active_cabinets,
             "running_cabinets": running_cabinets,
             "cabinets_quota": quota.max_cabinets,
             "cabinets_quota_used_pct": round(100 * active_cabinets / quota.max_cabinets, 1)
@@ -194,15 +175,19 @@ class CompanyMetricsAggregator:
             "agent_tokens_used": tokens_used,
             "agent_input_tokens": input_tok,
             "agent_output_tokens": output_tok,
-            "agent_messages": agent_messages,
+            "agent_requests": agent_requests,
+            "agent_messages": agent_requests,
             "last_activity_at": last_activity.isoformat() if last_activity else None,
-            "storage_bytes": storage_bytes,
+            "storage_bytes": 0,
             "high_agent_usage": high_usage,
             "keycloak_unbound": company.keycloak_sub is None,
             "employees_keycloak_unbound": employees_keycloak_unbound,
             **key_metrics,
             **sub,
         }
+        return await overlay_store_counters(
+            metrics, entity_type=ENTITY_COMPANY, entity_id=company_id
+        )
 
 
 class CabinetMetricsAggregator:
@@ -265,10 +250,10 @@ class CabinetMetricsAggregator:
             .join(ProjectRow, ProjectRow.id == AgentSessionRow.project_id)
             .where(
                 ProjectRow.cabinet_id == cabinet_id,
-                AgentEventRow.event_type == "text_delta",
+                AgentEventRow.event_type == "user_message",
             )
         )
-        agent_messages = int(msg_q.scalar_one() or 0)
+        agent_requests = int(msg_q.scalar_one() or 0)
 
         sess_q = await self._session.execute(
             select(func.max(AgentSessionRow.updated_at))
@@ -291,20 +276,7 @@ class CabinetMetricsAggregator:
         times = [t for t in candidates if t is not None]
         last_activity = max(times) if times else None
 
-        from prodavan.application.admin.storage_metrics import company_blob_storage_bytes
-
-        keys_q = await self._session.execute(
-            select(ProjectRow.workspace_key).where(
-                ProjectRow.cabinet_id == cabinet_id,
-                ProjectRow.status != ProjectStatus.DELETED,
-            )
-        )
-        storage_bytes = company_blob_storage_bytes(
-            workspace_keys=list(keys_q.scalars().all()),
-            cabinet_ids=[],
-        )
-
-        return {
+        metrics = {
             "cabinet_id": cabinet_id,
             "employees_total": employees_total,
             "employees_online": employees_online,
@@ -312,10 +284,14 @@ class CabinetMetricsAggregator:
             "agent_tokens_used": input_tok + output_tok,
             "agent_input_tokens": input_tok,
             "agent_output_tokens": output_tok,
-            "agent_messages": agent_messages,
-            "storage_bytes": storage_bytes,
+            "agent_requests": agent_requests,
+            "agent_messages": agent_requests,
+            "storage_bytes": 0,
             "last_activity_at": last_activity.isoformat() if last_activity else None,
         }
+        return await overlay_store_counters(
+            metrics, entity_type=ENTITY_CABINET, entity_id=cabinet_id
+        )
 
 
 class ProjectMetricsAggregator:
@@ -350,15 +326,13 @@ class ProjectMetricsAggregator:
             .join(AgentSessionRow, AgentSessionRow.id == AgentEventRow.session_id)
             .where(
                 AgentSessionRow.project_id == project_id,
-                AgentEventRow.event_type == "text_delta",
+                AgentEventRow.event_type == "user_message",
             )
         )
-        agent_messages = int(msg_q.scalar_one() or 0)
+        agent_requests = int(msg_q.scalar_one() or 0)
 
         sess_q = await self._session.execute(
-            select(func.max(AgentSessionRow.updated_at)).where(
-                AgentSessionRow.project_id == project_id
-            )
+            select(func.max(AgentSessionRow.updated_at)).where(AgentSessionRow.project_id == project_id)
         )
         evt_q = await self._session.execute(
             select(func.max(AgentEventRow.created_at))
@@ -369,20 +343,17 @@ class ProjectMetricsAggregator:
         times = [t for t in candidates if t is not None]
         last_activity = max(times) if times else None
 
-        from prodavan.application.admin.storage_metrics import company_blob_storage_bytes
-
-        storage_bytes = company_blob_storage_bytes(
-            workspace_keys=[row.workspace_key] if row.workspace_key else [],
-            cabinet_ids=[],
-        )
-
-        return {
+        metrics = {
             "project_id": project_id,
             "status": row.status,
             "agent_tokens_used": input_tok + output_tok,
             "agent_input_tokens": input_tok,
             "agent_output_tokens": output_tok,
-            "agent_messages": agent_messages,
-            "storage_bytes": storage_bytes,
+            "agent_requests": agent_requests,
+            "agent_messages": agent_requests,
+            "storage_bytes": 0,
             "last_activity_at": last_activity.isoformat() if last_activity else None,
         }
+        return await overlay_store_counters(
+            metrics, entity_type=ENTITY_PROJECT, entity_id=project_id
+        )

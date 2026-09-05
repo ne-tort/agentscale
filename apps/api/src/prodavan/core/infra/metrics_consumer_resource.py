@@ -42,6 +42,7 @@ class MetricsConsumerResource(LifespanResource):
             topics = [
                 settings.kafka_topic_platform_events,
                 settings.kafka_topic_metrics_events,
+                settings.kafka_topic_relation_events,
             ]
             consumer = AIOKafkaConsumer(
                 *topics,

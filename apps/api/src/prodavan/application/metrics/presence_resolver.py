@@ -30,6 +30,10 @@ class PresenceResolver:
             return None
         roles = {str(r) for r in (payload.get("roles") or [])}
         username = str(payload.get("username") or "").strip()
+        employee_id = str(payload.get("employee_id") or "").strip()
+
+        if employee_id:
+            return ResolvedPresence(kind="employee", entity_id=employee_id)
 
         if ROLE_COMPANY in roles:
             login = username or sub
@@ -37,10 +41,16 @@ class PresenceResolver:
                 return None
             return ResolvedPresence(kind="company", entity_id=login)
 
-        if ROLE_EMPLOYEE in roles:
+        if ROLE_EMPLOYEE in roles or not roles:
+            # Logout often omits roles — resolve employee by sub as fallback.
             emp = await self._entitlements.get_employee_by_sub(sub)
-            if emp is None:
+            if emp is not None:
+                return ResolvedPresence(kind="employee", entity_id=emp.id)
+            if ROLE_EMPLOYEE in roles:
                 return None
-            return ResolvedPresence(kind="employee", entity_id=emp.id)
+
+        if not roles:
+            login = username or sub
+            return ResolvedPresence(kind="company", entity_id=login)
 
         return None

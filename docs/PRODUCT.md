@@ -54,7 +54,7 @@ Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** depe
 ## Observability
 
 - **k8s metrics-server** — cluster addon для CPU/RAM sandbox pod'ов; Prodavan не деплоит отдельный metrics microservice.
-- **Metrics BC** (`application/metrics/`) — внутри `prodavan-api`: Kafka consumer, Redis (presence + pod samples), REST для admin/company/employee container UI.
+- **Metrics BC** (`application/metrics/`) — Kafka-first read-model внутри `prodavan-api`: facts (`metrics.usage.turn`, `metrics.counter.delta`, `metrics.storage.snapshot`, presence heartbeat) + `relation.*` links → Redis counters/cascade; overview REST читает store (не live SQL/FS scan для requests/tokens/storage). Presence: login/refresh/logout + cabinet heartbeat. Backfill: `POST /admin/metrics/rebuild`. Series: `GET /admin/metrics/series` / `GET /cabinets/{id}/metrics/series`.
 - **Project lifecycle** — статусы `draft` | `active` | `paused` | `error` | `completed`. `error` = fatal pod failure after grace; **node/WSL flap** (`NotFound` / transient Unknown при `desired=RUNNING`) не залипает в `error` сразу — grace + reconcile **auto-reprovision**; recovery также через `POST /projects/{id}/reload`. Chat readable для `active|paused|error`; send только при `active` + `observed_state=running`; иначе composer wake (tap → resume/reload).
 - **Agent sessions** — pause **suspend** (recoverable); resume/reload reactivate ту же PG-сессию и re-register bridge. История чата в Postgres сохраняется.
 - **Workspace sync** — rematerialize модулей **только** явным `POST /projects/{id}/sync` («Обновить проект») или при launch. Изменения cabinet/module data помечают `workspace_outdated_at` до sync.

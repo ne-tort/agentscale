@@ -10,6 +10,7 @@ from prodavan.core.infra.metrics_consumer_resource import MetricsConsumerResourc
 from prodavan.core.infra.platform_bootstrap_resource import PlatformBootstrapResource
 from prodavan.core.infra.pod_metrics_sampler_resource import PodMetricsSamplerResource
 from prodavan.core.infra.redis_manager import RedisManager
+from prodavan.core.infra.storage_metrics_sampler_resource import StorageMetricsSamplerResource
 from prodavan.core.infra.trigger_worker_resource import TriggerWorkerResource
 from prodavan.core.lifespan.manager import LifespanManager
 from prodavan.infrastructure.files.manager import FileStoreManager
@@ -79,6 +80,7 @@ def build_lifespan_manager() -> LifespanManager:
         manager.register(MetricsConsumerResource())
     manager.register(PlatformBootstrapResource())
     manager.register(PodMetricsSamplerResource())
+    manager.register(StorageMetricsSamplerResource())
     manager.register(TriggerWorkerResource())
     _lifespan_manager = manager
     return manager

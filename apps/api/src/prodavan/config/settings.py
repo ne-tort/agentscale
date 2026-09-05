@@ -87,6 +87,8 @@ class Settings(BaseSettings):
     kafka_metrics_group: str = "prodavan-metrics"
     metrics_sample_ttl_sec: int = 60
     metrics_sample_interval_sec: int = 15
+    metrics_storage_sampler_enabled: bool = True
+    metrics_storage_sample_interval_sec: int = 300
     metrics_delta_min_cpu_millicores: int = 50
     metrics_delta_min_memory_bytes: int = 32 * 1024 * 1024
 

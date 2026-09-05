@@ -1,4 +1,4 @@
-"""Metrics BC domain types."""
+"""Metrics BC domain types — Kafka facts + pod samples."""
 
 from __future__ import annotations
 
@@ -9,10 +9,28 @@ METRICS_EVENT_TYPES = frozenset(
     {
         "pod.metrics.sample",
         "pod.metrics.degraded",
+        "metrics.presence.heartbeat",
+        "metrics.presence.clear",
+        "metrics.counter.delta",
+        "metrics.usage.turn",
+        "metrics.storage.snapshot",
     }
 )
 
-METRIC_WINDOWS = frozenset({"1h"})
+# Named counters accumulated for overview / cascade.
+METRIC_AGENT_REQUESTS = "agent_requests"
+METRIC_AGENT_TOKENS = "agent_tokens"
+METRIC_STORAGE_BYTES = "storage_bytes"
+METRIC_EMPLOYEES_TOTAL = "employees_total"
+METRIC_PROJECTS_TOTAL = "projects_total"
+METRIC_CABINETS_TOTAL = "cabinets_total"
+
+ENTITY_PROJECT = "project"
+ENTITY_CABINET = "cabinet"
+ENTITY_COMPANY = "company"
+ENTITY_EMPLOYEE = "employee"
+
+METRIC_WINDOWS = frozenset({"1h", "24h", "7d"})
 
 
 @dataclass(slots=True)

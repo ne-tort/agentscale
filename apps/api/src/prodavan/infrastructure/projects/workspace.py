@@ -202,14 +202,16 @@ class WorkspaceLayoutWriter:
 
 
 def workspace_tree_bytes(workspace_key: str) -> int:
-    """Best-effort workspace blob size for admin metrics (L04 / C-OBJECT-STORE)."""
-    from prodavan.core.infra.object_keys import workspace_object_key
+    """Best-effort full project tree size (``projects/{key}/``), not only ``workspace/``."""
+    from prodavan.core.infra.object_keys import project_tree_prefix
 
-    prefix = workspace_object_key(workspace_key=workspace_key, relative_path="")
+    key = (workspace_key or "").strip()
+    if not key:
+        return 0
     try:
-        return ensure_file_store().prefix_size_sync(prefix)
+        return ensure_file_store().prefix_size_sync(project_tree_prefix(key))
     except Exception:
-        root = Path(settings.storage_root) / "projects" / workspace_key
+        root = Path(settings.storage_root) / "projects" / key
         if not root.is_dir():
             return 0
         total = 0

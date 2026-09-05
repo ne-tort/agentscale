@@ -195,6 +195,58 @@ async def get_cabinet_metrics(
     return await MetricsQuery(session).cabinet_metrics(cabinet_id)
 
 
+@router.get("/{cabinet_id}/metrics/series")
+async def get_cabinet_metrics_series(
+    cabinet_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    metric: str = "agent_tokens",
+    window: str = "7d",
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+) -> dict:
+    await CabinetInstanceService(session).get(
+        cabinet_id=cabinet_id, principal=principal, employee=employee
+    )
+    from prodavan.application.metrics.query import MetricsQuery
+
+    return await MetricsQuery(session).counter_series(
+        metric=metric,
+        entity_type="cabinet",
+        entity_id=cabinet_id,
+        window=window,
+    )
+
+
+@router.post("/{cabinet_id}/presence/heartbeat")
+async def cabinet_presence_heartbeat(
+    cabinet_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+) -> dict:
+    """Refresh Redis presence while employee cabinet shell is open."""
+    from prodavan.application.metrics.publish import publish_presence_heartbeat
+    from prodavan.domain.errors import AppError
+
+    cab = await CabinetInstanceService(session).get(
+        cabinet_id=cabinet_id, principal=principal, employee=employee
+    )
+    if employee is None:
+        raise AppError(
+            code="FORBIDDEN",
+            title="Forbidden",
+            status=403,
+            detail="employee required for presence heartbeat",
+        )
+    company_id = str(cab.get("company_id") or "") or None
+    await publish_presence_heartbeat(
+        employee_id=employee.id,
+        cabinet_id=cabinet_id,
+        company_id=company_id,
+    )
+    return {"ok": True, "employee_id": employee.id, "cabinet_id": cabinet_id}
+
+
 @router.get("/{cabinet_id}")
 async def get_cabinet(
     cabinet_id: str,

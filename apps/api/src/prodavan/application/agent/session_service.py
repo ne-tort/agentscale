@@ -440,6 +440,16 @@ class AgentSessionService:
         _touch_session_activity(row, text=text)
         yield {"type": PLATFORM_EVENT_USER_MESSAGE, "data": user_payload}
 
+        from prodavan.application.metrics.publish import schedule_agent_request
+
+        schedule_agent_request(
+            self._session,
+            project_id=project_id,
+            company_id=project.company_id,
+            cabinet_id=project.cabinet_id,
+            employee_id=employee.id if employee else None,
+        )
+
         stream_normalizer = TurnStreamNormalizer()
         used_bridge = False
         if settings.pod_agent_runtime_enabled:
@@ -497,6 +507,19 @@ class AgentSessionService:
                             else None,
                         )
                     )
+                    from prodavan.application.metrics.publish import schedule_usage_turn
+
+                    schedule_usage_turn(
+                        self._session,
+                        project_id=project_id,
+                        company_id=project.company_id,
+                        cabinet_id=project.cabinet_id,
+                        employee_id=employee.id if employee else None,
+                        input_tokens=normalized.data.get("input_tokens"),
+                        output_tokens=normalized.data.get("output_tokens"),
+                        provider=str(normalized.data.get("provider") or row.provider),
+                        model=normalized.data.get("model") or row.model,
+                    )
                 if normalized.type in {AgentEventType.DONE, AgentEventType.ERROR}:
                     if normalized.type == AgentEventType.DONE:
                         state = await bridge.sync_adapter_state_for_session(
@@ -547,6 +570,19 @@ class AgentSessionService:
                         if normalized.data.get("cost_usd") is not None
                         else None,
                     )
+                )
+                from prodavan.application.metrics.publish import schedule_usage_turn
+
+                schedule_usage_turn(
+                    self._session,
+                    project_id=project_id,
+                    company_id=project.company_id,
+                    cabinet_id=project.cabinet_id,
+                    employee_id=employee.id if employee else None,
+                    input_tokens=normalized.data.get("input_tokens"),
+                    output_tokens=normalized.data.get("output_tokens"),
+                    provider=str(normalized.data.get("provider") or row.provider),
+                    model=normalized.data.get("model") or row.model,
                 )
 
     async def chat_turn(
@@ -882,6 +918,20 @@ class AgentSessionService:
                     cost_usd=Decimal(str(data["cost_usd"])) if data.get("cost_usd") is not None else None,
                 )
             )
+            project = await self._session.get(ProjectRow, row.project_id)
+            if project is not None:
+                from prodavan.application.metrics.publish import schedule_usage_turn
+
+                schedule_usage_turn(
+                    self._session,
+                    project_id=project.id,
+                    company_id=project.company_id,
+                    cabinet_id=project.cabinet_id,
+                    input_tokens=data.get("input_tokens"),
+                    output_tokens=data.get("output_tokens"),
+                    provider=str(data.get("provider") or row.provider),
+                    model=data.get("model") or row.model,
+                )
 
         await self._session.commit()
         return _event_public(ev_row)

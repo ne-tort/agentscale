@@ -533,6 +533,21 @@ class ProdavanApi {
     }
   }
 
+  /// Keep Redis presence alive while the cabinet shell is open.
+  Future<void> cabinetPresenceHeartbeat(String cabinetId) async {
+    final prev = this.cabinetId;
+    this.cabinetId = cabinetId;
+    try {
+      final res = await AuthHttp.post(
+        _uri('/cabinets/$cabinetId/presence/heartbeat'),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+    } finally {
+      this.cabinetId = prev;
+    }
+  }
+
   Future<Map<String, dynamic>> getProjectMetrics(String projectId) async {
     final prevProj = this.projectId;
     this.projectId = projectId;

@@ -205,12 +205,17 @@ class AuthService:
     ) -> None:
         self._require_oidc()
         client = self._client()
-        sub: str | None = None
+        logout_payload: dict[str, Any] = {}
         if access_token:
             try:
-                sub = decode_access_claims(access_token).sub
+                claims = decode_access_claims(access_token)
+                logout_payload = {
+                    "sub": claims.sub,
+                    "roles": list(claims.roles or ()),
+                    "username": claims.username,
+                }
             except AppError:
-                sub = None
+                logout_payload = {}
         if refresh_token:
             await client.revoke(token=refresh_token, token_type_hint="refresh_token")
         if access_token:
@@ -219,7 +224,8 @@ class AuthService:
             id_token=id_token,
             post_logout_redirect_uri=settings.oidc_flutter_redirect_uri_desktop,
         )
-        await publish_auth_event("auth.logout", {"sub": sub} if sub else {})
+        if logout_payload:
+            await publish_auth_event("auth.logout", logout_payload)
 
     def start_broker(
         self,

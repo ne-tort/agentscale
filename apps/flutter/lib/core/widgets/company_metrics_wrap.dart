@@ -26,6 +26,12 @@ class CompanyMetricsWrap extends StatelessWidget {
     return '$v';
   }
 
+  String _agentRequests() {
+    final v = metrics?['agent_requests'] ?? metrics?['agent_messages'];
+    if (v == null) return '0';
+    return '$v';
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -52,7 +58,7 @@ class CompanyMetricsWrap extends StatelessWidget {
         StatTile(label: l10n.commonProjects, value: _metric('projects_total')),
         StatTile(label: l10n.commonAgentTokens, value: _metric('agent_tokens_used')),
         if (includeAgentDetail) ...[
-          StatTile(label: l10n.adminAgentMessages, value: _metric('agent_messages')),
+          StatTile(label: l10n.adminAgentMessages, value: _agentRequests()),
           StatTile(label: l10n.adminAiKeysBound, value: _metric('ai_keys_bound')),
         ],
         StatTile(label: l10n.commonStorageBytes, value: storageValue),

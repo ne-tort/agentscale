@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/responsive/app_breakpoints.dart';
@@ -54,6 +56,7 @@ class _CabinetShellState extends State<CabinetShell> {
   List<Map<String, dynamic>> _pinnedChats = const [];
   List<Map<String, dynamic>> _projectChats = const [];
   String? _activeSessionId;
+  Timer? _presenceHeartbeat;
 
   bool get _showManagement => _managementEntries.isNotEmpty;
   bool get _showData => _dataEntries.isNotEmpty;
@@ -81,12 +84,31 @@ class _CabinetShellState extends State<CabinetShell> {
     workContext.addListener(_onWorkContext);
     _loadNav();
     _loadSelectionAndSidebar();
+    _startPresenceHeartbeat();
   }
 
   @override
   void dispose() {
+    _presenceHeartbeat?.cancel();
     workContext.removeListener(_onWorkContext);
     super.dispose();
+  }
+
+  void _startPresenceHeartbeat() {
+    _presenceHeartbeat?.cancel();
+    unawaited(_sendPresenceHeartbeat());
+    _presenceHeartbeat = Timer.periodic(
+      const Duration(seconds: 120),
+      (_) => unawaited(_sendPresenceHeartbeat()),
+    );
+  }
+
+  Future<void> _sendPresenceHeartbeat() async {
+    try {
+      await workContext.api.cabinetPresenceHeartbeat(widget.cabinetId);
+    } catch (_) {
+      // Presence is best-effort; overview online may lag until next tick.
+    }
   }
 
   String? _lastKnownSelectedProjectId;

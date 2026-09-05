@@ -7,6 +7,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.application.metrics.adapters.redis_counter_store import build_counter_store
 from prodavan.application.metrics.adapters.redis_metrics_store import build_metrics_store
 from prodavan.application.metrics.aggregator import (
     CabinetMetricsAggregator,
@@ -15,12 +16,14 @@ from prodavan.application.metrics.aggregator import (
 )
 from prodavan.application.metrics.read_service import MetricsReadService
 from prodavan.config.settings import settings
+from prodavan.domain.metrics.types import METRIC_WINDOWS
 
 
 class MetricsQuery:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._store = build_metrics_store()
+        self._counters = build_counter_store()
         self._aggregator = CompanyMetricsAggregator(session)
         self._read = MetricsReadService()
 
@@ -35,6 +38,33 @@ class MetricsQuery:
 
     async def project_metrics(self, project_id: str) -> dict[str, Any]:
         return await ProjectMetricsAggregator(self._session).aggregate(project_id)
+
+    async def counter_series(
+        self,
+        *,
+        metric: str,
+        entity_type: str,
+        entity_id: str,
+        window: str = "7d",
+    ) -> dict[str, Any]:
+        win = window if window in METRIC_WINDOWS or window == "7d" else "7d"
+        series = await self._counters.get_counter_series(
+            entity_type, entity_id, metric, window=win
+        )
+        deltas: list[dict[str, Any]] = []
+        prev: int | None = None
+        for p in series:
+            val = int(p.get("value") or 0)
+            delta = val if prev is None else val - prev
+            deltas.append({"at": p.get("at"), "value": val, "delta": delta})
+            prev = val
+        return {
+            "metric": metric,
+            "entity_type": entity_type,
+            "entity_id": entity_id,
+            "window": win,
+            "series": deltas,
+        }
 
     async def get_project_runtime_metrics(
         self,
