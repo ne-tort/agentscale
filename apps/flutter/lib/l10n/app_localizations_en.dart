@@ -2351,6 +2351,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get chatRenameTitle => 'Rename chat';
 
   @override
+  String get chatDeleteDialog => 'Delete chat';
+
+  @override
+  String get chatDeleteDialogConfirmMessage =>
+      'This chat and its message history will be permanently deleted.';
+
+  @override
   String get chatOpenFromSidebarHint => 'Use New chat or a chat in the sidebar';
 
   @override

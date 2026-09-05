@@ -1329,6 +1329,8 @@
   "chatPin": "Закрепить чат",
   "chatUnpin": "Открепить чат",
   "chatRenameTitle": "Переименовать чат",
+  "chatDeleteDialog": "Удалить диалог",
+  "chatDeleteDialogConfirmMessage": "Диалог и история сообщений будут удалены без возможности восстановления.",
   "chatOpenFromSidebarHint": "Откройте «Новый чат» или чат в боковой панели",
   "chatSelectProjectHint": "Выберите проект",
   "chatCreateChatHint": "Создайте чат",

@@ -4196,6 +4196,18 @@ abstract class AppLocalizations {
   /// **'Rename chat'**
   String get chatRenameTitle;
 
+  /// No description provided for @chatDeleteDialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete chat'**
+  String get chatDeleteDialog;
+
+  /// No description provided for @chatDeleteDialogConfirmMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'This chat and its message history will be permanently deleted.'**
+  String get chatDeleteDialogConfirmMessage;
+
   /// No description provided for @chatOpenFromSidebarHint.
   ///
   /// In en, this message translates to:

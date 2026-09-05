@@ -2363,6 +2363,13 @@ class AppLocalizationsRu extends AppLocalizations {
   String get chatRenameTitle => 'Переименовать чат';
 
   @override
+  String get chatDeleteDialog => 'Удалить диалог';
+
+  @override
+  String get chatDeleteDialogConfirmMessage =>
+      'Диалог и история сообщений будут удалены без возможности восстановления.';
+
+  @override
   String get chatOpenFromSidebarHint =>
       'Откройте «Новый чат» или чат в боковой панели';
 

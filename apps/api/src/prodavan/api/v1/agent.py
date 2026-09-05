@@ -137,6 +137,23 @@ async def patch_agent_session(
     )
 
 
+@router.delete("/projects/{project_id}/agent/sessions/{session_id}")
+async def delete_agent_session(
+    project_id: str,
+    session_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    """Delete one chat dialog (session + history). Allowed while project paused."""
+    return await AgentSessionService(session).delete_session(
+        project_id=project_id,
+        session_id=session_id,
+        principal=principal,
+        employee=employee,
+    )
+
+
 @router.post("/projects/{project_id}/chat")
 async def project_chat_turn(
     project_id: str,

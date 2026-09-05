@@ -1000,6 +1000,59 @@ class AgentSessionService:
             **meta,
         }
 
+    async def delete_session(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        """Cancel runtime (best-effort) and hard-delete session + cascade history/pins."""
+        from sqlalchemy import delete
+
+        await self._projects.require_access(
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+            allow_paused=True,
+        )
+        row = await self.get_session(session_id=session_id)
+        if row.project_id != project_id:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+
+        if row.status == AgentSessionStatus.ACTIVE:
+            try:
+                adapter = get_agent_adapter(api_kind=row.api_kind)
+                handle = AgentHandle(
+                    id=row.vendor_agent_id,
+                    provider=row.provider,
+                    cwd=row.cwd,
+                    model=row.model,
+                )
+                await adapter.cancel(handle)
+            except Exception:
+                pass
+        else:
+            try:
+                adapter = get_agent_adapter(api_kind=row.api_kind)
+                handle = AgentHandle(
+                    id=row.vendor_agent_id,
+                    provider=row.provider,
+                    cwd=row.cwd,
+                    model=row.model,
+                )
+                await adapter.close(handle)
+            except Exception:
+                pass
+
+        await self._session.execute(delete(AgentEventRow).where(AgentEventRow.session_id == session_id))
+        await self._session.execute(delete(AgentUsageRow).where(AgentUsageRow.session_id == session_id))
+        await self._session.execute(delete(AgentSessionRow).where(AgentSessionRow.id == session_id))
+        await self._session.commit()
+        return {"ok": True, "session_id": session_id, "project_id": project_id}
+
     async def cancel_session(
         self,
         *,

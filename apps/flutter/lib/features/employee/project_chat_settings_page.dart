@@ -3,8 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/chat/controller/chat_session_controller.dart';
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/work_context.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/widgets/app_confirm_page.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 import 'package:prodavan/features/employee/project_chat_model_select_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -37,6 +41,7 @@ class ProjectChatSettingsPage extends StatefulWidget {
 class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
   late String _title;
   late bool _pinned;
+  bool _deleting = false;
 
   @override
   void initState() {
@@ -56,7 +61,7 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
   }
 
   Future<void> _pickModel() async {
-    if (widget.controller.streaming) return;
+    if (widget.controller.streaming || _deleting) return;
     final picked = await ProjectChatModelSelectPage.push(
       context,
       models: widget.controller.availableModels,
@@ -91,9 +96,38 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
     widget.onPinnedChanged(next);
   }
 
+  Future<void> _deleteDialog() async {
+    if (_deleting || widget.controller.streaming) return;
+    final l10n = AppLocalizations.of(context);
+    final ok = await AppConfirmPage.push(
+      context,
+      title: l10n.chatDeleteDialog,
+      message: l10n.chatDeleteDialogConfirmMessage,
+      confirmLabel: l10n.chatDeleteDialog,
+      severity: AppStatusSeverity.warning,
+    );
+    if (!ok || !mounted) return;
+    setState(() => _deleting = true);
+    try {
+      await workContext.api.deleteAgentSession(
+        projectId: widget.projectId,
+        sessionId: widget.sessionId,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _deleting = false);
+        AppErrors.showSnack(context, e);
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final warning = context.appColors.warning;
+    final enabled = !_deleting && !widget.controller.streaming;
     return AppScaffold(
       title: Text(l10n.projectChatSettingsTitle),
       body: ListView(
@@ -109,14 +143,24 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
           AppSwitchPreference(
             title: l10n.chatPin,
             value: _pinned,
+            enabled: enabled,
             onChanged: _setPinned,
           ),
           AppPreferenceTile(
             title: l10n.projectChatModelLabel,
             subtitle: Text(widget.controller.selectedModelLabel),
             trailing: const AppTrailingChevron(),
-            enabled: !widget.controller.streaming,
+            enabled: enabled,
             onTap: _pickModel,
+          ),
+          AppNavPreference(
+            title: l10n.chatDeleteDialog,
+            icon: Icons.delete_outline,
+            accentColor: warning,
+            enabled: enabled,
+            loading: _deleting,
+            loadingLabel: l10n.chatDeleteDialog,
+            onTap: _deleteDialog,
           ),
         ],
       ),

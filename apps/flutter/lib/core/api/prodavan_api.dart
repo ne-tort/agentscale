@@ -1092,6 +1092,23 @@ class ProdavanApi {
     }
   }
 
+  Future<void> deleteAgentSession({
+    required String projectId,
+    required String sessionId,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.delete(
+        _uri('/projects/$projectId/agent/sessions/$sessionId'),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
   Future<Map<String, dynamic>> projectChatTranscript({
     required String projectId,
     required String sessionId,

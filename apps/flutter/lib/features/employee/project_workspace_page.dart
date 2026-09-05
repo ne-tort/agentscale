@@ -154,8 +154,8 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   }
 
   Future<void> _openChatSettings() async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
+    final deleted = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
         builder: (_) => ProjectChatSettingsPage(
           controller: _chat,
           projectId: widget.projectId,
@@ -171,6 +171,9 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         ),
       ),
     );
+    if (deleted == true && mounted) {
+      Navigator.of(context).pop();
+    }
   }
 
   Future<void> _openSettings() async {

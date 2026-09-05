@@ -1161,6 +1161,78 @@ def test_agent_session_create_blocked_cancel_allowed_when_paused(client: TestCli
 
 
 @requires_postgres
+def test_delete_agent_session_removes_dialog(client: TestClient) -> None:
+    admin = _token(sub="padmin-del-sess", platform_admin=True)
+    co = client.post(
+        "/api/v1/companies",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={
+            "name": "DelSessCo",
+            "password": "test-company-pass",
+            "admin_email": "owner@delsess.test",
+        },
+    )
+    assert co.status_code == 201, co.text
+    company_id = co.json()["company"]["id"]
+    key = client.post(
+        "/api/v1/admin/ai-keys",
+        headers={"Authorization": f"Bearer {admin}"},
+        json={
+            "name": "DelSess Key",
+            "provider": "cursor",
+            "api_kind": "cursor_sdk",
+            "secret": "sk-del-sess",
+            "company_ids": [company_id],
+        },
+    )
+    assert key.status_code == 201, key.text
+
+    owner_h = owner_auth_from_company(_token, co.json())
+    cab = client.post(
+        "/api/v1/cabinets",
+        headers=owner_h,
+        json={"name": "DelSessCab", "company_id": company_id},
+    )
+    assert cab.status_code in (200, 201), cab.text
+    cabinet_id = cab.json()["id"]
+    proj = client.post(
+        f"/api/v1/cabinets/{cabinet_id}/projects",
+        headers=owner_h,
+        json={"name": "DelSessProj"},
+    )
+    assert proj.status_code == 201, proj.text
+    project_id = proj.json()["id"]
+    configure_and_launch(client, owner_h, project_id)
+
+    sess = client.post(f"/api/v1/projects/{project_id}/agent/sessions", headers=owner_h, json={})
+    assert sess.status_code == 201, sess.text
+    session_id = sess.json()["id"]
+    send = client.post(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/send",
+        headers=owner_h,
+        json={"text": "bye"},
+    )
+    assert send.status_code == 200, send.text
+
+    deleted = client.delete(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}",
+        headers=owner_h,
+    )
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["ok"] is True
+
+    listed = client.get(f"/api/v1/projects/{project_id}/agent/sessions", headers=owner_h)
+    assert listed.status_code == 200, listed.text
+    assert all(s["id"] != session_id for s in listed.json()["items"])
+
+    missing = client.get(
+        f"/api/v1/projects/{project_id}/chat/transcript?session_id={session_id}",
+        headers=owner_h,
+    )
+    assert missing.status_code == 404, missing.text
+
+
+@requires_postgres
 def test_project_prepare_allowed_while_paused(client: TestClient) -> None:
     admin = _token(sub="padmin-prep-pause", platform_admin=True)
     created_co = client.post(

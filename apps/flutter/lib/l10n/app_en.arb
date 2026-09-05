@@ -1327,6 +1327,8 @@
   "chatPin": "Pin chat",
   "chatUnpin": "Unpin chat",
   "chatRenameTitle": "Rename chat",
+  "chatDeleteDialog": "Delete chat",
+  "chatDeleteDialogConfirmMessage": "This chat and its message history will be permanently deleted.",
   "chatOpenFromSidebarHint": "Use New chat or a chat in the sidebar",
   "chatSelectProjectHint": "Select a project",
   "chatCreateChatHint": "Create a chat",
