@@ -148,7 +148,7 @@ class ChatMessageList extends StatefulWidget {
 class ChatMessageListState extends State<ChatMessageList> {
   final _scroll = ScrollController();
   bool _pinnedToBottom = true;
-  bool _loadingOlder = false;
+  bool _didInitialBottom = false;
   int _lastFingerprint = 0;
   int _lastBlockCount = 0;
 
@@ -160,25 +160,37 @@ class ChatMessageListState extends State<ChatMessageList> {
     _lastBlockCount = widget.blocks.length;
   }
 
-  /// reverse: true — visual bottom (newest) is near pixels ≈ 0.
+  /// Chat pattern (Telegram / Ollama / Discord): reverse list — visual bottom
+  /// (newest) sits at pixels ≈ 0. Pin is natural; no jumpTo(max) crutches.
   bool _isPinnedToBottom([ScrollMetrics? metrics]) {
     final m = metrics ?? (_scroll.hasClients ? _scroll.position : null);
     if (m == null) return true;
     return m.pixels <= _kStickThreshold;
   }
 
+  void _ensureBottom({bool animate = false}) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients || !_pinnedToBottom) return;
+      if (_scroll.position.pixels <= _kStickThreshold) return;
+      if (animate) {
+        _scroll.animateTo(
+          0,
+          duration: const Duration(milliseconds: 120),
+          curve: Curves.easeOut,
+        );
+      } else {
+        _scroll.jumpTo(0);
+      }
+    });
+  }
+
   void _maybeAutoloadOlder() {
     if (!_scroll.hasClients) return;
-    if (!widget.hasMoreHistory ||
-        widget.loadingHistory ||
-        _loadingOlder ||
-        widget.onLoadOlder == null) {
+    if (!widget.hasMoreHistory || widget.loadingHistory || widget.onLoadOlder == null) {
       return;
     }
-    final pos = _scroll.position;
-    if (pos.maxScrollExtent < _kStickThreshold ||
-        pos.pixels >= pos.maxScrollExtent - _kStickThreshold) {
-      _loadingOlder = true;
+    // Only when content cannot fill the viewport — user has no way to scroll to top.
+    if (_scroll.position.maxScrollExtent < _kStickThreshold) {
       widget.onLoadOlder!();
     }
   }
@@ -187,12 +199,11 @@ class ChatMessageListState extends State<ChatMessageList> {
     if (!_scroll.hasClients) return;
     final pos = _scroll.position;
     _pinnedToBottom = _isPinnedToBottom(pos);
+    // Visual top = maxScrollExtent in a reverse list.
     if (pos.pixels >= pos.maxScrollExtent - _kStickThreshold &&
         widget.hasMoreHistory &&
         !widget.loadingHistory &&
-        !_loadingOlder &&
         widget.onLoadOlder != null) {
-      _loadingOlder = true;
       widget.onLoadOlder!();
     }
   }
@@ -211,6 +222,7 @@ class ChatMessageListState extends State<ChatMessageList> {
   }
 
   Widget _renderEntry(AppLocalizations l10n, ChatDisplayEntry entry) {
+    // Per-item SelectionArea: a single wrap around the ListView eats drag gestures.
     return SelectionArea(
       child: switch (entry) {
         ChatDisplaySingle(:final item) => _renderPair(item),
@@ -247,22 +259,15 @@ class ChatMessageListState extends State<ChatMessageList> {
                 widget.blocks.first.id != oldWidget.blocks.first.id &&
                 widget.blocks.last.id == oldWidget.blocks.last.id));
 
-    if (prepended) {
+    if (prepended || widget.loadingHistory || oldWidget.loadingHistory) {
+      // Prepend in reverse list grows maxScrollExtent; offset-from-bottom stays stable.
       _lastFingerprint = fp;
       _lastBlockCount = widget.blocks.length;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _loadingOlder = false;
-        _maybeAutoloadOlder();
-      });
-      return;
-    }
-
-    if (oldWidget.loadingHistory && !widget.loadingHistory) {
-      _loadingOlder = false;
-      _lastFingerprint = fp;
-      _lastBlockCount = widget.blocks.length;
-      WidgetsBinding.instance.addPostFrameCallback((_) => _maybeAutoloadOlder());
+      if (oldWidget.loadingHistory && !widget.loadingHistory) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _maybeAutoloadOlder();
+        });
+      }
       return;
     }
 
@@ -271,6 +276,9 @@ class ChatMessageListState extends State<ChatMessageList> {
       _lastFingerprint = fp;
       _lastBlockCount = widget.blocks.length;
       _pinnedToBottom = wasPinned;
+      if (wasPinned) {
+        _ensureBottom(animate: _didInitialBottom);
+      }
       return;
     }
 
@@ -288,17 +296,35 @@ class ChatMessageListState extends State<ChatMessageList> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final entries = groupDisplayEntries(widget.blocks, turnStreaming: widget.turnStreaming);
-    // reverse: index 0 at visual bottom — newest first in the builder list.
-    final reversed = entries.reversed.toList(growable: false);
+    // reverse:true — first child is visual bottom (newest).
+    final visual = entries.reversed.toList(growable: false);
 
+    if (!_didInitialBottom && widget.blocks.isNotEmpty) {
+      _didInitialBottom = true;
+      _pinnedToBottom = true;
+      _ensureBottom();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _maybeAutoloadOlder();
+      });
+    }
+
+    // Eager children (not builder): markdown/tool panels have unbounded height;
+    // builder underestimates maxScrollExtent → hard scroll ceiling after 1–2 items.
     return Stack(
       children: [
-        ListView.builder(
-          controller: _scroll,
-          reverse: true,
-          padding: EdgeInsets.all(AppSpacing.md),
-          itemCount: reversed.length,
-          itemBuilder: (context, index) => _renderEntry(l10n, reversed[index]),
+        NotificationListener<ScrollNotification>(
+          onNotification: (n) {
+            if (n is ScrollUpdateNotification || n is UserScrollNotification) {
+              _pinnedToBottom = _isPinnedToBottom(n.metrics);
+            }
+            return false;
+          },
+          child: ListView(
+            controller: _scroll,
+            reverse: true,
+            padding: EdgeInsets.all(AppSpacing.md),
+            children: [for (final e in visual) _renderEntry(l10n, e)],
+          ),
         ),
         if (widget.loadingHistory)
           const Positioned(
