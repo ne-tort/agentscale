@@ -150,6 +150,7 @@ class ChatMessageListState extends State<ChatMessageList> {
   bool _pinnedToBottom = true;
   bool _didInitialJump = false;
   bool _loadingOlder = false;
+  bool _jumpScheduled = false;
   int _lastFingerprint = 0;
   int _lastBlockCount = 0;
   double? _anchorPixels;
@@ -176,14 +177,22 @@ class ChatMessageListState extends State<ChatMessageList> {
     _anchorMaxExtent = _scroll.position.maxScrollExtent;
   }
 
-  void _restoreAnchor() {
+  void _restoreAnchor({int framesLeft = 2}) {
     final anchor = _anchorPixels;
     final oldMax = _anchorMaxExtent;
     if (anchor == null || oldMax == null) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scroll.hasClients) return;
       final delta = _scroll.position.maxScrollExtent - oldMax;
-      _scroll.jumpTo((anchor + delta).clamp(0.0, _scroll.position.maxScrollExtent));
+      final target = (anchor + delta).clamp(0.0, _scroll.position.maxScrollExtent);
+      if ((_scroll.offset - target).abs() > 0.5) {
+        _scroll.jumpTo(target);
+      }
+      if (framesLeft > 1) {
+        // Markdown / SelectionArea can settle extent one frame later.
+        _restoreAnchor(framesLeft: framesLeft - 1);
+        return;
+      }
       _anchorPixels = null;
       _anchorMaxExtent = null;
       _loadingOlder = false;
@@ -192,8 +201,11 @@ class ChatMessageListState extends State<ChatMessageList> {
   }
 
   void _scrollToBottom({bool animate = false}) {
+    if (_jumpScheduled) return;
+    _jumpScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scroll.hasClients) return;
+      _jumpScheduled = false;
+      if (!mounted || !_scroll.hasClients) return;
       final target = _scroll.position.maxScrollExtent;
       if (animate) {
         _scroll.animateTo(
@@ -204,9 +216,9 @@ class ChatMessageListState extends State<ChatMessageList> {
       } else {
         _scroll.jumpTo(target);
       }
-      // Extent often grows after first layout of variable-height blocks.
+      // Second frame: late intrinsic layout (markdown) grows maxScrollExtent.
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!_scroll.hasClients) return;
+        if (!mounted || !_scroll.hasClients || !_pinnedToBottom) return;
         final t2 = _scroll.position.maxScrollExtent;
         if ((t2 - _scroll.offset).abs() > 1) {
           _scroll.jumpTo(t2);
@@ -246,6 +258,19 @@ class ChatMessageListState extends State<ChatMessageList> {
     }
   }
 
+  /// When extent grows after layout (variable-height children), keep visual bottom
+  /// if pinned — without this, scroll feels like a stepped ceiling while reading up.
+  bool _onMetrics(ScrollMetricsNotification n) {
+    if (!_scroll.hasClients) return false;
+    if (_pinnedToBottom && !_loadingOlder && _anchorPixels == null) {
+      final max = n.metrics.maxScrollExtent;
+      if (max - _scroll.offset > _kStickThreshold) {
+        _scroll.jumpTo(max);
+      }
+    }
+    return false;
+  }
+
   Widget _renderPair(ChatDisplayPair item) {
     final block = item.block;
     return ChatBlockRenderer(
@@ -282,6 +307,13 @@ class ChatMessageListState extends State<ChatMessageList> {
           ),
       },
     );
+  }
+
+  void _scheduleInitialJumpIfNeeded() {
+    if (_didInitialJump || widget.blocks.isEmpty) return;
+    _didInitialJump = true;
+    _pinnedToBottom = true;
+    _scrollToBottom();
   }
 
   @override
@@ -329,6 +361,7 @@ class ChatMessageListState extends State<ChatMessageList> {
     }
 
     _lastBlockCount = widget.blocks.length;
+    _scheduleInitialJumpIfNeeded();
   }
 
   @override
@@ -343,18 +376,24 @@ class ChatMessageListState extends State<ChatMessageList> {
     final l10n = AppLocalizations.of(context);
     final entries = groupDisplayEntries(widget.blocks, turnStreaming: widget.turnStreaming);
 
+    // Side-effect-free schedule: first non-empty transcript → jump to bottom.
     if (!_didInitialJump && widget.blocks.isNotEmpty) {
-      _didInitialJump = true;
-      _scrollToBottom();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _scheduleInitialJumpIfNeeded();
+      });
     }
 
+    // Eager children (not builder): variable-height markdown makes builder
+    // underestimate maxScrollExtent → "stair-step ceiling" when scrolling up.
     return Stack(
       children: [
-        ListView.builder(
-          controller: _scroll,
-          padding: EdgeInsets.all(AppSpacing.md),
-          itemCount: entries.length,
-          itemBuilder: (context, index) => _renderEntry(l10n, entries[index]),
+        NotificationListener<ScrollMetricsNotification>(
+          onNotification: _onMetrics,
+          child: ListView(
+            controller: _scroll,
+            padding: EdgeInsets.all(AppSpacing.md),
+            children: [for (final e in entries) _renderEntry(l10n, e)],
+          ),
         ),
         if (widget.loadingHistory)
           const Positioned(
