@@ -40,6 +40,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   bool _loading = true;
   bool _chatReadable = true;
   bool _chatSendable = true;
+  bool _waking = false;
   Map<String, dynamic>? _project;
   Object? _lastSnackError;
   late String _title;
@@ -74,6 +75,12 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     _bootstrap();
   }
 
+  Future<void> _refreshProjectFlags() async {
+    _project = await workContext.api.getProject(widget.projectId);
+    _chatReadable = projectChatReadable(_project);
+    _chatSendable = projectChatSendable(_project);
+  }
+
   Future<void> _bootstrap() async {
     final hadCache = _chat.hasCachedTranscript;
     if (hadCache && mounted) {
@@ -101,6 +108,31 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   void dispose() {
     _chat.dispose();
     super.dispose();
+  }
+
+  Future<void> _wakeProject() async {
+    if (_waking || _chatSendable) return;
+    setState(() => _waking = true);
+    try {
+      final status = _project?['status'] as String?;
+      if (status == 'paused') {
+        await workContext.api.resumeProject(widget.projectId);
+      } else {
+        await workContext.api.reloadProject(widget.projectId);
+      }
+      await _refreshProjectFlags();
+      if (_chatReadable) {
+        await _chat.loadTranscript();
+        if (_chatSendable) {
+          unawaited(_chat.loadModels());
+        }
+      }
+      workContext.notifyProjectLifecycleChanged();
+    } catch (e) {
+      if (mounted) showAgentChatSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _waking = false);
+    }
   }
 
   Future<void> _openChatSettings() async {
@@ -132,9 +164,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         ),
       ),
     );
-    _project = await workContext.api.getProject(widget.projectId);
-    _chatReadable = projectChatReadable(_project);
-    _chatSendable = projectChatSendable(_project);
+    await _refreshProjectFlags();
     if (_chatReadable) {
       await _chat.loadTranscript();
       if (_chatSendable) {
@@ -153,48 +183,48 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    if (!_chatReadable) {
-      return AppScaffold(
-        title: Text(widget.projectName),
-        body: Center(child: Text(l10n.projectProjectPaused)),
-      );
-    }
+    final needsWake = projectChatNeedsWake(_project) || (!_chatSendable && _chatReadable);
     return AppScaffold(
-      title: Text(_displayTitle),
+      title: Text(_chatReadable ? _displayTitle : widget.projectName),
       actions: [
-        IconButton(
-          icon: Icon(_pinned ? Icons.push_pin : Icons.push_pin_outlined),
-          tooltip: _pinned ? l10n.chatUnpin : l10n.chatPin,
-          onPressed: () async {
-            // Quick pin without leaving workspace; settings page also toggles.
-            try {
-              final body = await workContext.api.patchAgentSession(
-                projectId: widget.projectId,
-                sessionId: widget.sessionId,
-                pin: !_pinned,
-              );
-              if (!mounted) return;
-              setState(() => _pinned = body['pinned'] == true);
-            } catch (e) {
-              if (mounted) showAgentChatSnack(context, e);
-            }
-          },
-        ),
-        IconButton(
-          icon: const Icon(Icons.settings_outlined),
-          tooltip: l10n.projectProjectSettings,
-          onPressed: _openSettings,
-        ),
+        if (_chatReadable) ...[
+          IconButton(
+            icon: Icon(_pinned ? Icons.push_pin : Icons.push_pin_outlined),
+            tooltip: _pinned ? l10n.chatUnpin : l10n.chatPin,
+            onPressed: () async {
+              try {
+                final body = await workContext.api.patchAgentSession(
+                  projectId: widget.projectId,
+                  sessionId: widget.sessionId,
+                  pin: !_pinned,
+                );
+                if (!mounted) return;
+                setState(() => _pinned = body['pinned'] == true);
+              } catch (e) {
+                if (mounted) showAgentChatSnack(context, e);
+              }
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: l10n.projectProjectSettings,
+            onPressed: _openSettings,
+          ),
+        ],
       ],
-      body: ChatScaffold(
-        controller: _chat,
-        api: workContext.api,
-        chatSendable: _chatSendable,
-        loading: _loading,
-        disabledHint: _chatSendable ? null : l10n.errorPodNotRunning,
-        title: Text(_displayTitle),
-        onOpenChatSettings: _openChatSettings,
-      ),
+      body: !_chatReadable
+          ? Center(child: Text(l10n.projectProjectPaused))
+          : ChatScaffold(
+              controller: _chat,
+              api: workContext.api,
+              chatSendable: _chatSendable,
+              loading: _loading,
+              disabledHint: _chatSendable ? null : l10n.errorPodNotRunning,
+              wakeMode: needsWake,
+              onWake: needsWake && !_waking ? _wakeProject : null,
+              title: Text(_displayTitle),
+              onOpenChatSettings: _openChatSettings,
+            ),
     );
   }
 }

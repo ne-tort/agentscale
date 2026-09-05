@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/preferences/app_value_preference.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -27,6 +28,8 @@ class ChatComposer extends StatefulWidget {
     this.onOpenSettings,
     this.projectId,
     this.api,
+    this.wakeMode = false,
+    this.onWake,
   });
 
   final ChatComposerSend onSend;
@@ -37,6 +40,9 @@ class ChatComposer extends StatefulWidget {
   final VoidCallback? onOpenSettings;
   final String? projectId;
   final ProdavanApi? api;
+  /// When true, field is not sendable but tappable — [onWake] resumes/reloads.
+  final bool wakeMode;
+  final VoidCallback? onWake;
 
   @override
   State<ChatComposer> createState() => _ChatComposerState();
@@ -147,10 +153,12 @@ class _ChatComposerState extends State<ChatComposer> {
 
   InputDecoration _fieldDecoration(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final warning = context.appColors.warning;
     return kBorderlessInputDecoration.copyWith(
       hintText: widget.enabled
           ? l10n.projectMessageHint
           : (widget.disabledHint ?? l10n.projectMessageHint),
+      hintStyle: widget.wakeMode ? TextStyle(color: warning) : null,
       filled: false,
       isDense: true,
       contentPadding: EdgeInsets.symmetric(
@@ -213,15 +221,19 @@ class _ChatComposerState extends State<ChatComposer> {
   }
 
   Widget _textField(BuildContext context) {
+    final warning = context.appColors.warning;
     return Focus(
       onKeyEvent: _handleKeyEvent,
       child: TextField(
         controller: _controller,
         focusNode: _focusNode,
-        enabled: widget.enabled && !_uploading,
+        enabled: !_uploading && (widget.enabled || widget.wakeMode),
+        readOnly: widget.wakeMode || !widget.enabled,
+        style: widget.wakeMode ? TextStyle(color: warning) : null,
         minLines: 1,
         maxLines: 6,
         decoration: _fieldDecoration(context),
+        onTap: widget.wakeMode ? widget.onWake : null,
       ),
     );
   }

@@ -187,6 +187,7 @@ async def test_promote_or_demote_k8s_unknown_with_error() -> None:
     svc = RuntimeObservationService(session)
     project = _project()
     pod = _pod(status=PodStatus.RUNNING)
+    pod.updated_at = datetime.now(UTC) - timedelta(seconds=400)
     svc.observe = AsyncMock(  # type: ignore[method-assign]
         return_value={
             "observed_state": ObservedState.UNKNOWN.value,
@@ -195,10 +196,51 @@ async def test_promote_or_demote_k8s_unknown_with_error() -> None:
     )
     with patch("prodavan.application.pod_service.runtime_observation.settings") as mock_settings:
         mock_settings.pod_runtime_mode = "k8s"
+        mock_settings.pod_provisioning_timeout_sec = 30
         action = await svc.promote_or_demote(project=project, pod=pod)
     assert action == "demoted"
     assert pod.status == PodStatus.FAILED
     assert project.status == ProjectStatus.ERROR
+
+
+@pytest.mark.asyncio
+async def test_promote_or_demote_k8s_absent_within_flap_grace() -> None:
+    session = MagicMock()
+    svc = RuntimeObservationService(session)
+    project = _project()
+    pod = _pod(status=PodStatus.RUNNING)
+    pod.updated_at = datetime.now(UTC) - timedelta(seconds=5)
+    svc.observe = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "observed_state": ObservedState.ABSENT.value,
+            "last_error": "pod not found in k8s",
+        }
+    )
+    with patch("prodavan.application.pod_service.runtime_observation.settings") as mock_settings:
+        mock_settings.pod_runtime_mode = "k8s"
+        mock_settings.pod_provisioning_timeout_sec = 30
+        action = await svc.promote_or_demote(project=project, pod=pod)
+    assert action == "noop"
+    assert pod.status == PodStatus.RUNNING
+    assert project.status == ProjectStatus.ACTIVE
+
+
+@pytest.mark.asyncio
+async def test_promote_or_demote_recovers_failed_when_running() -> None:
+    session = MagicMock()
+    svc = RuntimeObservationService(session)
+    project = _project(status=ProjectStatus.ERROR)
+    pod = _pod(status=PodStatus.FAILED, last_error="node flap")
+    svc.observe = AsyncMock(  # type: ignore[method-assign]
+        return_value={"observed_state": ObservedState.RUNNING.value},
+    )
+    with patch("prodavan.application.pod_service.runtime_observation.settings") as mock_settings:
+        mock_settings.pod_runtime_mode = "k8s"
+        action = await svc.promote_or_demote(project=project, pod=pod)
+    assert action == "promoted"
+    assert pod.status == PodStatus.RUNNING
+    assert pod.last_error is None
+    assert project.status == ProjectStatus.ACTIVE
 
 
 @pytest.mark.asyncio

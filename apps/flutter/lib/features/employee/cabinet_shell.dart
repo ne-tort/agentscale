@@ -36,11 +36,15 @@ class _CabinetShellState extends State<CabinetShell> {
   static const _projectsIndex = 1;
 
   final GlobalKey<NavigatorState> _projectsNavKey = GlobalKey<NavigatorState>();
+  /// Dedicated chat stack — not nested under Projects.
+  final GlobalKey<NavigatorState> _chatNavKey = GlobalKey<NavigatorState>();
+  late final _ChatNavObserver _chatNavObserver = _ChatNavObserver(_onChatStackChanged);
 
   int _contentIndex = _overviewIndex;
   int? _railSelected;
   int _narrowStackIndex = 1;
   bool _subpageOpen = false;
+  bool _chatOpen = false;
   bool _navLoading = true;
   List<CabinetNavEntry> _railEntries = const [];
   List<CabinetNavEntry> _managementEntries = const [];
@@ -174,7 +178,33 @@ class _CabinetShellState extends State<CabinetShell> {
     setState(() => _subpageOpen = open);
   }
 
+  void _onChatStackChanged() {
+    if (!mounted) return;
+    final open = _chatNavKey.currentState?.canPop() ?? false;
+    if (_chatOpen == open && _subpageOpen == open) return;
+    setState(() {
+      _chatOpen = open;
+      _subpageOpen = open;
+    });
+  }
+
+  void _closeChatLayer() {
+    final nav = _chatNavKey.currentState;
+    if (nav != null) {
+      while (nav.canPop()) {
+        nav.pop();
+      }
+    }
+    if (_chatOpen || _subpageOpen) {
+      setState(() {
+        _chatOpen = false;
+        _subpageOpen = false;
+      });
+    }
+  }
+
   void _goOverview() {
+    _closeChatLayer();
     setState(() {
       _contentIndex = _overviewIndex;
       _railSelected = null;
@@ -186,6 +216,7 @@ class _CabinetShellState extends State<CabinetShell> {
   void _selectRail(int destIndex) {
     final indices = _wideDestContentIndices;
     if (destIndex < 0 || destIndex >= indices.length) return;
+    _closeChatLayer();
     setState(() {
       _railSelected = destIndex;
       _contentIndex = indices[destIndex];
@@ -195,6 +226,7 @@ class _CabinetShellState extends State<CabinetShell> {
   }
 
   void _selectSettingsWide() {
+    _closeChatLayer();
     setState(() {
       _contentIndex = _settingsIndex;
       _railSelected = null;
@@ -316,7 +348,7 @@ class _CabinetShellState extends State<CabinetShell> {
     }
   }
 
-  /// Wide: push into Projects nested navigator (rail stays). Narrow: root push (full-screen).
+  /// Wide: dedicated chat navigator (not under Projects). Narrow: root push.
   Future<void> _pushChat(Widget page) async {
     final route = MaterialPageRoute<void>(builder: (_) => page);
     if (AppBreakpoints.isNarrow(context)) {
@@ -324,16 +356,19 @@ class _CabinetShellState extends State<CabinetShell> {
       return;
     }
     setState(() {
-      _contentIndex = _projectsIndex;
-      _railSelected = 0;
+      _chatOpen = true;
       _subpageOpen = true;
     });
-    // Wait a frame so IndexedStack activates the projects branch navigator.
     await WidgetsBinding.instance.endOfFrame;
-    final nav = _projectsNavKey.currentState;
+    if (!mounted) return;
+    final nav = _chatNavKey.currentState;
     if (nav == null) {
-      if (!mounted) return;
       await Navigator.of(context).push(route);
+      return;
+    }
+    // Share one chat page between dialogs — replace rather than nest under Projects.
+    if (nav.canPop()) {
+      await nav.pushReplacement(route);
       return;
     }
     await nav.push(route);
@@ -481,9 +516,26 @@ class _CabinetShellState extends State<CabinetShell> {
       railExtra: _chatsRail(extended: expanded),
       body: _navLoading
           ? const Center(child: CircularProgressIndicator())
-          : IndexedStack(
-              index: _contentIndex,
-              children: _buildWideBranches(l10n),
+          : Stack(
+              children: [
+                Offstage(
+                  offstage: _chatOpen,
+                  child: IndexedStack(
+                    index: _contentIndex,
+                    children: _buildWideBranches(l10n),
+                  ),
+                ),
+                Offstage(
+                  offstage: !_chatOpen,
+                  child: Navigator(
+                    key: _chatNavKey,
+                    observers: [_chatNavObserver],
+                    onGenerateRoute: (_) => MaterialPageRoute<void>(
+                      builder: (_) => const SizedBox.shrink(),
+                    ),
+                  ),
+                ),
+              ],
             ),
     );
   }
@@ -528,9 +580,10 @@ class _CabinetShellState extends State<CabinetShell> {
     return [
       for (var i = 0; i < mainPages.length; i++)
         AppShellBranch(
-          active: _contentIndex == i,
+          active: _contentIndex == i && !_chatOpen,
           navigatorKey: i == _projectsIndex ? _projectsNavKey : null,
-          onSubpageOpenChanged: _contentIndex == i ? _onSubpageOpenChanged : null,
+          onSubpageOpenChanged:
+              _contentIndex == i && !_chatOpen ? _onSubpageOpenChanged : null,
           root: mainPages[i],
         ),
       EmployeeSettingsBody(
@@ -539,4 +592,24 @@ class _CabinetShellState extends State<CabinetShell> {
       ),
     ];
   }
+}
+
+class _ChatNavObserver extends NavigatorObserver {
+  _ChatNavObserver(this._onChanged);
+
+  final VoidCallback _onChanged;
+
+  void _notify() => _onChanged();
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) => _notify();
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) => _notify();
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) => _notify();
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) => _notify();
 }

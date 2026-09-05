@@ -9,6 +9,7 @@ import pytest
 
 from prodavan.application.pod_service.query import PodQuery
 from prodavan.domain.pods import PodDesiredState, PodStatus
+from prodavan.domain.projects import ProjectStatus
 from prodavan.infrastructure.persistence.models.projects import ProjectPodRow
 
 
@@ -66,6 +67,7 @@ async def test_runtime_summary_shape() -> None:
 
 @pytest.mark.asyncio
 async def test_runtime_view_includes_failed_pod() -> None:
+    """FAILED + desired=RUNNING re-observes; stub mode must keep last_error."""
     session = AsyncMock()
     failed = ProjectPodRow(
         id="pod_failed",
@@ -79,14 +81,27 @@ async def test_runtime_view_includes_failed_pod() -> None:
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
+    project = MagicMock()
+    project.launch_phase = None
+    project.status = ProjectStatus.ERROR
     live_result = MagicMock()
     live_result.scalar_one_or_none.return_value = None
     failed_result = MagicMock()
     failed_result.scalar_one_or_none.return_value = failed
     session.execute = AsyncMock(side_effect=[live_result, failed_result])
+    session.get = AsyncMock(return_value=project)
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock()
 
-    with patch("prodavan.config.settings.settings") as mock_settings:
-        mock_settings.pod_runtime_mode = "stub"
+    # runtime_observation imports settings at module level — patch there, not only
+    # prodavan.config.settings (FAILED+RUNNING no longer short-circuits before mode).
+    with (
+        patch("prodavan.application.pod_service.runtime_observation.settings") as obs_settings,
+        patch("prodavan.config.settings.settings") as cfg_settings,
+    ):
+        for mock_settings in (obs_settings, cfg_settings):
+            mock_settings.pod_runtime_mode = "stub"
+            mock_settings.pod_provisioning_timeout_sec = 300
         summary = await PodQuery(session).runtime_view("prj_test1234567890")
 
     assert summary is not None

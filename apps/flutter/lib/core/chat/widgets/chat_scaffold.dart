@@ -148,13 +148,9 @@ class ChatMessageList extends StatefulWidget {
 class ChatMessageListState extends State<ChatMessageList> {
   final _scroll = ScrollController();
   bool _pinnedToBottom = true;
-  bool _didInitialJump = false;
   bool _loadingOlder = false;
-  bool _jumpScheduled = false;
   int _lastFingerprint = 0;
   int _lastBlockCount = 0;
-  double? _anchorPixels;
-  double? _anchorMaxExtent;
 
   @override
   void initState() {
@@ -164,68 +160,11 @@ class ChatMessageListState extends State<ChatMessageList> {
     _lastBlockCount = widget.blocks.length;
   }
 
-  /// Chronological ListView — visual bottom is maxScrollExtent.
+  /// reverse: true — visual bottom (newest) is near pixels ≈ 0.
   bool _isPinnedToBottom([ScrollMetrics? metrics]) {
     final m = metrics ?? (_scroll.hasClients ? _scroll.position : null);
     if (m == null) return true;
-    return m.pixels >= m.maxScrollExtent - _kStickThreshold;
-  }
-
-  void _captureAnchor() {
-    if (!_scroll.hasClients) return;
-    _anchorPixels = _scroll.offset;
-    _anchorMaxExtent = _scroll.position.maxScrollExtent;
-  }
-
-  void _restoreAnchor({int framesLeft = 2}) {
-    final anchor = _anchorPixels;
-    final oldMax = _anchorMaxExtent;
-    if (anchor == null || oldMax == null) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scroll.hasClients) return;
-      final delta = _scroll.position.maxScrollExtent - oldMax;
-      final target = (anchor + delta).clamp(0.0, _scroll.position.maxScrollExtent);
-      if ((_scroll.offset - target).abs() > 0.5) {
-        _scroll.jumpTo(target);
-      }
-      if (framesLeft > 1) {
-        // Markdown / SelectionArea can settle extent one frame later.
-        _restoreAnchor(framesLeft: framesLeft - 1);
-        return;
-      }
-      _anchorPixels = null;
-      _anchorMaxExtent = null;
-      _loadingOlder = false;
-      _maybeAutoloadOlder();
-    });
-  }
-
-  void _scrollToBottom({bool animate = false}) {
-    if (_jumpScheduled) return;
-    _jumpScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _jumpScheduled = false;
-      if (!mounted || !_scroll.hasClients) return;
-      final target = _scroll.position.maxScrollExtent;
-      if (animate) {
-        _scroll.animateTo(
-          target,
-          duration: const Duration(milliseconds: 120),
-          curve: Curves.easeOut,
-        );
-      } else {
-        _scroll.jumpTo(target);
-      }
-      // Second frame: late intrinsic layout (markdown) grows maxScrollExtent.
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_scroll.hasClients || !_pinnedToBottom) return;
-        final t2 = _scroll.position.maxScrollExtent;
-        if ((t2 - _scroll.offset).abs() > 1) {
-          _scroll.jumpTo(t2);
-        }
-        _maybeAutoloadOlder();
-      });
-    });
+    return m.pixels <= _kStickThreshold;
   }
 
   void _maybeAutoloadOlder() {
@@ -236,9 +175,10 @@ class ChatMessageListState extends State<ChatMessageList> {
         widget.onLoadOlder == null) {
       return;
     }
-    if (_scroll.position.maxScrollExtent < _kStickThreshold) {
+    final pos = _scroll.position;
+    if (pos.maxScrollExtent < _kStickThreshold ||
+        pos.pixels >= pos.maxScrollExtent - _kStickThreshold) {
       _loadingOlder = true;
-      _captureAnchor();
       widget.onLoadOlder!();
     }
   }
@@ -247,28 +187,14 @@ class ChatMessageListState extends State<ChatMessageList> {
     if (!_scroll.hasClients) return;
     final pos = _scroll.position;
     _pinnedToBottom = _isPinnedToBottom(pos);
-    if (pos.pixels <= _kStickThreshold &&
+    if (pos.pixels >= pos.maxScrollExtent - _kStickThreshold &&
         widget.hasMoreHistory &&
         !widget.loadingHistory &&
         !_loadingOlder &&
         widget.onLoadOlder != null) {
       _loadingOlder = true;
-      _captureAnchor();
       widget.onLoadOlder!();
     }
-  }
-
-  /// When extent grows after layout (variable-height children), keep visual bottom
-  /// if pinned — without this, scroll feels like a stepped ceiling while reading up.
-  bool _onMetrics(ScrollMetricsNotification n) {
-    if (!_scroll.hasClients) return false;
-    if (_pinnedToBottom && !_loadingOlder && _anchorPixels == null) {
-      final max = n.metrics.maxScrollExtent;
-      if (max - _scroll.offset > _kStickThreshold) {
-        _scroll.jumpTo(max);
-      }
-    }
-    return false;
   }
 
   Widget _renderPair(ChatDisplayPair item) {
@@ -285,7 +211,6 @@ class ChatMessageListState extends State<ChatMessageList> {
   }
 
   Widget _renderEntry(AppLocalizations l10n, ChatDisplayEntry entry) {
-    // Per-item SelectionArea: wrapping the whole ListView eats drag gestures on first paint.
     return SelectionArea(
       child: switch (entry) {
         ChatDisplaySingle(:final item) => _renderPair(item),
@@ -309,13 +234,6 @@ class ChatMessageListState extends State<ChatMessageList> {
     );
   }
 
-  void _scheduleInitialJumpIfNeeded() {
-    if (_didInitialJump || widget.blocks.isEmpty) return;
-    _didInitialJump = true;
-    _pinnedToBottom = true;
-    _scrollToBottom();
-  }
-
   @override
   void didUpdateWidget(covariant ChatMessageList oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -324,20 +242,19 @@ class ChatMessageListState extends State<ChatMessageList> {
     final prepended = countGrew &&
         (widget.loadingHistory ||
             oldWidget.loadingHistory ||
-            _anchorPixels != null ||
             (widget.blocks.isNotEmpty &&
                 oldWidget.blocks.isNotEmpty &&
                 widget.blocks.first.id != oldWidget.blocks.first.id &&
                 widget.blocks.last.id == oldWidget.blocks.last.id));
 
-    if (!oldWidget.loadingHistory && widget.loadingHistory) {
-      _captureAnchor();
-    }
-
     if (prepended) {
       _lastFingerprint = fp;
       _lastBlockCount = widget.blocks.length;
-      _restoreAnchor();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _loadingOlder = false;
+        _maybeAutoloadOlder();
+      });
       return;
     }
 
@@ -354,14 +271,10 @@ class ChatMessageListState extends State<ChatMessageList> {
       _lastFingerprint = fp;
       _lastBlockCount = widget.blocks.length;
       _pinnedToBottom = wasPinned;
-      if (wasPinned) {
-        _scrollToBottom(animate: _didInitialJump);
-      }
       return;
     }
 
     _lastBlockCount = widget.blocks.length;
-    _scheduleInitialJumpIfNeeded();
   }
 
   @override
@@ -375,25 +288,17 @@ class ChatMessageListState extends State<ChatMessageList> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final entries = groupDisplayEntries(widget.blocks, turnStreaming: widget.turnStreaming);
+    // reverse: index 0 at visual bottom — newest first in the builder list.
+    final reversed = entries.reversed.toList(growable: false);
 
-    // Side-effect-free schedule: first non-empty transcript → jump to bottom.
-    if (!_didInitialJump && widget.blocks.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _scheduleInitialJumpIfNeeded();
-      });
-    }
-
-    // Eager children (not builder): variable-height markdown makes builder
-    // underestimate maxScrollExtent → "stair-step ceiling" when scrolling up.
     return Stack(
       children: [
-        NotificationListener<ScrollMetricsNotification>(
-          onNotification: _onMetrics,
-          child: ListView(
-            controller: _scroll,
-            padding: EdgeInsets.all(AppSpacing.md),
-            children: [for (final e in entries) _renderEntry(l10n, e)],
-          ),
+        ListView.builder(
+          controller: _scroll,
+          reverse: true,
+          padding: EdgeInsets.all(AppSpacing.md),
+          itemCount: reversed.length,
+          itemBuilder: (context, index) => _renderEntry(l10n, reversed[index]),
         ),
         if (widget.loadingHistory)
           const Positioned(
@@ -423,6 +328,8 @@ class ChatScaffold extends StatelessWidget {
     required this.onOpenChatSettings,
     required this.title,
     this.disabledHint,
+    this.wakeMode = false,
+    this.onWake,
   });
 
   final ChatSessionController controller;
@@ -432,6 +339,8 @@ class ChatScaffold extends StatelessWidget {
   final VoidCallback onOpenChatSettings;
   final Widget title;
   final String? disabledHint;
+  final bool wakeMode;
+  final VoidCallback? onWake;
 
   double _columnMaxWidth(double width) {
     if (width < 600) return width;
@@ -475,6 +384,8 @@ class ChatScaffold extends StatelessWidget {
                   enabled: chatSendable,
                   streaming: controller.streaming,
                   disabledHint: disabledHint,
+                  wakeMode: wakeMode,
+                  onWake: onWake,
                   onSend: (text, refs) => controller.send(text, attachmentRefs: refs),
                   onCancel: controller.streaming ? () => controller.cancelStream() : null,
                   onOpenSettings: onOpenChatSettings,

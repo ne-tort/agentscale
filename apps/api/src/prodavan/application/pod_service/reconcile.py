@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.pod_service.command import PodCommand
@@ -50,10 +50,17 @@ class PodReconcileService:
 
     async def run(self) -> dict:
         fixed = 0
+        # Include FAILED pods that still desire RUNNING so WSL/node flaps can heal.
         q = await self._session.execute(
             select(ProjectPodRow, ProjectRow)
             .join(ProjectRow, ProjectRow.id == ProjectPodRow.project_id, isouter=True)
-            .where(ProjectPodRow.status.notin_((PodStatus.TERMINATED, PodStatus.FAILED)))
+            .where(
+                or_(
+                    ProjectPodRow.status.notin_((PodStatus.TERMINATED, PodStatus.FAILED)),
+                    (ProjectPodRow.status == PodStatus.FAILED)
+                    & (ProjectPodRow.desired_state == PodDesiredState.RUNNING.value),
+                )
+            )
         )
         for pod, project in q.all():
             if project is None:
@@ -62,11 +69,16 @@ class PodReconcileService:
                     pod.status = PodStatus.TERMINATED
                     fixed += 1
                 continue
-            desired = (
-                PodDesiredState.RUNNING
-                if project.status == ProjectStatus.ACTIVE
-                else PodDesiredState.ABSENT
-            )
+            # Keep desired=RUNNING for ERROR projects that still want a live pod.
+            if pod.desired_state == PodDesiredState.RUNNING.value and project.status in {
+                ProjectStatus.ACTIVE,
+                ProjectStatus.ERROR,
+            }:
+                desired = PodDesiredState.RUNNING
+            elif project.status == ProjectStatus.ACTIVE:
+                desired = PodDesiredState.RUNNING
+            else:
+                desired = PodDesiredState.ABSENT
             drift = pod.desired_state != desired.value or not PodCommand._status_matches_desired(
                 pod, desired
             )
@@ -84,13 +96,14 @@ class PodReconcileService:
                     fixed += 1
 
         active_q = await self._session.execute(
-            select(ProjectRow).where(ProjectRow.status == ProjectStatus.ACTIVE)
+            select(ProjectRow).where(
+                ProjectRow.status.in_((ProjectStatus.ACTIVE, ProjectStatus.ERROR))
+            )
         )
         pod_query = PodQuery(self._session)
         for project in active_q.scalars().all():
-            if project.status == ProjectStatus.ERROR:
-                continue
-            if await pod_query.get_for_project(project.id) is not None:
+            live = await pod_query.get_for_project(project.id)
+            if live is not None:
                 continue
             had_pod = await self._session.execute(
                 select(ProjectPodRow.id)
@@ -123,7 +136,13 @@ class PodReconcileService:
         q_obs = await self._session.execute(
             select(ProjectPodRow, ProjectRow)
             .join(ProjectRow, ProjectRow.id == ProjectPodRow.project_id)
-            .where(ProjectPodRow.status.notin_((PodStatus.TERMINATED, PodStatus.FAILED)))
+            .where(
+                or_(
+                    ProjectPodRow.status.notin_((PodStatus.TERMINATED, PodStatus.FAILED)),
+                    (ProjectPodRow.status == PodStatus.FAILED)
+                    & (ProjectPodRow.desired_state == PodDesiredState.RUNNING.value),
+                )
+            )
         )
         promote_actions = 0
         for pod, project in q_obs.all():

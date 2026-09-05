@@ -29,8 +29,9 @@
 
 ## Chat
 
-- **Wide:** open chat via nested Projects `Navigator` — left rail stays visible (may compact when subpage open).
+- **Wide:** dedicated chat `Navigator` (`_chatNavKey`) overlaid on the shell body — **not** nested under Projects. Switching dialogs uses `pushReplacement` on that stack; Projects table stays on its own branch.
 - **Narrow:** root push — bottom nav hidden (full-screen chat).
+- Paused / error / pod-down: transcript stays readable; composer wake (warning text) — tap resumes or reloads without extra banners.
 
 ## State machine
 

@@ -93,12 +93,15 @@ class RuntimeObservationService:
             )
 
         if pod.status == PodStatus.FAILED:
-            return self._summary(
-                ObservedState.FAILED,
-                orchestrator_status=pod.status,
-                desired_state=pod.desired_state,
-                last_error=pod.last_error,
-            )
+            # Sticky FAILED short-circuit only when we are not trying to run —
+            # otherwise re-observe k8s so a recovered node can promote again.
+            if pod.desired_state != PodDesiredState.RUNNING.value:
+                return self._summary(
+                    ObservedState.FAILED,
+                    orchestrator_status=pod.status,
+                    desired_state=pod.desired_state,
+                    last_error=pod.last_error,
+                )
 
         mode = (settings.pod_runtime_mode or "stub").strip().lower()
         if mode != "k8s":
@@ -194,14 +197,32 @@ class RuntimeObservationService:
                 pod.last_started_at = now
                 return "promoted"
             if (
+                state == ObservedState.RUNNING.value
+                and pod.desired_state == PodDesiredState.RUNNING.value
+                and (
+                    pod.status == PodStatus.FAILED
+                    or project.status == ProjectStatus.ERROR
+                )
+            ):
+                pod.status = PodStatus.RUNNING
+                pod.last_error = None
+                pod.last_started_at = now
+                if project.status == ProjectStatus.ERROR:
+                    project.status = ProjectStatus.ACTIVE
+                return "promoted"
+            if (
                 pod.status == PodStatus.RUNNING
                 and pod.desired_state == PodDesiredState.RUNNING.value
                 and state != ObservedState.RUNNING.value
             ):
                 age = (now - self._as_utc(pod.updated_at)).total_seconds()
                 transitional = state in _TRANSITIONAL_OBSERVED
+                flap = state in {
+                    ObservedState.ABSENT.value,
+                    ObservedState.UNKNOWN.value,
+                }
                 if (
-                    not transitional
+                    (not transitional and not flap)
                     or age > settings.pod_provisioning_timeout_sec
                     or state == ObservedState.FAILED.value
                 ):
@@ -212,11 +233,32 @@ class RuntimeObservationService:
                     return "demoted"
             return "noop"
 
-        if state == ObservedState.RUNNING.value and pod.status == PodStatus.PROVISIONING:
-            pod.status = PodStatus.RUNNING
-            pod.last_error = None
-            pod.last_started_at = now
-            return "promoted"
+        if state == ObservedState.RUNNING.value and pod.desired_state == PodDesiredState.RUNNING.value:
+            if pod.status == PodStatus.PROVISIONING:
+                pod.status = PodStatus.RUNNING
+                pod.last_error = None
+                pod.last_started_at = now
+                return "promoted"
+            if pod.status == PodStatus.FAILED or project.status == ProjectStatus.ERROR:
+                pod.status = PodStatus.RUNNING
+                pod.last_error = None
+                pod.last_started_at = now
+                if project.status == ProjectStatus.ERROR:
+                    project.status = ProjectStatus.ACTIVE
+                return "promoted"
+
+        age = (now - self._as_utc(pod.updated_at)).total_seconds()
+        flap_observed = state in {
+            ObservedState.ABSENT.value,
+            ObservedState.UNKNOWN.value,
+        }
+        within_flap_grace = (
+            flap_observed
+            and pod.desired_state == PodDesiredState.RUNNING.value
+            and age <= settings.pod_provisioning_timeout_sec
+        )
+        if within_flap_grace:
+            return "noop"
 
         if (
             pod.status == PodStatus.RUNNING
@@ -227,7 +269,6 @@ class RuntimeObservationService:
                 ObservedState.PAUSED.value,
             }
         ):
-            age = (now - self._as_utc(pod.updated_at)).total_seconds()
             transitional = state in _TRANSITIONAL_OBSERVED
             if not transitional or age > settings.pod_provisioning_timeout_sec:
                 pod.status = PodStatus.FAILED
@@ -336,12 +377,21 @@ class RuntimeObservationService:
             )
 
         if phase == "NotFound":
+            # Node/WSL flap: absent, not permanent FAILED — reconcile can recreate.
+            if pod.desired_state == PodDesiredState.RUNNING.value:
+                return obs(
+                    ObservedState.ABSENT,
+                    orchestrator_status=pod.status,
+                    desired_state=pod.desired_state,
+                    phase=phase,
+                    last_error=pod.last_error or "pod not found in k8s",
+                )
             return obs(
-                ObservedState.FAILED if pod.desired_state == PodDesiredState.RUNNING.value else ObservedState.ABSENT,
+                ObservedState.ABSENT,
                 orchestrator_status=pod.status,
                 desired_state=pod.desired_state,
                 phase=phase,
-                last_error=pod.last_error or "pod not found in k8s",
+                last_error=pod.last_error,
             )
 
         if phase == "Failed":

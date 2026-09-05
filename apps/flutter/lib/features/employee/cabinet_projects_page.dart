@@ -159,9 +159,11 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
     final id = project['id'] as String?;
     final status = project['status'] as String?;
     final selected = id != null && id == workContext.selectedProjectId;
+    if (status == 'error' || projectShowsContainerError(project)) {
+      return context.appColors.danger;
+    }
     if (selected &&
         status == 'active' &&
-        !projectShowsContainerError(project) &&
         projectChatReadable(project)) {
       return context.appColors.success;
     }
