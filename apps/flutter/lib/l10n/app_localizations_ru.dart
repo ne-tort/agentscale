@@ -2149,6 +2149,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get navManagement => 'Управление';
 
   @override
+  String get navData => 'Данные';
+
+  @override
   String get navProdavan => 'Prodavan';
 
   @override

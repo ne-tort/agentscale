@@ -352,7 +352,7 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
             onSave: _saveName,
           ),
           if (_launched &&
-              projectChatReadable({
+              projectChatSendable({
                 'status': _status,
                 'runtime': _runtime,
                 'observed_state': _runtime?['observed_state'],

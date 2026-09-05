@@ -67,7 +67,8 @@ Tabs may declare product-shell placement for **preview** and runtime when module
 | `nav.placement` | Employee cabinet | Admin / Company |
 |-----------------|------------------|-----------------|
 | `rail` | Primary sidebar (wide) | Desktop rail |
-| `management` | **Управление** hub only (narrow) | Mobile Management hub |
+| `management` | **Управление** hub (hidden if empty) | Mobile Management hub |
+| `data` | **Данные** hub (hidden if empty; meta tables) | — |
 | `none` | Not in shell; in-page hub / deep link | Same |
 
 **Defaults (employee / cabinet contour):**

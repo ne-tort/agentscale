@@ -3,12 +3,15 @@
 ## CabinetNavLoader
 
 ```dart
-Future<({List<CabinetNavEntry> rail, List<CabinetNavEntry> management})>
-    loadCabinetNavBundle(String cabinetId)
+Future<({
+  List<CabinetNavEntry> rail,
+  List<CabinetNavEntry> management,
+  List<CabinetNavEntry> data,
+})> loadCabinetNavBundle(String cabinetId)
 
 Future<List<CabinetNavEntry>> loadCabinetNavEntries(
-  String cabinetId, {
-  required CabinetNavPlacement placement,
+    String cabinetId, {
+    required CabinetNavPlacement placement,
 })
 ```
 
@@ -19,21 +22,25 @@ Future<List<CabinetNavEntry>> loadCabinetNavEntries(
 5. Merge + sort by `order`
 6. Title collision → `"${tab.title} · ${module.name}"`
 
-| `nav.placement` | Wide sidebar | Narrow «Управление» |
-|---------------|--------------|---------------------|
+| `nav.placement` | Wide sidebar | Narrow |
+|---------------|--------------|--------|
 | `rail` | module tab in rail | no |
-| `management` | inside **«Управление»** page (always in employee sidebar) | inside **«Управление»** page |
+| `management` | inside **«Управление»** (hub hidden if empty) | same |
+| `data` | inside **«Данные»** (hub hidden if empty) | same |
 | `none` | no | no |
+
+Optional tab `subtitle` — shown under the title on Management/Data hub preference tiles.
 
 ## System pages (employee sidebar)
 
-- **Projects** — hardcoded rail entry, **not** inside «Управление»
-- **Управление** — hardcoded rail entry (wide + narrow); lists tabs with `nav.placement: management`
+- **Projects** — hardcoded rail entry, **not** inside hubs
+- **Управление** — only if ≥1 tab with `placement: management`
+- **Данные** — only if ≥1 tab with `placement: data` (meta tables / meta syntax)
 
 ## Body
 
 - `CabinetModuleHost` → `ViewInterpreterHost` + `CabinetDataController`
-- TabBar or rail entry switches `view_slug`
+- Hub rows: `AppNavPreference` (same chrome as project settings)
 
 ## In-page injection
 

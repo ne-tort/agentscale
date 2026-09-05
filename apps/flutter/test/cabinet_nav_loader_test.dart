@@ -73,6 +73,16 @@ void main() {
       );
     });
 
+    test('respects explicit data placement', () {
+      expect(
+        cabinetNavPlacementOf({
+          'id': 't',
+          'nav': {'contour': 'employee', 'placement': 'data'},
+        }),
+        CabinetNavPlacement.data,
+      );
+    });
+
     test('none placement excludes tab from both rail and management', () {
       expect(
         cabinetNavPlacementOf({
@@ -95,14 +105,15 @@ void main() {
   });
 
   group('CabinetManagementPage', () {
-    testWidgets('renders passed entries without Projects row', (tester) async {
+    testWidgets('renders preference tiles with subtitle', (tester) async {
       const entry = CabinetNavEntry(
         moduleId: 'mod_mcp',
         moduleName: 'MCP',
         tab: {
           'id': 'tab_mcp',
           'title': 'MCP',
-          'icon': 'extension_outlined',
+          'subtitle': 'Инструменты и интеграции',
+          'icon': 'hub',
           'view_slug': 'mcp_packages_list',
         },
         label: 'MCP',
@@ -118,12 +129,13 @@ void main() {
       );
 
       expect(find.text('MCP'), findsOneWidget);
+      expect(find.text('Инструменты и интеграции'), findsOneWidget);
       expect(find.text('Проекты'), findsNothing);
     });
   });
 
   group('CabinetShell destinations', () {
-    testWidgets('wide rail has Projects and Management', (tester) async {
+    testWidgets('wide rail has Projects; Management hidden when empty', (tester) async {
       tester.view.physicalSize = const Size(900, 700);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -137,10 +149,14 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       expect(find.text('Проекты'), findsWidgets);
-      expect(find.text('Управление'), findsWidgets);
+      // No modules loaded in test → hubs hidden.
+      expect(find.text('Управление'), findsNothing);
+      expect(find.text('Данные'), findsNothing);
     });
 
-    testWidgets('narrow bottom nav shows Projects, Overview, and Management', (tester) async {
+    testWidgets('narrow bottom nav shows Projects and Overview without empty hubs', (
+      tester,
+    ) async {
       tester.view.physicalSize = const Size(400, 800);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -156,7 +172,8 @@ void main() {
       expect(find.byType(NavigationBar), findsOneWidget);
       expect(find.text('Проекты'), findsOneWidget);
       expect(find.text('Обзор'), findsOneWidget);
-      expect(find.text('Управление'), findsOneWidget);
+      expect(find.text('Управление'), findsNothing);
+      expect(find.text('Данные'), findsNothing);
     });
   });
 }

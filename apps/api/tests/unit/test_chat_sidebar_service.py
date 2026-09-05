@@ -132,13 +132,78 @@ async def test_sidebar_sorts_pinned_and_project_chats() -> None:
     )
 
     svc = ChatSidebarService(session)
-    with patch.object(svc._cabinets, "require_access", new=AsyncMock()):
+    with (
+        patch.object(svc._cabinets, "require_access", new=AsyncMock()),
+        patch(
+            "prodavan.application.agent.chat_sidebar_service.PodQuery"
+        ) as pod_cls,
+    ):
+        pod_cls.return_value.runtime_view = AsyncMock(
+            return_value={"observed_state": "running"}
+        )
         out = await svc.sidebar(cabinet_id="cab_1", principal=_principal(), employee=emp)
 
     assert out["new_chat_enabled"] is True
+    assert out["observed_state"] == "running"
     assert out["selected_project_id"] == "proj_1"
     assert [c["session_id"] for c in out["pinned"]] == ["ags_old"]
     assert [c["session_id"] for c in out["project_chats"]] == ["ags_new"]
+
+
+@pytest.mark.asyncio
+async def test_sidebar_new_chat_disabled_unless_container_running() -> None:
+    session = AsyncMock()
+    emp = _employee()
+    sel = MagicMock()
+    sel.project_id = "proj_1"
+    proj = _project(status="active")
+    projects_result = MagicMock()
+    projects_result.scalars.return_value.all.return_value = [proj]
+    pins_result = MagicMock()
+    pins_result.scalars.return_value.all.return_value = []
+    project_sess = MagicMock()
+    project_sess.scalars.return_value.all.return_value = []
+    session.get = AsyncMock(return_value=sel)
+    session.execute = AsyncMock(side_effect=[projects_result, pins_result, project_sess])
+
+    svc = ChatSidebarService(session)
+    with (
+        patch.object(svc._cabinets, "require_access", new=AsyncMock()),
+        patch(
+            "prodavan.application.agent.chat_sidebar_service.PodQuery"
+        ) as pod_cls,
+    ):
+        pod_cls.return_value.runtime_view = AsyncMock(
+            return_value={"observed_state": "starting"}
+        )
+        out = await svc.sidebar(cabinet_id="cab_1", principal=_principal(), employee=emp)
+
+    assert out["new_chat_enabled"] is False
+    assert out["observed_state"] == "starting"
+
+
+@pytest.mark.asyncio
+async def test_sidebar_new_chat_disabled_for_error_project() -> None:
+    session = AsyncMock()
+    emp = _employee()
+    sel = MagicMock()
+    sel.project_id = "proj_1"
+    proj = _project(status="error")
+    projects_result = MagicMock()
+    projects_result.scalars.return_value.all.return_value = [proj]
+    pins_result = MagicMock()
+    pins_result.scalars.return_value.all.return_value = []
+    project_sess = MagicMock()
+    project_sess.scalars.return_value.all.return_value = []
+    session.get = AsyncMock(return_value=sel)
+    session.execute = AsyncMock(side_effect=[projects_result, pins_result, project_sess])
+
+    svc = ChatSidebarService(session)
+    with patch.object(svc._cabinets, "require_access", new=AsyncMock()):
+        out = await svc.sidebar(cabinet_id="cab_1", principal=_principal(), employee=emp)
+
+    assert out["new_chat_enabled"] is False
+    assert out["observed_state"] is None
 
 
 @pytest.mark.asyncio

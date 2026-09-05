@@ -361,6 +361,7 @@ def mod_prompts_meta() -> dict[str, list[Any]]:
             {
                 "id": "tab_prompts",
                 "title": "Промпты",
+                "subtitle": "Инструкции для агента",
                 "order": 10,
                 "icon": "psychology_outlined",
                 "view_slug": "prompt_profiles_list",
@@ -461,8 +462,9 @@ def mod_files_meta() -> dict[str, list[Any]]:
             {
                 "id": "tab_files",
                 "title": "Файлы",
+                "subtitle": "Дополнительные файлы для агента",
                 "order": 30,
-                "icon": "folder_outlined",
+                "icon": "attach_file",
                 "view_slug": "files_list",
                 "table_slug": "files",
                 "enabled": True,
@@ -562,8 +564,9 @@ def mod_mcp_meta() -> dict[str, list[Any]]:
             {
                 "id": "tab_mcp",
                 "title": "MCP",
+                "subtitle": "Инструменты и интеграции",
                 "order": 20,
-                "icon": "extension_outlined",
+                "icon": "hub",
                 "view_slug": "mcp_packages_list",
                 "table_slug": "mcp_packages",
                 "enabled": True,

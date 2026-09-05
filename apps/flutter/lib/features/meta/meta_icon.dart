@@ -17,12 +17,23 @@ IconData metaIconFromName(String? name, {IconData fallback = Icons.extension_out
     case 'extension_outlined':
       return Icons.extension_outlined;
     case 'hub':
+      return Icons.hub_outlined;
     case 'apps_outlined':
       return Icons.apps_outlined;
     case 'dashboard_outlined':
       return Icons.dashboard_outlined;
     case 'folder_outlined':
       return Icons.folder_outlined;
+    case 'psychology':
+    case 'psychology_outlined':
+      return Icons.psychology_outlined;
+    case 'attach_file':
+      return Icons.attach_file;
+    case 'table_chart_outlined':
+      return Icons.table_chart_outlined;
+    case 'integration_instructions':
+    case 'integration_instructions_outlined':
+      return Icons.integration_instructions_outlined;
     default:
       return fallback;
   }
@@ -42,13 +53,14 @@ abstract final class ShellNavContour {
 abstract final class ShellNavPlacement {
   static const rail = 'rail';
   static const management = 'management';
+  static const data = 'data';
   static const none = 'none';
 
-  static const all = {rail, management, none};
+  static const all = {rail, management, data, none};
 }
 
 /// Resolved placement for employee [CabinetShell] navigation.
-enum CabinetNavPlacement { rail, management, none }
+enum CabinetNavPlacement { rail, management, data, none }
 
 /// One dynamic nav item merged from module meta tabs.
 class ShellNavEntry {
@@ -102,6 +114,7 @@ CabinetNavPlacement cabinetNavPlacementOf(Map<String, dynamic> tab) {
   if (explicit == ShellNavPlacement.management) {
     return CabinetNavPlacement.management;
   }
+  if (explicit == ShellNavPlacement.data) return CabinetNavPlacement.data;
   return CabinetNavPlacement.management;
 }
 

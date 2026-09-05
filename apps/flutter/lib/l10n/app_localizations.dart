@@ -3818,6 +3818,12 @@ abstract class AppLocalizations {
   /// **'Management'**
   String get navManagement;
 
+  /// No description provided for @navData.
+  ///
+  /// In en, this message translates to:
+  /// **'Data'**
+  String get navData;
+
   /// No description provided for @navProdavan.
   ///
   /// In en, this message translates to:

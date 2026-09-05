@@ -2137,6 +2137,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get navManagement => 'Management';
 
   @override
+  String get navData => 'Data';
+
+  @override
   String get navProdavan => 'Prodavan';
 
   @override

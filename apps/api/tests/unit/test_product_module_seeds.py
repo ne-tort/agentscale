@@ -22,7 +22,19 @@ def test_prompts_meta_has_materialize_and_seed() -> None:
     assert meta["seed_rows"]["items"]
     tab = meta["tabs"][0]
     assert tab["view_slug"] == "prompt_profiles_list"
+    assert tab["subtitle"] == "Инструкции для агента"
+    assert tab["icon"] == "psychology_outlined"
     assert any(c["name"] == "project_ids" for c in meta["columns"])
+
+
+def test_management_tabs_have_unique_icons_and_subtitles() -> None:
+    prompts = mod_prompts_meta()["tabs"][0]
+    mcp = mod_mcp_meta()["tabs"][0]
+    files = mod_files_meta()["tabs"][0]
+    icons = {prompts["icon"], mcp["icon"], files["icon"]}
+    assert len(icons) == 3
+    assert mcp["subtitle"] == "Инструменты и интеграции"
+    assert files["subtitle"] == "Дополнительные файлы для агента"
 
 
 def test_mcp_inline_add_is_laconic() -> None:

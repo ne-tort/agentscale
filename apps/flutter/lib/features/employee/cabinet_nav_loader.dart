@@ -4,7 +4,7 @@ import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 
-/// One cabinet module tab merged into [CabinetShell] rail or management hub.
+/// One cabinet module tab merged into [CabinetShell] rail / management / data hub.
 class CabinetNavEntry {
   const CabinetNavEntry({
     required this.moduleId,
@@ -21,6 +21,14 @@ class CabinetNavEntry {
   String get viewSlug => tab['view_slug'] as String? ?? '';
 
   IconData get icon => metaIconFromName(tab['icon'] as String?);
+
+  /// Optional hub subtitle from tab meta (`subtitle`).
+  String? get subtitle {
+    final raw = tab['subtitle'];
+    if (raw is! String) return null;
+    final trimmed = raw.trim();
+    return trimmed.isEmpty ? null : trimmed;
+  }
 
   int get order => tab['order'] is int ? tab['order'] as int : 999;
 }
@@ -101,23 +109,30 @@ Future<List<CabinetNavEntry>> loadCabinetNavEntries(
   );
 }
 
-/// Loads rail and management entries in one API pass.
-Future<({List<CabinetNavEntry> rail, List<CabinetNavEntry> management})>
-    loadCabinetNavBundle(String cabinetId) async {
+/// Loads rail, management, and data entries in one API pass.
+Future<
+    ({
+      List<CabinetNavEntry> rail,
+      List<CabinetNavEntry> management,
+      List<CabinetNavEntry> data,
+    })> loadCabinetNavBundle(String cabinetId) async {
   final raw = await _loadRawCabinetNavEntries(cabinetId);
-    return (
-        rail: _finalizeCabinetNavEntries(
-            raw.where((e) => cabinetNavPlacementOf(e.tab) == CabinetNavPlacement.rail).toList(),
-        ),
-        management: _finalizeCabinetNavEntries(
-            raw
-                .where((e) => cabinetNavPlacementOf(e.tab) == CabinetNavPlacement.management)
-                .toList(),
-        ),
-    );
+  return (
+    rail: _finalizeCabinetNavEntries(
+      raw.where((e) => cabinetNavPlacementOf(e.tab) == CabinetNavPlacement.rail).toList(),
+    ),
+    management: _finalizeCabinetNavEntries(
+      raw
+          .where((e) => cabinetNavPlacementOf(e.tab) == CabinetNavPlacement.management)
+          .toList(),
+    ),
+    data: _finalizeCabinetNavEntries(
+      raw.where((e) => cabinetNavPlacementOf(e.tab) == CabinetNavPlacement.data).toList(),
+    ),
+  );
 }
 
-/// First enabled nav tab for a module (management/rail/none — any placement).
+/// First enabled nav tab for a module (management/rail/data/none — any placement).
 Future<CabinetNavEntry?> loadFirstModuleNavEntry(String cabinetId, String moduleId) async {
   final raw = await _loadRawCabinetNavEntries(cabinetId);
   final matches = raw.where((e) => e.moduleId == moduleId).toList();

@@ -32,14 +32,15 @@ class CabinetChatsRail extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final items = <Widget>[
-      _row(
-        context,
-        icon: Icons.add_comment_outlined,
-        label: l10n.navNewChat,
-        selected: false,
-        enabled: newChatEnabled && onNewChat != null,
-        onTap: onNewChat,
-      ),
+      if (newChatEnabled && onNewChat != null)
+        _row(
+          context,
+          icon: Icons.add_comment_outlined,
+          label: l10n.navNewChat,
+          selected: false,
+          enabled: true,
+          onTap: onNewChat,
+        ),
       for (final chat in pinned)
         _chatRow(context, chat, pinned: true, l10n: l10n),
       for (final chat in projectChats)

@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.cabinets.access import CabinetAccessService
+from prodavan.application.pod_service.query import PodQuery
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.infrastructure.persistence.models.agent import (
@@ -134,8 +135,15 @@ class ChatSidebarService:
 
         project_chats: list[dict] = []
         new_chat_enabled = False
+        observed_state: str | None = None
         if selected_project_id and selected_project_id in projects:
-            new_chat_enabled = projects[selected_project_id].status in {"active", "error"}
+            proj = projects[selected_project_id]
+            # New chat only when project is active and container is running —
+            # not draft/paused/error/launching/failed.
+            if proj.status == "active":
+                runtime = await PodQuery(self._session).runtime_view(proj.id)
+                observed_state = runtime.get("observed_state") if runtime else None
+                new_chat_enabled = observed_state == "running"
             sess_q = await self._session.execute(
                 select(AgentSessionRow)
                 .where(AgentSessionRow.project_id == selected_project_id)
@@ -143,13 +151,14 @@ class ChatSidebarService:
             )
             rows = [r for r in sess_q.scalars().all() if r.id not in pinned_ids]
             rows.sort(key=_sort_key, reverse=True)
-            pname = projects[selected_project_id].name
+            pname = proj.name
             project_chats = [_chat_item(r, project_name=pname, pinned=False) for r in rows]
 
         return {
             "cabinet_id": cabinet_id,
             "selected_project_id": selected_project_id,
             "new_chat_enabled": new_chat_enabled,
+            "observed_state": observed_state,
             "pinned": pinned,
             "project_chats": project_chats,
             "project_ids_in_cabinet": project_ids,

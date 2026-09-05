@@ -15,7 +15,7 @@ COLUMN_TYPES = frozenset(
 )
 VIEW_KINDS = frozenset({"collection", "form", "hub", "detail", "board", "profile_hub"})
 SHELL_NAV_CONTOURS = frozenset({"admin", "company", "employee", "cabinet"})
-SHELL_NAV_PLACEMENTS = frozenset({"rail", "management", "none"})
+SHELL_NAV_PLACEMENTS = frozenset({"rail", "management", "data", "none"})
 
 _ENV_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 _LIFECYCLE_WHEN = frozenset({"project.launch", "project.sync", "project.resumed", "project.reload"})
@@ -151,6 +151,9 @@ def validate_manifest(manifest: dict[str, list[dict[str, Any]]]) -> None:
                 not isinstance(placement, str) or placement not in SHELL_NAV_PLACEMENTS
             ):
                 raise _meta_error(f"invalid tab nav.placement: {placement!r}")
+        subtitle = tab.get("subtitle")
+        if subtitle is not None and not isinstance(subtitle, str):
+            raise _meta_error("tab subtitle must be a string when set")
 
     for item in manifest["seed_rows"]:
         table_slug = item.get("table_slug")

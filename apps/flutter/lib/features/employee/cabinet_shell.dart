@@ -16,7 +16,7 @@ import 'package:prodavan/features/employee/employee_settings_body.dart';
 import 'package:prodavan/features/employee/project_workspace_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Employee cabinet shell — Projects + Chats rail + optional modules + Management.
+/// Employee cabinet shell — Projects + Chats rail + optional modules + hubs.
 class CabinetShell extends StatefulWidget {
   const CabinetShell({
     super.key,
@@ -42,15 +42,31 @@ class _CabinetShellState extends State<CabinetShell> {
   bool _navLoading = true;
   List<CabinetNavEntry> _railEntries = const [];
   List<CabinetNavEntry> _managementEntries = const [];
+  List<CabinetNavEntry> _dataEntries = const [];
 
   bool _newChatEnabled = false;
   List<Map<String, dynamic>> _pinnedChats = const [];
   List<Map<String, dynamic>> _projectChats = const [];
   String? _activeSessionId;
 
-  int get _railModuleCount => _railEntries.length;
-  int get _managementIndex => _projectsIndex + 1 + _railModuleCount;
-  int get _settingsIndex => _managementIndex + 1;
+  bool get _showManagement => _managementEntries.isNotEmpty;
+  bool get _showData => _dataEntries.isNotEmpty;
+
+  int get _managementContentIndex => _projectsIndex + 1 + _railEntries.length;
+  int get _dataContentIndex =>
+      _managementContentIndex + (_showManagement ? 1 : 0);
+  int get _settingsIndex => _dataContentIndex + (_showData ? 1 : 0);
+
+  /// Content indices for each wide rail destination (parallel to destinations).
+  List<int> get _wideDestContentIndices {
+    final indices = <int>[_projectsIndex];
+    for (var i = 0; i < _railEntries.length; i++) {
+      indices.add(_projectsIndex + 1 + i);
+    }
+    if (_showManagement) indices.add(_managementContentIndex);
+    if (_showData) indices.add(_dataContentIndex);
+    return indices;
+  }
 
   @override
   void initState() {
@@ -96,13 +112,19 @@ class _CabinetShellState extends State<CabinetShell> {
       setState(() {
         _railEntries = bundle.rail;
         _managementEntries = bundle.management;
+        _dataEntries = bundle.data;
         _navLoading = false;
+        if (_contentIndex > _settingsIndex) {
+          _contentIndex = _overviewIndex;
+          _railSelected = null;
+        }
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _railEntries = const [];
         _managementEntries = const [];
+        _dataEntries = const [];
         _navLoading = false;
       });
     }
@@ -154,10 +176,12 @@ class _CabinetShellState extends State<CabinetShell> {
     });
   }
 
-  void _selectRail(int index) {
+  void _selectRail(int destIndex) {
+    final indices = _wideDestContentIndices;
+    if (destIndex < 0 || destIndex >= indices.length) return;
     setState(() {
-      _railSelected = index;
-      _contentIndex = index + 1;
+      _railSelected = destIndex;
+      _contentIndex = indices[destIndex];
       _narrowStackIndex = 1;
       _subpageOpen = false;
     });
@@ -173,29 +197,59 @@ class _CabinetShellState extends State<CabinetShell> {
 
   void _selectNarrowSettings() {
     setState(() {
-      _narrowStackIndex = 3;
+      _narrowStackIndex = _narrowSettingsStackIndex;
       _subpageOpen = false;
     });
   }
 
-  int? _narrowSelectedDestIndex() {
-    if (_narrowStackIndex == 3) return null;
-    return switch (_narrowStackIndex) {
-      0 => 1,
-      1 => 0,
-      2 => 2,
-      _ => 0,
-    };
+  /// Narrow stack: 0 overview, 1 projects, 2 management?, 3 data?, last settings.
+  int get _narrowManagementStackIndex => 2;
+  int get _narrowDataStackIndex => 2 + (_showManagement ? 1 : 0);
+  int get _narrowSettingsStackIndex =>
+      2 + (_showManagement ? 1 : 0) + (_showData ? 1 : 0);
+
+  List<({int stackIndex, AppNavDestination dest})> _narrowDestinations(
+    AppLocalizations l10n,
+  ) {
+    return [
+      (
+        stackIndex: 1,
+        dest: AppNavDestination(icon: Icons.folder_outlined, label: l10n.navProjects),
+      ),
+      (
+        stackIndex: 0,
+        dest: AppNavDestination(icon: Icons.dashboard_outlined, label: l10n.navOverview),
+      ),
+      if (_showManagement)
+        (
+          stackIndex: _narrowManagementStackIndex,
+          dest: AppNavDestination(icon: Icons.apps_outlined, label: l10n.navManagement),
+        ),
+      if (_showData)
+        (
+          stackIndex: _narrowDataStackIndex,
+          dest: AppNavDestination(
+            icon: Icons.table_chart_outlined,
+            label: l10n.navData,
+          ),
+        ),
+    ];
   }
 
-  void _onNarrowDestinationSelected(int index) {
+  int? _narrowSelectedDestIndex(AppLocalizations l10n) {
+    if (_narrowStackIndex == _narrowSettingsStackIndex) return null;
+    final dests = _narrowDestinations(l10n);
+    for (var i = 0; i < dests.length; i++) {
+      if (dests[i].stackIndex == _narrowStackIndex) return i;
+    }
+    return 0;
+  }
+
+  void _onNarrowDestinationSelected(int index, AppLocalizations l10n) {
+    final dests = _narrowDestinations(l10n);
+    if (index < 0 || index >= dests.length) return;
     setState(() {
-      _narrowStackIndex = switch (index) {
-        0 => 1,
-        1 => 0,
-        2 => 2,
-        _ => 1,
-      };
+      _narrowStackIndex = dests[index].stackIndex;
       _subpageOpen = false;
     });
   }
@@ -299,20 +353,17 @@ class _CabinetShellState extends State<CabinetShell> {
     final expanded = AppBreakpoints.railExtended(context, subpageOpen: _subpageOpen);
 
     if (narrow) {
+      final narrowDests = _narrowDestinations(l10n);
       return AppLayout(
         constrainBody: false,
         subpageOpen: _subpageOpen,
-        selectedIndex: _narrowSelectedDestIndex(),
+        selectedIndex: _narrowSelectedDestIndex(l10n),
         trailingDestination: settingsDest,
-        trailingSelected: _narrowStackIndex == 3,
+        trailingSelected: _narrowStackIndex == _narrowSettingsStackIndex,
         onTrailingSelected: _selectNarrowSettings,
-        onDestinationSelected: _onNarrowDestinationSelected,
+        onDestinationSelected: (i) => _onNarrowDestinationSelected(i, l10n),
         onLogoTap: _goOverview,
-        destinations: [
-          AppNavDestination(icon: Icons.folder_outlined, label: l10n.navProjects),
-          AppNavDestination(icon: Icons.dashboard_outlined, label: l10n.navOverview),
-          AppNavDestination(icon: Icons.apps_outlined, label: l10n.navManagement),
-        ],
+        destinations: [for (final d in narrowDests) d.dest],
         actions: [
           IconButton(
             icon: const Icon(Icons.forum_outlined),
@@ -341,15 +392,27 @@ class _CabinetShellState extends State<CabinetShell> {
                 onSelectionChanged: _onProjectSelected,
               ),
             ),
-            AppShellBranch(
-              active: _narrowStackIndex == 2,
-              onSubpageOpenChanged:
-                  _narrowStackIndex == 2 ? _onSubpageOpenChanged : null,
-              root: CabinetManagementPage(
-                cabinetId: widget.cabinetId,
-                entries: _managementEntries,
+            if (_showManagement)
+              AppShellBranch(
+                active: _narrowStackIndex == _narrowManagementStackIndex,
+                onSubpageOpenChanged: _narrowStackIndex == _narrowManagementStackIndex
+                    ? _onSubpageOpenChanged
+                    : null,
+                root: CabinetManagementPage(
+                  cabinetId: widget.cabinetId,
+                  entries: _managementEntries,
+                ),
               ),
-            ),
+            if (_showData)
+              AppShellBranch(
+                active: _narrowStackIndex == _narrowDataStackIndex,
+                onSubpageOpenChanged:
+                    _narrowStackIndex == _narrowDataStackIndex ? _onSubpageOpenChanged : null,
+                root: CabinetDataPage(
+                  cabinetId: widget.cabinetId,
+                  entries: _dataEntries,
+                ),
+              ),
             EmployeeSettingsBody(
               cabinetId: widget.cabinetId,
               cabinetName: widget.cabinetName,
@@ -364,13 +427,24 @@ class _CabinetShellState extends State<CabinetShell> {
       ..._railEntries.map(
         (e) => AppNavDestination(icon: e.icon, label: e.label),
       ),
-      AppNavDestination(icon: Icons.apps_outlined, label: l10n.navManagement),
+      if (_showManagement)
+        AppNavDestination(icon: Icons.apps_outlined, label: l10n.navManagement),
+      if (_showData)
+        AppNavDestination(icon: Icons.table_chart_outlined, label: l10n.navData),
     ];
+
+    final wideSelected = () {
+      if (_contentIndex == _overviewIndex || _contentIndex == _settingsIndex) {
+        return null;
+      }
+      final idx = _wideDestContentIndices.indexOf(_contentIndex);
+      return idx >= 0 ? idx : _railSelected;
+    }();
 
     return AppLayout(
       constrainBody: false,
       subpageOpen: _subpageOpen,
-      selectedIndex: _railSelected,
+      selectedIndex: wideSelected,
       trailingDestination: settingsDest,
       trailingSelected: _contentIndex == _settingsIndex,
       onTrailingSelected: _selectSettingsWide,
@@ -398,7 +472,7 @@ class _CabinetShellState extends State<CabinetShell> {
         )
         .toList();
 
-    final mainPages = [
+    final mainPages = <Widget>[
       CabinetOverviewPage(
         cabinetId: widget.cabinetId,
         cabinetName: widget.cabinetName,
@@ -408,11 +482,18 @@ class _CabinetShellState extends State<CabinetShell> {
         onSelectionChanged: _onProjectSelected,
       ),
       ...railModulePages,
-      CabinetManagementPage(
-        cabinetId: widget.cabinetId,
-        entries: _managementEntries,
-        embedded: true,
-      ),
+      if (_showManagement)
+        CabinetManagementPage(
+          cabinetId: widget.cabinetId,
+          entries: _managementEntries,
+          embedded: true,
+        ),
+      if (_showData)
+        CabinetDataPage(
+          cabinetId: widget.cabinetId,
+          entries: _dataEntries,
+          embedded: true,
+        ),
     ];
 
     return [
