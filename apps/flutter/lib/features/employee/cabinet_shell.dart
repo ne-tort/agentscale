@@ -113,7 +113,9 @@ class _CabinetShellState extends State<CabinetShell> {
   }
 
   Future<void> _loadNav() async {
-    setState(() => _navLoading = true);
+    // Never flip _navLoading back to true after first paint — that replaces the
+    // body Stack with a spinner and disposes the chat Navigator (kicks user out
+    // of wake/resume). Soft-refresh rail entries in place.
     try {
       final bundle = await loadCabinetNavBundle(
         widget.cabinetId,
@@ -125,7 +127,8 @@ class _CabinetShellState extends State<CabinetShell> {
         _managementEntries = bundle.management;
         _dataEntries = bundle.data;
         _navLoading = false;
-        if (_contentIndex > _settingsIndex) {
+        // Preserve underlying branch while chat overlay is open.
+        if (!_chatOpen && _contentIndex > _settingsIndex) {
           _contentIndex = _overviewIndex;
           _railSelected = null;
         }
