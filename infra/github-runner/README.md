@@ -41,27 +41,25 @@ gh api repos/ne-tort/prodavan/actions/runners --jq '.runners[]|{name,status,busy
 
 Stop: `docker compose down` · wipe cache: `docker compose down -v`
 
-## DNS (обязательно явно)
+## DNS
 
-Два разных DNS-пути — оба должны быть заданы, иначе flaky `lookup …: Try again` / stuck pulls:
+| Путь | Кто резолвит | Где |
+|------|--------------|-----|
+| **Runner container** (gh, pip, curl) | compose `dns:` → ExtServers `8.8.8.8` / `1.1.1.1` | `docker-compose.yml` |
+| **`docker build` / sibling** via socket | Docker **embedded** DNS (Desktop `192.168.65.7`) | default — **do not** override in `daemon.json` |
 
-| Путь | Кто резолвит | Где задаём |
-|------|--------------|------------|
-| **Runner container** (checkout, curl, pip) | compose `dns:` → ExtServers `8.8.8.8` / `1.1.1.1` | `docker-compose.yml` |
-| **`docker build` / sibling** через `/var/run/docker.sock` | Docker **engine** daemon | `Ensure-DockerDns.ps1` → `daemon.json` `"dns": ["8.8.8.8","1.1.1.1"]` |
+`Ensure-DockerDns.ps1` **снимает** вредный `daemon.json` `dns: [8.8.8.8,…]`: публичные резолверы обходят embedded DNS и ломают `host.docker.internal` (migration smoke / portproxy).
 
-Не полагаться на дефолт Desktop (`192.168.65.7` без overrides). После правки `daemon.json` — перезапуск Docker Desktop.
+Явный DNS только у runner-контейнеров. Sibling-контейнеры CI Images migration smoke ходят по user-defined bridge (имя Postgres), не через `host.docker.internal`.
 
 Проверка:
 
 ```powershell
-# runner
 docker compose exec runner cat /etc/resolv.conf
-# expect ExtServers: [8.8.8.8 1.1.1.1]
+# ExtServers: [8.8.8.8 1.1.1.1]
 
-# engine (build path) — after Desktop restart
-docker run --rm alpine cat /etc/resolv.conf
-# expect nameserver 8.8.8.8 (or both), not only 192.168.65.7 with Overrides: []
+docker run --rm alpine getent hosts host.docker.internal
+# must resolve (embedded DNS)
 ```
 
 `dns_opt: timeout:2, attempts:3, use-vc` — устойчивость к UDP-дропам на Desktop.
