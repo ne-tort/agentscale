@@ -59,9 +59,10 @@ List<CabinetNavEntry> _finalizeCabinetNavEntries(List<CabinetNavEntry> raw) {
   ];
 }
 
-Future<List<CabinetNavEntry>> _loadRawCabinetNavEntries(String cabinetId) async {
-  final api = workContext.api;
-  final modules = await api.listCabinetModules(cabinetId);
+Future<List<CabinetNavEntry>> _loadRawFromModules(
+  List<Map<String, dynamic>> modules, {
+  required Future<Map<String, dynamic>> Function(String moduleId) fetchTabs,
+}) async {
   final raw = <CabinetNavEntry>[];
 
   for (final mod in modules) {
@@ -69,11 +70,7 @@ Future<List<CabinetNavEntry>> _loadRawCabinetNavEntries(String cabinetId) async 
     if (moduleId.isEmpty) continue;
     final moduleName = mod['name'] as String? ?? moduleId;
     try {
-      final doc = await api.getCabinetModuleMeta(
-        cabinetId: cabinetId,
-        moduleId: moduleId,
-        slug: ModuleMetaSlugs.tabs,
-      );
+      final doc = await fetchTabs(moduleId);
       final body = doc['body'];
       final tabs = body is Map ? body['items'] : body;
       if (tabs is! List) continue;
@@ -98,36 +95,69 @@ Future<List<CabinetNavEntry>> _loadRawCabinetNavEntries(String cabinetId) async 
   return raw;
 }
 
+Future<List<CabinetNavEntry>> _loadRawCabinetNavEntries(String cabinetId) async {
+  final api = workContext.api;
+  final modules = await api.listCabinetModules(cabinetId);
+  return _loadRawFromModules(
+    modules,
+    fetchTabs: (moduleId) => api.getCabinetModuleMeta(
+      cabinetId: cabinetId,
+      moduleId: moduleId,
+      slug: ModuleMetaSlugs.tabs,
+    ),
+  );
+}
+
+/// Loads Management/Data hub tabs from the selected project's leaf instances.
+Future<List<CabinetNavEntry>> _loadRawProjectNavEntries(String projectId) async {
+  final api = workContext.api;
+  final modules = await api.listProjectRuntimeModules(projectId);
+  return _loadRawFromModules(
+    modules,
+    fetchTabs: (moduleId) => api.getProjectRuntimeModuleMeta(
+      projectId: projectId,
+      moduleId: moduleId,
+      slug: ModuleMetaSlugs.tabs,
+    ),
+  );
+}
+
 /// Loads module tabs for cabinet shell navigation filtered by [placement].
 Future<List<CabinetNavEntry>> loadCabinetNavEntries(
   String cabinetId, {
   required CabinetNavPlacement placement,
+  String? projectId,
 }) async {
-  final raw = await _loadRawCabinetNavEntries(cabinetId);
+  final raw = projectId == null || projectId.isEmpty
+      ? await _loadRawCabinetNavEntries(cabinetId)
+      : await _loadRawProjectNavEntries(projectId);
   return _finalizeCabinetNavEntries(
     raw.where((e) => cabinetNavPlacementOf(e.tab) == placement).toList(),
   );
 }
 
-/// Loads rail, management, and data entries in one API pass.
+/// Loads rail (cabinet) + management/data (selected project) in one pass.
 Future<
     ({
       List<CabinetNavEntry> rail,
       List<CabinetNavEntry> management,
       List<CabinetNavEntry> data,
-    })> loadCabinetNavBundle(String cabinetId) async {
-  final raw = await _loadRawCabinetNavEntries(cabinetId);
+    })> loadCabinetNavBundle(String cabinetId, {String? projectId}) async {
+  final cabinetRaw = await _loadRawCabinetNavEntries(cabinetId);
+  final projectRaw = (projectId == null || projectId.isEmpty)
+      ? <CabinetNavEntry>[]
+      : await _loadRawProjectNavEntries(projectId);
   return (
     rail: _finalizeCabinetNavEntries(
-      raw.where((e) => cabinetNavPlacementOf(e.tab) == CabinetNavPlacement.rail).toList(),
+      cabinetRaw.where((e) => cabinetNavPlacementOf(e.tab) == CabinetNavPlacement.rail).toList(),
     ),
     management: _finalizeCabinetNavEntries(
-      raw
+      projectRaw
           .where((e) => cabinetNavPlacementOf(e.tab) == CabinetNavPlacement.management)
           .toList(),
     ),
     data: _finalizeCabinetNavEntries(
-      raw.where((e) => cabinetNavPlacementOf(e.tab) == CabinetNavPlacement.data).toList(),
+      projectRaw.where((e) => cabinetNavPlacementOf(e.tab) == CabinetNavPlacement.data).toList(),
     ),
   );
 }

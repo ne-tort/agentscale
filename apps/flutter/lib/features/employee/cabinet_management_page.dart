@@ -11,29 +11,34 @@ import 'package:prodavan/l10n/app_localizations.dart';
 /// Hub listing module tabs for a shell placement (`management` or `data`).
 ///
 /// Rows use the same preference-tile chrome as project settings.
+/// Management/Data are scoped to the selected project instance (leaf copy).
 class CabinetModuleHubPage extends StatelessWidget {
   const CabinetModuleHubPage({
     super.key,
     required this.cabinetId,
     required this.title,
     required this.entries,
+    this.projectId,
     this.embedded = false,
     this.emptyIcon = Icons.apps_outlined,
   });
 
   final String cabinetId;
+  final String? projectId;
   final String title;
   final List<CabinetNavEntry> entries;
   final bool embedded;
   final IconData emptyIcon;
 
   Future<void> _openModule(BuildContext context, CabinetNavEntry entry) {
+    final pid = projectId;
     return Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => AppScaffold(
           title: Text(entry.label),
           body: CabinetModuleHost(
             cabinetId: cabinetId,
+            projectId: pid,
             entry: entry,
             embedded: true,
           ),
@@ -43,6 +48,13 @@ class CabinetModuleHubPage extends StatelessWidget {
   }
 
   Widget _listBody(BuildContext context, AppLocalizations l10n) {
+    final pid = projectId;
+    if (pid == null || pid.isEmpty) {
+      return EmptyPlaceholder(
+        title: l10n.projectCreateProjectHint,
+        icon: Icons.folder_outlined,
+      );
+    }
     if (entries.isEmpty) {
       return EmptyPlaceholder(
         title: l10n.companyNoModules,
@@ -85,10 +97,12 @@ class CabinetManagementPage extends StatelessWidget {
     super.key,
     required this.cabinetId,
     required this.entries,
+    this.projectId,
     this.embedded = false,
   });
 
   final String cabinetId;
+  final String? projectId;
   final List<CabinetNavEntry> entries;
   final bool embedded;
 
@@ -97,6 +111,7 @@ class CabinetManagementPage extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     return CabinetModuleHubPage(
       cabinetId: cabinetId,
+      projectId: projectId,
       title: l10n.navManagement,
       entries: entries,
       embedded: embedded,
@@ -111,10 +126,12 @@ class CabinetDataPage extends StatelessWidget {
     super.key,
     required this.cabinetId,
     required this.entries,
+    this.projectId,
     this.embedded = false,
   });
 
   final String cabinetId;
+  final String? projectId;
   final List<CabinetNavEntry> entries;
   final bool embedded;
 
@@ -123,6 +140,7 @@ class CabinetDataPage extends StatelessWidget {
     final l10n = AppLocalizations.of(context);
     return CabinetModuleHubPage(
       cabinetId: cabinetId,
+      projectId: projectId,
       title: l10n.navData,
       entries: entries,
       embedded: embedded,

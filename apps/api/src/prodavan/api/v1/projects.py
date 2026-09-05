@@ -386,6 +386,148 @@ async def patch_project_modules(
     return ids
 
 
+class ProjectRuntimeDataBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    body: dict = Field(default_factory=dict)
+
+
+@router.get("/projects/{project_id}/runtime-modules")
+async def list_project_runtime_modules(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.projects.project_runtime_module_service import (
+        ProjectRuntimeModuleService,
+    )
+
+    items = await ProjectRuntimeModuleService(session).list_modules(
+        project_id=project_id, principal=principal, employee=employee
+    )
+    return {"items": items}
+
+
+@router.get("/projects/{project_id}/runtime-modules/{module_id}/meta/documents/{slug}")
+async def get_project_runtime_module_meta(
+    project_id: str,
+    module_id: str,
+    slug: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.projects.project_runtime_module_service import (
+        ProjectRuntimeModuleService,
+    )
+
+    return await ProjectRuntimeModuleService(session).get_meta_document(
+        project_id=project_id,
+        module_id=module_id,
+        slug=slug,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.get("/projects/{project_id}/runtime-modules/{module_id}/data/{table_slug}")
+async def list_project_runtime_module_data(
+    project_id: str,
+    module_id: str,
+    table_slug: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.projects.project_runtime_module_service import (
+        ProjectRuntimeModuleService,
+    )
+
+    items = await ProjectRuntimeModuleService(session).list_data_rows(
+        project_id=project_id,
+        module_id=module_id,
+        table_slug=table_slug,
+        principal=principal,
+        employee=employee,
+    )
+    return {"items": items}
+
+
+@router.post("/projects/{project_id}/runtime-modules/{module_id}/data/{table_slug}")
+async def create_project_runtime_module_data(
+    project_id: str,
+    module_id: str,
+    table_slug: str,
+    body: ProjectRuntimeDataBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.projects.project_runtime_module_service import (
+        ProjectRuntimeModuleService,
+    )
+
+    return await ProjectRuntimeModuleService(session).create_data_row(
+        project_id=project_id,
+        module_id=module_id,
+        table_slug=table_slug,
+        body=body.body,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.patch("/projects/{project_id}/runtime-modules/{module_id}/data/{table_slug}/{row_id}")
+async def update_project_runtime_module_data(
+    project_id: str,
+    module_id: str,
+    table_slug: str,
+    row_id: str,
+    body: ProjectRuntimeDataBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.projects.project_runtime_module_service import (
+        ProjectRuntimeModuleService,
+    )
+
+    return await ProjectRuntimeModuleService(session).update_data_row(
+        project_id=project_id,
+        module_id=module_id,
+        table_slug=table_slug,
+        row_id=row_id,
+        body=body.body,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.delete("/projects/{project_id}/runtime-modules/{module_id}/data/{table_slug}/{row_id}")
+async def delete_project_runtime_module_data(
+    project_id: str,
+    module_id: str,
+    table_slug: str,
+    row_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.projects.project_runtime_module_service import (
+        ProjectRuntimeModuleService,
+    )
+
+    return await ProjectRuntimeModuleService(session).delete_data_row(
+        project_id=project_id,
+        module_id=module_id,
+        table_slug=table_slug,
+        row_id=row_id,
+        principal=principal,
+        employee=employee,
+    )
+
+
 @router.get("/projects/{project_id}/ai-keys/available")
 async def list_project_ai_keys(
     project_id: str,

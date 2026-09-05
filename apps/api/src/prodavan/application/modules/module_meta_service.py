@@ -124,7 +124,26 @@ class ModuleMetaDocumentService:
         else:
             row.body = body
         await self._session.commit()
+        await self._mirror_to_owner_instance(module_id=module_id, slug=slug, body=body)
         return await self.get_document(module_id=module_id, slug=slug)
+
+    async def _mirror_to_owner_instance(self, *, module_id: str, slug: str, body: Any) -> None:
+        """Keep platform/company instance meta in sync with template catalog edits."""
+        from prodavan.application.modules.module_instance_service import ModuleInstanceService
+        from prodavan.infrastructure.persistence.models.modules import ModuleRow
+
+        mod = await self._session.get(ModuleRow, module_id)
+        if mod is None:
+            return
+        instances = ModuleInstanceService(self._session)
+        if mod.owner_scope == "company" and mod.owner_company_id:
+            inst = await instances.ensure_company_instance(
+                company_id=mod.owner_company_id, module_id=module_id
+            )
+        else:
+            inst = await instances.ensure_platform_instance(module_id=module_id)
+        await instances.put_meta_document(instance_id=inst.id, slug=slug, body=body)
+        await self._session.commit()
 
     async def delete_document(self, *, module_id: str, slug: str) -> None:
         slug = _check_slug(slug)

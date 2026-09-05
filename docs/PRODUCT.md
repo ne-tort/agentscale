@@ -89,20 +89,31 @@ GitOps, k3s, CI — не legacy: [`07-infrastructure/runbook.md`](07-infrastruct
 ## Module data model (base modules)
 
 ```text
-Platform meta (template)  →  Cabinet module_data_rows (storage)  →  Project workspace (materialize)
+Template (modules + module_meta_documents)
+  → fork on bind → Module Instance (meta + data JSONB)
+       Admin/platform → Company → Cabinet → Project (leaf)
+  → Materialize reads project instance → workspace files
 ```
 
 | Layer | What |
 |-------|------|
-| **Template** | Shared module meta: tables, views, materialize rules |
-| **Cabinet** | Per-cabinet rows in `module_data_rows` (JSONB body) |
-| **Project** | Materialize filters rows by `project_ids` in body; profile pick by `prompt_profiles.project_ids`; optional MP binding skips whole module |
+| **Template** | Catalog module meta (`modules` + `module_meta_documents`) — source for first platform instance |
+| **Instance** | Independent copy: `module_instances` + `module_instance_meta_documents` + `module_instance_data_rows` (Postgres JSONB). Owner: `platform` / `company` / `cabinet` / `project` |
+| **Bind** | Creates a **fork** of parent instance (deep copy meta+data); further edits stay in the child |
+| **Project hubs** | Employee Management/Data UI = selected project’s leaf instances (`/projects/{id}/runtime-modules`); hubs stay visible with CTA when no project selected |
+| **Materialize data** | Row/profile content from **project** instance (leaf) on launch/sync |
+| **Materialize rules** | Rule definitions still from **template** meta slug `materialize` (MVP); instance-level rules later |
+| **Admin/company edit** | Template catalog PUT mirrors into platform/company **instance** meta; seed upsert refreshes platform instance meta only (children untouched) |
 
-Row-level **`project_ids`** (JSON array in row body): empty or absent → row applies to **all** projects in the cabinet; otherwise only listed projects.
+Product module seed changes (`PRODUCT_MODULES`) ship only via Alembic calling `upsert_product_modules` — not silent bootstrap overwrite.
+
+**Legacy note:** older `cab_inst_*.module_data_rows` + row-level `project_ids` filtering remain as migration/read fallback only — no new writes. Isolation is per-project instances, not shared cabinet rows filtered by `project_ids`.
+
+**Mongo backlog:** optional later ADR to move `module_instance_data_rows` into Mongo with `instance_id` pointers in Postgres — not default until copy-on-bind is stable on Postgres.
 
 Module-level **MP binding** (`module_project_bindings`): if bindings exist, module materializes only for bound projects.
 
-Future base modules (MCP, Files, Prompts, …) follow the same pattern: edit in cabinet UI, scope rows to projects, materialize into Pod workspace on **launch** or **sync** (not on create).
+Future base modules follow the same cascade: edit in the owner’s instance, fork on bind down the chain, materialize from the project leaf.
 
 **File & env pipeline (meta-syntax spec):** upload via Content Service → FileRef in row → materialize (`copy_blob` / `raw`) → Pod `/workspace`; container env and Vault secrets — declarative slugs, implementation backlog. See [12-content-file-pipeline](target/06-modules/meta-syntax/12-content-file-pipeline.md) · [13-container-env-secrets](target/06-modules/meta-syntax/13-container-env-secrets.md) · [gap map P-META-*](target/09-gap-map.md).
 

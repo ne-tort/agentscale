@@ -248,6 +248,98 @@ class ProdavanApi {
     }
   }
 
+  /// Project leaf module instances (Management/Data hubs).
+  Future<List<Map<String, dynamic>>> listProjectRuntimeModules(String projectId) async {
+    final res = await AuthHttp.get(
+      _uri('/projects/$projectId/runtime-modules'),
+      extraHeaders: _workHeaders,
+    );
+    _throwIfError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = body['items'];
+    if (items is List) {
+      return items.cast<Map<String, dynamic>>();
+    }
+    return const [];
+  }
+
+  Future<Map<String, dynamic>> getProjectRuntimeModuleMeta({
+    required String projectId,
+    required String moduleId,
+    required String slug,
+  }) async {
+    final res = await AuthHttp.get(
+      _uri('/projects/$projectId/runtime-modules/$moduleId/meta/documents/$slug'),
+      extraHeaders: _workHeaders,
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> listProjectRuntimeModuleDataRows({
+    required String projectId,
+    required String moduleId,
+    required String tableSlug,
+  }) async {
+    final res = await AuthHttp.get(
+      _uri('/projects/$projectId/runtime-modules/$moduleId/data/$tableSlug'),
+      extraHeaders: _workHeaders,
+    );
+    _throwIfError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = body['items'];
+    if (items is List) {
+      return items.cast<Map<String, dynamic>>();
+    }
+    return const [];
+  }
+
+  Future<Map<String, dynamic>> createProjectRuntimeModuleDataRow({
+    required String projectId,
+    required String moduleId,
+    required String tableSlug,
+    required Map<String, dynamic> body,
+  }) async {
+    final res = await AuthHttp.post(
+      _uri('/projects/$projectId/runtime-modules/$moduleId/data/$tableSlug'),
+      body: jsonEncode({'body': body}),
+      extraHeaders: _workHeaders,
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> updateProjectRuntimeModuleDataRow({
+    required String projectId,
+    required String moduleId,
+    required String tableSlug,
+    required String rowId,
+    required Map<String, dynamic> body,
+  }) async {
+    final res = await AuthHttp.patch(
+      _uri('/projects/$projectId/runtime-modules/$moduleId/data/$tableSlug/$rowId'),
+      body: jsonEncode({'body': body}),
+      extraHeaders: _workHeaders,
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> deleteProjectRuntimeModuleDataRow({
+    required String projectId,
+    required String moduleId,
+    required String tableSlug,
+    required String rowId,
+  }) async {
+    final res = await AuthHttp.delete(
+      _uri('/projects/$projectId/runtime-modules/$moduleId/data/$tableSlug/$rowId'),
+      extraHeaders: _workHeaders,
+    );
+    _throwIfError(res);
+    if (res.body.isEmpty) return <String, dynamic>{'deleted': true};
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> invokeModuleAction({
     required String cabinetId,
     required String moduleId,

@@ -102,3 +102,81 @@ class ModuleProjectBindingRow(Base):
         nullable=False,
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+def _minst_id() -> str:
+    return f"minst_{uuid.uuid4().hex[:16]}"
+
+
+def _mimd_id() -> str:
+    return f"mimd_{uuid.uuid4().hex[:16]}"
+
+
+def _midr_id() -> str:
+    return f"midr_{uuid.uuid4().hex[:16]}"
+
+
+class ModuleInstanceRow(Base):
+    """Independent fork of module meta+data owned by platform/company/cabinet/project."""
+
+    __tablename__ = "module_instances"
+    __table_args__ = (
+        UniqueConstraint("owner_kind", "owner_id", "module_id", name="uq_module_instance_owner"),
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=_minst_id)
+    module_id: Mapped[str] = mapped_column(ForeignKey("modules.id", ondelete="CASCADE"), nullable=False)
+    owner_kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    owner_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    parent_instance_id: Mapped[str | None] = mapped_column(
+        ForeignKey("module_instances.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ModuleInstanceMetaDocumentRow(Base):
+    __tablename__ = "module_instance_meta_documents"
+    __table_args__ = (
+        UniqueConstraint("instance_id", "slug", name="uq_module_instance_meta_slug"),
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=_mimd_id)
+    instance_id: Mapped[str] = mapped_column(
+        ForeignKey("module_instances.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    slug: Mapped[str] = mapped_column(String(64), nullable=False)
+    body: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ModuleInstanceDataRow(Base):
+    __tablename__ = "module_instance_data_rows"
+    __table_args__ = (
+        UniqueConstraint(
+            "instance_id",
+            "table_slug",
+            "row_id",
+            name="uq_module_instance_data_row",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=_midr_id)
+    instance_id: Mapped[str] = mapped_column(
+        ForeignKey("module_instances.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    table_slug: Mapped[str] = mapped_column(String(64), nullable=False)
+    row_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    body: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    created_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

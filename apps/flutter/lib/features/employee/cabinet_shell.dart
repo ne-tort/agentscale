@@ -49,8 +49,8 @@ class _CabinetShellState extends State<CabinetShell> {
   List<Map<String, dynamic>> _projectChats = const [];
   String? _activeSessionId;
 
-  bool get _showManagement => _managementEntries.isNotEmpty;
-  bool get _showData => _dataEntries.isNotEmpty;
+  bool get _showManagement => true;
+  bool get _showData => true;
 
   int get _managementContentIndex => _projectsIndex + 1 + _railEntries.length;
   int get _dataContentIndex =>
@@ -94,11 +94,13 @@ class _CabinetShellState extends State<CabinetShell> {
       _lastKnownSelectedProjectId = selected;
       _lastProjectLifecycleEpoch = lifecycle;
       _reloadSidebar();
+      _loadNav();
       return;
     }
     if (lifecycle != _lastProjectLifecycleEpoch) {
       _lastProjectLifecycleEpoch = lifecycle;
       _reloadSidebar();
+      _loadNav();
       return;
     }
     setState(() {});
@@ -107,7 +109,10 @@ class _CabinetShellState extends State<CabinetShell> {
   Future<void> _loadNav() async {
     setState(() => _navLoading = true);
     try {
-      final bundle = await loadCabinetNavBundle(widget.cabinetId);
+      final bundle = await loadCabinetNavBundle(
+        widget.cabinetId,
+        projectId: workContext.selectedProjectId,
+      );
       if (!mounted) return;
       setState(() {
         _railEntries = bundle.rail;
@@ -400,6 +405,7 @@ class _CabinetShellState extends State<CabinetShell> {
                     : null,
                 root: CabinetManagementPage(
                   cabinetId: widget.cabinetId,
+                  projectId: workContext.selectedProjectId,
                   entries: _managementEntries,
                 ),
               ),
@@ -410,6 +416,7 @@ class _CabinetShellState extends State<CabinetShell> {
                     _narrowStackIndex == _narrowDataStackIndex ? _onSubpageOpenChanged : null,
                 root: CabinetDataPage(
                   cabinetId: widget.cabinetId,
+                  projectId: workContext.selectedProjectId,
                   entries: _dataEntries,
                 ),
               ),
@@ -485,12 +492,14 @@ class _CabinetShellState extends State<CabinetShell> {
       if (_showManagement)
         CabinetManagementPage(
           cabinetId: widget.cabinetId,
+          projectId: workContext.selectedProjectId,
           entries: _managementEntries,
           embedded: true,
         ),
       if (_showData)
         CabinetDataPage(
           cabinetId: widget.cabinetId,
+          projectId: workContext.selectedProjectId,
           entries: _dataEntries,
           embedded: true,
         ),

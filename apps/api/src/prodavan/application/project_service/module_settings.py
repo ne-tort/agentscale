@@ -1,21 +1,19 @@
-"""Project module enablement + profile selection (project_ids on profile rows)."""
+"""Project module enablement + profile selection on project leaf instances."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.cabinets.access import CabinetAccessService
-from prodavan.application.cabinets.cabinet_module_service import CabinetModuleService
 from prodavan.application.modules.module_binding_service import ModuleBindingService
+from prodavan.application.modules.module_instance_service import ModuleInstanceService
 from prodavan.application.modules.module_meta_service import ModuleMetaDocumentService
 from prodavan.application.project_service.access import ProjectAccessPolicy
-from prodavan.application.projects.materialize_planner import _row_applies_to_project
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
-from prodavan.infrastructure.cabinets.sql import qident
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.modules import ModuleCabinetBindingRow, ModuleRow
@@ -35,15 +33,6 @@ def _profile_hub_config(views: list[Any]) -> dict[str, str] | None:
                 "settings_table": str(ui.get("settings_table") or "profile_settings"),
             }
     return None
-
-
-def _profile_explicit_for_project(body: dict[str, Any], project_id: str) -> bool:
-    pids = body.get("project_ids")
-    return isinstance(pids, list) and project_id in [str(p) for p in pids]
-
-
-def _has_explicit_profile_assignment(profiles: list[dict[str, Any]], project_id: str) -> bool:
-    return any(_profile_explicit_for_project(item["body"], project_id) for item in profiles)
 
 
 def pick_default_profile_row_id(profiles: list[dict[str, Any]]) -> str | None:
@@ -70,6 +59,7 @@ class ProjectModuleSettingsService:
         self._session = session
         self._access = ProjectAccessPolicy(session)
         self._meta = ModuleMetaDocumentService(session)
+        self._instances = ModuleInstanceService(session)
 
     async def _require_project(
         self,
@@ -107,57 +97,49 @@ class ProjectModuleSettingsService:
         )
         return [(mid, name) for mid, name in q.all()]
 
-    async def _profile_rows(
+    async def _profile_rows_for_project(
         self,
         *,
-        schema_name: str,
+        project_id: str,
         module_id: str,
         profile_table: str,
     ) -> list[dict[str, Any]]:
-        qschema = qident(schema_name)
-        q = await self._session.execute(
-            text(
-                f"""
-                SELECT row_id, body
-                FROM {qschema}.module_data_rows
-                WHERE module_id = :module_id AND table_slug = :table_slug
-                ORDER BY updated_at
-                """
-            ),
-            {"module_id": module_id, "table_slug": profile_table},
+        inst = await self._instances.ensure_project_instance(
+            project_id=project_id, module_id=module_id
+        )
+        rows = await self._instances.list_data_rows(
+            instance_id=inst.id, table_slug=profile_table
         )
         out: list[dict[str, Any]] = []
-        for row in q.fetchall():
-            body = row.body if isinstance(row.body, dict) else {}
-            out.append({"row_id": str(row.row_id), "body": body})
+        for row in rows:
+            body = row.get("body") if isinstance(row.get("body"), dict) else {}
+            out.append({"row_id": str(row["row_id"]), "body": body, "instance_id": inst.id})
         return out
 
-    def _resolve_profile_for_project(
+    def _resolve_active_profile(
         self,
         profiles: list[dict[str, Any]],
-        project_id: str,
     ) -> dict[str, str] | None:
-        explicit: dict[str, str] | None = None
-        matches: list[tuple[str, str, bool]] = []
-        for item in profiles:
-            row_id = item["row_id"]
-            body = item["body"]
-            name = str(body.get("name") or row_id)
-            pids = body.get("project_ids")
-            if isinstance(pids, list) and pids and project_id in [str(p) for p in pids]:
-                explicit = {"profile_id": row_id, "profile_name": name}
-            if _row_applies_to_project(body, project_id):
-                matches.append((row_id, name, bool(body.get("is_default"))))
-        if explicit is not None:
-            return explicit
-        if not matches:
+        if not profiles:
             return None
-        defaults = [(rid, name) for rid, name, is_def in matches if is_def]
+        defaults = [
+            (item["row_id"], str(item["body"].get("name") or item["row_id"]))
+            for item in profiles
+            if item["body"].get("is_default")
+        ]
         if defaults:
             rid, name = sorted(defaults, key=lambda x: x[1].lower())[0]
             return {"profile_id": rid, "profile_name": name}
-        rid, name, _ = sorted(matches, key=lambda x: x[1].lower())[0]
-        return {"profile_id": rid, "profile_name": name}
+        picked = pick_default_profile_row_id(profiles)
+        if picked is None:
+            return None
+        for item in profiles:
+            if item["row_id"] == picked:
+                return {
+                    "profile_id": picked,
+                    "profile_name": str(item["body"].get("name") or picked),
+                }
+        return None
 
     async def ensure_default_profiles_for_project(
         self,
@@ -166,10 +148,7 @@ class ProjectModuleSettingsService:
         principal: Principal,
         employee: EmployeeRow | None,
     ) -> None:
-        """Assign default module profiles on project create (explicit project_ids)."""
-        inst = await self._session.get(CabinetInstanceRow, project.cabinet_id)
-        if inst is None:
-            return
+        """Mark default profile as active on the project leaf instance."""
         for module_id, _ in await self._cabinet_modules(project.cabinet_id):
             hub: dict[str, str] | None = None
             try:
@@ -181,22 +160,24 @@ class ProjectModuleSettingsService:
                 hub = None
             if hub is None:
                 continue
-            profiles = await self._profile_rows(
-                schema_name=inst.schema_name,
+            profiles = await self._profile_rows_for_project(
+                project_id=project.id,
                 module_id=module_id,
                 profile_table=hub["profile_table"],
             )
-            if not profiles or _has_explicit_profile_assignment(profiles, project.id):
+            if not profiles:
+                continue
+            if any(p["body"].get("is_default") for p in profiles):
                 continue
             profile_id = pick_default_profile_row_id(profiles)
             if profile_id is None:
                 continue
-            await self.set_profile(
+            await self._apply_profile_on_instance(
                 project_id=project.id,
                 module_id=module_id,
+                profile_table=hub["profile_table"],
                 profile_id=profile_id,
-                principal=principal,
-                employee=employee,
+                profiles=profiles,
             )
 
     async def list_modules(
@@ -228,12 +209,12 @@ class ProjectModuleSettingsService:
             profile_id: str | None = None
             profile_name: str | None = None
             if hub is not None:
-                profiles = await self._profile_rows(
-                    schema_name=inst.schema_name,
+                profiles = await self._profile_rows_for_project(
+                    project_id=project.id,
                     module_id=module_id,
                     profile_table=hub["profile_table"],
                 )
-                picked = self._resolve_profile_for_project(profiles, project.id)
+                picked = self._resolve_active_profile(profiles)
                 if picked is not None:
                     profile_id = picked["profile_id"]
                     profile_name = picked["profile_name"]
@@ -275,23 +256,17 @@ class ProjectModuleSettingsService:
             project = await self._require_project(
                 project_id=project_id, principal=principal, employee=employee, write=False
             )
-            inst = await self._session.get(CabinetInstanceRow, project.cabinet_id)
-            if inst is None:
-                raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="cabinet not found")
-            for item in await self._profile_rows(
-                schema_name=inst.schema_name,
+            for item in await self._profile_rows_for_project(
+                project_id=project.id,
                 module_id=module_id,
                 profile_table=str(module["profile_table"]),
             ):
                 body = item["body"]
-                pids = body.get("project_ids")
-                pid_list = [str(p) for p in pids] if isinstance(pids, list) else []
                 profiles_out.append(
                     {
                         "profile_id": item["row_id"],
                         "name": str(body.get("name") or item["row_id"]),
-                        "project_ids": pid_list,
-                        "selected": project.id in pid_list,
+                        "selected": bool(body.get("is_default")),
                     }
                 )
         module["profiles"] = profiles_out
@@ -339,33 +314,46 @@ class ProjectModuleSettingsService:
                 detail="unknown profile_id",
             )
 
-        inst = await self._session.get(CabinetInstanceRow, project.cabinet_id)
-        if inst is None:
-            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="cabinet not found")
-        rows = await self._profile_rows(
-            schema_name=inst.schema_name, module_id=module_id, profile_table=profile_table
+        profiles = await self._profile_rows_for_project(
+            project_id=project.id,
+            module_id=module_id,
+            profile_table=profile_table,
         )
-        cabinet_modules = CabinetModuleService(self._session)
-        for item in rows:
-            row_id = item["row_id"]
-            body = dict(item["body"])
-            pids = body.get("project_ids")
-            current = [str(p) for p in pids] if isinstance(pids, list) else []
-            if row_id == profile_id:
-                if project.id not in current:
-                    current.append(project.id)
-            else:
-                current = [p for p in current if p != project.id]
-            body["project_ids"] = current
-            await cabinet_modules.update_data_row(
-                cabinet_id=project.cabinet_id,
-                module_id=module_id,
-                table_slug=profile_table,
-                row_id=row_id,
-                body=body,
-                principal=principal,
-                employee=employee,
-            )
+        await self._apply_profile_on_instance(
+            project_id=project.id,
+            module_id=module_id,
+            profile_table=profile_table,
+            profile_id=profile_id,
+            profiles=profiles,
+        )
+        await self._session.commit()
         return await self.get_module(
             project_id=project_id, module_id=module_id, principal=principal, employee=employee
         )
+
+    async def _apply_profile_on_instance(
+        self,
+        *,
+        project_id: str,
+        module_id: str,
+        profile_table: str,
+        profile_id: str,
+        profiles: list[dict[str, Any]],
+    ) -> None:
+        inst = await self._instances.ensure_project_instance(
+            project_id=project_id, module_id=module_id
+        )
+        for item in profiles:
+            body = dict(item["body"])
+            body["is_default"] = item["row_id"] == profile_id
+            # Leaf isolation — clear legacy project_ids filter noise.
+            if "project_ids" in body:
+                body["project_ids"] = []
+            await self._instances.upsert_data_row(
+                instance_id=inst.id,
+                table_slug=profile_table,
+                row_id=item["row_id"],
+                body=body,
+                created_by=None,
+            )
+        await self._session.flush()

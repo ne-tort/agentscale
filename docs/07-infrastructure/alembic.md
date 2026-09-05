@@ -60,6 +60,7 @@ Readiness `/health/ready` проверяет доступность Postgres, **
 2. **Не править** уже применённые ревизии на dev/staging/prod — только новый файл.
 3. **Data migration** (UPDATE/backfill) — явный `op.execute` / batch; autogenerate не заменяет ревью.
 4. Role `prodavan_app`: CI выдаёт GRANT после migrate; в k3s — bootstrap/Terraform.
+5. **Product module seeds** (`product_module_seeds.py` → `PRODUCT_MODULES`): любая смена seeds → новая Alembic-ревизия, вызывающая `upsert_product_modules(conn)` из `product_module_upsert.py`. Не silent-overwrite meta из API bootstrap (затрёт ручные правки platform).
 
 ## Если миграция «не доехала»
 

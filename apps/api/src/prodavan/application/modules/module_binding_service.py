@@ -279,6 +279,12 @@ class ModuleBindingService:
         for cid in unique:
             self._session.add(ModuleCompanyGrantRow(module_id=module_id, company_id=cid))
         await self._session.flush()
+        from prodavan.application.modules.module_instance_service import ModuleInstanceService
+
+        instances = ModuleInstanceService(self._session)
+        for cid in unique:
+            if cid not in old_ids:
+                await instances.ensure_company_instance(company_id=cid, module_id=module_id)
         return unique
 
     async def org_cabinet_ids(self, company_id: str) -> set[str]:

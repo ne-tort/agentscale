@@ -123,6 +123,7 @@ void main() {
         _ruApp(
           const CabinetManagementPage(
             cabinetId: 'cab-1',
+            projectId: 'prj-1',
             entries: [entry],
           ),
         ),
@@ -135,7 +136,7 @@ void main() {
   });
 
   group('CabinetShell destinations', () {
-    testWidgets('wide rail has Projects; Management hidden when empty', (tester) async {
+    testWidgets('wide rail has Projects; Management/Data hubs always shown', (tester) async {
       tester.view.physicalSize = const Size(900, 700);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -149,12 +150,11 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       expect(find.text('Проекты'), findsWidgets);
-      // No modules loaded in test → hubs hidden.
-      expect(find.text('Управление'), findsNothing);
-      expect(find.text('Данные'), findsNothing);
+      expect(find.text('Управление'), findsOneWidget);
+      expect(find.text('Данные'), findsOneWidget);
     });
 
-    testWidgets('narrow bottom nav shows Projects and Overview without empty hubs', (
+    testWidgets('narrow bottom nav shows Projects, Overview, and hubs', (
       tester,
     ) async {
       tester.view.physicalSize = const Size(400, 800);
@@ -172,8 +172,8 @@ void main() {
       expect(find.byType(NavigationBar), findsOneWidget);
       expect(find.text('Проекты'), findsOneWidget);
       expect(find.text('Обзор'), findsOneWidget);
-      expect(find.text('Управление'), findsNothing);
-      expect(find.text('Данные'), findsNothing);
+      expect(find.text('Управление'), findsOneWidget);
+      expect(find.text('Данные'), findsOneWidget);
     });
   });
 }

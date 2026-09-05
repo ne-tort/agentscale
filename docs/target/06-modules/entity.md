@@ -1,7 +1,7 @@
 # Module — сущность (канон)
 
-**Module** — переиспользуемый каталог метаданных (meta tables/columns/views/tabs) для кабинетов.  
-Не runtime instance: **шаблон** в platform DB (`module_meta_documents`); **данные** — в `cab_inst_*.module_data_rows`.
+**Module (template)** — каталог метаданных в platform DB (`modules` + `module_meta_documents`).  
+**Module Instance** — независимая копия meta + data после bind (`module_instances` + `module_instance_*`).
 
 Карта: [00-entities](../00-entities.md) · Meta slugs: [05-cabinets/meta-and-ui](../05-cabinets/meta-and-ui.md).
 
@@ -9,32 +9,48 @@
 
 | Таблица | Смысл |
 |---------|--------|
-| `modules` | `id` (`mod_*`), `name`, `status`, timestamps |
-| `module_meta_documents` | `module_id`, `slug`, `body` JSONB — канон slugs: `tables`, `columns`, `views`, `tabs` |
-| `module_cabinet_bindings` | N:M module ↔ cabinet |
-| `module_project_bindings` | N:M module ↔ project (только если module уже bound к `project.cabinet_id`) |
+| `modules` | `id` (`mod_*`), `name`, `status`, timestamps — template catalog |
+| `module_meta_documents` | Template meta: `module_id`, `slug`, `body` JSONB |
+| `module_instances` | Fork: `owner_kind` (`platform`/`company`/`cabinet`/`project`) + `owner_id` + `module_id` + `parent_instance_id` |
+| `module_instance_meta_documents` | Per-instance meta copy |
+| `module_instance_data_rows` | Per-instance data rows (JSONB body) |
+| `module_cabinet_bindings` | N:M module ↔ cabinet (triggers cabinet fork) |
+| `module_company_grants` | Visibility + company fork |
+| `module_project_bindings` | Optional allowlist module ↔ project |
+
+## Cascade (copy-on-bind)
+
+```text
+Template → platform instance
+         → company instance (on grant)
+         → cabinet instance (on MC bind)
+         → project instance (on create / ensure; leaf for UI + materialize)
+```
+
+Parent не видит мутации child. Re-sync from parent — отдельный явный API (вне MVP).
+
+**Materialize (MVP):** data/profile rows from **project instance**; materialize **rules** still from template slug `materialize`. Admin/company meta PUT mirrors into owner instance; Alembic seed upsert refreshes **platform** instance meta only.
 
 ## Привязки
 
-```text
-Module ──N:M──► CabinetInstance
-Module ──N:M──► Project (precondition: cabinet grant exists)
-```
-
 | Правило | MVP |
 |---------|-----|
-| Admin UI bind | cabinets only |
-| Project bind | API only; project.cabinet_id must have active MC row |
-| Delete module | CASCADE meta + bindings only; cabinets/projects **не** удаляются |
-| Delete cabinet | CASCADE MC rows; auto-revoke MP for projects in that cabinet |
-| Delete project | CASCADE MP row |
+| Admin UI bind | cabinets; fork cabinet instance |
+| Company grant | fork company instance |
+| Project | ensure project instance from cabinet; hubs = selected project |
+| Delete module | CASCADE template meta + instances + bindings |
+| Delete cabinet/project | CASCADE owner instances |
+
+## Legacy
+
+`cab_inst_*.module_data_rows` + row `project_ids` — migration/fallback. Канон изоляции — **project instance**, не фильтр shared cabinet rows.
 
 ## Не путать
 
 | | |
 |--|--|
-| Module | reusable meta catalog (platform DB) |
-| CabinetInstance | runtime shell + `cab_inst_*` schema |
-| Legacy code-pack «module» | deprecated; см. [05-cabinets/dynamic-cabinets](../05-cabinets/dynamic-cabinets.md) |
+| Module template | reusable meta catalog |
+| Module instance | editable fork at an owner |
+| CabinetInstance | runtime shell + `cab_inst_*` schema (legacy data layer) |
 
-Дальше: [backend](backend.md) · **[meta-syntax](meta-syntax/README.md)** — полная спецификация синтаксиса
+Дальше: [backend](backend.md) · **[meta-syntax](meta-syntax/README.md)**

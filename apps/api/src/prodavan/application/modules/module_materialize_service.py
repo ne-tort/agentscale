@@ -64,6 +64,12 @@ class ModuleMaterializeService:
             {"module_id": module_id},
         )
         await self._apply_seed_rows(schema_name=inst.schema_name, module_id=module_id)
+        # Copy-on-bind: fork independent cabinet instance from company/platform.
+        from prodavan.application.modules.module_instance_service import ModuleInstanceService
+
+        await ModuleInstanceService(self._session).ensure_cabinet_instance(
+            cabinet_id=cabinet_id, module_id=module_id
+        )
 
     async def _apply_seed_rows(self, *, schema_name: str, module_id: str) -> None:
         """Copy optional meta slug `seed_rows` into module_data_rows (idempotent upsert by PK)."""
@@ -110,6 +116,11 @@ class ModuleMaterializeService:
         await self._session.execute(
             text(f"DELETE FROM {qschema}.module_installations WHERE module_id = :module_id"),
             {"module_id": module_id},
+        )
+        from prodavan.application.modules.module_instance_service import ModuleInstanceService
+
+        await ModuleInstanceService(self._session).delete_cabinet_module_instances(
+            cabinet_id=cabinet_id, module_id=module_id
         )
 
     async def uninstall_all_for_module(self, *, module_id: str, cabinet_ids: list[str]) -> None:

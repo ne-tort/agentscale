@@ -141,8 +141,12 @@ class ProjectCommand:
                 "visibility_mode": row.visibility_mode,
             },
         )
+        from prodavan.application.modules.module_instance_service import ModuleInstanceService
         from prodavan.application.project_service.module_settings import ProjectModuleSettingsService
 
+        await ModuleInstanceService(self._session).ensure_project_instances_for_cabinet_modules(
+            project_id=project_id
+        )
         await ProjectModuleSettingsService(self._session).ensure_default_profiles_for_project(
             project=row,
             principal=principal,

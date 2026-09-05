@@ -1,9 +1,9 @@
-"""Unit — module seed_rows parse + install applies seeds."""
+"""Unit — module seed_rows parse + install applies seeds and forks instance."""
 
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -31,7 +31,7 @@ def test_parse_seed_items_object_and_list() -> None:
 
 
 @pytest.mark.asyncio
-async def test_install_applies_seed_rows() -> None:
+async def test_install_applies_seed_rows_and_forks_instance() -> None:
     session = AsyncMock()
     inst = SimpleNamespace(schema_name="cab_inst_test")
     session.get = AsyncMock(return_value=inst)
@@ -47,7 +47,13 @@ async def test_install_applies_seed_rows() -> None:
     svc._provisioner = MagicMock()
     svc._provisioner.ensure_data_layer = AsyncMock()
 
-    await svc.install(cabinet_id="cab_1", module_id="mod_1")
+    with patch(
+        "prodavan.application.modules.module_instance_service.ModuleInstanceService"
+    ) as cls:
+        ensure = AsyncMock()
+        cls.return_value.ensure_cabinet_instance = ensure
+        await svc.install(cabinet_id="cab_1", module_id="mod_1")
+        ensure.assert_awaited_once_with(cabinet_id="cab_1", module_id="mod_1")
 
     assert session.execute.await_count == 3
     last_sql = str(session.execute.await_args_list[-1].args[0])

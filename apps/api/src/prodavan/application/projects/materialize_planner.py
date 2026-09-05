@@ -49,9 +49,18 @@ class MaterializePlanner:
         when: str = "project.created",
         enabled_module_ids: list[str] | None = None,
     ) -> tuple[list[MaterializeOp], str | None]:
+        from prodavan.application.modules.module_instance_service import ModuleInstanceService
+
         inst = await self._session.get(CabinetInstanceRow, cabinet_id)
         if inst is None:
             return [], None
+        # Ensure leaf project instances exist before planning (copy-on-bind cascade).
+        try:
+            await ModuleInstanceService(self._session).ensure_project_instances_for_cabinet_modules(
+                project_id=project_id
+            )
+        except Exception:
+            pass
         active_profile_id = await self._resolve_active_profile_id(
             schema_name=inst.schema_name,
             project_id=project_id,
@@ -240,6 +249,29 @@ class MaterializePlanner:
         schema_name: str,
         project_id: str,
     ) -> str | None:
+        from prodavan.application.modules.module_instance_service import (
+            OWNER_PROJECT,
+            ModuleInstanceService,
+        )
+
+        instances = ModuleInstanceService(self._session)
+        inst = await instances.get_instance(
+            owner_kind=OWNER_PROJECT, owner_id=project_id, module_id="mod_prompts"
+        )
+        if inst is not None:
+            rows = await instances.list_data_rows(
+                instance_id=inst.id, table_slug="prompt_profiles"
+            )
+            matches: list[tuple[str, bool]] = []
+            for row in rows:
+                body = row.get("body") if isinstance(row.get("body"), dict) else {}
+                matches.append((str(row["row_id"]), bool(body.get("is_default"))))
+            if matches:
+                defaults = [rid for rid, is_def in matches if is_def]
+                if defaults:
+                    return defaults[0]
+                return matches[0][0]
+
         qschema = qident(schema_name)
         q = await self._session.execute(
             text(
@@ -252,7 +284,7 @@ class MaterializePlanner:
                 """
             )
         )
-        matches: list[tuple[str, bool]] = []
+        matches = []
         for row in q.fetchall():
             body = row.body if isinstance(row.body, dict) else {}
             if not _row_applies_to_project(body, project_id):
@@ -272,7 +304,26 @@ class MaterializePlanner:
         module_id: str,
         table_slug: str,
         row_id: str,
+        project_id: str | None = None,
     ) -> dict[str, Any] | None:
+        if project_id:
+            from prodavan.application.modules.module_instance_service import (
+                OWNER_PROJECT,
+                ModuleInstanceService,
+            )
+
+            instances = ModuleInstanceService(self._session)
+            inst = await instances.get_instance(
+                owner_kind=OWNER_PROJECT, owner_id=project_id, module_id=module_id
+            )
+            if inst is not None:
+                row = await instances.get_data_row(
+                    instance_id=inst.id, table_slug=table_slug, row_id=row_id
+                )
+                if row is not None:
+                    body = row.get("body")
+                    return body if isinstance(body, dict) else {}
+
         qschema = qident(schema_name)
         q = await self._session.execute(
             text(
@@ -298,6 +349,25 @@ class MaterializePlanner:
         filt: dict[str, Any] | None,
         project_id: str,
     ) -> list[dict[str, Any]]:
+        from prodavan.application.modules.module_instance_service import (
+            OWNER_PROJECT,
+            ModuleInstanceService,
+        )
+
+        instances = ModuleInstanceService(self._session)
+        inst = await instances.get_instance(
+            owner_kind=OWNER_PROJECT, owner_id=project_id, module_id=module_id
+        )
+        if inst is not None:
+            rows = await instances.list_data_rows(instance_id=inst.id, table_slug=table_slug)
+            out: list[dict[str, Any]] = []
+            for r in rows:
+                body = r.get("body") if isinstance(r.get("body"), dict) else {}
+                if filt and not _row_matches_filter(body, filt):
+                    continue
+                out.append({"row_id": r["row_id"], **body})
+            return out
+
         qschema = qident(schema_name)
         q = await self._session.execute(
             text(
@@ -309,7 +379,7 @@ class MaterializePlanner:
             ),
             {"module_id": module_id, "table_slug": table_slug},
         )
-        out: list[dict[str, Any]] = []
+        out = []
         for r in q.fetchall():
             body = r.body if isinstance(r.body, dict) else {}
             if filt and not _row_matches_filter(body, filt):
@@ -353,10 +423,23 @@ class MaterializePlanner:
             module_id=module_id,
             table_slug=table_slug,
             row_id=row_id,
+            project_id=project_id,
         )
         if body is None:
             return None
-        if not _row_applies_to_project(body, project_id):
+        # Project instances are already leaf copies; project_ids filter is legacy fallback only.
+        from prodavan.application.modules.module_instance_service import (
+            OWNER_PROJECT,
+            ModuleInstanceService,
+        )
+
+        has_instance = (
+            await ModuleInstanceService(self._session).get_instance(
+                owner_kind=OWNER_PROJECT, owner_id=project_id, module_id=module_id
+            )
+            is not None
+        )
+        if not has_instance and not _row_applies_to_project(body, project_id):
             return None
         str_body = {k: str(v) for k, v in body.items() if v is not None}
         ws_path = self._substitute(str(target.get("workspace_path") or ""), {**ctx, **str_body})

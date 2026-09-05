@@ -7,6 +7,12 @@ from prodavan.application.platform.product_module_seeds import (
     mod_mcp_meta,
     mod_prompts_meta,
 )
+from prodavan.application.platform.product_module_upsert import upsert_product_modules
+
+
+def test_upsert_product_modules_helper_is_importable() -> None:
+    assert callable(upsert_product_modules)
+    assert len(PRODUCT_MODULES) == 3
 
 
 def test_product_modules_replace_examples() -> None:

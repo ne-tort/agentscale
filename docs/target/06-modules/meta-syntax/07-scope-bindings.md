@@ -1,15 +1,17 @@
 # Scope, bindings, enabled
 
-Как meta взаимодействует с **module↔cabinet↔project** bindings и UI state (disabled items, project filter).
+Как meta взаимодействует с **module instance cascade** и UI state (disabled items, project filter).
 
 ## Binding model (recap)
 
 ```text
-Module ──MC──► Cabinet     (install + data schema)
-Module ──MP──► Project     (visibility within cabinet; precondition: MC exists)
+Template → platform/company/cabinet/project instances (copy-on-bind)
+Module ──MC──► Cabinet     (fork cabinet instance + legacy install)
+Module ──MP──► Project     (optional allowlist; leaf = project instance)
 ```
 
-Meta template **shared**; data **per cabinet**; visibility **may filter by project**.
+**Канон:** editable path = **instances**. Employee Management/Data hubs = **selected project** leaf.  
+**Legacy:** shared cabinet `module_data_rows` + row `project_ids` filter — только fallback после миграции.
 
 ## Scope block
 

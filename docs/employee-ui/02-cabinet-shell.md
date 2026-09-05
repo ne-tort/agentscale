@@ -7,20 +7,28 @@
 - Logo → `CabinetOverviewPage`
 - Rail destinations:
   - **Projects** (system, order 10)
-  - Module tabs with `nav.placement: rail` only
-- **No** «Управление» destination on desktop
+  - Module tabs with `nav.placement: rail` only (cabinet instance APIs)
+  - **Управление** / **Данные** hubs (always listed; content scoped to `selectedProjectId`)
 - Trailing: **Settings** → `EmployeeSettingsBody`
 
 ## Narrow (<600px)
 
-- Bottom nav: **Управление** hub only (like CompanyShell)
-- Hub list: module tabs with `nav.placement: management` (from parent shell — no reload)
-- **Projects** — not in hub; available on wide rail only (or via overview/deep link later)
-- Settings — trailing bottom item
+- Bottom nav: **Projects**, **Overview**, **Управление**, **Данные**, Settings
+- Hub lists: module tabs with `nav.placement: management` / `data` for the selected project
+- Without a selected project hubs show CTA to create/select a project
+
+## Runtime-modules scope
+
+| Surface | Owner | API |
+|---------|-------|-----|
+| Rail tabs | cabinet instance | `/cabinets/{id}/modules…` |
+| Management / Data | project leaf | `/projects/{id}/runtime-modules…` |
+
+`CabinetModuleHost(projectId: …)` must receive an explicit project id for hubs; rail omits it. Do not fall back to `workContext.selectedProjectId` inside the host.
 
 ## State machine
 
-Копия `_CompanyShellState`: `_contentIndex`, `_railSelected`, `_narrowStackIndex`, `_subpageOpen`, `AppShellBranch` per tab.
+Копия `_CompanyShellState`: `_contentIndex`, `_railSelected`, `_narrowStackIndex`, `_subpageOpen`, `AppShellBranch` per tab. Reload management/data nav when `selectedProjectId` changes.
 
 ## Params
 
