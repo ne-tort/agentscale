@@ -35,6 +35,8 @@ class _CabinetShellState extends State<CabinetShell> {
   static const _overviewIndex = 0;
   static const _projectsIndex = 1;
 
+  final GlobalKey<NavigatorState> _projectsNavKey = GlobalKey<NavigatorState>();
+
   int _contentIndex = _overviewIndex;
   int? _railSelected;
   int _narrowStackIndex = 1;
@@ -49,8 +51,8 @@ class _CabinetShellState extends State<CabinetShell> {
   List<Map<String, dynamic>> _projectChats = const [];
   String? _activeSessionId;
 
-  bool get _showManagement => true;
-  bool get _showData => true;
+  bool get _showManagement => _managementEntries.isNotEmpty;
+  bool get _showData => _dataEntries.isNotEmpty;
 
   int get _managementContentIndex => _projectsIndex + 1 + _railEntries.length;
   int get _dataContentIndex =>
@@ -269,18 +271,15 @@ class _CabinetShellState extends State<CabinetShell> {
     if (sessionId == null || projectId == null) return;
     final projectName = chat['project_name'] as String? ?? projectId;
     setState(() => _activeSessionId = sessionId);
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => ProjectWorkspacePage(
-          cabinetId: widget.cabinetId,
-          projectId: projectId,
-          projectName: projectName,
-          sessionId: sessionId,
-          initialTitle: chat['title'] as String?,
-          initiallyPinned: chat['pinned'] == true,
-        ),
-      ),
+    final page = ProjectWorkspacePage(
+      cabinetId: widget.cabinetId,
+      projectId: projectId,
+      projectName: projectName,
+      sessionId: sessionId,
+      initialTitle: chat['title'] as String?,
+      initiallyPinned: chat['pinned'] == true,
     );
+    await _pushChat(page);
     if (!mounted) return;
     setState(() => _activeSessionId = null);
     await _reloadSidebar();
@@ -300,17 +299,14 @@ class _CabinetShellState extends State<CabinetShell> {
       } catch (_) {}
       if (!mounted) return;
       setState(() => _activeSessionId = sessionId);
-      await Navigator.of(context).push<void>(
-        MaterialPageRoute<void>(
-          builder: (_) => ProjectWorkspacePage(
-            cabinetId: widget.cabinetId,
-            projectId: projectId,
-            projectName: name,
-            sessionId: sessionId,
-            initialTitle: created['title'] as String?,
-          ),
-        ),
+      final page = ProjectWorkspacePage(
+        cabinetId: widget.cabinetId,
+        projectId: projectId,
+        projectName: name,
+        sessionId: sessionId,
+        initialTitle: created['title'] as String?,
       );
+      await _pushChat(page);
       if (!mounted) return;
       setState(() => _activeSessionId = null);
       await _reloadSidebar();
@@ -318,6 +314,29 @@ class _CabinetShellState extends State<CabinetShell> {
       if (!mounted) return;
       AppErrors.showSnack(context, e);
     }
+  }
+
+  /// Wide: push into Projects nested navigator (rail stays). Narrow: root push (full-screen).
+  Future<void> _pushChat(Widget page) async {
+    final route = MaterialPageRoute<void>(builder: (_) => page);
+    if (AppBreakpoints.isNarrow(context)) {
+      await Navigator.of(context).push(route);
+      return;
+    }
+    setState(() {
+      _contentIndex = _projectsIndex;
+      _railSelected = 0;
+      _subpageOpen = true;
+    });
+    // Wait a frame so IndexedStack activates the projects branch navigator.
+    await WidgetsBinding.instance.endOfFrame;
+    final nav = _projectsNavKey.currentState;
+    if (nav == null) {
+      if (!mounted) return;
+      await Navigator.of(context).push(route);
+      return;
+    }
+    await nav.push(route);
   }
 
   void _openNarrowChats() {
@@ -390,6 +409,7 @@ class _CabinetShellState extends State<CabinetShell> {
             ),
             AppShellBranch(
               active: _narrowStackIndex == 1,
+              navigatorKey: _projectsNavKey,
               onSubpageOpenChanged:
                   _narrowStackIndex == 1 ? _onSubpageOpenChanged : null,
               root: CabinetProjectsPage(
@@ -509,6 +529,7 @@ class _CabinetShellState extends State<CabinetShell> {
       for (var i = 0; i < mainPages.length; i++)
         AppShellBranch(
           active: _contentIndex == i,
+          navigatorKey: i == _projectsIndex ? _projectsNavKey : null,
           onSubpageOpenChanged: _contentIndex == i ? _onSubpageOpenChanged : null,
           root: mainPages[i],
         ),

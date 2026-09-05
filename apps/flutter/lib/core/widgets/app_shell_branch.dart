@@ -7,6 +7,7 @@ class AppShellBranch extends StatefulWidget {
     required this.root,
     required this.active,
     this.onSubpageOpenChanged,
+    this.navigatorKey,
   });
 
   final Widget root;
@@ -15,12 +16,16 @@ class AppShellBranch extends StatefulWidget {
   /// Called when this branch is [active] and stack depth changes (detail open/close).
   final ValueChanged<bool>? onSubpageOpenChanged;
 
+  /// Optional external key so the shell can push routes into this branch (e.g. chat).
+  final GlobalKey<NavigatorState>? navigatorKey;
+
   @override
   State<AppShellBranch> createState() => _AppShellBranchState();
 }
 
 class _AppShellBranchState extends State<AppShellBranch> {
-  final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
+  late final GlobalKey<NavigatorState> _navKey =
+      widget.navigatorKey ?? GlobalKey<NavigatorState>();
   late final _StackObserver _observer = _StackObserver(_report);
 
   @override

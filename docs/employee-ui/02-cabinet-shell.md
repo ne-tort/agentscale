@@ -8,14 +8,15 @@
 - Rail destinations:
   - **Projects** (system, order 10)
   - Module tabs with `nav.placement: rail` only (cabinet instance APIs)
-  - **Управление** / **Данные** hubs (always listed; content scoped to `selectedProjectId`)
+  - **Управление** / **Данные** hubs only when the selected project has tabs for that placement
 - Trailing: **Settings** → `EmployeeSettingsBody`
 
 ## Narrow (<600px)
 
-- Bottom nav: **Projects**, **Overview**, **Управление**, **Данные**, Settings
+- Bottom nav: **Projects**, **Overview**, optional **Управление** / **Данные**, Settings
 - Hub lists: module tabs with `nav.placement: management` / `data` for the selected project
-- Without a selected project hubs show CTA to create/select a project
+- Empty placement → hub destination omitted from nav
+- Hub page with null `projectId` still shows CTA to create/select a project
 
 ## Runtime-modules scope
 
@@ -25,6 +26,11 @@
 | Management / Data | project leaf | `/projects/{id}/runtime-modules…` |
 
 `CabinetModuleHost(projectId: …)` must receive an explicit project id for hubs; rail omits it. Do not fall back to `workContext.selectedProjectId` inside the host.
+
+## Chat
+
+- **Wide:** open chat via nested Projects `Navigator` — left rail stays visible (may compact when subpage open).
+- **Narrow:** root push — bottom nav hidden (full-screen chat).
 
 ## State machine
 

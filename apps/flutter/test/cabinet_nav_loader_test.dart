@@ -136,7 +136,7 @@ void main() {
   });
 
   group('CabinetShell destinations', () {
-    testWidgets('wide rail has Projects; Management/Data hubs always shown', (tester) async {
+    testWidgets('wide rail has Projects; empty hubs stay hidden', (tester) async {
       tester.view.physicalSize = const Size(900, 700);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
@@ -150,11 +150,11 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
 
       expect(find.text('Проекты'), findsWidgets);
-      expect(find.text('Управление'), findsOneWidget);
-      expect(find.text('Данные'), findsOneWidget);
+      expect(find.text('Управление'), findsNothing);
+      expect(find.text('Данные'), findsNothing);
     });
 
-    testWidgets('narrow bottom nav shows Projects, Overview, and hubs', (
+    testWidgets('narrow bottom nav shows Projects and Overview without empty hubs', (
       tester,
     ) async {
       tester.view.physicalSize = const Size(400, 800);
@@ -172,8 +172,8 @@ void main() {
       expect(find.byType(NavigationBar), findsOneWidget);
       expect(find.text('Проекты'), findsOneWidget);
       expect(find.text('Обзор'), findsOneWidget);
-      expect(find.text('Управление'), findsOneWidget);
-      expect(find.text('Данные'), findsOneWidget);
+      expect(find.text('Управление'), findsNothing);
+      expect(find.text('Данные'), findsNothing);
     });
   });
 }

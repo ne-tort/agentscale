@@ -100,7 +100,7 @@ Template (modules + module_meta_documents)
 | **Template** | Catalog module meta (`modules` + `module_meta_documents`) — source for first platform instance |
 | **Instance** | Independent copy: `module_instances` + `module_instance_meta_documents` + `module_instance_data_rows` (Postgres JSONB). Owner: `platform` / `company` / `cabinet` / `project` |
 | **Bind** | Creates a **fork** of parent instance (deep copy meta+data); further edits stay in the child |
-| **Project hubs** | Employee Management/Data UI = selected project’s leaf instances (`/projects/{id}/runtime-modules`); hubs stay visible with CTA when no project selected |
+| **Project hubs** | Employee Management/Data UI = selected project’s leaf instances (`/projects/{id}/runtime-modules`); hub destinations shown only when that placement has tabs |
 | **Materialize data** | Row/profile content from **project** instance (leaf) on launch/sync |
 | **Materialize rules** | Rule definitions still from **template** meta slug `materialize` (MVP); instance-level rules later |
 | **Admin/company edit** | Template catalog PUT mirrors into platform/company **instance** meta; seed upsert refreshes platform instance meta only (children untouched) |

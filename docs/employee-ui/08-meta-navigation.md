@@ -27,8 +27,8 @@ Future<List<CabinetNavEntry>> loadCabinetNavEntries(
 | `nav.placement` | Wide sidebar | Narrow |
 |---------------|--------------|--------|
 | `rail` | module tab in rail (cabinet instance) | no |
-| `management` | inside **«Управление»** (always shown; CTA if no project) | same |
-| `data` | inside **«Данные»** (always shown; CTA if no project) | same |
+| `management` | inside **«Управление»** (hub hidden if empty) | same |
+| `data` | inside **«Данные»** (hub hidden if empty) | same |
 | `none` | no | no |
 
 Optional tab `subtitle` — shown under the title on Management/Data hub preference tiles.
@@ -36,7 +36,9 @@ Optional tab `subtitle` — shown under the title on Management/Data hub prefere
 ## System pages (employee sidebar)
 
 - **Projects** — hardcoded rail entry, **not** inside hubs
-- **Управление** / **Данные** — always present; empty state CTA «создайте проект» when `selectedProjectId` is null
+- **Управление** — only if ≥1 tab with `placement: management` for the selected project
+- **Данные** — only if ≥1 tab with `placement: data` for the selected project
+- Without selected project hub lists are empty → hubs hidden; hub page still shows CTA if opened with null `projectId`
 - Hub module lists reload when the selected project changes
 
 ## Body
