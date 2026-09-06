@@ -51,8 +51,10 @@ class CabinetContentUploadService:
             employee=employee,
             mime=mime,
             title=filename,
-            link_kind="cabinet",
-            link_id=cabinet_id,
+            # Do not link every cabinet upload to cabinet_id — uq_content_asset_link_target
+            # is 1:1 per (kind, id); catalogs need many files per cabinet.
+            link_kind=None,
+            link_id=None,
         )
         from prodavan.infrastructure.persistence.models.content import ContentBlobVersionRow
 

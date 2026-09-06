@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/preferences/app_preference_tile.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 
 /// Upload file via cabinet content API; stores FileRef map in form state.
@@ -30,7 +32,7 @@ class FileUploadField extends StatelessWidget {
   final dynamic value;
   final String cabinetId;
   final ProdavanApi api;
-  final ValueChanged<Map<String, dynamic>?> onChanged;
+  final FutureOr<void> Function(Map<String, dynamic>?) onChanged;
   final bool readOnly;
   final String? accept;
   /// Shown only when a file is present and subtitle is non-empty.
@@ -60,12 +62,11 @@ class FileUploadField extends StatelessWidget {
         bytes: bytes,
         mime: _guessMime(file.name),
       );
-      onChanged(ref);
+      final maybeFuture = onChanged(ref);
+      await maybeFuture;
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e')),
-        );
+        AppErrors.showSnack(context, e);
       }
     }
   }

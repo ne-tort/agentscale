@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
@@ -74,33 +75,37 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     setState(() => _values[name] = value);
     if (widget.readOnly) return;
     final tableSlug = widget.view['table_slug'] as String? ?? '';
-    if (_rowId == null) {
-      final ui = widget.view['ui_json'];
-      final hidden = ui is Map ? ui['hidden_defaults'] : null;
-      if (hidden is Map) {
-        _values.addAll(Map<String, dynamic>.from(hidden));
-      }
-      if (widget.rowId != null) {
-        final profileField = widget.view['table_slug'] == 'agents_md' ? 'profile_id' : null;
-        if (profileField != null) {
-          _values[profileField] = widget.rowId;
+    try {
+      if (_rowId == null) {
+        final ui = widget.view['ui_json'];
+        final hidden = ui is Map ? ui['hidden_defaults'] : null;
+        if (hidden is Map) {
+          _values.addAll(Map<String, dynamic>.from(hidden));
         }
+        if (widget.rowId != null) {
+          final profileField = widget.view['table_slug'] == 'agents_md' ? 'profile_id' : null;
+          if (profileField != null) {
+            _values[profileField] = widget.rowId;
+          }
+        }
+        _rowId = widget.seeds.createRow(tableSlug);
+        final body = widget.seeds.bodyFor(_rowId!);
+        body.addAll(_values);
+        final upsert = widget.seeds.upsertBody(_rowId!, body);
+        if (upsert is Future) await upsert;
+      } else {
+        final patch = widget.seeds.patchField(_rowId!, name, value);
+        if (patch is Future) await patch;
       }
-      _rowId = widget.seeds.createRow(tableSlug);
-      final body = widget.seeds.bodyFor(_rowId!);
-      body.addAll(_values);
-      final upsert = widget.seeds.upsertBody(_rowId!, body);
-      if (upsert is Future) await upsert;
-    } else {
-      final patch = widget.seeds.patchField(_rowId!, name, value);
-      if (patch is Future) await patch;
-    }
-    if (!mounted || _rowId == null) return;
-    final item = widget.seeds.itemById(_rowId!);
-    if (item != null) {
-      setState(() {
-        _values = Map<String, dynamic>.from(widget.seeds.bodyFor(_rowId!));
-      });
+      if (!mounted || _rowId == null) return;
+      final item = widget.seeds.itemById(_rowId!);
+      if (item != null) {
+        setState(() {
+          _values = Map<String, dynamic>.from(widget.seeds.bodyFor(_rowId!));
+        });
+      }
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
     }
   }
 

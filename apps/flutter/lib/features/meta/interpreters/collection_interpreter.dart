@@ -54,7 +54,16 @@ class CollectionViewInterpreter extends StatelessWidget {
       listenable: seeds is Listenable ? seeds as Listenable : ValueNotifier(0),
       builder: (context, _) {
         final locale = Localizations.localeOf(context);
-        final columns = _columns(uiJson, l10n, locale);
+        final titleField = uiJson['title_field'] as String? ?? 'name';
+        final allColumns = _columns(uiJson, l10n, locale);
+        final primaryLabel = allColumns
+                .where((c) => c.id == titleField)
+                .map((c) => c.label)
+                .cast<String?>()
+                .firstWhere((_) => true, orElse: () => null) ??
+            (allColumns.isNotEmpty ? allColumns.first.label : l10n.commonEntity);
+        // Primary column already shows title_field — do not repeat it as a data column.
+        final columns = allColumns.where((c) => c.id != titleField).toList();
         final rawRows = _filteredRows(seeds, tableSlug, uiJson);
         final rows = _withSelection(context, uiJson, rawRows);
         final hasInline = _hasInlineAdd(uiJson);
@@ -73,7 +82,7 @@ class CollectionViewInterpreter extends StatelessWidget {
         final collection = AppEntityCollection(
           rows: rows,
           columns: columns,
-          primaryColumnLabel: columns.isNotEmpty ? columns.first.label : l10n.commonEntity,
+          primaryColumnLabel: primaryLabel,
           toolbar: toolbar,
           empty: EmptyPlaceholder(
             title: emptyTitle.isEmpty ? l10n.adminModuleSeedEmpty : emptyTitle,

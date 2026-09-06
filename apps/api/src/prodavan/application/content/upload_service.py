@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import hashlib
 
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.content.asset_service import AssetService
 from prodavan.domain.content.types import ContentVisibility
+from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.infrastructure.files.keys import new_blob_key
 from prodavan.infrastructure.files.manager import ensure_file_store
@@ -54,16 +57,49 @@ class UploadService:
         )
         self._session.add(ver_row)
         if link_kind and link_id:
-            self._session.add(
-                ContentAssetLinkRow(
-                    asset_id=asset_id,
-                    link_kind=link_kind,
-                    link_id=link_id,
-                )
+            await self._upsert_asset_link(
+                asset_id=asset_id,
+                link_kind=link_kind,
+                link_id=link_id,
             )
-        await self._session.commit()
+        try:
+            await self._session.commit()
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise AppError(
+                code="CONFLICT",
+                title="Conflict",
+                status=409,
+                detail="content asset link already exists",
+            ) from exc
         await self._session.refresh(ver_row)
         return asset_id, ver_row.id
+
+    async def _upsert_asset_link(
+        self,
+        *,
+        asset_id: str,
+        link_kind: str,
+        link_id: str,
+    ) -> None:
+        """One asset per (link_kind, link_id) — replace on re-upload/re-index."""
+        q = await self._session.execute(
+            select(ContentAssetLinkRow).where(
+                ContentAssetLinkRow.link_kind == link_kind,
+                ContentAssetLinkRow.link_id == link_id,
+            )
+        )
+        existing = q.scalar_one_or_none()
+        if existing is not None:
+            existing.asset_id = asset_id
+            return
+        self._session.add(
+            ContentAssetLinkRow(
+                asset_id=asset_id,
+                link_kind=link_kind,
+                link_id=link_id,
+            )
+        )
 
     async def link_asset(
         self,
@@ -72,11 +108,18 @@ class UploadService:
         link_kind: str,
         link_id: str,
     ) -> None:
-        self._session.add(
-            ContentAssetLinkRow(
-                asset_id=asset_id,
-                link_kind=link_kind,
-                link_id=link_id,
-            )
+        await self._upsert_asset_link(
+            asset_id=asset_id,
+            link_kind=link_kind,
+            link_id=link_id,
         )
-        await self._session.commit()
+        try:
+            await self._session.commit()
+        except IntegrityError as exc:
+            await self._session.rollback()
+            raise AppError(
+                code="CONFLICT",
+                title="Conflict",
+                status=409,
+                detail="content asset link already exists",
+            ) from exc

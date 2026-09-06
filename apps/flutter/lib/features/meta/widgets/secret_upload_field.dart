@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Masked secret upload for secret_ref columns — stores ref only, never plaintext in row.
@@ -57,9 +58,7 @@ class _SecretUploadFieldState extends State<SecretUploadField> {
       widget.onChanged(ref);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e')),
-        );
+        AppErrors.showSnack(context, e);
       }
     } finally {
       if (mounted) setState(() => _uploading = false);

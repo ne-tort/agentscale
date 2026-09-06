@@ -696,7 +696,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             {
                 "table_slug": "catalogs",
                 "name": "name",
-                "label": {"ru": "Название БД", "en": "Database name"},
+                "label": {"ru": "Название", "en": "Name"},
                 "type": "text",
                 "required": True,
             },
@@ -933,7 +933,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "columns": [
                         {
                             "field": "name",
-                            "label": {"ru": "Название БД", "en": "Database name"},
+                            "label": {"ru": "Название", "en": "Name"},
                         },
                         {"field": "row_count", "label": {"ru": "Строк", "en": "Rows"}},
                         {

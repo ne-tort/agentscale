@@ -3,6 +3,7 @@
 from fastapi import Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from prodavan.domain.errors import AppError
@@ -70,7 +71,17 @@ async def validation_exception_handler(
     )
 
 
+async def integrity_error_handler(_request: Request, exc: IntegrityError) -> JSONResponse:
+    return problem_response(
+        status=409,
+        code="CONFLICT",
+        title="Conflict",
+        detail="database integrity constraint violated",
+    )
+
+
 def register_exception_handlers(app) -> None:
     app.add_exception_handler(AppError, app_error_handler)
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
+    app.add_exception_handler(IntegrityError, integrity_error_handler)

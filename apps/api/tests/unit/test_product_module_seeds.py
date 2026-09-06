@@ -127,7 +127,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert all(c["field"] != "status" for c in catalogs_list["ui_json"]["columns"])
 
     name_col = next(c for c in meta["columns"] if c["name"] == "name" and c["table_slug"] == "catalogs")
-    assert name_col["label"]["ru"] == "Название БД"
+    assert name_col["label"]["ru"] == "Название"
     assert any(c["name"] == "paused" for c in meta["columns"])
     assert any(c["name"] == "column_map" for c in meta["columns"])
 
