@@ -193,6 +193,19 @@ Radio in row leading; tap → `POST .../actions/{action}/invoke?row_id=`.
 | `seamless` | Each preference `onSave` → PATCH row (default) |
 | `submit` | Explicit Save button (multi-field create only) |
 
+| Field extra | Behavior |
+|-------------|----------|
+| `read_only` | Preference disabled (display-only) |
+| `visible_when` | Show field only when condition matches current row body |
+
+`visible_when` shapes:
+
+```json
+{ "field": "status", "eq": "ready" }
+{ "field": "status", "in": ["ready", "error"] }
+{ "field": "error", "not_empty": true }
+```
+
 ### `hub` → navigation list
 
 ```json

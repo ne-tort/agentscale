@@ -115,11 +115,14 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     final colByName = {for (final c in columns) c['name'] as String: c};
 
     final fields = uiJson['fields'];
-    final fieldNames = fields is List
-        ? fields
-            .whereType<Map>()
+    final fieldEntries = fields is List
+        ? fields.whereType<Map>().map((f) => Map<String, dynamic>.from(f)).toList()
+        : <Map<String, dynamic>>[];
+    final fieldNames = fieldEntries.isNotEmpty
+        ? fieldEntries
             .map((f) => f['column'] as String? ?? '')
             .where((n) => n.isNotEmpty)
+            .where((n) => _isFieldVisible(_fieldConfig(fieldEntries, n)))
             .toList()
         : columns.map((c) => c['name'] as String).toList();
 
@@ -136,6 +139,37 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     );
   }
 
+  Map<String, dynamic>? _fieldConfig(List<Map<String, dynamic>> fields, String name) {
+    for (final f in fields) {
+      if (f['column'] == name) return f;
+    }
+    return null;
+  }
+
+  bool _isFieldVisible(Map<String, dynamic>? fieldCfg) {
+    if (fieldCfg == null) return true;
+    final when = fieldCfg['visible_when'];
+    if (when is! Map) return true;
+    final field = when['field']?.toString();
+    if (field == null || field.isEmpty) return true;
+    final actual = _values[field];
+    final actualText = actual?.toString();
+    if (when.containsKey('eq')) {
+      return actualText == when['eq']?.toString();
+    }
+    if (when['in'] is List) {
+      final allowed = (when['in'] as List).map((e) => e.toString()).toSet();
+      return actualText != null && allowed.contains(actualText);
+    }
+    if (when['not_empty'] == true) {
+      if (actual == null) return false;
+      if (actual is String) return actual.trim().isNotEmpty;
+      if (actual is Iterable) return actual.isNotEmpty;
+      return true;
+    }
+    return true;
+  }
+
   Widget _field(BuildContext context, Map<String, dynamic> column, String name, Map<String, dynamic> uiJson) {
     final l10n = AppLocalizations.of(context);
     final locale = Localizations.localeOf(context);
@@ -143,21 +177,18 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     final type = column['type'] as String? ?? 'text';
     final value = _values[name];
     final fields = uiJson['fields'];
-    String? widgetKind;
-    if (fields is List) {
-      for (final f in fields.whereType<Map>()) {
-        if (f['column'] == name) {
-          widgetKind = f['widget'] as String?;
-          break;
-        }
-      }
-    }
+    final fieldEntries = fields is List
+        ? fields.whereType<Map>().map((f) => Map<String, dynamic>.from(f)).toList()
+        : <Map<String, dynamic>>[];
+    final fieldCfg = _fieldConfig(fieldEntries, name);
+    final widgetKind = fieldCfg?['widget'] as String?;
+    final fieldReadOnly = widget.readOnly || fieldCfg?['read_only'] == true;
 
     if (widgetKind == 'project_multiselect') {
       return ProjectMultiselectField(
         label: label,
         value: value,
-        readOnly: widget.readOnly,
+        readOnly: fieldReadOnly,
         onChanged: (ids) => _persist(name, ids),
       );
     }
@@ -165,9 +196,9 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       return MarkdownEditorField(
         label: label,
         value: value?.toString() ?? '',
-        readOnly: widget.readOnly,
+        readOnly: fieldReadOnly,
         onChanged: (v) => _persist(name, v),
-        onUploadMarkdown: widget.readOnly
+        onUploadMarkdown: fieldReadOnly
             ? null
             : (text) async {
                 final picked = await pickMarkdownFileText();
@@ -181,15 +212,6 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       final scope = ModuleRuntimeScope.maybeOf(context);
       if (scope == null) {
         return ListTile(title: Text(label), subtitle: const Text('file (preview only)'));
-      }
-      Map<String, dynamic>? fieldCfg;
-      if (fields is List) {
-        for (final f in fields.whereType<Map>()) {
-          if (f['column'] == name) {
-            fieldCfg = Map<String, dynamic>.from(f);
-            break;
-          }
-        }
       }
       final accept = fieldCfg?['accept'] as String?;
       final warnWhenEmpty = fieldCfg?['empty_style']?.toString() == 'warning';
@@ -209,7 +231,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         value: value,
         cabinetId: scope.cabinetId,
         api: scope.api,
-        readOnly: widget.readOnly,
+        readOnly: fieldReadOnly,
         accept: accept,
         subtitle: subtitle,
         warnWhenEmpty: warnWhenEmpty,
@@ -227,7 +249,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         cabinetId: scope.cabinetId,
         moduleId: scope.moduleId,
         api: scope.api,
-        readOnly: widget.readOnly,
+        readOnly: fieldReadOnly,
         onChanged: (ref) => _persist(name, ref),
       );
     }
@@ -255,7 +277,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         choices: choices,
         keyFor: (v) => v,
         labelFor: (v) => labels[v] ?? v,
-        enabled: !widget.readOnly,
+        enabled: !fieldReadOnly,
         onSave: (v) async {
           _persist(name, v.isEmpty ? null : v);
         },
@@ -270,7 +292,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         choices: choices,
         keyFor: (v) => v,
         labelFor: (v) => _enumLabel(column, v),
-        enabled: !widget.readOnly,
+        enabled: !fieldReadOnly,
         onSave: (v) async {
           _persist(name, v);
         },
@@ -282,7 +304,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         return AppSwitchPreference(
           title: label,
           value: value == true,
-          enabled: !widget.readOnly,
+          enabled: !fieldReadOnly,
           onChanged: (v) async {
             _persist(name, v);
           },
@@ -296,7 +318,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
           choices: choices,
           keyFor: (v) => v,
           labelFor: (v) => _enumLabel(column, v),
-          enabled: !widget.readOnly,
+          enabled: !fieldReadOnly,
           onSave: (v) async {
             _persist(name, v);
           },
@@ -305,7 +327,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         return AppValuePreference<String>(
           title: label,
           value: value?.toString() ?? '',
-          enabled: !widget.readOnly,
+          enabled: !fieldReadOnly,
           onSave: (v) async {
             _persist(name, v);
           },

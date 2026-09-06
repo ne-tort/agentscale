@@ -104,6 +104,16 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     )
     assert file_field["subtitle_from"] == "row_count"
     assert file_field["empty_style"] == "warning"
+    assert not any(f["column"] == "status" for f in settings["ui_json"]["fields"])
+    error_field = next(f for f in settings["ui_json"]["fields"] if f["column"] == "error")
+    assert error_field["visible_when"] == {"field": "status", "eq": "error"}
+    meta_fields = [
+        f for f in settings["ui_json"]["fields"] if f["column"] in ("row_count", "columns_json", "project_ids")
+    ]
+    assert all(f["visible_when"]["eq"] == "ready" for f in meta_fields)
+
+    catalogs_list = next(v for v in meta["views"] if v["slug"] == "catalogs_list")
+    assert all(c["field"] != "status" for c in catalogs_list["ui_json"]["columns"])
 
     lines = next(v for v in meta["views"] if v["slug"] == "request_lines_list")
     assert lines["ui_json"]["scaffold"]["title"]["ru"] == "Позиции заказчика"
