@@ -20,10 +20,13 @@ def upsert_product_modules(conn: sa.Connection) -> int:
     for module_id, name, slugs in PRODUCT_MODULES:
         _upsert_one(conn, module_id=module_id, name=name, slugs=slugs)
         count += 1
-    # Refresh platform instance meta only when instance tables exist (post-0503).
+    # Refresh instance meta when instance tables exist (post-0503).
+    # Product module seeds are SoT — propagate to every owner instance (platform /
+    # company / cabinet / project). Leaving only platform refreshed leaves bound
+    # cabinets on stale UX after seed updates.
     if _has_table(conn, "module_instances"):
         for module_id, _, slugs in PRODUCT_MODULES:
-            _refresh_platform_instance_meta(conn, module_id=module_id, slugs=slugs)
+            _refresh_all_instance_meta(conn, module_id=module_id, slugs=slugs)
     return count
 
 
@@ -40,43 +43,47 @@ def _has_table(conn: sa.Connection, name: str) -> bool:
     return row is not None
 
 
+def _refresh_all_instance_meta(
+    conn: sa.Connection,
+    *,
+    module_id: str,
+    slugs: dict[str, Any],
+) -> None:
+    """Overwrite meta documents for every instance of a product module from seed."""
+    import uuid
+
+    rows = conn.execute(
+        sa.text("SELECT id FROM module_instances WHERE module_id = :mid"),
+        {"mid": module_id},
+    ).fetchall()
+    for row in rows:
+        instance_id = str(row[0])
+        for slug, body in slugs.items():
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO module_instance_meta_documents (id, instance_id, slug, body)
+                    VALUES (:id, :iid, :slug, CAST(:body AS jsonb))
+                    ON CONFLICT (instance_id, slug) DO UPDATE SET body = EXCLUDED.body
+                    """
+                ),
+                {
+                    "id": f"mimd_{uuid.uuid4().hex[:16]}",
+                    "iid": instance_id,
+                    "slug": slug,
+                    "body": json.dumps(body),
+                },
+            )
+
+
 def _refresh_platform_instance_meta(
     conn: sa.Connection,
     *,
     module_id: str,
     slugs: dict[str, Any],
 ) -> None:
-    """Refresh platform instance meta from template; leave child instances untouched."""
-    import uuid
-
-    row = conn.execute(
-        sa.text(
-            """
-            SELECT id FROM module_instances
-            WHERE owner_kind = 'platform' AND owner_id = 'platform' AND module_id = :mid
-            """
-        ),
-        {"mid": module_id},
-    ).fetchone()
-    if row is None:
-        return
-    instance_id = str(row[0])
-    for slug, body in slugs.items():
-        conn.execute(
-            sa.text(
-                """
-                INSERT INTO module_instance_meta_documents (id, instance_id, slug, body)
-                VALUES (:id, :iid, :slug, CAST(:body AS jsonb))
-                ON CONFLICT (instance_id, slug) DO UPDATE SET body = EXCLUDED.body
-                """
-            ),
-            {
-                "id": f"mimd_{uuid.uuid4().hex[:16]}",
-                "iid": instance_id,
-                "slug": slug,
-                "body": json.dumps(body),
-            },
-        )
+    """Backward-compatible alias — refresh all instances for the module."""
+    _refresh_all_instance_meta(conn, module_id=module_id, slugs=slugs)
 
 
 def _upsert_one(

@@ -253,7 +253,7 @@ def test_upsert_skips_platform_refresh_when_instances_table_missing() -> None:
         patch.object(upsert_mod, "PRODUCT_MODULES", [("mod_x", "X", {"tabs": []})]),
         patch.object(upsert_mod, "_upsert_one") as one,
         patch.object(upsert_mod, "_has_table", return_value=False) as has,
-        patch.object(upsert_mod, "_refresh_platform_instance_meta") as refresh,
+        patch.object(upsert_mod, "_refresh_all_instance_meta") as refresh,
     ):
         n = upsert_mod.upsert_product_modules(conn)
 
@@ -263,7 +263,7 @@ def test_upsert_skips_platform_refresh_when_instances_table_missing() -> None:
     refresh.assert_not_called()
 
 
-def test_upsert_refreshes_platform_meta_when_instances_exist() -> None:
+def test_upsert_refreshes_all_instance_meta_when_instances_exist() -> None:
     from prodavan.application.platform import product_module_upsert as upsert_mod
 
     conn = MagicMock()
@@ -271,8 +271,20 @@ def test_upsert_refreshes_platform_meta_when_instances_exist() -> None:
         patch.object(upsert_mod, "PRODUCT_MODULES", [("mod_x", "X", {"tabs": []})]),
         patch.object(upsert_mod, "_upsert_one"),
         patch.object(upsert_mod, "_has_table", return_value=True),
-        patch.object(upsert_mod, "_refresh_platform_instance_meta") as refresh,
+        patch.object(upsert_mod, "_refresh_all_instance_meta") as refresh,
     ):
         upsert_mod.upsert_product_modules(conn)
 
     refresh.assert_called_once_with(conn, module_id="mod_x", slugs={"tabs": []})
+
+
+def test_refresh_all_instance_meta_updates_every_owner() -> None:
+    from prodavan.application.platform import product_module_upsert as upsert_mod
+
+    conn = MagicMock()
+    conn.execute.return_value.fetchall.return_value = [("inst_a",), ("inst_b",)]
+    upsert_mod._refresh_all_instance_meta(
+        conn, module_id="mod_x", slugs={"views": [{"slug": "v1"}]}
+    )
+    # 1 SELECT instances + 2 instances * 1 slug UPSERT
+    assert conn.execute.call_count == 3
