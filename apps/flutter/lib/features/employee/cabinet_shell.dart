@@ -423,6 +423,7 @@ class _CabinetShellState extends State<CabinetShell> {
       activeSessionId: _activeSessionId,
       onNewChat: _newChatEnabled ? _newChat : null,
       onOpenChat: _openChat,
+      showLeadingDivider: true,
     );
   }
 

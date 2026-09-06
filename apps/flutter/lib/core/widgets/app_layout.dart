@@ -314,7 +314,6 @@ class AppLayout extends StatelessWidget {
                         selected: mainSelected == i,
                         onTap: () => onDestinationSelected(i),
                       ),
-                    const SizedBox(height: AppSpacing.md),
                     railExtra!,
                     const SizedBox(height: AppSpacing.sm),
                   ],

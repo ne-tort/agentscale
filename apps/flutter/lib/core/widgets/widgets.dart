@@ -5,6 +5,7 @@ export 'app_confirm_page.dart';
 export 'app_entity_collection.dart';
 export 'app_error_presenter.dart';
 export 'app_hairline_divider.dart';
+export 'app_taper_hairline.dart';
 export 'app_icon_button.dart';
 export 'app_inline_add_field.dart';
 export 'app_json_editor_field.dart';

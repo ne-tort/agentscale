@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/widgets/app_taper_hairline.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Peer nav block for chats — same geometry as [AppLayout] destinations.
@@ -15,6 +16,7 @@ class CabinetChatsRail extends StatelessWidget {
     required this.activeSessionId,
     required this.onNewChat,
     required this.onOpenChat,
+    this.showLeadingDivider = false,
   });
 
   final bool extended;
@@ -24,6 +26,10 @@ class CabinetChatsRail extends StatelessWidget {
   final String? activeSessionId;
   final VoidCallback? onNewChat;
   final void Function(Map<String, dynamic> chat) onOpenChat;
+
+  /// When true and the chats block is non-empty, draw a taper hairline above
+  /// (separates main rail destinations from chats).
+  final bool showLeadingDivider;
 
   static const double _railMinWidth = 80;
   static const double _iconLabelGap = 8;
@@ -47,10 +53,17 @@ class CabinetChatsRail extends StatelessWidget {
         _chatRow(context, chat, pinned: false, l10n: l10n),
     ];
 
+    if (items.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: items,
+      children: [
+        if (showLeadingDivider) const AppTaperHairline(),
+        ...items,
+      ],
     );
   }
 
