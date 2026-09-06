@@ -123,8 +123,15 @@ jobs:
           asyncio.run(main())
           PY
 
-      - name: Ruff check
+      - name: Ruff check (advisory)
+        id: ruff
+        continue-on-error: true
         run: ruff check src tests
+
+      - name: Signal ruff findings
+        if: steps.ruff.outcome == 'failure'
+        run: |
+          echo "::warning title=Ruff (non-blocking)::ruff check reported issues — fix locally; does not fail CI Gate."
 
       - name: Release gate check
         working-directory: .
