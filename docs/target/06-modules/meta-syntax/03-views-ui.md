@@ -73,6 +73,8 @@ View = **как показать** данные таблицы. Отделён �
 | `row_filter` | Static equality filters on body fields (combined with `context_bind`) |
 | `selection` | Single-select radio among rows (see below) |
 | `empty` | `EmptyPlaceholder` — laconic per-table (`{"ru":"Нет MCP","en":"No MCP"}`) |
+| `empty.title` | MetaLabel for EmptyPlaceholder |
+| `empty.icon` | Material icon name (same map as hub tiles / `metaIconFromName`) |
 | `scaffold.title` | Optional app bar title (MetaLabel); default — none |
 
 **List/table mode:** page provides `AppCollectionViewModeButton`; meta не задаёт mode.

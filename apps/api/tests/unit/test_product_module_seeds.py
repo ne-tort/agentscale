@@ -95,6 +95,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     catalogs = next(v for v in meta["views"] if v["slug"] == "catalogs_list")
     assert catalogs["ui_json"]["inline_add"]["field"] == "name"
     assert catalogs["ui_json"]["scaffold"]["title"]["ru"] == "Базы данных"
+    assert catalogs["ui_json"]["empty"]["icon"] == "storage"
     assert "primary_action" not in catalogs["ui_json"]
 
     settings = next(v for v in meta["views"] if v["slug"] == "catalogs_settings")

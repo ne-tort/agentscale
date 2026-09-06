@@ -125,4 +125,35 @@ void main() {
 
     expect(find.byType(AppIconButton), findsNothing);
   });
+
+  testWidgets('inline add creates a visible seed row', (tester) async {
+    tester.view.physicalSize = const Size(900, 700);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    final manifest = ModuleMetaManifest.fromJson(_collectionManifestJson());
+    final seeds = SeedDataController(manifest);
+    final view = manifest.viewBySlug('items_list')!;
+
+    await tester.pumpWidget(
+      _ruApp(
+        CollectionViewInterpreter(
+          manifest: manifest,
+          view: view,
+          seeds: seeds,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Добавить MCP package'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Alpha');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+
+    expect(seeds.itemsForTable('items'), hasLength(1));
+    expect(seeds.itemsForTable('items').first['body']['name'], 'Alpha');
+    expect(find.text('Alpha'), findsWidgets);
+  });
 }

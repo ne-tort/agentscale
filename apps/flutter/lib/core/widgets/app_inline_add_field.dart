@@ -115,18 +115,22 @@ class _AppInlineAddFieldState extends State<AppInlineAddField> {
     final onSurface = context.appColors.onSurface;
 
     if (_expanded) {
-      return AppPreferenceTile(
-        title: widget.title,
+      // Input replaces the title row (no title + subtitle stack).
+      return ListTile(
         enabled: !_saving,
-        subtitle: TextField(
+        contentPadding: const EdgeInsets.only(
+          left: AppSpacing.md,
+          right: AppInsets.trailingActionRight,
+        ),
+        title: TextField(
           controller: _controller,
           focusNode: _focusNode,
           autofocus: true,
           enabled: !_saving,
           textInputAction: TextInputAction.done,
-          style: theme.textTheme.bodyMedium,
+          style: theme.textTheme.titleMedium,
           decoration: kBorderlessInputDecoration.copyWith(
-            hintText: widget.hintText,
+            hintText: widget.hintText ?? widget.title,
             errorText: _showError ? widget.invalidMessage : null,
           ),
           onSubmitted: (_) => _save(),

@@ -41,8 +41,11 @@ _BLOCK_EMPTY_TITLES: dict[str, dict[str, str]] = {
 }
 
 
-def _empty(title_ru: str, title_en: str) -> dict[str, Any]:
-    return {"title": {"ru": title_ru, "en": title_en}}
+def _empty(title_ru: str, title_en: str, *, icon: str | None = None) -> dict[str, Any]:
+    out: dict[str, Any] = {"title": {"ru": title_ru, "en": title_en}}
+    if icon:
+        out["icon"] = icon
+    return out
 
 
 def _project_ids_column(table_slug: str) -> dict[str, Any]:
@@ -850,7 +853,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     ],
                     "row_tap": {"kind": "open_view", "view": "catalogs_settings"},
                     "inline_add": {"field": "name", "title": "Добавить базу"},
-                    "empty": _empty("Нет баз", "No databases"),
+                    "empty": _empty("Нет баз", "No databases", icon="storage"),
                 },
             },
             {
@@ -900,7 +903,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     ],
                     "row_tap": {"kind": "open_view", "view": "offers_for_line"},
                     "inline_add": {"field": "title", "title": "Добавить позицию"},
-                    "empty": _empty("Нет позиций", "No lines"),
+                    "empty": _empty("Нет позиций", "No lines", icon="list_alt"),
                 },
             },
             {
@@ -947,7 +950,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     },
                     "row_tap": {"kind": "open_form", "view": "found_offers_form"},
                     "inline_add": {"field": "title", "title": "Добавить товар"},
-                    "empty": _empty("Нет кандидатов", "No offers"),
+                    "empty": _empty("Нет кандидатов", "No offers", icon="inventory_2"),
                 },
             },
             {
@@ -972,7 +975,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     ],
                     "row_tap": {"kind": "open_form", "view": "found_offers_form"},
                     "inline_add": {"field": "title", "title": "Добавить товар"},
-                    "empty": _empty("Нет товаров", "No offers"),
+                    "empty": _empty("Нет товаров", "No offers", icon="inventory_2"),
                 },
             },
             {

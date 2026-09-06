@@ -6,10 +6,12 @@ import 'package:prodavan/core/widgets/app_icon_button.dart';
 import 'package:prodavan/core/widgets/app_inline_add_field.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
+import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/preview/preview_stub.dart';
 import 'package:prodavan/features/meta/runtime/cabinet_data_controller.dart';
+import 'package:prodavan/features/meta/runtime/runtime_data_adapter.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 class CollectionViewInterpreter extends StatelessWidget {
@@ -61,6 +63,11 @@ class CollectionViewInterpreter extends StatelessWidget {
         final emptyTitle = emptyUi is Map && emptyUi['title'] != null
             ? resolveMetaLabel(emptyUi['title'], l10n, locale: locale)
             : l10n.adminModuleSeedEmpty;
+        final emptyIconName = emptyUi is Map ? emptyUi['icon'] as String? : null;
+        final emptyIcon = metaIconFromName(
+          emptyIconName,
+          fallback: Icons.inbox_outlined,
+        );
         final createLabel = hasInline ? null : _createLabel(uiJson, l10n, locale);
 
         final collection = AppEntityCollection(
@@ -70,6 +77,7 @@ class CollectionViewInterpreter extends StatelessWidget {
           toolbar: toolbar,
           empty: EmptyPlaceholder(
             title: emptyTitle.isEmpty ? l10n.adminModuleSeedEmpty : emptyTitle,
+            icon: emptyIcon,
             fillViewport: false,
             action: !readOnly && createLabel != null
                 ? TextButton(
@@ -336,7 +344,9 @@ class _CollectionInlineAddHost extends StatelessWidget {
 
   Future<void> _save(String raw) async {
     final field = inlineConfig['field'] as String? ?? 'name';
-    final body = seeds.defaultBodyForTable(tableSlug);
+    final body = Map<String, dynamic>.from(
+      Map<dynamic, dynamic>.from(seeds.defaultBodyForTable(tableSlug) as Map),
+    );
     body[field] = raw.trim();
     final filter = uiJson['row_filter'];
     if (filter is Map) {
@@ -353,12 +363,20 @@ class _CollectionInlineAddHost extends StatelessWidget {
       // Legacy prompts binding.
       body['profile_id'] = contextRowId;
     }
-    if (seeds.runtimeType.toString().contains('RuntimeDataAdapter')) {
-      await seeds.createRowAsync(tableSlug, initial: body);
-    } else {
-      final rowId = seeds.createRow(tableSlug);
-      seeds.upsertBody(rowId, body);
+    // Prefer typed async create with initial body. Never use runtimeType strings
+    // (dart2js minifies class names) + sync createRow fake pending ids.
+    final adapter = seeds;
+    if (adapter is RuntimeDataAdapter) {
+      await adapter.createRowAsync(tableSlug, initial: body);
+      return;
     }
+    if (adapter is CabinetDataController) {
+      await adapter.createRow(tableSlug, initial: body);
+      return;
+    }
+    final rowId = adapter.createRow(tableSlug) as String;
+    final upsert = adapter.upsertBody(rowId, body);
+    if (upsert is Future) await upsert;
   }
 
   @override
