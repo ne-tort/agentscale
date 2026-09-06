@@ -91,3 +91,23 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     tool_names = {t["name"] for t in meta["mcp_tools"]}
     assert "equipment_catalog_query" in tool_names
     assert "equipment_offers_upsert" in tool_names
+
+    catalogs = next(v for v in meta["views"] if v["slug"] == "catalogs_list")
+    assert catalogs["ui_json"]["inline_add"]["field"] == "name"
+    assert catalogs["ui_json"]["scaffold"]["title"]["ru"] == "Базы данных"
+    assert "primary_action" not in catalogs["ui_json"]
+
+    settings = next(v for v in meta["views"] if v["slug"] == "catalogs_settings")
+    file_field = next(
+        f for f in settings["ui_json"]["fields"] if f["column"] == "source_file"
+    )
+    assert file_field["subtitle_from"] == "row_count"
+    assert file_field["empty_style"] == "warning"
+
+    lines = next(v for v in meta["views"] if v["slug"] == "request_lines_list")
+    assert lines["ui_json"]["scaffold"]["title"]["ru"] == "Позиции заказчика"
+
+    offers = next(v for v in meta["views"] if v["slug"] == "found_offers_list")
+    assert offers["ui_json"]["inline_add"]["field"] == "title"
+    line_col = next(c for c in meta["columns"] if c["name"] == "line_id")
+    assert line_col["required"] is False

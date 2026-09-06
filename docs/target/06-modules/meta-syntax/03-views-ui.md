@@ -262,6 +262,13 @@ EmptyPlaceholder(title: "Метаданные", subtitle: "<parse error code>")
 
 Collection extras: `inline_add`, `row_filter`, `context_bind.profile_id=contextRowId`.
 
-**Page titles:** shell hosts do not inject tab titles into `AppScaffold`. Set `ui_json.scaffold.title` (MetaLabel) only when an app bar title is required (e.g. nested form).
+**Page titles:** shell hosts do not inject tab titles into `AppScaffold`. Nested pages resolve title via `resolveViewScaffoldTitle`:
+
+1. `ui_json.scaffold.title` (MetaLabel) — preferred for collections/hubs
+2. `ui_json.title` — form, detail, and any view that sets it
+
+Fallback in host: `view.label` → view slug. Management modules often open the collection as the tab root (tab title), so nested hub tiles **must** set `scaffold.title` (or `title`) or the AppBar shows the slug.
+
+`file_upload` field extras: `accept`, `subtitle_from` (body column for preference subtitle, e.g. `row_count`), `empty_style: "warning"` (title warning color + hidden subtitle until file present).
 
 Дальше: [tabs-navigation](04-tabs-navigation.md)

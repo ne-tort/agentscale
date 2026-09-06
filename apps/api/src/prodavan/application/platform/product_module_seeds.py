@@ -738,7 +738,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "name": "line_id",
                 "label": {"ru": "Позиция", "en": "Line"},
                 "type": "ref",
-                "required": True,
+                "required": False,
                 "ref": {"table_slug": "request_lines"},
             },
             {
@@ -782,7 +782,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "name": "match_kind",
                 "label": {"ru": "Совпадение", "en": "Match"},
                 "type": "enum",
-                "required": True,
+                "required": False,
                 "default": "analog",
                 "enum": {
                     "values": ["exact", "analog"],
@@ -840,6 +840,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "ui_json": {
                     "version": 1,
                     "kind": "collection",
+                    "scaffold": {"title": {"ru": "Базы данных", "en": "Databases"}},
                     "title_field": "name",
                     "subtitle_fields": ["status", "row_count"],
                     "columns": [
@@ -848,33 +849,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {"field": "row_count", "label": {"ru": "Строк", "en": "Rows"}},
                     ],
                     "row_tap": {"kind": "open_view", "view": "catalogs_settings"},
-                    "primary_action": {
-                        "kind": "create_row",
-                        "label": {"ru": "Добавить", "en": "Add"},
-                        "view": "catalogs_form",
-                    },
-                    "toolbar": [{"kind": "refresh"}],
+                    "inline_add": {"field": "name", "title": "Добавить базу"},
                     "empty": _empty("Нет баз", "No databases"),
-                },
-            },
-            {
-                "slug": "catalogs_form",
-                "table_slug": "catalogs",
-                "kind": "form",
-                "ui_json": {
-                    "version": 1,
-                    "kind": "form",
-                    "mode": "edit",
-                    "title": {"ru": "База данных", "en": "Database"},
-                    "fields": [
-                        {"column": "name", "widget": "value"},
-                        {
-                            "column": "source_file",
-                            "widget": "file_upload",
-                            "accept": ".csv,.xlsx,.xls",
-                        },
-                        {"column": "project_ids", "widget": "project_multiselect"},
-                    ],
                 },
             },
             {
@@ -892,6 +868,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "column": "source_file",
                             "widget": "file_upload",
                             "accept": ".csv,.xlsx,.xls",
+                            "subtitle_from": "row_count",
+                            "empty_style": "warning",
                         },
                         {"column": "status", "widget": "choice"},
                         {"column": "row_count", "widget": "value"},
@@ -908,6 +886,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "ui_json": {
                     "version": 1,
                     "kind": "collection",
+                    "scaffold": {
+                        "title": {"ru": "Позиции заказчика", "en": "Request lines"}
+                    },
                     "title_field": "title",
                     "subtitle_fields": ["part_number", "found_count"],
                     "columns": [
@@ -946,6 +927,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "ui_json": {
                     "version": 1,
                     "kind": "collection",
+                    "scaffold": {
+                        "title": {"ru": "Офферы позиции", "en": "Line offers"}
+                    },
                     "title_field": "title",
                     "subtitle_fields": ["part_number", "match_kind", "score"],
                     "columns": [
@@ -962,6 +946,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "action": "select_offer_primary",
                     },
                     "row_tap": {"kind": "open_form", "view": "found_offers_form"},
+                    "inline_add": {"field": "title", "title": "Добавить товар"},
                     "empty": _empty("Нет кандидатов", "No offers"),
                 },
             },
@@ -972,6 +957,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "ui_json": {
                     "version": 1,
                     "kind": "collection",
+                    "scaffold": {
+                        "title": {"ru": "Найденные товары", "en": "Found offers"}
+                    },
                     "title_field": "title",
                     "subtitle_fields": ["source_title", "match_kind"],
                     "columns": [
@@ -983,6 +971,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {"field": "source_title", "label": {"ru": "Запрос", "en": "Request"}},
                     ],
                     "row_tap": {"kind": "open_form", "view": "found_offers_form"},
+                    "inline_add": {"field": "title", "title": "Добавить товар"},
                     "empty": _empty("Нет товаров", "No offers"),
                 },
             },
@@ -997,9 +986,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "title": {"ru": "Найденный товар", "en": "Offer"},
                     "fields": [
                         {"column": "title", "widget": "value"},
+                        {"column": "line_id", "widget": "ref"},
                         {"column": "part_number", "widget": "value"},
                         {"column": "price", "widget": "value"},
-                        {"column": "line_id", "widget": "ref"},
                         {"column": "catalog_id", "widget": "ref"},
                         {"column": "score", "widget": "value"},
                         {"column": "match_kind", "widget": "choice"},

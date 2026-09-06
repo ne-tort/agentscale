@@ -68,7 +68,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     }
   }
 
-  void _persist(String name, dynamic value) {
+  Future<void> _persist(String name, dynamic value) async {
     setState(() => _values[name] = value);
     if (widget.readOnly) return;
     final tableSlug = widget.view['table_slug'] as String? ?? '';
@@ -87,9 +87,18 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       _rowId = widget.seeds.createRow(tableSlug);
       final body = widget.seeds.bodyFor(_rowId!);
       body.addAll(_values);
-      widget.seeds.upsertBody(_rowId!, body);
+      final upsert = widget.seeds.upsertBody(_rowId!, body);
+      if (upsert is Future) await upsert;
     } else {
-      widget.seeds.patchField(_rowId!, name, value);
+      final patch = widget.seeds.patchField(_rowId!, name, value);
+      if (patch is Future) await patch;
+    }
+    if (!mounted || _rowId == null) return;
+    final item = widget.seeds.itemById(_rowId!);
+    if (item != null) {
+      setState(() {
+        _values = Map<String, dynamic>.from(widget.seeds.bodyFor(_rowId!));
+      });
     }
   }
 
@@ -173,12 +182,25 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       if (scope == null) {
         return ListTile(title: Text(label), subtitle: const Text('file (preview only)'));
       }
-      String? accept;
+      Map<String, dynamic>? fieldCfg;
       if (fields is List) {
         for (final f in fields.whereType<Map>()) {
-          if (f['column'] == name && f['accept'] is String) {
-            accept = f['accept'] as String;
+          if (f['column'] == name) {
+            fieldCfg = Map<String, dynamic>.from(f);
             break;
+          }
+        }
+      }
+      final accept = fieldCfg?['accept'] as String?;
+      final warnWhenEmpty = fieldCfg?['empty_style']?.toString() == 'warning';
+      String? subtitle;
+      final subtitleFrom = fieldCfg?['subtitle_from'];
+      if (subtitleFrom is String && subtitleFrom.isNotEmpty) {
+        final raw = _values[subtitleFrom];
+        if (raw != null) {
+          final text = raw.toString().trim();
+          if (text.isNotEmpty && text != '0') {
+            subtitle = subtitleFrom == 'row_count' ? '$text строк' : text;
           }
         }
       }
@@ -189,6 +211,8 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         api: scope.api,
         readOnly: widget.readOnly,
         accept: accept,
+        subtitle: subtitle,
+        warnWhenEmpty: warnWhenEmpty,
         onChanged: (ref) => _persist(name, ref),
       );
     }

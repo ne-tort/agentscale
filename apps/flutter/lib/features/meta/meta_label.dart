@@ -75,9 +75,16 @@ String? resolveViewScaffoldTitle(
     final title = resolveMetaLabel(scaffold['title'], l10n, locale: locale);
     return title.isEmpty ? null : title;
   }
-  final formTitle = uiJson['title'];
-  if (formTitle != null && uiJson['kind'] == 'form') {
-    final title = resolveMetaLabel(formTitle, l10n, locale: locale);
+  // form/detail use ui_json.title; collections/hubs use scaffold.title (above)
+  // or optional title when authors set it explicitly.
+  final kind = uiJson['kind'];
+  final pageTitle = uiJson['title'];
+  if (pageTitle != null &&
+      (kind == 'form' ||
+          kind == 'detail' ||
+          kind == 'collection' ||
+          kind == 'hub')) {
+    final title = resolveMetaLabel(pageTitle, l10n, locale: locale);
     return title.isEmpty ? null : title;
   }
   return null;

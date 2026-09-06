@@ -4,9 +4,14 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
-import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/preferences/app_preference_tile.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
+import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 
 /// Upload file via cabinet content API; stores FileRef map in form state.
+///
+/// Preference-tile chrome (same row pattern as [AppNavPreference]): tap to pick.
+/// When [warnWhenEmpty] and no file — title uses warning color and [subtitle] is omitted.
 class FileUploadField extends StatelessWidget {
   const FileUploadField({
     super.key,
@@ -17,6 +22,8 @@ class FileUploadField extends StatelessWidget {
     required this.onChanged,
     this.readOnly = false,
     this.accept,
+    this.subtitle,
+    this.warnWhenEmpty = false,
   });
 
   final String label;
@@ -26,9 +33,14 @@ class FileUploadField extends StatelessWidget {
   final ValueChanged<Map<String, dynamic>?> onChanged;
   final bool readOnly;
   final String? accept;
+  /// Shown only when a file is present and subtitle is non-empty.
+  final String? subtitle;
+  final bool warnWhenEmpty;
 
   Map<String, dynamic>? get _ref =>
       value is Map ? Map<String, dynamic>.from(value as Map) : null;
+
+  bool get _hasFile => _ref != null;
 
   Future<void> _pick(BuildContext context) async {
     final result = await FilePicker.platform.pickFiles(
@@ -84,39 +96,36 @@ class FileUploadField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ref = _ref;
-    final filename = ref?['filename'] as String? ?? '—';
-    return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.md,
-        vertical: AppSpacing.sm,
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    final empty = !_hasFile;
+    final warn = warnWhenEmpty && empty;
+    final tokens = context.appColors;
+    final accent = warn ? tokens.warning : null;
+    final sub = (!empty && subtitle != null && subtitle!.trim().isNotEmpty)
+        ? Text(subtitle!.trim())
+        : null;
+
+    return AppPreferenceTile(
+      title: label,
+      icon: Icons.upload_file_outlined,
+      accentColor: accent,
+      subtitle: sub,
+      enabled: !readOnly,
+      trailing: readOnly
+          ? null
+          : Row(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                Text(label, style: Theme.of(context).textTheme.titleSmall),
-                const SizedBox(height: AppSpacing.xs),
-                Text(filename, style: Theme.of(context).textTheme.bodyMedium),
+                if (_hasFile)
+                  IconButton(
+                    tooltip: 'Clear',
+                    icon: const Icon(Icons.close),
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => onChanged(null),
+                  ),
+                const AppTrailingChevron(),
               ],
             ),
-          ),
-          if (!readOnly)
-            IconButton(
-              tooltip: 'Upload',
-              icon: const Icon(Icons.upload_file_outlined),
-              onPressed: () => _pick(context),
-            ),
-          if (!readOnly && ref != null)
-            IconButton(
-              tooltip: 'Clear',
-              icon: const Icon(Icons.close),
-              onPressed: () => onChanged(null),
-            ),
-        ],
-      ),
+      onTap: readOnly ? null : () => _pick(context),
     );
   }
 }

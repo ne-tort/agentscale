@@ -19,8 +19,9 @@ Product seed: `mod_equipment` — see `product_module_seeds.py`.
 
 ## Meta primitives
 
-- Hub tiles → collections
-- Catalog form + settings (detail) for metadata
+- Hub tiles → collections with `scaffold.title` (AppBar titles, not view slugs)
+- Catalogs: collection + `inline_add`; settings detail with `file_upload` (`empty_style: warning`, `subtitle_from: row_count`)
+- Found offers: `inline_add` on title; `line_id` optional `ref` selector in form
 - Line row_tap → offers collection with `context_bind` + `selection` → `data.select_row`
 - Action `content.index_tabular` after catalog file write
 - Materialize `copy_blob` of `artifact_ref` when `status=ready`

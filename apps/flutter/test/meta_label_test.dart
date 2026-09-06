@@ -84,6 +84,20 @@ void main() {
       expect(title, 'Заголовок');
     });
 
+    test('returns detail ui_json.title', () {
+      final title = resolveViewScaffoldTitle(
+        {
+          'ui_json': {
+            'kind': 'detail',
+            'title': {'ru': 'Настройки БД'},
+          },
+        },
+        _ruL10n(),
+        locale: const Locale('ru'),
+      );
+      expect(title, 'Настройки БД');
+    });
+
     test('returns null for collection without scaffold title', () {
       expect(
         resolveViewScaffoldTitle(

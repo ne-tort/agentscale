@@ -182,14 +182,24 @@ class CabinetModuleService:
             {"module_id": module_id, "instance_id": inst.id, **row},
             remat,
         )
+        row_id = str(row.get("row_id") or "")
         await self._maybe_run_row_actions(
             cabinet_id=cabinet_id,
             module_id=module_id,
             table_slug=table_slug,
-            row_id=str(row.get("row_id") or ""),
+            row_id=row_id,
             principal=principal,
             employee=employee,
         )
+        if row_id:
+            refreshed = await self._instances.get_data_row(
+                instance_id=inst.id, table_slug=table_slug, row_id=row_id
+            )
+            if refreshed is not None:
+                out = _attach_rematerialize(
+                    {"module_id": module_id, "instance_id": inst.id, **refreshed},
+                    remat,
+                )
         return out
 
     async def update_data_row(
@@ -252,6 +262,14 @@ class CabinetModuleService:
                 principal=principal,
                 employee=employee,
             )
+            refreshed = await self._instances.get_data_row(
+                instance_id=inst.id, table_slug=table_slug, row_id=row_id
+            )
+            if refreshed is not None:
+                out = _attach_rematerialize(
+                    {"module_id": module_id, "instance_id": inst.id, **refreshed},
+                    remat,
+                )
         return out
 
     async def delete_data_row(

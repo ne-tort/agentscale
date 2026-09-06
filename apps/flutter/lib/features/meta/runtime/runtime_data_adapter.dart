@@ -28,13 +28,11 @@ class RuntimeDataAdapter extends ChangeNotifier {
   Future<String> createRowAsync(String tableSlug, {Map<String, dynamic>? initial}) =>
       _inner.createRow(tableSlug, initial: initial);
 
-  void upsertBody(String rowId, Map<String, dynamic> body) {
-    _inner.upsertBody(rowId, body);
-  }
+  Future<void> upsertBody(String rowId, Map<String, dynamic> body) =>
+      _inner.upsertBody(rowId, body);
 
-  void patchField(String rowId, String field, dynamic value) {
-    _inner.patchField(rowId, field, value);
-  }
+  Future<void> patchField(String rowId, String field, dynamic value) =>
+      _inner.patchField(rowId, field, value);
 
   void deleteRow(String rowId) {
     _inner.deleteRow(rowId);
