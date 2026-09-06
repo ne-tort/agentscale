@@ -11,6 +11,7 @@ import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/preview/preview_stub.dart';
 import 'package:prodavan/features/meta/runtime/cabinet_data_controller.dart';
+import 'package:prodavan/features/meta/runtime/owner_module_data_controller.dart';
 import 'package:prodavan/features/meta/runtime/runtime_data_adapter.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -386,6 +387,10 @@ class _CollectionInlineAddHost extends StatelessWidget {
       return;
     }
     if (adapter is CabinetDataController) {
+      await adapter.createRow(tableSlug, initial: body);
+      return;
+    }
+    if (adapter is OwnerModuleDataController) {
       await adapter.createRow(tableSlug, initial: body);
       return;
     }

@@ -147,7 +147,8 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
             _values[profileField] = widget.rowId;
           }
         }
-        _rowId = widget.seeds.createRow(tableSlug);
+        final created = widget.seeds.createRow(tableSlug);
+        _rowId = created is Future ? await created as String : created as String;
         final body = widget.seeds.bodyFor(_rowId!);
         body.addAll(_values);
         final upsert = widget.seeds.upsertBody(_rowId!, body);

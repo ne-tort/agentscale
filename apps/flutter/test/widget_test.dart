@@ -160,7 +160,8 @@ void main() {
     expect(find.byIcon(Icons.download_outlined), findsOneWidget);
     expect(opened, isFalse);
 
-    await tester.tap(find.text('readme.txt'));
+    // Long-press toggles edit off (tap on the selected row must not steal actions).
+    await tester.longPress(find.text('readme.txt'));
     await tester.pumpAndSettle();
 
     expect(find.byIcon(Icons.download_outlined), findsNothing);
@@ -198,6 +199,46 @@ void main() {
     await tester.longPress(find.text('MCP pkg'));
     await tester.pumpAndSettle();
     expect(find.byIcon(Icons.delete_outline), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.delete_outline));
+    await tester.pumpAndSettle();
+    expect(deleted, isTrue);
+  });
+
+  testWidgets('entity collection delete works while row stays selected', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(900, 400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    var deleted = false;
+    var opened = false;
+    await tester.pumpWidget(
+      themed(
+        AppScaffold(
+          body: AppEntityCollection(
+            mode: AppEntityCollectionMode.table,
+            rows: const [
+              AppEntityRow(id: '1', title: 'Equipment DB', cells: {'x': '1'}),
+            ],
+            primaryColumnLabel: 'Name',
+            columns: const [AppEntityColumn(id: 'x', label: 'X', width: 48)],
+            onOpen: (_) => opened = true,
+            onDelete: (_) async {
+              deleted = true;
+            },
+          ),
+        ),
+      ),
+    );
+
+    await tester.longPress(find.text('Equipment DB'));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.delete_outline), findsOneWidget);
+
+    // Tap title while editing must not clear actions / open row.
+    await tester.tap(find.text('Equipment DB'));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.delete_outline), findsOneWidget);
+    expect(opened, isFalse);
+
     await tester.tap(find.byIcon(Icons.delete_outline));
     await tester.pumpAndSettle();
     expect(deleted, isTrue);

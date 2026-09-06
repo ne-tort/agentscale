@@ -513,6 +513,66 @@ class CompanyApi {
     _throwIfError(res);
   }
 
+  Future<List<Map<String, dynamic>>> listModuleDataRows({
+    required String companyId,
+    required String moduleId,
+    required String tableSlug,
+  }) async {
+    final res = await AuthHttp.get(
+      _uri('/companies/$companyId/modules/$moduleId/data/$tableSlug'),
+    );
+    _throwIfError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = body['items'];
+    if (items is List) {
+      return items.cast<Map<String, dynamic>>();
+    }
+    return const [];
+  }
+
+  Future<Map<String, dynamic>> createModuleDataRow({
+    required String companyId,
+    required String moduleId,
+    required String tableSlug,
+    required Map<String, dynamic> body,
+  }) async {
+    final res = await AuthHttp.post(
+      _uri('/companies/$companyId/modules/$moduleId/data/$tableSlug'),
+      body: jsonEncode({'body': body}),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> updateModuleDataRow({
+    required String companyId,
+    required String moduleId,
+    required String tableSlug,
+    required String rowId,
+    required Map<String, dynamic> body,
+  }) async {
+    final res = await AuthHttp.patch(
+      _uri('/companies/$companyId/modules/$moduleId/data/$tableSlug/$rowId'),
+      body: jsonEncode({'body': body}),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> deleteModuleDataRow({
+    required String companyId,
+    required String moduleId,
+    required String tableSlug,
+    required String rowId,
+  }) async {
+    final res = await AuthHttp.delete(
+      _uri('/companies/$companyId/modules/$moduleId/data/$tableSlug/$rowId'),
+    );
+    _throwIfError(res);
+    if (res.body.isEmpty) return <String, dynamic>{'deleted': true};
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> getAiKeyScopeBindings({
     required String companyId,
     required String keyId,

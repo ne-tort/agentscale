@@ -1,4 +1,4 @@
-"""Admin modules — CRUD + meta + bindings."""
+"""Admin modules — CRUD + meta + bindings + platform-instance data."""
 
 from __future__ import annotations
 
@@ -7,9 +7,14 @@ from typing import Any
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from prodavan.api.deps import PlatformAdminDep, SessionDep
+from prodavan.api.deps import PlatformAdminDep, PrincipalDep, SessionDep
+from prodavan.application.modules.module_instance_service import (
+    OWNER_PLATFORM,
+    PLATFORM_OWNER_ID,
+)
 from prodavan.application.modules.module_meta_service import ModuleMetaDocumentService
 from prodavan.application.modules.module_service import ModuleService
+from prodavan.application.modules.owner_module_data_service import OwnerModuleDataService
 
 router = APIRouter(prefix="/admin/modules", tags=["admin-modules"])
 
@@ -38,6 +43,12 @@ class CopyAdminModuleBody(BaseModel):
     model_config = {"extra": "forbid"}
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class DataRowBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    body: dict[str, Any]
 
 
 @router.get("")
@@ -150,3 +161,74 @@ async def revoke_project(
     session: SessionDep,
 ) -> dict:
     return await ModuleService(session).revoke_project(module_id=module_id, project_id=project_id)
+
+
+@router.get("/{module_id}/data/{table_slug}")
+async def list_platform_module_data(
+    module_id: str,
+    table_slug: str,
+    _: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    items = await OwnerModuleDataService(session).list_data_rows(
+        owner_kind=OWNER_PLATFORM,
+        owner_id=PLATFORM_OWNER_ID,
+        module_id=module_id,
+        table_slug=table_slug,
+    )
+    return {"items": items}
+
+
+@router.post("/{module_id}/data/{table_slug}")
+async def create_platform_module_data(
+    module_id: str,
+    table_slug: str,
+    body: DataRowBody,
+    principal: PrincipalDep,
+    _: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    return await OwnerModuleDataService(session).create_data_row(
+        owner_kind=OWNER_PLATFORM,
+        owner_id=PLATFORM_OWNER_ID,
+        module_id=module_id,
+        table_slug=table_slug,
+        body=body.body,
+        created_by=principal.sub,
+    )
+
+
+@router.patch("/{module_id}/data/{table_slug}/{row_id}")
+async def update_platform_module_data(
+    module_id: str,
+    table_slug: str,
+    row_id: str,
+    body: DataRowBody,
+    _: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    return await OwnerModuleDataService(session).update_data_row(
+        owner_kind=OWNER_PLATFORM,
+        owner_id=PLATFORM_OWNER_ID,
+        module_id=module_id,
+        table_slug=table_slug,
+        row_id=row_id,
+        body=body.body,
+    )
+
+
+@router.delete("/{module_id}/data/{table_slug}/{row_id}")
+async def delete_platform_module_data(
+    module_id: str,
+    table_slug: str,
+    row_id: str,
+    _: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    return await OwnerModuleDataService(session).delete_data_row(
+        owner_kind=OWNER_PLATFORM,
+        owner_id=PLATFORM_OWNER_ID,
+        module_id=module_id,
+        table_slug=table_slug,
+        row_id=row_id,
+    )

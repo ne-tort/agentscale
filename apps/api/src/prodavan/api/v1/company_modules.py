@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
 from prodavan.application.identity.service import EntitlementService
 from prodavan.application.modules.company_module_service import CompanyModuleService
+from prodavan.application.modules.module_instance_service import OWNER_COMPANY
+from prodavan.application.modules.owner_module_data_service import OwnerModuleDataService
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
 router = APIRouter(prefix="/companies/{company_id}/modules", tags=["company-modules"])
@@ -38,6 +40,12 @@ class CopyModuleBody(BaseModel):
     model_config = {"extra": "forbid"}
 
     name: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class DataRowBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    body: dict[str, Any]
 
 
 @router.get("")
@@ -164,4 +172,91 @@ async def put_company_module_meta(
     await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
     return await CompanyModuleService(session).put_meta_document(
         company_id=company_id, module_id=module_id, slug=slug, body=body.body
+    )
+
+
+@router.get("/{module_id}/data/{table_slug}")
+async def list_company_module_data(
+    company_id: str,
+    module_id: str,
+    table_slug: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    await CompanyModuleService(session).get_for_company(company_id=company_id, module_id=module_id)
+    items = await OwnerModuleDataService(session).list_data_rows(
+        owner_kind=OWNER_COMPANY,
+        owner_id=company_id,
+        module_id=module_id,
+        table_slug=table_slug,
+    )
+    return {"items": items}
+
+
+@router.post("/{module_id}/data/{table_slug}")
+async def create_company_module_data(
+    company_id: str,
+    module_id: str,
+    table_slug: str,
+    body: DataRowBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    await CompanyModuleService(session).get_for_company(company_id=company_id, module_id=module_id)
+    created_by = employee.id if employee is not None else principal.sub
+    return await OwnerModuleDataService(session).create_data_row(
+        owner_kind=OWNER_COMPANY,
+        owner_id=company_id,
+        module_id=module_id,
+        table_slug=table_slug,
+        body=body.body,
+        created_by=created_by,
+    )
+
+
+@router.patch("/{module_id}/data/{table_slug}/{row_id}")
+async def update_company_module_data(
+    company_id: str,
+    module_id: str,
+    table_slug: str,
+    row_id: str,
+    body: DataRowBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    await CompanyModuleService(session).get_for_company(company_id=company_id, module_id=module_id)
+    return await OwnerModuleDataService(session).update_data_row(
+        owner_kind=OWNER_COMPANY,
+        owner_id=company_id,
+        module_id=module_id,
+        table_slug=table_slug,
+        row_id=row_id,
+        body=body.body,
+    )
+
+
+@router.delete("/{module_id}/data/{table_slug}/{row_id}")
+async def delete_company_module_data(
+    company_id: str,
+    module_id: str,
+    table_slug: str,
+    row_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    await CompanyModuleService(session).get_for_company(company_id=company_id, module_id=module_id)
+    return await OwnerModuleDataService(session).delete_data_row(
+        owner_kind=OWNER_COMPANY,
+        owner_id=company_id,
+        module_id=module_id,
+        table_slug=table_slug,
+        row_id=row_id,
     )

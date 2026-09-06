@@ -1,33 +1,41 @@
 import 'package:flutter/foundation.dart';
 
-import 'package:prodavan/core/api/prodavan_api.dart';
+import 'package:prodavan/core/api/admin_api.dart';
+import 'package:prodavan/core/api/company_api.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 
-typedef ProjectsRematerializeCallback = void Function(int scheduled, {required bool inline});
-typedef WorkspaceOutdatedCallback = void Function();
-
-/// Live cabinet / project-instance module data — mirrors SeedDataController API for interpreters.
-class CabinetDataController extends ChangeNotifier {
-  CabinetDataController({
-    required this.api,
-    required this.cabinetId,
+/// Live platform / company module-instance data for shell nav modules.
+///
+/// Mirrors [CabinetDataController] so meta interpreters stay owner-agnostic.
+/// Deletes only the caller's instance copy (no cascade to delegated children).
+class OwnerModuleDataController extends ChangeNotifier {
+  OwnerModuleDataController.platform({
+    required AdminApi api,
     required this.moduleId,
     required ModuleMetaManifest manifest,
-    this.projectId,
-  }) : _manifest = manifest;
+  })  : _adminApi = api,
+        _companyApi = null,
+        companyId = null,
+        _manifest = manifest;
 
-  final ProdavanApi api;
-  final String cabinetId;
-  final String? projectId;
+  OwnerModuleDataController.company({
+    required CompanyApi api,
+    required this.companyId,
+    required this.moduleId,
+    required ModuleMetaManifest manifest,
+  })  : _adminApi = null,
+        _companyApi = api,
+        _manifest = manifest;
+
+  final AdminApi? _adminApi;
+  final CompanyApi? _companyApi;
+  final String? companyId;
   final String moduleId;
   ModuleMetaManifest _manifest;
   final List<Map<String, dynamic>> _items = [];
 
-  bool get _useProjectInstance => projectId != null && projectId!.isNotEmpty;
-
-  ProjectsRematerializeCallback? onProjectsRematerialize;
-  WorkspaceOutdatedCallback? onWorkspaceOutdated;
+  bool get _isCompany => companyId != null && companyId!.isNotEmpty;
 
   ModuleMetaManifest get manifest => _manifest;
 
@@ -38,14 +46,13 @@ class CabinetDataController extends ChangeNotifier {
     for (final table in _manifest.tables) {
       final slug = table['slug'] as String?;
       if (slug == null || slug.isEmpty) continue;
-      final rows = _useProjectInstance
-          ? await api.listProjectRuntimeModuleDataRows(
-              projectId: projectId!,
+      final rows = _isCompany
+          ? await _companyApi!.listModuleDataRows(
+              companyId: companyId!,
               moduleId: moduleId,
               tableSlug: slug,
             )
-          : await api.listModuleDataRows(
-              cabinetId: cabinetId,
+          : await _adminApi!.listModuleDataRows(
               moduleId: moduleId,
               tableSlug: slug,
             );
@@ -56,6 +63,8 @@ class CabinetDataController extends ChangeNotifier {
           'body': row['body'] is Map
               ? Map<String, dynamic>.from(row['body'] as Map)
               : <String, dynamic>{},
+          if (row['created_at'] != null) 'created_at': row['created_at'],
+          if (row['updated_at'] != null) 'updated_at': row['updated_at'],
         });
       }
     }
@@ -80,48 +89,20 @@ class CabinetDataController extends ChangeNotifier {
     return {};
   }
 
-  void _emitRematerialize(Map<String, dynamic>? payload) {
-    final remat = payload?['rematerialize'] ?? payload?['workspace_sync'];
-    if (remat is Map) {
-      final marked = remat['marked_outdated'];
-      if (marked is int && marked > 0) {
-        onWorkspaceOutdated?.call();
-        return;
-      }
-      final scheduled = remat['scheduled'];
-      if (scheduled is int && scheduled > 0) {
-        final sync = remat['sync'];
-        final inline = sync is List && sync.isNotEmpty;
-        onProjectsRematerialize?.call(scheduled, inline: inline);
-        return;
-      }
-      if (remat['mode'] == 'deferred') {
-        onWorkspaceOutdated?.call();
-        return;
-      }
-    }
-    final outdated = payload?['workspace_outdated'];
-    if (outdated is Map && (outdated['marked_outdated'] as int? ?? 0) > 0) {
-      onWorkspaceOutdated?.call();
-    }
-  }
-
   Future<String> createRow(String tableSlug, {Map<String, dynamic>? initial}) async {
     final body = initial ?? defaultBodyForTable(tableSlug);
-    final created = _useProjectInstance
-        ? await api.createProjectRuntimeModuleDataRow(
-            projectId: projectId!,
+    final created = _isCompany
+        ? await _companyApi!.createModuleDataRow(
+            companyId: companyId!,
             moduleId: moduleId,
             tableSlug: tableSlug,
             body: body,
           )
-        : await api.createModuleDataRow(
-            cabinetId: cabinetId,
+        : await _adminApi!.createModuleDataRow(
             moduleId: moduleId,
             tableSlug: tableSlug,
             body: body,
           );
-    _emitRematerialize(created);
     final rowId = created['row_id'] as String;
     _items.add({
       'table_slug': tableSlug,
@@ -134,24 +115,24 @@ class CabinetDataController extends ChangeNotifier {
 
   Future<void> upsertBody(String rowId, Map<String, dynamic> body) async {
     final item = itemById(rowId);
-    if (item == null) return;
+    if (item == null) {
+      throw StateError('module data row not found: $rowId');
+    }
     final tableSlug = item['table_slug'] as String;
-    final updated = _useProjectInstance
-        ? await api.updateProjectRuntimeModuleDataRow(
-            projectId: projectId!,
+    final updated = _isCompany
+        ? await _companyApi!.updateModuleDataRow(
+            companyId: companyId!,
             moduleId: moduleId,
             tableSlug: tableSlug,
             rowId: rowId,
             body: body,
           )
-        : await api.updateModuleDataRow(
-            cabinetId: cabinetId,
+        : await _adminApi!.updateModuleDataRow(
             moduleId: moduleId,
             tableSlug: tableSlug,
             rowId: rowId,
             body: body,
           );
-    _emitRematerialize(updated);
     for (var i = 0; i < _items.length; i++) {
       if (_items[i]['row_id'] == rowId) {
         _items[i] = {
@@ -175,32 +156,23 @@ class CabinetDataController extends ChangeNotifier {
     if (item == null) {
       throw StateError('module data row not found: $rowId');
     }
-    final deleted = _useProjectInstance
-        ? await api.deleteProjectRuntimeModuleDataRow(
-            projectId: projectId!,
-            moduleId: moduleId,
-            tableSlug: item['table_slug'] as String,
-            rowId: rowId,
-          )
-        : await api.deleteModuleDataRow(
-            cabinetId: cabinetId,
-            moduleId: moduleId,
-            tableSlug: item['table_slug'] as String,
-            rowId: rowId,
-          );
-    _emitRematerialize(deleted);
+    final tableSlug = item['table_slug'] as String;
+    if (_isCompany) {
+      await _companyApi!.deleteModuleDataRow(
+        companyId: companyId!,
+        moduleId: moduleId,
+        tableSlug: tableSlug,
+        rowId: rowId,
+      );
+    } else {
+      await _adminApi!.deleteModuleDataRow(
+        moduleId: moduleId,
+        tableSlug: tableSlug,
+        rowId: rowId,
+      );
+    }
     _items.removeWhere((i) => i['row_id'] == rowId);
     notifyListeners();
-  }
-
-  Future<void> invokeAction(String actionId, {String? rowId}) async {
-    await api.invokeModuleAction(
-      cabinetId: cabinetId,
-      moduleId: moduleId,
-      actionId: actionId,
-      rowId: rowId,
-    );
-    await loadAll();
   }
 
   void refresh() => notifyListeners();
@@ -245,7 +217,13 @@ class CabinetDataController extends ChangeNotifier {
       for (final col in columnDefs) {
         final field = col['field'] as String? ?? '';
         if (field.isEmpty) continue;
-        cells[field] = _cellValue(item, body, col);
+        final source = col['source']?.toString();
+        if (source == 'row.created_at' || source == 'row.updated_at') {
+          final key = source == 'row.created_at' ? 'created_at' : 'updated_at';
+          cells[field] = _formatEnvelopeDate(item[key]);
+        } else {
+          cells[field] = _formatCell(body[field], tableSlug, field);
+        }
       }
       return AppEntityRow(
         id: rowId,
@@ -254,20 +232,6 @@ class CabinetDataController extends ChangeNotifier {
         cells: cells,
       );
     }).toList();
-  }
-
-  String _cellValue(
-    Map<String, dynamic> item,
-    Map<String, dynamic> body,
-    Map<String, dynamic> col,
-  ) {
-    final source = col['source']?.toString();
-    if (source == 'row.created_at' || source == 'row.updated_at') {
-      final key = source == 'row.created_at' ? 'created_at' : 'updated_at';
-      return _formatEnvelopeDate(item[key]);
-    }
-    final field = col['field'] as String? ?? '';
-    return body[field]?.toString() ?? '';
   }
 
   String _formatEnvelopeDate(dynamic raw) {
@@ -281,5 +245,27 @@ class CabinetDataController extends ChangeNotifier {
     final m = local.month.toString().padLeft(2, '0');
     final d = local.day.toString().padLeft(2, '0');
     return '$y-$m-$d';
+  }
+
+  String _formatCell(dynamic value, String tableSlug, String field) {
+    if (value == null) return '';
+    if (value is bool) return value ? 'true' : 'false';
+    if (value is Map && value.containsKey('filename')) {
+      return value['filename']?.toString() ?? 'file';
+    }
+    if (value is Map || value is List) return '…';
+    final col = _manifest.columnsForTable(tableSlug).cast<Map<String, dynamic>?>().firstWhere(
+          (c) => c?['name'] == field,
+          orElse: () => null,
+        );
+    if (col != null && col['type'] == 'enum') {
+      final en = col['enum'];
+      if (en is Map && en['labels'] is Map) {
+        final labels = Map<String, dynamic>.from(en['labels'] as Map);
+        final key = value.toString();
+        if (labels.containsKey(key)) return labels[key].toString();
+      }
+    }
+    return value.toString();
   }
 }

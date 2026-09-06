@@ -465,14 +465,19 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                 DataRow(
                   selected: _editFocusId == row.id,
                   onSelectChanged: (_) {
-                    if (_editFocusId == row.id) {
-                      _clearEdit();
-                      return;
-                    }
+                    // While editing, ignore select so action IconButtons receive
+                    // the tap (DataRow otherwise steals it and clears edit).
+                    if (_editFocusId == row.id) return;
                     widget.onOpen(row);
                   },
                   onLongPress: _mutateEnabled && _rowHasMutateActions(row)
-                      ? () => _enterEdit(row)
+                      ? () {
+                          if (_editFocusId == row.id) {
+                            _clearEdit();
+                          } else {
+                            _enterEdit(row);
+                          }
+                        }
                       : null,
                   cells: [
                     DataCell(
@@ -491,6 +496,8 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                                 child: _mutateTrailing(context, row),
                               )
                             : const SizedBox.shrink(),
+                        // Override row select so delete/copy taps are not stolen.
+                        onTap: () {},
                       ),
                   ],
                 ),

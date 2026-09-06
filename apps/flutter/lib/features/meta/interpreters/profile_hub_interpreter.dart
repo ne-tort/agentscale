@@ -137,24 +137,28 @@ class ProfileHubInterpreter extends StatelessWidget {
     return item['row_id'] as String? ?? '—';
   }
 
-  void _setActiveProfile({
+  Future<void> _setActiveProfile({
     required String settingsTable,
     required String profileIdField,
     required String activeField,
     required String profileId,
-  }) {
-    final settings = seeds.itemsForTable(settingsTable);
+  }) async {
+    final settings = seeds.itemsForTable(settingsTable) as List;
     for (final s in settings) {
-      final rowId = s['row_id'] as String?;
+      final rowId = (s as Map)['row_id'] as String?;
       if (rowId == null) continue;
-      final body = seeds.bodyFor(rowId);
+      final body = seeds.bodyFor(rowId) as Map;
       final match = body[profileIdField]?.toString() == profileId;
-      seeds.patchField(rowId, activeField, match);
+      final patch = seeds.patchField(rowId, activeField, match);
+      if (patch is Future) await patch;
     }
     if (settings.isEmpty) {
-      final rowId = seeds.createRow(settingsTable);
-      seeds.patchField(rowId, profileIdField, profileId);
-      seeds.patchField(rowId, activeField, true);
+      final created = seeds.createRow(settingsTable);
+      final rowId = created is Future ? await created as String : created as String;
+      final p1 = seeds.patchField(rowId, profileIdField, profileId);
+      if (p1 is Future) await p1;
+      final p2 = seeds.patchField(rowId, activeField, true);
+      if (p2 is Future) await p2;
     }
     seeds.refresh();
   }

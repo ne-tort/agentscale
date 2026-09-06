@@ -80,7 +80,7 @@ def validate_row_with_columns(
     columns_body: Any,
     table_slug: str,
     body: dict,
-    cabinet_id: str,
+    cabinet_id: str | None = None,
 ) -> dict:
     columns = columns_for_table(columns_body, table_slug)
     if not columns:
