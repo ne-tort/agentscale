@@ -113,6 +113,8 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert error_field["visible_when"] == {"field": "status", "eq": "error"}
     map_field = next(f for f in settings["ui_json"]["fields"] if f["column"] == "column_map")
     assert map_field["widget"] == "column_map"
+    map_col = next(c for c in meta["columns"] if c["name"] == "column_map")
+    assert map_col["label"]["ru"] == "Сопоставление колонок"
     assert map_field["visible_when"]["eq"] == "ready"
     paused_field = next(f for f in settings["ui_json"]["fields"] if f["column"] == "paused")
     assert paused_field["visible_when"]["in"] == ["ready", "error"]

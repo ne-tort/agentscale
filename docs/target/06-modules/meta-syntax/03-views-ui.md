@@ -226,6 +226,7 @@ Radio in row leading; tap → `POST .../actions/{action}/invoke?row_id=`.
 }
 ```
 
+UI: preference-tile with chevron → dedicated mapping page (not an inline stack of dropdowns on the settings form).
 Collection column envelope sources (not body fields):
 
 ```json

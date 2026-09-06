@@ -22,9 +22,15 @@ class TabularIndexResult:
 
 
 def _normalize_header(raw: str, *, index: int, used: set[str]) -> str:
-    base = re.sub(r"[^A-Za-z0-9_]+", "_", (raw or "").strip()).strip("_").lower()
-    if not base or not _SAFE_COL.match(base):
+    """Keep human headers (incl. Cyrillic) for column_map UI; quote-safe for SQLite."""
+    base = (raw or "").strip().replace('"', "'")
+    if not base:
         base = f"col_{index + 1}"
+    # ASCII identifiers stay snake_case for stable MCP/query names.
+    if _SAFE_COL.match(base.replace("-", "_")) and base.isascii():
+        base = re.sub(r"[^A-Za-z0-9_]+", "_", base).strip("_").lower() or f"col_{index + 1}"
+        if not _SAFE_COL.match(base):
+            base = f"col_{index + 1}"
     name = base
     n = 2
     while name in used:

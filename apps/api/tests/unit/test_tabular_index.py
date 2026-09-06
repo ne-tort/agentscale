@@ -10,6 +10,17 @@ from xml.etree.ElementTree import Element, SubElement, tostring
 from prodavan.application.content.tabular_index import index_csv_bytes, index_tabular_bytes, index_xlsx_bytes
 
 
+def test_index_csv_preserves_cyrillic_headers() -> None:
+    raw = "Название,Цена,Артикул\nМышь,10,M1\n".encode()
+    result = index_csv_bytes(raw)
+    assert result.columns == ["Название", "Цена", "Артикул"]
+    conn = sqlite3.connect(":memory:")
+    conn.deserialize(result.sqlite_bytes)
+    row = conn.execute('SELECT "Название", "Цена" FROM rows').fetchone()
+    assert row == ("Мышь", "10")
+    conn.close()
+
+
 def test_index_csv_bytes_basic() -> None:
     raw = b"name,part_number,price\nMouse,M1,10\nKeyboard,K1,20\n"
     result = index_csv_bytes(raw)

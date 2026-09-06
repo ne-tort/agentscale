@@ -183,14 +183,18 @@ class CabinetModuleService:
             remat,
         )
         row_id = str(row.get("row_id") or "")
-        await self._maybe_run_row_actions(
-            cabinet_id=cabinet_id,
-            module_id=module_id,
-            table_slug=table_slug,
-            row_id=row_id,
-            principal=principal,
-            employee=employee,
-        )
+        action_error: AppError | None = None
+        try:
+            await self._maybe_run_row_actions(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+            )
+        except AppError as exc:
+            action_error = exc
         if row_id:
             refreshed = await self._instances.get_data_row(
                 instance_id=inst.id, table_slug=table_slug, row_id=row_id
@@ -200,6 +204,8 @@ class CabinetModuleService:
                     {"module_id": module_id, "instance_id": inst.id, **refreshed},
                     remat,
                 )
+        if action_error is not None:
+            raise action_error
         return out
 
     async def update_data_row(
@@ -254,14 +260,18 @@ class CabinetModuleService:
             remat,
         )
         if run_actions:
-            await self._maybe_run_row_actions(
-                cabinet_id=cabinet_id,
-                module_id=module_id,
-                table_slug=table_slug,
-                row_id=row_id,
-                principal=principal,
-                employee=employee,
-            )
+            action_error: AppError | None = None
+            try:
+                await self._maybe_run_row_actions(
+                    cabinet_id=cabinet_id,
+                    module_id=module_id,
+                    table_slug=table_slug,
+                    row_id=row_id,
+                    principal=principal,
+                    employee=employee,
+                )
+            except AppError as exc:
+                action_error = exc
             refreshed = await self._instances.get_data_row(
                 instance_id=inst.id, table_slug=table_slug, row_id=row_id
             )
@@ -270,6 +280,8 @@ class CabinetModuleService:
                     {"module_id": module_id, "instance_id": inst.id, **refreshed},
                     remat,
                 )
+            if action_error is not None:
+                raise action_error
         return out
 
     async def delete_data_row(

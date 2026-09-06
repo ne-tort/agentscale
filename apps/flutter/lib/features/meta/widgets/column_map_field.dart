@@ -3,11 +3,15 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/app_choice_preference.dart';
+import 'package:prodavan/core/preferences/app_nav_preference.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Maps source tabular headers onto a canonical target schema.
+///
+/// Renders as a nav preference that opens a dedicated mapping page.
 ///
 /// Meta field shape:
 /// ```json
@@ -60,9 +64,18 @@ class _ColumnMapFieldState extends State<ColumnMapField> {
       _map = _parseMap(widget.value);
       _seeded = false;
       _maybeAutofill();
-    } else if (oldWidget.sourceColumns != widget.sourceColumns) {
+    } else if (!_sameList(oldWidget.sourceColumns, widget.sourceColumns)) {
       _maybeAutofill();
     }
+  }
+
+  bool _sameList(List<String> a, List<String> b) {
+    if (identical(a, b)) return true;
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
   }
 
   Map<String, String?> _parseMap(dynamic raw) {
@@ -167,6 +180,88 @@ class _ColumnMapFieldState extends State<ColumnMapField> {
     return out;
   }
 
+  int _mappedCount() {
+    var n = 0;
+    for (final slot in widget.schema) {
+      final key = slot['key']?.toString() ?? '';
+      final v = _map[key];
+      if (v != null && v.trim().isNotEmpty) n++;
+    }
+    return n;
+  }
+
+  Future<void> _openEditor(BuildContext context) async {
+    final l10n = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context);
+    final title = resolveMetaLabel(widget.label, l10n, locale: locale);
+    final result = await Navigator.of(context).push<Map<String, String?>>(
+      MaterialPageRoute(
+        builder: (_) => _ColumnMapEditorPage(
+          title: title,
+          initial: Map<String, String?>.from(_map),
+          sourceColumns: _sources(),
+          schema: widget.schema,
+          readOnly: widget.readOnly,
+        ),
+      ),
+    );
+    if (!mounted || result == null) return;
+    setState(() => _map = result);
+    widget.onChanged(_cleanMap(result));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context);
+    final title = resolveMetaLabel(widget.label, l10n, locale: locale);
+    final sources = _sources();
+    final mapped = _mappedCount();
+    final total = widget.schema.length;
+    final subtitleText = sources.isEmpty
+        ? (locale.languageCode == 'ru' ? 'Нет столбцов в файле' : 'No columns in file')
+        : (locale.languageCode == 'ru'
+            ? '$mapped из $total · ${sources.length} столбцов файла'
+            : '$mapped of $total · ${sources.length} file columns');
+
+    return AppNavPreference(
+      title: title,
+      icon: Icons.table_chart_outlined,
+      enabled: !widget.readOnly || mapped > 0,
+      subtitle: Text(subtitleText),
+      onTap: () => _openEditor(context),
+    );
+  }
+}
+
+class _ColumnMapEditorPage extends StatefulWidget {
+  const _ColumnMapEditorPage({
+    required this.title,
+    required this.initial,
+    required this.sourceColumns,
+    required this.schema,
+    required this.readOnly,
+  });
+
+  final String title;
+  final Map<String, String?> initial;
+  final List<String> sourceColumns;
+  final List<Map<String, dynamic>> schema;
+  final bool readOnly;
+
+  @override
+  State<_ColumnMapEditorPage> createState() => _ColumnMapEditorPageState();
+}
+
+class _ColumnMapEditorPageState extends State<_ColumnMapEditorPage> {
+  late Map<String, String?> _map;
+
+  @override
+  void initState() {
+    super.initState();
+    _map = Map<String, String?>.from(widget.initial);
+  }
+
   void _setSlot(String key, String? source) {
     setState(() {
       _map = {
@@ -174,62 +269,63 @@ class _ColumnMapFieldState extends State<ColumnMapField> {
         key: (source == null || source.isEmpty) ? null : source,
       };
     });
-    widget.onChanged(_cleanMap(_map));
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final locale = Localizations.localeOf(context);
-    final sources = _sources();
     final noneLabel = locale.languageCode == 'ru' ? 'Не использовать' : 'Unused';
+    final sources = widget.sourceColumns;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.md,
-            AppSpacing.sm,
-            AppSpacing.md,
-            AppSpacing.xs,
+    return AppScaffold(
+      title: Text(widget.title),
+      actions: [
+        if (!widget.readOnly)
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(_map),
+            child: Text(locale.languageCode == 'ru' ? 'Готово' : 'Done'),
           ),
-          child: Text(
-            resolveMetaLabel(widget.label, l10n, locale: locale),
-            style: Theme.of(context).textTheme.titleSmall,
-          ),
-        ),
-        for (final slot in widget.schema) ...[
-          Builder(
-            builder: (context) {
-              final key = slot['key']?.toString() ?? '';
-              if (key.isEmpty) return const SizedBox.shrink();
-              final required = slot['required'] == true;
-              final slotLabel = resolveMetaLabel(
-                slot['label'] ?? key,
-                l10n,
-                locale: locale,
-              );
-              final choices = <String>[
-                if (!required) '',
-                ...sources,
-              ];
-              final current = _map[key] ?? '';
-              final value = choices.contains(current) ? current : (required ? (choices.isNotEmpty ? choices.first : '') : '');
-              return AppChoicePreference<String>(
-                title: slotLabel,
-                icon: required ? Icons.link_rounded : Icons.link_off_outlined,
-                value: value,
-                choices: choices,
-                keyFor: (v) => v,
-                labelFor: (v) => v.isEmpty ? noneLabel : v,
-                enabled: !widget.readOnly && sources.isNotEmpty,
-                onSave: (v) async => _setSlot(key, v.isEmpty ? null : v),
-              );
-            },
-          ),
-        ],
       ],
+      body: ListView(
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+        children: [
+          for (final slot in widget.schema) ...[
+            Builder(
+              builder: (context) {
+                final key = slot['key']?.toString() ?? '';
+                if (key.isEmpty) return const SizedBox.shrink();
+                final required = slot['required'] == true;
+                final slotLabel = resolveMetaLabel(
+                  slot['label'] ?? key,
+                  l10n,
+                  locale: locale,
+                );
+                final choices = <String>[
+                  if (!required) '',
+                  ...sources,
+                ];
+                final current = _map[key] ?? '';
+                final value = choices.contains(current)
+                    ? current
+                    : (required
+                        ? (choices.isNotEmpty ? choices.first : '')
+                        : '');
+                return AppChoicePreference<String>(
+                  title: slotLabel,
+                  icon: required ? Icons.link_rounded : Icons.link_off_outlined,
+                  value: value,
+                  choices: choices,
+                  keyFor: (v) => v,
+                  labelFor: (v) => v.isEmpty ? noneLabel : v,
+                  enabled: !widget.readOnly && sources.isNotEmpty,
+                  onSave: (v) async => _setSlot(key, v.isEmpty ? null : v),
+                );
+              },
+            ),
+          ],
+        ],
+      ),
     );
   }
 }

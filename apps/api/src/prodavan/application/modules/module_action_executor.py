@@ -188,13 +188,22 @@ class ModuleActionExecutor:
                     principal=principal,
                     employee=employee,
                 )
-            except Exception:
+            except AppError:
+                # Domain failure already persisted as status=error — surface to client.
+                raise
+            except Exception as exc:
                 logger.exception(
                     "auto index_tabular failed module=%s table=%s row=%s",
                     module_id,
                     table_slug,
                     row_id,
                 )
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail=f"index_tabular failed: {exc}",
+                ) from exc
 
     async def _select_row(
         self,

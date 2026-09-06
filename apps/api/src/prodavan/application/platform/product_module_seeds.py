@@ -757,7 +757,10 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             {
                 "table_slug": "catalogs",
                 "name": "column_map",
-                "label": {"ru": "Сопоставление", "en": "Column map"},
+                "label": {
+                    "ru": "Сопоставление колонок",
+                    "en": "Column mapping",
+                },
                 "type": "json",
                 "required": False,
                 "default": {},

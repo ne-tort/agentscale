@@ -34,6 +34,8 @@ class RuntimeDataAdapter extends ChangeNotifier {
   Future<void> patchField(String rowId, String field, dynamic value) =>
       _inner.patchField(rowId, field, value);
 
+  Future<void> loadAll() => _inner.loadAll();
+
   void deleteRow(String rowId) {
     _inner.deleteRow(rowId);
   }

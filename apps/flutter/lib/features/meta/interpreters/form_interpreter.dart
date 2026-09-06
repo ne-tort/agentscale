@@ -38,19 +38,78 @@ class FormViewInterpreter extends StatefulWidget {
 class _FormViewInterpreterState extends State<FormViewInterpreter> {
   late Map<String, dynamic> _values;
   String? _rowId;
+  Listenable? _seedsListenable;
 
   @override
   void initState() {
     super.initState();
+    _attachSeedsListener();
     _syncFromSeeds();
   }
 
   @override
   void didUpdateWidget(covariant FormViewInterpreter oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.rowId != widget.rowId) {
-      _syncFromSeeds();
+    if (oldWidget.seeds != widget.seeds) {
+      _detachSeedsListener();
+      _attachSeedsListener();
     }
+    if (oldWidget.rowId != widget.rowId || oldWidget.seeds != widget.seeds) {
+      _syncFromSeeds();
+      return;
+    }
+    // Parent ListenableBuilder rebuilds with same rowId after row body changes
+    // (e.g. content.index_tabular sets status=ready). Keep local form state in sync.
+    _syncFromSeedsIfChanged();
+  }
+
+  @override
+  void dispose() {
+    _detachSeedsListener();
+    super.dispose();
+  }
+
+  void _attachSeedsListener() {
+    final seeds = widget.seeds;
+    if (seeds is Listenable) {
+      _seedsListenable = seeds;
+      seeds.addListener(_onSeedsChanged);
+    }
+  }
+
+  void _detachSeedsListener() {
+    _seedsListenable?.removeListener(_onSeedsChanged);
+    _seedsListenable = null;
+  }
+
+  void _onSeedsChanged() {
+    if (!mounted) return;
+    _syncFromSeedsIfChanged();
+  }
+
+  void _syncFromSeedsIfChanged() {
+    if (_rowId == null) return;
+    final item = widget.seeds.itemById(_rowId!);
+    if (item == null) return;
+    final next = Map<String, dynamic>.from(widget.seeds.bodyFor(_rowId!));
+    if (_bodyFingerprint(next) == _bodyFingerprint(_values)) return;
+    setState(() => _values = next);
+  }
+
+  String _bodyFingerprint(Map<String, dynamic> body) {
+    // Status/columns drive visible_when + column_map; include file identity.
+    final file = body['source_file'];
+    final fileKey = file is Map ? '${file['storage_key']}|${file['asset_id']}' : '$file';
+    return [
+      body['status'],
+      body['row_count'],
+      body['columns_json'],
+      body['error'],
+      body['paused'],
+      body['column_map'],
+      body['project_ids'],
+      fileKey,
+    ].join('¦');
   }
 
   void _syncFromSeeds() {
@@ -105,7 +164,28 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         });
       }
     } catch (e) {
+      // Row may already be committed with status=error/ready from index_tabular.
+      await _reloadRowAfterFailure();
       if (mounted) AppErrors.showSnack(context, e);
+    }
+  }
+
+  Future<void> _reloadRowAfterFailure() async {
+    if (_rowId == null) return;
+    try {
+      final reload = widget.seeds.loadAll;
+      if (reload is Future Function()) {
+        await reload();
+      } else if (reload is Function()) {
+        final result = reload();
+        if (result is Future) await result;
+      }
+    } catch (_) {}
+    if (!mounted || _rowId == null) return;
+    if (widget.seeds.itemById(_rowId!) != null) {
+      setState(() {
+        _values = Map<String, dynamic>.from(widget.seeds.bodyFor(_rowId!));
+      });
     }
   }
 
@@ -251,14 +331,18 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
           }
         }
       }
+      final status = _values['status']?.toString();
+      final indexing = status == 'indexing';
       return FileUploadField(
         label: label,
         value: value,
         cabinetId: scope.cabinetId,
         api: scope.api,
-        readOnly: fieldReadOnly,
+        readOnly: fieldReadOnly || indexing,
         accept: accept,
-        subtitle: subtitle,
+        subtitle: indexing
+            ? 'Индексация…'
+            : subtitle,
         warnWhenEmpty: warnWhenEmpty,
         onChanged: (ref) => _persist(name, ref),
       );
