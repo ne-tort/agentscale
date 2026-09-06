@@ -87,7 +87,8 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     kinds = {a["kind"] for a in meta["actions"]}
     assert "content.index_tabular" in kinds
     assert "data.select_row" in kinds
-    assert any(r["target"]["format"] == "copy_blob" for r in meta["materialize"])
+    assert any(r["target"]["format"] == "merge_mapped_sqlite" for r in meta["materialize"])
+    assert not any(r["target"]["format"] == "copy_blob" for r in meta["materialize"])
     tool_names = {t["name"] for t in meta["mcp_tools"]}
     assert "equipment_catalog_query" in tool_names
     assert "equipment_offers_upsert" in tool_names
@@ -97,6 +98,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert catalogs["ui_json"]["scaffold"]["title"]["ru"] == "Базы данных"
     assert catalogs["ui_json"]["empty"]["icon"] == "storage"
     assert "primary_action" not in catalogs["ui_json"]
+    assert any(c.get("source") == "row.created_at" for c in catalogs["ui_json"]["columns"])
 
     settings = next(v for v in meta["views"] if v["slug"] == "catalogs_settings")
     file_field = next(
@@ -105,15 +107,33 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert file_field["subtitle_from"] == "row_count"
     assert file_field["empty_style"] == "warning"
     assert not any(f["column"] == "status" for f in settings["ui_json"]["fields"])
+    name_field = next(f for f in settings["ui_json"]["fields"] if f["column"] == "name")
+    assert name_field["icon"] == "storage"
     error_field = next(f for f in settings["ui_json"]["fields"] if f["column"] == "error")
     assert error_field["visible_when"] == {"field": "status", "eq": "error"}
+    map_field = next(f for f in settings["ui_json"]["fields"] if f["column"] == "column_map")
+    assert map_field["widget"] == "column_map"
+    assert map_field["visible_when"]["eq"] == "ready"
+    paused_field = next(f for f in settings["ui_json"]["fields"] if f["column"] == "paused")
+    assert paused_field["visible_when"]["in"] == ["ready", "error"]
     meta_fields = [
-        f for f in settings["ui_json"]["fields"] if f["column"] in ("row_count", "columns_json", "project_ids")
+        f
+        for f in settings["ui_json"]["fields"]
+        if f["column"] in ("row_count", "column_map", "project_ids")
     ]
     assert all(f["visible_when"]["eq"] == "ready" for f in meta_fields)
 
     catalogs_list = next(v for v in meta["views"] if v["slug"] == "catalogs_list")
     assert all(c["field"] != "status" for c in catalogs_list["ui_json"]["columns"])
+
+    name_col = next(c for c in meta["columns"] if c["name"] == "name" and c["table_slug"] == "catalogs")
+    assert name_col["label"]["ru"] == "Название БД"
+    assert any(c["name"] == "paused" for c in meta["columns"])
+    assert any(c["name"] == "column_map" for c in meta["columns"])
+
+    merge_rule = next(r for r in meta["materialize"] if r["id"] == "catalog_merged_sqlite")
+    assert merge_rule["source"]["filter"] == {"status": "ready", "paused": False}
+    assert merge_rule["target"]["workspace_path"] == "catalogs/catalog.sqlite"
 
     lines = next(v for v in meta["views"] if v["slug"] == "request_lines_list")
     assert lines["ui_json"]["scaffold"]["title"]["ru"] == "Позиции заказчика"

@@ -109,12 +109,12 @@ class SeedDataController extends ChangeNotifier {
     final subtitleFields = uiJson['subtitle_fields'] is List
         ? (uiJson['subtitle_fields'] as List).cast<String>()
         : <String>[];
-    final columnFields = uiJson['columns'] is List
+    final columnDefs = uiJson['columns'] is List
         ? (uiJson['columns'] as List)
-            .map((c) => (c as Map)['field'] as String? ?? '')
-            .where((f) => f.isNotEmpty)
+            .whereType<Map>()
+            .map((c) => Map<String, dynamic>.from(c))
             .toList()
-        : <String>[];
+        : <Map<String, dynamic>>[];
 
     final dataRows = itemsForTable(tableSlug);
     return dataRows.map((item) {
@@ -129,8 +129,16 @@ class SeedDataController extends ChangeNotifier {
           .where((s) => s.isNotEmpty)
           .join(' · ');
       final cells = <String, String>{};
-      for (final f in columnFields) {
-        cells[f] = _formatCell(body[f], tableSlug, f);
+      for (final col in columnDefs) {
+        final field = col['field'] as String? ?? '';
+        if (field.isEmpty) continue;
+        final source = col['source']?.toString();
+        if (source == 'row.created_at' || source == 'row.updated_at') {
+          final key = source == 'row.created_at' ? 'created_at' : 'updated_at';
+          cells[field] = _formatEnvelopeDate(item[key]);
+        } else {
+          cells[field] = _formatCell(body[field], tableSlug, field);
+        }
       }
       return AppEntityRow(
         id: rowId,
@@ -139,6 +147,19 @@ class SeedDataController extends ChangeNotifier {
         cells: cells,
       );
     }).toList();
+  }
+
+  String _formatEnvelopeDate(dynamic raw) {
+    if (raw == null) return '';
+    final text = raw.toString().trim();
+    if (text.isEmpty) return '';
+    final parsed = DateTime.tryParse(text);
+    if (parsed == null) return text;
+    final local = parsed.toLocal();
+    final y = local.year.toString().padLeft(4, '0');
+    final m = local.month.toString().padLeft(2, '0');
+    final d = local.day.toString().padLeft(2, '0');
+    return '$y-$m-$d';
   }
 
   String _formatCell(dynamic value, String tableSlug, String field) {

@@ -33,6 +33,7 @@ class MaterializeOp:
     mcp_package_name: str | None = None
     rows_bodies: list[dict[str, Any]] | None = None
     template_text: str | None = None
+    merge_params: dict[str, Any] | None = None
 
 
 class MaterializePlanner:
@@ -365,6 +366,8 @@ class MaterializePlanner:
                 body = r.get("body") if isinstance(r.get("body"), dict) else {}
                 if filt and not _row_matches_filter(body, filt):
                     continue
+                if not _row_applies_to_project(body, project_id):
+                    continue
                 out.append({"row_id": r["row_id"], **body})
             return out
 
@@ -427,19 +430,8 @@ class MaterializePlanner:
         )
         if body is None:
             return None
-        # Project instances are already leaf copies; project_ids filter is legacy fallback only.
-        from prodavan.application.modules.module_instance_service import (
-            OWNER_PROJECT,
-            ModuleInstanceService,
-        )
-
-        has_instance = (
-            await ModuleInstanceService(self._session).get_instance(
-                owner_kind=OWNER_PROJECT, owner_id=project_id, module_id=module_id
-            )
-            is not None
-        )
-        if not has_instance and not _row_applies_to_project(body, project_id):
+        # Always honor row project_ids (empty/missing = all projects).
+        if not _row_applies_to_project(body, project_id):
             return None
         str_body = {k: str(v) for k, v in body.items() if v is not None}
         ws_path = self._substitute(str(target.get("workspace_path") or ""), {**ctx, **str_body})
@@ -502,6 +494,34 @@ class MaterializePlanner:
                     )
                 ]
             return []
+        if fmt == "merge_mapped_sqlite":
+            ws_path = self._substitute(str(target.get("workspace_path") or ""), ctx)
+            if not ws_path:
+                return []
+            return [
+                MaterializeOp(
+                    rule_id=rule_id,
+                    module_id=module_id,
+                    workspace_path=ws_path,
+                    format="merge_mapped_sqlite",
+                    source_type="rows",
+                    priority=priority,
+                    rows_bodies=rows,
+                    merge_params={
+                        "artifact_field": str(
+                            target.get("artifact_field") or field or "artifact_ref"
+                        ),
+                        "map_field": str(target.get("map_field") or "column_map"),
+                        "schema": list(target.get("schema") or []),
+                        "required_map_keys": list(
+                            target.get("required_map_keys") or ["title", "price"]
+                        ),
+                        "provenance": target.get("provenance")
+                        if isinstance(target.get("provenance"), dict)
+                        else {"target": "source_catalog", "from": "name"},
+                    },
+                )
+            ]
         ops: list[MaterializeOp] = []
         for i, body in enumerate(rows):
             str_ctx = _row_path_context(body, field if isinstance(field, str) else None)

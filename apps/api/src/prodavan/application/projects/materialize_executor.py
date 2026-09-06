@@ -58,6 +58,10 @@ class MaterializeExecutor:
                     path = self._write_template(writer, op)
                     if path:
                         written.append(path)
+                elif op.format == "merge_mapped_sqlite":
+                    path = await self._write_merge_mapped_sqlite(writer, op)
+                    if path:
+                        written.append(path)
             except Exception:
                 logger.exception("materialize op failed rule=%s path=%s", op.rule_id, op.workspace_path)
         if mcp_packages:
@@ -126,6 +130,52 @@ class MaterializeExecutor:
             template = op.static_value
         text = _render_template(template, ctx)
         writer.write_text_file(relative_path=op.workspace_path, text=text)
+        return op.workspace_path
+
+    async def _write_merge_mapped_sqlite(
+        self, writer: WorkspaceLayoutWriter, op: MaterializeOp
+    ) -> str | None:
+        if not op.workspace_path:
+            return None
+        from prodavan.application.content.merge_mapped_sqlite import merge_mapped_sqlite_bytes
+
+        params = op.merge_params or {}
+        provenance = params.get("provenance") if isinstance(params.get("provenance"), dict) else {}
+        schema = params.get("schema")
+        schema_list = [str(c) for c in schema] if isinstance(schema, list) and schema else None
+        required = params.get("required_map_keys")
+        required_list = (
+            [str(c) for c in required] if isinstance(required, list) and required else None
+        )
+
+        async def _load(ref: dict[str, Any]) -> bytes | None:
+            return await self._load_file_ref(ref)
+
+        # Preload artifacts synchronously for the pure merge helper.
+        sources: list[dict[str, Any]] = []
+        for body in op.rows_bodies or []:
+            item = dict(body)
+            artifact_field = str(params.get("artifact_field") or "artifact_ref")
+            ref = item.get(artifact_field)
+            if isinstance(ref, dict):
+                raw = await _load(ref)
+                if raw is not None:
+                    item["_artifact_bytes"] = raw
+            sources.append(item)
+
+        blob, _count, _content_sha = merge_mapped_sqlite_bytes(
+            sources,
+            schema=schema_list,
+            required_map_keys=required_list,
+            artifact_field=str(params.get("artifact_field") or "artifact_ref"),
+            map_field=str(params.get("map_field") or "column_map"),
+            provenance_target=str(provenance.get("target") or "source_catalog"),
+            provenance_from=str(provenance.get("from") or "name"),
+        )
+        existing = writer.read_bytes_file(op.workspace_path)
+        if existing is not None and hashlib.sha256(existing).hexdigest() == hashlib.sha256(blob).hexdigest():
+            return op.workspace_path
+        writer.write_bytes_file(relative_path=op.workspace_path, data=blob)
         return op.workspace_path
 
     async def _write_mcp_package(

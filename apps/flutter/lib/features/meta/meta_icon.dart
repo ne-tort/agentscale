@@ -44,6 +44,12 @@ IconData metaIconFromName(String? name, {IconData fallback = Icons.extension_out
       return Icons.inventory_2_outlined;
     case 'sync':
       return Icons.sync;
+    case 'pause':
+    case 'pause_circle':
+    case 'pause_circle_outline':
+      return Icons.pause_circle_outline;
+    case 'link':
+      return Icons.link_rounded;
     default:
       return fallback;
   }

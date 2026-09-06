@@ -118,6 +118,7 @@ abstract final class ModuleMetaValidator {
       'template',
       'copy_blob',
       'mcp_package',
+      'merge_mapped_sqlite',
     };
     const blobFormats = {'copy_blob', 'mcp_package'};
 

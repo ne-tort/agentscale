@@ -30,7 +30,15 @@ def test_row_matches_filter_profile_placeholder() -> None:
     assert _row_matches_filter(body, {"profile_id": "profile_default", "block_type": "rules"})
 
 
-def test_row_applies_to_project_empty_means_all() -> None:
+def test_row_matches_filter_bool_missing_is_false() -> None:
+    from prodavan.application.projects.materialize_planner import _row_matches_filter
+
+    assert _row_matches_filter({"status": "ready"}, {"status": "ready", "paused": False})
+    assert not _row_matches_filter(
+        {"status": "ready", "paused": True},
+        {"status": "ready", "paused": False},
+    )
+
     assert _row_applies_to_project({}, "proj_a")
     assert _row_applies_to_project({"project_ids": []}, "proj_a")
     assert _row_applies_to_project({"project_ids": None}, "proj_a")

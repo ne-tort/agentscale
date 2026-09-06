@@ -45,3 +45,35 @@ def test_list_and_query_catalog_sqlite(tmp_path: Path) -> None:
 
     text = query_catalog_sqlite(db, text_query="Mouse", limit=10)
     assert {h.values["part_number"] for h in text} == {"M1", "MP1"}
+
+
+def test_list_prefers_merged_catalog(tmp_path: Path) -> None:
+    catalogs = tmp_path / "catalogs"
+    catalogs.mkdir()
+    legacy = catalogs / "cat1.sqlite"
+    merged = catalogs / "catalog.sqlite"
+    _write_catalog(legacy, [("Mouse", "M1", "10")])
+    _write_catalog(merged, [("Keyboard", "K1", "20")])
+    assert list_catalog_sqlite_files(tmp_path) == [merged]
+
+
+def test_query_title_like_on_canonical_schema(tmp_path: Path) -> None:
+    db = tmp_path / "catalog.sqlite"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE rows (title TEXT, price TEXT, part_number TEXT, source_catalog TEXT)"
+    )
+    conn.executemany(
+        "INSERT INTO rows VALUES (?, ?, ?, ?)",
+        [
+            ("Mouse", "10", "M1", "Vendor A"),
+            ("Mouse Pad", "5", "MP1", "Vendor A"),
+            ("Keyboard", "20", "K1", "Vendor B"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    text = query_catalog_sqlite(db, text_query="Mouse", limit=10)
+    assert {h.values["part_number"] for h in text} == {"M1", "MP1"}
+    assert text[0].catalog_id == "Vendor A"

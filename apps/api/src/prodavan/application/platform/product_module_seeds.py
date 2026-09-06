@@ -48,6 +48,74 @@ def _empty(title_ru: str, title_en: str, *, icon: str | None = None) -> dict[str
     return out
 
 
+_CATALOG_MERGE_SCHEMA = [
+    "title",
+    "price",
+    "part_number",
+    "supplier",
+    "lead_time",
+    "source_catalog",
+]
+
+_CATALOG_COLUMN_MAP_SCHEMA = [
+    {
+        "key": "title",
+        "label": {"ru": "Название", "en": "Title"},
+        "required": True,
+        "synonyms": [
+            "title",
+            "name",
+            "наименование",
+            "название",
+            "товар",
+            "product",
+            "description",
+            "описание",
+        ],
+    },
+    {
+        "key": "price",
+        "label": {"ru": "Цена", "en": "Price"},
+        "required": True,
+        "synonyms": ["price", "цена", "cost", "стоимость", "amount", "сумма"],
+    },
+    {
+        "key": "part_number",
+        "label": {"ru": "P/N", "en": "P/N"},
+        "required": False,
+        "synonyms": [
+            "part_number",
+            "pn",
+            "p_n",
+            "sku",
+            "артикул",
+            "партномер",
+            "article",
+            "mpn",
+        ],
+    },
+    {
+        "key": "supplier",
+        "label": {"ru": "Поставщик", "en": "Supplier"},
+        "required": False,
+        "synonyms": ["supplier", "vendor", "поставщик", "продавец", "brand", "бренд"],
+    },
+    {
+        "key": "lead_time",
+        "label": {"ru": "Срок", "en": "Lead time"},
+        "required": False,
+        "synonyms": [
+            "lead_time",
+            "delivery",
+            "срок",
+            "срок_поставки",
+            "availability",
+            "наличие",
+        ],
+    },
+]
+
+
 def _project_ids_column(table_slug: str) -> dict[str, Any]:
     return {
         "table_slug": table_slug,
@@ -628,7 +696,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             {
                 "table_slug": "catalogs",
                 "name": "name",
-                "label": {"ru": "Имя", "en": "Name"},
+                "label": {"ru": "Название БД", "en": "Database name"},
                 "type": "text",
                 "required": True,
             },
@@ -665,6 +733,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             {
                 "table_slug": "catalogs",
+                "name": "paused",
+                "label": {"ru": "Приостановлена", "en": "Paused"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+            },
+            {
+                "table_slug": "catalogs",
                 "name": "row_count",
                 "label": {"ru": "Строк", "en": "Rows"},
                 "type": "number",
@@ -677,6 +753,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "label": {"ru": "Столбцы", "en": "Columns"},
                 "type": "text",
                 "required": False,
+            },
+            {
+                "table_slug": "catalogs",
+                "name": "column_map",
+                "label": {"ru": "Сопоставление", "en": "Column map"},
+                "type": "json",
+                "required": False,
+                "default": {},
             },
             {
                 "table_slug": "catalogs",
@@ -847,8 +931,16 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "title_field": "name",
                     "subtitle_fields": ["row_count"],
                     "columns": [
-                        {"field": "name", "label": {"ru": "Имя", "en": "Name"}},
+                        {
+                            "field": "name",
+                            "label": {"ru": "Название БД", "en": "Database name"},
+                        },
                         {"field": "row_count", "label": {"ru": "Строк", "en": "Rows"}},
+                        {
+                            "field": "added_at",
+                            "label": {"ru": "Добавлено", "en": "Added"},
+                            "source": "row.created_at",
+                        },
                     ],
                     "row_tap": {"kind": "open_view", "view": "catalogs_settings"},
                     "inline_add": {"field": "name", "title": "Добавить базу"},
@@ -865,7 +957,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "mode": "edit",
                     "title": {"ru": "Настройки БД", "en": "Database settings"},
                     "fields": [
-                        {"column": "name", "widget": "value"},
+                        {"column": "name", "widget": "value", "icon": "storage"},
                         {
                             "column": "source_file",
                             "widget": "file_upload",
@@ -886,15 +978,26 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "visible_when": {"field": "status", "eq": "ready"},
                         },
                         {
-                            "column": "columns_json",
-                            "widget": "value",
-                            "read_only": True,
+                            "column": "column_map",
+                            "widget": "column_map",
+                            "source_columns_from": "columns_json",
+                            "schema": _CATALOG_COLUMN_MAP_SCHEMA,
                             "visible_when": {"field": "status", "eq": "ready"},
                         },
                         {
                             "column": "project_ids",
                             "widget": "project_multiselect",
+                            "icon": "folder_outlined",
                             "visible_when": {"field": "status", "eq": "ready"},
+                        },
+                        {
+                            "column": "paused",
+                            "widget": "switch",
+                            "icon": "pause_circle_outline",
+                            "visible_when": {
+                                "field": "status",
+                                "in": ["ready", "error"],
+                            },
                         },
                     ],
                 },
@@ -1070,19 +1173,23 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
         ],
         "materialize": [
             {
-                "id": "catalog_sqlite_artifacts",
+                "id": "catalog_merged_sqlite",
                 "enabled": True,
                 "when": ["project.created", "project.resumed", "project.sync"],
                 "priority": 40,
                 "source": {
                     "type": "rows",
                     "table_slug": "catalogs",
-                    "filter": {"status": "ready"},
+                    "filter": {"status": "ready", "paused": False},
                 },
                 "target": {
-                    "workspace_path": "catalogs/{{row_id}}.sqlite",
-                    "format": "copy_blob",
-                    "field": "artifact_ref",
+                    "workspace_path": "catalogs/catalog.sqlite",
+                    "format": "merge_mapped_sqlite",
+                    "artifact_field": "artifact_ref",
+                    "map_field": "column_map",
+                    "schema": list(_CATALOG_MERGE_SCHEMA),
+                    "required_map_keys": ["title", "price"],
+                    "provenance": {"target": "source_catalog", "from": "name"},
                 },
             },
             {
@@ -1093,7 +1200,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "source": {
                     "type": "rows",
                     "table_slug": "catalogs",
-                    "filter": {"status": "ready"},
+                    "filter": {"status": "ready", "paused": False},
                 },
                 "target": {
                     "workspace_path": "catalogs/manifest.json",
@@ -1106,13 +1213,19 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "id": "equipment_catalog_list",
                 "name": "equipment_catalog_list",
                 "label": "List equipment catalogs",
-                "description": "List ready catalog cards (Postgres SoT); files live at /workspace/catalogs",
+                "description": (
+                    "List ready non-paused catalog cards (Postgres SoT); "
+                    "merged RO search file is /workspace/catalogs/catalog.sqlite"
+                ),
                 "enabled": True,
                 "kind": "rows_query",
                 "params_schema": {"type": "object", "properties": {}},
                 "implementation": {
                     "table_slug": "catalogs",
-                    "query": {"filter": {"status": "ready"}, "limit": 100},
+                    "query": {
+                        "filter": {"status": "ready", "paused": False},
+                        "limit": 100,
+                    },
                 },
             },
             {
@@ -1120,22 +1233,22 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "name": "equipment_catalog_query",
                 "label": "Query catalog SQLite",
                 "description": (
-                    "RO search in materialized catalogs/*.sqlite (table rows). "
-                    "Prefer part_number exact; else text LIKE across columns."
+                    "RO search in merged /workspace/catalogs/catalog.sqlite "
+                    "(canonical columns: title, price, part_number, supplier, "
+                    "lead_time, source_catalog). Prefer part_number exact; else title LIKE."
                 ),
                 "enabled": True,
                 "kind": "workspace_sqlite_query",
                 "params_schema": {
                     "type": "object",
                     "properties": {
-                        "catalog_id": {"type": "string"},
                         "part_number": {"type": "string"},
                         "query": {"type": "string"},
                         "limit": {"type": "integer", "default": 20},
                     },
                 },
                 "implementation": {
-                    "workspace_glob": "catalogs/*.sqlite",
+                    "workspace_path": "catalogs/catalog.sqlite",
                     "table": "rows",
                     "helper": "prodavan.application.modules.catalog_sqlite_query",
                 },

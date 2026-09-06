@@ -5,6 +5,8 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
+import 'package:prodavan/features/meta/meta_icon.dart';
+import 'package:prodavan/features/meta/widgets/column_map_field.dart';
 import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
 import 'package:prodavan/features/meta/widgets/secret_upload_field.dart';
 import 'package:prodavan/features/meta/widgets/markdown_editor_field.dart';
@@ -183,7 +185,25 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     final fieldCfg = _fieldConfig(fieldEntries, name);
     final widgetKind = fieldCfg?['widget'] as String?;
     final fieldReadOnly = widget.readOnly || fieldCfg?['read_only'] == true;
+    final fieldIconName = fieldCfg?['icon'] as String?;
+    final fieldIcon =
+        fieldIconName != null && fieldIconName.isNotEmpty ? metaIconFromName(fieldIconName) : null;
 
+    if (widgetKind == 'column_map') {
+      final sourceFrom = fieldCfg?['source_columns_from']?.toString() ?? 'columns_json';
+      final schemaRaw = fieldCfg?['schema'];
+      final schema = schemaRaw is List
+          ? schemaRaw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
+          : <Map<String, dynamic>>[];
+      return ColumnMapField(
+        label: label,
+        value: value,
+        sourceColumns: parseColumnsJson(_values[sourceFrom]),
+        schema: schema,
+        readOnly: fieldReadOnly,
+        onChanged: (map) => _persist(name, map),
+      );
+    }
     if (widgetKind == 'project_multiselect') {
       return ProjectMultiselectField(
         label: label,
@@ -273,6 +293,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       final current = value?.toString() ?? '';
       return AppChoicePreference<String>(
         title: label,
+        icon: fieldIcon,
         value: choices.contains(current) ? current : '',
         choices: choices,
         keyFor: (v) => v,
@@ -283,11 +304,23 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         },
       );
     }
+    if (widgetKind == 'switch' || type == 'bool') {
+      return AppSwitchPreference(
+        title: label,
+        icon: fieldIcon,
+        value: value == true,
+        enabled: !fieldReadOnly,
+        onChanged: (v) async {
+          _persist(name, v);
+        },
+      );
+    }
     if (widgetKind == 'choice' || type == 'enum') {
       final choices = _enumChoices(column);
       final current = value?.toString() ?? (choices.isNotEmpty ? choices.first : '');
       return AppChoicePreference<String>(
         title: label,
+        icon: fieldIcon,
         value: current,
         choices: choices,
         keyFor: (v) => v,
@@ -300,20 +333,12 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     }
 
     switch (type) {
-      case 'bool':
-        return AppSwitchPreference(
-          title: label,
-          value: value == true,
-          enabled: !fieldReadOnly,
-          onChanged: (v) async {
-            _persist(name, v);
-          },
-        );
       case 'enum':
         final choices = _enumChoices(column);
         final current = value?.toString() ?? (choices.isNotEmpty ? choices.first : '');
         return AppChoicePreference<String>(
           title: label,
+          icon: fieldIcon,
           value: current,
           choices: choices,
           keyFor: (v) => v,
@@ -326,6 +351,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       default:
         return AppValuePreference<String>(
           title: label,
+          icon: fieldIcon,
           value: value?.toString() ?? '',
           enabled: !fieldReadOnly,
           onSave: (v) async {

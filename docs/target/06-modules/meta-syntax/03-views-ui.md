@@ -197,6 +197,8 @@ Radio in row leading; tap → `POST .../actions/{action}/invoke?row_id=`.
 |-------------|----------|
 | `read_only` | Preference disabled (display-only) |
 | `visible_when` | Show field only when condition matches current row body |
+| `icon` | Leading icon on preference (`metaIconFromName`) |
+| `widget: column_map` | Map source headers → canonical schema slots |
 
 `visible_when` shapes:
 
@@ -205,6 +207,32 @@ Radio in row leading; tap → `POST .../actions/{action}/invoke?row_id=`.
 { "field": "status", "in": ["ready", "error"] }
 { "field": "error", "not_empty": true }
 ```
+
+`column_map` field shape:
+
+```json
+{
+  "column": "column_map",
+  "widget": "column_map",
+  "source_columns_from": "columns_json",
+  "schema": [
+    {
+      "key": "title",
+      "label": {"ru": "Название", "en": "Title"},
+      "required": true,
+      "synonyms": ["title", "name", "наименование"]
+    }
+  ]
+}
+```
+
+Collection column envelope sources (not body fields):
+
+```json
+{ "field": "added_at", "label": {"ru": "Добавлено"}, "source": "row.created_at" }
+```
+
+Supported: `row.created_at`, `row.updated_at`.
 
 ### `hub` → navigation list
 
@@ -274,6 +302,8 @@ EmptyPlaceholder(title: "Метаданные", subtitle: "<parse error code>")
 | `form` + `widget: markdown_editor` | MarkdownEditorField | AGENTS.md, prompt items |
 | `form` + `widget: file_upload` | FileUploadField | `file_ref` via `/cabinets/{id}/content/upload` |
 | `form` + `widget: project_multiselect` | ProjectMultiselectField | `project_ids` column; empty = all projects |
+| `form` + `widget: column_map` | ColumnMapField | map source headers → canonical schema |
+| `form` + `fields[].icon` | preference leading icon | any value/switch/choice field |
 
 Collection extras: `inline_add`, `row_filter`, `context_bind.profile_id=contextRowId`.
 

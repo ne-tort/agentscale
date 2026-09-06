@@ -72,6 +72,30 @@ Slug: `materialize` — массив `MaterializeRule[]`.
 | `json_single` | One row body object |
 | `template` | Mustache-style `{{field}}` in template field |
 | `copy_blob` | Binary copy from Content Service blob (`storage_key` / `version_id`) |
+| `merge_mapped_sqlite` | Merge N row SQLite artifacts via per-row `column_map` into one canonical `rows` table |
+
+### `merge_mapped_sqlite`
+
+```json
+{
+  "source": {
+    "type": "rows",
+    "table_slug": "catalogs",
+    "filter": { "status": "ready", "paused": false }
+  },
+  "target": {
+    "workspace_path": "catalogs/catalog.sqlite",
+    "format": "merge_mapped_sqlite",
+    "artifact_field": "artifact_ref",
+    "map_field": "column_map",
+    "schema": ["title", "price", "part_number", "supplier", "lead_time", "source_catalog"],
+    "required_map_keys": ["title", "price"],
+    "provenance": { "target": "source_catalog", "from": "name" }
+  }
+}
+```
+
+Rows without a complete required map are skipped. `project_ids` on each body is always applied (empty = all projects). Bool filters treat missing keys as `false`.
 
 ## Workspace layout (канон)
 
