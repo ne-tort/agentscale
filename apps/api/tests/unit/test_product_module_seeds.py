@@ -3,6 +3,7 @@
 from prodavan.application.platform.product_module_seeds import (
     EXAMPLE_MODULE_IDS,
     PRODUCT_MODULES,
+    mod_equipment_meta,
     mod_files_meta,
     mod_mcp_meta,
     mod_prompts_meta,
@@ -12,12 +13,12 @@ from prodavan.application.platform.product_module_upsert import upsert_product_m
 
 def test_upsert_product_modules_helper_is_importable() -> None:
     assert callable(upsert_product_modules)
-    assert len(PRODUCT_MODULES) == 3
+    assert len(PRODUCT_MODULES) == 4
 
 
 def test_product_modules_replace_examples() -> None:
     ids = {m[0] for m in PRODUCT_MODULES}
-    assert ids == {"mod_prompts", "mod_mcp", "mod_files"}
+    assert ids == {"mod_prompts", "mod_mcp", "mod_files", "mod_equipment"}
     assert len(EXAMPLE_MODULE_IDS) == 4
 
 
@@ -71,3 +72,22 @@ def test_collection_views_use_inline_add_without_primary_action() -> None:
             ui = coll["ui_json"]
             assert "primary_action" not in ui
             assert ui["inline_add"]["title"]
+
+
+def test_equipment_meta_hub_on_data_placement() -> None:
+    meta = mod_equipment_meta()
+    tab = meta["tabs"][0]
+    assert tab["view_slug"] == "equipment_hub"
+    assert tab["nav"]["placement"] == "data"
+    assert {t["slug"] for t in meta["tables"]} == {
+        "catalogs",
+        "request_lines",
+        "found_offers",
+    }
+    kinds = {a["kind"] for a in meta["actions"]}
+    assert "content.index_tabular" in kinds
+    assert "data.select_row" in kinds
+    assert any(r["target"]["format"] == "copy_blob" for r in meta["materialize"])
+    tool_names = {t["name"] for t in meta["mcp_tools"]}
+    assert "equipment_catalog_query" in tool_names
+    assert "equipment_offers_upsert" in tool_names

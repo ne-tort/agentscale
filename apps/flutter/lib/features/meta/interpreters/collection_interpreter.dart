@@ -53,7 +53,8 @@ class CollectionViewInterpreter extends StatelessWidget {
       builder: (context, _) {
         final locale = Localizations.localeOf(context);
         final columns = _columns(uiJson, l10n, locale);
-        final rows = _filteredRows(seeds, tableSlug, uiJson);
+        final rawRows = _filteredRows(seeds, tableSlug, uiJson);
+        final rows = _withSelection(context, uiJson, rawRows);
         final hasInline = _hasInlineAdd(uiJson);
         final toolbar = _toolbar(context, uiJson, tableSlug, l10n, skipCreate: hasInline);
         final emptyUi = uiJson['empty'];
@@ -117,20 +118,34 @@ class CollectionViewInterpreter extends StatelessWidget {
   List<AppEntityRow> _filteredRows(dynamic seeds, String tableSlug, Map<String, dynamic> uiJson) {
     final all = seeds.entityRows(tableSlug, uiJson) as List<AppEntityRow>;
     final filter = uiJson['row_filter'];
-    if (filter is! Map) return all;
     final contextBind = uiJson['context_bind'];
-    String? profileId = contextRowId;
-    if (contextBind is Map && contextBind['profile_id'] == 'contextRowId') {
-      profileId = contextRowId;
+    final bindEntries = <MapEntry<String, String>>[];
+    if (contextBind is Map && contextRowId != null) {
+      for (final e in contextBind.entries) {
+        if (e.value?.toString() == 'contextRowId') {
+          bindEntries.add(MapEntry(e.key.toString(), contextRowId!));
+        }
+      }
     }
+    // Legacy prompts: profile_id ← contextRowId when context_bind missing.
+    if (bindEntries.isEmpty && contextRowId != null && contextBind is Map) {
+      if (contextBind['profile_id'] == 'contextRowId') {
+        bindEntries.add(MapEntry('profile_id', contextRowId!));
+      }
+    }
+    if (filter is! Map && bindEntries.isEmpty) return all;
     return all.where((row) {
       final item = seeds.itemById(row.id);
       final body = item?['body'];
       if (body is! Map) return false;
-      for (final entry in filter.entries) {
-        if (body[entry.key]?.toString() != entry.value.toString()) return false;
+      if (filter is Map) {
+        for (final entry in filter.entries) {
+          if (body[entry.key]?.toString() != entry.value.toString()) return false;
+        }
       }
-      if (profileId != null && body['profile_id']?.toString() != profileId) return false;
+      for (final bind in bindEntries) {
+        if (body[bind.key]?.toString() != bind.value) return false;
+      }
       return true;
     }).toList();
   }
@@ -193,7 +208,7 @@ class CollectionViewInterpreter extends StatelessWidget {
             AppIconButton(
               icon: Icons.bolt_outlined,
               tooltip: actionId.isEmpty ? 'Action' : actionId,
-              onPressed: () => _invokeAction(context, actionId),
+              onPressed: () => _invokeAction(context, actionId, rowId: contextRowId),
             ),
           );
         }
@@ -227,11 +242,11 @@ class CollectionViewInterpreter extends StatelessWidget {
     return null;
   }
 
-  Future<void> _invokeAction(BuildContext context, String actionId) async {
+  Future<void> _invokeAction(BuildContext context, String actionId, {String? rowId}) async {
     if (actionId.isEmpty) return;
     if (seeds is CabinetDataController) {
       try {
-        await (seeds as CabinetDataController).invokeAction(actionId);
+        await (seeds as CabinetDataController).invokeAction(actionId, rowId: rowId);
         if (context.mounted) {
           AppSnackBar.info(context, actionId);
         }
@@ -245,14 +260,61 @@ class CollectionViewInterpreter extends StatelessWidget {
     PreviewStub.run(context, actionId);
   }
 
+  List<AppEntityRow> _withSelection(
+    BuildContext context,
+    Map<String, dynamic> uiJson,
+    List<AppEntityRow> rows,
+  ) {
+    final selection = uiJson['selection'];
+    if (selection is! Map || selection['kind'] != 'single') return rows;
+    final field = selection['field'] as String? ?? 'is_selected';
+    final actionId = selection['action'] as String? ?? '';
+    String? selectedId;
+    for (final row in rows) {
+      final item = seeds.itemById(row.id);
+      final body = item?['body'];
+      if (body is Map && body[field] == true) {
+        selectedId = row.id;
+        break;
+      }
+    }
+    return rows.map((row) {
+      return AppEntityRow(
+        id: row.id,
+        title: row.title,
+        subtitle: row.subtitle,
+        cells: row.cells,
+        cellWidgets: row.cellWidgets,
+        titleColor: row.titleColor,
+        rowColor: row.rowColor,
+        titleBold: row.titleBold,
+        trailing: row.trailing,
+        leading: Radio<String>(
+          value: row.id,
+          groupValue: selectedId,
+          onChanged: readOnly || actionId.isEmpty
+              ? null
+              : (_) => _invokeAction(context, actionId, rowId: row.id),
+        ),
+      );
+    }).toList();
+  }
+
   void _create(BuildContext context, Map<String, dynamic> uiJson, String tableSlug) {
     final rowId = seeds.createRow(tableSlug);
-    final rowTap = uiJson['row_tap'];
-    if (rowTap is Map && rowTap['kind'] == 'open_form') {
-      final formView = rowTap['view'] as String?;
-      if (formView != null && onOpenForm != null) {
-        onOpenForm!(formView, rowId: rowId);
+    final primary = uiJson['primary_action'];
+    String? formView;
+    if (primary is Map && primary['view'] is String) {
+      formView = primary['view'] as String;
+    } else {
+      final rowTap = uiJson['row_tap'];
+      if (rowTap is Map &&
+          (rowTap['kind'] == 'open_form' || rowTap['kind'] == 'open_view')) {
+        formView = rowTap['view'] as String?;
       }
+    }
+    if (formView != null && onOpenForm != null) {
+      onOpenForm!(formView, rowId: rowId);
     }
   }
 }
@@ -280,7 +342,15 @@ class _CollectionInlineAddHost extends StatelessWidget {
     if (filter is Map) {
       body.addAll(Map<String, dynamic>.from(filter));
     }
-    if (contextRowId != null) {
+    final contextBind = uiJson['context_bind'];
+    if (contextRowId != null && contextBind is Map) {
+      for (final e in contextBind.entries) {
+        if (e.value?.toString() == 'contextRowId') {
+          body[e.key.toString()] = contextRowId;
+        }
+      }
+    } else if (contextRowId != null) {
+      // Legacy prompts binding.
       body['profile_id'] = contextRowId;
     }
     if (seeds.runtimeType.toString().contains('RuntimeDataAdapter')) {

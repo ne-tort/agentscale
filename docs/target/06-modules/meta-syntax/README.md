@@ -81,6 +81,7 @@ Shared template в platform DB — `module_meta_documents`:
 | Agent context (prompts/rules → Pod) | [examples/agent-context-module.md](examples/agent-context-module.md) |
 | Простая data-table для MCP | [examples/data-only-module.md](examples/data-only-module.md) |
 | Project-scoped вкладка | [examples/project-scoped-tab.md](examples/project-scoped-tab.md) |
+| Подбор техники (catalogs + lines + offers) | [examples/equipment-matching-module.md](examples/equipment-matching-module.md) |
 
 ## Версионирование
 

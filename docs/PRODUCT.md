@@ -40,7 +40,7 @@ Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** depe
 ### Chat UX (project workspace)
 
 - **Multi-chat** — несколько agent sessions на project; selected project и pin — **per employee**. Rail: peer блок чатов («Новый диалог» → pins → чаты проекта). «Новый диалог» **скрыта**, пока selected project не `active` **и** container `observed_state=running` (`new_chat_enabled`); draft/paused/error/запуск — без кнопки. После launch/resume/reload UI обновляет rail. Settings «Чат» — только при sendable (active+running). Таблица проектов: about / chats / budget (stub). Workspace только с явным `sessionId`.
-- **Cabinet hubs** — «Управление» (`nav.placement: management`) и «Данные» (`data`) — страницы-хабы как peer к Projects; **скрыты**, если ни один модуль не подключил вкладку. Промпты/MCP/Файлы — preference tiles (уникальные иконки + subtitle).
+- **Cabinet hubs** — «Управление» (`nav.placement: management`) и «Данные» (`data`) — страницы-хабы как peer к Projects; **скрыты**, если ни один модуль не подключил вкладку. Промпты/MCP/Файлы — preference tiles в «Управление»; **Подбор техники** (`mod_equipment`) — hub в «Данные».
 - **Live streaming** — assistant text из SSE `text_delta` без full reload после turn; ingress нормализует cumulative/overlap SDK deltas в incremental.
 - **Block-based transcript** — `GET /chat/transcript?session_id=` → `{ blocks: [...] }` (user, assistant_markdown, tool_*, subagent, plan, thinking, usage).
 - **Cursor-style rendering** — assistant inline без bubble; reasoning/tools — muted underlined lines + inset panel; tools paired by id; consecutive thinking → один spoiler; tool expand с path/`+N −M`.
@@ -118,6 +118,27 @@ Module-level **MP binding** (`module_project_bindings`): if bindings exist, modu
 Future base modules follow the same cascade: edit in the owner’s instance, fork on bind down the chain, materialize from the project leaf.
 
 **File & env pipeline (meta-syntax spec):** upload via Content Service → FileRef in row → materialize (`copy_blob` / `raw`) → Pod `/workspace`; container env and Vault secrets — declarative slugs, implementation backlog. See [12-content-file-pipeline](target/06-modules/meta-syntax/12-content-file-pipeline.md) · [13-container-env-secrets](target/06-modules/meta-syntax/13-container-env-secrets.md) · [gap map P-META-*](target/09-gap-map.md).
+
+### Equipment matching module (`mod_equipment`)
+
+Product module for computer-equipment matching (meta-tables, hub on **Данные**).
+
+| Layer | SoT | Notes |
+|-------|-----|--------|
+| Catalog cards, request lines, found offers, selection | Postgres module instance rows | Editable UI + agent via rows API |
+| Parsed price tables (csv/xlsx → index) | MinIO content blob (**SQLite artifact**) | Materialize RO into `/workspace/catalogs/{row_id}.sqlite` for MCP search |
+
+**Hybrid (fixed):** heavy catalogs are not JSONB rows and not live platform Postgres DSN in the Pod. Ingest is platform action `content.index_tabular` (reusable, not equipment-only).
+
+| Table | Scope intent | Role |
+|-------|--------------|------|
+| `catalogs` | shared (cabinet instance) | name, source file, artifact ref, status, row_count, columns |
+| `request_lines` | project leaf | customer line: title, P/N, qty, found_count, selected_offer_id |
+| `found_offers` | project leaf | candidates linked to a line; exactly one `is_selected` primary |
+
+Agent fills `found_offers` / `found_count` through cabinet/project rows APIs (or declarative `mcp_tools`); MCP RO tools query materialized SQLite catalogs only.
+
+Meta primitives used/extended: hub + collections, `file_ref`, master–detail (`open_view` + `context_bind`), `data.select_row`, `content.index_tabular`. See [meta-syntax](target/06-modules/meta-syntax/).
 
 ## Project lifecycle (employee UI)
 

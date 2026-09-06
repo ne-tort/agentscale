@@ -2,16 +2,25 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.cabinets.cabinet_module_service import CabinetModuleService
+from prodavan.application.content.tabular_index import index_tabular_bytes
+from prodavan.application.content.upload_service import UploadService
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
+from prodavan.infrastructure.files.manager import ensure_file_store
+from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
+from prodavan.infrastructure.persistence.models.content import ContentBlobVersionRow
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.modules import ModuleMetaDocumentRow
+
+logger = logging.getLogger(__name__)
 
 
 class ModuleActionExecutor:
@@ -87,6 +96,26 @@ class ModuleActionExecutor:
             )
             return {"kind": kind, "deleted_row_id": row_id}
 
+        if kind == "data.select_row":
+            return await self._select_row(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+            )
+
+        if kind == "content.index_tabular":
+            return await self._index_tabular(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+            )
+
         raise AppError(
             code="NOT_IMPLEMENTED",
             title="Not Implemented",
@@ -94,7 +123,337 @@ class ModuleActionExecutor:
             detail=f"action kind not supported: {kind}",
         )
 
-    async def _load_action(self, *, module_id: str, action_id: str) -> dict[str, Any]:
+    async def maybe_auto_index_tabular(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        table_slug: str,
+        row_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> None:
+        """Best-effort: run content.index_tabular actions matching table after row write."""
+        for action in await self._list_actions(module_id=module_id):
+            if action.get("enabled") is False:
+                continue
+            if str(action.get("kind") or "") != "content.index_tabular":
+                continue
+            params = action.get("params") if isinstance(action.get("params"), dict) else {}
+            if str(params.get("table_slug") or "") != table_slug:
+                continue
+            trigger = action.get("trigger") if isinstance(action.get("trigger"), dict) else {}
+            on = trigger.get("on") if isinstance(trigger.get("on"), list) else ["row.created", "row.updated"]
+            if "row.created" not in on and "row.updated" not in on:
+                continue
+            source_column = str(params.get("source_column") or "source_file")
+            status_col = str(params.get("status_column") or "status")
+            rows = await self._modules.list_data_rows(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                principal=principal,
+                employee=employee,
+            )
+            target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
+            if target is None:
+                continue
+            body = target.get("body") if isinstance(target.get("body"), dict) else {}
+            if not isinstance(body.get(source_column), dict):
+                continue
+            status = str(body.get(status_col) or "")
+            if status == "indexing":
+                continue
+            artifact_col = str(params.get("artifact_column") or "artifact_ref")
+            source_ref = body.get(source_column)
+            storage_key = (
+                str(source_ref.get("storage_key") or "")
+                if isinstance(source_ref, dict)
+                else ""
+            )
+            # Skip only when already indexed for the same source blob.
+            if (
+                status == "ready"
+                and isinstance(body.get(artifact_col), dict)
+                and storage_key
+                and storage_key == str(body.get("indexed_source_key") or "")
+            ):
+                continue
+            try:
+                await self._index_tabular(
+                    cabinet_id=cabinet_id,
+                    module_id=module_id,
+                    params=params,
+                    row_id=row_id,
+                    principal=principal,
+                    employee=employee,
+                )
+            except Exception:
+                logger.exception(
+                    "auto index_tabular failed module=%s table=%s row=%s",
+                    module_id,
+                    table_slug,
+                    row_id,
+                )
+
+    async def _select_row(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        row_id: str | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict[str, Any]:
+        table_slug = params.get("table_slug")
+        select_field = str(params.get("select_field") or "is_selected")
+        group_by = params.get("group_by")
+        if not isinstance(table_slug, str) or not table_slug:
+            raise AppError(
+                code="META_VALIDATION",
+                title="Meta validation error",
+                status=422,
+                detail="data.select_row requires params.table_slug",
+            )
+        if not row_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="row_id required for data.select_row",
+            )
+        if not isinstance(group_by, str) or not group_by:
+            raise AppError(
+                code="META_VALIDATION",
+                title="Meta validation error",
+                status=422,
+                detail="data.select_row requires params.group_by",
+            )
+
+        rows = await self._modules.list_data_rows(
+            cabinet_id=cabinet_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            principal=principal,
+            employee=employee,
+        )
+        target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
+        if target is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        body = dict(target.get("body") or {})
+        group_val = body.get(group_by)
+        updated = 0
+        for row in rows:
+            b = dict(row.get("body") or {})
+            if b.get(group_by) != group_val:
+                continue
+            rid = str(row.get("row_id"))
+            want = rid == row_id
+            if bool(b.get(select_field)) is want:
+                continue
+            b[select_field] = want
+            await self._modules.update_data_row(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                row_id=rid,
+                body=b,
+                principal=principal,
+                employee=employee,
+                run_actions=False,
+            )
+            updated += 1
+
+        parent = params.get("parent") if isinstance(params.get("parent"), dict) else None
+        if parent:
+            parent_table = parent.get("table_slug")
+            id_from = parent.get("id_from") or group_by
+            set_field = parent.get("set_field") or "selected_offer_id"
+            parent_id = body.get(id_from) if isinstance(id_from, str) else None
+            if isinstance(parent_table, str) and parent_table and parent_id:
+                parent_rows = await self._modules.list_data_rows(
+                    cabinet_id=cabinet_id,
+                    module_id=module_id,
+                    table_slug=parent_table,
+                    principal=principal,
+                    employee=employee,
+                )
+                for prow in parent_rows:
+                    if str(prow.get("row_id")) == str(parent_id):
+                        pb = dict(prow.get("body") or {})
+                        pb[str(set_field)] = row_id
+                        pb["status"] = "selected"
+                        await self._modules.update_data_row(
+                            cabinet_id=cabinet_id,
+                            module_id=module_id,
+                            table_slug=parent_table,
+                            row_id=str(prow.get("row_id")),
+                            body=pb,
+                            principal=principal,
+                            employee=employee,
+                            run_actions=False,
+                        )
+                        break
+
+        return {"kind": "data.select_row", "row_id": row_id, "updated": updated}
+
+    async def _index_tabular(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        row_id: str | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict[str, Any]:
+        table_slug = params.get("table_slug")
+        source_column = str(params.get("source_column") or "source_file")
+        if not isinstance(table_slug, str) or not table_slug:
+            raise AppError(
+                code="META_VALIDATION",
+                title="Meta validation error",
+                status=422,
+                detail="content.index_tabular requires params.table_slug",
+            )
+        if not row_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="row_id required for content.index_tabular",
+            )
+
+        rows = await self._modules.list_data_rows(
+            cabinet_id=cabinet_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            principal=principal,
+            employee=employee,
+        )
+        target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
+        if target is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        body = dict(target.get("body") or {})
+        status_col = str(params.get("status_column") or "status")
+        error_col = str(params.get("error_column") or "error")
+        artifact_col = str(params.get("artifact_column") or "artifact_ref")
+        row_count_col = str(params.get("row_count_column") or "row_count")
+        columns_col = str(params.get("columns_json_column") or "columns_json")
+
+        file_ref = body.get(source_column)
+        if not isinstance(file_ref, dict):
+            body[status_col] = "draft"
+            body[error_col] = None
+            await self._modules.update_data_row(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                row_id=row_id,
+                body=body,
+                principal=principal,
+                employee=employee,
+                run_actions=False,
+            )
+            return {"kind": "content.index_tabular", "status": "draft", "row_id": row_id}
+
+        body[status_col] = "indexing"
+        body[error_col] = None
+        await self._modules.update_data_row(
+            cabinet_id=cabinet_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            row_id=row_id,
+            body=body,
+            principal=principal,
+            employee=employee,
+            run_actions=False,
+        )
+
+        indexed_columns: list[str] = []
+        try:
+            storage_key = str(file_ref.get("storage_key") or "")
+            filename = str(file_ref.get("filename") or "data.csv")
+            if not storage_key:
+                raise ValueError("file_ref.storage_key missing")
+            raw = ensure_file_store().get_bytes_sync(storage_key)
+            indexed = index_tabular_bytes(raw, filename=filename)
+            indexed_columns = list(indexed.columns)
+
+            cab = await self._session.get(CabinetInstanceRow, cabinet_id)
+            if cab is None or not cab.company_id:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail="cabinet has no company for content upload",
+                )
+            asset_id, version_id = await UploadService(self._session).upload_bytes_as_asset(
+                data=indexed.sqlite_bytes,
+                owner_company_id=cab.company_id,
+                principal=principal,
+                employee=employee,
+                mime="application/x-sqlite3",
+                title=f"{filename}.sqlite",
+                link_kind="module_catalog",
+                link_id=row_id,
+            )
+            ver = await self._session.get(ContentBlobVersionRow, version_id)
+            if ver is None:
+                raise RuntimeError("blob version missing after upload")
+            body[artifact_col] = {
+                "asset_id": asset_id,
+                "version_id": version_id,
+                "storage_key": ver.storage_key,
+                "filename": f"{row_id}.sqlite",
+            }
+            body["indexed_source_key"] = storage_key
+            body[row_count_col] = indexed.row_count
+            body[columns_col] = json.dumps(indexed.columns, ensure_ascii=False)
+            body[status_col] = "ready"
+            body[error_col] = None
+        except AppError:
+            raise
+        except Exception as exc:
+            body[status_col] = "error"
+            body[error_col] = str(exc)[:500]
+            await self._modules.update_data_row(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                row_id=row_id,
+                body=body,
+                principal=principal,
+                employee=employee,
+                run_actions=False,
+            )
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail=f"index_tabular failed: {exc}",
+            ) from exc
+
+        await self._modules.update_data_row(
+            cabinet_id=cabinet_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            row_id=row_id,
+            body=body,
+            principal=principal,
+            employee=employee,
+            run_actions=False,
+        )
+        return {
+            "kind": "content.index_tabular",
+            "status": "ready",
+            "row_id": row_id,
+            "row_count": body.get(row_count_col),
+            "columns": indexed_columns,
+        }
+
+    async def _list_actions(self, *, module_id: str) -> list[dict[str, Any]]:
         q = await self._session.execute(
             select(ModuleMetaDocumentRow.body).where(
                 ModuleMetaDocumentRow.module_id == module_id,
@@ -103,8 +462,11 @@ class ModuleActionExecutor:
         )
         body = q.scalar_one_or_none()
         if not isinstance(body, list):
-            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="actions not found")
-        for item in body:
-            if isinstance(item, dict) and str(item.get("id")) == action_id:
+            return []
+        return [item for item in body if isinstance(item, dict)]
+
+    async def _load_action(self, *, module_id: str, action_id: str) -> dict[str, Any]:
+        for item in await self._list_actions(module_id=module_id):
+            if str(item.get("id")) == action_id:
                 return item
         raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="action not found")

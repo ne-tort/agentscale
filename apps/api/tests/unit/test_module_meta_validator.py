@@ -179,10 +179,16 @@ def test_materialize_copy_blob_requires_field() -> None:
 
 def test_product_module_seeds_pass_meta_validation() -> None:
     from prodavan.application.platform.product_module_seeds import (
+        mod_equipment_meta,
         mod_files_meta,
         mod_mcp_meta,
         mod_prompts_meta,
     )
 
-    for meta in (mod_prompts_meta(), mod_mcp_meta(), mod_files_meta()):
+    for meta in (
+        mod_prompts_meta(),
+        mod_mcp_meta(),
+        mod_files_meta(),
+        mod_equipment_meta(),
+    ):
         validate_merged_slug_map(meta)

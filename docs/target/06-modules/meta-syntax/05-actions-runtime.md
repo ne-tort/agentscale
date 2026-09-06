@@ -43,6 +43,8 @@ Actions описывают **функциональную логику** без 
 |------|---------|----------------|
 | `data.create_row` | POST data row | `table_slug`, optional `defaults` |
 | `data.delete_row` | DELETE row | `table_slug` |
+| `data.select_row` | Clear siblings + set selected | `table_slug`, `select_field`, `group_by`, optional `parent` |
+| `content.index_tabular` | Parse csv/xlsx → SQLite artifact FileRef | `table_slug`, `source_column`, metadata columns |
 | `materialize.file` | MinIO get → put workspace prefix | `source`, `target` |
 | `materialize.rows` | Export rows JSON/CSV to workspace | `table_slug`, `filter`, `target` |
 | `materialize.template` | Render template field → file | `source_row`, `field`, `target_path` |
@@ -50,6 +52,49 @@ Actions описывают **функциональную логику** без 
 | `project.ensure_container` | Trigger Pod ensure (async) | `project_id` from context |
 | `mcp.invoke` | Call registered declarative tool | `tool_id`, `args` |
 | `http.webhook` | Outbound POST (future, policy-gated) | `url`, `body_template` |
+
+### `data.select_row`
+
+```json
+{
+  "id": "select_offer_primary",
+  "kind": "data.select_row",
+  "params": {
+    "table_slug": "found_offers",
+    "select_field": "is_selected",
+    "group_by": "line_id",
+    "parent": {
+      "table_slug": "request_lines",
+      "id_from": "line_id",
+      "set_field": "selected_offer_id"
+    }
+  }
+}
+```
+
+Semantics: for all rows with the same `group_by` value as the target row, set `select_field=false`; set target `true`; optionally write target id into parent row field.
+
+### `content.index_tabular`
+
+```json
+{
+  "id": "index_catalog_file",
+  "kind": "content.index_tabular",
+  "params": {
+    "table_slug": "catalogs",
+    "source_column": "source_file",
+    "artifact_column": "artifact_ref",
+    "status_column": "status",
+    "row_count_column": "row_count",
+    "columns_json_column": "columns_json",
+    "error_column": "error",
+    "sheet": 0
+  },
+  "trigger": { "on": ["row.created", "row.updated"], "async": true }
+}
+```
+
+Accepts csv / xlsx (first sheet). Writes SQLite blob (`CREATE TABLE rows (...);`) as Content asset FileRef. Updates metadata columns. Status enum typically `draft|indexing|ready|error`.
 
 ## Triggers (when action runs)
 

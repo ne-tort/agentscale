@@ -68,7 +68,10 @@ View = **как показать** данные таблицы. Отделён �
 | `primary_action.kind=create_row` | toolbar add → form (only when **no** `inline_add`) |
 | `inline_add` | `AppInlineAddField` — canonical inline create (see below) |
 | `row_tap.kind=open_form` | `Navigator.push` form view |
-| `row_tap.kind=open_view` | `Navigator.push` any view (e.g. profile hub) |
+| `row_tap.kind=open_view` | `Navigator.push` any view (e.g. profile hub, nested collection) |
+| `context_bind` | Map child body field → `contextRowId` (parent row). Example: `{"line_id": "contextRowId"}` filters/creates children for that parent |
+| `row_filter` | Static equality filters on body fields (combined with `context_bind`) |
+| `selection` | Single-select radio among rows (see below) |
 | `empty` | `EmptyPlaceholder` — laconic per-table (`{"ru":"Нет MCP","en":"No MCP"}`) |
 | `scaffold.title` | Optional app bar title (MetaLabel); default — none |
 
@@ -113,6 +116,47 @@ Interpreter: [`meta_label.dart`](../../../../apps/flutter/lib/features/meta/meta
 | `label` | deprecated alias for `title` |
 
 Hairline divider under field is built into `AppInlineAddField` (same as Company employees / Admin lists).
+
+When `context_bind` is set, inline create copies bound parent id into the named field (not only legacy `profile_id`).
+
+### Master–detail (`open_view` + `context_bind`)
+
+```json
+"row_tap": { "kind": "open_view", "view": "offers_for_line" }
+```
+
+Child collection:
+
+```json
+{
+  "slug": "offers_for_line",
+  "table_slug": "found_offers",
+  "kind": "collection",
+  "ui_json": {
+    "version": 1,
+    "kind": "collection",
+    "title_field": "title",
+    "context_bind": { "line_id": "contextRowId" },
+    "selection": {
+      "kind": "single",
+      "field": "is_selected",
+      "action": "select_offer_primary"
+    }
+  }
+}
+```
+
+Parent row id is passed as `contextRowId` into the child interpreter. Filter: body[`line_id`] == contextRowId. Inline add sets the same field.
+
+### `selection` (single among siblings)
+
+| Field | Meaning |
+|-------|---------|
+| `kind` | `single` (MVP) |
+| `field` | bool column on row (`is_selected`) |
+| `action` | ActionDefinition id (`data.select_row`) invoked with `row_id` |
+
+Radio in row leading; tap → `POST .../actions/{action}/invoke?row_id=`.
 
 ### `form` → preference fields
 

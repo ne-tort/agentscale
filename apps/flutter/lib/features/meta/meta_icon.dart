@@ -34,6 +34,16 @@ IconData metaIconFromName(String? name, {IconData fallback = Icons.extension_out
     case 'integration_instructions':
     case 'integration_instructions_outlined':
       return Icons.integration_instructions_outlined;
+    case 'precision_manufacturing':
+      return Icons.precision_manufacturing_outlined;
+    case 'storage':
+      return Icons.storage_outlined;
+    case 'list_alt':
+      return Icons.list_alt_outlined;
+    case 'inventory_2':
+      return Icons.inventory_2_outlined;
+    case 'sync':
+      return Icons.sync;
     default:
       return fallback;
   }

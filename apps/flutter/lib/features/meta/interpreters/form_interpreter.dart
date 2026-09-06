@@ -173,12 +173,22 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       if (scope == null) {
         return ListTile(title: Text(label), subtitle: const Text('file (preview only)'));
       }
+      String? accept;
+      if (fields is List) {
+        for (final f in fields.whereType<Map>()) {
+          if (f['column'] == name && f['accept'] is String) {
+            accept = f['accept'] as String;
+            break;
+          }
+        }
+      }
       return FileUploadField(
         label: label,
         value: value,
         cabinetId: scope.cabinetId,
         api: scope.api,
         readOnly: widget.readOnly,
+        accept: accept,
         onChanged: (ref) => _persist(name, ref),
       );
     }
@@ -195,6 +205,51 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         api: scope.api,
         readOnly: widget.readOnly,
         onChanged: (ref) => _persist(name, ref),
+      );
+    }
+    if (widgetKind == 'ref' || type == 'ref') {
+      final refMeta = column['ref'];
+      final refTable = refMeta is Map ? refMeta['table_slug'] as String? : null;
+      final choices = <String>[''];
+      final labels = <String, String>{'': '—'};
+      if (refTable != null && refTable.isNotEmpty) {
+        for (final item in widget.seeds.itemsForTable(refTable)) {
+          final id = item['row_id']?.toString() ?? '';
+          if (id.isEmpty) continue;
+          final body = item['body'];
+          final title = body is Map
+              ? (body['name'] ?? body['title'] ?? id).toString()
+              : id;
+          choices.add(id);
+          labels[id] = title;
+        }
+      }
+      final current = value?.toString() ?? '';
+      return AppChoicePreference<String>(
+        title: label,
+        value: choices.contains(current) ? current : '',
+        choices: choices,
+        keyFor: (v) => v,
+        labelFor: (v) => labels[v] ?? v,
+        enabled: !widget.readOnly,
+        onSave: (v) async {
+          _persist(name, v.isEmpty ? null : v);
+        },
+      );
+    }
+    if (widgetKind == 'choice' || type == 'enum') {
+      final choices = _enumChoices(column);
+      final current = value?.toString() ?? (choices.isNotEmpty ? choices.first : '');
+      return AppChoicePreference<String>(
+        title: label,
+        value: current,
+        choices: choices,
+        keyFor: (v) => v,
+        labelFor: (v) => _enumLabel(column, v),
+        enabled: !widget.readOnly,
+        onSave: (v) async {
+          _persist(name, v);
+        },
       );
     }
 

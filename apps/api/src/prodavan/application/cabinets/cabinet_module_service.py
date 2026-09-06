@@ -178,10 +178,19 @@ class CabinetModuleService:
         )
         await self._session.commit()
         remat = await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id)
-        return _attach_rematerialize(
+        out = _attach_rematerialize(
             {"module_id": module_id, "instance_id": inst.id, **row},
             remat,
         )
+        await self._maybe_run_row_actions(
+            cabinet_id=cabinet_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            row_id=str(row.get("row_id") or ""),
+            principal=principal,
+            employee=employee,
+        )
+        return out
 
     async def update_data_row(
         self,
@@ -193,6 +202,7 @@ class CabinetModuleService:
         body: Any,
         principal: Principal,
         employee: EmployeeRow | None,
+        run_actions: bool = True,
     ) -> dict:
         table_slug = check_table_slug(table_slug)
         body = ensure_row_body(body)
@@ -229,10 +239,20 @@ class CabinetModuleService:
         # rematerialize still commit. Prefer commit for HTTP handlers.
         await self._session.commit()
         remat = await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id)
-        return _attach_rematerialize(
+        out = _attach_rematerialize(
             {"module_id": module_id, "instance_id": inst.id, **row},
             remat,
         )
+        if run_actions:
+            await self._maybe_run_row_actions(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+            )
+        return out
 
     async def delete_data_row(
         self,
@@ -268,6 +288,29 @@ class CabinetModuleService:
             self._session,
             cabinet_id=cabinet_id,
             module_id=module_id,
+        )
+
+    async def _maybe_run_row_actions(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        table_slug: str,
+        row_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> None:
+        if not row_id:
+            return
+        from prodavan.application.modules.module_action_executor import ModuleActionExecutor
+
+        await ModuleActionExecutor(self._session).maybe_auto_index_tabular(
+            cabinet_id=cabinet_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            row_id=row_id,
+            principal=principal,
+            employee=employee,
         )
 
     async def _require_module_binding(self, *, cabinet_id: str, module_id: str) -> None:

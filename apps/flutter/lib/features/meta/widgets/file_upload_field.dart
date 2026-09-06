@@ -60,17 +60,25 @@ class FileUploadField extends StatelessWidget {
 
   List<String>? _extensions() {
     final accept = this.accept;
-    if (accept == null) return null;
-    if (accept.startsWith('.')) {
-      return [accept.substring(1)];
+    if (accept == null || accept.trim().isEmpty) return null;
+    final parts = accept.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty);
+    final out = <String>[];
+    for (final part in parts) {
+      out.add(part.startsWith('.') ? part.substring(1) : part);
     }
-    return null;
+    return out.isEmpty ? null : out;
   }
 
   String? _guessMime(String name) {
-    if (name.endsWith('.md')) return 'text/markdown';
-    if (name.endsWith('.zip')) return 'application/zip';
-    if (name.endsWith('.json')) return 'application/json';
+    final lower = name.toLowerCase();
+    if (lower.endsWith('.md')) return 'text/markdown';
+    if (lower.endsWith('.zip')) return 'application/zip';
+    if (lower.endsWith('.json')) return 'application/json';
+    if (lower.endsWith('.csv')) return 'text/csv';
+    if (lower.endsWith('.xlsx')) {
+      return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    }
+    if (lower.endsWith('.xls')) return 'application/vnd.ms-excel';
     return 'application/octet-stream';
   }
 
