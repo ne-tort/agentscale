@@ -21,7 +21,8 @@ def _sync_from_minio(*, workspace_key: str, target: Path) -> None:
     if not endpoint or not access_key or not secret_key:
         raise RuntimeError("MINIO_* env required for hydrate")
 
-    prefix = f"projects/{workspace_key}/"
+    # Object keys are projects/{key}/workspace/{rel}; land files at /workspace/{rel}.
+    prefix = f"projects/{workspace_key}/workspace/"
     client = boto3.client(
         "s3",
         endpoint_url=endpoint,

@@ -395,6 +395,9 @@ class PodCommand:
 
     async def _prepare_reload(self, project: ProjectRow, pod: ProjectPodRow) -> None:
         """Terminate live k8s workload and reset pod row so reload always recreates."""
+        from prodavan.application.projects.workspace_checkpoint import checkpoint_project_workspace
+
+        await checkpoint_project_workspace(self._session, project_id=project.id, best_effort=True)
         ref = pod.runtime_ref or project.container_ref
         if ref:
             try:

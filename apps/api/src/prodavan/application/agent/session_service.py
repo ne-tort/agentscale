@@ -31,6 +31,7 @@ from prodavan.application.ai_keys.service import AiKeysService
 from prodavan.application.ai_models.resolution import AiModelResolutionService
 from prodavan.application.project_service import ProjectAccessPolicy
 from prodavan.application.projects.attachment_service import ProjectAttachmentService
+from prodavan.application.projects.workspace_checkpoint import checkpoint_project_workspace
 from prodavan.config.settings import settings
 from prodavan.domain.agent import (
     FROZEN_EVENT_TYPES,
@@ -110,6 +111,20 @@ APPENDABLE_AGENT_EVENT_TYPES = frozenset(
 
 POD_AGENT_APPENDABLE_EVENT_TYPES = frozenset({*FROZEN_EVENT_TYPES, *PLATFORM_STREAM_EVENT_TYPES})
 
+# Mid-turn durability: commit user_message immediately; flush stream every N events
+# or on block boundaries so API/pod crash does not lose the whole turn.
+_STREAM_FLUSH_EVERY = 8
+_STREAM_FLUSH_TYPES = frozenset(
+    {
+        AgentEventType.TOOL_RESULT,
+        AgentEventType.TOOL_APPROVAL_REQUEST,
+        AgentEventType.USAGE,
+        AgentEventType.DONE,
+        AgentEventType.ERROR,
+        AgentEventType.SUBAGENT_STOP,
+    }
+)
+
 
 def _raise_if_agent_error_events(events: list[dict]) -> None:
     for event in reversed(events):
@@ -129,6 +144,19 @@ class AgentSessionService:
         self._keys = AiKeysService(session)
         self._budget = AgentBudgetService(session)
         self._subscription = CompanySubscriptionGate(session)
+
+    async def _flush_events(self) -> None:
+        """Commit pending agent_events so mid-turn crashes keep transcript durable."""
+        await self._session.commit()
+
+    async def _maybe_flush_stream(self, *, since_flush: int, event_type: str) -> int:
+        if since_flush >= _STREAM_FLUSH_EVERY or event_type in _STREAM_FLUSH_TYPES:
+            await self._flush_events()
+            return 0
+        return since_flush
+
+    async def _checkpoint_workspace_after_turn(self, *, project_id: str) -> None:
+        await checkpoint_project_workspace(self._session, project_id=project_id, best_effort=True)
 
     async def create_session(
         self,
@@ -449,9 +477,13 @@ class AgentSessionService:
             cabinet_id=project.cabinet_id,
             employee_id=employee.id if employee else None,
         )
+        # Durable user turn before vendor stream (crash mid-turn keeps the prompt).
+        await self._flush_events()
+        since_flush = 0
 
         stream_normalizer = TurnStreamNormalizer()
         used_bridge = False
+        turn_ok = False
         if settings.pod_agent_runtime_enabled:
             bridge = OpenClawBridgeBootstrap(self._session)
             if row.resolved_key_id:
@@ -493,6 +525,7 @@ class AgentSessionService:
                     )
                 )
                 yield normalized.to_dict()
+                since_flush += 1
                 if normalized.type == AgentEventType.USAGE:
                     self._session.add(
                         AgentUsageRow(
@@ -528,7 +561,14 @@ class AgentSessionService:
                         )
                         if isinstance(state, dict):
                             row.adapter_state = state
+                        turn_ok = True
+                    await self._flush_events()
+                    if turn_ok:
+                        await self._checkpoint_workspace_after_turn(project_id=project_id)
                     return
+                since_flush = await self._maybe_flush_stream(
+                    since_flush=since_flush, event_type=normalized.type
+                )
 
             if used_bridge:
                 state = await bridge.sync_adapter_state_for_session(
@@ -537,6 +577,8 @@ class AgentSessionService:
                 )
                 if isinstance(state, dict):
                     row.adapter_state = state
+                await self._flush_events()
+                await self._checkpoint_workspace_after_turn(project_id=project_id)
                 return
             raise agent_runtime_unavailable(detail="pod agent-runtime did not respond")
 
@@ -557,6 +599,7 @@ class AgentSessionService:
                 )
             )
             yield normalized.to_dict()
+            since_flush += 1
             if normalized.type == AgentEventType.USAGE:
                 self._session.add(
                     AgentUsageRow(
@@ -584,6 +627,18 @@ class AgentSessionService:
                     provider=str(normalized.data.get("provider") or row.provider),
                     model=normalized.data.get("model") or row.model,
                 )
+            if normalized.type == AgentEventType.DONE:
+                turn_ok = True
+            if normalized.type in {AgentEventType.DONE, AgentEventType.ERROR}:
+                await self._flush_events()
+                if turn_ok:
+                    await self._checkpoint_workspace_after_turn(project_id=project_id)
+                return
+            since_flush = await self._maybe_flush_stream(
+                since_flush=since_flush, event_type=normalized.type
+            )
+        await self._flush_events()
+        await self._checkpoint_workspace_after_turn(project_id=project_id)
 
     async def chat_turn(
         self,

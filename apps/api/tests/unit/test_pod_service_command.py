@@ -373,9 +373,15 @@ async def test_sync_desired_reload_restarts_running_pod() -> None:
     cmd = PodCommand(session, runtime=runtime, events=events, hydrate=hydrate)
     cmd._project_events = AsyncMock()
 
-    with patch(
-        "prodavan.application.metrics.adapters.redis_metrics_store.build_metrics_store",
-        return_value=store,
+    with (
+        patch(
+            "prodavan.application.projects.workspace_checkpoint.checkpoint_project_workspace",
+            new=AsyncMock(return_value=None),
+        ),
+        patch(
+            "prodavan.application.metrics.adapters.redis_metrics_store.build_metrics_store",
+            return_value=store,
+        ),
     ):
         await cmd.sync_desired(
             project.id,

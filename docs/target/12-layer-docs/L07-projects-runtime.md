@@ -157,6 +157,11 @@ apps/api/.env.example
 | «Обновить проект» (`POST /sync`) UI loading | **done** | spinner на management page |
 | Company/admin container reload | **done** | `POST .../containers/{id}/reload`; integration `test_company_containers_reload` + `test_admin_containers_reload` |
 | Live Pod workspace browser (UI) | **done** | `PodWorkspacePort` + k8s exec `workspace_fs`; REST list/preview/download; Flutter Files button when `running`; k8s e2e `AGENTS.md` |
+| Chat transcript SoT | **done** | Postgres `agent_events` (не MinIO); mid-turn flush `user_message` + periodic stream commit |
+| Workspace dehydrate (pod→MinIO) | **done** | last-good overwrite under `projects/{key}/workspace/`; after successful turn + before pause; hydrate prefix = workspace/ |
+| Pause sync → MinIO (target gap) | **done** | dehydrate before `stop_project_runtime` / delete Pod |
+| Versioned workspace checkpoints | **hole** | MVP = single last-good tree; history of container versions — backlog |
+| PVC / live MinIO mount | **hole** | emptyDir + hydrate/dehydrate |
 
 ## Проверка
 

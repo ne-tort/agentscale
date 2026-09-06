@@ -25,6 +25,7 @@ from prodavan.application.projects.runtime_side_effects import (
     schedule_bootstrap_background,
 )
 from prodavan.application.projects.trigger_service import ProjectTriggerService
+from prodavan.application.projects.workspace_checkpoint import checkpoint_project_workspace
 from prodavan.application.relations.commands import RelationsCommand
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
@@ -288,6 +289,8 @@ class ProjectCommand:
         reason: str | None = None,
         purge_workspace: bool = False,
     ) -> None:
+        if not purge_workspace:
+            await checkpoint_project_workspace(self._session, project_id=row.id, best_effort=True)
         await stop_project_runtime(
             self._session,
             project_id=row.id,

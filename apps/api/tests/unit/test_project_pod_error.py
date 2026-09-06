@@ -119,12 +119,16 @@ async def test_sync_desired_reload_recovers_project_from_error() -> None:
     cmd = PodCommand(session, runtime=runtime, events=events, hydrate=AsyncMock())
     cmd._project_events = project_events
 
-    await cmd.sync_desired(
-        project.id,
-        PodDesiredState.RUNNING,
-        principal=_principal(),
-        reason="reload",
-    )
+    with patch(
+        "prodavan.application.projects.workspace_checkpoint.checkpoint_project_workspace",
+        new=AsyncMock(return_value=None),
+    ):
+        await cmd.sync_desired(
+            project.id,
+            PodDesiredState.RUNNING,
+            principal=_principal(),
+            reason="reload",
+        )
 
     assert project.status == ProjectStatus.ACTIVE
     assert failed.status == PodStatus.PROVISIONING

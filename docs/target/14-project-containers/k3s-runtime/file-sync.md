@@ -79,4 +79,4 @@ When Pod is **running**, API/UI read `/workspace` via k8s exec into sandbox cont
 | delete / move / copy | exec mutations (API only; no Flutter UI yet) |
 | UI gate | `observed_state == running`; button hidden otherwise |
 
-Write-back to MinIO (pause sync) remains future work — see rematerialize/hydrate paths above.
+Write-back to MinIO: **dehydrate** (pod→MinIO last-good) after successful agent turn and before pause — see as-built L07 / PRODUCT.md.
