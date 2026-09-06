@@ -120,6 +120,8 @@ class ProjectRuntimeModuleService:
         inst = await self._instances.ensure_project_instance(
             project_id=project_id, module_id=module_id
         )
+        # Persist fork before returning so subsequent meta slug fetches skip re-fork.
+        await self._session.commit()
         try:
             doc = await self._instances.get_meta_document(instance_id=inst.id, slug=slug)
         except AppError:

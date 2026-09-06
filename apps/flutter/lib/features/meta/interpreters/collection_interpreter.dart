@@ -109,7 +109,13 @@ class CollectionViewInterpreter extends StatelessWidget {
           onDelete: readOnly
               ? null
               : (row) async {
-                  seeds.deleteRow(row.id);
+                  try {
+                    final delete = seeds.deleteRow(row.id);
+                    if (delete is Future) await delete;
+                  } catch (e) {
+                    if (context.mounted) AppErrors.showSnack(context, e);
+                    rethrow;
+                  }
                 },
         );
 

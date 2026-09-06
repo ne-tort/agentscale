@@ -36,9 +36,7 @@ class RuntimeDataAdapter extends ChangeNotifier {
 
   Future<void> loadAll() => _inner.loadAll();
 
-  void deleteRow(String rowId) {
-    _inner.deleteRow(rowId);
-  }
+  Future<void> deleteRow(String rowId) => _inner.deleteRow(rowId);
 
   void refresh() => _inner.refresh();
 

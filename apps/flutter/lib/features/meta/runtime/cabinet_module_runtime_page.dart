@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/session/work_context.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
@@ -94,6 +95,7 @@ class _CabinetModuleRuntimePageState extends State<CabinetModuleRuntimePage> {
       });
     } catch (e) {
       if (!mounted) return;
+      AppErrors.showSnack(context, e);
       setState(() {
         _error = e;
         _loading = false;
@@ -124,8 +126,13 @@ class _CabinetModuleRuntimePageState extends State<CabinetModuleRuntimePage> {
     }
     if (_error != null || _manifest == null || _adapter == null) {
       return EmptyPlaceholder(
-        title: l10n.errorUnexpected,
-        subtitle: _error?.toString(),
+        title: _error != null
+            ? AppErrors.localize(context, _error!)
+            : l10n.errorUnexpected,
+        action: TextButton(
+          onPressed: _load,
+          child: Text(l10n.commonRetry),
+        ),
       );
     }
     final manifest = _manifest!;

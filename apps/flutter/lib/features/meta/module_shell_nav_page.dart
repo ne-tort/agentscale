@@ -72,6 +72,7 @@ class _ModuleShellNavPageState extends State<ModuleShellNavPage> {
       });
     } catch (e) {
       if (!mounted) return;
+      AppErrors.showSnack(context, e);
       setState(() {
         _error = e;
         _loading = false;
@@ -110,9 +111,11 @@ class _ModuleShellNavPageState extends State<ModuleShellNavPage> {
       return const Center(child: CircularProgressIndicator());
     }
     if (_error != null) {
-      return Center(
-        child: EmptyPlaceholder(
-          title: AppErrors.localize(context, _error!),
+      return EmptyPlaceholder(
+        title: AppErrors.localize(context, _error!),
+        action: TextButton(
+          onPressed: _load,
+          child: Text(l10n.commonRetry),
         ),
       );
     }

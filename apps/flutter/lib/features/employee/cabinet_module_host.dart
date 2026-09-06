@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/session/work_context.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
@@ -64,6 +65,22 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
     }
   }
 
+  Future<Map<String, dynamic>> _fetchMetaDoc(ProdavanApi api, String slug) async {
+    final projectId = widget.projectId;
+    if (projectId != null && projectId.isNotEmpty) {
+      return api.getProjectRuntimeModuleMeta(
+        projectId: projectId,
+        moduleId: widget.entry.moduleId,
+        slug: slug,
+      );
+    }
+    return api.getCabinetModuleMeta(
+      cabinetId: widget.cabinetId,
+      moduleId: widget.entry.moduleId,
+      slug: slug,
+    );
+  }
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
@@ -73,29 +90,34 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
       final ProdavanApi api = workContext.api;
       final projectId = widget.projectId;
       final docs = <String, dynamic>{};
-      for (final slug in ModuleMetaSlugs.all) {
-        try {
-          final Map<String, dynamic> doc;
-          if (projectId != null && projectId.isNotEmpty) {
-            doc = await api.getProjectRuntimeModuleMeta(
-              projectId: projectId,
-              moduleId: widget.entry.moduleId,
-              slug: slug,
-            );
-          } else {
-            doc = await api.getCabinetModuleMeta(
-              cabinetId: widget.cabinetId,
-              moduleId: widget.entry.moduleId,
-              slug: slug,
-            );
+
+      // Warm leaf/cabinet instance on the first required slug (fork once), then
+      // fetch the rest in parallel so gateway timeouts are less likely.
+      final warm = ModuleMetaSlugs.required.first;
+      final warmDoc = await _fetchMetaDoc(api, warm);
+      docs[warm] = warmDoc['body'];
+
+      final remaining = ModuleMetaSlugs.all.where((s) => s != warm).toList();
+      final settled = await Future.wait(
+        remaining.map((slug) async {
+          try {
+            final doc = await _fetchMetaDoc(api, slug);
+            return (slug, doc['body'], null);
+          } catch (e) {
+            return (slug, null, e);
           }
-          docs[slug] = doc['body'];
-        } catch (_) {
+        }),
+      );
+      for (final (slug, body, err) in settled) {
+        if (err != null) {
           if (ModuleMetaSlugs.required.contains(slug)) {
-            rethrow;
+            throw err;
           }
+          continue;
         }
+        docs[slug] = body;
       }
+
       final manifest = ModuleMetaManifest.fromSlugMap(docs);
       _data?.dispose();
       final data = CabinetDataController(
@@ -125,9 +147,11 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
         _manifest = manifest;
         _adapter = RuntimeDataAdapter(data);
         _loading = false;
+        _error = null;
       });
     } catch (e) {
       if (!mounted) return;
+      AppErrors.showSnack(context, e);
       setState(() {
         _error = e;
         _loading = false;
@@ -174,7 +198,13 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
       return const Center(child: CircularProgressIndicator());
     }
     if (_error != null) {
-      return Center(child: Text('$_error'));
+      return EmptyPlaceholder(
+        title: AppErrors.localize(context, _error!),
+        action: TextButton(
+          onPressed: _load,
+          child: Text(l10n.commonRetry),
+        ),
+      );
     }
     final manifest = _manifest!;
     final adapter = _adapter!;

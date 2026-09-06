@@ -168,6 +168,41 @@ void main() {
     expect(actionPressed, isFalse);
   });
 
+  testWidgets('entity collection table long-press shows delete with empty columns', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(900, 400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    var deleted = false;
+    await tester.pumpWidget(
+      themed(
+        AppScaffold(
+          body: AppEntityCollection(
+            mode: AppEntityCollectionMode.table,
+            rows: const [
+              AppEntityRow(id: '1', title: 'MCP pkg', cells: {}),
+            ],
+            primaryColumnLabel: 'Name',
+            columns: const [],
+            onOpen: (_) {},
+            onDelete: (_) async {
+              deleted = true;
+            },
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byIcon(Icons.delete_outline), findsNothing);
+    await tester.longPress(find.text('MCP pkg'));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.delete_outline), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.delete_outline));
+    await tester.pumpAndSettle();
+    expect(deleted, isTrue);
+  });
+
   testWidgets('entity collection rowActions respect visible predicate', (tester) async {
     await tester.binding.setSurfaceSize(const Size(900, 400));
     addTearDown(() => tester.binding.setSurfaceSize(null));

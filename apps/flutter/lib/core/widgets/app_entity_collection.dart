@@ -409,7 +409,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
             mutateMin +
             widget.columns.length * _columnSpacing;
         final needsScroll = minTableWidth > tableWidth;
-        final lastColIndex = widget.columns.isEmpty ? -1 : widget.columns.length - 1;
+        final showActionsCol = _mutateEnabled;
 
         final table = Theme(
           data: Theme.of(context).copyWith(
@@ -457,6 +457,8 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                   numeric: c.align == AppEntityColumnAlign.end,
                 ),
               ),
+              if (showActionsCol)
+                const DataColumn(label: SizedBox.shrink()),
             ],
             rows: [
               for (final row in widget.rows)
@@ -479,19 +481,17 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                         child: _primaryCellContent(row, bodyMedium),
                       ),
                     ),
-                    ...[
-                      for (var i = 0; i < widget.columns.length; i++)
-                        _editFocusId == row.id &&
-                                _mutateEnabled &&
-                                i == lastColIndex
-                            ? DataCell(
-                                Align(
-                                  alignment: Alignment.centerRight,
-                                  child: _mutateTrailing(context, row),
-                                ),
+                    for (final col in widget.columns)
+                      _dataCell(context, row, col),
+                    if (showActionsCol)
+                      DataCell(
+                        _editFocusId == row.id
+                            ? Align(
+                                alignment: Alignment.centerRight,
+                                child: _mutateTrailing(context, row),
                               )
-                            : _dataCell(context, row, widget.columns[i]),
-                    ],
+                            : const SizedBox.shrink(),
+                      ),
                   ],
                 ),
             ],
