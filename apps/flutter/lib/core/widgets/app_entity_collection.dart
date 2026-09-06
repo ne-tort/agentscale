@@ -69,7 +69,7 @@ class AppEntityRow {
   Color? get effectiveColor => rowColor ?? titleColor;
 }
 
-/// Custom icon action shown inline in the actions column for a row.
+/// Custom icon action shown in edit mode (long-press) for a row.
 class AppEntityRowAction {
   const AppEntityRowAction({
     required this.tooltip,
@@ -88,8 +88,8 @@ class AppEntityRowAction {
 
 /// Unified entity collection — table on wide, list on narrow (canon 07).
 ///
-/// When [onCopy] / [onDelete] / [onEnabledChanged] or [rowActions] are set,
-/// action controls are always visible in the last column / list trailing.
+/// Long-press enters edit mode when [onCopy] / [onDelete] / [onEnabledChanged]
+/// or [rowActions] are set (inline icons in the last column / list trailing).
 class AppEntityCollection extends StatefulWidget {
   const AppEntityCollection({
     super.key,
@@ -126,17 +126,17 @@ class AppEntityCollection extends StatefulWidget {
   final Future<void> Function(AppEntityRow row)? onCopy;
   final Future<void> Function(AppEntityRow row)? onDelete;
 
-  /// When set, copy is shown only for rows where this returns true.
+  /// When set, long-press shows copy only for rows where this returns true.
   final bool Function(AppEntityRow row)? copyableOf;
 
-  /// When set, delete is shown only for rows where this returns true.
+  /// When set, long-press shows delete only for rows where this returns true.
   final bool Function(AppEntityRow row)? deletableOf;
 
-  /// When set with [onEnabledChanged], shows a trailing switch.
+  /// When set with [onEnabledChanged], long-press shows a trailing switch.
   final bool Function(AppEntityRow row)? enabledOf;
   final Future<void> Function(AppEntityRow row, bool enabled)? onEnabledChanged;
 
-  /// Custom row actions (preview, download, etc.) shown inline in the actions column.
+  /// Custom row actions (preview, download, etc.) shown inline on long-press.
   final List<AppEntityRowAction> rowActions;
 
   @override
@@ -149,6 +149,8 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
   static const double _primaryMinWidth = 140;
   static const double _flexColumnMinWidth = 96;
   static const double _mutateTrailingMinWidth = 128;
+
+  String? _editFocusId;
 
   bool get _mutateEnabled =>
       widget.onCopy != null ||
@@ -214,6 +216,16 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
     return (base ?? const TextStyle()).copyWith(color: color);
   }
 
+  void _clearEdit() {
+    if (_editFocusId == null) return;
+    setState(() => _editFocusId = null);
+  }
+
+  void _enterEdit(AppEntityRow row) {
+    if (!_mutateEnabled || !_rowHasMutateActions(row)) return;
+    setState(() => _editFocusId = row.id);
+  }
+
   Widget _mutateTrailing(BuildContext context, AppEntityRow row) {
     final l10n = AppLocalizations.of(context);
     final onSurface = context.appColors.onSurface;
@@ -232,6 +244,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
             ),
             onPressed: () async {
               await widget.onCopy!(row);
+              if (mounted) _clearEdit();
             },
           ),
         if (_canDelete(row))
@@ -246,6 +259,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
             ),
             onPressed: () async {
               await widget.onDelete!(row);
+              if (mounted) _clearEdit();
             },
           ),
         if (widget.enabledOf != null && widget.onEnabledChanged != null)
@@ -253,6 +267,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
             value: widget.enabledOf!(row),
             onChanged: (v) async {
               await widget.onEnabledChanged!(row, v);
+              if (mounted) _clearEdit();
             },
           ),
         for (final action in widget.rowActions)
@@ -269,6 +284,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
               ),
               onPressed: () async {
                 await action.onPressed(row);
+                if (mounted) _clearEdit();
               },
             ),
       ],
@@ -327,6 +343,7 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
         itemCount: widget.rows.length,
         itemBuilder: (context, i) {
           final row = widget.rows[i];
+          final editing = _editFocusId == row.id;
           final subtitleStyle = row.effectiveColor != null
               ? bodyMedium?.copyWith(color: row.effectiveColor)
               : bodyMedium;
@@ -342,12 +359,26 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
               subtitle:
                   row.subtitle != null ? Text(row.subtitle!, style: subtitleStyle) : null,
               leading: row.leading,
-              selected: false,
-              trailing: _rowHasMutateActions(row)
+              selected: editing,
+              trailing: editing
                   ? _mutateTrailing(context, row)
                   : (row.trailing ?? const AppTrailingChevron()),
-              onTap: () => widget.onOpen(row),
-              onLongPress: null,
+              onTap: () {
+                if (editing) {
+                  _clearEdit();
+                  return;
+                }
+                widget.onOpen(row);
+              },
+              onLongPress: _mutateEnabled && _rowHasMutateActions(row)
+                  ? () {
+                      if (editing) {
+                        _clearEdit();
+                      } else {
+                        _enterEdit(row);
+                      }
+                    }
+                  : null,
             ),
           );
         },
@@ -438,8 +469,22 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
             rows: [
               for (final row in widget.rows)
                 DataRow(
-                  selected: false,
-                  onSelectChanged: (_) => widget.onOpen(row),
+                  selected: _editFocusId == row.id,
+                  onSelectChanged: (_) {
+                    // While editing, ignore select so action IconButtons receive
+                    // the tap (DataRow otherwise steals it and clears edit).
+                    if (_editFocusId == row.id) return;
+                    widget.onOpen(row);
+                  },
+                  onLongPress: _mutateEnabled && _rowHasMutateActions(row)
+                      ? () {
+                          if (_editFocusId == row.id) {
+                            _clearEdit();
+                          } else {
+                            _enterEdit(row);
+                          }
+                        }
+                      : null,
                   cells: [
                     DataCell(
                       Align(
@@ -451,13 +496,13 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
                       _dataCell(context, row, col),
                     if (showActionsCol)
                       DataCell(
-                        _rowHasMutateActions(row)
+                        _editFocusId == row.id
                             ? Align(
                                 alignment: Alignment.centerRight,
                                 child: _mutateTrailing(context, row),
                               )
                             : const SizedBox.shrink(),
-                        // Absorb row InkWell so action IconButtons receive the tap.
+                        // Override row select so delete/copy taps are not stolen.
                         onTap: () {},
                       ),
                   ],

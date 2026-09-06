@@ -210,7 +210,7 @@ class ModuleInstanceService:
         row = await self._session.get(ModuleInstanceRow, instance_id)
         if row is None:
             return False
-        self._session.delete(row)
+        await self._session.delete(row)
         await self._session.flush()
         return True
 
@@ -228,10 +228,10 @@ class ModuleInstanceService:
                 owner_kind=OWNER_PROJECT, owner_id=project_id, module_id=module_id
             )
             if pr is not None:
-                self._session.delete(pr)
+                await self._session.delete(pr)
                 deleted += 1
         if cab is not None:
-            self._session.delete(cab)
+            await self._session.delete(cab)
             deleted += 1
         await self._session.flush()
         return deleted
@@ -244,7 +244,7 @@ class ModuleInstanceService:
             )
         )
         for row in existing.scalars().all():
-            self._session.delete(row)
+            await self._session.delete(row)
         await self._session.flush()
         await self._copy_template_meta(module_id=module_id, instance_id=instance_id)
 
@@ -423,7 +423,7 @@ class ModuleInstanceService:
         row = q.scalar_one_or_none()
         if row is None:
             return False
-        self._session.delete(row)
+        await self._session.delete(row)
         await self._session.flush()
         return True
 

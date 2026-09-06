@@ -16,6 +16,45 @@ from prodavan.application.modules.module_instance_service import (
 from prodavan.application.modules.module_materialize_service import ModuleMaterializeService
 
 
+@pytest.mark.asyncio
+async def test_delete_data_row_awaits_async_session_delete() -> None:
+    """AsyncSession.delete is a coroutine — must be awaited or the row stays."""
+    session = MagicMock()
+    session.execute = AsyncMock()
+    session.delete = AsyncMock()
+    session.flush = AsyncMock()
+
+    row = SimpleNamespace(id="midr_1", instance_id="minst_a", table_slug="t", row_id="r1")
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = row
+    session.execute.return_value = result
+
+    svc = ModuleInstanceService(session)
+    ok = await svc.delete_data_row(instance_id="minst_a", table_slug="t", row_id="r1")
+
+    assert ok is True
+    session.delete.assert_awaited_once_with(row)
+    session.flush.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_delete_data_row_missing_returns_false() -> None:
+    session = MagicMock()
+    session.execute = AsyncMock()
+    session.delete = AsyncMock()
+    session.flush = AsyncMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = None
+    session.execute.return_value = result
+
+    svc = ModuleInstanceService(session)
+    ok = await svc.delete_data_row(instance_id="minst_a", table_slug="t", row_id="missing")
+
+    assert ok is False
+    session.delete.assert_not_awaited()
+    session.flush.assert_not_awaited()
+
+
 def test_row_applies_to_project_empty_means_all() -> None:
     assert row_applies_to_project({}, "prj_1")
     assert row_applies_to_project({"project_ids": []}, "prj_1")
