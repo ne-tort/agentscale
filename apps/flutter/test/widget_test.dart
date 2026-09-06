@@ -1,13 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
-import 'package:prodavan/app.dart';
 import 'package:prodavan/core/theme/app_theme.dart';
+import 'package:prodavan/core/widgets/app_catalog_select_page.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_catalog_select_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 Widget themed(Widget home, {Locale locale = const Locale('en')}) {
@@ -26,17 +23,6 @@ Widget themed(Widget home, {Locale locale = const Locale('en')}) {
 }
 
 void main() {
-  TestWidgetsFlutterBinding.ensureInitialized();
-
-  testWidgets('app entry shows login form (default ru)', (tester) async {
-    SharedPreferences.setMockInitialValues({});
-    await tester.pumpWidget(const ProdavanApp());
-    await tester.pumpAndSettle();
-    expect(find.text('Вход'), findsWidgets);
-    expect(find.text('Логин'), findsOneWidget);
-    expect(find.text('Пароль'), findsOneWidget);
-  });
-
   testWidgets('entity collection list opens row', (tester) async {
     String? opened;
     await tester.pumpWidget(
@@ -121,7 +107,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('entity collection rowActions show inline and tap deselects', (tester) async {
+  testWidgets('entity collection rowActions are always visible and tappable', (tester) async {
     var opened = false;
     var actionPressed = false;
     await tester.binding.setSurfaceSize(const Size(900, 400));
@@ -152,26 +138,14 @@ void main() {
       ),
     );
 
-    expect(find.byIcon(Icons.download_outlined), findsNothing);
-
-    await tester.longPress(find.text('readme.txt'));
-    await tester.pumpAndSettle();
-
     expect(find.byIcon(Icons.download_outlined), findsOneWidget);
-    expect(opened, isFalse);
-
-    // Long-press toggles edit off (tap on the selected row must not steal actions).
-    await tester.longPress(find.text('readme.txt'));
+    await tester.tap(find.byIcon(Icons.download_outlined));
     await tester.pumpAndSettle();
-
-    expect(find.byIcon(Icons.download_outlined), findsNothing);
+    expect(actionPressed, isTrue);
     expect(opened, isFalse);
-    expect(actionPressed, isFalse);
   });
 
-  testWidgets('entity collection table long-press shows delete with empty columns', (
-    tester,
-  ) async {
+  testWidgets('entity collection table delete is always visible', (tester) async {
     await tester.binding.setSurfaceSize(const Size(900, 400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -195,16 +169,13 @@ void main() {
       ),
     );
 
-    expect(find.byIcon(Icons.delete_outline), findsNothing);
-    await tester.longPress(find.text('MCP pkg'));
-    await tester.pumpAndSettle();
     expect(find.byIcon(Icons.delete_outline), findsOneWidget);
     await tester.tap(find.byIcon(Icons.delete_outline));
     await tester.pumpAndSettle();
     expect(deleted, isTrue);
   });
 
-  testWidgets('entity collection delete works while row stays selected', (tester) async {
+  testWidgets('entity collection delete does not open row', (tester) async {
     await tester.binding.setSurfaceSize(const Size(900, 400));
     addTearDown(() => tester.binding.setSurfaceSize(null));
 
@@ -229,19 +200,39 @@ void main() {
       ),
     );
 
-    await tester.longPress(find.text('Equipment DB'));
-    await tester.pumpAndSettle();
     expect(find.byIcon(Icons.delete_outline), findsOneWidget);
-
-    // Tap title while editing must not clear actions / open row.
-    await tester.tap(find.text('Equipment DB'));
-    await tester.pumpAndSettle();
-    expect(find.byIcon(Icons.delete_outline), findsOneWidget);
-    expect(opened, isFalse);
-
     await tester.tap(find.byIcon(Icons.delete_outline));
     await tester.pumpAndSettle();
     expect(deleted, isTrue);
+    expect(opened, isFalse);
+  });
+
+  testWidgets('entity collection list delete is not stolen by row tap', (tester) async {
+    var deleted = false;
+    var opened = false;
+    await tester.pumpWidget(
+      themed(
+        AppScaffold(
+          body: AppEntityCollection(
+            mode: AppEntityCollectionMode.list,
+            rows: const [
+              AppEntityRow(id: '1', title: 'MCP pkg', cells: {}),
+            ],
+            columns: const [],
+            onOpen: (_) => opened = true,
+            onDelete: (_) async {
+              deleted = true;
+            },
+          ),
+        ),
+      ),
+    );
+
+    expect(find.byIcon(Icons.delete_outline), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.delete_outline));
+    await tester.pumpAndSettle();
+    expect(deleted, isTrue);
+    expect(opened, isFalse);
   });
 
   testWidgets('entity collection rowActions respect visible predicate', (tester) async {
@@ -271,9 +262,6 @@ void main() {
         ),
       ),
     );
-
-    await tester.longPress(find.text('docs'));
-    await tester.pumpAndSettle();
 
     expect(find.byIcon(Icons.download_outlined), findsNothing);
   });

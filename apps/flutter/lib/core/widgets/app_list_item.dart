@@ -7,6 +7,9 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 enum AppListTone { neutral, warning, danger, success }
 
 /// Universal list row — replaces ad-hoc ListTile / menu rows.
+///
+/// [trailing] sits outside the row [InkWell] so IconButtons (delete/copy) are
+/// not stolen by [onTap].
 class AppListItem extends StatelessWidget {
   const AppListItem({
     super.key,
@@ -62,65 +65,71 @@ class AppListItem extends StatelessWidget {
         borderRadius: BorderRadius.circular(borderless ? 0 : 8),
         side: border,
       ),
-      child: InkWell(
-        onTap: enabled ? onTap : null,
-        onLongPress: enabled ? onLongPress : null,
-        borderRadius: BorderRadius.circular(borderless ? 0 : 8),
-        child: Padding(
-          padding: EdgeInsets.only(
-            left: leftPad,
-            right: AppInsets.trailingActionRight,
-            top: dense ? AppSpacing.sm : AppSpacing.md,
-            bottom: dense ? AppSpacing.sm : AppSpacing.md,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (banner != null && banner!.isNotEmpty) ...[
-                Text(
-                  banner!,
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: tokens.warning,
-                      ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-              ],
-              Row(
-                children: [
-                  if (leading != null) ...[
-                    leading!,
-                    const SizedBox(width: AppSpacing.sm),
-                  ],
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: leftPad,
+          right: AppInsets.trailingActionRight,
+          top: dense ? AppSpacing.sm : AppSpacing.md,
+          bottom: dense ? AppSpacing.sm : AppSpacing.md,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (banner != null && banner!.isNotEmpty) ...[
+              Text(
+                banner!,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: tokens.warning,
+                    ),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+            ],
+            Row(
+              children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: enabled ? onTap : null,
+                    onLongPress: enabled ? onLongPress : null,
+                    borderRadius: BorderRadius.circular(borderless ? 0 : 8),
+                    child: Row(
                       children: [
-                        DefaultTextStyle.merge(
-                          style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                color: enabled ? null : tokens.muted,
-                              ),
-                          child: title,
-                        ),
-                        if (subtitle != null) ...[
-                          const SizedBox(height: AppSpacing.xs),
-                          DefaultTextStyle.merge(
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                                  color: tokens.muted,
-                                ),
-                            child: subtitle!,
-                          ),
+                        if (leading != null) ...[
+                          leading!,
+                          const SizedBox(width: AppSpacing.sm),
                         ],
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              DefaultTextStyle.merge(
+                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                      color: enabled ? null : tokens.muted,
+                                    ),
+                                child: title,
+                              ),
+                              if (subtitle != null) ...[
+                                const SizedBox(height: AppSpacing.xs),
+                                DefaultTextStyle.merge(
+                                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                        color: tokens.muted,
+                                      ),
+                                  child: subtitle!,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                  if (trailingSlot != null) ...[
-                    const SizedBox(width: AppSpacing.sm),
-                    trailingSlot,
-                  ],
+                ),
+                if (trailingSlot != null) ...[
+                  const SizedBox(width: AppSpacing.sm),
+                  trailingSlot,
                 ],
-              ),
-            ],
-          ),
+              ],
+            ),
+          ],
         ),
       ),
     );
