@@ -20,6 +20,8 @@ Product seed: `mod_equipment` — see `product_module_seeds.py`.
 - `equipment_types` — `name`, `sort_order`, `build_scope` (`all`|`pc`|`server`), `fields_json` (`[{key,label}]`); seed 13 PC/server types (incl. case fans; RAID/HBA/backplane/BMC server-only)
 - `equipment_items` — `name`, `offer_id`/`offer_title`, `type_id`/`type_name`, `part_number`, `qty`, `attrs` (string map by field key)
 - `equipment_builds` — `name`, `build_kind` (`pc`|`server`), `slots` (`{etype_id: item_row_id}`), denorm `components_count` / `price_total`
+- `trusted_sellers` — `name`, `aliases` (comma-separated); CRUD only
+- `web_shops` — `name`, `url`, `cookies` (free-form paste); CRUD only
 
 ## Meta primitives
 
@@ -41,6 +43,7 @@ Product seed: `mod_equipment` — see `product_module_seeds.py`.
 3. **Write matches:** upsert into `found_offers` (`equipment_offers_upsert` / rows API) with `line_id`, bump `request_lines.found_count`. Alternatives stay as non-selected siblings; primary selection is UI/`data.select_row` (`is_selected` + parent `selected_offer_id`).
 4. **Component types / characteristics:** `equipment_types_list`, `equipment_items_list`, `equipment_items_upsert` — `attrs` values are plain strings keyed by `fields_json[].key`. Link item → offer via `offer_id`.
 5. **Builds:** `equipment_builds_list` / `equipment_builds_upsert` — `slots` maps type row id → item row id; `price_total` ≈ Σ `found_offers.price * (item.qty ?? 1)`.
-6. **Never** treat Pod FS or dehydrate blobs as SoT for offers/selection — only Postgres module rows survive pause/reload as editable state.
+6. **Trusted sellers / web shops:** `trusted_sellers_*`, `web_shops_*` — list/upsert only (no ranking/search logic yet).
+7. **Never** treat Pod FS or dehydrate blobs as SoT for offers/selection — only Postgres module rows survive pause/reload as editable state.
 
 Full definitions live in the product seed; this file is the human summary.

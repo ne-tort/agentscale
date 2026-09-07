@@ -932,6 +932,26 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "scope": {"projects": "all"},
             },
+            {
+                "slug": "trusted_sellers",
+                "label": {
+                    "ru": "Проверенные продавцы",
+                    "en": "Trusted sellers",
+                },
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all"},
+            },
+            {
+                "slug": "web_shops",
+                "label": {
+                    "ru": "Интернет магазины",
+                    "en": "Web shops",
+                },
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all"},
+            },
         ],
         "columns": [
             {
@@ -1276,6 +1296,46 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "default": 0,
             },
             _project_ids_column("equipment_builds"),
+            {
+                "table_slug": "trusted_sellers",
+                "name": "name",
+                "label": {"ru": "Название", "en": "Name"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "trusted_sellers",
+                "name": "aliases",
+                "label": {"ru": "Алиасы", "en": "Aliases"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            _project_ids_column("trusted_sellers"),
+            {
+                "table_slug": "web_shops",
+                "name": "name",
+                "label": {"ru": "Название", "en": "Name"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "web_shops",
+                "name": "url",
+                "label": {"ru": "Ссылка", "en": "URL"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "web_shops",
+                "name": "cookies",
+                "label": {"ru": "Cookies", "en": "Cookies"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            _project_ids_column("web_shops"),
         ],
         "views": [
             {
@@ -1323,6 +1383,22 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "target": {
                                 "kind": "view",
                                 "view": "equipment_builds_list",
+                            },
+                        },
+                        {
+                            "title": "Проверенные продавцы",
+                            "icon": "verified",
+                            "target": {
+                                "kind": "view",
+                                "view": "trusted_sellers_list",
+                            },
+                        },
+                        {
+                            "title": "Интернет магазины",
+                            "icon": "language",
+                            "target": {
+                                "kind": "view",
+                                "view": "web_shops_list",
                             },
                         },
                     ],
@@ -1951,6 +2027,144 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     ],
                 },
             },
+            {
+                "slug": "trusted_sellers_list",
+                "table_slug": "trusted_sellers",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {
+                        "title": {
+                            "ru": "Проверенные продавцы",
+                            "en": "Trusted sellers",
+                        }
+                    },
+                    "title_field": "name",
+                    "subtitle_fields": ["aliases"],
+                    "columns": [
+                        {
+                            "field": "name",
+                            "label": {"ru": "Название", "en": "Name"},
+                        },
+                        {
+                            "field": "aliases",
+                            "label": {"ru": "Алиасы", "en": "Aliases"},
+                        },
+                    ],
+                    "row_tap": {
+                        "kind": "open_view",
+                        "view": "trusted_sellers_settings",
+                    },
+                    "inline_add": {
+                        "field": "name",
+                        "title": "Добавить продавца",
+                    },
+                    "empty": _empty(
+                        "Нет продавцов",
+                        "No sellers",
+                        icon="verified",
+                    ),
+                },
+            },
+            {
+                "slug": "trusted_sellers_settings",
+                "table_slug": "trusted_sellers",
+                "kind": "detail",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "detail",
+                    "mode": "edit",
+                    "title": {
+                        "ru": "Продавец",
+                        "en": "Seller",
+                    },
+                    "fields": [
+                        {
+                            "column": "name",
+                            "widget": "value",
+                            "icon": "storefront",
+                        },
+                        {
+                            "column": "aliases",
+                            "widget": "value",
+                            "icon": "alternate_email",
+                        },
+                    ],
+                },
+            },
+            {
+                "slug": "web_shops_list",
+                "table_slug": "web_shops",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {
+                        "title": {
+                            "ru": "Интернет магазины",
+                            "en": "Web shops",
+                        }
+                    },
+                    "title_field": "name",
+                    "subtitle_fields": ["url"],
+                    "columns": [
+                        {
+                            "field": "name",
+                            "label": {"ru": "Название", "en": "Name"},
+                        },
+                        {
+                            "field": "url",
+                            "label": {"ru": "Ссылка", "en": "URL"},
+                        },
+                    ],
+                    "row_tap": {
+                        "kind": "open_view",
+                        "view": "web_shops_settings",
+                    },
+                    "inline_add": {
+                        "field": "name",
+                        "title": "Добавить магазин",
+                    },
+                    "empty": _empty(
+                        "Нет магазинов",
+                        "No shops",
+                        icon="language",
+                    ),
+                },
+            },
+            {
+                "slug": "web_shops_settings",
+                "table_slug": "web_shops",
+                "kind": "detail",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "detail",
+                    "mode": "edit",
+                    "title": {
+                        "ru": "Магазин",
+                        "en": "Shop",
+                    },
+                    "fields": [
+                        {
+                            "column": "name",
+                            "widget": "value",
+                            "icon": "language",
+                        },
+                        {
+                            "column": "url",
+                            "widget": "value",
+                            "icon": "link",
+                        },
+                        {
+                            "column": "cookies",
+                            "widget": "value",
+                            "max_lines": 6,
+                            "icon": "cookie",
+                        },
+                    ],
+                },
+            },
         ],
         "tabs": [
             {
@@ -2164,6 +2378,55 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "kind": "rows_upsert",
                 "implementation": {"table_slug": "equipment_builds"},
+            },
+            {
+                "id": "trusted_sellers_list",
+                "name": "trusted_sellers_list",
+                "label": "List trusted sellers",
+                "description": "List trusted_sellers (name, aliases).",
+                "enabled": True,
+                "kind": "rows_query",
+                "params_schema": {"type": "object", "properties": {}},
+                "implementation": {
+                    "table_slug": "trusted_sellers",
+                    "query": {"limit": 500},
+                },
+            },
+            {
+                "id": "trusted_sellers_upsert",
+                "name": "trusted_sellers_upsert",
+                "label": "Upsert trusted sellers",
+                "description": (
+                    "Create/update trusted_sellers. aliases is a comma-separated string."
+                ),
+                "enabled": True,
+                "kind": "rows_upsert",
+                "implementation": {"table_slug": "trusted_sellers"},
+            },
+            {
+                "id": "web_shops_list",
+                "name": "web_shops_list",
+                "label": "List web shops",
+                "description": "List web_shops (name, url, cookies).",
+                "enabled": True,
+                "kind": "rows_query",
+                "params_schema": {"type": "object", "properties": {}},
+                "implementation": {
+                    "table_slug": "web_shops",
+                    "query": {"limit": 200},
+                },
+            },
+            {
+                "id": "web_shops_upsert",
+                "name": "web_shops_upsert",
+                "label": "Upsert web shops",
+                "description": (
+                    "Create/update web_shops. cookies is a free-form string "
+                    "(Cookie header / jar dump) for later automation."
+                ),
+                "enabled": True,
+                "kind": "rows_upsert",
+                "implementation": {"table_slug": "web_shops"},
             },
         ],
         "seed_rows": {"items": _equipment_type_seed_rows()},

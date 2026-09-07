@@ -552,11 +552,16 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
           },
         );
       default:
+        final maxLinesRaw = fieldCfg?['max_lines'];
+        final maxLines = maxLinesRaw is num
+            ? maxLinesRaw.toInt()
+            : int.tryParse(maxLinesRaw?.toString() ?? '') ?? 1;
         return AppValuePreference<String>(
           title: label,
           icon: fieldIcon,
           value: value?.toString() ?? '',
           enabled: !fieldReadOnly,
+          maxLines: maxLines < 1 ? 1 : maxLines,
           onSave: (v) async {
             _persist(name, v);
           },

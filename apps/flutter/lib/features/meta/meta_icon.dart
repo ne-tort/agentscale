@@ -70,6 +70,16 @@ IconData metaIconFromName(String? name, {IconData fallback = Icons.extension_out
       return Icons.play_circle_outline;
     case 'link':
       return Icons.link_rounded;
+    case 'verified':
+      return Icons.verified_outlined;
+    case 'language':
+      return Icons.language;
+    case 'storefront':
+      return Icons.storefront_outlined;
+    case 'alternate_email':
+      return Icons.alternate_email;
+    case 'cookie':
+      return Icons.cookie_outlined;
     default:
       return fallback;
   }

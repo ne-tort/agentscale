@@ -86,6 +86,8 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "equipment_types",
         "equipment_items",
         "equipment_builds",
+        "trusted_sellers",
+        "web_shops",
     }
     kinds = {a["kind"] for a in meta["actions"]}
     assert "content.index_tabular" in kinds
@@ -99,12 +101,18 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert "equipment_items_upsert" in tool_names
     assert "equipment_builds_list" in tool_names
     assert "equipment_builds_upsert" in tool_names
+    assert "trusted_sellers_list" in tool_names
+    assert "trusted_sellers_upsert" in tool_names
+    assert "web_shops_list" in tool_names
+    assert "web_shops_upsert" in tool_names
 
     hub = next(v for v in meta["views"] if v["slug"] == "equipment_hub")
     hub_titles = {i["title"] for i in hub["ui_json"]["items"]}
     assert "Характеристики оборудования" in hub_titles
     assert "Типы комплектующих" in hub_titles
     assert "Сборка" in hub_titles
+    assert "Проверенные продавцы" in hub_titles
+    assert "Интернет магазины" in hub_titles
 
     items_list = next(v for v in meta["views"] if v["slug"] == "equipment_items_list")
     assert items_list["ui_json"]["inline_add"]["field"] == "name"
@@ -175,6 +183,26 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert any(s["row_id"] == "etype_case_fans" for s in seed_items)
     assert seed_items[-1]["row_id"] == "etype_bmc"
     assert seed_items[-1]["body"]["build_scope"] == "server"
+
+    sellers_list = next(v for v in meta["views"] if v["slug"] == "trusted_sellers_list")
+    assert sellers_list["ui_json"]["inline_add"]["field"] == "name"
+    sellers_settings = next(
+        v for v in meta["views"] if v["slug"] == "trusted_sellers_settings"
+    )
+    assert [f["column"] for f in sellers_settings["ui_json"]["fields"]] == [
+        "name",
+        "aliases",
+    ]
+
+    shops_list = next(v for v in meta["views"] if v["slug"] == "web_shops_list")
+    assert shops_list["ui_json"]["inline_add"]["field"] == "name"
+    shops_settings = next(v for v in meta["views"] if v["slug"] == "web_shops_settings")
+    shop_cols = [f["column"] for f in shops_settings["ui_json"]["fields"]]
+    assert shop_cols == ["name", "url", "cookies"]
+    cookies_field = next(
+        f for f in shops_settings["ui_json"]["fields"] if f["column"] == "cookies"
+    )
+    assert cookies_field["max_lines"] == 6
 
     catalogs = next(v for v in meta["views"] if v["slug"] == "catalogs_list")
     assert catalogs["ui_json"]["inline_add"]["field"] == "name"
