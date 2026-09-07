@@ -85,6 +85,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "found_offers",
         "equipment_types",
         "equipment_items",
+        "equipment_builds",
     }
     kinds = {a["kind"] for a in meta["actions"]}
     assert "content.index_tabular" in kinds
@@ -96,33 +97,71 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert "equipment_offers_upsert" in tool_names
     assert "equipment_types_list" in tool_names
     assert "equipment_items_upsert" in tool_names
+    assert "equipment_builds_list" in tool_names
+    assert "equipment_builds_upsert" in tool_names
 
     hub = next(v for v in meta["views"] if v["slug"] == "equipment_hub")
     hub_titles = {i["title"] for i in hub["ui_json"]["items"]}
     assert "Характеристики оборудования" in hub_titles
     assert "Типы комплектующих" in hub_titles
+    assert "Сборка" in hub_titles
 
     items_list = next(v for v in meta["views"] if v["slug"] == "equipment_items_list")
     assert items_list["ui_json"]["inline_add"]["field"] == "name"
     item_settings = next(v for v in meta["views"] if v["slug"] == "equipment_item_settings")
+    item_cols = [f["column"] for f in item_settings["ui_json"]["fields"]]
+    assert item_cols[:3] == ["name", "offer_id", "type_id"]
+    offer_field = next(f for f in item_settings["ui_json"]["fields"] if f["column"] == "offer_id")
+    assert offer_field["widget"] == "type_ref_picker"
+    assert offer_field["pick_view"] == "found_offers_pick"
+    assert offer_field["title_field"] == "offer_title"
     type_field = next(f for f in item_settings["ui_json"]["fields"] if f["column"] == "type_id")
     assert type_field["widget"] == "type_ref_picker"
     assert type_field["empty_style"] == "warning"
     attrs_field = next(f for f in item_settings["ui_json"]["fields"] if f["column"] == "attrs")
     assert attrs_field["widget"] == "schema_attrs"
+    assert attrs_field["section_title"]["ru"] == "Характеристики"
 
     types_pick = next(v for v in meta["views"] if v["slug"] == "equipment_types_pick")
     assert types_pick["ui_json"]["selection"]["set_on_context"]["field"] == "type_id"
+    assert types_pick["ui_json"]["selection"]["control"] == "switch"
+    assert types_pick["ui_json"]["selection"]["placement"] == "trailing"
+    assert types_pick["ui_json"]["selection"]["disable_row_tap"] is True
+    assert "row_tap" not in types_pick["ui_json"]
+
+    offers_pick = next(v for v in meta["views"] if v["slug"] == "found_offers_pick")
+    assert offers_pick["ui_json"]["selection"]["control"] == "switch"
+    assert offers_pick["ui_json"]["selection"]["disable_row_tap"] is True
+    assert offers_pick["ui_json"]["selection"]["set_on_context"]["field"] == "offer_id"
+
+    items_pick = next(v for v in meta["views"] if v["slug"] == "equipment_items_pick")
+    assert items_pick["ui_json"]["selection"]["set_on_context"]["map_field"] == "slots"
+    assert items_pick["ui_json"]["row_filter_from_context"]["type_id"] == "_pick_type_id"
+
     type_settings = next(v for v in meta["views"] if v["slug"] == "equipment_type_settings")
     fields_ed = next(f for f in type_settings["ui_json"]["fields"] if f["column"] == "fields_json")
     assert fields_ed["widget"] == "fields_schema_editor"
 
+    types_list = next(v for v in meta["views"] if v["slug"] == "equipment_types_list")
+    assert all(c["field"] != "sort_order" for c in types_list["ui_json"]["columns"])
+
+    builds_list = next(v for v in meta["views"] if v["slug"] == "equipment_builds_list")
+    assert builds_list["ui_json"]["inline_add"]["field"] == "name"
+    build_settings = next(v for v in meta["views"] if v["slug"] == "equipment_build_settings")
+    slots_field = next(f for f in build_settings["ui_json"]["fields"] if f["column"] == "slots")
+    assert slots_field["widget"] == "build_slots"
+    assert slots_field["pick_view"] == "equipment_items_pick"
+
     seed_items = meta["seed_rows"]["items"]
-    assert len(seed_items) == 12
+    assert len(seed_items) == 13
     assert seed_items[0]["row_id"] == "etype_cpu"
     assert seed_items[0]["body"]["sort_order"] == 10
+    assert seed_items[0]["body"]["build_roles"] == ["pc", "server"]
     assert any(f["key"] == "cores" for f in seed_items[0]["body"]["fields_json"])
+    assert any(f["key"] == "memory_channels" for f in seed_items[0]["body"]["fields_json"])
+    assert any(s["row_id"] == "etype_case_fans" for s in seed_items)
     assert seed_items[-1]["row_id"] == "etype_bmc"
+    assert seed_items[-1]["body"]["build_roles"] == ["server"]
 
     catalogs = next(v for v in meta["views"] if v["slug"] == "catalogs_list")
     assert catalogs["ui_json"]["inline_add"]["field"] == "name"
@@ -167,6 +206,12 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert name_col["label"]["ru"] == "Название"
     assert any(c["name"] == "paused" for c in meta["columns"])
     assert any(c["name"] == "column_map" for c in meta["columns"])
+    assert any(
+        c["name"] == "offer_id" and c["table_slug"] == "equipment_items" for c in meta["columns"]
+    )
+    assert any(
+        c["name"] == "build_roles" and c["table_slug"] == "equipment_types" for c in meta["columns"]
+    )
 
     merge_rule = next(r for r in meta["materialize"] if r["id"] == "catalog_merged_sqlite")
     assert merge_rule["source"]["filter"] == {"status": "ready", "paused": False}

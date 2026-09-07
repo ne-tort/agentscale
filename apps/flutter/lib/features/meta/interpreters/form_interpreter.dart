@@ -15,6 +15,7 @@ import 'package:prodavan/features/meta/widgets/schema_attrs_field.dart';
 import 'package:prodavan/features/meta/widgets/secret_upload_field.dart';
 import 'package:prodavan/features/meta/widgets/markdown_editor_field.dart';
 import 'package:prodavan/features/meta/widgets/project_multiselect_field.dart';
+import 'package:prodavan/features/meta/widgets/build_slots_field.dart';
 import 'package:prodavan/features/meta/widgets/type_ref_picker_field.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -303,7 +304,9 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     if (widgetKind == 'type_ref_picker') {
       final pickView = fieldCfg?['pick_view']?.toString() ?? 'equipment_types_pick';
       final typeId = value?.toString();
-      final typeName = _values['type_name']?.toString();
+      final titleField = fieldCfg?['title_field']?.toString() ?? 'type_name';
+      final typeName = _values[titleField]?.toString();
+      final iconName = fieldCfg?['icon']?.toString();
       return TypeRefPickerField(
         label: label,
         typeId: typeId,
@@ -311,6 +314,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         readOnly: fieldReadOnly,
         emptyStyleWarning: fieldCfg?['empty_style']?.toString() == 'warning',
         emptyLabel: typeRefEmptyLabel(fieldCfg, l10n, locale),
+        icon: typeRefIcon(iconName),
         onOpenPick: () {
           final open = widget.onOpenView;
           if (open == null || _rowId == null) return;
@@ -350,7 +354,24 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         fields: fields,
         attrs: parseAttrsMap(value),
         readOnly: fieldReadOnly,
+        sectionTitle: schemaAttrsSectionTitle(fieldCfg, l10n, locale),
         onChanged: (attrs) => _persist(name, attrs),
+      );
+    }
+    if (widgetKind == 'build_slots') {
+      return BuildSlotsField(
+        seeds: widget.seeds,
+        slots: parseSlotsMap(value),
+        buildKind: _values['build_kind']?.toString() ?? 'pc',
+        readOnly: fieldReadOnly,
+        typesTable: fieldCfg?['types_table']?.toString() ?? 'equipment_types',
+        itemsTable: fieldCfg?['items_table']?.toString() ?? 'equipment_items',
+        offersTable: fieldCfg?['offers_table']?.toString() ?? 'found_offers',
+        pickView: fieldCfg?['pick_view']?.toString() ?? 'equipment_items_pick',
+        sectionTitle: buildSlotsSectionTitle(fieldCfg, l10n, locale),
+        emptyLabel: buildSlotsEmptyLabel(fieldCfg, l10n, locale),
+        rowId: _rowId,
+        onOpenPick: widget.onOpenView,
       );
     }
     if (widgetKind == 'fields_schema_editor') {

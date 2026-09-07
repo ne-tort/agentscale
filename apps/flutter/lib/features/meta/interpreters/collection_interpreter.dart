@@ -97,6 +97,10 @@ class CollectionViewInterpreter extends StatelessWidget {
                 : null,
           ),
           onOpen: (row) {
+            final selection = uiJson['selection'];
+            if (selection is Map && selection['disable_row_tap'] == true) {
+              return;
+            }
             final rowTap = uiJson['row_tap'];
             if (rowTap is Map && onOpenForm != null) {
               final kind = rowTap['kind'] as String?;
@@ -168,7 +172,24 @@ class CollectionViewInterpreter extends StatelessWidget {
         bindEntries.add(MapEntry('profile_id', contextRowId!));
       }
     }
-    if (filter is! Map && bindEntries.isEmpty) return all;
+    final filterFromCtx = uiJson['row_filter_from_context'];
+    final ctxFilterEntries = <MapEntry<String, String>>[];
+    if (filterFromCtx is Map && contextRowId != null) {
+      final ctx = seeds.itemById(contextRowId!);
+      final ctxBody = ctx is Map && ctx['body'] is Map
+          ? Map<String, dynamic>.from(ctx['body'] as Map)
+          : <String, dynamic>{};
+      for (final e in filterFromCtx.entries) {
+        final ctxKey = e.value?.toString();
+        if (ctxKey == null || ctxKey.isEmpty) continue;
+        final v = ctxBody[ctxKey]?.toString();
+        if (v == null || v.isEmpty) continue;
+        ctxFilterEntries.add(MapEntry(e.key.toString(), v));
+      }
+    }
+    if (filter is! Map && bindEntries.isEmpty && ctxFilterEntries.isEmpty) {
+      return all;
+    }
     return all.where((row) {
       final item = seeds.itemById(row.id);
       final body = item?['body'];
@@ -179,6 +200,9 @@ class CollectionViewInterpreter extends StatelessWidget {
         }
       }
       for (final bind in bindEntries) {
+        if (body[bind.key]?.toString() != bind.value) return false;
+      }
+      for (final bind in ctxFilterEntries) {
         if (body[bind.key]?.toString() != bind.value) return false;
       }
       return true;
@@ -327,23 +351,13 @@ class CollectionViewInterpreter extends StatelessWidget {
       }
     }
     return rows.map((row) {
-      return AppEntityRow(
-        id: row.id,
-        title: row.title,
-        subtitle: row.subtitle,
-        cells: row.cells,
-        cellWidgets: row.cellWidgets,
-        titleColor: row.titleColor,
-        rowColor: row.rowColor,
-        titleBold: row.titleBold,
-        trailing: row.trailing,
-        leading: Radio<String>(
-          value: row.id,
-          groupValue: selectedId,
-          onChanged: readOnly || actionId.isEmpty
-              ? null
-              : (_) => _invokeAction(context, actionId, rowId: row.id),
-        ),
+      return _selectionRow(
+        row: row,
+        selection: selection,
+        selected: selectedId == row.id,
+        onSelect: readOnly || actionId.isEmpty
+            ? null
+            : () => _invokeAction(context, actionId, rowId: row.id),
       );
     }).toList();
   }
@@ -355,37 +369,91 @@ class CollectionViewInterpreter extends StatelessWidget {
     Map setOnContext,
     List<AppEntityRow> rows,
   ) {
-    final matchField =
-        selection['match_context_field']?.toString() ?? setOnContext['field']?.toString() ?? '';
-    String? selectedId;
-    if (contextRowId != null && matchField.isNotEmpty) {
-      final ctx = seeds.itemById(contextRowId!);
-      final body = ctx is Map ? ctx['body'] : null;
-      if (body is Map) {
-        final v = body[matchField]?.toString();
-        if (v != null && v.isNotEmpty) selectedId = v;
-      }
-    }
+    final selectedId = _contextSelectedId(selection, setOnContext);
     return rows.map((row) {
-      return AppEntityRow(
-        id: row.id,
-        title: row.title,
-        subtitle: row.subtitle,
-        cells: row.cells,
-        cellWidgets: row.cellWidgets,
-        titleColor: row.titleColor,
-        rowColor: row.rowColor,
-        titleBold: row.titleBold,
-        trailing: row.trailing,
-        leading: Radio<String>(
-          value: row.id,
-          groupValue: selectedId,
-          onChanged: readOnly
-              ? null
-              : (_) => _applyContextSelection(context, setOnContext, row.id),
-        ),
+      return _selectionRow(
+        row: row,
+        selection: selection,
+        selected: selectedId == row.id,
+        onSelect: readOnly
+            ? null
+            : () => _applyContextSelection(context, setOnContext, row.id),
       );
     }).toList();
+  }
+
+  String? _contextSelectedId(Map selection, Map setOnContext) {
+    if (contextRowId == null) return null;
+    final ctx = seeds.itemById(contextRowId!);
+    final body = ctx is Map && ctx['body'] is Map
+        ? Map<String, dynamic>.from(ctx['body'] as Map)
+        : null;
+    if (body == null) return null;
+
+    final mapField = selection['match_map_field']?.toString() ??
+        setOnContext['map_field']?.toString();
+    final mapKeyFrom = selection['match_map_key_from_context']?.toString() ??
+        setOnContext['map_key_from_context']?.toString();
+    if (mapField != null &&
+        mapField.isNotEmpty &&
+        mapKeyFrom != null &&
+        mapKeyFrom.isNotEmpty) {
+      final key = body[mapKeyFrom]?.toString();
+      if (key == null || key.isEmpty) return null;
+      final map = body[mapField];
+      if (map is Map) {
+        final v = map[key]?.toString();
+        if (v != null && v.isNotEmpty) return v;
+      }
+      return null;
+    }
+
+    final matchField =
+        selection['match_context_field']?.toString() ?? setOnContext['field']?.toString() ?? '';
+    if (matchField.isEmpty) return null;
+    final v = body[matchField]?.toString();
+    if (v != null && v.isNotEmpty) return v;
+    return null;
+  }
+
+  AppEntityRow _selectionRow({
+    required AppEntityRow row,
+    required Map selection,
+    required bool selected,
+    required VoidCallback? onSelect,
+  }) {
+    final useSwitch = selection['control']?.toString() == 'switch';
+    final trailingPlacement = selection['placement']?.toString() == 'trailing';
+    Widget control;
+    if (useSwitch) {
+      control = Switch.adaptive(
+        value: selected,
+        onChanged: onSelect == null
+            ? null
+            : (v) {
+                if (v) onSelect();
+              },
+      );
+    } else {
+      control = Radio<String>(
+        value: row.id,
+        groupValue: selected ? row.id : null,
+        onChanged: onSelect == null ? null : (_) => onSelect(),
+      );
+    }
+
+    return AppEntityRow(
+      id: row.id,
+      title: row.title,
+      subtitle: row.subtitle,
+      cells: row.cells,
+      cellWidgets: row.cellWidgets,
+      titleColor: row.titleColor,
+      rowColor: row.rowColor,
+      titleBold: row.titleBold,
+      leading: trailingPlacement ? row.leading : control,
+      trailing: trailingPlacement ? control : row.trailing,
+    );
   }
 
   Future<void> _applyContextSelection(
@@ -394,8 +462,6 @@ class CollectionViewInterpreter extends StatelessWidget {
     String selectedRowId,
   ) async {
     if (contextRowId == null) return;
-    final field = setOnContext['field']?.toString();
-    if (field == null || field.isEmpty) return;
     final ctxItem = seeds.itemById(contextRowId!);
     if (ctxItem is! Map) return;
     final body = Map<String, dynamic>.from(
@@ -404,9 +470,29 @@ class CollectionViewInterpreter extends StatelessWidget {
           : <String, dynamic>{},
     );
     final valueFrom = setOnContext['value_from']?.toString() ?? 'row_id';
-    if (valueFrom == 'row_id') {
-      body[field] = selectedRowId;
+    final selectedValue = valueFrom == 'row_id' ? selectedRowId : selectedRowId;
+
+    final mapField = setOnContext['map_field']?.toString();
+    final mapKeyFrom = setOnContext['map_key_from_context']?.toString();
+    if (mapField != null &&
+        mapField.isNotEmpty &&
+        mapKeyFrom != null &&
+        mapKeyFrom.isNotEmpty) {
+      final key = body[mapKeyFrom]?.toString();
+      if (key == null || key.isEmpty) return;
+      final slots = Map<String, dynamic>.from(
+        body[mapField] is Map
+            ? Map<String, dynamic>.from(body[mapField] as Map)
+            : <String, dynamic>{},
+      );
+      slots[key] = selectedValue;
+      body[mapField] = slots;
+    } else {
+      final field = setOnContext['field']?.toString();
+      if (field == null || field.isEmpty) return;
+      body[field] = selectedValue;
     }
+
     final selectedItem = seeds.itemById(selectedRowId);
     final selectedBody = selectedItem is Map && selectedItem['body'] is Map
         ? Map<String, dynamic>.from(selectedItem['body'] as Map)
@@ -433,6 +519,9 @@ class CollectionViewInterpreter extends StatelessWidget {
         }
       }
     }
+    if (setOnContext['recompute_build_totals'] == true) {
+      _recomputeBuildTotals(body);
+    }
     try {
       final upsert = seeds.upsertBody(contextRowId!, body);
       if (upsert is Future) await upsert;
@@ -442,6 +531,41 @@ class CollectionViewInterpreter extends StatelessWidget {
     } catch (e) {
       if (context.mounted) AppErrors.showSnack(context, e);
     }
+  }
+
+  void _recomputeBuildTotals(Map<String, dynamic> body) {
+    final slotsRaw = body['slots'];
+    final slots = slotsRaw is Map
+        ? Map<String, dynamic>.from(slotsRaw)
+        : <String, dynamic>{};
+    var count = 0;
+    var total = 0.0;
+    for (final entry in slots.entries) {
+      final itemId = entry.value?.toString();
+      if (itemId == null || itemId.isEmpty) continue;
+      count += 1;
+      final item = seeds.itemById(itemId);
+      final itemBody = item is Map && item['body'] is Map
+          ? Map<String, dynamic>.from(item['body'] as Map)
+          : <String, dynamic>{};
+      final qtyRaw = itemBody['qty'];
+      final qty = qtyRaw is num
+          ? qtyRaw.toDouble()
+          : double.tryParse(qtyRaw?.toString() ?? '') ?? 1.0;
+      final offerId = itemBody['offer_id']?.toString();
+      if (offerId == null || offerId.isEmpty) continue;
+      final offer = seeds.itemById(offerId);
+      final offerBody = offer is Map && offer['body'] is Map
+          ? Map<String, dynamic>.from(offer['body'] as Map)
+          : <String, dynamic>{};
+      final priceRaw = offerBody['price'];
+      final price = priceRaw is num
+          ? priceRaw.toDouble()
+          : double.tryParse(priceRaw?.toString() ?? '') ?? 0.0;
+      total += price * (qty <= 0 ? 1.0 : qty);
+    }
+    body['components_count'] = count;
+    body['price_total'] = total;
   }
 
   void _create(BuildContext context, Map<String, dynamic> uiJson, String tableSlug) {

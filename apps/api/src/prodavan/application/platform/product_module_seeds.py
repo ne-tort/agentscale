@@ -58,6 +58,7 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "row_id": "etype_cpu",
         "name": "Процессор",
         "sort_order": 10,
+        "build_roles": ["pc", "server"],
         "fields": [
             _eq_field("cores", "Ядра", "Cores"),
             _eq_field("threads", "Потоки", "Threads"),
@@ -66,12 +67,16 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
             _eq_field("socket", "Сокет", "Socket"),
             _eq_field("tdp", "TDP", "TDP"),
             _eq_field("lithography", "Техпроцесс", "Lithography"),
+            _eq_field("memory_channels", "Каналы памяти", "Memory channels"),
+            _eq_field("pcie_gen", "PCIe поколение", "PCIe gen"),
+            _eq_field("max_memory", "Макс. память", "Max memory"),
         ],
     },
     {
         "row_id": "etype_motherboard",
         "name": "Материнская плата",
         "sort_order": 20,
+        "build_roles": ["pc", "server"],
         "fields": [
             _eq_field("socket", "Сокет", "Socket"),
             _eq_field("chipset", "Чипсет", "Chipset"),
@@ -81,12 +86,17 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
             _eq_field("max_ram", "Макс. ОЗУ", "Max RAM"),
             _eq_field("sata_ports", "SATA порты", "SATA ports"),
             _eq_field("m2_slots", "M.2 слоты", "M.2 slots"),
+            _eq_field("cpu_sockets", "Сокетов CPU", "CPU sockets"),
+            _eq_field("memory_speed_max", "Макс. частота ОЗУ", "Max memory speed"),
+            _eq_field("pcie_gen", "PCIe поколение", "PCIe gen"),
+            _eq_field("ecc_support", "Поддержка ECC", "ECC support"),
         ],
     },
     {
         "row_id": "etype_ram",
         "name": "Оперативная память",
         "sort_order": 30,
+        "build_roles": ["pc", "server"],
         "fields": [
             _eq_field("ram_type", "Тип", "Type"),
             _eq_field("module_capacity", "Объём модуля", "Module capacity"),
@@ -94,12 +104,16 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
             _eq_field("total_capacity", "Суммарный объём", "Total capacity"),
             _eq_field("frequency", "Частота", "Frequency"),
             _eq_field("ecc", "ECC", "ECC"),
+            _eq_field("form_factor", "Форм-фактор", "Form factor"),
+            _eq_field("voltage", "Напряжение", "Voltage"),
+            _eq_field("registered", "Registered/LRDIMM", "Registered"),
         ],
     },
     {
         "row_id": "etype_storage",
         "name": "Накопитель",
         "sort_order": 40,
+        "build_roles": ["pc", "server"],
         "fields": [
             _eq_field("drive_type", "Тип", "Drive type"),
             _eq_field("interface", "Интерфейс", "Interface"),
@@ -107,12 +121,15 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
             _eq_field("form_factor", "Форм-фактор", "Form factor"),
             _eq_field("seq_read", "Чтение", "Seq. read"),
             _eq_field("seq_write", "Запись", "Seq. write"),
+            _eq_field("protocol_gen", "Поколение протокола", "Protocol gen"),
+            _eq_field("hot_swap", "Hot-swap", "Hot-swap"),
         ],
     },
     {
         "row_id": "etype_gpu",
         "name": "Видеокарта",
         "sort_order": 50,
+        "build_roles": ["pc", "server"],
         "fields": [
             _eq_field("gpu_memory", "Память", "Memory"),
             _eq_field("memory_bus", "Шина памяти", "Memory bus"),
@@ -120,59 +137,86 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
             _eq_field("tdp", "TDP", "TDP"),
             _eq_field("length_mm", "Длина, мм", "Length mm"),
             _eq_field("power_connectors", "Питание", "Power connectors"),
+            _eq_field("slot_width", "Ширина слотов", "Slot width"),
+            _eq_field("recommended_psu_w", "Реком. БП, Вт", "Recommended PSU W"),
         ],
     },
     {
         "row_id": "etype_psu",
         "name": "Блок питания",
         "sort_order": 60,
+        "build_roles": ["pc", "server"],
         "fields": [
             _eq_field("wattage", "Мощность", "Wattage"),
             _eq_field("efficiency", "КПД", "Efficiency"),
             _eq_field("modular", "Модульность", "Modular"),
             _eq_field("form_factor", "Форм-фактор", "Form factor"),
             _eq_field("pcie_cables", "PCIe кабели", "PCIe cables"),
+            _eq_field("atx_version", "ATX версия", "ATX version"),
+            _eq_field("eps_8pin", "EPS 8-pin", "EPS 8-pin"),
+            _eq_field("12vhpwr", "12VHPWR", "12VHPWR"),
         ],
     },
     {
         "row_id": "etype_cooling",
         "name": "Охлаждение",
         "sort_order": 70,
+        "build_roles": ["pc", "server"],
         "fields": [
             _eq_field("cooling_kind", "Тип", "Kind"),
             _eq_field("socket_compat", "Сокеты", "Socket compat"),
             _eq_field("tdp_rating", "TDP рейтинг", "TDP rating"),
             _eq_field("radiator_size", "Радиатор", "Radiator size"),
             _eq_field("height_mm", "Высота, мм", "Height mm"),
+            _eq_field("mount_type", "Крепление", "Mount type"),
+            _eq_field("clearance_mm", "Клиренс, мм", "Clearance mm"),
         ],
     },
     {
         "row_id": "etype_case",
         "name": "Корпус",
         "sort_order": 80,
+        "build_roles": ["pc", "server"],
         "fields": [
             _eq_field("form_factor_support", "Форм-факторы", "Form factors"),
             _eq_field("max_gpu_length", "Макс. GPU", "Max GPU length"),
             _eq_field("max_cooler_height", "Макс. кулер", "Max cooler height"),
             _eq_field("drive_bays", "Отсеки", "Drive bays"),
             _eq_field("psu_form_factor", "БП форм-фактор", "PSU form factor"),
+            _eq_field("rad_support", "Радиаторы СЖО", "Rad support"),
+            _eq_field("psu_max_length", "Макс. длина БП", "PSU max length"),
+        ],
+    },
+    {
+        "row_id": "etype_case_fans",
+        "name": "Корпусные вентиляторы",
+        "sort_order": 85,
+        "build_roles": ["pc", "server"],
+        "fields": [
+            _eq_field("count", "Количество", "Count"),
+            _eq_field("size_mm", "Размер, мм", "Size mm"),
+            _eq_field("pwm", "PWM", "PWM"),
+            _eq_field("connector", "Разъём", "Connector"),
         ],
     },
     {
         "row_id": "etype_nic",
         "name": "Сетевой адаптер",
         "sort_order": 90,
+        "build_roles": ["pc", "server"],
         "fields": [
             _eq_field("port_speed", "Скорость", "Port speed"),
             _eq_field("ports", "Порты", "Ports"),
             _eq_field("interface", "Интерфейс", "Interface"),
             _eq_field("rdma", "RDMA", "RDMA"),
+            _eq_field("form_factor", "Форм-фактор", "Form factor"),
         ],
     },
     {
         "row_id": "etype_raid_hba",
         "name": "RAID/HBA контроллер",
         "sort_order": 100,
+        "build_roles": ["server"],
         "fields": [
             _eq_field("interface", "Интерфейс", "Interface"),
             _eq_field("internal_ports", "Внутр. порты", "Internal ports"),
@@ -184,6 +228,7 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "row_id": "etype_backplane",
         "name": "Дисковая корзина",
         "sort_order": 110,
+        "build_roles": ["server"],
         "fields": [
             _eq_field("bays", "Отсеки", "Bays"),
             _eq_field("drive_form_factor", "Форм-фактор дисков", "Drive form factor"),
@@ -194,6 +239,7 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "row_id": "etype_bmc",
         "name": "Модуль управления BMC",
         "sort_order": 120,
+        "build_roles": ["server"],
         "fields": [
             _eq_field("mgmt_port", "Порт управления", "Mgmt port"),
             _eq_field("protocols", "Протоколы", "Protocols"),
@@ -211,6 +257,7 @@ def _equipment_type_seed_rows() -> list[dict[str, Any]]:
             "body": {
                 "name": t["name"],
                 "sort_order": t["sort_order"],
+                "build_roles": list(t["build_roles"]),
                 "fields_json": list(t["fields"]),
             },
         }
@@ -878,6 +925,13 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "scope": {"projects": "all"},
             },
+            {
+                "slug": "equipment_builds",
+                "label": {"ru": "Сборка", "en": "Builds"},
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all"},
+            },
         ],
         "columns": [
             {
@@ -1105,6 +1159,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "required": False,
                 "default": [],
             },
+            {
+                "table_slug": "equipment_types",
+                "name": "build_roles",
+                "label": {"ru": "Роли сборки", "en": "Build roles"},
+                "type": "json",
+                "required": False,
+                "default": ["pc", "server"],
+            },
             _project_ids_column("equipment_types"),
             {
                 "table_slug": "equipment_items",
@@ -1112,6 +1174,21 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "label": {"ru": "Название", "en": "Name"},
                 "type": "text",
                 "required": True,
+            },
+            {
+                "table_slug": "equipment_items",
+                "name": "offer_id",
+                "label": {"ru": "Найденный товар", "en": "Found offer"},
+                "type": "ref",
+                "required": False,
+                "ref": {"table_slug": "found_offers"},
+            },
+            {
+                "table_slug": "equipment_items",
+                "name": "offer_title",
+                "label": {"ru": "Товар", "en": "Offer"},
+                "type": "text",
+                "required": False,
             },
             {
                 "table_slug": "equipment_items",
@@ -1151,6 +1228,50 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "default": {},
             },
             _project_ids_column("equipment_items"),
+            {
+                "table_slug": "equipment_builds",
+                "name": "name",
+                "label": {"ru": "Название", "en": "Name"},
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "equipment_builds",
+                "name": "build_kind",
+                "label": {"ru": "Тип", "en": "Kind"},
+                "type": "enum",
+                "required": True,
+                "default": "pc",
+                "enum": {
+                    "values": ["pc", "server"],
+                    "labels": {"pc": "ПК", "server": "Сервер"},
+                },
+            },
+            {
+                "table_slug": "equipment_builds",
+                "name": "slots",
+                "label": {"ru": "Комплектующие", "en": "Slots"},
+                "type": "json",
+                "required": False,
+                "default": {},
+            },
+            {
+                "table_slug": "equipment_builds",
+                "name": "components_count",
+                "label": {"ru": "Комплектующих", "en": "Components"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+            },
+            {
+                "table_slug": "equipment_builds",
+                "name": "price_total",
+                "label": {"ru": "Цена", "en": "Price"},
+                "type": "number",
+                "required": False,
+                "default": 0,
+            },
+            _project_ids_column("equipment_builds"),
         ],
         "views": [
             {
@@ -1190,6 +1311,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "target": {
                                 "kind": "view",
                                 "view": "equipment_types_list",
+                            },
+                        },
+                        {
+                            "title": "Сборка",
+                            "icon": "precision_manufacturing",
+                            "target": {
+                                "kind": "view",
+                                "view": "equipment_builds_list",
                             },
                         },
                     ],
@@ -1467,6 +1596,22 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "icon": "label_outline",
                         },
                         {
+                            "column": "offer_id",
+                            "widget": "type_ref_picker",
+                            "pick_view": "found_offers_pick",
+                            "title_field": "offer_title",
+                            "icon": "inventory_2",
+                            "empty_style": "warning",
+                            "empty_label": {
+                                "ru": "Не выбран",
+                                "en": "Not selected",
+                            },
+                            "label": {
+                                "ru": "Найденный товар",
+                                "en": "Found offer",
+                            },
+                        },
+                        {
                             "column": "type_id",
                             "widget": "type_ref_picker",
                             "pick_view": "equipment_types_pick",
@@ -1492,6 +1637,10 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "type_id_field": "type_id",
                             "types_table": "equipment_types",
                             "fields_from": "fields_json",
+                            "section_title": {
+                                "ru": "Характеристики",
+                                "en": "Characteristics",
+                            },
                             "visible_when": {
                                 "field": "type_id",
                                 "not_empty": True,
@@ -1514,15 +1663,11 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         }
                     },
                     "title_field": "name",
-                    "subtitle_fields": ["sort_order"],
+                    "subtitle_fields": [],
                     "columns": [
                         {
                             "field": "name",
                             "label": {"ru": "Название", "en": "Name"},
-                        },
-                        {
-                            "field": "sort_order",
-                            "label": {"ru": "Порядок", "en": "Order"},
                         },
                     ],
                     "row_tap": {
@@ -1554,7 +1699,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         }
                     },
                     "title_field": "name",
-                    "subtitle_fields": ["sort_order"],
+                    "subtitle_fields": [],
                     "columns": [
                         {
                             "field": "name",
@@ -1563,6 +1708,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     ],
                     "selection": {
                         "kind": "single",
+                        "control": "switch",
+                        "placement": "trailing",
+                        "disable_row_tap": True,
                         "match_context_field": "type_id",
                         "set_on_context": {
                             "field": "type_id",
@@ -1572,10 +1720,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "pop_after": True,
                         },
                     },
-                    "row_tap": {
-                        "kind": "open_view",
-                        "view": "equipment_type_settings",
-                    },
                     "inline_add": {
                         "field": "name",
                         "title": "Добавить тип",
@@ -1584,6 +1728,95 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "Нет типов",
                         "No types",
                         icon="category",
+                    ),
+                },
+            },
+            {
+                "slug": "found_offers_pick",
+                "table_slug": "found_offers",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {
+                        "title": {
+                            "ru": "Выбор товара",
+                            "en": "Select offer",
+                        }
+                    },
+                    "title_field": "title",
+                    "subtitle_fields": ["part_number", "price"],
+                    "columns": [
+                        {
+                            "field": "title",
+                            "label": {"ru": "Товар", "en": "Title"},
+                        },
+                        {
+                            "field": "price",
+                            "label": {"ru": "Цена", "en": "Price"},
+                        },
+                    ],
+                    "selection": {
+                        "kind": "single",
+                        "control": "switch",
+                        "placement": "trailing",
+                        "disable_row_tap": True,
+                        "match_context_field": "offer_id",
+                        "set_on_context": {
+                            "field": "offer_id",
+                            "value_from": "row_id",
+                            "also_copy": [{"from": "title", "to": "offer_title"}],
+                            "pop_after": True,
+                        },
+                    },
+                    "empty": _empty(
+                        "Нет товаров",
+                        "No offers",
+                        icon="inventory_2",
+                    ),
+                },
+            },
+            {
+                "slug": "equipment_items_pick",
+                "table_slug": "equipment_items",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {
+                        "title": {
+                            "ru": "Выбор комплектующего",
+                            "en": "Select component",
+                        }
+                    },
+                    "title_field": "name",
+                    "subtitle_fields": ["part_number", "offer_title"],
+                    "columns": [
+                        {
+                            "field": "name",
+                            "label": {"ru": "Название", "en": "Name"},
+                        }
+                    ],
+                    "row_filter_from_context": {"type_id": "_pick_type_id"},
+                    "selection": {
+                        "kind": "single",
+                        "control": "switch",
+                        "placement": "trailing",
+                        "disable_row_tap": True,
+                        "match_map_field": "slots",
+                        "match_map_key_from_context": "_slot_key",
+                        "set_on_context": {
+                            "map_field": "slots",
+                            "map_key_from_context": "_slot_key",
+                            "value_from": "row_id",
+                            "recompute_build_totals": True,
+                            "pop_after": True,
+                        },
+                    },
+                    "empty": _empty(
+                        "Нет позиций",
+                        "No items",
+                        icon="tune",
                     ),
                 },
             },
@@ -1613,6 +1846,102 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {
                             "column": "fields_json",
                             "widget": "fields_schema_editor",
+                            "section_title": {
+                                "ru": "Характеристики",
+                                "en": "Characteristics",
+                            },
+                        },
+                    ],
+                },
+            },
+            {
+                "slug": "equipment_builds_list",
+                "table_slug": "equipment_builds",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {
+                        "title": {"ru": "Сборка", "en": "Builds"},
+                    },
+                    "title_field": "name",
+                    "subtitle_fields": ["build_kind", "components_count", "price_total"],
+                    "columns": [
+                        {
+                            "field": "name",
+                            "label": {"ru": "Название", "en": "Name"},
+                        },
+                        {
+                            "field": "build_kind",
+                            "label": {"ru": "Тип", "en": "Kind"},
+                        },
+                        {
+                            "field": "components_count",
+                            "label": {"ru": "Комплектующих", "en": "Components"},
+                        },
+                        {
+                            "field": "price_total",
+                            "label": {"ru": "Цена", "en": "Price"},
+                        },
+                    ],
+                    "row_tap": {
+                        "kind": "open_view",
+                        "view": "equipment_build_settings",
+                    },
+                    "inline_add": {
+                        "field": "name",
+                        "title": "Добавить сборку",
+                    },
+                    "empty": _empty(
+                        "Нет сборок",
+                        "No builds",
+                        icon="precision_manufacturing",
+                    ),
+                },
+            },
+            {
+                "slug": "equipment_build_settings",
+                "table_slug": "equipment_builds",
+                "kind": "detail",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "detail",
+                    "mode": "edit",
+                    "title": {"ru": "Сборка", "en": "Build"},
+                    "fields": [
+                        {
+                            "column": "name",
+                            "widget": "value",
+                            "icon": "label_outline",
+                        },
+                        {
+                            "column": "build_kind",
+                            "widget": "choice",
+                            "icon": "precision_manufacturing",
+                        },
+                        {
+                            "column": "slots",
+                            "widget": "build_slots",
+                            "types_table": "equipment_types",
+                            "items_table": "equipment_items",
+                            "offers_table": "found_offers",
+                            "pick_view": "equipment_items_pick",
+                            "section_title": {
+                                "ru": "Комплектующие",
+                                "en": "Components",
+                            },
+                        },
+                        {
+                            "column": "components_count",
+                            "widget": "value",
+                            "read_only": True,
+                            "icon": "numbers",
+                        },
+                        {
+                            "column": "price_total",
+                            "widget": "value",
+                            "read_only": True,
+                            "icon": "payments",
                         },
                     ],
                 },
@@ -1803,6 +2132,33 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "kind": "rows_upsert",
                 "implementation": {"table_slug": "equipment_items"},
+            },
+            {
+                "id": "equipment_builds_list",
+                "name": "equipment_builds_list",
+                "label": "List builds",
+                "description": (
+                    "List equipment_builds (name, build_kind, slots, components_count, price_total)."
+                ),
+                "enabled": True,
+                "kind": "rows_query",
+                "params_schema": {"type": "object", "properties": {}},
+                "implementation": {
+                    "table_slug": "equipment_builds",
+                    "query": {"limit": 200},
+                },
+            },
+            {
+                "id": "equipment_builds_upsert",
+                "name": "equipment_builds_upsert",
+                "label": "Upsert builds",
+                "description": (
+                    "Create/update equipment_builds. slots maps equipment_types.row_id → "
+                    "equipment_items.row_id. price_total is sum of linked found_offers.price * qty."
+                ),
+                "enabled": True,
+                "kind": "rows_upsert",
+                "implementation": {"table_slug": "equipment_builds"},
             },
         ],
         "seed_rows": {"items": _equipment_type_seed_rows()},

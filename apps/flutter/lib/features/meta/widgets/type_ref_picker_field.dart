@@ -6,7 +6,7 @@ import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Opens a types collection (radio pick) and shows warning when empty.
+/// Opens a types/offers collection (switch pick) and shows warning when empty.
 class TypeRefPickerField extends StatelessWidget {
   const TypeRefPickerField({
     super.key,
@@ -17,6 +17,7 @@ class TypeRefPickerField extends StatelessWidget {
     required this.emptyStyleWarning,
     required this.emptyLabel,
     required this.onOpenPick,
+    this.icon = Icons.category_outlined,
   });
 
   final String label;
@@ -26,6 +27,7 @@ class TypeRefPickerField extends StatelessWidget {
   final bool emptyStyleWarning;
   final String emptyLabel;
   final VoidCallback onOpenPick;
+  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
@@ -36,7 +38,7 @@ class TypeRefPickerField extends StatelessWidget {
         : emptyLabel;
     return AppNavPreference(
       title: label,
-      icon: Icons.category_outlined,
+      icon: icon,
       subtitle: Text(
         subtitleText,
         style: TextStyle(
