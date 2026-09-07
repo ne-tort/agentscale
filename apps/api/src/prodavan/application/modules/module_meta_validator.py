@@ -22,7 +22,16 @@ _LIFECYCLE_WHEN = frozenset({"project.launch", "project.sync", "project.resumed"
 _MATERIALIZE_WHEN = frozenset({"project.created", "project.resumed", "project.sync"})
 _MATERIALIZE_SOURCE_TYPES = frozenset({"row", "rows", "static", "meta_document"})
 _MATERIALIZE_FORMATS = frozenset(
-    {"raw", "json_rows", "json_single", "template", "copy_blob", "mcp_package", "merge_mapped_sqlite"}
+    {
+        "raw",
+        "json_rows",
+        "json_single",
+        "template",
+        "copy_blob",
+        "mcp_package",
+        "merge_mapped_sqlite",
+        "prompt_paths",
+    }
 )
 _BLOB_MATERIALIZE_FORMATS = frozenset({"copy_blob", "mcp_package"})
 

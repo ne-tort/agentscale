@@ -65,6 +65,7 @@ class MaterializePlanner:
         active_profile_id = await self._resolve_active_profile_id(
             schema_name=inst.schema_name,
             project_id=project_id,
+            cabinet_id=cabinet_id,
         )
         module_ids = enabled_module_ids
         if module_ids is None:
@@ -98,6 +99,7 @@ class MaterializePlanner:
                         fmt=fmt,
                         active_profile_id=active_profile_id,
                         project_id=project_id,
+                        cabinet_id=cabinet_id,
                         priority=priority,
                     )
                     if op:
@@ -112,6 +114,7 @@ class MaterializePlanner:
                         fmt=fmt,
                         active_profile_id=active_profile_id,
                         project_id=project_id,
+                        cabinet_id=cabinet_id,
                         priority=priority,
                     )
                     ops.extend(row_ops)
@@ -249,13 +252,28 @@ class MaterializePlanner:
         *,
         schema_name: str,
         project_id: str,
+        cabinet_id: str | None = None,
     ) -> str | None:
         from prodavan.application.modules.module_instance_service import (
+            OWNER_CABINET,
             OWNER_PROJECT,
             ModuleInstanceService,
         )
 
         instances = ModuleInstanceService(self._session)
+        # Cabinet-owned prompts: SoT is cabinet instance.
+        if cabinet_id:
+            cab = await instances.get_instance(
+                owner_kind=OWNER_CABINET, owner_id=cabinet_id, module_id="mod_prompts"
+            )
+            if cab is not None:
+                rows = await instances.list_data_rows(
+                    instance_id=cab.id, table_slug="prompt_profiles"
+                )
+                rid = _pick_active_profile(rows, project_id)
+                if rid:
+                    return rid
+
         inst = await instances.get_instance(
             owner_kind=OWNER_PROJECT, owner_id=project_id, module_id="mod_prompts"
         )
@@ -263,15 +281,9 @@ class MaterializePlanner:
             rows = await instances.list_data_rows(
                 instance_id=inst.id, table_slug="prompt_profiles"
             )
-            matches: list[tuple[str, bool]] = []
-            for row in rows:
-                body = row.get("body") if isinstance(row.get("body"), dict) else {}
-                matches.append((str(row["row_id"]), bool(body.get("is_default"))))
-            if matches:
-                defaults = [rid for rid, is_def in matches if is_def]
-                if defaults:
-                    return defaults[0]
-                return matches[0][0]
+            rid = _pick_active_profile(rows, project_id)
+            if rid:
+                return rid
 
         qschema = qident(schema_name)
         q = await self._session.execute(
@@ -285,18 +297,11 @@ class MaterializePlanner:
                 """
             )
         )
-        matches = []
-        for row in q.fetchall():
-            body = row.body if isinstance(row.body, dict) else {}
-            if not _row_applies_to_project(body, project_id):
-                continue
-            matches.append((str(row.row_id), bool(body.get("is_default"))))
-        if not matches:
-            return None
-        defaults = [rid for rid, is_def in matches if is_def]
-        if defaults:
-            return defaults[0]
-        return matches[0][0]
+        legacy_rows = [
+            {"row_id": str(row.row_id), "body": row.body if isinstance(row.body, dict) else {}}
+            for row in q.fetchall()
+        ]
+        return _pick_active_profile(legacy_rows, project_id)
 
     async def _fetch_row(
         self,
@@ -306,14 +311,30 @@ class MaterializePlanner:
         table_slug: str,
         row_id: str,
         project_id: str | None = None,
+        cabinet_id: str | None = None,
     ) -> dict[str, Any] | None:
-        if project_id:
-            from prodavan.application.modules.module_instance_service import (
-                OWNER_PROJECT,
-                ModuleInstanceService,
-            )
+        from prodavan.application.modules.module_instance_service import (
+            OWNER_CABINET,
+            OWNER_PROJECT,
+            ModuleInstanceService,
+        )
 
-            instances = ModuleInstanceService(self._session)
+        instances = ModuleInstanceService(self._session)
+        owner = await self._instance_owner_for_module(module_id)
+
+        if owner == "cabinet" and cabinet_id:
+            cab = await instances.get_instance(
+                owner_kind=OWNER_CABINET, owner_id=cabinet_id, module_id=module_id
+            )
+            if cab is not None:
+                row = await instances.get_data_row(
+                    instance_id=cab.id, table_slug=table_slug, row_id=row_id
+                )
+                if row is not None:
+                    body = row.get("body")
+                    return body if isinstance(body, dict) else {}
+
+        if project_id:
             inst = await instances.get_instance(
                 owner_kind=OWNER_PROJECT, owner_id=project_id, module_id=module_id
             )
@@ -349,18 +370,19 @@ class MaterializePlanner:
         table_slug: str,
         filt: dict[str, Any] | None,
         project_id: str,
+        cabinet_id: str | None = None,
     ) -> list[dict[str, Any]]:
         from prodavan.application.modules.module_instance_service import (
+            OWNER_CABINET,
             OWNER_PROJECT,
             ModuleInstanceService,
         )
 
         instances = ModuleInstanceService(self._session)
-        inst = await instances.get_instance(
-            owner_kind=OWNER_PROJECT, owner_id=project_id, module_id=module_id
-        )
-        if inst is not None:
-            rows = await instances.list_data_rows(instance_id=inst.id, table_slug=table_slug)
+        owner = await self._instance_owner_for_module(module_id)
+
+        async def _from_instance(instance_id: str) -> list[dict[str, Any]]:
+            rows = await instances.list_data_rows(instance_id=instance_id, table_slug=table_slug)
             out: list[dict[str, Any]] = []
             for r in rows:
                 body = r.get("body") if isinstance(r.get("body"), dict) else {}
@@ -370,6 +392,19 @@ class MaterializePlanner:
                     continue
                 out.append({"row_id": r["row_id"], **body})
             return out
+
+        if owner == "cabinet" and cabinet_id:
+            cab = await instances.get_instance(
+                owner_kind=OWNER_CABINET, owner_id=cabinet_id, module_id=module_id
+            )
+            if cab is not None:
+                return await _from_instance(cab.id)
+
+        inst = await instances.get_instance(
+            owner_kind=OWNER_PROJECT, owner_id=project_id, module_id=module_id
+        )
+        if inst is not None:
+            return await _from_instance(inst.id)
 
         qschema = qident(schema_name)
         q = await self._session.execute(
@@ -391,6 +426,34 @@ class MaterializePlanner:
                 continue
             out.append({"row_id": r.row_id, **body})
         return out
+
+    async def _instance_owner_for_module(self, module_id: str) -> str:
+        """Read instance_owner from tabs meta; default project."""
+        try:
+            doc = await self._meta.get_document(module_id=module_id, slug="tabs")
+        except Exception:
+            return "project"
+        body = doc.get("body") if isinstance(doc, dict) else None
+        if isinstance(body, dict) and "items" in body:
+            items = body.get("items")
+        elif isinstance(body, list):
+            items = body
+        else:
+            items = None
+        if not isinstance(items, list):
+            return "project"
+        for tab in items:
+            if not isinstance(tab, dict):
+                continue
+            raw = tab.get("instance_owner")
+            if isinstance(raw, str) and raw in ("cabinet", "project"):
+                return raw
+            nav = tab.get("nav")
+            if isinstance(nav, dict):
+                nested = nav.get("instance_owner")
+                if isinstance(nested, str) and nested in ("cabinet", "project"):
+                    return nested
+        return "project"
 
     def _substitute(self, template: str, ctx: dict[str, str | None]) -> str:
         # {{var}} row-field templates first — {var} would otherwise match the inner
@@ -415,6 +478,7 @@ class MaterializePlanner:
         fmt: str,
         active_profile_id: str | None,
         project_id: str,
+        cabinet_id: str,
         priority: int,
     ) -> MaterializeOp | None:
         table_slug = source.get("table_slug") or ""
@@ -427,6 +491,7 @@ class MaterializePlanner:
             table_slug=table_slug,
             row_id=row_id,
             project_id=project_id,
+            cabinet_id=cabinet_id,
         )
         if body is None:
             return None
@@ -462,6 +527,7 @@ class MaterializePlanner:
         fmt: str,
         active_profile_id: str | None,
         project_id: str,
+        cabinet_id: str,
         priority: int,
     ) -> list[MaterializeOp]:
         table_slug = source.get("table_slug") or ""
@@ -477,6 +543,7 @@ class MaterializePlanner:
             table_slug=table_slug,
             filt=filt,
             project_id=project_id,
+            cabinet_id=cabinet_id,
         )
         field = source.get("field") or target.get("field")
         if fmt == "json_rows":
@@ -522,6 +589,13 @@ class MaterializePlanner:
                     },
                 )
             ]
+        if fmt == "prompt_paths":
+            return _expand_prompt_path_ops(
+                rows=rows,
+                rule_id=rule_id,
+                module_id=module_id,
+                priority=priority,
+            )
         ops: list[MaterializeOp] = []
         for i, body in enumerate(rows):
             str_ctx = _row_path_context(body, field if isinstance(field, str) else None)
@@ -596,6 +670,21 @@ def _row_matches_filter(body: dict[str, Any], filt: dict[str, Any]) -> bool:
     return True
 
 
+def _pick_active_profile(rows: list[dict[str, Any]], project_id: str) -> str | None:
+    matches: list[tuple[str, bool]] = []
+    for row in rows:
+        body = row.get("body") if isinstance(row.get("body"), dict) else {}
+        if not _row_applies_to_project(body, project_id):
+            continue
+        matches.append((str(row["row_id"]), bool(body.get("is_default"))))
+    if not matches:
+        return None
+    defaults = [rid for rid, is_def in matches if is_def]
+    if defaults:
+        return defaults[0]
+    return matches[0][0]
+
+
 def _row_applies_to_project(body: dict[str, Any], project_id: str) -> bool:
     pids = body.get("project_ids")
     if pids is None:
@@ -638,3 +727,63 @@ def _row_path_context(body: dict[str, Any], field: str | None) -> dict[str, str]
             if isinstance(filename, str) and filename:
                 ctx["filename"] = filename
     return ctx
+
+
+def _join_prompt_file_path(base: str, file_name: str) -> str:
+    """Join prompt_paths.path with a file name → workspace-relative path."""
+    name = file_name.strip().lstrip("/")
+    if not name:
+        return ""
+    if not name.endswith(".md"):
+        name = f"{name}.md"
+    base_norm = (base or "").strip().replace("\\", "/").lstrip("/")
+    if not base_norm or base_norm == ".":
+        return name
+    return f"{base_norm.rstrip('/')}/{name}"
+
+
+def _file_entry_body(entry: dict[str, Any]) -> str | None:
+    for key in ("body", "body_md", "content"):
+        val = entry.get(key)
+        if isinstance(val, str):
+            return val
+    return None
+
+
+def _expand_prompt_path_ops(
+    *,
+    rows: list[dict[str, Any]],
+    rule_id: str,
+    module_id: str,
+    priority: int,
+) -> list[MaterializeOp]:
+    """Expand prompt_paths.files_json into raw write ops; skip empty files_json."""
+    ops: list[MaterializeOp] = []
+    for i, body in enumerate(rows):
+        files = body.get("files_json")
+        if not isinstance(files, list) or not files:
+            continue
+        path_base = str(body.get("path") or "")
+        for j, entry in enumerate(files):
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name") or "").strip()
+            text = _file_entry_body(entry)
+            if not name or text is None:
+                continue
+            ws_path = _join_prompt_file_path(path_base, name)
+            if not ws_path:
+                continue
+            ops.append(
+                MaterializeOp(
+                    rule_id=f"{rule_id}_{i}_{j}",
+                    module_id=module_id,
+                    workspace_path=ws_path,
+                    format="raw",
+                    source_type="rows",
+                    priority=priority,
+                    row_body={"body_md": text},
+                    field="body_md",
+                )
+            )
+    return ops

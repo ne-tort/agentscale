@@ -622,7 +622,7 @@
   "cabinetAddRow": "Add row",
   "cabinetAgentsInstructions": "Agents instructions",
   "cabinetAgentsMd": "AGENTS.md",
-  "cabinetAgentsMdHint": "Written into project workspace on materialize (AGENTS.md + CLAUDE.md). Re-materialize projects to apply.",
+  "cabinetAgentsMdHint": "Written into project workspace on materialize (AGENTS.md). Re-materialize projects to apply.",
   "cabinetModuleRematerializeScheduled": "Updating {count, plural, =1{1 project workspace} other{{count} project workspaces}} in the background…",
   "@cabinetModuleRematerializeScheduled": {
     "placeholders": {

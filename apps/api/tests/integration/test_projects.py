@@ -126,7 +126,7 @@ def test_project_create_materialize_lifecycle(client: TestClient) -> None:
     ws_root = Path(launched["materialize"]["workspace_root"])
     assert ws_root.is_dir()
     assert (ws_root / "AGENTS.md").is_file()
-    assert (ws_root / "CLAUDE.md").is_file()
+    assert not (ws_root / "CLAUDE.md").exists()
     assert (ws_root / "mcp.json").is_file()
     assert (ws_root / ".prodavan" / "config.yaml").is_file()
     assert (ws_root / "inbox").is_dir()

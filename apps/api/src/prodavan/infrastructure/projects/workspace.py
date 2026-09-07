@@ -39,7 +39,8 @@ class WorkspaceLayoutWriter:
         ensure_file_store().put_bytes_sync(key, data, content_type=content_type)
 
     def ensure_dirs(self) -> None:
-        for rel in ("prompts", "rules", "skills", "packages", "inbox", "out", "cabinet-seed"):
+        # Only always-on agent dirs; rules/skills/prompts created on write when needed.
+        for rel in ("packages", "inbox", "out", "cabinet-seed"):
             (self._root / rel).mkdir(parents=True, exist_ok=True)
 
     def write_text_file(self, *, relative_path: str, text: str) -> None:
@@ -71,7 +72,7 @@ class WorkspaceLayoutWriter:
         )
         raw = text.encode("utf-8")
         self._put_workspace_bytes("AGENTS.md", raw, content_type="text/markdown; charset=utf-8")
-        self._put_workspace_bytes("CLAUDE.md", raw, content_type="text/markdown; charset=utf-8")
+        # Do not write CLAUDE.md alias — only AGENTS.md.
 
     def write_mcp_config(self, *, cabinet_id: str, packages: list[dict[str, Any]]) -> None:
         payload = {

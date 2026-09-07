@@ -2,6 +2,8 @@
 
 from prodavan.application.projects.materialize_planner import (
     MaterializePlanner,
+    _expand_prompt_path_ops,
+    _join_prompt_file_path,
     _merge_materialize_rules,
     _row_applies_to_project,
     _row_matches_filter,
@@ -87,3 +89,34 @@ def test_row_path_context_extracts_filename() -> None:
     assert ctx["filename"] == "spec.pdf"
     assert ctx["name"] == "ACME"
     assert "spec_file" not in ctx
+
+
+def test_join_prompt_file_path() -> None:
+    assert _join_prompt_file_path("", "AGENTS.md") == "AGENTS.md"
+    assert _join_prompt_file_path("/", "AGENTS.md") == "AGENTS.md"
+    assert _join_prompt_file_path("rules/", "style") == "rules/style.md"
+    assert _join_prompt_file_path("prompts/examples/", "sample.md") == "prompts/examples/sample.md"
+
+
+def test_expand_prompt_path_ops_skips_empty_files() -> None:
+    ops = _expand_prompt_path_ops(
+        rows=[
+            {"row_id": "path_agents", "path": "", "files_json": []},
+            {
+                "row_id": "path_rules",
+                "path": "rules/",
+                "files_json": [
+                    {"name": "style", "body": "# Style\n"},
+                    {"name": "skip-me"},  # no body
+                ],
+            },
+        ],
+        rule_id="prompt_paths_files",
+        module_id="mod_prompts",
+        priority=10,
+    )
+    assert len(ops) == 1
+    assert ops[0].workspace_path == "rules/style.md"
+    assert ops[0].format == "raw"
+    assert ops[0].row_body == {"body_md": "# Style\n"}
+    assert ops[0].field == "body_md"

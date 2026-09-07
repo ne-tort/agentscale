@@ -316,6 +316,21 @@ class CollectionViewInterpreter extends StatelessWidget {
         }
       }
     }
+    final settingsView = uiJson['settings_view'] as String?;
+    if (settingsView != null &&
+        settingsView.isNotEmpty &&
+        onOpenForm != null &&
+        contextRowId != null &&
+        contextRowId!.isNotEmpty) {
+      final locale = Localizations.localeOf(context);
+      items.add(
+        AppIconButton(
+          icon: Icons.settings_outlined,
+          tooltip: locale.languageCode == 'en' ? 'Settings' : 'Настройки',
+          onPressed: () => onOpenForm!(settingsView, rowId: contextRowId),
+        ),
+      );
+    }
     return items.isEmpty ? null : items;
   }
 

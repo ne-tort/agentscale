@@ -4,41 +4,16 @@ from __future__ import annotations
 
 from typing import Any
 
-_BLOCK_TYPES = [
-    "rules",
-    "skills",
-    "output_schema",
-    "guardrails",
-    "examples",
-    "others",
+# Default prompt path cards for profile_default (empty files_json until edited).
+_PROMPT_PATH_SEEDS: list[tuple[str, str, str]] = [
+    ("path_agents", "AGENTS.md", ""),
+    ("path_rules", "rules", "rules/"),
+    ("path_skills", "skills", "skills/"),
+    ("path_output_schema", "output_schema", "prompts/output-schema/"),
+    ("path_guardrails", "guardrails", "prompts/guardrails/"),
+    ("path_examples", "examples", "prompts/examples/"),
+    ("path_others", "others", "prompts/others/"),
 ]
-
-_BLOCK_LABELS: dict[str, dict[str, str]] = {
-    "rules": {"ru": "Правила", "en": "Rules"},
-    "skills": {"ru": "Умения", "en": "Skills"},
-    "output_schema": {"ru": "Схема ответа", "en": "Output schema"},
-    "guardrails": {"ru": "Безопасность", "en": "Guardrails"},
-    "examples": {"ru": "Примеры", "en": "Examples"},
-    "others": {"ru": "Другое", "en": "Others"},
-}
-
-_BLOCK_INLINE_TITLES = {
-    "rules": "Добавить правило",
-    "skills": "Добавить умение",
-    "output_schema": "Добавить схему ответа",
-    "guardrails": "Добавить ограничение",
-    "examples": "Добавить пример",
-    "others": "Добавить запись",
-}
-
-_BLOCK_EMPTY_TITLES: dict[str, dict[str, str]] = {
-    "rules": {"ru": "Нет правил", "en": "No rules"},
-    "skills": {"ru": "Нет умений", "en": "No skills"},
-    "output_schema": {"ru": "Нет схем", "en": "No schemas"},
-    "guardrails": {"ru": "Нет ограничений", "en": "No guardrails"},
-    "examples": {"ru": "Нет примеров", "en": "No examples"},
-    "others": {"ru": "Нет записей", "en": "No items"},
-}
 
 
 def _empty(title_ru: str, title_en: str, *, icon: str | None = None) -> dict[str, Any]:
@@ -345,195 +320,40 @@ def _project_ids_column(table_slug: str) -> dict[str, Any]:
     }
 
 
-def _collection_view(
-    *,
-    slug: str,
-    table_slug: str,
-    form_slug: str | None = None,
-    open_view_slug: str | None = None,
-    title_field: str = "name",
-    label: str | dict[str, str] = "Имя",
-    inline_title: str = "Добавить запись",
-    empty: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    if open_view_slug is not None:
-        row_tap: dict[str, Any] = {"kind": "open_view", "view": open_view_slug}
-    else:
-        row_tap = {"kind": "open_form", "view": form_slug or ""}
-    ui: dict[str, Any] = {
-        "version": 1,
-        "kind": "collection",
-        "title_field": title_field,
-        "subtitle_fields": [],
-        "columns": [{"field": title_field, "label": label}],
-        "row_tap": row_tap,
-        "inline_add": {"field": title_field, "title": inline_title},
-    }
-    if empty is not None:
-        ui["empty"] = empty
-    return {
-        "slug": slug,
-        "table_slug": table_slug,
-        "kind": "collection",
-        "ui_json": ui,
-    }
-
-
-def _prompt_item_views(block_type: str) -> tuple[dict[str, Any], dict[str, Any]]:
-    list_slug = f"{block_type}_list"
-    form_slug = f"{block_type}_form"
-    label = _BLOCK_LABELS.get(block_type, {"ru": block_type, "en": block_type})
-    inline_title = _BLOCK_INLINE_TITLES.get(block_type, f"Добавить {block_type}")
-    empty = _BLOCK_EMPTY_TITLES.get(block_type, {"ru": "Нет записей", "en": "No items"})
-    coll = _collection_view(
-        slug=list_slug,
-        table_slug="prompt_items",
-        form_slug=form_slug,
-        label=label,
-        inline_title=inline_title,
-        empty={"title": empty},
-    )
-    ui = coll["ui_json"]
-    ui["row_filter"] = {"block_type": block_type}
-    ui["context_bind"] = {"profile_id": "contextRowId"}
-    return (
-        coll,
-        {
-            "slug": form_slug,
-            "table_slug": "prompt_items",
-            "kind": "form",
-            "ui_json": {
-                "version": 1,
-                "kind": "form",
-                "mode": "edit",
-                "title": label,
-                "fields": [
-                    {"column": "name", "widget": "value"},
-                    {"column": "body_md", "widget": "markdown_editor"},
-                    {"column": "project_ids", "widget": "project_multiselect"},
-                ],
-                "hidden_defaults": {"block_type": block_type},
-            },
-        },
-    )
-
-
 def _prompts_materialize_rules() -> list[dict[str, Any]]:
-    rules: list[dict[str, Any]] = [
+    return [
         {
-            "id": "agents_active_profile",
+            "id": "prompt_paths_files",
             "enabled": True,
             "when": ["project.created", "project.resumed", "project.sync"],
             "priority": 10,
             "source": {
-                "type": "row",
-                "table_slug": "agents_md",
-                "row_id": "{active_profile_id}",
-                "field": "body_md",
+                "type": "rows",
+                "table_slug": "prompt_paths",
+                "filter": {"profile_id": "{active_profile_id}"},
             },
-            "target": {"workspace_path": "AGENTS.md", "format": "raw"},
-        },
+            "target": {"workspace_path": ".", "format": "prompt_paths"},
+        }
     ]
-    path_by_block = {
-        "rules": "rules/{{name}}.md",
-        "skills": "skills/{{name}}.md",
-        "output_schema": "prompts/output-schema/{{name}}.md",
-        "guardrails": "prompts/guardrails/{{name}}.md",
-        "examples": "prompts/examples/{{name}}.md",
-        "others": "prompts/others/{{name}}.md",
-    }
-    prio = 20
-    for block_type, ws_path in path_by_block.items():
-        rules.append(
-            {
-                "id": f"{block_type}_active_profile",
-                "enabled": True,
-                "when": ["project.created", "project.resumed", "project.sync"],
-                "priority": prio,
-                "source": {
-                    "type": "rows",
-                    "table_slug": "prompt_items",
-                    "filter": {
-                        "profile_id": "{active_profile_id}",
-                        "block_type": block_type,
-                    },
-                    "field": "body_md",
-                },
-                "target": {"workspace_path": ws_path, "format": "raw"},
-            }
-        )
-        prio += 1
-    return rules
+
+
+def _prompt_path_seed_rows() -> list[dict[str, Any]]:
+    return [
+        {
+            "table_slug": "prompt_paths",
+            "row_id": row_id,
+            "body": {
+                "profile_id": "profile_default",
+                "name": name,
+                "path": path,
+                "files_json": [],
+            },
+        }
+        for row_id, name, path in _PROMPT_PATH_SEEDS
+    ]
 
 
 def mod_prompts_meta() -> dict[str, list[Any]]:
-    views: list[dict[str, Any]] = [
-        _collection_view(
-            slug="prompt_profiles_list",
-            table_slug="prompt_profiles",
-            open_view_slug="prompts_hub",
-            inline_title="Добавить профиль",
-            empty=_empty("Нет профилей", "No profiles"),
-        ),
-        {
-            "slug": "prompt_profiles_form",
-            "table_slug": "prompt_profiles",
-            "kind": "form",
-            "ui_json": {
-                "version": 1,
-                "kind": "form",
-                "mode": "edit",
-                "title": {"ru": "Профиль", "en": "Profile"},
-                "fields": [
-                    {"column": "name", "widget": "value"},
-                    {"column": "project_ids", "widget": "project_multiselect"},
-                ],
-            },
-        },
-        {
-            "slug": "prompts_hub",
-            "kind": "profile_hub",
-            "ui_json": {
-                "version": 1,
-                "kind": "profile_hub",
-                "profile_table": "prompt_profiles",
-                "settings_table": "profile_settings",
-                "profile_id_field": "profile_id",
-                "active_field": "active",
-                "blocks": [
-                    {
-                        "title": "AGENTS.md",
-                        "icon": "description",
-                        "target": {"kind": "view", "view": "agents_form"},
-                    },
-                    *[
-                        {
-                            "title": _BLOCK_LABELS[b],
-                            "icon": "article_outlined",
-                            "target": {"kind": "view", "view": f"{b}_list"},
-                        }
-                        for b in _BLOCK_TYPES
-                    ],
-                ],
-            },
-        },
-        {
-            "slug": "agents_form",
-            "table_slug": "agents_md",
-            "kind": "form",
-            "ui_json": {
-                "version": 1,
-                "kind": "form",
-                "mode": "edit",
-                "title": "AGENTS.md",
-                "fields": [{"column": "body_md", "widget": "markdown_editor"}],
-            },
-        },
-    ]
-    for block_type in _BLOCK_TYPES:
-        list_v, form_v = _prompt_item_views(block_type)
-        views.extend([list_v, form_v])
-
     return {
         "tables": [
             {
@@ -551,15 +371,8 @@ def mod_prompts_meta() -> dict[str, list[Any]]:
                 "scope": {"projects": "all"},
             },
             {
-                "slug": "agents_md",
-                "label": "AGENTS.md",
-                "storage_kind": "json_document",
-                "enabled": True,
-                "scope": {"projects": "all"},
-            },
-            {
-                "slug": "prompt_items",
-                "label": "Prompt items",
+                "slug": "prompt_paths",
+                "label": "Пути промптов",
                 "storage_kind": "json_document",
                 "enabled": True,
                 "scope": {"projects": "all"},
@@ -598,53 +411,132 @@ def mod_prompts_meta() -> dict[str, list[Any]]:
                 "default": False,
             },
             {
-                "table_slug": "agents_md",
+                "table_slug": "prompt_paths",
                 "name": "profile_id",
                 "label": "Profile",
                 "type": "text",
                 "required": True,
             },
             {
-                "table_slug": "agents_md",
-                "name": "body_md",
-                "label": "Body",
-                "type": "text",
-                "required": False,
-                "default": "",
-            },
-            {
-                "table_slug": "prompt_items",
-                "name": "profile_id",
-                "label": "Profile",
-                "type": "text",
-                "required": True,
-            },
-            {
-                "table_slug": "prompt_items",
-                "name": "block_type",
-                "label": "Block",
-                "type": "enum",
-                "required": True,
-                "enum": {"values": _BLOCK_TYPES},
-            },
-            {
-                "table_slug": "prompt_items",
+                "table_slug": "prompt_paths",
                 "name": "name",
                 "label": "Имя",
                 "type": "text",
                 "required": True,
             },
             {
-                "table_slug": "prompt_items",
-                "name": "body_md",
-                "label": "Body",
+                "table_slug": "prompt_paths",
+                "name": "path",
+                "label": "Путь",
                 "type": "text",
-                "required": False,
+                "required": True,
                 "default": "",
             },
-            _project_ids_column("prompt_items"),
+            {
+                "table_slug": "prompt_paths",
+                "name": "files_json",
+                "label": {"ru": "Промпты", "en": "Prompts"},
+                "type": "json",
+                "required": False,
+                "default": [],
+            },
         ],
-        "views": views,
+        "views": [
+            {
+                "slug": "prompt_profiles_list",
+                "table_slug": "prompt_profiles",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {
+                        "title": {"ru": "Профили", "en": "Profiles"},
+                    },
+                    "title_field": "name",
+                    "subtitle_fields": [],
+                    "columns": [
+                        {
+                            "field": "name",
+                            "label": {"ru": "Имя", "en": "Name"},
+                        },
+                        {
+                            "field": "project_ids",
+                            "label": {"ru": "Проекты", "en": "Projects"},
+                        },
+                    ],
+                    "row_tap": {"kind": "open_view", "view": "prompts_hub"},
+                    "inline_add": {"field": "name", "title": "Добавить профиль"},
+                    "empty": _empty("Нет профилей", "No profiles"),
+                },
+            },
+            {
+                "slug": "prompt_profiles_form",
+                "table_slug": "prompt_profiles",
+                "kind": "form",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "form",
+                    "mode": "edit",
+                    "title": {"ru": "Профиль", "en": "Profile"},
+                    "fields": [
+                        {"column": "project_ids", "widget": "project_multiselect"},
+                        {"column": "name", "widget": "value"},
+                    ],
+                },
+            },
+            {
+                "slug": "prompts_hub",
+                "table_slug": "prompt_paths",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {
+                        "title": {"ru": "Промпты", "en": "Prompts"},
+                    },
+                    "title_field": "name",
+                    "subtitle_fields": ["path"],
+                    "columns": [
+                        {
+                            "field": "name",
+                            "label": {"ru": "Имя", "en": "Name"},
+                        },
+                        {
+                            "field": "path",
+                            "label": {"ru": "Путь", "en": "Path"},
+                        },
+                    ],
+                    "context_bind": {"profile_id": "contextRowId"},
+                    "row_tap": {"kind": "open_view", "view": "prompt_path_settings"},
+                    "inline_add": {"field": "name", "title": "Добавить путь"},
+                    "empty": _empty("Нет путей", "No paths"),
+                    # Profile settings (projects first) — Flutter may open via AppBar later.
+                    "settings_view": "prompt_profiles_form",
+                    "profile_table": "prompt_profiles",
+                    "settings_table": "profile_settings",
+                },
+            },
+            {
+                "slug": "prompt_path_settings",
+                "table_slug": "prompt_paths",
+                "kind": "detail",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "detail",
+                    "mode": "edit",
+                    "title": {"ru": "Путь", "en": "Path"},
+                    "fields": [
+                        {"column": "name", "widget": "value"},
+                        {"column": "path", "widget": "value"},
+                        {
+                            "column": "files_json",
+                            "widget": "prompt_files_editor",
+                            "section_title": {"ru": "Промпты", "en": "Prompts"},
+                        },
+                    ],
+                },
+            },
+        ],
         "tabs": [
             {
                 "id": "tab_prompts",
@@ -655,6 +547,7 @@ def mod_prompts_meta() -> dict[str, list[Any]]:
                 "view_slug": "prompt_profiles_list",
                 "table_slug": "prompt_profiles",
                 "enabled": True,
+                "instance_owner": "cabinet",
                 "nav": {"contour": "employee", "placement": "management"},
             }
         ],
@@ -671,14 +564,7 @@ def mod_prompts_meta() -> dict[str, list[Any]]:
                     "row_id": "settings_default",
                     "body": {"profile_id": "profile_default", "active": True},
                 },
-                {
-                    "table_slug": "agents_md",
-                    "row_id": "profile_default",
-                    "body": {
-                        "profile_id": "profile_default",
-                        "body_md": "# Agent\n\nEdit AGENTS.md in the cabinet UI.\n",
-                    },
-                },
+                *_prompt_path_seed_rows(),
             ]
         },
     }
@@ -708,7 +594,8 @@ def mod_files_meta() -> dict[str, list[Any]]:
                 "name": "target_path",
                 "label": "Путь в workspace",
                 "type": "text",
-                "required": True,
+                "required": False,
+                "default": "",
             },
             {
                 "table_slug": "files",
@@ -720,14 +607,33 @@ def mod_files_meta() -> dict[str, list[Any]]:
             _project_ids_column("files"),
         ],
         "views": [
-            _collection_view(
-                slug="files_list",
-                table_slug="files",
-                form_slug="files_form",
-                label="Имя",
-                inline_title="Добавить файл",
-                empty=_empty("Нет файлов", "No files"),
-            ),
+            {
+                "slug": "files_list",
+                "table_slug": "files",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {
+                        "title": {"ru": "Файлы", "en": "Files"},
+                    },
+                    "title_field": "name",
+                    "subtitle_fields": ["target_path"],
+                    "columns": [
+                        {
+                            "field": "name",
+                            "label": {"ru": "Название", "en": "Name"},
+                        },
+                        {
+                            "field": "target_path",
+                            "label": {"ru": "Путь", "en": "Path"},
+                        },
+                    ],
+                    "row_tap": {"kind": "open_form", "view": "files_form"},
+                    "inline_add": {"field": "name", "title": "Добавить файл"},
+                    "empty": _empty("Нет файлов", "No files", icon="attach_file"),
+                },
+            },
             {
                 "slug": "files_form",
                 "table_slug": "files",
@@ -736,12 +642,12 @@ def mod_files_meta() -> dict[str, list[Any]]:
                     "version": 1,
                     "kind": "form",
                     "mode": "edit",
-                    "title": "Файл",
+                    "title": {"ru": "Файл", "en": "File"},
                     "fields": [
+                        {"column": "project_ids", "widget": "project_multiselect"},
                         {"column": "name", "widget": "value"},
                         {"column": "target_path", "widget": "value"},
                         {"column": "file_ref", "widget": "file_upload"},
-                        {"column": "project_ids", "widget": "project_multiselect"},
                     ],
                 },
             },
@@ -756,6 +662,7 @@ def mod_files_meta() -> dict[str, list[Any]]:
                 "view_slug": "files_list",
                 "table_slug": "files",
                 "enabled": True,
+                "instance_owner": "cabinet",
                 "nav": {"contour": "employee", "placement": "management"},
             }
         ],
@@ -817,18 +724,38 @@ def mod_mcp_meta() -> dict[str, list[Any]]:
                 "name": "file_ref",
                 "label": "Zip package",
                 "type": "file_ref",
-                "required": True,
+                "required": False,
             },
             _project_ids_column("mcp_packages"),
         ],
         "views": [
-            _collection_view(
-                slug="mcp_packages_list",
-                table_slug="mcp_packages",
-                form_slug="mcp_packages_form",
-                inline_title="Добавить MCP",
-                empty=_empty("Нет MCP", "No MCP"),
-            ),
+            {
+                "slug": "mcp_packages_list",
+                "table_slug": "mcp_packages",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {
+                        "title": {"ru": "MCP", "en": "MCP"},
+                    },
+                    "title_field": "name",
+                    "subtitle_fields": ["version"],
+                    "columns": [
+                        {
+                            "field": "name",
+                            "label": {"ru": "Название", "en": "Name"},
+                        },
+                        {
+                            "field": "version",
+                            "label": {"ru": "Версия", "en": "Version"},
+                        },
+                    ],
+                    "row_tap": {"kind": "open_form", "view": "mcp_packages_form"},
+                    "inline_add": {"field": "name", "title": "Добавить MCP"},
+                    "empty": _empty("Нет MCP", "No MCP", icon="hub"),
+                },
+            },
             {
                 "slug": "mcp_packages_form",
                 "table_slug": "mcp_packages",
@@ -837,13 +764,17 @@ def mod_mcp_meta() -> dict[str, list[Any]]:
                     "version": 1,
                     "kind": "form",
                     "mode": "edit",
-                    "title": "MCP",
+                    "title": {"ru": "MCP", "en": "MCP"},
                     "fields": [
+                        {"column": "project_ids", "widget": "project_multiselect"},
                         {"column": "name", "widget": "value"},
                         {"column": "version", "widget": "value"},
                         {"column": "enabled", "widget": "switch"},
-                        {"column": "file_ref", "widget": "file_upload", "accept": ".zip"},
-                        {"column": "project_ids", "widget": "project_multiselect"},
+                        {
+                            "column": "file_ref",
+                            "widget": "file_upload",
+                            "accept": ".zip",
+                        },
                     ],
                 },
             },
@@ -858,6 +789,7 @@ def mod_mcp_meta() -> dict[str, list[Any]]:
                 "view_slug": "mcp_packages_list",
                 "table_slug": "mcp_packages",
                 "enabled": True,
+                "instance_owner": "cabinet",
                 "nav": {"contour": "employee", "placement": "management"},
             }
         ],
@@ -2175,6 +2107,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "view_slug": "equipment_hub",
                 "table_slug": "catalogs",
                 "enabled": True,
+                "instance_owner": "project",
                 "nav": {"contour": "employee", "placement": "data"},
             }
         ],

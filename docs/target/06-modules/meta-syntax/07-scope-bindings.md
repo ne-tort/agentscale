@@ -10,8 +10,18 @@ Module ──MC──► Cabinet     (fork cabinet instance + legacy install)
 Module ──MP──► Project     (optional allowlist; leaf = project instance)
 ```
 
-**Канон:** editable path = **instances**. Employee Management/Data hubs = **selected project** leaf.  
-**Legacy:** shared cabinet `module_data_rows` + row `project_ids` filter — только fallback после миграции.
+**Канон:** editable path = **instances**.  
+
+**`instance_owner` (orthogonal to `nav.placement`):**
+
+| Value | Employee hub UI | Materialize SoT |
+|-------|-----------------|-----------------|
+| `cabinet` | Cabinet instance API (`listModuleData*`); management/data entries **without** requiring selected project | Cabinet instance rows; filter `_row_applies_to_project(project_ids)` |
+| `project` | Project leaf (`listProjectRuntimeModuleData*`); only with selected project; project change → reload | Project leaf rows |
+
+Product seeds: `mod_prompts` / `mod_mcp` / `mod_files` → `cabinet`; `mod_equipment` → `project`.
+
+**Legacy:** shared cabinet `module_data_rows` + row `project_ids` filter — fallback after migration for older paths; management modules above intentionally keep cabinet SoT + `project_ids`.
 
 ## Scope block
 

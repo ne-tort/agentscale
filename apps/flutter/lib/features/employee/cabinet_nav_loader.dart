@@ -31,6 +31,12 @@ class CabinetNavEntry {
   }
 
   int get order => tab['order'] is int ? tab['order'] as int : 999;
+
+  /// `cabinet` or `project` — which instance leaf hosts this tab's data.
+  String get instanceOwner => moduleInstanceOwnerOf(tab);
+
+  /// True when the tab binds to the selected project's leaf (not cabinet).
+  bool get usesProjectLeaf => instanceOwner != 'cabinet';
 }
 
 List<CabinetNavEntry> _finalizeCabinetNavEntries(List<CabinetNavEntry> raw) {
@@ -122,21 +128,54 @@ Future<List<CabinetNavEntry>> _loadRawProjectNavEntries(String projectId) async 
   );
 }
 
+/// Merges management/data hub tabs from cabinet + project leaves.
+///
+/// Cabinet-owned tabs come from [cabinetRaw]; project-owned from [projectRaw].
+/// Deduplicates by `moduleId`+`viewSlug`, preferring cabinet-owned.
+List<CabinetNavEntry> _mergeHubPlacementEntries({
+  required List<CabinetNavEntry> cabinetRaw,
+  required List<CabinetNavEntry> projectRaw,
+  required CabinetNavPlacement placement,
+}) {
+  final fromCabinet = cabinetRaw.where(
+    (e) =>
+        cabinetNavPlacementOf(e.tab) == placement && isCabinetInstanceOwner(e.tab),
+  );
+  final fromProject = projectRaw.where(
+    (e) =>
+        cabinetNavPlacementOf(e.tab) == placement && !isCabinetInstanceOwner(e.tab),
+  );
+
+  final byKey = <String, CabinetNavEntry>{};
+  for (final e in fromProject) {
+    byKey['${e.moduleId}:${e.viewSlug}'] = e;
+  }
+  for (final e in fromCabinet) {
+    byKey['${e.moduleId}:${e.viewSlug}'] = e;
+  }
+  return byKey.values.toList();
+}
+
 /// Loads module tabs for cabinet shell navigation filtered by [placement].
 Future<List<CabinetNavEntry>> loadCabinetNavEntries(
   String cabinetId, {
   required CabinetNavPlacement placement,
   String? projectId,
 }) async {
-  final raw = projectId == null || projectId.isEmpty
-      ? await _loadRawCabinetNavEntries(cabinetId)
-      : await _loadRawProjectNavEntries(projectId);
-  return _finalizeCabinetNavEntries(
-    raw.where((e) => cabinetNavPlacementOf(e.tab) == placement).toList(),
-  );
+  final bundle = await loadCabinetNavBundle(cabinetId, projectId: projectId);
+  switch (placement) {
+    case CabinetNavPlacement.rail:
+      return bundle.rail;
+    case CabinetNavPlacement.management:
+      return bundle.management;
+    case CabinetNavPlacement.data:
+      return bundle.data;
+    case CabinetNavPlacement.none:
+      return const [];
+  }
 }
 
-/// Loads rail (cabinet) + management/data (selected project) in one pass.
+/// Loads rail (cabinet) + management/data (cabinet-owned ∪ project-owned) in one pass.
 Future<
     ({
       List<CabinetNavEntry> rail,
@@ -152,12 +191,18 @@ Future<
       cabinetRaw.where((e) => cabinetNavPlacementOf(e.tab) == CabinetNavPlacement.rail).toList(),
     ),
     management: _finalizeCabinetNavEntries(
-      projectRaw
-          .where((e) => cabinetNavPlacementOf(e.tab) == CabinetNavPlacement.management)
-          .toList(),
+      _mergeHubPlacementEntries(
+        cabinetRaw: cabinetRaw,
+        projectRaw: projectRaw,
+        placement: CabinetNavPlacement.management,
+      ),
     ),
     data: _finalizeCabinetNavEntries(
-      projectRaw.where((e) => cabinetNavPlacementOf(e.tab) == CabinetNavPlacement.data).toList(),
+      _mergeHubPlacementEntries(
+        cabinetRaw: cabinetRaw,
+        projectRaw: projectRaw,
+        placement: CabinetNavPlacement.data,
+      ),
     ),
   );
 }

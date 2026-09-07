@@ -102,16 +102,27 @@ Template (modules + module_meta_documents)
 | **Template** | Catalog module meta (`modules` + `module_meta_documents`) — source for first platform instance |
 | **Instance** | Independent copy: `module_instances` + `module_instance_meta_documents` + `module_instance_data_rows` (Postgres JSONB). Owner: `platform` / `company` / `cabinet` / `project` |
 | **Bind** | Creates a **fork** of parent instance (deep copy meta+data); further edits stay in the child |
-| **Project hubs** | Employee Management/Data UI = selected project’s leaf instances (`/projects/{id}/runtime-modules`); hub destinations shown only when that placement has tabs |
-| **Materialize data** | Row/profile content from **project** instance (leaf) on launch/sync |
+| **Project hubs** | Employee Management/Data UI. Tab `instance_owner` selects data API: `cabinet` = cabinet instance (no project required); `project` = selected project leaf (reload on project change) |
+| **Materialize data** | Default: project leaf. Modules with `instance_owner: cabinet` (prompts / MCP / files) read **cabinet** instance rows and filter by row `project_ids` |
 | **Materialize rules** | Rule definitions still from **template** meta slug `materialize` (MVP); instance-level rules later |
 | **Admin/company edit** | Template catalog PUT mirrors into platform/company **instance** meta; seed upsert refreshes platform instance meta only (children untouched) |
 
 Product module seed changes (`PRODUCT_MODULES`) ship only via Alembic calling `upsert_product_modules` — not silent bootstrap overwrite.
 
-**Legacy note:** older `cab_inst_*.module_data_rows` + row-level `project_ids` filtering remain as migration/read fallback only — no new writes. Isolation is per-project instances, not shared cabinet rows filtered by `project_ids`.
+**Legacy note:** older `cab_inst_*.module_data_rows` remain as migration/read fallback. Management modules (`mod_prompts`, `mod_mcp`, `mod_files`) keep **cabinet instance** as SoT with row `project_ids` for materialize targeting — orthogonal to project-leaf equipment data.
 
-**Mongo backlog:** optional later ADR to move `module_instance_data_rows` into Mongo with `instance_id` pointers in Postgres — not default until copy-on-bind is stable on Postgres.
+### `instance_owner` (tab / module)
+
+Independent of `nav.placement` (rail / management / data):
+
+| Value | UI | Materialize SoT |
+|-------|----|-----------------|
+| `cabinet` | Cabinet instance API; Management/Data без обязательного выбранного проекта | Cabinet rows + `project_ids` filter |
+| `project` | Project leaf API; только при выбранном проекте | Project leaf rows |
+
+Seeds: `mod_prompts` / `mod_mcp` / `mod_files` → `cabinet`; `mod_equipment` → `project`.
+
+**Prompts hub:** path-cards (`prompt_paths`: name, path, `files_json`); empty `files_json` skips folder creation; workspace writes only `AGENTS.md` (no `CLAUDE.md` alias).
 
 Module-level **MP binding** (`module_project_bindings`): if bindings exist, module materializes only for bound projects.
 

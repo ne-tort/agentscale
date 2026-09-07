@@ -10,6 +10,7 @@ import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/widgets/column_map_field.dart';
 import 'package:prodavan/features/meta/widgets/fields_schema_editor_field.dart';
+import 'package:prodavan/features/meta/widgets/prompt_files_editor_field.dart';
 import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
 import 'package:prodavan/features/meta/widgets/schema_attrs_field.dart';
 import 'package:prodavan/features/meta/widgets/secret_upload_field.dart';
@@ -381,6 +382,16 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         value: value,
         readOnly: fieldReadOnly,
         onChanged: (fields) => _persist(name, fields),
+      );
+    }
+    if (widgetKind == 'prompt_files_editor') {
+      final sectionRaw = fieldCfg?['section_title'];
+      final section = resolveMetaLabel(sectionRaw, l10n, locale: locale);
+      return PromptFilesEditorField(
+        label: section.isNotEmpty ? section : label,
+        value: value,
+        readOnly: fieldReadOnly,
+        onChanged: (files) => _persist(name, files),
       );
     }
     if (widgetKind == 'project_multiselect') {

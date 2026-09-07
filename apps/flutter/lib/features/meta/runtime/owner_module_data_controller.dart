@@ -4,6 +4,7 @@ import 'package:prodavan/core/api/admin_api.dart';
 import 'package:prodavan/core/api/company_api.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
+import 'package:prodavan/features/meta/project_ids_cell.dart';
 import 'package:prodavan/features/meta/runtime/module_pick_context.dart';
 
 /// Live platform / company module-instance data for shell nav modules.
@@ -249,6 +250,9 @@ class OwnerModuleDataController extends ChangeNotifier with ModulePickContextMix
   }
 
   String _formatCell(dynamic value, String tableSlug, String field) {
+    if (field == 'project_ids') {
+      return formatProjectIdsCell(value);
+    }
     if (value == null) return '';
     if (value is bool) return value ? 'true' : 'false';
     if (value is Map && value.containsKey('filename')) {

@@ -624,7 +624,7 @@
   "cabinetAddRow": "Добавить строку",
   "cabinetAgentsInstructions": "Инструкции для агентов",
   "cabinetAgentsMd": "AGENTS.md",
-  "cabinetAgentsMdHint": "Пишется в workspace проекта при materialize (AGENTS.md + CLAUDE.md). Пересоздайте проекты, чтобы применить.",
+  "cabinetAgentsMdHint": "Пишется в workspace проекта при materialize (AGENTS.md). Пересоздайте проекты, чтобы применить.",
   "cabinetModuleRematerializeScheduled": "Обновляем workspace {count, plural, one{{count} проекта} few{{count} проектов} many{{count} проектов} other{{count} проектов}} в фоне…",
   "@cabinetModuleRematerializeScheduled": {
     "placeholders": {

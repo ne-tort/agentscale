@@ -11,7 +11,7 @@ import 'package:prodavan/l10n/app_localizations.dart';
 /// Hub listing module tabs for a shell placement (`management` or `data`).
 ///
 /// Rows use the same preference-tile chrome as project settings.
-/// Management/Data are scoped to the selected project instance (leaf copy).
+/// Cabinet-owned tabs work without a selected project; project-owned need a leaf.
 class CabinetModuleHubPage extends StatelessWidget {
   const CabinetModuleHubPage({
     super.key,
@@ -31,7 +31,7 @@ class CabinetModuleHubPage extends StatelessWidget {
   final IconData emptyIcon;
 
   Future<void> _openModule(BuildContext context, CabinetNavEntry entry) {
-    final pid = projectId;
+    final pid = entry.usesProjectLeaf ? projectId : null;
     return Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => AppScaffold(
@@ -49,7 +49,8 @@ class CabinetModuleHubPage extends StatelessWidget {
 
   Widget _listBody(BuildContext context, AppLocalizations l10n) {
     final pid = projectId;
-    if (pid == null || pid.isEmpty) {
+    final hasCabinetOwned = entries.any((e) => !e.usesProjectLeaf);
+    if ((pid == null || pid.isEmpty) && !hasCabinetOwned) {
       return EmptyPlaceholder(
         title: l10n.projectCreateProjectHint,
         icon: Icons.folder_outlined,

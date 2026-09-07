@@ -1007,7 +1007,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get cabinetAgentsMdHint =>
-      'Written into project workspace on materialize (AGENTS.md + CLAUDE.md). Re-materialize projects to apply.';
+      'Written into project workspace on materialize (AGENTS.md). Re-materialize projects to apply.';
 
   @override
   String cabinetModuleRematerializeScheduled(int count) {

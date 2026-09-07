@@ -21,6 +21,7 @@ from prodavan.infrastructure.persistence.models.projects import ProjectModuleBin
 
 
 def _profile_hub_config(views: list[Any]) -> dict[str, str] | None:
+    """Detect prompt-profile tables from profile_hub or prompts_hub markers."""
     for view in views:
         if not isinstance(view, dict):
             continue
@@ -30,6 +31,12 @@ def _profile_hub_config(views: list[Any]) -> dict[str, str] | None:
         if ui.get("kind") == "profile_hub" or view.get("kind") == "profile_hub":
             return {
                 "profile_table": str(ui.get("profile_table") or "prompt_profiles"),
+                "settings_table": str(ui.get("settings_table") or "profile_settings"),
+            }
+        # Collection hub for path cards still declares profile/settings tables.
+        if isinstance(ui.get("profile_table"), str) and ui.get("profile_table").strip():
+            return {
+                "profile_table": str(ui.get("profile_table")),
                 "settings_table": str(ui.get("settings_table") or "profile_settings"),
             }
     return None

@@ -104,6 +104,94 @@ void main() {
     });
   });
 
+  group('moduleInstanceOwnerOf', () {
+    test('defaults rail to cabinet', () {
+      expect(
+        moduleInstanceOwnerOf({
+          'id': 't',
+          'nav': {'contour': 'employee', 'placement': 'rail'},
+        }),
+        'cabinet',
+      );
+    });
+
+    test('defaults management/data to project', () {
+      expect(
+        moduleInstanceOwnerOf({
+          'id': 't',
+          'nav': {'contour': 'employee', 'placement': 'management'},
+        }),
+        'project',
+      );
+      expect(
+        moduleInstanceOwnerOf({
+          'id': 't',
+          'nav': {'contour': 'employee', 'placement': 'data'},
+        }),
+        'project',
+      );
+    });
+
+    test('reads top-level instance_owner', () {
+      expect(
+        moduleInstanceOwnerOf({
+          'id': 't',
+          'instance_owner': 'cabinet',
+          'nav': {'contour': 'employee', 'placement': 'management'},
+        }),
+        'cabinet',
+      );
+    });
+
+    test('reads nav.instance_owner', () {
+      expect(
+        moduleInstanceOwnerOf({
+          'id': 't',
+          'nav': {
+            'contour': 'employee',
+            'placement': 'data',
+            'instance_owner': 'cabinet',
+          },
+        }),
+        'cabinet',
+      );
+    });
+
+    test('isCabinetInstanceOwner mirrors owner', () {
+      expect(
+        isCabinetInstanceOwner({
+          'instance_owner': 'cabinet',
+          'nav': {'placement': 'management'},
+        }),
+        isTrue,
+      );
+      expect(
+        isCabinetInstanceOwner({
+          'nav': {'contour': 'employee', 'placement': 'management'},
+        }),
+        isFalse,
+      );
+    });
+  });
+
+  group('CabinetNavEntry.usesProjectLeaf', () {
+    test('cabinet owner does not use project leaf', () {
+      const entry = CabinetNavEntry(
+        moduleId: 'mod_prompts',
+        moduleName: 'Промпты',
+        tab: {
+          'title': 'Промпты',
+          'view_slug': 'prompt_profiles_list',
+          'instance_owner': 'cabinet',
+          'nav': {'contour': 'employee', 'placement': 'management'},
+        },
+        label: 'Промпты',
+      );
+      expect(entry.instanceOwner, 'cabinet');
+      expect(entry.usesProjectLeaf, isFalse);
+    });
+  });
+
   group('CabinetManagementPage', () {
     testWidgets('renders preference tiles with subtitle', (tester) async {
       const entry = CabinetNavEntry(
@@ -115,6 +203,7 @@ void main() {
           'subtitle': 'Инструменты и интеграции',
           'icon': 'hub',
           'view_slug': 'mcp_packages_list',
+          'instance_owner': 'cabinet',
         },
         label: 'MCP',
       );
@@ -132,6 +221,34 @@ void main() {
       expect(find.text('MCP'), findsOneWidget);
       expect(find.text('Инструменты и интеграции'), findsOneWidget);
       expect(find.text('Проекты'), findsNothing);
+    });
+
+    testWidgets('shows cabinet-owned entries without projectId', (tester) async {
+      const entry = CabinetNavEntry(
+        moduleId: 'mod_mcp',
+        moduleName: 'MCP',
+        tab: {
+          'id': 'tab_mcp',
+          'title': 'MCP',
+          'icon': 'hub',
+          'view_slug': 'mcp_packages_list',
+          'instance_owner': 'cabinet',
+          'nav': {'contour': 'employee', 'placement': 'management'},
+        },
+        label: 'MCP',
+      );
+
+      await tester.pumpWidget(
+        _ruApp(
+          const CabinetManagementPage(
+            cabinetId: 'cab-1',
+            entries: [entry],
+          ),
+        ),
+      );
+
+      expect(find.text('MCP'), findsOneWidget);
+      expect(find.byIcon(Icons.folder_outlined), findsNothing);
     });
   });
 

@@ -164,6 +164,27 @@ CabinetNavPlacement cabinetNavPlacementOf(Map<String, dynamic> tab) {
   return CabinetNavPlacement.management;
 }
 
+/// Instance leaf for module data: `cabinet` or `project`.
+///
+/// Reads `tab['instance_owner']` or `tab['nav']['instance_owner']`.
+/// Default: `cabinet` for rail tabs, `project` for management/data.
+String moduleInstanceOwnerOf(Map<String, dynamic> tab) {
+  final top = tab['instance_owner'];
+  if (top is String && top.trim().isNotEmpty) return top.trim();
+  final nav = tab['nav'];
+  if (nav is Map) {
+    final nested = nav['instance_owner'];
+    if (nested is String && nested.trim().isNotEmpty) return nested.trim();
+  }
+  if (cabinetNavPlacementOf(tab) == CabinetNavPlacement.rail) {
+    return 'cabinet';
+  }
+  return 'project';
+}
+
+bool isCabinetInstanceOwner(Map tab) =>
+    moduleInstanceOwnerOf(Map<String, dynamic>.from(tab)) == 'cabinet';
+
 /// Builds sorted shell nav entries from module list + tab arrays.
 List<ShellNavEntry> mergeShellNavEntries({
   required String contour,

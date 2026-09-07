@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
+import 'package:prodavan/features/meta/project_ids_cell.dart';
 import 'package:prodavan/features/meta/runtime/module_pick_context.dart';
 
 typedef ProjectsRematerializeCallback = void Function(int scheduled, {required bool inline});
@@ -268,7 +269,11 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
       return _formatEnvelopeDate(item[key]);
     }
     final field = col['field'] as String? ?? '';
-    return body[field]?.toString() ?? '';
+    final raw = body[field];
+    if (field == 'project_ids') {
+      return formatProjectIdsCell(raw);
+    }
+    return raw?.toString() ?? '';
   }
 
   String _formatEnvelopeDate(dynamic raw) {

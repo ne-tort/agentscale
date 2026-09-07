@@ -59,6 +59,9 @@ async def test_workspace_writer_agents_via_object_store(tmp_path: Path, monkeypa
     agents_key = "projects/wk1/workspace/AGENTS.md"
     assert await mgr.get_bytes(agents_key) == b"# hello\n"
     assert (tmp_path / agents_key).read_text(encoding="utf-8") == "# hello\n"
+    assert not (tmp_path / "projects/wk1/workspace/CLAUDE.md").exists()
+    assert not (tmp_path / "projects/wk1/workspace/rules").exists()
+    assert not (tmp_path / "projects/wk1/workspace/skills").exists()
     writer.write_mcp_config(cabinet_id="cab_1", packages=[])
     mcp = json.loads((tmp_path / "projects/wk1/workspace/mcp.json").read_text(encoding="utf-8"))
     assert mcp["platform"]["cabinet_id"] == "cab_1"

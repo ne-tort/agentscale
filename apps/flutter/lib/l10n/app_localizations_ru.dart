@@ -1013,7 +1013,7 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get cabinetAgentsMdHint =>
-      'Пишется в workspace проекта при materialize (AGENTS.md + CLAUDE.md). Пересоздайте проекты, чтобы применить.';
+      'Пишется в workspace проекта при materialize (AGENTS.md). Пересоздайте проекты, чтобы применить.';
 
   @override
   String cabinetModuleRematerializeScheduled(int count) {

@@ -73,8 +73,11 @@ Slug: `materialize` — массив `MaterializeRule[]`.
 | `template` | Mustache-style `{{field}}` in template field |
 | `copy_blob` | Binary copy from Content Service blob (`storage_key` / `version_id`) |
 | `merge_mapped_sqlite` | Merge N row SQLite artifacts via per-row `column_map` into one canonical `rows` table |
+| `prompt_paths` | Expand `prompt_paths.files_json` → one `raw` file per entry under `path`/`name`.md; skip row if `files_json` empty |
 
-### `merge_mapped_sqlite`
+### `prompt_paths`
+
+Cabinet-owned prompts module. Empty path cards do **not** create directories. Root path + `AGENTS.md` → workspace `AGENTS.md` only (no `CLAUDE.md` alias).
 
 ```json
 {
@@ -101,15 +104,13 @@ Rows without a complete required map are skipped. `project_ids` on each body is 
 
 ```text
 projects/{workspace_key}/
-  AGENTS.md
-  prompts/
-  rules/
-  skills/
+  AGENTS.md              # only when a prompt file materializes (not pre-created empty)
   mcp.json
   packages/
   cabinet-seed/
   inbox/
   out/
+  # rules/ skills/ prompts/ — created on write when files_json non-empty
 ```
 
 Materialize rules **must** target paths under this tree.

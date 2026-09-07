@@ -1829,7 +1829,7 @@ abstract class AppLocalizations {
   /// No description provided for @cabinetAgentsMdHint.
   ///
   /// In en, this message translates to:
-  /// **'Written into project workspace on materialize (AGENTS.md + CLAUDE.md). Re-materialize projects to apply.'**
+  /// **'Written into project workspace on materialize (AGENTS.md). Re-materialize projects to apply.'**
   String get cabinetAgentsMdHint;
 
   /// No description provided for @cabinetModuleRematerializeScheduled.
