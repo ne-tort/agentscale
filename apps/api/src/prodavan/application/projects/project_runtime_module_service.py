@@ -163,6 +163,7 @@ class ProjectRuntimeModuleService:
         body: Any,
         principal: Principal,
         employee: EmployeeRow | None,
+        run_actions: bool = True,
     ) -> dict[str, Any]:
         table_slug = check_table_slug(table_slug)
         body = ensure_row_body(body)
@@ -202,12 +203,40 @@ class ProjectRuntimeModuleService:
             source="project_module_instance",
         )
         remat = notification.rematerialize_alias()
-        return {
+        out: dict[str, Any] = {
             "module_id": module_id,
             "instance_id": inst.id,
             **row,
             "rematerialize": remat,
         }
+        row_id = str(row.get("row_id") or "")
+        if run_actions and row_id:
+            action_error: AppError | None = None
+            try:
+                await self._maybe_run_row_actions(
+                    project_id=project_id,
+                    cabinet_id=project.cabinet_id,
+                    module_id=module_id,
+                    table_slug=table_slug,
+                    row_id=row_id,
+                    principal=principal,
+                    employee=employee,
+                )
+            except AppError as exc:
+                action_error = exc
+            refreshed = await self._instances.get_data_row(
+                instance_id=inst.id, table_slug=table_slug, row_id=row_id
+            )
+            if refreshed is not None:
+                out = {
+                    "module_id": module_id,
+                    "instance_id": inst.id,
+                    **refreshed,
+                    "rematerialize": remat,
+                }
+            if action_error is not None:
+                raise action_error
+        return out
 
     async def update_data_row(
         self,
@@ -219,6 +248,7 @@ class ProjectRuntimeModuleService:
         body: Any,
         principal: Principal,
         employee: EmployeeRow | None,
+        run_actions: bool = True,
     ) -> dict[str, Any]:
         table_slug = check_table_slug(table_slug)
         body = ensure_row_body(body)
@@ -260,12 +290,39 @@ class ProjectRuntimeModuleService:
             source="project_module_instance",
         )
         remat = notification.rematerialize_alias()
-        return {
+        out: dict[str, Any] = {
             "module_id": module_id,
             "instance_id": inst.id,
             **row,
             "rematerialize": remat,
         }
+        if run_actions:
+            action_error: AppError | None = None
+            try:
+                await self._maybe_run_row_actions(
+                    project_id=project_id,
+                    cabinet_id=project.cabinet_id,
+                    module_id=module_id,
+                    table_slug=table_slug,
+                    row_id=row_id,
+                    principal=principal,
+                    employee=employee,
+                )
+            except AppError as exc:
+                action_error = exc
+            refreshed = await self._instances.get_data_row(
+                instance_id=inst.id, table_slug=table_slug, row_id=row_id
+            )
+            if refreshed is not None:
+                out = {
+                    "module_id": module_id,
+                    "instance_id": inst.id,
+                    **refreshed,
+                    "rematerialize": remat,
+                }
+            if action_error is not None:
+                raise action_error
+        return out
 
     async def delete_data_row(
         self,
@@ -301,3 +358,28 @@ class ProjectRuntimeModuleService:
         )
         remat = notification.rematerialize_alias()
         return {"deleted": True, "row_id": row_id, "rematerialize": remat}
+
+    async def _maybe_run_row_actions(
+        self,
+        *,
+        project_id: str,
+        cabinet_id: str,
+        module_id: str,
+        table_slug: str,
+        row_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> None:
+        if not row_id:
+            return
+        from prodavan.application.modules.module_action_executor import ModuleActionExecutor
+
+        await ModuleActionExecutor(self._session).maybe_auto_index_tabular(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            row_id=row_id,
+            principal=principal,
+            employee=employee,
+        )

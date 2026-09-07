@@ -132,6 +132,7 @@ class ModuleActionExecutor:
         row_id: str,
         principal: Principal,
         employee: EmployeeRow | None,
+        project_id: str | None = None,
     ) -> None:
         """Best-effort: run content.index_tabular actions matching table after row write."""
         for action in await self._list_actions(module_id=module_id):
@@ -148,8 +149,9 @@ class ModuleActionExecutor:
                 continue
             source_column = str(params.get("source_column") or "source_file")
             status_col = str(params.get("status_column") or "status")
-            rows = await self._modules.list_data_rows(
+            rows = await self._list_module_rows(
                 cabinet_id=cabinet_id,
+                project_id=project_id,
                 module_id=module_id,
                 table_slug=table_slug,
                 principal=principal,
@@ -182,6 +184,7 @@ class ModuleActionExecutor:
             try:
                 await self._index_tabular(
                     cabinet_id=cabinet_id,
+                    project_id=project_id,
                     module_id=module_id,
                     params=params,
                     row_id=row_id,
@@ -204,6 +207,75 @@ class ModuleActionExecutor:
                     status=422,
                     detail=f"index_tabular failed: {exc}",
                 ) from exc
+
+    async def _list_module_rows(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        table_slug: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if project_id:
+            from prodavan.application.projects.project_runtime_module_service import (
+                ProjectRuntimeModuleService,
+            )
+
+            return await ProjectRuntimeModuleService(self._session).list_data_rows(
+                project_id=project_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                principal=principal,
+                employee=employee,
+            )
+        return await self._modules.list_data_rows(
+            cabinet_id=cabinet_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            principal=principal,
+            employee=employee,
+        )
+
+    async def _update_module_row(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        table_slug: str,
+        row_id: str,
+        body: dict[str, Any],
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+        run_actions: bool = False,
+    ) -> dict[str, Any]:
+        if project_id:
+            from prodavan.application.projects.project_runtime_module_service import (
+                ProjectRuntimeModuleService,
+            )
+
+            return await ProjectRuntimeModuleService(self._session).update_data_row(
+                project_id=project_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                row_id=row_id,
+                body=body,
+                principal=principal,
+                employee=employee,
+                run_actions=run_actions,
+            )
+        return await self._modules.update_data_row(
+            cabinet_id=cabinet_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            row_id=row_id,
+            body=body,
+            principal=principal,
+            employee=employee,
+            run_actions=run_actions,
+        )
 
     async def _select_row(
         self,
@@ -316,6 +388,7 @@ class ModuleActionExecutor:
         row_id: str | None,
         principal: Principal,
         employee: EmployeeRow | None,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
         table_slug = params.get("table_slug")
         source_column = str(params.get("source_column") or "source_file")
@@ -334,8 +407,9 @@ class ModuleActionExecutor:
                 detail="row_id required for content.index_tabular",
             )
 
-        rows = await self._modules.list_data_rows(
+        rows = await self._list_module_rows(
             cabinet_id=cabinet_id,
+            project_id=project_id,
             module_id=module_id,
             table_slug=table_slug,
             principal=principal,
@@ -355,8 +429,9 @@ class ModuleActionExecutor:
         if not isinstance(file_ref, dict):
             body[status_col] = "draft"
             body[error_col] = None
-            await self._modules.update_data_row(
+            await self._update_module_row(
                 cabinet_id=cabinet_id,
+                project_id=project_id,
                 module_id=module_id,
                 table_slug=table_slug,
                 row_id=row_id,
@@ -369,8 +444,9 @@ class ModuleActionExecutor:
 
         body[status_col] = "indexing"
         body[error_col] = None
-        await self._modules.update_data_row(
+        await self._update_module_row(
             cabinet_id=cabinet_id,
+            project_id=project_id,
             module_id=module_id,
             table_slug=table_slug,
             row_id=row_id,
@@ -427,8 +503,9 @@ class ModuleActionExecutor:
         except Exception as exc:
             body[status_col] = "error"
             body[error_col] = str(exc)[:500]
-            await self._modules.update_data_row(
+            await self._update_module_row(
                 cabinet_id=cabinet_id,
+                project_id=project_id,
                 module_id=module_id,
                 table_slug=table_slug,
                 row_id=row_id,
@@ -444,8 +521,9 @@ class ModuleActionExecutor:
                 detail=f"index_tabular failed: {exc}",
             ) from exc
 
-        await self._modules.update_data_row(
+        await self._update_module_row(
             cabinet_id=cabinet_id,
+            project_id=project_id,
             module_id=module_id,
             table_slug=table_slug,
             row_id=row_id,
