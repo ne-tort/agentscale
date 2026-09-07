@@ -174,15 +174,19 @@ class CollectionViewInterpreter extends StatelessWidget {
     }
     final filterFromCtx = uiJson['row_filter_from_context'];
     final ctxFilterEntries = <MapEntry<String, String>>[];
-    if (filterFromCtx is Map && contextRowId != null) {
-      final ctx = seeds.itemById(contextRowId!);
-      final ctxBody = ctx is Map && ctx['body'] is Map
-          ? Map<String, dynamic>.from(ctx['body'] as Map)
-          : <String, dynamic>{};
+    if (filterFromCtx is Map) {
+      final pick = _pickContextMap();
+      Map<String, dynamic> ctxBody = const {};
+      if (contextRowId != null) {
+        final ctx = seeds.itemById(contextRowId!);
+        if (ctx is Map && ctx['body'] is Map) {
+          ctxBody = Map<String, dynamic>.from(ctx['body'] as Map);
+        }
+      }
       for (final e in filterFromCtx.entries) {
         final ctxKey = e.value?.toString();
         if (ctxKey == null || ctxKey.isEmpty) continue;
-        final v = ctxBody[ctxKey]?.toString();
+        final v = _resolvePickOrBody(ctxKey, pick: pick, body: ctxBody);
         if (v == null || v.isEmpty) continue;
         ctxFilterEntries.add(MapEntry(e.key.toString(), v));
       }
@@ -207,6 +211,36 @@ class CollectionViewInterpreter extends StatelessWidget {
       }
       return true;
     }).toList();
+  }
+
+  Map<String, String>? _pickContextMap() {
+    try {
+      final raw = seeds.pickContext;
+      if (raw is! Map) return null;
+      return {
+        for (final e in raw.entries) e.key.toString(): e.value.toString(),
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String? _resolvePickOrBody(
+    String key, {
+    required Map<String, String>? pick,
+    required Map<String, dynamic>? body,
+  }) {
+    final fromPick = pick?[key];
+    if (fromPick != null && fromPick.isNotEmpty) return fromPick;
+    final fromBody = body?[key]?.toString();
+    if (fromBody != null && fromBody.isNotEmpty) return fromBody;
+    return null;
+  }
+
+  void _clearPickContext() {
+    try {
+      seeds.clearPickContext();
+    } catch (_) {}
   }
 
   int _sortOrderOf(dynamic item) {
@@ -389,6 +423,7 @@ class CollectionViewInterpreter extends StatelessWidget {
         ? Map<String, dynamic>.from(ctx['body'] as Map)
         : null;
     if (body == null) return null;
+    final pick = _pickContextMap();
 
     final mapField = selection['match_map_field']?.toString() ??
         setOnContext['map_field']?.toString();
@@ -398,7 +433,7 @@ class CollectionViewInterpreter extends StatelessWidget {
         mapField.isNotEmpty &&
         mapKeyFrom != null &&
         mapKeyFrom.isNotEmpty) {
-      final key = body[mapKeyFrom]?.toString();
+      final key = _resolvePickOrBody(mapKeyFrom, pick: pick, body: body);
       if (key == null || key.isEmpty) return null;
       final map = body[mapField];
       if (map is Map) {
@@ -411,7 +446,7 @@ class CollectionViewInterpreter extends StatelessWidget {
     final matchField =
         selection['match_context_field']?.toString() ?? setOnContext['field']?.toString() ?? '';
     if (matchField.isEmpty) return null;
-    final v = body[matchField]?.toString();
+    final v = _resolvePickOrBody(matchField, pick: pick, body: body);
     if (v != null && v.isNotEmpty) return v;
     return null;
   }
@@ -478,7 +513,8 @@ class CollectionViewInterpreter extends StatelessWidget {
         mapField.isNotEmpty &&
         mapKeyFrom != null &&
         mapKeyFrom.isNotEmpty) {
-      final key = body[mapKeyFrom]?.toString();
+      final pick = _pickContextMap();
+      final key = _resolvePickOrBody(mapKeyFrom, pick: pick, body: body);
       if (key == null || key.isEmpty) return;
       final slots = Map<String, dynamic>.from(
         body[mapField] is Map
@@ -525,6 +561,7 @@ class CollectionViewInterpreter extends StatelessWidget {
     try {
       final upsert = seeds.upsertBody(contextRowId!, body);
       if (upsert is Future) await upsert;
+      _clearPickContext();
       if (setOnContext['pop_after'] == true && context.mounted) {
         Navigator.of(context).maybePop();
       }

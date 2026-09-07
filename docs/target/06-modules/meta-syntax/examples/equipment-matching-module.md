@@ -17,7 +17,7 @@ Product seed: `mod_equipment` — see `product_module_seeds.py`.
 - `catalogs` — `name`, `source_file`, `artifact_ref`, `status`, `paused`, `row_count`, `columns_json`, `column_map`, `error`, `project_ids`
 - `request_lines` — `title`, `part_number`, `qty`, `found_count`, `selected_offer_id`, `status`
 - `found_offers` — `line_id` (ref), `title`, `part_number`, `price`, `catalog_id`, `score`, `match_kind`, `is_selected`, `source_title`
-- `equipment_types` — `name`, `sort_order`, `build_roles` (`pc`/`server`), `fields_json` (`[{key,label}]`); seed 13 PC/server types (incl. case fans; RAID/HBA/backplane/BMC server-only)
+- `equipment_types` — `name`, `sort_order`, `build_scope` (`all`|`pc`|`server`), `fields_json` (`[{key,label}]`); seed 13 PC/server types (incl. case fans; RAID/HBA/backplane/BMC server-only)
 - `equipment_items` — `name`, `offer_id`/`offer_title`, `type_id`/`type_name`, `part_number`, `qty`, `attrs` (string map by field key)
 - `equipment_builds` — `name`, `build_kind` (`pc`|`server`), `slots` (`{etype_id: item_row_id}`), denorm `components_count` / `price_total`
 
@@ -29,7 +29,7 @@ Product seed: `mod_equipment` — see `product_module_seeds.py`.
 - Line row_tap → offers collection with `context_bind` + `selection` → `data.select_row`
 - Equipment items: `type_ref_picker` for offer (`found_offers_pick`) then type (`equipment_types_pick`); pick views use `selection.control: switch` + `placement: trailing` + `disable_row_tap`; `schema_attrs` section title «Характеристики»
 - Types: list without «Порядок» column (sort still by `sort_order`); `fields_schema_editor` on type settings; seeded latin keys for MCP
-- Builds: `build_slots` lists types filtered by `build_roles` ∩ `build_kind`; pick item via `equipment_items_pick` (`row_filter_from_context` + `map_field: slots`); recompute count/price from linked offers
+- Builds: `build_slots` lists types filtered by `build_scope` vs `build_kind`; pick item via `equipment_items_pick` (ephemeral pickContext `type_id` filter + `map_field: slots`); recompute count/price from linked offers
 - Action `content.index_tabular` after catalog file write
 - Materialize `merge_mapped_sqlite` for ready + non-paused catalogs (skip incomplete maps)
 - Declarative `mcp_tools` for agent surface

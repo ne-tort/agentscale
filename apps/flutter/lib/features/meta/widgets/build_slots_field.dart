@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/app_nav_preference.dart';
-import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Slot list for PC/server builds: one row per equipment type with matching build_roles.
+/// Slot list for PC/server builds: one row per equipment type with matching build_scope.
 class BuildSlotsField extends StatelessWidget {
   const BuildSlotsField({
     super.key,
@@ -42,19 +41,6 @@ class BuildSlotsField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (sectionTitle.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.md,
-              AppSpacing.sm,
-              AppSpacing.md,
-              AppSpacing.xs,
-            ),
-            child: Text(
-              sectionTitle,
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
-          ),
         for (final type in types)
           AppNavPreference(
             title: type.name,
@@ -77,11 +63,7 @@ class BuildSlotsField extends StatelessWidget {
       final body = item['body'] is Map
           ? Map<String, dynamic>.from(item['body'] as Map)
           : <String, dynamic>{};
-      final roles = body['build_roles'];
-      final roleList = roles is List
-          ? roles.map((e) => e.toString()).toList()
-          : <String>[];
-      if (buildKind.isNotEmpty && !roleList.contains(buildKind)) continue;
+      if (!_scopeMatches(body)) continue;
       final name = body['name']?.toString() ?? id;
       final sortRaw = body['sort_order'];
       final sort = sortRaw is num
@@ -97,6 +79,22 @@ class BuildSlotsField extends StatelessWidget {
     return out;
   }
 
+  bool _scopeMatches(Map<String, dynamic> body) {
+    // Missing/legacy → treat as all (show for any build_kind).
+    final raw = body['build_scope']?.toString().trim();
+    final scope = (raw == null || raw.isEmpty) ? 'all' : raw;
+    // Legacy build_roles: ["pc","server"] ≈ all; ["server"] ≈ server.
+    if (body['build_roles'] is List && (raw == null || raw.isEmpty)) {
+      final roles = (body['build_roles'] as List).map((e) => e.toString()).toSet();
+      if (roles.contains('pc') && roles.contains('server')) return true;
+      if (buildKind.isEmpty) return true;
+      return roles.contains(buildKind);
+    }
+    if (scope == 'all') return true;
+    if (buildKind.isEmpty) return true;
+    return scope == buildKind;
+  }
+
   String _slotSubtitle(String typeId) {
     final itemId = slots[typeId]?.toString();
     if (itemId == null || itemId.isEmpty) return emptyLabel;
@@ -109,19 +107,13 @@ class BuildSlotsField extends StatelessWidget {
     return itemId;
   }
 
-  Future<void> _openSlotPick(String typeId) async {
+  void _openSlotPick(String typeId) {
     if (rowId == null || onOpenPick == null) return;
-    final ctxItem = seeds.itemById(rowId!);
-    if (ctxItem is! Map) return;
-    final body = Map<String, dynamic>.from(
-      ctxItem['body'] is Map
-          ? Map<String, dynamic>.from(ctxItem['body'] as Map)
-          : <String, dynamic>{},
-    );
-    body['_pick_type_id'] = typeId;
-    body['_slot_key'] = typeId;
-    final upsert = seeds.upsertBody(rowId!, body);
-    if (upsert is Future) await upsert;
+    try {
+      seeds.setPickContext(typeId: typeId, slotKey: typeId);
+    } catch (_) {
+      return;
+    }
     onOpenPick!(pickView, rowId: rowId);
   }
 }
@@ -151,7 +143,7 @@ String buildSlotsSectionTitle(
   final raw = fieldCfg?['section_title'];
   final resolved = resolveMetaLabel(raw, l10n, locale: locale);
   if (resolved.isNotEmpty) return resolved;
-  return locale.languageCode == 'en' ? 'Components' : 'Комплектующие';
+  return '';
 }
 
 String buildSlotsEmptyLabel(

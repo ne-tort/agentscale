@@ -2,9 +2,10 @@ import 'package:flutter/foundation.dart';
 
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
+import 'package:prodavan/features/meta/runtime/module_pick_context.dart';
 
 /// Mutable seed_rows editor backing module preview CRUD.
-class SeedDataController extends ChangeNotifier {
+class SeedDataController extends ChangeNotifier with ModulePickContextMixin {
   SeedDataController(ModuleMetaManifest manifest)
       : _manifest = manifest,
         _items = [

@@ -4,12 +4,13 @@ import 'package:prodavan/core/api/admin_api.dart';
 import 'package:prodavan/core/api/company_api.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
+import 'package:prodavan/features/meta/runtime/module_pick_context.dart';
 
 /// Live platform / company module-instance data for shell nav modules.
 ///
 /// Mirrors [CabinetDataController] so meta interpreters stay owner-agnostic.
 /// Deletes only the caller's instance copy (no cascade to delegated children).
-class OwnerModuleDataController extends ChangeNotifier {
+class OwnerModuleDataController extends ChangeNotifier with ModulePickContextMixin {
   OwnerModuleDataController.platform({
     required AdminApi api,
     required this.moduleId,

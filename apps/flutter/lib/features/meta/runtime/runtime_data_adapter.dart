@@ -46,6 +46,13 @@ class RuntimeDataAdapter extends ChangeNotifier {
   List<dynamic> entityRows(String tableSlug, Map<String, dynamic> uiJson) =>
       _inner.entityRows(tableSlug, uiJson);
 
+  Map<String, String>? get pickContext => _inner.pickContext;
+
+  void setPickContext({required String typeId, required String slotKey}) =>
+      _inner.setPickContext(typeId: typeId, slotKey: slotKey);
+
+  void clearPickContext() => _inner.clearPickContext();
+
   @override
   void dispose() {
     _inner.removeListener(notifyListeners);

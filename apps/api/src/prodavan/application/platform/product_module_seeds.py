@@ -58,7 +58,7 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "row_id": "etype_cpu",
         "name": "Процессор",
         "sort_order": 10,
-        "build_roles": ["pc", "server"],
+        "build_scope": "all",
         "fields": [
             _eq_field("cores", "Ядра", "Cores"),
             _eq_field("threads", "Потоки", "Threads"),
@@ -76,7 +76,7 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "row_id": "etype_motherboard",
         "name": "Материнская плата",
         "sort_order": 20,
-        "build_roles": ["pc", "server"],
+        "build_scope": "all",
         "fields": [
             _eq_field("socket", "Сокет", "Socket"),
             _eq_field("chipset", "Чипсет", "Chipset"),
@@ -96,7 +96,7 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "row_id": "etype_ram",
         "name": "Оперативная память",
         "sort_order": 30,
-        "build_roles": ["pc", "server"],
+        "build_scope": "all",
         "fields": [
             _eq_field("ram_type", "Тип", "Type"),
             _eq_field("module_capacity", "Объём модуля", "Module capacity"),
@@ -113,7 +113,7 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "row_id": "etype_storage",
         "name": "Накопитель",
         "sort_order": 40,
-        "build_roles": ["pc", "server"],
+        "build_scope": "all",
         "fields": [
             _eq_field("drive_type", "Тип", "Drive type"),
             _eq_field("interface", "Интерфейс", "Interface"),
@@ -129,7 +129,7 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "row_id": "etype_gpu",
         "name": "Видеокарта",
         "sort_order": 50,
-        "build_roles": ["pc", "server"],
+        "build_scope": "all",
         "fields": [
             _eq_field("gpu_memory", "Память", "Memory"),
             _eq_field("memory_bus", "Шина памяти", "Memory bus"),
@@ -145,7 +145,7 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "row_id": "etype_psu",
         "name": "Блок питания",
         "sort_order": 60,
-        "build_roles": ["pc", "server"],
+        "build_scope": "all",
         "fields": [
             _eq_field("wattage", "Мощность", "Wattage"),
             _eq_field("efficiency", "КПД", "Efficiency"),
@@ -161,7 +161,7 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "row_id": "etype_cooling",
         "name": "Охлаждение",
         "sort_order": 70,
-        "build_roles": ["pc", "server"],
+        "build_scope": "all",
         "fields": [
             _eq_field("cooling_kind", "Тип", "Kind"),
             _eq_field("socket_compat", "Сокеты", "Socket compat"),
@@ -176,7 +176,7 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "row_id": "etype_case",
         "name": "Корпус",
         "sort_order": 80,
-        "build_roles": ["pc", "server"],
+        "build_scope": "all",
         "fields": [
             _eq_field("form_factor_support", "Форм-факторы", "Form factors"),
             _eq_field("max_gpu_length", "Макс. GPU", "Max GPU length"),
@@ -191,7 +191,7 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "row_id": "etype_case_fans",
         "name": "Корпусные вентиляторы",
         "sort_order": 85,
-        "build_roles": ["pc", "server"],
+        "build_scope": "all",
         "fields": [
             _eq_field("count", "Количество", "Count"),
             _eq_field("size_mm", "Размер, мм", "Size mm"),
@@ -203,7 +203,7 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "row_id": "etype_nic",
         "name": "Сетевой адаптер",
         "sort_order": 90,
-        "build_roles": ["pc", "server"],
+        "build_scope": "all",
         "fields": [
             _eq_field("port_speed", "Скорость", "Port speed"),
             _eq_field("ports", "Порты", "Ports"),
@@ -216,7 +216,7 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "row_id": "etype_raid_hba",
         "name": "RAID/HBA контроллер",
         "sort_order": 100,
-        "build_roles": ["server"],
+        "build_scope": "server",
         "fields": [
             _eq_field("interface", "Интерфейс", "Interface"),
             _eq_field("internal_ports", "Внутр. порты", "Internal ports"),
@@ -228,7 +228,7 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "row_id": "etype_backplane",
         "name": "Дисковая корзина",
         "sort_order": 110,
-        "build_roles": ["server"],
+        "build_scope": "server",
         "fields": [
             _eq_field("bays", "Отсеки", "Bays"),
             _eq_field("drive_form_factor", "Форм-фактор дисков", "Drive form factor"),
@@ -239,7 +239,7 @@ _EQUIPMENT_TYPE_SEEDS: list[dict[str, Any]] = [
         "row_id": "etype_bmc",
         "name": "Модуль управления BMC",
         "sort_order": 120,
-        "build_roles": ["server"],
+        "build_scope": "server",
         "fields": [
             _eq_field("mgmt_port", "Порт управления", "Mgmt port"),
             _eq_field("protocols", "Протоколы", "Protocols"),
@@ -257,7 +257,7 @@ def _equipment_type_seed_rows() -> list[dict[str, Any]]:
             "body": {
                 "name": t["name"],
                 "sort_order": t["sort_order"],
-                "build_roles": list(t["build_roles"]),
+                "build_scope": t["build_scope"],
                 "fields_json": list(t["fields"]),
             },
         }
@@ -1161,11 +1161,15 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             {
                 "table_slug": "equipment_types",
-                "name": "build_roles",
-                "label": {"ru": "Роли сборки", "en": "Build roles"},
-                "type": "json",
-                "required": False,
-                "default": ["pc", "server"],
+                "name": "build_scope",
+                "label": {"ru": "Сборка", "en": "Build"},
+                "type": "enum",
+                "required": True,
+                "default": "all",
+                "enum": {
+                    "values": ["all", "pc", "server"],
+                    "labels": {"all": "Все", "pc": "ПК", "server": "Сервер"},
+                },
             },
             _project_ids_column("equipment_types"),
             {
@@ -1839,6 +1843,11 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "icon": "category",
                         },
                         {
+                            "column": "build_scope",
+                            "widget": "choice",
+                            "icon": "precision_manufacturing",
+                        },
+                        {
                             "column": "sort_order",
                             "widget": "value",
                             "icon": "sort",
@@ -1920,18 +1929,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "icon": "precision_manufacturing",
                         },
                         {
-                            "column": "slots",
-                            "widget": "build_slots",
-                            "types_table": "equipment_types",
-                            "items_table": "equipment_items",
-                            "offers_table": "found_offers",
-                            "pick_view": "equipment_items_pick",
-                            "section_title": {
-                                "ru": "Комплектующие",
-                                "en": "Components",
-                            },
-                        },
-                        {
                             "column": "components_count",
                             "widget": "value",
                             "read_only": True,
@@ -1942,6 +1939,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "widget": "value",
                             "read_only": True,
                             "icon": "payments",
+                        },
+                        {
+                            "column": "slots",
+                            "widget": "build_slots",
+                            "types_table": "equipment_types",
+                            "items_table": "equipment_items",
+                            "offers_table": "found_offers",
+                            "pick_view": "equipment_items_pick",
                         },
                     ],
                 },

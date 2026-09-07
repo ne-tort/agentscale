@@ -139,6 +139,10 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert items_pick["ui_json"]["row_filter_from_context"]["type_id"] == "_pick_type_id"
 
     type_settings = next(v for v in meta["views"] if v["slug"] == "equipment_type_settings")
+    type_cols = [f["column"] for f in type_settings["ui_json"]["fields"]]
+    assert type_cols[:2] == ["name", "build_scope"]
+    scope_field = next(f for f in type_settings["ui_json"]["fields"] if f["column"] == "build_scope")
+    assert scope_field["widget"] == "choice"
     fields_ed = next(f for f in type_settings["ui_json"]["fields"] if f["column"] == "fields_json")
     assert fields_ed["widget"] == "fields_schema_editor"
 
@@ -148,20 +152,29 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     builds_list = next(v for v in meta["views"] if v["slug"] == "equipment_builds_list")
     assert builds_list["ui_json"]["inline_add"]["field"] == "name"
     build_settings = next(v for v in meta["views"] if v["slug"] == "equipment_build_settings")
+    build_cols = [f["column"] for f in build_settings["ui_json"]["fields"]]
+    assert build_cols == [
+        "name",
+        "build_kind",
+        "components_count",
+        "price_total",
+        "slots",
+    ]
     slots_field = next(f for f in build_settings["ui_json"]["fields"] if f["column"] == "slots")
     assert slots_field["widget"] == "build_slots"
     assert slots_field["pick_view"] == "equipment_items_pick"
+    assert "section_title" not in slots_field
 
     seed_items = meta["seed_rows"]["items"]
     assert len(seed_items) == 13
     assert seed_items[0]["row_id"] == "etype_cpu"
     assert seed_items[0]["body"]["sort_order"] == 10
-    assert seed_items[0]["body"]["build_roles"] == ["pc", "server"]
+    assert seed_items[0]["body"]["build_scope"] == "all"
     assert any(f["key"] == "cores" for f in seed_items[0]["body"]["fields_json"])
     assert any(f["key"] == "memory_channels" for f in seed_items[0]["body"]["fields_json"])
     assert any(s["row_id"] == "etype_case_fans" for s in seed_items)
     assert seed_items[-1]["row_id"] == "etype_bmc"
-    assert seed_items[-1]["body"]["build_roles"] == ["server"]
+    assert seed_items[-1]["body"]["build_scope"] == "server"
 
     catalogs = next(v for v in meta["views"] if v["slug"] == "catalogs_list")
     assert catalogs["ui_json"]["inline_add"]["field"] == "name"
@@ -210,7 +223,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         c["name"] == "offer_id" and c["table_slug"] == "equipment_items" for c in meta["columns"]
     )
     assert any(
-        c["name"] == "build_roles" and c["table_slug"] == "equipment_types" for c in meta["columns"]
+        c["name"] == "build_scope" and c["table_slug"] == "equipment_types" for c in meta["columns"]
     )
 
     merge_rule = next(r for r in meta["materialize"] if r["id"] == "catalog_merged_sqlite")

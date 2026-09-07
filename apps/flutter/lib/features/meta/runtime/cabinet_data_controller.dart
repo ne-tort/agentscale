@@ -3,12 +3,13 @@ import 'package:flutter/foundation.dart';
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
+import 'package:prodavan/features/meta/runtime/module_pick_context.dart';
 
 typedef ProjectsRematerializeCallback = void Function(int scheduled, {required bool inline});
 typedef WorkspaceOutdatedCallback = void Function();
 
 /// Live cabinet / project-instance module data — mirrors SeedDataController API for interpreters.
-class CabinetDataController extends ChangeNotifier {
+class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
   CabinetDataController({
     required this.api,
     required this.cabinetId,
