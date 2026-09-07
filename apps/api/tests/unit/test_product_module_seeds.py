@@ -118,6 +118,9 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert map_field["visible_when"]["eq"] == "ready"
     assert not any(f["column"] == "row_count" for f in settings["ui_json"]["fields"])
     paused_field = next(f for f in settings["ui_json"]["fields"] if f["column"] == "paused")
+    assert paused_field["widget"] == "pause_toggle"
+    assert paused_field["pause_label"]["ru"] == "Приостановить"
+    assert paused_field["resume_label"]["ru"] == "Возобновить"
     assert paused_field["visible_when"]["in"] == ["ready", "error"]
     meta_fields = [
         f

@@ -734,7 +734,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             {
                 "table_slug": "catalogs",
                 "name": "paused",
-                "label": {"ru": "Приостановлена", "en": "Paused"},
+                "label": {"ru": "Пауза", "en": "Pause"},
                 "type": "bool",
                 "required": False,
                 "default": False,
@@ -989,8 +989,18 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         },
                         {
                             "column": "paused",
-                            "widget": "switch",
-                            "icon": "pause_circle_outline",
+                            "widget": "pause_toggle",
+                            "accent": "warning",
+                            "pause_label": {
+                                "ru": "Приостановить",
+                                "en": "Pause",
+                            },
+                            "resume_label": {
+                                "ru": "Возобновить",
+                                "en": "Resume",
+                            },
+                            "pause_icon": "pause_outlined",
+                            "resume_icon": "play_arrow_outlined",
                             "visible_when": {
                                 "field": "status",
                                 "in": ["ready", "error"],

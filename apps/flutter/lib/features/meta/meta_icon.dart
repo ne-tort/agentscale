@@ -45,9 +45,17 @@ IconData metaIconFromName(String? name, {IconData fallback = Icons.extension_out
     case 'sync':
       return Icons.sync;
     case 'pause':
+    case 'pause_outlined':
+      return Icons.pause_outlined;
     case 'pause_circle':
     case 'pause_circle_outline':
       return Icons.pause_circle_outline;
+    case 'play_arrow':
+    case 'play_arrow_outlined':
+      return Icons.play_arrow_outlined;
+    case 'play_circle':
+    case 'play_circle_outline':
+      return Icons.play_circle_outline;
     case 'link':
       return Icons.link_rounded;
     default:

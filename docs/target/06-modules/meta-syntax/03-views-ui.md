@@ -199,6 +199,7 @@ Radio in row leading; tap → `POST .../actions/{action}/invoke?row_id=`.
 | `visible_when` | Show field only when condition matches current row body |
 | `icon` | Leading icon on preference (`metaIconFromName`) |
 | `widget: column_map` | Map source headers → canonical schema slots |
+| `widget: pause_toggle` | Action row (pause/resume) instead of switch; optional `pause_label` / `resume_label` / icons; `accent: warning` |
 
 `visible_when` shapes:
 
@@ -304,6 +305,7 @@ EmptyPlaceholder(title: "Метаданные", subtitle: "<parse error code>")
 | `form` + `widget: file_upload` | FileUploadField | `file_ref` via `/cabinets/{id}/content/upload` |
 | `form` + `widget: project_multiselect` | ProjectMultiselectField | `project_ids` column; empty = all projects |
 | `form` + `widget: column_map` | ColumnMapField | map source headers → canonical schema |
+| `form` + `widget: pause_toggle` | AppNavPreference | bool pause/resume action (warning accent) |
 | `form` + `fields[].icon` | preference leading icon | any value/switch/choice field |
 
 Collection extras: `inline_add`, `row_filter`, `context_bind.profile_id=contextRowId`.

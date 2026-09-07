@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/preferences.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
@@ -392,6 +393,27 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         onSave: (v) async {
           _persist(name, v.isEmpty ? null : v);
         },
+      );
+    }
+    if (widgetKind == 'pause_toggle') {
+      final paused = value == true;
+      final warning = context.appColors.warning;
+      final actionLabel = resolveMetaLabel(
+        paused
+            ? (fieldCfg?['resume_label'] ?? {'ru': 'Возобновить', 'en': 'Resume'})
+            : (fieldCfg?['pause_label'] ?? {'ru': 'Приостановить', 'en': 'Pause'}),
+        l10n,
+        locale: Localizations.localeOf(context),
+      );
+      final iconName = paused
+          ? (fieldCfg?['resume_icon']?.toString() ?? 'play_arrow_outlined')
+          : (fieldCfg?['pause_icon']?.toString() ?? 'pause_outlined');
+      return AppNavPreference(
+        title: actionLabel,
+        icon: metaIconFromName(iconName),
+        accentColor: warning,
+        enabled: !fieldReadOnly,
+        onTap: () => _persist(name, !paused),
       );
     }
     if (widgetKind == 'switch' || type == 'bool') {
