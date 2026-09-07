@@ -200,6 +200,12 @@ Radio in row leading; tap → `POST .../actions/{action}/invoke?row_id=`.
 | `icon` | Leading icon on preference (`metaIconFromName`) |
 | `widget: column_map` | Map source headers → canonical schema slots |
 | `widget: pause_toggle` | Action row (pause/resume) instead of switch; optional `pause_label` / `resume_label` / icons; `accent: warning` |
+| `widget: type_ref_picker` | Nav to types collection; warning accent when empty; `pick_view` + `empty_style` |
+| `widget: schema_attrs` | Dynamic text fields from type `fields_json` into `attrs` map |
+| `widget: fields_schema_editor` | Edit type `fields_json` ({key,label}) with inline add |
+
+Collection `selection.set_on_context` (type pick): radio writes fields onto `contextRowId` row (no action invoke); optional `also_copy`, `clear_fields`, `pop_after`.
+
 
 `visible_when` shapes:
 
@@ -306,6 +312,9 @@ EmptyPlaceholder(title: "Метаданные", subtitle: "<parse error code>")
 | `form` + `widget: project_multiselect` | ProjectMultiselectField | `project_ids` column; empty = all projects |
 | `form` + `widget: column_map` | ColumnMapField | map source headers → canonical schema |
 | `form` + `widget: pause_toggle` | AppNavPreference | bool pause/resume action (warning accent) |
+| `form` + `widget: type_ref_picker` | TypeRefPickerField | open types pick collection |
+| `form` + `widget: schema_attrs` | SchemaAttrsField | dynamic text attrs from type schema |
+| `form` + `widget: fields_schema_editor` | FieldsSchemaEditorField | edit type fields_json |
 | `form` + `fields[].icon` | preference leading icon | any value/switch/choice field |
 
 Collection extras: `inline_add`, `row_filter`, `context_bind.profile_id=contextRowId`.

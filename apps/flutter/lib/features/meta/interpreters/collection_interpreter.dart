@@ -140,7 +140,18 @@ class CollectionViewInterpreter extends StatelessWidget {
   }
 
   List<AppEntityRow> _filteredRows(dynamic seeds, String tableSlug, Map<String, dynamic> uiJson) {
-    final all = seeds.entityRows(tableSlug, uiJson) as List<AppEntityRow>;
+    var all = seeds.entityRows(tableSlug, uiJson) as List<AppEntityRow>;
+    if (tableSlug == 'equipment_types') {
+      all = [...all]..sort((a, b) {
+          final ba = seeds.itemById(a.id);
+          final bb = seeds.itemById(b.id);
+          final oa = _sortOrderOf(ba);
+          final ob = _sortOrderOf(bb);
+          final c = oa.compareTo(ob);
+          if (c != 0) return c;
+          return a.title.compareTo(b.title);
+        });
+    }
     final filter = uiJson['row_filter'];
     final contextBind = uiJson['context_bind'];
     final bindEntries = <MapEntry<String, String>>[];
@@ -172,6 +183,15 @@ class CollectionViewInterpreter extends StatelessWidget {
       }
       return true;
     }).toList();
+  }
+
+  int _sortOrderOf(dynamic item) {
+    if (item is! Map) return 1000;
+    final body = item['body'];
+    if (body is! Map) return 1000;
+    final raw = body['sort_order'];
+    if (raw is num) return raw.toInt();
+    return int.tryParse(raw?.toString() ?? '') ?? 1000;
   }
 
   List<AppEntityColumn> _columns(
@@ -291,6 +311,10 @@ class CollectionViewInterpreter extends StatelessWidget {
   ) {
     final selection = uiJson['selection'];
     if (selection is! Map || selection['kind'] != 'single') return rows;
+    final setOnContext = selection['set_on_context'];
+    if (setOnContext is Map) {
+      return _withContextSelection(context, uiJson, selection, setOnContext, rows);
+    }
     final field = selection['field'] as String? ?? 'is_selected';
     final actionId = selection['action'] as String? ?? '';
     String? selectedId;
@@ -322,6 +346,102 @@ class CollectionViewInterpreter extends StatelessWidget {
         ),
       );
     }).toList();
+  }
+
+  List<AppEntityRow> _withContextSelection(
+    BuildContext context,
+    Map<String, dynamic> uiJson,
+    Map selection,
+    Map setOnContext,
+    List<AppEntityRow> rows,
+  ) {
+    final matchField =
+        selection['match_context_field']?.toString() ?? setOnContext['field']?.toString() ?? '';
+    String? selectedId;
+    if (contextRowId != null && matchField.isNotEmpty) {
+      final ctx = seeds.itemById(contextRowId!);
+      final body = ctx is Map ? ctx['body'] : null;
+      if (body is Map) {
+        final v = body[matchField]?.toString();
+        if (v != null && v.isNotEmpty) selectedId = v;
+      }
+    }
+    return rows.map((row) {
+      return AppEntityRow(
+        id: row.id,
+        title: row.title,
+        subtitle: row.subtitle,
+        cells: row.cells,
+        cellWidgets: row.cellWidgets,
+        titleColor: row.titleColor,
+        rowColor: row.rowColor,
+        titleBold: row.titleBold,
+        trailing: row.trailing,
+        leading: Radio<String>(
+          value: row.id,
+          groupValue: selectedId,
+          onChanged: readOnly
+              ? null
+              : (_) => _applyContextSelection(context, setOnContext, row.id),
+        ),
+      );
+    }).toList();
+  }
+
+  Future<void> _applyContextSelection(
+    BuildContext context,
+    Map setOnContext,
+    String selectedRowId,
+  ) async {
+    if (contextRowId == null) return;
+    final field = setOnContext['field']?.toString();
+    if (field == null || field.isEmpty) return;
+    final ctxItem = seeds.itemById(contextRowId!);
+    if (ctxItem is! Map) return;
+    final body = Map<String, dynamic>.from(
+      ctxItem['body'] is Map
+          ? Map<String, dynamic>.from(ctxItem['body'] as Map)
+          : <String, dynamic>{},
+    );
+    final valueFrom = setOnContext['value_from']?.toString() ?? 'row_id';
+    if (valueFrom == 'row_id') {
+      body[field] = selectedRowId;
+    }
+    final selectedItem = seeds.itemById(selectedRowId);
+    final selectedBody = selectedItem is Map && selectedItem['body'] is Map
+        ? Map<String, dynamic>.from(selectedItem['body'] as Map)
+        : <String, dynamic>{};
+    final alsoCopy = setOnContext['also_copy'];
+    if (alsoCopy is List) {
+      for (final entry in alsoCopy) {
+        if (entry is! Map) continue;
+        final from = entry['from']?.toString();
+        final to = entry['to']?.toString();
+        if (from == null || to == null) continue;
+        body[to] = selectedBody[from];
+      }
+    }
+    final clearFields = setOnContext['clear_fields'];
+    if (clearFields is List) {
+      for (final f in clearFields) {
+        final key = f?.toString();
+        if (key == null || key.isEmpty) continue;
+        if (key == 'attrs') {
+          body[key] = <String, dynamic>{};
+        } else {
+          body[key] = null;
+        }
+      }
+    }
+    try {
+      final upsert = seeds.upsertBody(contextRowId!, body);
+      if (upsert is Future) await upsert;
+      if (setOnContext['pop_after'] == true && context.mounted) {
+        Navigator.of(context).maybePop();
+      }
+    } catch (e) {
+      if (context.mounted) AppErrors.showSnack(context, e);
+    }
   }
 
   void _create(BuildContext context, Map<String, dynamic> uiJson, String tableSlug) {

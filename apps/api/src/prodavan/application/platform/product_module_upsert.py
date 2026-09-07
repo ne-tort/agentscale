@@ -27,8 +27,65 @@ def upsert_product_modules(conn: sa.Connection) -> int:
     if _has_table(conn, "module_instances"):
         for module_id, _, slugs in PRODUCT_MODULES:
             _refresh_all_instance_meta(conn, module_id=module_id, slugs=slugs)
+            _apply_seed_rows_to_instances(conn, module_id=module_id, slugs=slugs)
     return count
 
+
+def _apply_seed_rows_to_instances(
+    conn: sa.Connection,
+    *,
+    module_id: str,
+    slugs: dict[str, Any],
+) -> None:
+    """Upsert template seed_rows into every instance (idempotent by row_id)."""
+    import uuid
+
+    if not _has_table(conn, "module_instance_data_rows"):
+        return
+    seed = slugs.get("seed_rows")
+    if not isinstance(seed, dict):
+        return
+    items = seed.get("items")
+    if not isinstance(items, list) or not items:
+        return
+    rows = conn.execute(
+        sa.text("SELECT id FROM module_instances WHERE module_id = :mid"),
+        {"mid": module_id},
+    ).fetchall()
+    for row in rows:
+        instance_id = str(row[0])
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            table_slug = item.get("table_slug")
+            row_id = item.get("row_id")
+            body = item.get("body", {})
+            if not isinstance(table_slug, str) or not isinstance(row_id, str):
+                continue
+            if not isinstance(body, dict):
+                body = {}
+            conn.execute(
+                sa.text(
+                    """
+                    INSERT INTO module_instance_data_rows
+                        (id, instance_id, table_slug, row_id, body, created_by)
+                    VALUES
+                        (:id, :iid, :ts, :rid, CAST(:body AS jsonb), :cb)
+                    ON CONFLICT (instance_id, table_slug, row_id) DO UPDATE
+                    SET body = EXCLUDED.body
+                    WHERE module_instance_data_rows.created_by = 'module_seed'
+                       OR module_instance_data_rows.created_by IS NULL
+                    """
+                ),
+                {
+                    "id": f"midr_{uuid.uuid4().hex[:16]}",
+                    "iid": instance_id,
+                    "ts": table_slug,
+                    "rid": row_id,
+                    "body": json.dumps(body),
+                    "cb": "module_seed",
+                },
+            )
 
 def _has_table(conn: sa.Connection, name: str) -> bool:
     row = conn.execute(

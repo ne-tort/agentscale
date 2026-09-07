@@ -83,6 +83,8 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "catalogs",
         "request_lines",
         "found_offers",
+        "equipment_types",
+        "equipment_items",
     }
     kinds = {a["kind"] for a in meta["actions"]}
     assert "content.index_tabular" in kinds
@@ -92,6 +94,35 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     tool_names = {t["name"] for t in meta["mcp_tools"]}
     assert "equipment_catalog_query" in tool_names
     assert "equipment_offers_upsert" in tool_names
+    assert "equipment_types_list" in tool_names
+    assert "equipment_items_upsert" in tool_names
+
+    hub = next(v for v in meta["views"] if v["slug"] == "equipment_hub")
+    hub_titles = {i["title"] for i in hub["ui_json"]["items"]}
+    assert "Характеристики оборудования" in hub_titles
+    assert "Типы комплектующих" in hub_titles
+
+    items_list = next(v for v in meta["views"] if v["slug"] == "equipment_items_list")
+    assert items_list["ui_json"]["inline_add"]["field"] == "name"
+    item_settings = next(v for v in meta["views"] if v["slug"] == "equipment_item_settings")
+    type_field = next(f for f in item_settings["ui_json"]["fields"] if f["column"] == "type_id")
+    assert type_field["widget"] == "type_ref_picker"
+    assert type_field["empty_style"] == "warning"
+    attrs_field = next(f for f in item_settings["ui_json"]["fields"] if f["column"] == "attrs")
+    assert attrs_field["widget"] == "schema_attrs"
+
+    types_pick = next(v for v in meta["views"] if v["slug"] == "equipment_types_pick")
+    assert types_pick["ui_json"]["selection"]["set_on_context"]["field"] == "type_id"
+    type_settings = next(v for v in meta["views"] if v["slug"] == "equipment_type_settings")
+    fields_ed = next(f for f in type_settings["ui_json"]["fields"] if f["column"] == "fields_json")
+    assert fields_ed["widget"] == "fields_schema_editor"
+
+    seed_items = meta["seed_rows"]["items"]
+    assert len(seed_items) == 12
+    assert seed_items[0]["row_id"] == "etype_cpu"
+    assert seed_items[0]["body"]["sort_order"] == 10
+    assert any(f["key"] == "cores" for f in seed_items[0]["body"]["fields_json"])
+    assert seed_items[-1]["row_id"] == "etype_bmc"
 
     catalogs = next(v for v in meta["views"] if v["slug"] == "catalogs_list")
     assert catalogs["ui_json"]["inline_add"]["field"] == "name"

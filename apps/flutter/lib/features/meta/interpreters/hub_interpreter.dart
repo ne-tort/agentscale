@@ -106,6 +106,7 @@ class ViewInterpreterHost extends StatelessWidget {
           seeds: seeds,
           rowId: rowId,
           readOnly: readOnly,
+          onOpenView: onOpenView,
         );
       case 'hub':
         return HubViewInterpreter(

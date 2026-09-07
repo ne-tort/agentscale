@@ -9,10 +9,13 @@ import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/widgets/column_map_field.dart';
+import 'package:prodavan/features/meta/widgets/fields_schema_editor_field.dart';
 import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
+import 'package:prodavan/features/meta/widgets/schema_attrs_field.dart';
 import 'package:prodavan/features/meta/widgets/secret_upload_field.dart';
 import 'package:prodavan/features/meta/widgets/markdown_editor_field.dart';
 import 'package:prodavan/features/meta/widgets/project_multiselect_field.dart';
+import 'package:prodavan/features/meta/widgets/type_ref_picker_field.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -24,6 +27,7 @@ class FormViewInterpreter extends StatefulWidget {
     required this.seeds,
     this.rowId,
     this.readOnly = false,
+    this.onOpenView,
   });
 
   final ModuleMetaManifest manifest;
@@ -31,6 +35,7 @@ class FormViewInterpreter extends StatefulWidget {
   final dynamic seeds;
   final String? rowId;
   final bool readOnly;
+  final void Function(String viewSlug, {String? rowId})? onOpenView;
 
   @override
   State<FormViewInterpreter> createState() => _FormViewInterpreterState();
@@ -98,7 +103,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
   }
 
   String _bodyFingerprint(Map<String, dynamic> body) {
-    // Status/columns drive visible_when + column_map; include file identity.
+      // Status/columns drive visible_when + column_map; include file identity.
     final file = body['source_file'];
     final fileKey = file is Map ? '${file['storage_key']}|${file['asset_id']}' : '$file';
     return [
@@ -109,6 +114,10 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       body['paused'],
       body['column_map'],
       body['project_ids'],
+      body['type_id'],
+      body['type_name'],
+      body['attrs'],
+      body['fields_json'],
       fileKey,
     ].join('¦');
   }
@@ -289,6 +298,67 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         schema: schema,
         readOnly: fieldReadOnly,
         onChanged: (map) => _persist(name, map),
+      );
+    }
+    if (widgetKind == 'type_ref_picker') {
+      final pickView = fieldCfg?['pick_view']?.toString() ?? 'equipment_types_pick';
+      final typeId = value?.toString();
+      final typeName = _values['type_name']?.toString();
+      return TypeRefPickerField(
+        label: label,
+        typeId: typeId,
+        typeName: typeName,
+        readOnly: fieldReadOnly,
+        emptyStyleWarning: fieldCfg?['empty_style']?.toString() == 'warning',
+        emptyLabel: typeRefEmptyLabel(fieldCfg, l10n, locale),
+        onOpenPick: () {
+          final open = widget.onOpenView;
+          if (open == null || _rowId == null) return;
+          open(pickView, rowId: _rowId);
+        },
+      );
+    }
+    if (widgetKind == 'schema_attrs') {
+      final typeIdField = fieldCfg?['type_id_field']?.toString() ?? 'type_id';
+      final typesTable = fieldCfg?['types_table']?.toString() ?? 'equipment_types';
+      final fieldsFrom = fieldCfg?['fields_from']?.toString() ?? 'fields_json';
+      final typeId = _values[typeIdField]?.toString() ?? '';
+      List<Map<String, dynamic>> fields = const [];
+      if (typeId.isNotEmpty) {
+        final typeItem = widget.seeds.itemById(typeId);
+        final typeBody = typeItem is Map
+            ? (typeItem['body'] is Map
+                ? Map<String, dynamic>.from(typeItem['body'] as Map)
+                : <String, dynamic>{})
+            : <String, dynamic>{};
+        // Prefer live type row; fall back to table scan if id lookup misses.
+        if (typeBody.isEmpty) {
+          for (final item in widget.seeds.itemsForTable(typesTable) as List) {
+            if (item is Map && item['row_id']?.toString() == typeId) {
+              final body = item['body'];
+              if (body is Map) {
+                fields = parseFieldsJson(body[fieldsFrom]);
+              }
+              break;
+            }
+          }
+        } else {
+          fields = parseFieldsJson(typeBody[fieldsFrom]);
+        }
+      }
+      return SchemaAttrsField(
+        fields: fields,
+        attrs: parseAttrsMap(value),
+        readOnly: fieldReadOnly,
+        onChanged: (attrs) => _persist(name, attrs),
+      );
+    }
+    if (widgetKind == 'fields_schema_editor') {
+      return FieldsSchemaEditorField(
+        label: label,
+        value: value,
+        readOnly: fieldReadOnly,
+        onChanged: (fields) => _persist(name, fields),
       );
     }
     if (widgetKind == 'project_multiselect') {

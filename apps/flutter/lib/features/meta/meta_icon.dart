@@ -38,6 +38,18 @@ IconData metaIconFromName(String? name, {IconData fallback = Icons.extension_out
       return Icons.precision_manufacturing_outlined;
     case 'storage':
       return Icons.storage_outlined;
+    case 'tune':
+      return Icons.tune;
+    case 'category':
+      return Icons.category_outlined;
+    case 'label_outline':
+      return Icons.label_outline;
+    case 'qr_code_2':
+      return Icons.qr_code_2_outlined;
+    case 'numbers':
+      return Icons.numbers;
+    case 'sort':
+      return Icons.sort;
     case 'list_alt':
       return Icons.list_alt_outlined;
     case 'inventory_2':
