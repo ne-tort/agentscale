@@ -21,6 +21,13 @@ def test_index_csv_preserves_cyrillic_headers() -> None:
     conn.close()
 
 
+def test_index_csv_cp1251_cyrillic_headers() -> None:
+    raw = "Название;Цена\nМышь;10\n".encode("cp1251")
+    result = index_csv_bytes(raw)
+    assert result.columns == ["Название", "Цена"]
+    assert result.row_count == 1
+
+
 def test_index_csv_bytes_basic() -> None:
     raw = b"name,part_number,price\nMouse,M1,10\nKeyboard,K1,20\n"
     result = index_csv_bytes(raw)
@@ -72,6 +79,43 @@ def _minimal_xlsx() -> bytes:
     return buf.getvalue()
 
 
+def _inline_str_xlsx_cyrillic() -> bytes:
+    """XLSX with inlineStr headers (no sharedStrings) — common openpyxl export."""
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr(
+            "[Content_Types].xml",
+            """<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+            <Default Extension="xml" ContentType="application/xml"/>
+            <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+            <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+            </Types>""",
+        )
+        zf.writestr(
+            "xl/workbook.xml",
+            """<?xml version="1.0"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+            <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"/></sheets>
+            </workbook>""",
+        )
+        zf.writestr(
+            "xl/worksheets/sheet1.xml",
+            """<?xml version="1.0"?>
+            <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+              <sheetData>
+                <row r="1">
+                  <c r="A1" t="inlineStr"><is><t>Название</t></is></c>
+                  <c r="B1" t="inlineStr"><is><t>Артикул</t></is></c>
+                </row>
+                <row r="2">
+                  <c r="A2" t="inlineStr"><is><t>Мышь</t></is></c>
+                  <c r="B2" t="inlineStr"><is><t>M1</t></is></c>
+                </row>
+              </sheetData>
+            </worksheet>""",
+        )
+    return buf.getvalue()
+
+
 def test_index_xlsx_bytes_basic() -> None:
     result = index_xlsx_bytes(_minimal_xlsx())
     assert result.row_count == 1
@@ -80,6 +124,17 @@ def test_index_xlsx_bytes_basic() -> None:
     conn.deserialize(result.sqlite_bytes)
     row = conn.execute("SELECT name, sku FROM rows").fetchone()
     assert row == ("Widget", "W-1")
+    conn.close()
+
+
+def test_index_xlsx_inline_str_preserves_cyrillic_headers() -> None:
+    result = index_xlsx_bytes(_inline_str_xlsx_cyrillic())
+    assert result.columns == ["Название", "Артикул"]
+    assert result.row_count == 1
+    conn = sqlite3.connect(":memory:")
+    conn.deserialize(result.sqlite_bytes)
+    row = conn.execute('SELECT "Название", "Артикул" FROM rows').fetchone()
+    assert row == ("Мышь", "M1")
     conn.close()
 
 

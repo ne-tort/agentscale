@@ -12,6 +12,7 @@ from xml.etree import ElementTree as ET
 
 _SAFE_COL = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 _NS = {"m": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+_CSV_ENCODINGS = ("utf-8-sig", "utf-8", "cp1251", "cp866", "latin-1")
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,15 +23,17 @@ class TabularIndexResult:
 
 
 def _normalize_header(raw: str, *, index: int, used: set[str]) -> str:
-    """Keep human headers (incl. Cyrillic) for column_map UI; quote-safe for SQLite."""
+    """Preserve human headers (incl. Cyrillic) for column_map; quote-safe for SQLite."""
     base = (raw or "").strip().replace('"', "'")
+    # Drop UTF-8 replacement junk from wrong-encoding decode attempts.
+    if base and set(base) <= {"\ufffd", "?", "_", "-", " "}:
+        base = ""
     if not base:
         base = f"col_{index + 1}"
-    # ASCII identifiers stay snake_case for stable MCP/query names.
-    if _SAFE_COL.match(base.replace("-", "_")) and base.isascii():
-        base = re.sub(r"[^A-Za-z0-9_]+", "_", base).strip("_").lower() or f"col_{index + 1}"
-        if not _SAFE_COL.match(base):
-            base = f"col_{index + 1}"
+    # Only snake_case pure ASCII identifiers (stable MCP names); keep everything else as-is.
+    elif base.isascii() and _SAFE_COL.match(base.replace("-", "_")):
+        snake = re.sub(r"[^A-Za-z0-9_]+", "_", base).strip("_").lower()
+        base = snake if snake and _SAFE_COL.match(snake) else f"col_{index + 1}"
     name = base
     n = 2
     while name in used:
@@ -60,14 +63,51 @@ def _rows_to_sqlite(headers: list[str], rows: list[list[str]]) -> TabularIndexRe
     return TabularIndexResult(sqlite_bytes=raw, row_count=len(rows), columns=cols)
 
 
+def _decode_csv_bytes(data: bytes) -> str:
+    """Prefer UTF-8; fall back to common Russian Windows encodings."""
+    best: str | None = None
+    best_score = -1
+    for enc in _CSV_ENCODINGS:
+        try:
+            text = data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+        # Higher is better: Cyrillic letters, fewer replacement chars.
+        cyr = sum(1 for ch in text if "\u0400" <= ch <= "\u04ff")
+        bad = text.count("\ufffd")
+        score = cyr * 10 - bad * 50 + (5 if enc.startswith("utf-8") and bad == 0 else 0)
+        if score > best_score:
+            best_score = score
+            best = text
+            if enc.startswith("utf-8") and bad == 0 and (cyr > 0 or data[:3] == b"\xef\xbb\xbf"):
+                break
+    if best is None:
+        return data.decode("utf-8", errors="replace")
+    return best
+
+
+def _csv_matrix(text: str) -> list[list[str]]:
+    sample = text[:4096]
+    delimiter = ","
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",;\t")
+        delimiter = dialect.delimiter
+    except csv.Error:
+        if sample.count(";") > sample.count(","):
+            delimiter = ";"
+        elif sample.count("\t") > sample.count(","):
+            delimiter = "\t"
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    return [[str(c) for c in row] for row in reader]
+
+
 def index_csv_bytes(data: bytes) -> TabularIndexResult:
-    text = data.decode("utf-8-sig", errors="replace")
-    reader = csv.reader(io.StringIO(text))
-    rows_iter = list(reader)
+    text = _decode_csv_bytes(data)
+    rows_iter = _csv_matrix(text)
     if not rows_iter:
         return _rows_to_sqlite(["col_1"], [])
-    headers = [str(c) for c in rows_iter[0]]
-    body = [[str(c) for c in r] for r in rows_iter[1:]]
+    headers = rows_iter[0]
+    body = rows_iter[1:]
     return _rows_to_sqlite(headers, body)
 
 
@@ -91,6 +131,22 @@ def _xlsx_shared_strings(zf: zipfile.ZipFile) -> list[str]:
     return out
 
 
+def _xlsx_cell_text(cell: ET.Element, shared: list[str]) -> str:
+    cell_type = cell.attrib.get("t")
+    if cell_type == "inlineStr":
+        texts = [t.text or "" for t in cell.findall(".//m:t", _NS)]
+        return "".join(texts)
+    v_el = cell.find("m:v", _NS)
+    raw = v_el.text if v_el is not None and v_el.text is not None else ""
+    if cell_type == "s":
+        try:
+            return shared[int(raw)]
+        except (ValueError, IndexError):
+            return ""
+    # t="str" (formula string) or bare value — keep as text.
+    return raw
+
+
 def index_xlsx_bytes(data: bytes, *, sheet_index: int = 0) -> TabularIndexResult:
     with zipfile.ZipFile(io.BytesIO(data)) as zf:
         shared = _xlsx_shared_strings(zf)
@@ -111,14 +167,7 @@ def index_xlsx_bytes(data: bytes, *, sheet_index: int = 0) -> TabularIndexResult
                 ref = cell.attrib.get("r") or ""
                 c_idx = _col_letter_to_index(ref)
                 max_col = max(max_col, c_idx)
-                v_el = cell.find("m:v", _NS)
-                raw = v_el.text if v_el is not None and v_el.text is not None else ""
-                if cell.attrib.get("t") == "s":
-                    try:
-                        raw = shared[int(raw)]
-                    except (ValueError, IndexError):
-                        pass
-                grid.setdefault(r_idx, {})[c_idx] = raw
+                grid.setdefault(r_idx, {})[c_idx] = _xlsx_cell_text(cell, shared)
         width = max_col + 1 if max_col >= 0 else 1
         matrix: list[list[str]] = []
         for r in range(max_row + 1):

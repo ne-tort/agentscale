@@ -975,12 +975,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "visible_when": {"field": "status", "eq": "error"},
                         },
                         {
-                            "column": "row_count",
-                            "widget": "value",
-                            "read_only": True,
-                            "visible_when": {"field": "status", "eq": "ready"},
-                        },
-                        {
                             "column": "column_map",
                             "widget": "column_map",
                             "source_columns_from": "columns_json",
