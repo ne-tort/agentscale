@@ -16,6 +16,7 @@ import 'package:prodavan/features/meta/widgets/secret_upload_field.dart';
 import 'package:prodavan/features/meta/widgets/markdown_editor_field.dart';
 import 'package:prodavan/features/meta/widgets/project_multiselect_field.dart';
 import 'package:prodavan/features/meta/widgets/build_slots_field.dart';
+import 'package:prodavan/features/meta/widgets/text_editor_nav_field.dart';
 import 'package:prodavan/features/meta/widgets/type_ref_picker_field.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -404,6 +405,16 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
                   _persist(name, picked);
                 }
               },
+      );
+    }
+    if (widgetKind == 'text_editor') {
+      return TextEditorNavField(
+        label: label,
+        value: value?.toString() ?? '',
+        readOnly: fieldReadOnly,
+        icon: fieldIcon ?? textEditorIcon(fieldIconName),
+        emptyLabel: textEditorEmptyLabel(fieldCfg, l10n, locale),
+        onChanged: (v) => _persist(name, v),
       );
     }
     if (widgetKind == 'file_upload') {

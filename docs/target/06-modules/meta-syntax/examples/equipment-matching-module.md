@@ -21,7 +21,7 @@ Product seed: `mod_equipment` — see `product_module_seeds.py`.
 - `equipment_items` — `name`, `offer_id`/`offer_title`, `type_id`/`type_name`, `part_number`, `qty`, `attrs` (string map by field key)
 - `equipment_builds` — `name`, `build_kind` (`pc`|`server`), `slots` (`{etype_id: item_row_id}`), denorm `components_count` / `price_total`
 - `trusted_sellers` — `name`, `aliases` (comma-separated); CRUD only
-- `web_shops` — `name`, `url`, `cookies` (free-form paste); CRUD only
+- `web_shops` — `name`, `url`, `cookies` (free-form paste via `text_editor` nav page); CRUD only
 
 ## Meta primitives
 

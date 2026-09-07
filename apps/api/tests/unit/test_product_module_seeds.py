@@ -202,7 +202,8 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     cookies_field = next(
         f for f in shops_settings["ui_json"]["fields"] if f["column"] == "cookies"
     )
-    assert cookies_field["max_lines"] == 6
+    assert cookies_field["widget"] == "text_editor"
+    assert "max_lines" not in cookies_field
 
     catalogs = next(v for v in meta["views"] if v["slug"] == "catalogs_list")
     assert catalogs["ui_json"]["inline_add"]["field"] == "name"

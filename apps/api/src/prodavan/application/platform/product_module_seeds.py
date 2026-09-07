@@ -2158,8 +2158,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         },
                         {
                             "column": "cookies",
-                            "widget": "value",
-                            "max_lines": 6,
+                            "widget": "text_editor",
                             "icon": "cookie",
                         },
                     ],
