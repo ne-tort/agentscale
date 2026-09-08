@@ -707,10 +707,12 @@ def test_company_suspended_emit_and_chat_gate(client: TestClient) -> None:
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
+    owner_h = {"Authorization": f"Bearer {owner_tok}"}
+    configure_and_launch(client, owner_h, project_id)
 
     sess = client.post(
         f"/api/v1/projects/{project_id}/agent/sessions",
-        headers={"Authorization": f"Bearer {owner_tok}"},
+        headers=owner_h,
         json={},
     )
     assert sess.status_code == 201, sess.text
@@ -1996,6 +1998,14 @@ def test_admin_cabinet_module_bind_syncs_running_pod(client: TestClient) -> None
     )
     assert rebound.status_code == 200, rebound.text
     assert "mod_files" in rebound.json()["module_ids"]
+
+    # Re-enable module on the running project (MC rebind does not auto-create MP).
+    enabled = client.patch(
+        f"/api/v1/projects/{project_id}/modules",
+        headers=owner_h,
+        json={"module_ids": all_module_ids},
+    )
+    assert enabled.status_code == 200, enabled.text
 
     file_row = client.post(
         f"/api/v1/cabinets/{cabinet_id}/modules/mod_files/data/files",

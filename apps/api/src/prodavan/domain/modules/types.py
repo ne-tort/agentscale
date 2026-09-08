@@ -27,8 +27,9 @@ def default_project_bind_kind(module_id: str) -> ModuleBindKind:
 
 
 def default_cabinet_bind_kind(module_id: str) -> ModuleBindKind:
-    """Default MC bind: management modules share parent SoT; others fork locally."""
-    return default_project_bind_kind(module_id)
+    """Cabinet binds always fork local SoT; projects may share it via global MP binds."""
+    _ = module_id
+    return ModuleBindKind.LOCAL
 
 
 def default_child_may_edit(bind_kind: ModuleBindKind | str) -> bool:

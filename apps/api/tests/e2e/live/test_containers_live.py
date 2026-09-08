@@ -19,6 +19,34 @@ from tests.e2e.live.keycloak_auth import (
 pytestmark = [pytest.mark.live, requires_live_api]
 
 
+def _wait_runtime_running(
+    client: httpx.Client,
+    api: str,
+    headers: dict[str, str],
+    project_id: str,
+    *,
+    wait_sec: float = 180.0,
+) -> dict:
+    """Wait until project.runtime.status is running (pod ready for agent)."""
+    deadline = time.time() + wait_sec
+    last: dict = {}
+    while time.time() < deadline:
+        got = client.get(f"{api}/projects/{project_id}", headers=headers)
+        assert got.status_code == 200, got.text
+        last = got.json()
+        if last.get("status") == "error":
+            raise AssertionError(f"project error while waiting for runtime: {last}")
+        runtime = last.get("runtime") or {}
+        if (
+            last.get("status") == "active"
+            and runtime.get("observed_state") == "running"
+            and runtime.get("desired_state") == "running"
+        ):
+            return last
+        time.sleep(2.0)
+    raise AssertionError(f"timeout waiting for running runtime: {last}")
+
+
 def _wait_project_status(
     client: httpx.Client,
     api: str,
@@ -74,8 +102,11 @@ def _configure_and_launch(
     assert patched.status_code == 200, patched.text
     launched = client.post(f"{api}/projects/{project_id}/launch", headers=owner_h)
     assert launched.status_code == 200, launched.text
-    return _wait_project_status(
+    _wait_project_status(
         client, api, owner_h, project_id, want="active", wait_sec=wait_sec
+    )
+    return _wait_runtime_running(
+        client, api, owner_h, project_id, wait_sec=wait_sec
     )
 
 
@@ -240,6 +271,9 @@ def test_live_containers_lifecycle(live_client, live_api_prefix: str) -> None:
     assert idx_a < idx_b
     assert statuses[idx_a][1] == "active"
     assert statuses[idx_b][1] == "paused"
+
+    # Pause of B must not disturb A's live pod.
+    _wait_runtime_running(live_client, api, owner_h, projects[0]["id"], wait_sec=60.0)
 
     sess = live_client.post(
         f"{api}/projects/{projects[0]['id']}/agent/sessions",

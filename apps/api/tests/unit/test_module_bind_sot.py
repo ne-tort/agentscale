@@ -33,7 +33,8 @@ def test_default_bind_helpers() -> None:
     assert default_project_bind_kind("mod_mcp") == ModuleBindKind.GLOBAL
     assert default_project_bind_kind("mod_files") == ModuleBindKind.GLOBAL
     assert default_project_bind_kind("mod_equipment") == ModuleBindKind.LOCAL
-    assert default_cabinet_bind_kind("mod_prompts") == ModuleBindKind.GLOBAL
+    assert default_cabinet_bind_kind("mod_prompts") == ModuleBindKind.LOCAL
+    assert default_cabinet_bind_kind("mod_files") == ModuleBindKind.LOCAL
     assert default_cabinet_bind_kind("mod_equipment") == ModuleBindKind.LOCAL
     assert default_child_may_edit(ModuleBindKind.LOCAL) is True
     assert default_child_may_edit(ModuleBindKind.GLOBAL) is False

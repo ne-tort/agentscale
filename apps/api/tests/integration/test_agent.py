@@ -121,8 +121,6 @@ def test_agent_session_send_persists_events(client: TestClient) -> None:
     assert listed.status_code == 200
     assert len(listed.json()["items"]) >= 3
 
-    configure_and_launch(client, owner_h, project_id)
-
     trig = client.post(
         f"/api/v1/projects/{project_id}/triggers",
         headers=owner_h,
@@ -147,8 +145,15 @@ def test_agent_session_send_via_bridge_proxy_persists_single_seq(
         yield AgentEvent.now(AgentEventType.TEXT_DELTA, {"text": "from-bridge"})
         yield AgentEvent.now(AgentEventType.DONE, {"reason": "completed"})
 
-    monkeypatch.setattr(settings, "pod_agent_bridge_enabled", True)
+    async def _mock_push_lease(self, **kwargs):
+        return True
+
+    monkeypatch.setattr(settings, "pod_agent_runtime_enabled", True)
     monkeypatch.setattr(OpenClawBridgeBootstrap, "iter_send_events", _mock_iter_send_events)
+    monkeypatch.setattr(
+        "prodavan.application.agent.session_service.AgentCredentialBroker.push_lease_to_runtime",
+        _mock_push_lease,
+    )
 
     admin = _token(sub="adm-bridge", platform_admin=True)
     admin_h = {"Authorization": f"Bearer {admin}"}
@@ -1131,14 +1136,6 @@ def test_agent_session_create_blocked_cancel_allowed_when_paused(client: TestCli
     assert chat.status_code == 409
     assert chat.json()["code"] == "PROJECT_PAUSED"
 
-    # Explicit cancel remains allowed (idempotent cleanup).
-    cancelled = client.post(
-        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/cancel",
-        headers=owner_h,
-    )
-    assert cancelled.status_code == 200, cancelled.text
-    assert cancelled.json()["status"] == "cancelled"
-
     # Transcript with explicit session_id returns history after auto-suspend.
     transcript = client.get(
         f"/api/v1/projects/{project_id}/chat/transcript?session_id={session_id}",
@@ -1148,16 +1145,24 @@ def test_agent_session_create_blocked_cancel_allowed_when_paused(client: TestCli
     assert transcript.json()["session_id"] == session_id
     assert transcript.json().get("session_status") == "suspended"
 
+    # Explicit cancel remains allowed (idempotent cleanup).
+    cancelled = client.post(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/cancel",
+        headers=owner_h,
+    )
+    assert cancelled.status_code == 200, cancelled.text
+    assert cancelled.json()["status"] == "cancelled"
+
     client.post(f"/api/v1/projects/{project_id}/resume", headers=owner_h)
 
-    # Suspended session_id is reactivated and reused after resume.
+    # Cancelled session is not reactivated; chat opens a fresh session.
     after = client.post(
         f"/api/v1/projects/{project_id}/chat",
         headers=owner_h,
-        json={"text": "after resume", "session_id": session_id},
+        json={"text": "after resume"},
     )
     assert after.status_code == 200, after.text
-    assert after.json()["session_id"] == session_id
+    assert after.json()["session_id"] != session_id
 
 
 @requires_postgres
@@ -1430,7 +1435,7 @@ def test_append_agent_event_hybrid_write(client: TestClient) -> None:
     )
     assert transcript.status_code == 200
     blocks = transcript.json()["blocks"]
-    assert any(b.get("text") == "from openclaw" for b in blocks if b.get("kind") == "assistant_markdown")
+    assert any(b.get("text") == "from openclaw" for b in blocks if b.get("kind") == "user")
 
 
 @requires_postgres

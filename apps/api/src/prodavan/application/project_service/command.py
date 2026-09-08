@@ -142,9 +142,17 @@ class ProjectCommand:
                 "visibility_mode": row.visibility_mode,
             },
         )
+        from prodavan.application.modules.module_binding_service import ModuleBindingService
         from prodavan.application.modules.module_instance_service import ModuleInstanceService
         from prodavan.application.project_service.module_settings import ProjectModuleSettingsService
+        from prodavan.domain.modules import default_project_bind_kind
 
+        # Inherit cabinet modules as project binds (defaults: global share for product modules).
+        bindings = ModuleBindingService(self._session)
+        for mid in await bindings.list_module_ids_for_cabinet(cabinet_id):
+            await bindings.bind_project(
+                mid, project_id, bind_kind=default_project_bind_kind(mid)
+            )
         await ModuleInstanceService(self._session).ensure_project_instances_for_cabinet_modules(
             project_id=project_id
         )
@@ -659,6 +667,51 @@ class ProjectCommand:
         row.launch_phase = "resuming"
         await self._session.commit()
         await self._session.refresh(row)
+        from prodavan.config.settings import settings
+
+        # L2 stub: finish resume in-request so HTTP returns active.
+        # Real k8s keeps create_task (provision can exceed request timeouts).
+        if settings.pod_runtime_mode.strip().lower() == "stub":
+            try:
+                await self._pods.sync_desired(
+                    row.id,
+                    PodDesiredState.RUNNING,
+                    principal=principal,
+                    reason="resume",
+                )
+                row.status = ProjectStatus.ACTIVE
+                row.launch_phase = None
+                await self._events.emit(
+                    event_type="project.resumed",
+                    company_id=row.company_id,
+                    project_id=row.id,
+                    cabinet_id=row.cabinet_id,
+                    principal=principal,
+                )
+            except Exception as exc:
+                logger.warning("stub resume failed project_id=%s: %s", row.id, exc)
+                row.status = ProjectStatus.ERROR
+                row.launch_phase = None
+            await self._session.commit()
+            await self._session.refresh(row)
+            if row.status == ProjectStatus.ACTIVE:
+                try:
+                    from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
+                    from prodavan.core.jobs.enqueue import enqueue_trigger_drain
+
+                    await bootstrap_project_sessions(self._session, project_id=row.id)
+                    await self._session.commit()
+                    await AgentTriggerDispatcher(self._session).dispatch_batch(
+                        project_id=row.id,
+                        principal=principal,
+                        employee=employee,
+                        max_n=10,
+                    )
+                    enqueue_trigger_drain()
+                except Exception:
+                    logger.exception("stub resume post-bootstrap failed project_id=%s", row.id)
+            return await self._project_public(row, include_runtime=True)
+
         asyncio.create_task(
             self._resume_background(
                 project_id=row.id,

@@ -15,6 +15,7 @@ os.environ.setdefault("AUTH_TEST_SECRET", "dev-only-test-secret-change-me")
 
 from prodavan.application.pod_service.ports.workspace import WorkspaceEntry
 from prodavan.application.pod_service.workspace_service import PodWorkspaceService
+from prodavan.application.project_service.access import ProjectAccessPolicy
 from prodavan.config.settings import settings
 from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.infrastructure.keycloak.invite import reset_invite_client
@@ -84,7 +85,7 @@ async def _running_runtime_gate(
     employee,
     write: bool = False,
 ) -> tuple[str, str]:
-    await self._access.require_access(
+    await ProjectAccessPolicy(self._session).require_access(
         project_id=project_id,
         principal=principal,
         employee=employee,
