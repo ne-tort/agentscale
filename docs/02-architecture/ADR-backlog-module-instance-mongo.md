@@ -2,6 +2,10 @@
 
 **Status:** backlog — do **not** implement until Postgres copy-on-bind (`module_instances` / `module_instance_data_rows`) is stable in prod.
 
+## As-built (2026-09)
+
+Still **Postgres JSONB** only. No Mongo StatefulSet in `infra/k3s`. Modules and bindings stay in Postgres; instance meta/data are `module_instance_meta_documents` / `module_instance_data_rows`. Safer seed upserts (insert-only data rows + meta refresh) are the current path for schema evolution — not a Mongo cutover.
+
 ## Context
 
 Module instance rows are Postgres JSONB today (evolution of cabinet `module_data_rows`). Mongo could hold large/flexible documents with `instance_id` pointers kept in Postgres.

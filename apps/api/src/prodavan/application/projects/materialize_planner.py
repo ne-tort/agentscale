@@ -593,6 +593,8 @@ class MaterializePlanner:
                 )
             ]
         if fmt == "prompt_paths":
+            if not active_profile_id:
+                return []
             return _expand_prompt_path_ops(
                 rows=rows,
                 rule_id=rule_id,

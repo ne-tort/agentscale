@@ -248,7 +248,6 @@ class CabinetModuleService:
             table_slug=table_slug,
             row_id=row_id,
             body=body,
-            created_by=existing.get("created_by"),
         )
         await self._session.flush()
         # Avoid double-commit when nested from set_profile; callers that need

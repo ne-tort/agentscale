@@ -277,7 +277,6 @@ class ProjectRuntimeModuleService:
             table_slug=table_slug,
             row_id=row_id,
             body=body,
-            created_by=existing.get("created_by"),
         )
         await self._session.commit()
         from prodavan.application.projects.workspace_sync_policy import (

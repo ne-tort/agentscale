@@ -284,7 +284,62 @@ async def test_cabinet_write_targets_cabinet_instance() -> None:
     assert out["instance_id"] == "minst_cab"
 
 
-def test_upsert_skips_platform_refresh_when_instances_table_missing() -> None:
+@pytest.mark.asyncio
+async def test_upsert_data_row_clears_module_seed_created_by() -> None:
+    session = MagicMock()
+    session.execute = AsyncMock()
+    session.flush = AsyncMock()
+    row = SimpleNamespace(
+        id="midr_1",
+        instance_id="minst_a",
+        table_slug="prompt_profiles",
+        row_id="profile_default",
+        body={"name": "Default"},
+        created_by="module_seed",
+    )
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = row
+    session.execute.return_value = result
+
+    svc = ModuleInstanceService(session)
+    out = await svc.upsert_data_row(
+        instance_id="minst_a",
+        table_slug="prompt_profiles",
+        row_id="profile_default",
+        body={"name": "Edited"},
+    )
+
+    assert row.body == {"name": "Edited"}
+    assert row.created_by == "user"
+    assert out["created_by"] == "user"
+
+
+@pytest.mark.asyncio
+async def test_upsert_data_row_preserves_seed_when_explicit() -> None:
+    session = MagicMock()
+    session.execute = AsyncMock()
+    session.flush = AsyncMock()
+    row = SimpleNamespace(
+        id="midr_1",
+        instance_id="minst_a",
+        table_slug="t",
+        row_id="r1",
+        body={},
+        created_by="module_seed",
+    )
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = row
+    session.execute.return_value = result
+
+    svc = ModuleInstanceService(session)
+    await svc.upsert_data_row(
+        instance_id="minst_a",
+        table_slug="t",
+        row_id="r1",
+        body={"x": 1},
+        created_by="module_seed",
+    )
+    assert row.created_by == "module_seed"
     from prodavan.application.platform import product_module_upsert as upsert_mod
 
     conn = MagicMock()
@@ -327,3 +382,32 @@ def test_refresh_all_instance_meta_updates_every_owner() -> None:
     )
     # 1 SELECT instances + 2 instances * 1 slug UPSERT
     assert conn.execute.call_count == 3
+
+
+def test_apply_seed_rows_uses_on_conflict_do_nothing() -> None:
+    from prodavan.application.platform import product_module_upsert as upsert_mod
+
+    conn = MagicMock()
+    conn.execute.return_value.fetchall.return_value = [("inst_a",)]
+    with patch.object(upsert_mod, "_has_table", return_value=True):
+        upsert_mod._apply_seed_rows_to_instances(
+            conn,
+            module_id="mod_x",
+            slugs={
+                "seed_rows": {
+                    "items": [
+                        {
+                            "table_slug": "prompt_profiles",
+                            "row_id": "profile_default",
+                            "body": {"name": "Default"},
+                        }
+                    ]
+                }
+            },
+        )
+    # SELECT instances + INSERT
+    assert conn.execute.call_count == 2
+    insert_sql = str(conn.execute.call_args_list[1].args[0])
+    assert "ON CONFLICT" in insert_sql
+    assert "DO NOTHING" in insert_sql
+    assert "DO UPDATE" not in insert_sql

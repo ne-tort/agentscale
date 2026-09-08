@@ -138,7 +138,6 @@ class OwnerModuleDataService:
             table_slug=table_slug,
             row_id=row_id,
             body=body,
-            created_by=existing.get("created_by"),
         )
         await self._session.commit()
         return {"module_id": module_id, "instance_id": inst.id, **row}

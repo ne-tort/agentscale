@@ -105,7 +105,9 @@ Template (modules + module_meta_documents)
 | **Project hubs** | Employee Management/Data UI. Tab `instance_owner` selects data API: `cabinet` = cabinet instance (no project required); `project` = selected project leaf (reload on project change) |
 | **Materialize data** | Default: project leaf. Modules with `instance_owner: cabinet` (prompts / MCP / files) read **cabinet** instance rows and filter by row `project_ids` |
 | **Materialize rules** | Rule definitions still from **template** meta slug `materialize` (MVP); instance-level rules later |
-| **Admin/company edit** | Template catalog PUT mirrors into platform/company **instance** meta; seed upsert refreshes platform instance meta only (children untouched) |
+| **Admin/company edit** | Template catalog PUT mirrors into platform/company **instance** meta |
+| **Seed upsert (Alembic)** | `upsert_product_modules`: refreshes **meta** for every instance of the product module (UX/schema stay in sync). **Data rows:** insert missing seed rows only (`ON CONFLICT DO NOTHING`) — never overwrite existing bodies. User edits of former seed rows clear `created_by` from `module_seed` → `user`. Schema-breaking data transforms ship as explicit Alembic SQL, not blind body upsert |
+| **Storage** | Meta + data stay Postgres JSONB (`module_instance_meta_documents` / `module_instance_data_rows`). Mongo for instance docs is **deferred** — see [ADR backlog](02-architecture/ADR-backlog-module-instance-mongo.md) |
 
 Product module seed changes (`PRODUCT_MODULES`) ship only via Alembic calling `upsert_product_modules` — not silent bootstrap overwrite.
 
@@ -122,7 +124,7 @@ Independent of `nav.placement` (rail / management / data):
 
 Seeds: `mod_prompts` / `mod_mcp` / `mod_files` → `cabinet`; `mod_equipment` → `project`.
 
-**Prompts hub:** path-cards (`prompt_paths`: name, path, `files_json`); empty `files_json` skips folder creation; workspace writes only `AGENTS.md` (no `CLAUDE.md` alias).
+**Prompts hub:** path-cards (`prompt_paths`: name, path, `files_json`); empty `files_json` skips folder creation; workspace writes only `AGENTS.md` (no `CLAUDE.md` alias). Profile row `project_ids` empty/`null` = all projects; materialize writes **one** active profile (default among matches) for the target project — not every profile in the module.
 
 Module-level **MP binding** (`module_project_bindings`): if bindings exist, module materializes only for bound projects.
 

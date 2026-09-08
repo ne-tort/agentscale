@@ -387,6 +387,11 @@ class ModuleInstanceService:
             self._session.add(row)
         else:
             row.body = body
+            # API / user edits clear seed provenance so product upsert never clobbers.
+            if created_by is not None:
+                row.created_by = created_by
+            elif row.created_by in ("module_seed", None):
+                row.created_by = "user"
         await self._session.flush()
         return {
             "row_id": row.row_id,

@@ -37,7 +37,7 @@ def _apply_seed_rows_to_instances(
     module_id: str,
     slugs: dict[str, Any],
 ) -> None:
-    """Upsert template seed_rows into every instance (idempotent by row_id)."""
+    """Insert missing template seed_rows into every instance (never overwrite body)."""
     import uuid
 
     if not _has_table(conn, "module_instance_data_rows"):
@@ -71,10 +71,7 @@ def _apply_seed_rows_to_instances(
                         (id, instance_id, table_slug, row_id, body, created_by)
                     VALUES
                         (:id, :iid, :ts, :rid, CAST(:body AS jsonb), :cb)
-                    ON CONFLICT (instance_id, table_slug, row_id) DO UPDATE
-                    SET body = EXCLUDED.body
-                    WHERE module_instance_data_rows.created_by = 'module_seed'
-                       OR module_instance_data_rows.created_by IS NULL
+                    ON CONFLICT (instance_id, table_slug, row_id) DO NOTHING
                     """
                 ),
                 {

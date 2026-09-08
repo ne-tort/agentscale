@@ -53,7 +53,7 @@ class TextEditorNavField extends StatelessWidget {
           initial: value,
           readOnly: readOnly,
           markdown: markdown,
-          onChanged: readOnly ? null : onChanged,
+          onCommit: readOnly ? null : onChanged,
         ),
       ),
     );

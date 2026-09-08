@@ -214,10 +214,7 @@ class _PromptFileEditorPageState extends State<_PromptFileEditorPage> {
                   markdown: true,
                   expands: true,
                   focusNode: _bodyFocus,
-                  onChanged: (v) {
-                    _body = v;
-                    _flush();
-                  },
+                  onChanged: (v) => _body = v,
                   onEditingComplete: _flush,
                 ),
               ),

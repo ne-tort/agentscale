@@ -5,6 +5,7 @@ from prodavan.application.projects.materialize_planner import (
     _expand_prompt_path_ops,
     _join_prompt_file_path,
     _merge_materialize_rules,
+    _pick_active_profile,
     _row_applies_to_project,
     _row_matches_filter,
     _row_path_context,
@@ -125,3 +126,62 @@ def test_expand_prompt_path_ops_skips_empty_files() -> None:
     assert ops[0].format == "raw"
     assert ops[0].row_body == {"body_md": "# Style\n"}
     assert ops[0].field == "body_md"
+
+
+def test_pick_active_profile_filters_by_project_ids() -> None:
+    rows = [
+        {
+            "row_id": "prof_a",
+            "body": {"name": "A", "project_ids": ["proj1"], "is_default": True},
+        },
+        {
+            "row_id": "prof_b",
+            "body": {"name": "B", "project_ids": ["proj2"], "is_default": True},
+        },
+        {
+            "row_id": "prof_all",
+            "body": {"name": "All", "project_ids": [], "is_default": False},
+        },
+    ]
+    assert _pick_active_profile(rows, "proj1") == "prof_a"
+    assert _pick_active_profile(rows, "proj2") == "prof_b"
+    # Empty project_ids = all projects; no is_default among matches that prefer
+    # explicit defaults first — prof_a/prof_b win when listed; for proj3 only
+    # prof_all matches.
+    assert _pick_active_profile(rows, "proj3") == "prof_all"
+
+
+def test_active_profile_paths_only_expand_matching_profile() -> None:
+    """Simulate materialize filter: only active profile's prompt_paths land in ops."""
+    active = _pick_active_profile(
+        [
+            {"row_id": "prof_a", "body": {"project_ids": ["proj1"], "is_default": True}},
+            {"row_id": "prof_b", "body": {"project_ids": ["proj2"], "is_default": True}},
+        ],
+        "proj1",
+    )
+    assert active == "prof_a"
+    path_rows = [
+        {
+            "row_id": "pa",
+            "profile_id": "prof_a",
+            "path": "rules/",
+            "files_json": [{"name": "a", "body": "from A"}],
+        },
+        {
+            "row_id": "pb",
+            "profile_id": "prof_b",
+            "path": "rules/",
+            "files_json": [{"name": "b", "body": "from B"}],
+        },
+    ]
+    filtered = [r for r in path_rows if _row_matches_filter(r, {"profile_id": active})]
+    ops = _expand_prompt_path_ops(
+        rows=filtered,
+        rule_id="prompt_paths_files",
+        module_id="mod_prompts",
+        priority=10,
+    )
+    assert len(ops) == 1
+    assert ops[0].workspace_path == "rules/a.md"
+    assert ops[0].row_body == {"body_md": "from A"}
