@@ -162,19 +162,8 @@ class ModuleInstanceService:
         )
         row = grant.scalar_one_or_none()
         if row is not None and row.bind_kind == ModuleBindKind.GLOBAL:
-            sot = await self.resolve_sot_instance(
-                module_id=module_id,
-                owner_kind=OWNER_COMPANY,
-                owner_id=company_id,
-            )
-            if sot is None:
-                raise AppError(
-                    code="NOT_FOUND",
-                    title="Not Found",
-                    status=404,
-                    detail="global company grant SoT not found",
-                )
-            return sot
+            # Global grant shares platform SoT — create it if meta was never written yet.
+            return await self.ensure_platform_instance(module_id=module_id)
 
         parent = await self.ensure_platform_instance(module_id=module_id)
         return await self.fork_instance(
@@ -197,19 +186,15 @@ class ModuleInstanceService:
         )
         binding = mc.scalar_one_or_none()
         if binding is not None and binding.bind_kind == ModuleBindKind.GLOBAL:
-            sot = await self.resolve_sot_instance(
-                module_id=module_id,
-                owner_kind=OWNER_CABINET,
-                owner_id=cabinet_id,
-            )
-            if sot is None:
-                raise AppError(
-                    code="NOT_FOUND",
-                    title="Not Found",
-                    status=404,
-                    detail="global cabinet bind SoT not found",
+            cab = await self._session.get(CabinetInstanceRow, cabinet_id)
+            company_id = None
+            if cab is not None:
+                company_id = cab.owner_company_id or cab.company_id
+            if company_id:
+                return await self.ensure_company_instance(
+                    company_id=company_id, module_id=module_id
                 )
-            return sot
+            return await self.ensure_platform_instance(module_id=module_id)
 
         cab = await self._session.get(CabinetInstanceRow, cabinet_id)
         company_id = None
