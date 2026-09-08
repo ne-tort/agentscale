@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import UTC, datetime, timedelta
 
 import jwt
@@ -78,6 +79,28 @@ def _setup_project(client: TestClient) -> tuple[str, str, dict[str, str], str]:
     return company_id, admin, owner_h, project_id
 
 
+def _wait_runtime_running(
+    client: TestClient,
+    owner_h: dict[str, str],
+    project_id: str,
+    *,
+    wait_sec: float = 180.0,
+) -> dict:
+    deadline = time.time() + wait_sec
+    last: dict = {}
+    while time.time() < deadline:
+        after = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
+        assert after.status_code == 200, after.text
+        last = after.json()
+        if last.get("status") == "error":
+            raise AssertionError(f"project error while waiting for running: {last}")
+        runtime = last.get("runtime")
+        if runtime is not None and runtime.get("status") == "running":
+            return runtime
+        time.sleep(2.0)
+    raise AssertionError(f"timeout waiting for running runtime: {last}")
+
+
 def _configure_and_launch(client: TestClient, owner_h: dict[str, str], project_id: str) -> dict:
     keys = client.get(f"/api/v1/projects/{project_id}/ai-keys/available", headers=owner_h)
     assert keys.status_code == 200, keys.text
@@ -92,7 +115,7 @@ def _configure_and_launch(client: TestClient, owner_h: dict[str, str], project_i
     assert patched.status_code == 200, patched.text
     launched = client.post(f"/api/v1/projects/{project_id}/launch", headers=owner_h)
     assert launched.status_code == 200, launched.text
-    return launched.json()
+    return _wait_runtime_running(client, owner_h, project_id)
 
 
 def _ensure_pod_running(client: TestClient, owner_h: dict[str, str], project_id: str) -> dict:
@@ -104,16 +127,13 @@ def _ensure_pod_running(client: TestClient, owner_h: dict[str, str], project_id:
         return runtime
 
     if body.get("status") == "draft" or runtime is None:
-        _configure_and_launch(client, owner_h, project_id)
-    elif body.get("status") == "paused":
+        return _configure_and_launch(client, owner_h, project_id)
+    if body.get("status") == "paused":
         resumed = client.post(f"/api/v1/projects/{project_id}/resume", headers=owner_h)
         assert resumed.status_code == 200, resumed.text
+        return _wait_runtime_running(client, owner_h, project_id)
 
-    after = client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
-    runtime = after.json().get("runtime")
-    assert runtime is not None, after.text
-    assert runtime["status"] == "running"
-    return runtime
+    return _wait_runtime_running(client, owner_h, project_id)
 
 
 def _platform_events(
@@ -172,9 +192,7 @@ def test_k8s_pause_resume_recreates_pod(k8s_client: TestClient) -> None:
     k8s_client.post(f"/api/v1/projects/{project_id}/pause", headers=owner_h)
     k8s_client.post(f"/api/v1/projects/{project_id}/resume", headers=owner_h)
 
-    after = k8s_client.get(f"/api/v1/projects/{project_id}", headers=owner_h)
-    runtime = after.json()["runtime"]
-    assert runtime["status"] == "running"
+    runtime = _wait_runtime_running(k8s_client, owner_h, project_id)
     assert runtime["pod_id"] == first_id
     assert_k8s_pod_running(project_id)
 

@@ -33,7 +33,8 @@ def live_api_prefix(live_base_url: str) -> str:
 
 @pytest.fixture()
 def live_client(live_base_url: str) -> httpx.Client:
-    timeout = httpx.Timeout(connect=5.0, read=30.0, write=30.0, pool=5.0)
+    # Launch/provision against real k8s needs a long read timeout.
+    timeout = httpx.Timeout(connect=5.0, read=120.0, write=60.0, pool=5.0)
     with httpx.Client(base_url=live_base_url, timeout=timeout) as client:
         yield client
 
