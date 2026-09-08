@@ -100,12 +100,27 @@ def _configure_and_launch(
         json={"agent_provider": "cursor", "resolved_ai_key_id": key_id},
     )
     assert patched.status_code == 200, patched.text
+
+    # If a prior launch attempt already provisioned a pod (500 after create, race),
+    # skip re-launch and just wait for active/running.
+    current = client.get(f"{api}/projects/{project_id}", headers=owner_h)
+    assert current.status_code == 200, current.text
+    cur_body = current.json()
+    if cur_body.get("runtime") is not None or cur_body.get("status") == "active":
+        _wait_project_status(
+            client, api, owner_h, project_id, want="active", wait_sec=wait_sec
+        )
+        return _wait_runtime_running(
+            client, api, owner_h, project_id, wait_sec=wait_sec
+        )
+
     launched = client.post(f"{api}/projects/{project_id}/launch", headers=owner_h)
-    if launched.status_code != 200:
+    if launched.status_code not in (200, 409):
         # One retry — concurrent e2e / rematerialize can briefly 500 the API.
         time.sleep(2.0)
         launched = client.post(f"{api}/projects/{project_id}/launch", headers=owner_h)
-    assert launched.status_code == 200, launched.text
+    # 409 POD_ALREADY_EXISTS: pod row exists after a partial prior launch — wait it out.
+    assert launched.status_code in (200, 409), launched.text
     _wait_project_status(
         client, api, owner_h, project_id, want="active", wait_sec=wait_sec
     )

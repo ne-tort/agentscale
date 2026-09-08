@@ -1,5 +1,6 @@
 # Ephemeral pytest runner — synced only via Argo Application prodavan-e2e (manual).
 # Re-run: prodavan-ops e2e cleanup && prodavan-ops e2e run --suite k8s
+# CI may mount PR conftest + k8s tests via ConfigMaps (copied over image sources below).
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -32,6 +33,13 @@ spec:
             - /bin/sh
             - -ec
             - |
+              # PR overrides (CI ConfigMaps) — never mount over image paths (empty optional wipe).
+              if [ -f /e2e-pr/conftest/conftest.py ]; then
+                cp /e2e-pr/conftest/conftest.py /app/tests/e2e/conftest.py
+              fi
+              if [ -d /e2e-pr/k8s ] && [ "$(ls -A /e2e-pr/k8s 2>/dev/null || true)" ]; then
+                cp -a /e2e-pr/k8s/. /app/tests/e2e/k8s/
+              fi
               pip install -q pytest pytest-asyncio httpx PyJWT ruff asyncpg
               python - <<'PY'
               import asyncio, asyncpg, os
@@ -55,8 +63,10 @@ spec:
                 name: prodavan-e2e-config
           volumeMounts:
             - name: e2e-conftest
-              mountPath: /app/tests/e2e/conftest.py
-              subPath: conftest.py
+              mountPath: /e2e-pr/conftest
+              readOnly: true
+            - name: e2e-k8s-tests
+              mountPath: /e2e-pr/k8s
               readOnly: true
           resources:
             requests:
@@ -69,4 +79,8 @@ spec:
         - name: e2e-conftest
           configMap:
             name: prodavan-e2e-conftest
+            optional: true
+        - name: e2e-k8s-tests
+          configMap:
+            name: prodavan-e2e-k8s-tests
             optional: true
