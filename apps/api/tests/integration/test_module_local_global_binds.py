@@ -344,6 +344,10 @@ def test_global_unlocked_allows_shared_write(client: TestClient) -> None:
 @requires_postgres
 def test_employee_bind_unbind_and_bound_projects(client: TestClient) -> None:
     admin, company_id, cab_ws, owner_tok, _ = _setup(client, stamp="emp")
+    # Create projects before cabinet gets the module so auto-inherit on create
+    # does not pre-bind MP (this test covers explicit bind/unbind).
+    p1 = _create_project(client, cab_ws=cab_ws, owner_tok=owner_tok, name="E1")
+    p2 = _create_project(client, cab_ws=cab_ws, owner_tok=owner_tok, name="E2")
     module_id = _create_module(
         client,
         admin=admin,
@@ -352,8 +356,6 @@ def test_employee_bind_unbind_and_bound_projects(client: TestClient) -> None:
         owner_tok=owner_tok,
         name="Employee Bind",
     )
-    p1 = _create_project(client, cab_ws=cab_ws, owner_tok=owner_tok, name="E1")
-    p2 = _create_project(client, cab_ws=cab_ws, owner_tok=owner_tok, name="E2")
 
     empty = client.get(
         f"/api/v1/cabinets/{cab_ws}/modules/{module_id}/bound-projects",
