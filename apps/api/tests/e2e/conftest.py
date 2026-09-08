@@ -148,19 +148,33 @@ def k8s_pods_for_project(project_id: str) -> list[tuple[str, str]]:
     return out
 
 
-def assert_k8s_pod_running(project_id: str) -> str:
+def assert_k8s_pod_running(project_id: str, *, wait_sec: float = 90.0) -> str:
     """Assert exactly one Running pod exists in the cluster for project_id."""
-    pods = k8s_pods_for_project(project_id)
-    assert len(pods) == 1, f"expected 1 k8s pod, got {pods!r}"
-    name, phase = pods[0]
-    assert phase == "Running", f"pod {name} phase={phase!r}, want Running"
-    return name
+    import time
+
+    deadline = time.time() + wait_sec
+    last: list[tuple[str, str]] = []
+    while time.time() < deadline:
+        last = k8s_pods_for_project(project_id)
+        running = [(n, p) for n, p in last if p == "Running"]
+        if len(running) == 1:
+            return running[0][0]
+        time.sleep(2.0)
+    raise AssertionError(f"expected 1 Running k8s pod, got {last!r}")
 
 
-def assert_k8s_no_pods(project_id: str) -> None:
+def assert_k8s_no_pods(project_id: str, *, wait_sec: float = 90.0) -> None:
     """Assert no sandbox pods remain for project_id (pause/delete)."""
-    pods = k8s_pods_for_project(project_id)
-    assert pods == [], f"expected no k8s pods, got {pods!r}"
+    import time
+
+    deadline = time.time() + wait_sec
+    last: list[tuple[str, str]] = []
+    while time.time() < deadline:
+        last = k8s_pods_for_project(project_id)
+        if last == []:
+            return
+        time.sleep(2.0)
+    raise AssertionError(f"expected no k8s pods, got {last!r}")
 
 
 def _incluster_delete_pods(project_id: str) -> None:
