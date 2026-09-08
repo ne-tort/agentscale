@@ -1,0 +1,219 @@
+# MongoDB — Document Store BC (non-relational app data).
+# Sandbox NetworkPolicy must NOT allow egress to :27017.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: prodavan-mongodb
+  labels:
+    app.kubernetes.io/name: prodavan-mongodb
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: mongodb
+stringData:
+  root-user: root
+  root-password: prodavan-mongo-root
+  app-user: prodavan
+  app-password: prodavan
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prodavan-mongodb-data
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  labels:
+    app.kubernetes.io/name: prodavan-mongodb
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: mongodb
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prodavan-mongodb
+  labels:
+    app.kubernetes.io/name: prodavan-mongodb
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: mongodb
+spec:
+  ports:
+    - name: mongodb
+      port: 27017
+      targetPort: 27017
+  selector:
+    app.kubernetes.io/name: prodavan-mongodb
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: prodavan-mongodb
+  labels:
+    app.kubernetes.io/name: prodavan-mongodb
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: mongodb
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  serviceName: prodavan-mongodb
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prodavan-mongodb
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prodavan-mongodb
+        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/component: mongodb
+    spec:
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 999
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: mongodb
+          image: mongo:7.0.14
+          args:
+            - --bind_ip_all
+            - --auth
+          env:
+            - name: MONGO_INITDB_ROOT_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: prodavan-mongodb
+                  key: root-user
+            - name: MONGO_INITDB_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: prodavan-mongodb
+                  key: root-password
+            - name: MONGO_INITDB_DATABASE
+              value: prodavan
+          ports:
+            - name: mongodb
+              containerPort: 27017
+          volumeMounts:
+            - name: data
+              mountPath: /data/db
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  mongosh --quiet \
+                    -u "$MONGO_INITDB_ROOT_USERNAME" \
+                    -p "$MONGO_INITDB_ROOT_PASSWORD" \
+                    --authenticationDatabase admin \
+                    --eval "db.adminCommand('ping')"
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  mongosh --quiet \
+                    -u "$MONGO_INITDB_ROOT_USERNAME" \
+                    -p "$MONGO_INITDB_ROOT_PASSWORD" \
+                    --authenticationDatabase admin \
+                    --eval "db.adminCommand('ping')"
+            initialDelaySeconds: 40
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 1Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: prodavan-mongodb-data
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: prodavan-mongodb-init
+  labels:
+    app.kubernetes.io/name: prodavan-mongodb-init
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: mongodb-init
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    argocd.argoproj.io/sync-wave: "9"
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prodavan-mongodb-init
+        app.kubernetes.io/part-of: prodavan
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mongosh
+          image: mongo:7.0.14
+          env:
+            - name: MONGO_ROOT_USER
+              valueFrom:
+                secretKeyRef:
+                  name: prodavan-mongodb
+                  key: root-user
+            - name: MONGO_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: prodavan-mongodb
+                  key: root-password
+            - name: MONGO_APP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: prodavan-mongodb
+                  key: app-user
+            - name: MONGO_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: prodavan-mongodb
+                  key: app-password
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              i=0
+              until mongosh --host prodavan-mongodb --quiet \
+                -u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin \
+                --eval "db.adminCommand('ping')" >/dev/null 2>&1; do
+                i=$((i+1))
+                if [ "$i" -gt 60 ]; then echo "mongodb not ready"; exit 1; fi
+                sleep 2
+              done
+              mongosh --host prodavan-mongodb --quiet \
+                -u "$MONGO_ROOT_USER" -p "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin \
+                --eval "
+                  const user = '$MONGO_APP_USER';
+                  const pass = '$MONGO_APP_PASSWORD';
+                  const admin = db.getSiblingDB('admin');
+                  const existing = admin.getUser(user);
+                  const roles = [
+                    { role: 'readWrite', db: 'prodavan' },
+                    { role: 'dbAdmin', db: 'prodavan' }
+                  ];
+                  if (!existing) {
+                    admin.createUser({ user: user, pwd: pass, roles: roles });
+                    print('mongodb-init: created app user ' + user);
+                  } else {
+                    admin.updateUser(user, { pwd: pass, roles: roles });
+                    print('mongodb-init: updated app user ' + user);
+                  }
+                  db.getSiblingDB('prodavan').runCommand({ ping: 1 });
+                  print('mongodb-init: ok');
+                "

@@ -103,6 +103,21 @@ API **не** вызывает `create_bucket` на startup — только `hea
 
 ---
 
+## 5b. MongoDB (Document Store)
+
+| Компонент | Значение |
+|-----------|----------|
+| Service | `prodavan-mongodb:27017` (ns `prodavan`) |
+| Init Job | `prodavan-mongodb-init` — Sync hook wave 9; app user `prodavan` + db `prodavan` |
+| API creds | `MONGODB_URL` в `prodavan-api-secrets` (app user, `authSource=admin`) |
+| Root creds | `prodavan-mongodb` Secret — только init / break-glass |
+| PVC | `prodavan-mongodb-data` (5Gi, RWO) |
+| Sandbox | **нет** egress на 27017 — только API process |
+
+Document Store BC: in-proc Port + admin HTTP; Kafka bus `document` → `prodavan.document.events`.
+
+---
+
 ## 6. Keycloak (identity)
 
 | Компонент | Значение |

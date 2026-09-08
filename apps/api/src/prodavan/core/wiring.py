@@ -7,6 +7,7 @@ from prodavan.core.infra.database_resource import DatabaseEngineResource
 from prodavan.core.infra.k8s_manager import k8s_manager_from_settings
 from prodavan.core.infra.kafka_manager import KafkaManager
 from prodavan.core.infra.metrics_consumer_resource import MetricsConsumerResource
+from prodavan.core.infra.mongo_manager import MongoManager
 from prodavan.core.infra.platform_bootstrap_resource import PlatformBootstrapResource
 from prodavan.core.infra.pod_metrics_sampler_resource import PodMetricsSamplerResource
 from prodavan.core.infra.redis_manager import RedisManager
@@ -40,6 +41,14 @@ def build_lifespan_manager() -> LifespanManager:
         )
     )
     manager.register(
+        MongoManager(
+            url=settings.mongodb_url,
+            database=settings.mongodb_db,
+            enabled=settings.mongodb_enabled or bool((settings.mongodb_url or "").strip()),
+            required=settings.mongodb_required,
+        )
+    )
+    manager.register(
         FileStoreManager(
             backend=backend,  # type: ignore[arg-type]
             storage_root=settings.storage_root,
@@ -63,6 +72,7 @@ def build_lifespan_manager() -> LifespanManager:
             topic_auth_events=settings.kafka_topic_auth_events,
             topic_relation_events=settings.kafka_topic_relation_events,
             topic_metrics_events=settings.kafka_topic_metrics_events,
+            topic_document_events=settings.kafka_topic_document_events,
             required=settings.kafka_required,
             consumer_enabled=settings.kafka_consumer_enabled,
             consumer_group=settings.kafka_consumer_group,

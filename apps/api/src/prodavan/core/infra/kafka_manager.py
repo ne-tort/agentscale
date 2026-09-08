@@ -62,6 +62,7 @@ class KafkaManager(LifespanResource):
         topic_auth_events: str = "prodavan.auth.events",
         topic_relation_events: str = "prodavan.relation.events",
         topic_metrics_events: str = "prodavan.metrics.events",
+        topic_document_events: str = "prodavan.document.events",
         required: bool = False,
         buffer_size: int = 200,
         consumer_enabled: bool = False,
@@ -83,6 +84,7 @@ class KafkaManager(LifespanResource):
         self._topic_auth_events = topic_auth_events
         self._topic_relation_events = topic_relation_events
         self._topic_metrics_events = topic_metrics_events
+        self._topic_document_events = topic_document_events
         self._required = required
         self._consumer_enabled = consumer_enabled
         self._consumer_group = consumer_group
@@ -170,6 +172,8 @@ class KafkaManager(LifespanResource):
             return self._topic_relation_events
         if bus == "metrics":
             return self._topic_metrics_events
+        if bus == "document":
+            return self._topic_document_events
         raise ValueError(f"unknown bus: {bus}")
 
     def recent_envelopes(self) -> list[dict[str, Any]]:
@@ -569,6 +573,7 @@ class KafkaManager(LifespanResource):
             self._topic_auth_events,
             self._topic_relation_events,
             self._topic_metrics_events,
+            self._topic_document_events,
         ]
         try:
             from aiokafka.admin import AIOKafkaAdminClient, NewTopic
@@ -633,7 +638,7 @@ class KafkaManager(LifespanResource):
                 await self._producer.start()
                 await self._ensure_topics()
                 logger.info(
-                    "kafka: producer started servers=%s topics=%s,%s,%s,%s,%s,%s (attempt %s/%s)",
+                    "kafka: producer started servers=%s topics=%s,%s,%s,%s,%s,%s,%s (attempt %s/%s)",
                     self._bootstrap,
                     self._topic_platform,
                     self._topic_triggers,
@@ -641,6 +646,7 @@ class KafkaManager(LifespanResource):
                     self._topic_auth_events,
                     self._topic_relation_events,
                     self._topic_metrics_events,
+                    self._topic_document_events,
                     attempt,
                     attempts,
                 )

@@ -16,13 +16,14 @@ FIRST_PARTY_LATEST = {
     "ghcr.io/ne-tort/prodavan-web:latest",
 }
 FORBIDDEN_INFRA_LATEST = re.compile(
-    r"^(postgres:(16|latest)|redis:(7-alpine|7|latest)|minio/minio:latest|minio/mc:latest|"
+    r"^(postgres:(16|latest)|redis:(7-alpine|7|latest)|mongo:(7|latest)|minio/minio:latest|minio/mc:latest|"
     r"quay.io/keycloak/keycloak:latest)$"
 )
 REQUIRED_SNIPPETS = (
     "postgres:16.15",
     "redis:7.4.11-alpine",
     "minio/minio:RELEASE.2024-10-02T17-50-41Z",
+    "mongo:7.0.14",
     "redpanda:v24.2.4",
     "quay.io/keycloak/keycloak:26.0",
     "bitnamilegacy/kubectl:1.31.4",

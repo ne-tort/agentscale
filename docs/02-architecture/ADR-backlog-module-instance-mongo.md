@@ -4,7 +4,9 @@
 
 ## As-built (2026-09)
 
-Still **Postgres JSONB** only. No Mongo StatefulSet in `infra/k3s`. Modules and bindings stay in Postgres; instance meta/data are `module_instance_meta_documents` / `module_instance_data_rows`. Safer seed upserts (insert-only data rows + meta refresh) are the current path for schema evolution — not a Mongo cutover.
+Still **Postgres JSONB** only for module instances. Modules and bindings stay in Postgres; instance meta/data are `module_instance_meta_documents` / `module_instance_data_rows`.
+
+**Separate:** platform Document Store BC on Mongo is **accepted** for general app non-relational data — see [ADR-document-store-mongo.md](ADR-document-store-mongo.md). That BC does **not** replace this backlog item.
 
 ## Context
 

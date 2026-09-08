@@ -84,6 +84,7 @@ async def readiness(request: Request) -> dict[str, Any]:
             ("file_store", settings.object_store_required),
             ("worker", settings.celery_required),
             ("k8s", settings.pod_k8s_required),
+            ("mongodb", settings.mongodb_required),
         ]
         for name, required in required_resources:
             if not required:

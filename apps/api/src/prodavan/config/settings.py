@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     # When True, failed Redis ping on startup aborts process; readiness always requires Redis.
     redis_required: bool = False
 
+    # Document Store (Mongo). Empty URL = in-memory adapter (tests / local without Mongo).
+    mongodb_url: str | None = None
+    mongodb_db: str = "prodavan"
+    mongodb_enabled: bool = False
+    mongodb_required: bool = False
+
     # P0 object storage (C-OBJECT-STORE). local = keys under storage_root; s3 = MinIO/AWS.
     object_store_backend: str = "local"  # local | s3
     s3_endpoint_url: str | None = None
@@ -84,6 +90,7 @@ class Settings(BaseSettings):
     # Redis presence TTL for auth.login / token_refreshed (seconds).
     metrics_presence_ttl_sec: int = 900
     kafka_topic_metrics_events: str = "prodavan.metrics.events"
+    kafka_topic_document_events: str = "prodavan.document.events"
     kafka_metrics_group: str = "prodavan-metrics"
     metrics_sample_ttl_sec: int = 60
     metrics_sample_interval_sec: int = 15

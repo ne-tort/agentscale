@@ -22,7 +22,11 @@
 | `ENV` | dev | staging | prod | | Environment name |
 | `LOG_LEVEL` | debug | info | info | | Logging verbosity |
 | `DATABASE_URL` | ✓ | ✓ 🔒 | ✓ 🔒 | 🔒 | PostgreSQL async URL |
-| `REDIS_URL` | ✓ | ✓ | ✓ | ○ | Rate limit cache |
+| `MONGODB_URL` | ✓ | ✓ 🔒 | ✓ 🔒 | 🔒 | MongoDB URL (Document Store BC) |
+| `MONGODB_DB` | prodavan | prodavan | prodavan | | Logical database name |
+| `MONGODB_ENABLED` | true | true | true | | Lifespan connects when URL set |
+| `MONGODB_REQUIRED` | true | true | true | | Fail ready if Mongo down |
+| `REDIS_URL` | ✓ | ✓ | ✓ | ○ | Rate limit cache / Celery broker |
 | `JWT_SECRET` / `JWT_PRIVATE_KEY` | dev key | ✓ 🔒 | ✓ 🔒 | 🔒 | Token signing (legacy; OIDC uses JWKS) |
 | `AUTH_MODE` | oidc | oidc | oidc | | `test` only for pytest |
 | `KEYCLOAK_URL` | in-cluster `/auth` | ✓ | ✓ | | Admin API base |
@@ -45,6 +49,7 @@
 | `KAFKA_TOPIC_PROJECT_TRIGGERS` | prodavan.project.triggers | same | same | | Trigger kick/dispatch |
 | `KAFKA_TOPIC_AUTH_COMMANDS` | prodavan.auth.commands | same | same | | Auth Service register |
 | `KAFKA_TOPIC_AUTH_EVENTS` | prodavan.auth.events | same | same | | registered / failed |
+| `KAFKA_TOPIC_DOCUMENT_EVENTS` | prodavan.document.events | same | same | | Document Store BC domain events |
 | `KAFKA_CONSUMER_ENABLED` | true | true | true | | |
 | `KAFKA_CONSUMER_GROUP` | prodavan-api-triggers | same | same | | Project triggers |
 | `KAFKA_AUTH_COMMANDS_GROUP` | prodavan-auth-commands | same | same | | Auth register handler |

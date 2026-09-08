@@ -70,6 +70,7 @@ Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** depe
 | Pod lifecycle (stub + k8s) | `apps/api/src/prodavan/application/pod_service/` |
 | K8s adapter | `infrastructure/k8s/pod_runtime.py`, overlay `infra/k3s/overlays/e2e/` |
 | Backend e2e (API, не UI) | `apps/api/tests/integration/`, `tests/e2e/k8s/`, `tests/e2e/live/` |
+| Document Store (Mongo) | `application/document_store/`, admin `/admin/document-store`, [ADR](02-architecture/ADR-document-store-mongo.md) |
 | Agent + chat + files | `application/agent/`, `api/v1/agent.py`, content/assets |
 | Flutter UI (частично) | `apps/flutter/lib/features/` |
 | **Employee UI канон** | [`employee-ui/README.md`](employee-ui/README.md) |
@@ -108,7 +109,7 @@ Template (modules + module_meta_documents)
 | **Materialize** | Module runs for a project **only** with an explicit MP row. Row `project_ids` further filters entities (empty = all **bound** projects for that module). Bind alone does not dump every row into the workspace |
 | **Materialize rules** | From template meta slug `materialize` (MVP) |
 | **Seed upsert (Alembic)** | Meta refresh for all instances; data rows insert-only (`ON CONFLICT DO NOTHING`) |
-| **Storage** | Postgres JSONB. Mongo deferred — [ADR backlog](02-architecture/ADR-backlog-module-instance-mongo.md) |
+| **Storage** | Postgres JSONB for module instances. App Document Store on Mongo — [ADR](02-architecture/ADR-document-store-mongo.md). Module-instance→Mongo cutover still deferred — [backlog ADR](02-architecture/ADR-backlog-module-instance-mongo.md) |
 
 Product module seed changes ship only via Alembic calling `upsert_product_modules`.
 
@@ -157,7 +158,7 @@ Product module for computer-equipment matching (hub on **Данные**). Projec
 
 Agent fills `found_offers` / `found_count` through rows APIs (or declarative `mcp_tools`); MCP RO tools query the merged SQLite only.
 
-**S4B:** hub tile → settings form; password via cabinet secrets → Pod `S4B_PASSWORD`; zip materialize reuses `mcp_package` path. Redis/Kafka from Pod — **not** direct; see [tenant-infra-gateway](target/12-layer-docs/tenant-infra-gateway.md) (design).
+**S4B:** hub tile → settings form; password via cabinet secrets → Pod `S4B_PASSWORD`; zip materialize reuses `mcp_package` path. Redis/Kafka/Mongo from Pod — **not** direct; see [tenant-infra-gateway](target/12-layer-docs/tenant-infra-gateway.md) (design). App Document Store (Mongo) is in-proc for platform BCs only — [ADR](02-architecture/ADR-document-store-mongo.md).
 
 Meta primitives: hub + collections, `file_ref`, `column_map`, master–detail, `data.select_row`, `content.index_tabular`, `merge_mapped_sqlite`. See [meta-syntax](target/06-modules/meta-syntax/).
 
