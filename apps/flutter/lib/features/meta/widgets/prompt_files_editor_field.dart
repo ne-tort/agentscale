@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/app_preference_tile.dart';
+import 'package:prodavan/core/preferences/app_value_preference.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_inline_add_field.dart';
+import 'package:prodavan/core/widgets/app_multiline_text_field.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 
-/// Edit `files_json` as nested prompt files: list + markdown page (no project_ids).
+/// Edit `files_json` as nested prompt files: list + markdown editor page.
 class PromptFilesEditorField extends StatelessWidget {
   const PromptFilesEditorField({
     super.key,
@@ -30,6 +32,8 @@ class PromptFilesEditorField extends StatelessWidget {
 
   String _newId() => 'pf_${DateTime.now().microsecondsSinceEpoch}';
 
+  void _emit(List<Map<String, dynamic>> files) => onChanged(files);
+
   Future<void> _add(BuildContext context, String raw) async {
     final title = raw.trim();
     if (title.isEmpty) return;
@@ -41,22 +45,22 @@ class PromptFilesEditorField extends StatelessWidget {
       'body_md': '',
     };
     files.add(entry);
-    onChanged(files);
+    _emit(files);
     if (!context.mounted) return;
-    await _openEditor(context, entry, files.length - 1);
+    await _openEditor(context, files.length - 1);
   }
 
   void _remove(String id) {
-    final files = _files().where((f) => f['id']?.toString() != id).toList();
-    onChanged(files);
+    _emit(_files().where((f) => f['id']?.toString() != id).toList());
   }
 
-  Future<void> _openEditor(
-    BuildContext context,
-    Map<String, dynamic> entry,
-    int index,
-  ) async {
-    final result = await Navigator.of(context).push<_PromptFileEditResult>(
+  Future<void> _openEditor(BuildContext context, int index) async {
+    final files = _files();
+    if (index < 0 || index >= files.length) return;
+    final entry = Map<String, dynamic>.from(files[index]);
+    final locale = Localizations.localeOf(context);
+
+    await Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (_) => _PromptFileEditorPage(
           initialName: entry['name']?.toString() ?? '',
@@ -64,18 +68,20 @@ class PromptFilesEditorField extends StatelessWidget {
               entry['body']?.toString() ??
               '',
           readOnly: readOnly,
+          nameLabel: locale.languageCode == 'en' ? 'Name' : 'Имя',
+          onCommit: (name, body) {
+            final next = _files();
+            if (index < 0 || index >= next.length) return;
+            next[index] = {
+              ...next[index],
+              'name': name,
+              'body_md': body,
+            };
+            _emit(next);
+          },
         ),
       ),
     );
-    if (result == null || readOnly) return;
-    final files = _files();
-    if (index < 0 || index >= files.length) return;
-    files[index] = {
-      ...files[index],
-      'name': result.name,
-      'body_md': result.body,
-    };
-    onChanged(files);
   }
 
   @override
@@ -102,7 +108,7 @@ class PromptFilesEditorField extends StatelessWidget {
             title: files[i]['name']?.toString() ?? '',
             icon: Icons.description_outlined,
             enabled: true,
-            onTap: () => _openEditor(context, files[i], i),
+            onTap: () => _openEditor(context, i),
             trailing: readOnly
                 ? const Icon(Icons.chevron_right)
                 : IconButton(
@@ -117,25 +123,9 @@ class PromptFilesEditorField extends StatelessWidget {
             validator: (raw) => raw.trim().isNotEmpty,
             onSave: (raw) => _add(context, raw),
           ),
-        if (files.isEmpty)
-          Padding(
-            padding: const EdgeInsets.all(AppSpacing.md),
-            child: Text(
-              locale.languageCode == 'en' ? 'No prompts yet' : 'Нет промптов',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-            ),
-          ),
       ],
     );
   }
-}
-
-class _PromptFileEditResult {
-  const _PromptFileEditResult({required this.name, required this.body});
-  final String name;
-  final String body;
 }
 
 class _PromptFileEditorPage extends StatefulWidget {
@@ -143,94 +133,96 @@ class _PromptFileEditorPage extends StatefulWidget {
     required this.initialName,
     required this.initialBody,
     required this.readOnly,
+    required this.nameLabel,
+    required this.onCommit,
   });
 
   final String initialName;
   final String initialBody;
   final bool readOnly;
+  final String nameLabel;
+  final void Function(String name, String body) onCommit;
 
   @override
   State<_PromptFileEditorPage> createState() => _PromptFileEditorPageState();
 }
 
 class _PromptFileEditorPageState extends State<_PromptFileEditorPage> {
-  late final TextEditingController _name;
-  late final TextEditingController _body;
+  late String _name;
+  late String _body;
+  final _bodyFocus = FocusNode();
 
   @override
   void initState() {
     super.initState();
-    _name = TextEditingController(text: widget.initialName);
-    _body = TextEditingController(text: widget.initialBody);
+    _name = widget.initialName;
+    _body = widget.initialBody;
   }
 
   @override
   void dispose() {
-    _name.dispose();
-    _body.dispose();
+    _bodyFocus.dispose();
     super.dispose();
+  }
+
+  void _flush() {
+    if (widget.readOnly) return;
+    final name = _name.trim();
+    if (name.isEmpty) return;
+    widget.onCommit(name, _body);
+  }
+
+  void _pop() {
+    _flush();
+    if (mounted) Navigator.of(context).pop();
   }
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final locale = Localizations.localeOf(context);
-    final title = _name.text.trim().isEmpty
+    final title = _name.trim().isEmpty
         ? (locale.languageCode == 'en' ? 'Prompt' : 'Промпт')
-        : _name.text.trim();
-    return AppScaffold(
-      title: Text(title),
-      actions: [
-        if (!widget.readOnly)
-          TextButton(
-            onPressed: () {
-              final name = _name.text.trim();
-              if (name.isEmpty) return;
-              Navigator.of(context).pop(
-                _PromptFileEditResult(name: name, body: _body.text),
-              );
-            },
-            child: Text(locale.languageCode == 'en' ? 'Done' : 'Готово'),
+        : _name.trim();
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        _pop();
+      },
+      child: AppScaffold(
+        title: Text(title),
+        body: Padding(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              AppValuePreference<String>(
+                title: widget.nameLabel,
+                value: _name,
+                icon: Icons.badge_outlined,
+                enabled: !widget.readOnly,
+                onSave: (v) async {
+                  setState(() => _name = v.trim());
+                  _flush();
+                },
+              ),
+              const SizedBox(height: AppSpacing.md),
+              Expanded(
+                child: AppMultilineTextField(
+                  value: _body,
+                  readOnly: widget.readOnly,
+                  markdown: true,
+                  expands: true,
+                  focusNode: _bodyFocus,
+                  onChanged: (v) {
+                    _body = v;
+                    _flush();
+                  },
+                  onEditingComplete: _flush,
+                ),
+              ),
+            ],
           ),
-      ],
-      body: Padding(
-        padding: const EdgeInsets.all(AppSpacing.md),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            TextField(
-              controller: _name,
-              readOnly: widget.readOnly,
-              decoration: InputDecoration(
-                labelText: locale.languageCode == 'en' ? 'Name' : 'Имя',
-                border: const OutlineInputBorder(),
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Expanded(
-              child: TextField(
-                controller: _body,
-                readOnly: widget.readOnly,
-                expands: true,
-                maxLines: null,
-                minLines: null,
-                textAlignVertical: TextAlignVertical.top,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontFamily: 'monospace',
-                  height: 1.45,
-                ),
-                decoration: InputDecoration(
-                  labelText: 'Markdown',
-                  alignLabelWithHint: true,
-                  border: const OutlineInputBorder(),
-                  filled: true,
-                  fillColor: theme.colorScheme.surfaceContainerHighest
-                      .withValues(alpha: 0.35),
-                ),
-              ),
-            ),
-          ],
         ),
       ),
     );

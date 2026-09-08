@@ -43,7 +43,7 @@ def test_prompts_meta_has_materialize_and_seed() -> None:
     assert path_seeds[0]["row_id"] == "path_agents"
     assert path_seeds[0]["body"]["name"] == "AGENTS.md"
     assert path_seeds[0]["body"]["files_json"] == []
-    assert any(p["body"]["path"] == "rules/" for p in path_seeds)
+    assert any(p["body"]["path"] == "rules" for p in path_seeds)
 
     tab = meta["tabs"][0]
     assert tab["view_slug"] == "prompt_profiles_list"
@@ -52,12 +52,15 @@ def test_prompts_meta_has_materialize_and_seed() -> None:
     assert tab["instance_owner"] == "cabinet"
     assert any(c["name"] == "project_ids" for c in meta["columns"])
     assert not any(c["table_slug"] == "prompt_paths" and c["name"] == "project_ids" for c in meta["columns"])
+    path_col = next(c for c in meta["columns"] if c["table_slug"] == "prompt_paths" and c["name"] == "path")
+    assert path_col["ui"]["normalize"] == "workspace_path"
 
     profiles_list = next(v for v in meta["views"] if v["slug"] == "prompt_profiles_list")
     assert profiles_list["ui_json"]["scaffold"]["title"]["ru"] == "Профили"
     assert profiles_list["ui_json"]["row_tap"] == {"kind": "open_view", "view": "prompts_hub"}
     cols = [c["field"] for c in profiles_list["ui_json"]["columns"]]
-    assert cols == ["name", "project_ids"]
+    assert cols == ["name", "project_ids", "prompts_count"]
+    assert profiles_list["ui_json"]["columns"][2]["source"] == "aggregate.prompt_paths.files_json"
 
     form = next(v for v in meta["views"] if v["slug"] == "prompt_profiles_form")
     form_cols = [f["column"] for f in form["ui_json"]["fields"]]
@@ -67,11 +70,18 @@ def test_prompts_meta_has_materialize_and_seed() -> None:
     assert hub["kind"] == "collection"
     assert hub["table_slug"] == "prompt_paths"
     assert hub["ui_json"]["context_bind"] == {"profile_id": "contextRowId"}
-    assert hub["ui_json"]["settings_view"] == "prompt_profiles_form"
+    assert "settings_view" not in hub["ui_json"]
+    assert hub["ui_json"]["context_header"]["table_slug"] == "prompt_profiles"
+    assert hub["ui_json"]["scaffold"]["title_template"]["ru"] == "Профиль {name}"
+    assert hub["ui_json"]["inline_add"]["title"]["ru"] == "Добавить промпт"
+    hub_cols = [c["field"] for c in hub["ui_json"]["columns"]]
+    assert hub_cols == ["name", "path", "files_json"]
+    assert hub["ui_json"]["columns"][2]["format"] == "list_count"
     assert hub["ui_json"]["profile_table"] == "prompt_profiles"
     assert hub["ui_json"]["row_tap"]["view"] == "prompt_path_settings"
 
     path_settings = next(v for v in meta["views"] if v["slug"] == "prompt_path_settings")
+    assert path_settings["ui_json"]["title_template"]["ru"] == "Промпт {name}"
     path_fields = path_settings["ui_json"]["fields"]
     assert [f["column"] for f in path_fields] == ["name", "path", "files_json"]
     files_field = path_fields[2]

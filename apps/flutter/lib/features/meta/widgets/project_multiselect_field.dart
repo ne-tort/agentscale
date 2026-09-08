@@ -14,12 +14,15 @@ class ProjectMultiselectField extends StatefulWidget {
     required this.value,
     required this.readOnly,
     required this.onChanged,
+    this.subtitleMode,
   });
 
   final String label;
   final dynamic value;
   final bool readOnly;
   final void Function(List<String> projectIds) onChanged;
+  /// `count_or_hide` — empty selection hides subtitle; else show count.
+  final String? subtitleMode;
 
   @override
   State<ProjectMultiselectField> createState() => _ProjectMultiselectFieldState();
@@ -74,6 +77,10 @@ class _ProjectMultiselectFieldState extends State<ProjectMultiselectField> {
   }
 
   String _present(Set<String> ids, AppLocalizations l10n, Locale locale) {
+    if (widget.subtitleMode == 'count_or_hide') {
+      if (ids.isEmpty) return '';
+      return '${ids.length}';
+    }
     if (ids.isEmpty) {
       return locale.languageCode == 'ru' ? 'Все проекты' : 'All projects';
     }

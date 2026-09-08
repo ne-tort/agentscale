@@ -95,7 +95,12 @@ def test_join_prompt_file_path() -> None:
     assert _join_prompt_file_path("", "AGENTS.md") == "AGENTS.md"
     assert _join_prompt_file_path("/", "AGENTS.md") == "AGENTS.md"
     assert _join_prompt_file_path("rules/", "style") == "rules/style.md"
+    assert _join_prompt_file_path("\\skills\\", "x") == "skills/x.md"
+    assert _join_prompt_file_path("/skills/", "x.md") == "skills/x.md"
+    assert _join_prompt_file_path("../evil", "x") == ""
     assert _join_prompt_file_path("prompts/examples/", "sample.md") == "prompts/examples/sample.md"
+    assert _join_prompt_file_path("skills", "virus.py") == "skills/virus.py.md"
+    assert _join_prompt_file_path("", "prompt") == "prompt.md"
 
 
 def test_expand_prompt_path_ops_skips_empty_files() -> None:

@@ -8,7 +8,7 @@ import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/employee/cabinet_nav_loader.dart';
 import 'package:prodavan/features/meta/interpreters/hub_interpreter.dart';
-import 'package:prodavan/features/meta/meta_label.dart';
+import 'package:prodavan/features/meta/meta_view_scaffold_page.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/runtime/cabinet_data_controller.dart';
 import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
@@ -165,26 +165,19 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
     if (manifest == null || adapter == null) return;
     final view = manifest.viewBySlug(viewSlug);
     if (view == null) return;
-    final l10n = AppLocalizations.of(context);
-    final locale = Localizations.localeOf(context);
-    final title = resolveViewScaffoldTitle(view, l10n, locale: locale);
-    final fallback = view['label'] as String? ?? viewSlug;
-    final pageTitle = (title != null && title.isNotEmpty) ? title : fallback;
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (ctx) => ModuleRuntimeScope(
-          cabinetId: widget.cabinetId,
-          moduleId: widget.entry.moduleId,
-          api: workContext.api,
-          child: AppScaffold(
-            title: Text(pageTitle),
-            body: ViewInterpreterHost(
-              manifest: manifest,
-              view: view,
-              seeds: adapter,
-              rowId: rowId,
-              onOpenView: _openView,
-            ),
+        builder: (ctx) => MetaViewScaffoldPage(
+          manifest: manifest,
+          view: view,
+          seeds: adapter,
+          rowId: rowId,
+          onOpenView: _openView,
+          wrapBody: (page) => ModuleRuntimeScope(
+            cabinetId: widget.cabinetId,
+            moduleId: widget.entry.moduleId,
+            api: workContext.api,
+            child: page,
           ),
         ),
       ),

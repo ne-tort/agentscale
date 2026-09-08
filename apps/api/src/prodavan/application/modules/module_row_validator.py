@@ -49,13 +49,32 @@ def validate_row_body(
         if name in body:
             value = body[name]
             _validate_field(name, value, col, cabinet_id=cabinet_id)
-            sanitized[name] = value
+            sanitized[name] = _normalize_field_value(name, value, col)
         elif col.get("required") is True:
             raise _row_error(f"missing required field: {name}")
         elif "default" in col:
-            sanitized[name] = col["default"]
+            sanitized[name] = _normalize_field_value(name, col["default"], col)
 
     return sanitized
+
+
+def _normalize_field_value(name: str, value: Any, col: dict[str, Any]) -> Any:
+    ui = col.get("ui")
+    if not isinstance(ui, dict):
+        return value
+    if ui.get("normalize") != "workspace_path":
+        return value
+    if value is None:
+        return value
+    if not isinstance(value, str):
+        raise _row_error(f"{name}: expected string for workspace_path normalize")
+    from prodavan.application.pod_service.workspace_paths import normalize_workspace_path
+    from prodavan.domain.errors import AppError
+
+    try:
+        return normalize_workspace_path(value)
+    except AppError as exc:
+        raise _row_error(f"{name}: {exc.detail}") from exc
 
 
 def _validate_field(name: str, value: Any, col: dict[str, Any], *, cabinet_id: str | None = None) -> None:

@@ -7,6 +7,7 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/meta/interpreters/hub_interpreter.dart';
 import 'package:prodavan/features/meta/meta_icon.dart';
+import 'package:prodavan/features/meta/meta_view_scaffold_page.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/preview/seed_data_controller.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -77,16 +78,13 @@ class _ModuleMetaPreviewPageState extends State<ModuleMetaPreviewPage>
     if (view == null) return;
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => AppScaffold(
-          title: Text(view['label'] as String? ?? viewSlug),
-          body: ViewInterpreterHost(
-            manifest: widget.manifest,
-            view: view,
-            seeds: _seeds,
-            rowId: rowId,
-            readOnly: widget.readOnly,
-            onOpenView: _openView,
-          ),
+        builder: (_) => MetaViewScaffoldPage(
+          manifest: widget.manifest,
+          view: view,
+          seeds: _seeds,
+          rowId: rowId,
+          readOnly: widget.readOnly,
+          onOpenView: _openView,
         ),
       ),
     );

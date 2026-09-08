@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/widgets/app_multiline_text_field.dart';
 
-/// Multiline markdown editor with monospace styling (syntax-friendly).
-class MarkdownEditorField extends StatefulWidget {
+/// Inline multiline markdown editor (meta form widget `markdown_editor`).
+class MarkdownEditorField extends StatelessWidget {
   const MarkdownEditorField({
     super.key,
     required this.label,
@@ -20,33 +21,6 @@ class MarkdownEditorField extends StatefulWidget {
   final Future<void> Function(String text)? onUploadMarkdown;
 
   @override
-  State<MarkdownEditorField> createState() => _MarkdownEditorFieldState();
-}
-
-class _MarkdownEditorFieldState extends State<MarkdownEditorField> {
-  late TextEditingController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.value);
-  }
-
-  @override
-  void didUpdateWidget(covariant MarkdownEditorField oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.value != widget.value && _controller.text != widget.value) {
-      _controller.text = widget.value;
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
@@ -60,12 +34,12 @@ class _MarkdownEditorFieldState extends State<MarkdownEditorField> {
           Row(
             children: [
               Expanded(
-                child: Text(widget.label, style: theme.textTheme.titleSmall),
+                child: Text(label, style: theme.textTheme.titleSmall),
               ),
-              if (widget.onUploadMarkdown != null && !widget.readOnly)
+              if (onUploadMarkdown != null && !readOnly)
                 TextButton.icon(
                   onPressed: () async {
-                    await widget.onUploadMarkdown!(_controller.text);
+                    await onUploadMarkdown!(value);
                   },
                   icon: const Icon(Icons.upload_file_outlined, size: 18),
                   label: const Text('.md'),
@@ -73,21 +47,13 @@ class _MarkdownEditorFieldState extends State<MarkdownEditorField> {
             ],
           ),
           const SizedBox(height: AppSpacing.xs),
-          TextField(
-            controller: _controller,
-            readOnly: widget.readOnly,
-            maxLines: 16,
+          AppMultilineTextField(
+            value: value,
+            readOnly: readOnly,
+            markdown: true,
             minLines: 8,
-            style: theme.textTheme.bodyMedium?.copyWith(
-              fontFamily: 'monospace',
-              height: 1.45,
-            ),
-            decoration: InputDecoration(
-              border: const OutlineInputBorder(),
-              filled: true,
-              fillColor: theme.colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
-            ),
-            onChanged: widget.onChanged,
+            maxLines: 16,
+            onChanged: onChanged,
           ),
         ],
       ),

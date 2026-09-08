@@ -7,12 +7,12 @@ from typing import Any
 # Default prompt path cards for profile_default (empty files_json until edited).
 _PROMPT_PATH_SEEDS: list[tuple[str, str, str]] = [
     ("path_agents", "AGENTS.md", ""),
-    ("path_rules", "rules", "rules/"),
-    ("path_skills", "skills", "skills/"),
-    ("path_output_schema", "output_schema", "prompts/output-schema/"),
-    ("path_guardrails", "guardrails", "prompts/guardrails/"),
-    ("path_examples", "examples", "prompts/examples/"),
-    ("path_others", "others", "prompts/others/"),
+    ("path_rules", "rules", "rules"),
+    ("path_skills", "skills", "skills"),
+    ("path_output_schema", "output_schema", "prompts/output-schema"),
+    ("path_guardrails", "guardrails", "prompts/guardrails"),
+    ("path_examples", "examples", "prompts/examples"),
+    ("path_others", "others", "prompts/others"),
 ]
 
 
@@ -431,6 +431,7 @@ def mod_prompts_meta() -> dict[str, list[Any]]:
                 "type": "text",
                 "required": True,
                 "default": "",
+                "ui": {"normalize": "workspace_path"},
             },
             {
                 "table_slug": "prompt_paths",
@@ -463,6 +464,11 @@ def mod_prompts_meta() -> dict[str, list[Any]]:
                             "field": "project_ids",
                             "label": {"ru": "Проекты", "en": "Projects"},
                         },
+                        {
+                            "field": "prompts_count",
+                            "label": {"ru": "Промпты", "en": "Prompts"},
+                            "source": "aggregate.prompt_paths.files_json",
+                        },
                     ],
                     "row_tap": {"kind": "open_view", "view": "prompts_hub"},
                     "inline_add": {"field": "name", "title": "Добавить профиль"},
@@ -492,7 +498,10 @@ def mod_prompts_meta() -> dict[str, list[Any]]:
                     "version": 1,
                     "kind": "collection",
                     "scaffold": {
-                        "title": {"ru": "Промпты", "en": "Prompts"},
+                        "title_template": {
+                            "ru": "Профиль {name}",
+                            "en": "Profile {name}",
+                        },
                     },
                     "title_field": "name",
                     "subtitle_fields": ["path"],
@@ -505,13 +514,30 @@ def mod_prompts_meta() -> dict[str, list[Any]]:
                             "field": "path",
                             "label": {"ru": "Путь", "en": "Path"},
                         },
+                        {
+                            "field": "files_json",
+                            "label": {"ru": "Промпты", "en": "Prompts"},
+                            "format": "list_count",
+                        },
                     ],
                     "context_bind": {"profile_id": "contextRowId"},
+                    "context_header": {
+                        "table_slug": "prompt_profiles",
+                        "fields": [
+                            {"column": "name", "widget": "value"},
+                            {
+                                "column": "project_ids",
+                                "widget": "project_multiselect",
+                                "subtitle": "count_or_hide",
+                            },
+                        ],
+                    },
                     "row_tap": {"kind": "open_view", "view": "prompt_path_settings"},
-                    "inline_add": {"field": "name", "title": "Добавить путь"},
-                    "empty": _empty("Нет путей", "No paths"),
-                    # Profile settings (projects first) — Flutter may open via AppBar later.
-                    "settings_view": "prompt_profiles_form",
+                    "inline_add": {
+                        "field": "name",
+                        "title": {"ru": "Добавить промпт", "en": "Add prompt"},
+                    },
+                    "empty": _empty("Нет промптов", "No prompts"),
                     "profile_table": "prompt_profiles",
                     "settings_table": "profile_settings",
                 },
@@ -524,7 +550,10 @@ def mod_prompts_meta() -> dict[str, list[Any]]:
                     "version": 1,
                     "kind": "detail",
                     "mode": "edit",
-                    "title": {"ru": "Путь", "en": "Path"},
+                    "title_template": {
+                        "ru": "Промпт {name}",
+                        "en": "Prompt {name}",
+                    },
                     "fields": [
                         {"column": "name", "widget": "value"},
                         {"column": "path", "widget": "value"},

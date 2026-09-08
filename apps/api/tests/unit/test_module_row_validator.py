@@ -115,3 +115,30 @@ def test_secret_ref_cabinet_scope() -> None:
             cabinet_id="cab_other",
         )
     assert "belongs to cabinet cab_1" in (exc.value.detail or "")
+
+
+_PATH_COLUMNS = [
+    {
+        "table_slug": "prompt_paths",
+        "name": "path",
+        "type": "text",
+        "required": True,
+        "default": "",
+        "ui": {"normalize": "workspace_path"},
+    },
+]
+
+
+def test_workspace_path_normalize_on_save() -> None:
+    body = validate_row_body({"path": "\\skills\\"}, _PATH_COLUMNS)
+    assert body["path"] == "skills"
+    body2 = validate_row_body({"path": "/prompts/rules/"}, _PATH_COLUMNS)
+    assert body2["path"] == "prompts/rules"
+    body3 = validate_row_body({"path": ""}, _PATH_COLUMNS)
+    assert body3["path"] == ""
+
+
+def test_workspace_path_rejects_dotdot() -> None:
+    with pytest.raises(AppError) as exc:
+        validate_row_body({"path": "../etc"}, _PATH_COLUMNS)
+    assert exc.value.code == "ROW_VALIDATION"

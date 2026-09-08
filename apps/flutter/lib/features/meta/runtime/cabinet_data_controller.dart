@@ -2,8 +2,8 @@ import 'package:flutter/foundation.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
+import 'package:prodavan/features/meta/module_cell_format.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
-import 'package:prodavan/features/meta/project_ids_cell.dart';
 import 'package:prodavan/features/meta/runtime/module_pick_context.dart';
 
 typedef ProjectsRematerializeCallback = void Function(int scheduled, {required bool inline});
@@ -263,29 +263,12 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
     Map<String, dynamic> body,
     Map<String, dynamic> col,
   ) {
-    final source = col['source']?.toString();
-    if (source == 'row.created_at' || source == 'row.updated_at') {
-      final key = source == 'row.created_at' ? 'created_at' : 'updated_at';
-      return _formatEnvelopeDate(item[key]);
-    }
-    final field = col['field'] as String? ?? '';
-    final raw = body[field];
-    if (field == 'project_ids') {
-      return formatProjectIdsCell(raw);
-    }
-    return raw?.toString() ?? '';
-  }
-
-  String _formatEnvelopeDate(dynamic raw) {
-    if (raw == null) return '';
-    final text = raw.toString().trim();
-    if (text.isEmpty) return '';
-    final parsed = DateTime.tryParse(text);
-    if (parsed == null) return text;
-    final local = parsed.toLocal();
-    final y = local.year.toString().padLeft(4, '0');
-    final m = local.month.toString().padLeft(2, '0');
-    final d = local.day.toString().padLeft(2, '0');
-    return '$y-$m-$d';
+    return formatModuleCell(
+      item: item,
+      body: body,
+      col: col,
+      tableSlug: item['table_slug']?.toString() ?? '',
+      itemsForTable: itemsForTable,
+    );
   }
 }

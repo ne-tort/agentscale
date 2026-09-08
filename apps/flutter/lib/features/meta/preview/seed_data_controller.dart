@@ -1,8 +1,8 @@
 import 'package:flutter/foundation.dart';
 
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
+import 'package:prodavan/features/meta/module_cell_format.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
-import 'package:prodavan/features/meta/project_ids_cell.dart';
 import 'package:prodavan/features/meta/runtime/module_pick_context.dart';
 
 /// Mutable seed_rows editor backing module preview CRUD.
@@ -135,9 +135,20 @@ class SeedDataController extends ChangeNotifier with ModulePickContextMixin {
         final field = col['field'] as String? ?? '';
         if (field.isEmpty) continue;
         final source = col['source']?.toString();
-        if (source == 'row.created_at' || source == 'row.updated_at') {
-          final key = source == 'row.created_at' ? 'created_at' : 'updated_at';
-          cells[field] = _formatEnvelopeDate(item[key]);
+        final format = col['format']?.toString();
+        if (source != null ||
+            format != null ||
+            field == 'project_ids' ||
+            field == 'path' ||
+            field == 'files_json' ||
+            field == 'prompts_count') {
+          cells[field] = formatModuleCell(
+            item: item,
+            body: body,
+            col: col,
+            tableSlug: tableSlug,
+            itemsForTable: itemsForTable,
+          );
         } else {
           cells[field] = _formatCell(body[field], tableSlug, field);
         }
@@ -151,23 +162,7 @@ class SeedDataController extends ChangeNotifier with ModulePickContextMixin {
     }).toList();
   }
 
-  String _formatEnvelopeDate(dynamic raw) {
-    if (raw == null) return '';
-    final text = raw.toString().trim();
-    if (text.isEmpty) return '';
-    final parsed = DateTime.tryParse(text);
-    if (parsed == null) return text;
-    final local = parsed.toLocal();
-    final y = local.year.toString().padLeft(4, '0');
-    final m = local.month.toString().padLeft(2, '0');
-    final d = local.day.toString().padLeft(2, '0');
-    return '$y-$m-$d';
-  }
-
   String _formatCell(dynamic value, String tableSlug, String field) {
-    if (field == 'project_ids') {
-      return formatProjectIdsCell(value);
-    }
     if (value == null) return '';
     if (value is bool) return value ? 'true' : 'false';
     if (value is Map && value.containsKey('filename')) {

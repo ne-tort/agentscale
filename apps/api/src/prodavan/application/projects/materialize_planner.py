@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from typing import Any
 
 from sqlalchemy import select, text
@@ -11,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.modules.module_binding_service import ModuleBindingService
 from prodavan.application.modules.module_meta_service import ModuleMetaDocumentService
+from prodavan.application.pod_service.workspace_paths import normalize_workspace_path
+from prodavan.domain.errors import AppError
 from prodavan.infrastructure.cabinets.sql import qident
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 from prodavan.infrastructure.persistence.models.modules import ModuleMetaDocumentRow
@@ -731,13 +734,18 @@ def _row_path_context(body: dict[str, Any], field: str | None) -> dict[str, str]
 
 def _join_prompt_file_path(base: str, file_name: str) -> str:
     """Join prompt_paths.path with a file name → workspace-relative path."""
-    name = file_name.strip().lstrip("/")
+    name = file_name.strip().replace("\\", "/").lstrip("/")
     if not name:
+        return ""
+    if ".." in PurePosixPath(name).parts:
         return ""
     if not name.endswith(".md"):
         name = f"{name}.md"
-    base_norm = (base or "").strip().replace("\\", "/").lstrip("/")
-    if not base_norm or base_norm == ".":
+    try:
+        base_norm = normalize_workspace_path(base)
+    except AppError:
+        return ""
+    if not base_norm:
         return name
     return f"{base_norm.rstrip('/')}/{name}"
 

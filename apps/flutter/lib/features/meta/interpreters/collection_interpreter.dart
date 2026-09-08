@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/preferences/app_value_preference.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_icon_button.dart';
@@ -13,6 +14,7 @@ import 'package:prodavan/features/meta/preview/preview_stub.dart';
 import 'package:prodavan/features/meta/runtime/cabinet_data_controller.dart';
 import 'package:prodavan/features/meta/runtime/owner_module_data_controller.dart';
 import 'package:prodavan/features/meta/runtime/runtime_data_adapter.dart';
+import 'package:prodavan/features/meta/widgets/project_multiselect_field.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 class CollectionViewInterpreter extends StatelessWidget {
@@ -124,23 +126,39 @@ class CollectionViewInterpreter extends StatelessWidget {
                 },
         );
 
-        if (!hasInline) return collection;
+        if (!hasInline && !_hasContextHeader(uiJson)) return collection;
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _CollectionInlineAddHost(
-              inlineConfig: Map<String, dynamic>.from(uiJson['inline_add'] as Map),
-              tableSlug: tableSlug,
-              uiJson: uiJson,
-              seeds: seeds,
-              contextRowId: contextRowId,
-            ),
+            if (_hasContextHeader(uiJson))
+              _CollectionContextHeader(
+                headerConfig: Map<String, dynamic>.from(uiJson['context_header'] as Map),
+                seeds: seeds,
+                manifest: manifest,
+                contextRowId: contextRowId,
+                readOnly: readOnly,
+              ),
+            if (hasInline)
+              _CollectionInlineAddHost(
+                inlineConfig: Map<String, dynamic>.from(uiJson['inline_add'] as Map),
+                tableSlug: tableSlug,
+                uiJson: uiJson,
+                seeds: seeds,
+                contextRowId: contextRowId,
+              ),
             Expanded(child: collection),
           ],
         );
       },
     );
+  }
+
+  bool _hasContextHeader(Map<String, dynamic> uiJson) {
+    final header = uiJson['context_header'];
+    return header is Map &&
+        contextRowId != null &&
+        contextRowId!.isNotEmpty;
   }
 
   List<AppEntityRow> _filteredRows(dynamic seeds, String tableSlug, Map<String, dynamic> uiJson) {
@@ -315,21 +333,6 @@ class CollectionViewInterpreter extends StatelessWidget {
           );
         }
       }
-    }
-    final settingsView = uiJson['settings_view'] as String?;
-    if (settingsView != null &&
-        settingsView.isNotEmpty &&
-        onOpenForm != null &&
-        contextRowId != null &&
-        contextRowId!.isNotEmpty) {
-      final locale = Localizations.localeOf(context);
-      items.add(
-        AppIconButton(
-          icon: Icons.settings_outlined,
-          tooltip: locale.languageCode == 'en' ? 'Settings' : 'Настройки',
-          onPressed: () => onOpenForm!(settingsView, rowId: contextRowId),
-        ),
-      );
     }
     return items.isEmpty ? null : items;
   }
@@ -636,6 +639,103 @@ class CollectionViewInterpreter extends StatelessWidget {
     if (formView != null && onOpenForm != null) {
       onOpenForm!(formView, rowId: rowId);
     }
+  }
+}
+
+class _CollectionContextHeader extends StatelessWidget {
+  const _CollectionContextHeader({
+    required this.headerConfig,
+    required this.seeds,
+    required this.manifest,
+    required this.contextRowId,
+    required this.readOnly,
+  });
+
+  final Map<String, dynamic> headerConfig;
+  final dynamic seeds;
+  final ModuleMetaManifest manifest;
+  final String? contextRowId;
+  final bool readOnly;
+
+  @override
+  Widget build(BuildContext context) {
+    final rowId = contextRowId;
+    if (rowId == null || rowId.isEmpty) return const SizedBox.shrink();
+    final tableSlug = headerConfig['table_slug'] as String? ?? '';
+    final fieldsRaw = headerConfig['fields'];
+    if (tableSlug.isEmpty || fieldsRaw is! List) {
+      return const SizedBox.shrink();
+    }
+    final l10n = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context);
+    final body = Map<String, dynamic>.from(
+      seeds.bodyFor(rowId) as Map? ?? const {},
+    );
+    final columns = manifest.columnsForTable(tableSlug);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final raw in fieldsRaw.whereType<Map>())
+          _buildField(
+            context,
+            Map<String, dynamic>.from(raw),
+            columns: columns,
+            body: body,
+            rowId: rowId,
+            l10n: l10n,
+            locale: locale,
+          ),
+      ],
+    );
+  }
+
+  Widget _buildField(
+    BuildContext context,
+    Map<String, dynamic> fieldCfg, {
+    required List<Map<String, dynamic>> columns,
+    required Map<String, dynamic> body,
+    required String rowId,
+    required AppLocalizations l10n,
+    required Locale locale,
+  }) {
+    final columnName = fieldCfg['column'] as String? ?? '';
+    if (columnName.isEmpty) return const SizedBox.shrink();
+    final col = columns.cast<Map<String, dynamic>?>().firstWhere(
+          (c) => c?['name'] == columnName,
+          orElse: () => null,
+        );
+    final labelRaw = fieldCfg['label'] ?? col?['label'] ?? columnName;
+    final label = resolveMetaLabel(labelRaw, l10n, locale: locale);
+    final widgetKind = fieldCfg['widget'] as String? ?? 'value';
+    final value = body[columnName];
+
+    Future<void> persist(dynamic next) async {
+      try {
+        final patch = seeds.patchField(rowId, columnName, next);
+        if (patch is Future) await patch;
+      } catch (e) {
+        if (context.mounted) AppErrors.showSnack(context, e);
+      }
+    }
+
+    if (widgetKind == 'project_multiselect') {
+      return ProjectMultiselectField(
+        label: label,
+        value: value,
+        readOnly: readOnly,
+        subtitleMode: fieldCfg['subtitle']?.toString(),
+        onChanged: (ids) => persist(ids),
+      );
+    }
+
+    return AppValuePreference<String>(
+      title: label.isNotEmpty ? label : columnName,
+      value: value?.toString() ?? '',
+      icon: Icons.badge_outlined,
+      enabled: !readOnly,
+      onSave: (v) async => persist(v.trim()),
+    );
   }
 }
 

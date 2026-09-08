@@ -20,6 +20,7 @@ import 'package:prodavan/features/meta/widgets/build_slots_field.dart';
 import 'package:prodavan/features/meta/widgets/text_editor_nav_field.dart';
 import 'package:prodavan/features/meta/widgets/type_ref_picker_field.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
+import 'package:prodavan/features/meta/workspace_path.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 class FormViewInterpreter extends StatefulWidget {
@@ -144,7 +145,11 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
   }
 
   Future<void> _persist(String name, dynamic value) async {
-    setState(() => _values[name] = value);
+    var next = value;
+    if (name == 'path' && next is String) {
+      next = normalizeWorkspaceRelativePath(next);
+    }
+    setState(() => _values[name] = next);
     if (widget.readOnly) return;
     final tableSlug = widget.view['table_slug'] as String? ?? '';
     try {
@@ -167,7 +172,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         final upsert = widget.seeds.upsertBody(_rowId!, body);
         if (upsert is Future) await upsert;
       } else {
-        final patch = widget.seeds.patchField(_rowId!, name, value);
+        final patch = widget.seeds.patchField(_rowId!, name, next);
         if (patch is Future) await patch;
       }
       if (!mounted || _rowId == null) return;
@@ -399,6 +404,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         label: label,
         value: value,
         readOnly: fieldReadOnly,
+        subtitleMode: fieldCfg?['subtitle']?.toString(),
         onChanged: (ids) => _persist(name, ids),
       );
     }

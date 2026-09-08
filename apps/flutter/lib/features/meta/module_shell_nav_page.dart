@@ -8,6 +8,7 @@ import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/meta/company_module_meta_repository.dart';
 import 'package:prodavan/features/meta/interpreters/hub_interpreter.dart';
 import 'package:prodavan/features/meta/meta_icon.dart';
+import 'package:prodavan/features/meta/meta_view_scaffold_page.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/module_meta_repository.dart';
 import 'package:prodavan/features/meta/runtime/owner_module_data_controller.dart';
@@ -108,16 +109,13 @@ class _ModuleShellNavPageState extends State<ModuleShellNavPage> {
     if (view == null) return;
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => AppScaffold(
-          title: Text(view['label'] as String? ?? viewSlug),
-          body: ViewInterpreterHost(
-            manifest: manifest,
-            view: view,
-            seeds: seeds,
-            rowId: rowId,
-            readOnly: false,
-            onOpenView: _openView,
-          ),
+        builder: (_) => MetaViewScaffoldPage(
+          manifest: manifest,
+          view: view,
+          seeds: seeds,
+          rowId: rowId,
+          readOnly: false,
+          onOpenView: _openView,
         ),
       ),
     );

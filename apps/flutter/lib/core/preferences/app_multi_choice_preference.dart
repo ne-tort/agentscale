@@ -79,11 +79,12 @@ class AppMultiChoicePreference<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final text = _subtitle();
     return AppPreferenceTile(
       title: title,
       icon: icon,
       enabled: enabled,
-      subtitle: Text(_subtitle()),
+      subtitle: text.isEmpty ? null : Text(text),
       trailing: const AppTrailingChevron(),
       onTap: () => _pick(context),
     );

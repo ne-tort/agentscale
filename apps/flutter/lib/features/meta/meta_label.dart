@@ -62,15 +62,26 @@ String _resolveL10nKey(
 }
 
 /// Reads optional scaffold title from view ui_json (explicit syntax only).
+/// When [rowBody] is set, also resolves `title_template` with `{field}` placeholders.
 String? resolveViewScaffoldTitle(
   Map<String, dynamic> view,
   AppLocalizations l10n, {
   Locale? locale,
+  Map<String, dynamic>? rowBody,
 }) {
   final ui = view['ui_json'];
   if (ui is! Map) return null;
   final uiJson = Map<String, dynamic>.from(ui);
   final scaffold = uiJson['scaffold'];
+  final templateRaw = scaffold is Map
+      ? (scaffold['title_template'] ?? uiJson['title_template'])
+      : uiJson['title_template'];
+  if (templateRaw != null && rowBody != null) {
+    final template = resolveMetaLabel(templateRaw, l10n, locale: locale);
+    if (template.isNotEmpty) {
+      return _applyTitleTemplate(template, rowBody);
+    }
+  }
   if (scaffold is Map && scaffold['title'] != null) {
     final title = resolveMetaLabel(scaffold['title'], l10n, locale: locale);
     return title.isEmpty ? null : title;
@@ -88,4 +99,13 @@ String? resolveViewScaffoldTitle(
     return title.isEmpty ? null : title;
   }
   return null;
+}
+
+String _applyTitleTemplate(String template, Map<String, dynamic> rowBody) {
+  return template.replaceAllMapped(RegExp(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}'), (m) {
+    final key = m.group(1)!;
+    final val = rowBody[key];
+    if (val == null) return '';
+    return val.toString();
+  });
 }
