@@ -84,8 +84,42 @@ def _kubectl(args: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _incluster_list_pods(project_id: str) -> list[tuple[str, str]]:
+    """List sandbox pods via in-cluster SA (e2e Job has no kubectl binary)."""
+    import httpx
+
+    from prodavan.infrastructure.k8s.auth import InClusterAuth
+
+    auth = InClusterAuth()
+    if not auth.available():
+        raise RuntimeError("kubectl not on PATH and in-cluster SA unavailable")
+    label = f"prodavan.io/project-id={project_id}"
+    url = (
+        f"{auth.api_base()}/api/v1/namespaces/{K8S_SANDBOX_NAMESPACE}/pods"
+        f"?labelSelector={label}"
+    )
+    with httpx.Client(**auth.client_kwargs()) as client:
+        resp = client.get(url, headers=auth.headers())
+    if resp.status_code != 200:
+        raise AssertionError(
+            f"in-cluster list pods for {project_id} failed: {resp.status_code} {resp.text[:500]}"
+        )
+    body = resp.json()
+    out: list[tuple[str, str]] = []
+    for item in body.get("items") or []:
+        meta = item.get("metadata") or {}
+        status = item.get("status") or {}
+        name = str(meta.get("name") or "")
+        phase = str(status.get("phase") or "Unknown")
+        if name:
+            out.append((name, phase))
+    return out
+
+
 def k8s_pods_for_project(project_id: str) -> list[tuple[str, str]]:
     """Return [(pod_name, phase), ...] from prodavan-sandboxes for a project."""
+    if shutil.which("kubectl") is None:
+        return _incluster_list_pods(project_id)
     proc = _kubectl(
         [
             "get",
@@ -129,15 +163,44 @@ def assert_k8s_no_pods(project_id: str) -> None:
     assert pods == [], f"expected no k8s pods, got {pods!r}"
 
 
+def _incluster_delete_pods(project_id: str) -> None:
+    import httpx
+
+    from prodavan.infrastructure.k8s.auth import InClusterAuth
+
+    auth = InClusterAuth()
+    if not auth.available():
+        return
+    label = f"prodavan.io/project-id={project_id}"
+    list_url = (
+        f"{auth.api_base()}/api/v1/namespaces/{K8S_SANDBOX_NAMESPACE}/pods"
+        f"?labelSelector={label}"
+    )
+    with httpx.Client(**auth.client_kwargs()) as client:
+        listed = client.get(list_url, headers=auth.headers())
+        if listed.status_code != 200:
+            return
+        for item in listed.json().get("items") or []:
+            name = str((item.get("metadata") or {}).get("name") or "")
+            if not name:
+                continue
+            client.delete(
+                f"{auth.api_base()}/api/v1/namespaces/{K8S_SANDBOX_NAMESPACE}/pods/{name}",
+                headers=auth.headers(),
+            )
+
+
 def _delete_sandbox_pods_for_projects(project_ids: list[str]) -> None:
     if not project_ids:
         return
     kubectl = shutil.which("kubectl")
-    if kubectl is None and not os.path.isfile(
-        "/var/run/secrets/kubernetes.io/serviceaccount/token"
-    ):
+    sa = os.path.isfile("/var/run/secrets/kubernetes.io/serviceaccount/token")
+    if kubectl is None and not sa:
         return
     for project_id in project_ids:
+        if kubectl is None:
+            _incluster_delete_pods(project_id)
+            continue
         _kubectl(
             [
                 "delete",

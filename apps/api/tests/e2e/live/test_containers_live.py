@@ -101,6 +101,10 @@ def _configure_and_launch(
     )
     assert patched.status_code == 200, patched.text
     launched = client.post(f"{api}/projects/{project_id}/launch", headers=owner_h)
+    if launched.status_code != 200:
+        # One retry — concurrent e2e / rematerialize can briefly 500 the API.
+        time.sleep(2.0)
+        launched = client.post(f"{api}/projects/{project_id}/launch", headers=owner_h)
     assert launched.status_code == 200, launched.text
     _wait_project_status(
         client, api, owner_h, project_id, want="active", wait_sec=wait_sec
