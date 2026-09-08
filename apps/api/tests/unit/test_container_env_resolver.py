@@ -82,3 +82,17 @@ def test_merge_env_bindings_later_overrides() -> None:
         [("LOG_LEVEL", "debug"), ("FEATURE_X", "1")],
     )
     assert merged == (("FEATURE_X", "1"), ("LOG_LEVEL", "debug"))
+
+
+def test_row_eligible_for_env_respects_project_ids_and_enabled() -> None:
+    from prodavan.application.pod_service.container_env_loader import row_eligible_for_env
+
+    assert row_eligible_for_env({"base_url": "https://x"}, "proj_a")
+    assert row_eligible_for_env({"enabled": True, "project_ids": []}, "proj_a")
+    assert not row_eligible_for_env({"enabled": False}, "proj_a")
+    assert row_eligible_for_env(
+        {"enabled": True, "project_ids": ["proj_a"]}, "proj_a"
+    )
+    assert not row_eligible_for_env(
+        {"enabled": True, "project_ids": ["proj_b"]}, "proj_a"
+    )

@@ -22,6 +22,7 @@ Product seed: `mod_equipment` — see `product_module_seeds.py`.
 - `equipment_builds` — `name`, `build_kind` (`pc`|`server`), `slots` (`{etype_id: item_row_id}`), denorm `components_count` / `price_total`
 - `trusted_sellers` — `name`, `aliases` (comma-separated); CRUD only
 - `web_shops` — `name`, `url`, `cookies` (free-form paste via `text_editor` nav page); CRUD only
+- `s4b_settings` — `name`, `base_url`, `login`, `password` (`secret_ref`), `mcp_zip` (`file_ref`), `enabled`, `project_ids` (empty = all)
 
 ## Meta primitives
 
@@ -34,6 +35,8 @@ Product seed: `mod_equipment` — see `product_module_seeds.py`.
 - Builds: `build_slots` lists types filtered by `build_scope` vs `build_kind`; pick item via `equipment_items_pick` (ephemeral pickContext `type_id` filter + `map_field: slots`); recompute count/price from linked offers
 - Action `content.index_tabular` after catalog file write
 - Materialize `merge_mapped_sqlite` for ready + non-paused catalogs (skip incomplete maps)
+- Materialize `mcp_package` from enabled `s4b_settings.mcp_zip` → `/workspace/packages/{name}` + OpenClaw/mcp.json
+- `container_env` / `container_env_secrets`: `S4B_BASE_URL`, `S4B_LOGIN`, `S4B_PASSWORD` from enabled row applying to the project
 - Declarative `mcp_tools` for agent surface
 
 ## Agent / MCP contract
@@ -44,6 +47,7 @@ Product seed: `mod_equipment` — see `product_module_seeds.py`.
 4. **Component types / characteristics:** `equipment_types_list`, `equipment_items_list`, `equipment_items_upsert` — `attrs` values are plain strings keyed by `fields_json[].key`. Link item → offer via `offer_id`.
 5. **Builds:** `equipment_builds_list` / `equipment_builds_upsert` — `slots` maps type row id → item row id; `price_total` ≈ Σ `found_offers.price * (item.qty ?? 1)`.
 6. **Trusted sellers / web shops:** `trusted_sellers_*`, `web_shops_*` — list/upsert only (no ranking/search logic yet).
-7. **Never** treat Pod FS or dehydrate blobs as SoT for offers/selection — only Postgres module rows survive pause/reload as editable state.
+7. **S4B:** enabled settings inject `S4B_*` into the Pod; MCP zip unpacks like `mod_mcp` packages. Do **not** connect Pod to platform Redis — future Cache API via [tenant-infra-gateway](../../../12-layer-docs/tenant-infra-gateway.md).
+8. **Never** treat Pod FS or dehydrate blobs as SoT for offers/selection — only Postgres module rows survive pause/reload as editable state.
 
 Full definitions live in the product seed; this file is the human summary.

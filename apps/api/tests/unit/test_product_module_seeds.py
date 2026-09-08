@@ -152,12 +152,21 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "equipment_builds",
         "trusted_sellers",
         "web_shops",
+        "s4b_settings",
     }
     kinds = {a["kind"] for a in meta["actions"]}
     assert "content.index_tabular" in kinds
     assert "data.select_row" in kinds
     assert any(r["target"]["format"] == "merge_mapped_sqlite" for r in meta["materialize"])
+    assert any(r["id"] == "s4b_mcp_package" for r in meta["materialize"])
+    s4b_rule = next(r for r in meta["materialize"] if r["id"] == "s4b_mcp_package")
+    assert s4b_rule["target"]["format"] == "mcp_package"
+    assert s4b_rule["target"]["field"] == "mcp_zip"
+    assert s4b_rule["source"]["filter"] == {"enabled": True}
     assert not any(r["target"]["format"] == "copy_blob" for r in meta["materialize"])
+    env_names = {e["env_name"] for e in meta["container_env"]}
+    assert env_names == {"S4B_BASE_URL", "S4B_LOGIN"}
+    assert meta["container_env_secrets"][0]["env_name"] == "S4B_PASSWORD"
     tool_names = {t["name"] for t in meta["mcp_tools"]}
     assert "equipment_catalog_query" in tool_names
     assert "equipment_offers_upsert" in tool_names
@@ -177,6 +186,23 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert "Сборка" in hub_titles
     assert "Проверенные продавцы" in hub_titles
     assert "Интернет магазины" in hub_titles
+    assert "S4B" in hub_titles
+
+    s4b_form = next(v for v in meta["views"] if v["slug"] == "s4b_settings_form")
+    s4b_cols = [f["column"] for f in s4b_form["ui_json"]["fields"]]
+    assert s4b_cols == [
+        "project_ids",
+        "name",
+        "base_url",
+        "login",
+        "password",
+        "mcp_zip",
+        "enabled",
+    ]
+    assert any(
+        c["name"] == "password" and c["type"] == "secret_ref" for c in meta["columns"]
+    )
+    assert any(c["name"] == "mcp_zip" and c["type"] == "file_ref" for c in meta["columns"])
 
     items_list = next(v for v in meta["views"] if v["slug"] == "equipment_items_list")
     assert items_list["ui_json"]["inline_add"]["field"] == "name"

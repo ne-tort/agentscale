@@ -36,6 +36,16 @@ def _spec_cache_key(spec: dict[str, Any]) -> tuple[str, str, str]:
     )
 
 
+def row_eligible_for_env(body: dict[str, Any], project_id: str) -> bool:
+    """Whether a module data row may supply container_env value_from fields."""
+    if not _row_applies_to_project(body, project_id):
+        return False
+    # Explicit enabled=false must not inject env (S4B and similar).
+    if body.get("enabled") is False:
+        return False
+    return True
+
+
 def _cache_getter(cache: dict[tuple[str, str, str], str | None]):
     def getter(spec: dict[str, Any]) -> str | None:
         return cache.get(_spec_cache_key(spec))
@@ -208,7 +218,7 @@ class ContainerEnvLoader:
         )
         for row in rows:
             body = row.get("body") if isinstance(row.get("body"), dict) else {}
-            if not _row_applies_to_project(body, project_id):
+            if not row_eligible_for_env(body, project_id):
                 continue
             return body
         return None

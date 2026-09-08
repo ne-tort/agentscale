@@ -153,8 +153,11 @@ Product module for computer-equipment matching (hub on **Данные**). Projec
 | `catalogs` | project leaf (+ row `project_ids`) | name, source file, artifact, status, paused, column_map, project_ids |
 | `request_lines` | project leaf | customer line: title, P/N, qty, found_count, selected_offer_id |
 | `found_offers` | project leaf | candidates linked to a line; exactly one `is_selected` primary |
+| `s4b_settings` | project leaf (+ row `project_ids`) | S4B URL/login/password(secret)/MCP zip; empty `project_ids` = all bound projects; injects `S4B_*` env + materialize `mcp_package` |
 
 Agent fills `found_offers` / `found_count` through rows APIs (or declarative `mcp_tools`); MCP RO tools query the merged SQLite only.
+
+**S4B:** hub tile → settings form; password via cabinet secrets → Pod `S4B_PASSWORD`; zip materialize reuses `mcp_package` path. Redis/Kafka from Pod — **not** direct; see [tenant-infra-gateway](target/12-layer-docs/tenant-infra-gateway.md) (design).
 
 Meta primitives: hub + collections, `file_ref`, `column_map`, master–detail, `data.select_row`, `content.index_tabular`, `merge_mapped_sqlite`. See [meta-syntax](target/06-modules/meta-syntax/).
 
