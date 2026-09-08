@@ -24,7 +24,7 @@ async def test_project_update_runs_auto_index_and_returns_refreshed_body() -> No
     project = SimpleNamespace(id="prj_1", cabinet_id="cab_1")
     svc._require_project = AsyncMock(return_value=project)
     leaf = SimpleNamespace(id="minst_leaf")
-    svc._instances.ensure_project_instance = AsyncMock(return_value=leaf)
+    svc._sot_for_project = AsyncMock(return_value=leaf)
     svc._instances.resolve_columns_body = AsyncMock(return_value=[])
     existing = {
         "row_id": "row_1",
@@ -102,7 +102,7 @@ async def test_project_update_skips_actions_when_run_actions_false() -> None:
     project = SimpleNamespace(id="prj_1", cabinet_id="cab_1")
     svc._require_project = AsyncMock(return_value=project)
     leaf = SimpleNamespace(id="minst_leaf")
-    svc._instances.ensure_project_instance = AsyncMock(return_value=leaf)
+    svc._sot_for_project = AsyncMock(return_value=leaf)
     svc._instances.resolve_columns_body = AsyncMock(return_value=[])
     existing = {"row_id": "row_1", "body": {}, "created_by": "u1"}
     saved = {"row_id": "row_1", "body": {"status": "indexing"}}

@@ -9,7 +9,7 @@ import 'package:prodavan/features/employee/project_module_edit_page.dart';
 import 'package:prodavan/features/employee/project_modules_table.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Project modules list — enable/disable and open module editor.
+/// Project modules list — Local/Global bind and open module editor.
 class ProjectModulesListPage extends StatefulWidget {
   const ProjectModulesListPage({
     super.key,
@@ -52,28 +52,24 @@ class _ProjectModulesListPageState extends State<ProjectModulesListPage> {
     }
   }
 
-  Future<void> _toggleModule(String moduleId, bool enabled) async {
-    final ids = _modules
-        .where((m) => m['enabled'] == true)
-        .map((m) => m['module_id'] as String)
-        .whereType<String>()
-        .toSet();
-    if (enabled) {
-      ids.add(moduleId);
-    } else {
-      ids.remove(moduleId);
-    }
+  /// Enable with [bindKind] (`local`/`global`) or unbind when [bindKind] is null.
+  Future<void> _setBind(String moduleId, String? bindKind) async {
     try {
-      final result = await workContext.api.patchProjectModules(
-        widget.projectId,
-        moduleIds: ids.toList(),
-      );
+      if (bindKind == null) {
+        await workContext.api.revokeProjectModule(
+          widget.projectId,
+          moduleId: moduleId,
+        );
+      } else {
+        await workContext.api.bindProjectModule(
+          widget.projectId,
+          moduleId: moduleId,
+          bindKind: bindKind,
+        );
+      }
       await _load();
       if (!mounted) return;
-      final sync = result['sync'];
-      if (sync is Map && sync['ok'] == true) {
-        AppSnackBar.success(context, AppLocalizations.of(context).projectUpdateSuccess);
-      }
+      AppSnackBar.success(context, AppLocalizations.of(context).projectUpdateSuccess);
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     }
@@ -107,7 +103,7 @@ class _ProjectModulesListPageState extends State<ProjectModulesListPage> {
               child: ProjectModulesTable(
                 modules: _modules,
                 onOpen: _openModule,
-                onEnabledChanged: _toggleModule,
+                onBindChanged: _setBind,
                 showHeader: false,
               ),
             ),

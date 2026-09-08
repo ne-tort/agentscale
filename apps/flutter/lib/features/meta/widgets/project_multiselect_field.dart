@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/app_multi_choice_preference.dart';
-import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Multi-select cabinet projects stored as JSON list in row body.
+/// Multi-select **module-bound** projects stored as JSON list in row body.
+///
+/// Choices = projects with an MP bind for [moduleId] / runtime scope module.
+/// Empty bound list → field is hidden (no cabinet-wide project dump).
 class ProjectMultiselectField extends StatefulWidget {
   const ProjectMultiselectField({
     super.key,
@@ -15,6 +17,7 @@ class ProjectMultiselectField extends StatefulWidget {
     required this.readOnly,
     required this.onChanged,
     this.subtitleMode,
+    this.moduleId,
   });
 
   final String label;
@@ -23,6 +26,8 @@ class ProjectMultiselectField extends StatefulWidget {
   final void Function(List<String> projectIds) onChanged;
   /// `count_or_hide` — empty selection hides subtitle; else show count.
   final String? subtitleMode;
+  /// Optional override; defaults to [ModuleRuntimeScope.moduleId].
+  final String? moduleId;
 
   @override
   State<ProjectMultiselectField> createState() => _ProjectMultiselectFieldState();
@@ -52,8 +57,14 @@ class _ProjectMultiselectFieldState extends State<ProjectMultiselectField> {
       });
       return;
     }
+    final moduleId = (widget.moduleId ?? scope.moduleId).trim();
     try {
-      final rows = await scope.api.listProjects(scope.cabinetId);
+      final rows = moduleId.isEmpty
+          ? await scope.api.listProjects(scope.cabinetId)
+          : await scope.api.listModuleBoundProjects(
+              cabinetId: scope.cabinetId,
+              moduleId: moduleId,
+            );
       if (!mounted) return;
       setState(() {
         _projects = rows;
@@ -82,7 +93,7 @@ class _ProjectMultiselectFieldState extends State<ProjectMultiselectField> {
       return '${ids.length}';
     }
     if (ids.isEmpty) {
-      return locale.languageCode == 'ru' ? 'Все проекты' : 'All projects';
+      return locale.languageCode == 'ru' ? 'Все привязанные' : 'All bound';
     }
     if (ids.length == 1) {
       final id = ids.first;
@@ -104,15 +115,9 @@ class _ProjectMultiselectFieldState extends State<ProjectMultiselectField> {
     if (_loading) {
       return ListTile(title: Text(label), subtitle: const LinearProgressIndicator());
     }
-    if (_error != null) {
-      return ListTile(
-        title: Text(label),
-        subtitle: Text(
-          _error == 'preview'
-              ? l10n.adminMetaInvalid
-              : AppErrors.localize(context, _error!),
-        ),
-      );
+    // Preview / no runtime scope / load error / no binds → hide control.
+    if (_error != null || _projects.isEmpty) {
+      return const SizedBox.shrink();
     }
 
     final choices = _projects

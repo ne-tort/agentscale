@@ -14,6 +14,17 @@ def _principal() -> Principal:
     return Principal(sub="emp-1", roles=frozenset({"employee"}))
 
 
+def _bindings_mock(*, existing: list[str], after: list[str]) -> MagicMock:
+    bindings = MagicMock()
+    bindings.list_module_ids_for_cabinet = AsyncMock(
+        return_value=["mod_files", "mod_mcp"]
+    )
+    bindings.list_module_ids_for_project = AsyncMock(side_effect=[existing, after])
+    bindings.revoke_project = AsyncMock()
+    bindings.bind_project = AsyncMock()
+    return bindings
+
+
 @pytest.mark.asyncio
 async def test_set_module_ids_marks_workspace_outdated_by_default() -> None:
     session = AsyncMock()
@@ -21,12 +32,14 @@ async def test_set_module_ids_marks_workspace_outdated_by_default() -> None:
     row.id = "proj_1"
     row.cabinet_id = "cab_1"
     row.status = "active"
+    bindings = _bindings_mock(existing=["mod_files", "mod_mcp"], after=["mod_files"])
 
     with (
         patch("prodavan.application.pod_service.command.build_pod_runtime", return_value=AsyncMock()),
         patch(
-            "prodavan.application.modules.module_binding_service.ModuleBindingService"
-        ) as binding_cls,
+            "prodavan.application.modules.module_binding_service.ModuleBindingService",
+            return_value=bindings,
+        ),
         patch(
             "prodavan.application.projects.workspace_sync_policy.defer_or_schedule_project_sync",
             AsyncMock(
@@ -43,10 +56,6 @@ async def test_set_module_ids_marks_workspace_outdated_by_default() -> None:
         ) as defer,
     ):
         cmd = ProjectCommand(session)
-        binding_cls.return_value.list_module_ids_for_cabinet = AsyncMock(
-            return_value=["mod_files", "mod_mcp"]
-        )
-        session.execute = AsyncMock()
         cmd._access.require_access = AsyncMock(return_value=row)
 
         out = await cmd.set_module_ids(
@@ -60,6 +69,7 @@ async def test_set_module_ids_marks_workspace_outdated_by_default() -> None:
     assert out["workspace_sync"]["marked_outdated"] == 1
     assert out["workspace_sync"]["mode"] == "deferred"
     defer.assert_awaited_once()
+    bindings.revoke_project.assert_awaited_once_with("mod_mcp", "proj_1")
 
 
 @pytest.mark.asyncio
@@ -75,12 +85,14 @@ async def test_set_module_ids_triggers_rematerialize_when_auto_enabled(
     row.id = "proj_1"
     row.cabinet_id = "cab_1"
     row.status = "active"
+    bindings = _bindings_mock(existing=["mod_files", "mod_mcp"], after=["mod_files"])
 
     with (
         patch("prodavan.application.pod_service.command.build_pod_runtime", return_value=AsyncMock()),
         patch(
-            "prodavan.application.modules.module_binding_service.ModuleBindingService"
-        ) as binding_cls,
+            "prodavan.application.modules.module_binding_service.ModuleBindingService",
+            return_value=bindings,
+        ),
         patch(
             "prodavan.application.projects.workspace_sync_policy.defer_or_schedule_project_sync",
             AsyncMock(
@@ -98,10 +110,6 @@ async def test_set_module_ids_triggers_rematerialize_when_auto_enabled(
         ) as defer,
     ):
         cmd = ProjectCommand(session)
-        binding_cls.return_value.list_module_ids_for_cabinet = AsyncMock(
-            return_value=["mod_files", "mod_mcp"]
-        )
-        session.execute = AsyncMock()
         cmd._access.require_access = AsyncMock(return_value=row)
 
         out = await cmd.set_module_ids(

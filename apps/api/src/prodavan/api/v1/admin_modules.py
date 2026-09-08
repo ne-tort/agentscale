@@ -45,6 +45,13 @@ class CopyAdminModuleBody(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
 
 
+class BindProjectBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    bind_kind: str = Field(default="local", pattern="^(local|global)$")
+    child_may_edit: bool | None = None
+
+
 class DataRowBody(BaseModel):
     model_config = {"extra": "forbid"}
 
@@ -143,14 +150,34 @@ async def delete_meta_document(
     return {"deleted": True}
 
 
+@router.get("/{module_id}/projects")
+async def list_module_project_bindings(
+    module_id: str,
+    _: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    from prodavan.application.modules.module_binding_service import ModuleBindingService
+
+    await ModuleService(session)._get_row(module_id)
+    items = await ModuleBindingService(session).list_project_bindings_for_module(module_id)
+    return {"items": items}
+
+
 @router.post("/{module_id}/projects/{project_id}")
 async def bind_project(
     module_id: str,
     project_id: str,
     _: PlatformAdminDep,
     session: SessionDep,
+    body: BindProjectBody | None = None,
 ) -> dict:
-    return await ModuleService(session).bind_project(module_id=module_id, project_id=project_id)
+    payload = body or BindProjectBody()
+    return await ModuleService(session).bind_project(
+        module_id=module_id,
+        project_id=project_id,
+        bind_kind=payload.bind_kind,
+        child_may_edit=payload.child_may_edit,
+    )
 
 
 @router.delete("/{module_id}/projects/{project_id}")

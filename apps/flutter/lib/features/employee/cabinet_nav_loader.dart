@@ -33,9 +33,10 @@ class CabinetNavEntry {
   int get order => tab['order'] is int ? tab['order'] as int : 999;
 
   /// `cabinet` or `project` — which instance leaf hosts this tab's data.
+  /// Derived from `default_project_bind` (global→cabinet, local→project).
   String get instanceOwner => moduleInstanceOwnerOf(tab);
 
-  /// True when the tab binds to the selected project's leaf (not cabinet).
+  /// True when the tab needs a project leaf (local bind); false for global→cabinet SoT.
   bool get usesProjectLeaf => instanceOwner != 'cabinet';
 }
 

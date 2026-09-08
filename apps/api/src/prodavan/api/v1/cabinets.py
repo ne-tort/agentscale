@@ -333,6 +333,37 @@ async def list_cabinet_modules(
     return {"items": items}
 
 
+@router.get("/{cabinet_id}/modules/{module_id}/bound-projects")
+async def list_cabinet_module_bound_projects(
+    cabinet_id: str,
+    module_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
+) -> dict:
+    """Projects in this cabinet that have an explicit MP bind to the module."""
+    from prodavan.application.cabinets.access import CabinetAccessService
+    from prodavan.application.modules.module_binding_service import ModuleBindingService
+    from prodavan.infrastructure.persistence.models.projects import ProjectRow
+    from sqlalchemy import select
+
+    await CabinetAccessService(session).require_access(
+        cabinet_id=cabinet_id, principal=principal, employee=employee, write=False
+    )
+    bindings = ModuleBindingService(session)
+    if not await bindings.has_cabinet_binding(module_id, cabinet_id):
+        return {"items": []}
+    bound_ids = list(await bindings.list_project_ids(module_id))
+    if not bound_ids:
+        return {"items": []}
+    q = await session.execute(
+        select(ProjectRow.id, ProjectRow.name)
+        .where(ProjectRow.cabinet_id == cabinet_id, ProjectRow.id.in_(bound_ids))
+        .order_by(ProjectRow.name)
+    )
+    return {"items": [{"project_id": pid, "name": name} for pid, name in q.all()]}
+
+
 @router.get("/{cabinet_id}/modules/{module_id}/meta/documents/{slug}")
 async def get_cabinet_module_meta(
     cabinet_id: str,

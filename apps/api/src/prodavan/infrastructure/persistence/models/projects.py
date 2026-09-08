@@ -98,16 +98,6 @@ class ProjectTriggerRow(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class ProjectModuleBindingRow(Base):
-    __tablename__ = "project_module_bindings"
-    __table_args__ = (UniqueConstraint("project_id", "module_id", name="uq_project_module_binding"),)
-
-    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: _id("pmb"))
-    project_id: Mapped[str] = mapped_column(ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    module_id: Mapped[str] = mapped_column(ForeignKey("modules.id", ondelete="CASCADE"), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-
 class ProjectAttachmentRow(Base):
     __tablename__ = "project_attachments"
 

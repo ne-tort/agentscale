@@ -593,6 +593,69 @@ class AdminApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  /// Bound project bindings from GET `/admin/modules/{id}/projects`.
+  Future<List<Map<String, dynamic>>> listModuleProjectBindings(String moduleId) async {
+    final res = await AuthHttp.get(_uri('/admin/modules/$moduleId/projects'));
+    _throwIfError(res);
+    final decoded = jsonDecode(res.body);
+    if (decoded is Map && decoded['items'] is List) {
+      return [
+        for (final item in decoded['items'] as List)
+          if (item is Map) Map<String, dynamic>.from(item),
+      ];
+    }
+    return const [];
+  }
+
+  /// Bound project ids from module detail (`project_ids` on GET `/admin/modules/{id}`).
+  Future<List<Map<String, dynamic>>> listModuleBoundProjects(String moduleId) async {
+    final items = await listModuleProjectBindings(moduleId);
+    return [
+      for (final item in items)
+        {
+          'id': item['project_id']?.toString() ?? '',
+          'project_id': item['project_id']?.toString() ?? '',
+          'name': item['project_name']?.toString() ?? item['project_id']?.toString() ?? '',
+          'bind_kind': item['bind_kind'],
+          'child_may_edit': item['child_may_edit'],
+        },
+    ].where((e) => (e['id'] as String).isNotEmpty).toList();
+  }
+
+  Future<Map<String, dynamic>> bindModuleProject({
+    required String moduleId,
+    required String projectId,
+    String bindKind = 'local',
+    bool? childMayEdit,
+  }) async {
+    final payload = <String, dynamic>{'bind_kind': bindKind};
+    if (childMayEdit != null) payload['child_may_edit'] = childMayEdit;
+    final res = await AuthHttp.post(
+      _uri('/admin/modules/$moduleId/projects/$projectId'),
+      body: jsonEncode(payload),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> revokeModuleProject({
+    required String moduleId,
+    required String projectId,
+  }) async {
+    final res = await AuthHttp.delete(
+      _uri('/admin/modules/$moduleId/projects/$projectId'),
+    );
+    _throwIfError(res);
+    if (res.body.isEmpty) {
+      return <String, dynamic>{
+        'module_id': moduleId,
+        'project_id': projectId,
+        'status': 'revoked',
+      };
+    }
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> updateModule({
     required String moduleId,
     String? name,

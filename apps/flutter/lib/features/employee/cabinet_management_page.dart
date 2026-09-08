@@ -11,7 +11,8 @@ import 'package:prodavan/l10n/app_localizations.dart';
 /// Hub listing module tabs for a shell placement (`management` or `data`).
 ///
 /// Rows use the same preference-tile chrome as project settings.
-/// Cabinet-owned tabs work without a selected project; project-owned need a leaf.
+/// Global-bound tabs (`default_project_bind: global`) edit cabinet SoT without a
+/// selected project; local-bound tabs need a project leaf.
 class CabinetModuleHubPage extends StatelessWidget {
   const CabinetModuleHubPage({
     super.key,
@@ -31,6 +32,7 @@ class CabinetModuleHubPage extends StatelessWidget {
   final IconData emptyIcon;
 
   Future<void> _openModule(BuildContext context, CabinetNavEntry entry) {
+    // global bind → cabinet SoT (projectId null); local → project leaf required.
     final pid = entry.usesProjectLeaf ? projectId : null;
     return Navigator.of(context).push<void>(
       MaterialPageRoute<void>(

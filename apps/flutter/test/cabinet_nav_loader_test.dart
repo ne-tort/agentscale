@@ -132,7 +132,29 @@ void main() {
       );
     });
 
-    test('reads top-level instance_owner', () {
+    test('reads default_project_bind global as cabinet', () {
+      expect(
+        moduleInstanceOwnerOf({
+          'id': 't',
+          'default_project_bind': 'global',
+          'nav': {'contour': 'employee', 'placement': 'management'},
+        }),
+        'cabinet',
+      );
+    });
+
+    test('reads default_project_bind local as project', () {
+      expect(
+        moduleInstanceOwnerOf({
+          'id': 't',
+          'default_project_bind': 'local',
+          'nav': {'contour': 'employee', 'placement': 'management'},
+        }),
+        'project',
+      );
+    });
+
+    test('legacy instance_owner still accepted', () {
       expect(
         moduleInstanceOwnerOf({
           'id': 't',
@@ -143,7 +165,7 @@ void main() {
       );
     });
 
-    test('reads nav.instance_owner', () {
+    test('legacy nav.instance_owner still accepted', () {
       expect(
         moduleInstanceOwnerOf({
           'id': 't',
@@ -160,7 +182,7 @@ void main() {
     test('isCabinetInstanceOwner mirrors owner', () {
       expect(
         isCabinetInstanceOwner({
-          'instance_owner': 'cabinet',
+          'default_project_bind': 'global',
           'nav': {'placement': 'management'},
         }),
         isTrue,
@@ -175,14 +197,14 @@ void main() {
   });
 
   group('CabinetNavEntry.usesProjectLeaf', () {
-    test('cabinet owner does not use project leaf', () {
+    test('global bind does not use project leaf', () {
       const entry = CabinetNavEntry(
         moduleId: 'mod_prompts',
         moduleName: 'Промпты',
         tab: {
           'title': 'Промпты',
           'view_slug': 'prompt_profiles_list',
-          'instance_owner': 'cabinet',
+          'default_project_bind': 'global',
           'nav': {'contour': 'employee', 'placement': 'management'},
         },
         label: 'Промпты',
@@ -203,7 +225,7 @@ void main() {
           'subtitle': 'Инструменты и интеграции',
           'icon': 'hub',
           'view_slug': 'mcp_packages_list',
-          'instance_owner': 'cabinet',
+          'default_project_bind': 'global',
         },
         label: 'MCP',
       );
@@ -232,7 +254,7 @@ void main() {
           'title': 'MCP',
           'icon': 'hub',
           'view_slug': 'mcp_packages_list',
-          'instance_owner': 'cabinet',
+          'default_project_bind': 'global',
           'nav': {'contour': 'employee', 'placement': 'management'},
         },
         label: 'MCP',

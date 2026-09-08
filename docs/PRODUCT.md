@@ -92,67 +92,71 @@ GitOps, k3s, CI — не legacy: [`07-infrastructure/runbook.md`](07-infrastruct
 
 ```text
 Template (modules + module_meta_documents)
-  → fork on bind → Module Instance (meta + data JSONB)
-       Admin/platform → Company → Cabinet → Project (leaf)
-  → Materialize reads project instance → workspace files
+  → bind to owner (local | global)
+       local  → Module Instance fork (meta + data JSONB)
+       global → no new instance; SoT = resolve up to nearest local/platform instance
+  → Materialize into a project workspace only if an explicit module↔project bind exists
 ```
 
 | Layer | What |
 |-------|------|
 | **Template** | Catalog module meta (`modules` + `module_meta_documents`) — source for first platform instance |
-| **Instance** | Independent copy: `module_instances` + `module_instance_meta_documents` + `module_instance_data_rows` (Postgres JSONB). Owner: `platform` / `company` / `cabinet` / `project` |
-| **Bind** | Creates a **fork** of parent instance (deep copy meta+data); further edits stay in the child |
-| **Project hubs** | Employee Management/Data UI. Tab `instance_owner` selects data API: `cabinet` = cabinet instance (no project required); `project` = selected project leaf (reload on project change) |
-| **Materialize data** | Default: project leaf. Modules with `instance_owner: cabinet` (prompts / MCP / files) read **cabinet** instance rows and filter by row `project_ids` |
-| **Materialize rules** | Rule definitions still from **template** meta slug `materialize` (MVP); instance-level rules later |
-| **Admin/company edit** | Template catalog PUT mirrors into platform/company **instance** meta |
-| **Seed upsert (Alembic)** | `upsert_product_modules`: refreshes **meta** for every instance of the product module (UX/schema stay in sync). **Data rows:** insert missing seed rows only (`ON CONFLICT DO NOTHING`) — never overwrite existing bodies. User edits of former seed rows clear `created_by` from `module_seed` → `user`. Schema-breaking data transforms ship as explicit Alembic SQL, not blind body upsert |
-| **Storage** | Meta + data stay Postgres JSONB (`module_instance_meta_documents` / `module_instance_data_rows`). Mongo for instance docs is **deferred** — see [ADR backlog](02-architecture/ADR-backlog-module-instance-mongo.md) |
+| **Instance** | Independent copy when bind is **local**: `module_instances` + meta/data JSONB. Owner: `platform` / `company` / `cabinet` / `project` |
+| **Bind** | Edge on `platform→company` (grant), `company/cabinet` (MC), `cabinet→project` (MP). Fields: `bind_kind` (`local`\|`global`), `child_may_edit` (bool). **Local** forks a child instance. **Global** does not fork; child depends on parent SoT; writes allowed only if `child_may_edit` |
+| **SoT resolve** | `resolve_sot_instance(module, owner)`: local instance for owner if present, else follow global bind to parent. Replaces former tab `instance_owner` hack |
+| **Project hubs** | Employee UI edits the **SoT owner** returned by resolve (cabinet for global project binds on prompts/MCP/files; project leaf for local equipment binds) |
+| **Materialize** | Module runs for a project **only** with an explicit MP row. Row `project_ids` further filters entities (empty = all **bound** projects for that module). Bind alone does not dump every row into the workspace |
+| **Materialize rules** | From template meta slug `materialize` (MVP) |
+| **Seed upsert (Alembic)** | Meta refresh for all instances; data rows insert-only (`ON CONFLICT DO NOTHING`) |
+| **Storage** | Postgres JSONB. Mongo deferred — [ADR backlog](02-architecture/ADR-backlog-module-instance-mongo.md) |
 
-Product module seed changes (`PRODUCT_MODULES`) ship only via Alembic calling `upsert_product_modules` — not silent bootstrap overwrite.
+Product module seed changes ship only via Alembic calling `upsert_product_modules`.
 
-**Legacy note:** older `cab_inst_*.module_data_rows` remain as migration/read fallback. Management modules (`mod_prompts`, `mod_mcp`, `mod_files`) keep **cabinet instance** as SoT with row `project_ids` for materialize targeting — orthogonal to project-leaf equipment data.
+### Bind kinds (UI: «Локальная» / «Глобальная»)
 
-### `instance_owner` (tab / module)
+| `bind_kind` | Effect | Child edit |
+|-------------|--------|------------|
+| **local** | Child gets own instance (fork) | Child owns and edits its copy |
+| **global** | Child has no instance; uses parent SoT | Locked unless `child_may_edit=true` (lock icon in bind UI) |
 
-Independent of `nav.placement` (rail / management / data):
+Product defaults (`default_project_bind` on module meta / tabs):
 
-| Value | UI | Materialize SoT |
-|-------|----|-----------------|
-| `cabinet` | Cabinet instance API; Management/Data без обязательного выбранного проекта | Cabinet rows + `project_ids` filter |
-| `project` | Project leaf API; только при выбранном проекте | Project leaf rows |
+| Module | Typical cabinet→project bind |
+|--------|------------------------------|
+| `mod_prompts`, `mod_mcp`, `mod_files` | **global** |
+| `mod_equipment` | **local** |
 
-Seeds: `mod_prompts` / `mod_mcp` / `mod_files` → `cabinet`; `mod_equipment` → `project`.
+### Row `project_ids`
 
-**Prompts hub:** path-cards (`prompt_paths`: name, path, `files_json`); empty `files_json` skips folder creation; workspace writes only `AGENTS.md` (no `CLAUDE.md` alias). Profile row `project_ids` empty/`null` = all projects; materialize writes **one** active profile (default among matches) for the target project — not every profile in the module.
+- UI `project_multiselect` lists **only projects bound to the module**. No binds → control hidden.
+- Empty/`null` `project_ids` = all projects **bound to the module** (not every cabinet project).
+- Fan-out (e.g. equipment catalogs after merge): empty `project_ids` + local MP → materialize into each bound project workspace.
 
-Module-level **MP binding** (`module_project_bindings`): if bindings exist, module materializes only for bound projects.
+**Prompts hub:** `prompt_paths` (name, path, `files_json`); empty `files_json` skips folder creation; workspace writes `AGENTS.md` only. One active profile per project among matching `project_ids`.
 
-Future base modules follow the same cascade: edit in the owner’s instance, fork on bind down the chain, materialize from the project leaf.
-
-**File & env pipeline (meta-syntax spec):** upload via Content Service → FileRef in row → materialize (`copy_blob` / `raw`) → Pod `/workspace`; container env and Vault secrets — declarative slugs, implementation backlog. See [12-content-file-pipeline](target/06-modules/meta-syntax/12-content-file-pipeline.md) · [13-container-env-secrets](target/06-modules/meta-syntax/13-container-env-secrets.md) · [gap map P-META-*](target/09-gap-map.md).
+**File & env pipeline:** see [12-content-file-pipeline](target/06-modules/meta-syntax/12-content-file-pipeline.md) · [13-container-env-secrets](target/06-modules/meta-syntax/13-container-env-secrets.md).
 
 ### Equipment matching module (`mod_equipment`)
 
-Product module for computer-equipment matching (meta-tables, hub on **Данные**).
+Product module for computer-equipment matching (hub on **Данные**). Project binds stay **local** (per-project instance).
 
 | Layer | SoT | Notes |
 |-------|-----|--------|
-| Catalog cards, request lines, found offers, selection | Postgres module instance rows | Editable UI + agent via rows API |
+| Catalog cards, request lines, found offers, selection | Project leaf instance rows | Editable UI + agent via rows API |
 | Parsed price tables (csv/xlsx → index) | MinIO content blob (**raw SQLite artifact**) | Kept for rematerialize; not copied 1:1 into Pod |
 | Normalized merged catalog | Materialize `merge_mapped_sqlite` | Single RO `/workspace/catalogs/catalog.sqlite` |
 
-**Hybrid (fixed):** heavy catalogs are not JSONB rows and not live platform Postgres DSN in the Pod. Ingest is platform action `content.index_tabular` (reusable). Per-catalog `column_map` maps source headers → canonical columns (`title`, `price`, `part_number`, `supplier`, `lead_time` + auto `source_catalog`). Materialize merges all `status=ready` and `paused=false` catalogs that apply to the project (`project_ids` empty = all).
+**Hybrid (fixed):** heavy catalogs are not JSONB rows and not live platform Postgres DSN in the Pod. Ingest is platform action `content.index_tabular`. Per-catalog `column_map` maps source headers → canonical columns. Materialize merges `status=ready` and `paused=false` catalogs that apply (`project_ids` empty = all **module-bound** projects).
 
 | Table | Scope intent | Role |
 |-------|--------------|------|
-| `catalogs` | shared (cabinet instance) | name, source file, artifact, status, paused, column_map, project_ids |
+| `catalogs` | project leaf (+ row `project_ids`) | name, source file, artifact, status, paused, column_map, project_ids |
 | `request_lines` | project leaf | customer line: title, P/N, qty, found_count, selected_offer_id |
 | `found_offers` | project leaf | candidates linked to a line; exactly one `is_selected` primary |
 
-Agent fills `found_offers` / `found_count` through cabinet/project rows APIs (or declarative `mcp_tools`); MCP RO tools query the merged SQLite only.
+Agent fills `found_offers` / `found_count` through rows APIs (or declarative `mcp_tools`); MCP RO tools query the merged SQLite only.
 
-Meta primitives used/extended: hub + collections, `file_ref`, `column_map`, master–detail (`open_view` + `context_bind`), `data.select_row`, `content.index_tabular`, `merge_mapped_sqlite`. See [meta-syntax](target/06-modules/meta-syntax/).
+Meta primitives: hub + collections, `file_ref`, `column_map`, master–detail, `data.select_row`, `content.index_tabular`, `merge_mapped_sqlite`. See [meta-syntax](target/06-modules/meta-syntax/).
 
 ## Project lifecycle (employee UI)
 

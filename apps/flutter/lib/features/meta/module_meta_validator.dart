@@ -91,6 +91,12 @@ abstract final class ModuleMetaValidator {
           return 'invalid tab nav.placement: $placement';
         }
       }
+      // Optional product bind default; instance_owner is legacy and not required.
+      final dpb = tab['default_project_bind'];
+      if (dpb != null &&
+          (dpb is! String || (dpb != 'local' && dpb != 'global'))) {
+        return 'invalid tab default_project_bind: $dpb';
+      }
     }
 
     final rowIdRe = RegExp(r'^[a-zA-Z0-9_-]{1,64}$');

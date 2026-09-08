@@ -11,14 +11,17 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.domain.errors import AppError
+from prodavan.domain.modules import ModuleBindKind
 from prodavan.infrastructure.cabinets.sql import qident
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 from prodavan.infrastructure.persistence.models.modules import (
     ModuleCabinetBindingRow,
+    ModuleCompanyGrantRow,
     ModuleInstanceDataRow,
     ModuleInstanceMetaDocumentRow,
     ModuleInstanceRow,
     ModuleMetaDocumentRow,
+    ModuleProjectBindingRow,
     ModuleRow,
 )
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
@@ -43,7 +46,7 @@ def _new_data_id() -> str:
 
 
 def row_applies_to_project(body: dict[str, Any], project_id: str) -> bool:
-    """Legacy project_ids filter used only during cabinet→project backfill/fork."""
+    """Row project_ids filter: empty = all (caller intersects with module-bound set)."""
     pids = body.get("project_ids")
     if pids is None or not isinstance(pids, list) or len(pids) == 0:
         return True
@@ -143,22 +146,71 @@ class ModuleInstanceService:
         return child
 
     async def ensure_company_instance(self, *, company_id: str, module_id: str) -> ModuleInstanceRow:
+        """Ensure company SoT for a local grant. Global grant returns platform SoT (no fork)."""
         existing = await self.get_instance(
             owner_kind=OWNER_COMPANY, owner_id=company_id, module_id=module_id
         )
         if existing is not None:
             return existing
+
+        grant = await self._session.execute(
+            select(ModuleCompanyGrantRow).where(
+                ModuleCompanyGrantRow.module_id == module_id,
+                ModuleCompanyGrantRow.company_id == company_id,
+                ModuleCompanyGrantRow.status == "active",
+            )
+        )
+        row = grant.scalar_one_or_none()
+        if row is not None and row.bind_kind == ModuleBindKind.GLOBAL:
+            sot = await self.resolve_sot_instance(
+                module_id=module_id,
+                owner_kind=OWNER_COMPANY,
+                owner_id=company_id,
+            )
+            if sot is None:
+                raise AppError(
+                    code="NOT_FOUND",
+                    title="Not Found",
+                    status=404,
+                    detail="global company grant SoT not found",
+                )
+            return sot
+
         parent = await self.ensure_platform_instance(module_id=module_id)
         return await self.fork_instance(
             parent=parent, owner_kind=OWNER_COMPANY, owner_id=company_id
         )
 
     async def ensure_cabinet_instance(self, *, cabinet_id: str, module_id: str) -> ModuleInstanceRow:
+        """Ensure cabinet SoT for a local MC bind. Global MC returns parent SoT (no fork)."""
         existing = await self.get_instance(
             owner_kind=OWNER_CABINET, owner_id=cabinet_id, module_id=module_id
         )
         if existing is not None:
             return existing
+
+        mc = await self._session.execute(
+            select(ModuleCabinetBindingRow).where(
+                ModuleCabinetBindingRow.module_id == module_id,
+                ModuleCabinetBindingRow.cabinet_id == cabinet_id,
+            )
+        )
+        binding = mc.scalar_one_or_none()
+        if binding is not None and binding.bind_kind == ModuleBindKind.GLOBAL:
+            sot = await self.resolve_sot_instance(
+                module_id=module_id,
+                owner_kind=OWNER_CABINET,
+                owner_id=cabinet_id,
+            )
+            if sot is None:
+                raise AppError(
+                    code="NOT_FOUND",
+                    title="Not Found",
+                    status=404,
+                    detail="global cabinet bind SoT not found",
+                )
+            return sot
+
         cab = await self._session.get(CabinetInstanceRow, cabinet_id)
         company_id = None
         if cab is not None:
@@ -172,11 +224,26 @@ class ModuleInstanceService:
         )
 
     async def ensure_project_instance(self, *, project_id: str, module_id: str) -> ModuleInstanceRow:
+        """Ensure a **local** project leaf instance. Global MP must use resolve_sot_instance."""
         existing = await self.get_instance(
             owner_kind=OWNER_PROJECT, owner_id=project_id, module_id=module_id
         )
         if existing is not None:
             return existing
+        mp = await self._session.execute(
+            select(ModuleProjectBindingRow).where(
+                ModuleProjectBindingRow.module_id == module_id,
+                ModuleProjectBindingRow.project_id == project_id,
+            )
+        )
+        binding = mp.scalar_one_or_none()
+        if binding is not None and binding.bind_kind == ModuleBindKind.GLOBAL:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="global project bind has no project instance; use resolve_sot_instance",
+            )
         project = await self._session.get(ProjectRow, project_id)
         if project is None:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="project not found")
@@ -193,18 +260,162 @@ class ModuleInstanceService:
     async def ensure_project_instances_for_cabinet_modules(
         self, *, project_id: str
     ) -> list[ModuleInstanceRow]:
+        """Fork local-MP modules only (global binds share parent SoT)."""
         project = await self._session.get(ProjectRow, project_id)
         if project is None:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="project not found")
         q = await self._session.execute(
-            select(ModuleCabinetBindingRow.module_id).where(
-                ModuleCabinetBindingRow.cabinet_id == project.cabinet_id
+            select(ModuleProjectBindingRow.module_id).where(
+                ModuleProjectBindingRow.project_id == project_id,
+                ModuleProjectBindingRow.bind_kind == ModuleBindKind.LOCAL,
             )
         )
         out: list[ModuleInstanceRow] = []
         for module_id in q.scalars().all():
             out.append(await self.ensure_project_instance(project_id=project_id, module_id=module_id))
         return out
+
+    async def resolve_sot_instance(
+        self,
+        *,
+        module_id: str,
+        owner_kind: str,
+        owner_id: str,
+    ) -> ModuleInstanceRow | None:
+        """Resolve editable SoT instance walking global binds up to platform."""
+        local = await self.get_instance(
+            owner_kind=owner_kind, owner_id=owner_id, module_id=module_id
+        )
+        if local is not None:
+            return local
+
+        if owner_kind == OWNER_PROJECT:
+            mp = await self._session.execute(
+                select(ModuleProjectBindingRow).where(
+                    ModuleProjectBindingRow.module_id == module_id,
+                    ModuleProjectBindingRow.project_id == owner_id,
+                )
+            )
+            binding = mp.scalar_one_or_none()
+            if binding is None:
+                return None
+            if binding.bind_kind != ModuleBindKind.GLOBAL:
+                return None
+            project = await self._session.get(ProjectRow, owner_id)
+            if project is None:
+                return None
+            return await self.resolve_sot_instance(
+                module_id=module_id,
+                owner_kind=OWNER_CABINET,
+                owner_id=project.cabinet_id,
+            )
+
+        if owner_kind == OWNER_CABINET:
+            mc = await self._session.execute(
+                select(ModuleCabinetBindingRow).where(
+                    ModuleCabinetBindingRow.module_id == module_id,
+                    ModuleCabinetBindingRow.cabinet_id == owner_id,
+                )
+            )
+            binding = mc.scalar_one_or_none()
+            if binding is None:
+                return None
+            if binding.bind_kind != ModuleBindKind.GLOBAL:
+                return None
+            cab = await self._session.get(CabinetInstanceRow, owner_id)
+            if cab is None:
+                return None
+            company_id = cab.owner_company_id or cab.company_id
+            if company_id:
+                return await self.resolve_sot_instance(
+                    module_id=module_id,
+                    owner_kind=OWNER_COMPANY,
+                    owner_id=company_id,
+                )
+            return await self.get_instance(
+                owner_kind=OWNER_PLATFORM, owner_id=PLATFORM_OWNER_ID, module_id=module_id
+            )
+
+        if owner_kind == OWNER_COMPANY:
+            grant = await self._session.execute(
+                select(ModuleCompanyGrantRow).where(
+                    ModuleCompanyGrantRow.module_id == module_id,
+                    ModuleCompanyGrantRow.company_id == owner_id,
+                    ModuleCompanyGrantRow.status == "active",
+                )
+            )
+            row = grant.scalar_one_or_none()
+            if row is not None:
+                if row.bind_kind != ModuleBindKind.GLOBAL:
+                    return None
+                return await self.get_instance(
+                    owner_kind=OWNER_PLATFORM, owner_id=PLATFORM_OWNER_ID, module_id=module_id
+                )
+            # grant_scope=all product modules may lack grant row — fall through to platform
+            mod = await self._session.get(ModuleRow, module_id)
+            if mod is not None and mod.company_grant_scope == "all":
+                return await self.get_instance(
+                    owner_kind=OWNER_PLATFORM, owner_id=PLATFORM_OWNER_ID, module_id=module_id
+                )
+            return None
+
+        return await self.get_instance(
+            owner_kind=OWNER_PLATFORM, owner_id=PLATFORM_OWNER_ID, module_id=module_id
+        )
+
+    async def sot_may_edit(
+        self,
+        *,
+        module_id: str,
+        owner_kind: str,
+        owner_id: str,
+    ) -> bool:
+        """Whether this owner may mutate the resolved SoT instance."""
+        local = await self.get_instance(
+            owner_kind=owner_kind, owner_id=owner_id, module_id=module_id
+        )
+        if local is not None:
+            return True
+        if owner_kind == OWNER_PROJECT:
+            mp = await self._session.execute(
+                select(ModuleProjectBindingRow).where(
+                    ModuleProjectBindingRow.module_id == module_id,
+                    ModuleProjectBindingRow.project_id == owner_id,
+                )
+            )
+            binding = mp.scalar_one_or_none()
+            return bool(binding and binding.child_may_edit)
+        if owner_kind == OWNER_CABINET:
+            mc = await self._session.execute(
+                select(ModuleCabinetBindingRow).where(
+                    ModuleCabinetBindingRow.module_id == module_id,
+                    ModuleCabinetBindingRow.cabinet_id == owner_id,
+                )
+            )
+            binding = mc.scalar_one_or_none()
+            if binding is None:
+                return False
+            if binding.bind_kind == ModuleBindKind.LOCAL:
+                return True
+            return bool(binding.child_may_edit)
+        if owner_kind == OWNER_COMPANY:
+            grant = await self._session.execute(
+                select(ModuleCompanyGrantRow).where(
+                    ModuleCompanyGrantRow.module_id == module_id,
+                    ModuleCompanyGrantRow.company_id == owner_id,
+                    ModuleCompanyGrantRow.status == "active",
+                )
+            )
+            row = grant.scalar_one_or_none()
+            if row is None:
+                mod = await self._session.get(ModuleRow, module_id)
+                if mod is not None and mod.company_grant_scope == "all":
+                    return False
+                return False
+            if row.bind_kind == ModuleBindKind.LOCAL:
+                return True
+            return bool(row.child_may_edit)
+        return owner_kind == OWNER_PLATFORM
 
     async def delete_instance(self, *, instance_id: str) -> bool:
         row = await self._session.get(ModuleInstanceRow, instance_id)

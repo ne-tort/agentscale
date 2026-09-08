@@ -85,8 +85,10 @@ class CabinetModuleService:
                 "id": mod.id,
                 "name": mod.name,
                 "status": mod.status,
+                "bind_kind": bind.bind_kind,
+                "child_may_edit": bind.child_may_edit,
             }
-            for _bind, mod in q.all()
+            for bind, mod in q.all()
         ]
 
     async def get_meta_document(
@@ -102,9 +104,7 @@ class CabinetModuleService:
         await self._access.require_access(
             cabinet_id=cabinet_id, principal=principal, employee=employee, write=False
         )
-        inst = await self._instances.ensure_cabinet_instance(
-            cabinet_id=cabinet_id, module_id=module_id
-        )
+        inst = await self._cabinet_sot(cabinet_id=cabinet_id, module_id=module_id, write=False)
         try:
             doc = await self._instances.get_meta_document(instance_id=inst.id, slug=slug)
         except AppError:
@@ -125,9 +125,7 @@ class CabinetModuleService:
             cabinet_id=cabinet_id, principal=principal, employee=employee, write=False
         )
         await self._require_module_binding(cabinet_id=cabinet_id, module_id=module_id)
-        inst = await self._instances.ensure_cabinet_instance(
-            cabinet_id=cabinet_id, module_id=module_id
-        )
+        inst = await self._cabinet_sot(cabinet_id=cabinet_id, module_id=module_id, write=False)
         rows = await self._instances.list_data_rows(instance_id=inst.id, table_slug=table_slug)
         return [
             {
@@ -154,9 +152,7 @@ class CabinetModuleService:
             cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
         )
         await self._require_module_binding(cabinet_id=cabinet_id, module_id=module_id)
-        inst = await self._instances.ensure_cabinet_instance(
-            cabinet_id=cabinet_id, module_id=module_id
-        )
+        inst = await self._cabinet_sot(cabinet_id=cabinet_id, module_id=module_id, write=True)
         columns_body = await self._instances.resolve_columns_body(
             instance_id=inst.id, module_id=module_id
         )
@@ -226,9 +222,7 @@ class CabinetModuleService:
             cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
         )
         await self._require_module_binding(cabinet_id=cabinet_id, module_id=module_id)
-        inst = await self._instances.ensure_cabinet_instance(
-            cabinet_id=cabinet_id, module_id=module_id
-        )
+        inst = await self._cabinet_sot(cabinet_id=cabinet_id, module_id=module_id, write=True)
         columns_body = await self._instances.resolve_columns_body(
             instance_id=inst.id, module_id=module_id
         )
@@ -298,9 +292,7 @@ class CabinetModuleService:
             cabinet_id=cabinet_id, principal=principal, employee=employee, write=True
         )
         await self._require_module_binding(cabinet_id=cabinet_id, module_id=module_id)
-        inst = await self._instances.ensure_cabinet_instance(
-            cabinet_id=cabinet_id, module_id=module_id
-        )
+        inst = await self._cabinet_sot(cabinet_id=cabinet_id, module_id=module_id, write=True)
         ok = await self._instances.delete_data_row(
             instance_id=inst.id, table_slug=table_slug, row_id=row_id
         )
@@ -356,3 +348,25 @@ class CabinetModuleService:
                 status=404,
                 detail="module is not bound to cabinet",
             )
+
+    async def _cabinet_sot(self, *, cabinet_id: str, module_id: str, write: bool):
+        from prodavan.application.modules.module_instance_service import OWNER_CABINET
+
+        inst = await self._instances.ensure_cabinet_instance(
+            cabinet_id=cabinet_id, module_id=module_id
+        )
+        if write:
+            may = await self._instances.sot_may_edit(
+                module_id=module_id,
+                owner_kind=OWNER_CABINET,
+                owner_id=cabinet_id,
+            )
+            if not may:
+                raise AppError(
+                    code="FORBIDDEN",
+                    title="Forbidden",
+                    status=403,
+                    detail="global cabinet module bind is read-only",
+                )
+        return inst
+

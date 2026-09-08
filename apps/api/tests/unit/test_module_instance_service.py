@@ -199,7 +199,7 @@ async def test_uninstall_deletes_module_instances() -> None:
 
 
 @pytest.mark.asyncio
-async def test_set_profile_writes_project_leaf_not_cabinet() -> None:
+async def test_set_profile_writes_sot_instance() -> None:
     from prodavan.application.project_service.module_settings import ProjectModuleSettingsService
 
     session = AsyncMock()
@@ -207,8 +207,9 @@ async def test_set_profile_writes_project_leaf_not_cabinet() -> None:
     svc = ProjectModuleSettingsService.__new__(ProjectModuleSettingsService)
     svc._session = session
     svc._instances = MagicMock()
-    leaf = SimpleNamespace(id="minst_leaf")
-    svc._instances.ensure_project_instance = AsyncMock(return_value=leaf)
+    leaf = SimpleNamespace(id="minst_sot")
+    svc._instances.sot_may_edit = AsyncMock(return_value=True)
+    svc._instances.resolve_sot_instance = AsyncMock(return_value=leaf)
     svc._instances.upsert_data_row = AsyncMock()
 
     profiles = [
@@ -223,16 +224,14 @@ async def test_set_profile_writes_project_leaf_not_cabinet() -> None:
         profiles=profiles,
     )
 
-    svc._instances.ensure_project_instance.assert_awaited_once_with(
-        project_id="prj_1", module_id="mod_prompts"
-    )
+    svc._instances.resolve_sot_instance.assert_awaited()
     assert svc._instances.upsert_data_row.await_count == 2
     bodies = [c.kwargs["body"] for c in svc._instances.upsert_data_row.await_args_list]
     assert bodies[0]["is_default"] is False
     assert bodies[0]["project_ids"] == []
     assert bodies[1]["is_default"] is True
     for c in svc._instances.upsert_data_row.await_args_list:
-        assert c.kwargs["instance_id"] == "minst_leaf"
+        assert c.kwargs["instance_id"] == "minst_sot"
 
 
 @pytest.mark.asyncio
@@ -248,6 +247,7 @@ async def test_cabinet_write_targets_cabinet_instance() -> None:
     svc._instances = MagicMock()
     cab_inst = SimpleNamespace(id="minst_cab")
     svc._instances.ensure_cabinet_instance = AsyncMock(return_value=cab_inst)
+    svc._instances.sot_may_edit = AsyncMock(return_value=True)
     svc._instances.resolve_columns_body = AsyncMock(return_value=[])
     created = {"row_id": "row_1", "table_slug": "notes", "body": {"t": 1}}
     svc._instances.create_data_row = AsyncMock(return_value=created)

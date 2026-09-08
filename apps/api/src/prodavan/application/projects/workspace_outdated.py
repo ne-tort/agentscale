@@ -17,14 +17,18 @@ async def mark_workspace_outdated_for_cabinet(
     *,
     cabinet_id: str,
     source: str,
+    project_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    project_ids = await ProjectQuery(session).list_ids(
+    all_ids = await ProjectQuery(session).list_ids(
         cabinet_id=cabinet_id,
         exclude_status=ProjectStatus.DELETED,
     )
+    if project_ids is not None:
+        allow = set(project_ids)
+        all_ids = [pid for pid in all_ids if pid in allow]
     now = datetime.now(UTC)
     marked = 0
-    for project_id in project_ids:
+    for project_id in all_ids:
         row = await session.get(ProjectRow, project_id)
         if row is None:
             continue
@@ -35,7 +39,7 @@ async def mark_workspace_outdated_for_cabinet(
         "marked_outdated": marked,
         "cabinet_id": cabinet_id,
         "source": source,
-        "project_ids": project_ids,
+        "project_ids": all_ids,
     }
 
 

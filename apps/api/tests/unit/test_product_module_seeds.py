@@ -49,7 +49,7 @@ def test_prompts_meta_has_materialize_and_seed() -> None:
     assert tab["view_slug"] == "prompt_profiles_list"
     assert tab["subtitle"] == "Инструкции для агента"
     assert tab["icon"] == "psychology_outlined"
-    assert tab["instance_owner"] == "cabinet"
+    assert tab["default_project_bind"] == "global"
     assert any(c["name"] == "project_ids" for c in meta["columns"])
     assert not any(c["table_slug"] == "prompt_paths" and c["name"] == "project_ids" for c in meta["columns"])
     path_col = next(c for c in meta["columns"] if c["table_slug"] == "prompt_paths" and c["name"] == "path")
@@ -102,9 +102,9 @@ def test_management_tabs_have_unique_icons_and_subtitles() -> None:
     assert len(icons) == 3
     assert mcp["subtitle"] == "Инструменты и интеграции"
     assert files["subtitle"] == "Дополнительные файлы для агента"
-    assert prompts["instance_owner"] == "cabinet"
-    assert mcp["instance_owner"] == "cabinet"
-    assert files["instance_owner"] == "cabinet"
+    assert prompts["default_project_bind"] == "global"
+    assert mcp["default_project_bind"] == "global"
+    assert files["default_project_bind"] == "global"
 
 
 def test_mcp_inline_add_is_laconic() -> None:
@@ -142,7 +142,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     tab = meta["tabs"][0]
     assert tab["view_slug"] == "equipment_hub"
     assert tab["nav"]["placement"] == "data"
-    assert tab["instance_owner"] == "project"
+    assert tab["default_project_bind"] == "local"
     assert {t["slug"] for t in meta["tables"]} == {
         "catalogs",
         "request_lines",

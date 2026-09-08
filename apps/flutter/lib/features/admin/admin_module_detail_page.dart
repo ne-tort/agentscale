@@ -10,7 +10,7 @@ import 'package:prodavan/features/admin/admin_module_json_page.dart';
 import 'package:prodavan/features/meta/module_meta_repository.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Admin module detail — name, cabinet bindings, company grants.
+/// Admin module detail — name, cabinet/company grants, project Local/Global binds.
 class AdminModuleDetailPage extends StatefulWidget {
   const AdminModuleDetailPage({
     super.key,
@@ -33,6 +33,7 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
   Set<String> _cabinetIds = {};
   List<Map<String, dynamic>> _companies = const [];
   List<Map<String, dynamic>> _cabinets = const [];
+  List<Map<String, dynamic>> _projectBinds = const [];
   bool _jsonConfigured = false;
 
   @override
@@ -50,6 +51,7 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
       final mod = await adminContext.api.getModule(widget.moduleId);
       final companies = await adminContext.api.listCompanies();
       final cabinets = await adminContext.api.listCabinets();
+      final projectBinds = await adminContext.api.listModuleProjectBindings(widget.moduleId);
       final manifest = await ModuleMetaRepository.load(adminContext.api, widget.moduleId);
       if (!mounted) return;
       final companyIds = mod['company_ids'];
@@ -64,6 +66,7 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
             : <String>{};
         _companies = companies;
         _cabinets = cabinets;
+        _projectBinds = projectBinds;
         _jsonConfigured = manifest.hasContent;
         _loading = false;
       });
@@ -108,6 +111,7 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
             ? ids.map((e) => e.toString()).toSet()
             : cabinetIds;
       });
+      await _load();
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
       rethrow;
@@ -131,6 +135,26 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
       rethrow;
+    }
+  }
+
+  Future<void> _setProjectBind(String projectId, String? bindKind) async {
+    try {
+      if (bindKind == null) {
+        await adminContext.api.revokeModuleProject(
+          moduleId: widget.moduleId,
+          projectId: projectId,
+        );
+      } else {
+        await adminContext.api.bindModuleProject(
+          moduleId: widget.moduleId,
+          projectId: projectId,
+          bindKind: bindKind,
+        );
+      }
+      await _load();
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
     }
   }
 
@@ -170,6 +194,10 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context);
+    final isRu = locale.languageCode == 'ru';
+    final localLabel = isRu ? 'Локальная' : 'Local';
+    final globalLabel = isRu ? 'Глобальная' : 'Global';
     final companyChoices = _companies
         .map((c) => c['id'] as String)
         .where((id) => id.isNotEmpty)
@@ -228,6 +256,53 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
                   pickerTitle: l10n.adminSelectCompaniesForModule,
                   onSave: _saveCompanies,
                 ),
+                if (_projectBinds.isNotEmpty) ...[
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppSpacing.md,
+                      AppSpacing.md,
+                      AppSpacing.md,
+                      AppSpacing.sm,
+                    ),
+                    child: Text(
+                      isRu ? 'Проекты' : 'Projects',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ),
+                  for (final bind in _projectBinds)
+                    ListTile(
+                      title: Text(
+                        bind['project_name'] as String? ??
+                            bind['project_id'] as String? ??
+                            '—',
+                      ),
+                      subtitle: Text(bind['project_id'] as String? ?? ''),
+                      trailing: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          FilterChip(
+                            label: Text(localLabel, style: const TextStyle(fontSize: 12)),
+                            selected: bind['bind_kind'] == 'local',
+                            visualDensity: VisualDensity.compact,
+                            onSelected: (_) => _setProjectBind(
+                              bind['project_id'] as String,
+                              bind['bind_kind'] == 'local' ? null : 'local',
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          FilterChip(
+                            label: Text(globalLabel, style: const TextStyle(fontSize: 12)),
+                            selected: bind['bind_kind'] == 'global',
+                            visualDensity: VisualDensity.compact,
+                            onSelected: (_) => _setProjectBind(
+                              bind['project_id'] as String,
+                              bind['bind_kind'] == 'global' ? null : 'global',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
                 AppNavPreference(
                   title: l10n.adminModuleJson,
                   icon: Icons.data_object_outlined,

@@ -7,14 +7,13 @@ from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.modules.module_binding_service import ModuleBindingService
 from prodavan.application.modules.module_meta_service import ModuleMetaDocumentService
 from prodavan.application.pod_service.workspace_paths import normalize_workspace_path
 from prodavan.domain.errors import AppError
-from prodavan.infrastructure.cabinets.sql import qident
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 from prodavan.infrastructure.persistence.models.modules import ModuleMetaDocumentRow
 
@@ -72,11 +71,12 @@ class MaterializePlanner:
         )
         module_ids = enabled_module_ids
         if module_ids is None:
-            module_ids = await self._bindings.list_module_ids_for_cabinet(cabinet_id)
+            module_ids = await self._bindings.list_module_ids_for_project(project_id)
         ops: list[MaterializeOp] = []
         for module_id in module_ids:
+            # Explicit MP required — empty MP no longer means all projects.
             bound_projects = await self._bindings.list_project_ids(module_id)
-            if bound_projects and project_id not in bound_projects:
+            if project_id not in bound_projects:
                 continue
             rules = await self._load_materialize_rules(module_id)
             rules = _merge_materialize_rules(rules, await self._auto_rules_from_columns(module_id))
@@ -258,53 +258,63 @@ class MaterializePlanner:
         cabinet_id: str | None = None,
     ) -> str | None:
         from prodavan.application.modules.module_instance_service import (
+            OWNER_PROJECT,
+            ModuleInstanceService,
+        )
+
+        del schema_name  # legacy schema fallback removed
+        instances = ModuleInstanceService(self._session)
+        sot = await instances.resolve_sot_instance(
+            module_id="mod_prompts",
+            owner_kind=OWNER_PROJECT,
+            owner_id=project_id,
+        )
+        if sot is None and cabinet_id:
+            from prodavan.application.modules.module_instance_service import OWNER_CABINET
+
+            sot = await instances.resolve_sot_instance(
+                module_id="mod_prompts",
+                owner_kind=OWNER_CABINET,
+                owner_id=cabinet_id,
+            )
+        if sot is None:
+            return None
+        rows = await instances.list_data_rows(
+            instance_id=sot.id, table_slug="prompt_profiles"
+        )
+        return _pick_active_profile(rows, project_id)
+
+    async def _sot_instance_id(
+        self,
+        *,
+        module_id: str,
+        project_id: str | None,
+        cabinet_id: str | None,
+    ) -> str | None:
+        from prodavan.application.modules.module_instance_service import (
             OWNER_CABINET,
             OWNER_PROJECT,
             ModuleInstanceService,
         )
 
         instances = ModuleInstanceService(self._session)
-        # Cabinet-owned prompts: SoT is cabinet instance.
+        if project_id:
+            sot = await instances.resolve_sot_instance(
+                module_id=module_id,
+                owner_kind=OWNER_PROJECT,
+                owner_id=project_id,
+            )
+            if sot is not None:
+                return sot.id
         if cabinet_id:
-            cab = await instances.get_instance(
-                owner_kind=OWNER_CABINET, owner_id=cabinet_id, module_id="mod_prompts"
+            sot = await instances.resolve_sot_instance(
+                module_id=module_id,
+                owner_kind=OWNER_CABINET,
+                owner_id=cabinet_id,
             )
-            if cab is not None:
-                rows = await instances.list_data_rows(
-                    instance_id=cab.id, table_slug="prompt_profiles"
-                )
-                rid = _pick_active_profile(rows, project_id)
-                if rid:
-                    return rid
-
-        inst = await instances.get_instance(
-            owner_kind=OWNER_PROJECT, owner_id=project_id, module_id="mod_prompts"
-        )
-        if inst is not None:
-            rows = await instances.list_data_rows(
-                instance_id=inst.id, table_slug="prompt_profiles"
-            )
-            rid = _pick_active_profile(rows, project_id)
-            if rid:
-                return rid
-
-        qschema = qident(schema_name)
-        q = await self._session.execute(
-            text(
-                f"""
-                SELECT row_id, body
-                FROM {qschema}.module_data_rows
-                WHERE module_id = 'mod_prompts'
-                  AND table_slug = 'prompt_profiles'
-                ORDER BY updated_at
-                """
-            )
-        )
-        legacy_rows = [
-            {"row_id": str(row.row_id), "body": row.body if isinstance(row.body, dict) else {}}
-            for row in q.fetchall()
-        ]
-        return _pick_active_profile(legacy_rows, project_id)
+            if sot is not None:
+                return sot.id
+        return None
 
     async def _fetch_row(
         self,
@@ -316,53 +326,21 @@ class MaterializePlanner:
         project_id: str | None = None,
         cabinet_id: str | None = None,
     ) -> dict[str, Any] | None:
-        from prodavan.application.modules.module_instance_service import (
-            OWNER_CABINET,
-            OWNER_PROJECT,
-            ModuleInstanceService,
-        )
+        from prodavan.application.modules.module_instance_service import ModuleInstanceService
 
+        del schema_name
         instances = ModuleInstanceService(self._session)
-        owner = await self._instance_owner_for_module(module_id)
-
-        if owner == "cabinet" and cabinet_id:
-            cab = await instances.get_instance(
-                owner_kind=OWNER_CABINET, owner_id=cabinet_id, module_id=module_id
-            )
-            if cab is not None:
-                row = await instances.get_data_row(
-                    instance_id=cab.id, table_slug=table_slug, row_id=row_id
-                )
-                if row is not None:
-                    body = row.get("body")
-                    return body if isinstance(body, dict) else {}
-
-        if project_id:
-            inst = await instances.get_instance(
-                owner_kind=OWNER_PROJECT, owner_id=project_id, module_id=module_id
-            )
-            if inst is not None:
-                row = await instances.get_data_row(
-                    instance_id=inst.id, table_slug=table_slug, row_id=row_id
-                )
-                if row is not None:
-                    body = row.get("body")
-                    return body if isinstance(body, dict) else {}
-
-        qschema = qident(schema_name)
-        q = await self._session.execute(
-            text(
-                f"""
-                SELECT body FROM {qschema}.module_data_rows
-                WHERE module_id = :module_id AND table_slug = :table_slug AND row_id = :row_id
-                """
-            ),
-            {"module_id": module_id, "table_slug": table_slug, "row_id": row_id},
+        instance_id = await self._sot_instance_id(
+            module_id=module_id, project_id=project_id, cabinet_id=cabinet_id
         )
-        row = q.fetchone()
+        if instance_id is None:
+            return None
+        row = await instances.get_data_row(
+            instance_id=instance_id, table_slug=table_slug, row_id=row_id
+        )
         if row is None:
             return None
-        body = row.body
+        body = row.get("body")
         return body if isinstance(body, dict) else {}
 
     async def _fetch_rows(
@@ -375,88 +353,25 @@ class MaterializePlanner:
         project_id: str,
         cabinet_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        from prodavan.application.modules.module_instance_service import (
-            OWNER_CABINET,
-            OWNER_PROJECT,
-            ModuleInstanceService,
-        )
+        from prodavan.application.modules.module_instance_service import ModuleInstanceService
 
+        del schema_name
         instances = ModuleInstanceService(self._session)
-        owner = await self._instance_owner_for_module(module_id)
-
-        async def _from_instance(instance_id: str) -> list[dict[str, Any]]:
-            rows = await instances.list_data_rows(instance_id=instance_id, table_slug=table_slug)
-            out: list[dict[str, Any]] = []
-            for r in rows:
-                body = r.get("body") if isinstance(r.get("body"), dict) else {}
-                if filt and not _row_matches_filter(body, filt):
-                    continue
-                if not _row_applies_to_project(body, project_id):
-                    continue
-                out.append({"row_id": r["row_id"], **body})
-            return out
-
-        if owner == "cabinet" and cabinet_id:
-            cab = await instances.get_instance(
-                owner_kind=OWNER_CABINET, owner_id=cabinet_id, module_id=module_id
-            )
-            if cab is not None:
-                return await _from_instance(cab.id)
-
-        inst = await instances.get_instance(
-            owner_kind=OWNER_PROJECT, owner_id=project_id, module_id=module_id
+        instance_id = await self._sot_instance_id(
+            module_id=module_id, project_id=project_id, cabinet_id=cabinet_id
         )
-        if inst is not None:
-            return await _from_instance(inst.id)
-
-        qschema = qident(schema_name)
-        q = await self._session.execute(
-            text(
-                f"""
-                SELECT row_id, body FROM {qschema}.module_data_rows
-                WHERE module_id = :module_id AND table_slug = :table_slug
-                ORDER BY updated_at
-                """
-            ),
-            {"module_id": module_id, "table_slug": table_slug},
-        )
-        out = []
-        for r in q.fetchall():
-            body = r.body if isinstance(r.body, dict) else {}
+        if instance_id is None:
+            return []
+        rows = await instances.list_data_rows(instance_id=instance_id, table_slug=table_slug)
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            body = r.get("body") if isinstance(r.get("body"), dict) else {}
             if filt and not _row_matches_filter(body, filt):
                 continue
             if not _row_applies_to_project(body, project_id):
                 continue
-            out.append({"row_id": r.row_id, **body})
+            out.append({"row_id": r["row_id"], **body})
         return out
-
-    async def _instance_owner_for_module(self, module_id: str) -> str:
-        """Read instance_owner from tabs meta; default project."""
-        try:
-            doc = await self._meta.get_document(module_id=module_id, slug="tabs")
-        except Exception:
-            return "project"
-        body = doc.get("body") if isinstance(doc, dict) else None
-        if isinstance(body, dict) and "items" in body:
-            items = body.get("items")
-        elif isinstance(body, list):
-            items = body
-        else:
-            items = None
-        if not isinstance(items, list):
-            return "project"
-        for tab in items:
-            if not isinstance(tab, dict):
-                continue
-            raw = tab.get("instance_owner")
-            if isinstance(raw, str) and raw in ("cabinet", "project"):
-                return raw
-            nav = tab.get("nav")
-            if isinstance(nav, dict):
-                nested = nav.get("instance_owner")
-                if isinstance(nested, str) and nested in ("cabinet", "project"):
-                    return nested
-        return "project"
 
     def _substitute(self, template: str, ctx: dict[str, str | None]) -> str:
         # {{var}} row-field templates first — {var} would otherwise match the inner
@@ -498,7 +413,7 @@ class MaterializePlanner:
         )
         if body is None:
             return None
-        # Always honor row project_ids (empty/missing = all projects).
+        # Empty/missing project_ids = all module-bound projects (see _row_applies_to_project).
         if not _row_applies_to_project(body, project_id):
             return None
         str_body = {k: str(v) for k, v in body.items() if v is not None}

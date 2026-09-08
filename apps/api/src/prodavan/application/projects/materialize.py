@@ -102,7 +102,8 @@ class ProjectMaterializeService:
         all_ids = all_cabinet_module_ids
         if all_ids is None:
             all_ids = await ModuleBindingService(session).list_module_ids_for_cabinet(cabinet_id)
-        enabled = enabled_module_ids or all_ids
+        # Empty list is intentional (no MP binds) — never fall back to all cabinet modules.
+        enabled = all_ids if enabled_module_ids is None else enabled_module_ids
         enabled_set = set(enabled)
         disabled = [mid for mid in all_ids if mid not in enabled_set]
         manifest: dict[str, Any] = dict(project.materialize_manifest or {})

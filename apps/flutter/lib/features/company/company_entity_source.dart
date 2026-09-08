@@ -38,7 +38,16 @@ bool companyModuleBoundToCabinet(Map<String, dynamic> module, String cabinetId) 
   return ids.map((e) => e.toString()).contains(cabinetId);
 }
 
-/// List-row styling for platform-assigned entities (primary / dark blue + bold title).
+/// Module appears locked in company UI (global bind without child edit, or RO).
+bool companyModuleLocked(Map<String, dynamic> module) {
+  if (module['may_edit'] == false || module['writable'] == false) return true;
+  final bindKind = module['bind_kind'] as String?;
+  final childMayEdit = module['child_may_edit'];
+  if (bindKind == 'global' && childMayEdit == false) return true;
+  return companyEntityPlatformAssigned(module['source'] as String?);
+}
+
+/// List-row styling for platform-assigned / locked entities (primary + bold title).
 ({Color? rowColor, bool titleBold}) companyEntityRowStyle(
   BuildContext context,
   String? source,
@@ -47,6 +56,17 @@ bool companyModuleBoundToCabinet(Map<String, dynamic> module, String cabinetId) 
     return (rowColor: context.appColors.primary, titleBold: true);
   }
   return (rowColor: null, titleBold: false);
+}
+
+/// Row style for company modules using bind flags when present.
+({Color? rowColor, bool titleBold}) companyModuleRowStyle(
+  BuildContext context,
+  Map<String, dynamic> module,
+) {
+  if (companyModuleLocked(module)) {
+    return (rowColor: context.appColors.primary, titleBold: true);
+  }
+  return companyEntityRowStyle(context, module['source'] as String?);
 }
 
 /// Warning styling for paused/disabled rows (takes precedence over platform info).

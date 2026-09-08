@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -15,10 +15,17 @@ from prodavan.application.projects.workspace_sync_policy import WorkspaceSyncNot
 
 
 @pytest.mark.asyncio
-async def test_module_has_materialize_rules_product_modules() -> None:
+async def test_module_has_materialize_rules_reads_meta_document() -> None:
     session = AsyncMock()
-    assert await module_has_materialize_rules(session, module_id="mod_files") is True
-    assert await module_has_materialize_rules(session, module_id="mod_mcp") is True
+    with patch(
+        "prodavan.application.projects.rematerialize_scheduler.ModuleMetaDocumentService"
+    ) as meta_cls:
+        meta_cls.return_value.get_document = AsyncMock(
+            return_value={"body": [{"id": "r1", "enabled": True}]}
+        )
+        assert await module_has_materialize_rules(session, module_id="mod_files") is True
+        meta_cls.return_value.get_document = AsyncMock(return_value={"body": []})
+        assert await module_has_materialize_rules(session, module_id="mod_mcp") is False
 
 
 @pytest.mark.asyncio
@@ -32,16 +39,33 @@ async def test_schedule_cabinet_rematerialize_enqueues_projects() -> None:
         source="cabinet_module",
         enqueued=("proj_a", "proj_b"),
     )
-    with patch(
-        "prodavan.application.projects.rematerialize_scheduler.defer_or_schedule_cabinet_sync",
-        AsyncMock(return_value=notification),
-    ) as defer:
+    bindings = MagicMock()
+    bindings.list_project_ids = AsyncMock(return_value=["proj_a", "proj_b"])
+    with (
+        patch(
+            "prodavan.application.projects.rematerialize_scheduler.module_has_materialize_rules",
+            AsyncMock(return_value=True),
+        ),
+        patch(
+            "prodavan.application.modules.module_binding_service.ModuleBindingService",
+            return_value=bindings,
+        ),
+        patch(
+            "prodavan.application.projects.rematerialize_scheduler.defer_or_schedule_cabinet_sync",
+            AsyncMock(return_value=notification),
+        ) as defer,
+    ):
+        # cabinet project query returns both bound projects
+        result = MagicMock()
+        result.all.return_value = [("proj_a",), ("proj_b",)]
+        session.execute = AsyncMock(return_value=result)
         out = await schedule_cabinet_rematerialize(
             session, cabinet_id="cab_1", module_id="mod_files"
         )
 
     assert out["scheduled"] == 2
     defer.assert_awaited_once()
+    assert set(defer.await_args.kwargs["project_ids"]) == {"proj_a", "proj_b"}
 
 
 @pytest.mark.asyncio
@@ -68,10 +92,25 @@ async def test_schedule_cabinet_rematerialize_marks_outdated_when_auto_off() -> 
         module_id="mod_files",
         source="cabinet_module",
     )
-    with patch(
-        "prodavan.application.projects.rematerialize_scheduler.defer_or_schedule_cabinet_sync",
-        AsyncMock(return_value=notification),
-    ) as defer:
+    bindings = MagicMock()
+    bindings.list_project_ids = AsyncMock(return_value=["proj_a", "proj_b"])
+    result = MagicMock()
+    result.all.return_value = [("proj_a",), ("proj_b",)]
+    session.execute = AsyncMock(return_value=result)
+    with (
+        patch(
+            "prodavan.application.projects.rematerialize_scheduler.module_has_materialize_rules",
+            AsyncMock(return_value=True),
+        ),
+        patch(
+            "prodavan.application.modules.module_binding_service.ModuleBindingService",
+            return_value=bindings,
+        ),
+        patch(
+            "prodavan.application.projects.rematerialize_scheduler.defer_or_schedule_cabinet_sync",
+            AsyncMock(return_value=notification),
+        ) as defer,
+    ):
         out = await schedule_cabinet_rematerialize(
             session, cabinet_id="cab_1", module_id="mod_files"
         )

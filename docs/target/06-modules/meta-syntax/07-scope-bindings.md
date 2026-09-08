@@ -1,27 +1,27 @@
 # Scope, bindings, enabled
 
-Как meta взаимодействует с **module instance cascade** и UI state (disabled items, project filter).
+Как meta взаимодействует с **module bind cascade** (local / global) и UI state.
 
-## Binding model (recap)
+## Binding model
 
 ```text
-Template → platform/company/cabinet/project instances (copy-on-bind)
-Module ──MC──► Cabinet     (fork cabinet instance + legacy install)
-Module ──MP──► Project     (optional allowlist; leaf = project instance)
+Template → platform instance
+Module ──grant──► Company   (local = company instance; global = platform SoT)
+Module ──MC────► Cabinet    (local = cabinet fork; global = parent SoT)
+Module ──MP────► Project    (local = project leaf; global = parent SoT)
 ```
 
-**Канон:** editable path = **instances**.  
+Каждая связь: `bind_kind` ∈ {`local`,`global`}, `child_may_edit` bool.
 
-**`instance_owner` (orthogonal to `nav.placement`):**
+**Канон:** editable path = **SoT instance** from `resolve_sot_instance`.  
+**Удалено:** tab `instance_owner`, «пустой MP = все проекты», `project_module_bindings` enable-switch.
 
-| Value | Employee hub UI | Materialize SoT |
-|-------|-----------------|-----------------|
-| `cabinet` | Cabinet instance API (`listModuleData*`); management/data entries **without** requiring selected project | Cabinet instance rows; filter `_row_applies_to_project(project_ids)` |
-| `project` | Project leaf (`listProjectRuntimeModuleData*`); only with selected project; project change → reload | Project leaf rows |
+| Bind | Child instance | Materialize / UI SoT |
+|------|----------------|----------------------|
+| local | fork created | child instance |
+| global | none | resolve parent |
 
-Product seeds: `mod_prompts` / `mod_mcp` / `mod_files` → `cabinet`; `mod_equipment` → `project`.
-
-**Legacy:** shared cabinet `module_data_rows` + row `project_ids` filter — fallback after migration for older paths; management modules above intentionally keep cabinet SoT + `project_ids`.
+Product defaults: prompts/MCP/files → `default_project_bind: global`; equipment → `local`.
 
 ## Scope block
 
@@ -53,61 +53,19 @@ Reusable on `TableDefinition`, `ViewDefinition`, `TabDefinition`, `ActionDefinit
 | `visibility: hidden` | Not in nav; direct access 404 |
 | `visibility: disabled` | Shown grayed (tabs) |
 
-**Use cases:**
-
-| Case | Meta |
-|------|------|
-| Seasonal tab off | `enabled: false` |
-| Admin-only table | `scope.projects=none` + company.admin check in policy |
-| Beta feature | `visibility: hidden` until flag |
-
-## Condition (enabled_when)
-
-Simple JSON logic v1 — no arbitrary expressions:
-
-```json
-{
-  "enabled_when": {
-    "all": [
-      { "field": "status", "op": "eq", "value": "active" },
-      { "context.project.status", "op": "neq", "value": "paused" }
-    ]
-  }
-}
-```
-
-| op | Types |
-|----|-------|
-| `eq`, `neq` | any |
-| `in` | array |
-| `empty`, `not_empty` | string/array |
-| `gt`, `lt` | number, datetime |
-
-Context paths:
-
-| Path | Source |
-|------|--------|
-| `field.*` | Current row body |
-| `context.project.*` | Active project |
-| `context.cabinet.*` | Cabinet registry |
-| `context.user.*` | Employee roles |
-
-v2: CEL or JSONLogic subset — not v1.
-
 ## Project binding interaction
 
 ```text
 Employee opens Cabinet (no project)
   → tabs where scope.projects in (all, none)
+  → management modules with global project binds edit cabinet SoT
 
-Employee opens Project P in Cabinet C
-  → tabs scope.projects = all
-  → + tabs scope.projects = bound IF MP(module, P) exists
+Employee opens Project P
+  → module appears in materialize iff MP(module, P) exists
+  → local MP → project leaf UI; global MP → cabinet (or higher) SoT UI
 ```
 
-Module meta **does not** store project ids at template level — only `scope.projects=bound`; runtime checks `module_project_bindings`.
-
-**Row-level scoping (v1):** column `project_ids` (`type: json`, widget `project_multiselect`) in row body. Empty list = all projects in cabinet. Materialize and future project-context UI filter by this field. Orthogonal to MP: MP = module visible to project; `project_ids` = row included in that project's workspace.
+**Row-level scoping:** column `project_ids` (`project_multiselect`). Choices = **module-bound projects only**. Empty list = all bound projects. Orthogonal to bind_kind: MP = module linked to project; `project_ids` = which linked projects receive this row’s artifacts.
 
 ## Multi-module merge
 
@@ -118,23 +76,3 @@ Two modules bind same cabinet:
 | Tab title collision | Prefix module name |
 | Table slug collision | **Forbidden** across modules in one cabinet — validate on bind |
 | View slug collision | Namespace: `{module_short}_{view_slug}` internal |
-
-On bind: platform validates `table.slug` unique per cabinet installation set.
-
-## Company / Admin overrides
-
-| Actor | Can |
-|-------|-----|
-| Platform Admin | Edit module meta template |
-| Company admin | Assign employees; cannot edit platform module meta |
-| Employee | CRUD data rows; MCP meta mutate if policy allows |
-
-Platform-owned cabinet (`owner_scope=platform`): data read per grant; meta write admin-only.
-
-## Audit fields
-
-Tables with `audit.created_by: true` → `module_data_rows.created_by` populated (already in API).
-
-Meta mutations → `cabinet.meta.audit` (future centralized log).
-
-Дальше: [mcp-tools](08-mcp-tools.md)

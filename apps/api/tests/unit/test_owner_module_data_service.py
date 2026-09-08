@@ -56,6 +56,7 @@ async def test_company_delete_targets_company_instance_only() -> None:
     company = SimpleNamespace(id="minst_company")
 
     with (
+        patch.object(svc._instances, "resolve_sot_instance", AsyncMock(return_value=None)),
         patch.object(svc._instances, "ensure_company_instance", AsyncMock(return_value=company)) as ensure,
         patch.object(svc._instances, "delete_data_row", AsyncMock(return_value=True)) as delete,
         patch.object(svc._instances, "ensure_platform_instance", AsyncMock()) as ensure_platform,

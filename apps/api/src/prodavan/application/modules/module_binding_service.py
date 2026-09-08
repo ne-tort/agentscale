@@ -48,7 +48,12 @@ class ModuleBindingService:
             .order_by(CabinetInstanceRow.name)
         )
         return [
-            {"cabinet_id": row.cabinet_id, "cabinet_name": name}
+            {
+                "cabinet_id": row.cabinet_id,
+                "cabinet_name": name,
+                "bind_kind": row.bind_kind,
+                "child_may_edit": row.child_may_edit,
+            }
             for row, name in q.all()
         ]
 
@@ -59,6 +64,43 @@ class ModuleBindingService:
             .order_by(ModuleProjectBindingRow.project_id)
         )
         return list(q.scalars().all())
+
+    async def list_module_ids_for_project(self, project_id: str) -> list[str]:
+        """Modules explicitly bound to this project (MP). Empty → none materialize."""
+        q = await self._session.execute(
+            select(ModuleProjectBindingRow.module_id)
+            .where(ModuleProjectBindingRow.project_id == project_id)
+            .order_by(ModuleProjectBindingRow.module_id)
+        )
+        return list(q.scalars().all())
+
+    async def get_project_binding(
+        self, module_id: str, project_id: str
+    ) -> ModuleProjectBindingRow | None:
+        q = await self._session.execute(
+            select(ModuleProjectBindingRow).where(
+                ModuleProjectBindingRow.module_id == module_id,
+                ModuleProjectBindingRow.project_id == project_id,
+            )
+        )
+        return q.scalar_one_or_none()
+
+    async def list_project_bindings_for_module(self, module_id: str) -> list[dict]:
+        q = await self._session.execute(
+            select(ModuleProjectBindingRow, ProjectRow.name)
+            .join(ProjectRow, ProjectRow.id == ModuleProjectBindingRow.project_id)
+            .where(ModuleProjectBindingRow.module_id == module_id)
+            .order_by(ProjectRow.name)
+        )
+        return [
+            {
+                "project_id": row.project_id,
+                "project_name": name,
+                "bind_kind": row.bind_kind,
+                "child_may_edit": row.child_may_edit,
+            }
+            for row, name in q.all()
+        ]
 
     async def has_cabinet_binding(self, module_id: str, cabinet_id: str) -> bool:
         q = await self._session.execute(
@@ -96,7 +138,7 @@ class ModuleBindingService:
             await self._revoke_projects_for_cabinets(module_id, removed)
 
         for cid in unique:
-            self._session.add(ModuleCabinetBindingRow(module_id=module_id, cabinet_id=cid))
+            self._session.add(self._new_cabinet_binding(module_id=module_id, cabinet_id=cid))
         await self._session.flush()
 
         added = set(unique) - old_cabinet_ids
@@ -107,6 +149,17 @@ class ModuleBindingService:
             await materialize.uninstall(cabinet_id=cid, module_id=module_id)
 
         return unique
+
+    def _new_cabinet_binding(self, *, module_id: str, cabinet_id: str) -> ModuleCabinetBindingRow:
+        from prodavan.domain.modules import default_cabinet_bind_kind, default_child_may_edit
+
+        kind = default_cabinet_bind_kind(module_id)
+        return ModuleCabinetBindingRow(
+            module_id=module_id,
+            cabinet_id=cabinet_id,
+            bind_kind=kind,
+            child_may_edit=default_child_may_edit(kind),
+        )
 
     async def replace_module_bindings_for_cabinet(
         self, cabinet_id: str, module_ids: list[str]
@@ -144,7 +197,7 @@ class ModuleBindingService:
 
         for mid in unique:
             if mid in added:
-                self._session.add(ModuleCabinetBindingRow(module_id=mid, cabinet_id=cabinet_id))
+                self._session.add(self._new_cabinet_binding(module_id=mid, cabinet_id=cabinet_id))
         await self._session.flush()
 
         materialize = ModuleMaterializeService(self._session)
@@ -165,7 +218,24 @@ class ModuleBindingService:
 
         return unique
 
-    async def bind_project(self, module_id: str, project_id: str) -> None:
+    async def bind_project(
+        self,
+        module_id: str,
+        project_id: str,
+        *,
+        bind_kind: str = "local",
+        child_may_edit: bool | None = None,
+    ) -> dict:
+        from prodavan.domain.modules import ModuleBindKind
+        from prodavan.application.modules.module_instance_service import ModuleInstanceService
+
+        if bind_kind not in (ModuleBindKind.LOCAL, ModuleBindKind.GLOBAL):
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="bind_kind must be local or global",
+            )
         project = await self._session.get(ProjectRow, project_id)
         if project is None:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="project not found")
@@ -176,17 +246,46 @@ class ModuleBindingService:
                 status=422,
                 detail="module is not bound to project's cabinet",
             )
-        existing = await self._session.execute(
-            select(ModuleProjectBindingRow).where(
-                ModuleProjectBindingRow.module_id == module_id,
-                ModuleProjectBindingRow.project_id == project_id,
-            )
+        may_edit = (
+            True
+            if child_may_edit is None and bind_kind == ModuleBindKind.LOCAL
+            else False
+            if child_may_edit is None
+            else bool(child_may_edit)
         )
-        if existing.scalar_one_or_none() is None:
-            self._session.add(
-                ModuleProjectBindingRow(module_id=module_id, project_id=project_id)
+        existing = await self.get_project_binding(module_id, project_id)
+        instances = ModuleInstanceService(self._session)
+        if existing is None:
+            row = ModuleProjectBindingRow(
+                module_id=module_id,
+                project_id=project_id,
+                bind_kind=bind_kind,
+                child_may_edit=may_edit,
             )
+            self._session.add(row)
             await self._session.flush()
+        else:
+            existing.bind_kind = bind_kind
+            existing.child_may_edit = may_edit
+            row = existing
+            await self._session.flush()
+
+        if bind_kind == ModuleBindKind.LOCAL:
+            await instances.ensure_project_instance(project_id=project_id, module_id=module_id)
+        else:
+            # Drop stale local leaf if switching to global.
+            leaf = await instances.get_instance(
+                owner_kind="project", owner_id=project_id, module_id=module_id
+            )
+            if leaf is not None:
+                await instances.delete_instance(instance_id=leaf.id)
+
+        return {
+            "module_id": module_id,
+            "project_id": project_id,
+            "bind_kind": row.bind_kind,
+            "child_may_edit": row.child_may_edit,
+        }
 
     async def revoke_project(self, module_id: str, project_id: str) -> None:
         existing = await self._session.execute(
@@ -200,6 +299,14 @@ class ModuleBindingService:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="project binding not found")
         await self._session.delete(row)
         await self._session.flush()
+        from prodavan.application.modules.module_instance_service import ModuleInstanceService
+
+        instances = ModuleInstanceService(self._session)
+        leaf = await instances.get_instance(
+            owner_kind="project", owner_id=project_id, module_id=module_id
+        )
+        if leaf is not None:
+            await instances.delete_instance(instance_id=leaf.id)
 
     async def _revoke_projects_for_cabinets(self, module_id: str, cabinet_ids: set[str]) -> None:
         if not cabinet_ids:
@@ -277,13 +384,29 @@ class ModuleBindingService:
             await self._session.delete(row)
         await self._session.flush()
         for cid in unique:
-            self._session.add(ModuleCompanyGrantRow(module_id=module_id, company_id=cid))
+            mod = await self._session.get(ModuleRow, module_id)
+            bind_kind = "local"
+            child_may_edit = True
+            if mod is not None and mod.owner_scope == "platform":
+                bind_kind = "global"
+                child_may_edit = False
+            self._session.add(
+                ModuleCompanyGrantRow(
+                    module_id=module_id,
+                    company_id=cid,
+                    bind_kind=bind_kind,
+                    child_may_edit=child_may_edit,
+                )
+            )
         await self._session.flush()
         from prodavan.application.modules.module_instance_service import ModuleInstanceService
 
         instances = ModuleInstanceService(self._session)
         for cid in unique:
             if cid not in old_ids:
+                mod = await self._session.get(ModuleRow, module_id)
+                if mod is not None and mod.owner_scope == "platform":
+                    continue  # global grant — no company fork
                 await instances.ensure_company_instance(company_id=cid, module_id=module_id)
         return unique
 
@@ -362,7 +485,7 @@ class ModuleBindingService:
             await self._revoke_projects_for_cabinets(module_id, removed)
 
         for cid in added:
-            self._session.add(ModuleCabinetBindingRow(module_id=module_id, cabinet_id=cid))
+            self._session.add(self._new_cabinet_binding(module_id=module_id, cabinet_id=cid))
         await self._session.flush()
 
         materialize = ModuleMaterializeService(self._session)

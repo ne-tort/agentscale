@@ -125,9 +125,21 @@ class ModuleService:
         await self._session.refresh(new_row)
         return await _public_row(self._session, new_row, bindings=self._bindings)
 
-    async def bind_project(self, *, module_id: str, project_id: str) -> dict:
+    async def bind_project(
+        self,
+        *,
+        module_id: str,
+        project_id: str,
+        bind_kind: str = "local",
+        child_may_edit: bool | None = None,
+    ) -> dict:
         await self._get_row(module_id)
-        await self._bindings.bind_project(module_id, project_id)
+        binding = await self._bindings.bind_project(
+            module_id,
+            project_id,
+            bind_kind=bind_kind,
+            child_may_edit=child_may_edit,
+        )
         await self._session.commit()
         from prodavan.application.projects.workspace_sync_policy import (
             attach_workspace_sync,
@@ -141,7 +153,13 @@ class ModuleService:
         )
         await self._session.commit()
         return attach_workspace_sync(
-            {"module_id": module_id, "project_id": project_id, "status": "active"},
+            {
+                "module_id": module_id,
+                "project_id": project_id,
+                "status": "active",
+                "bind_kind": binding["bind_kind"],
+                "child_may_edit": binding["child_may_edit"],
+            },
             notification,
         )
 

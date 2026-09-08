@@ -32,6 +32,14 @@ class OwnerModuleDataService:
         if owner_kind == OWNER_PLATFORM:
             return await self._instances.ensure_platform_instance(module_id=module_id)
         if owner_kind == OWNER_COMPANY:
+            # Prefer resolve+ensure: global grants return platform SoT without forking.
+            sot = await self._instances.resolve_sot_instance(
+                module_id=module_id,
+                owner_kind=OWNER_COMPANY,
+                owner_id=owner_id,
+            )
+            if sot is not None:
+                return sot
             return await self._instances.ensure_company_instance(
                 company_id=owner_id, module_id=module_id
             )

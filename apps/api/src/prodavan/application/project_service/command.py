@@ -169,17 +169,8 @@ class ProjectCommand:
 
     async def _resolve_enabled_module_ids(self, row: ProjectRow) -> list[str]:
         from prodavan.application.modules.module_binding_service import ModuleBindingService
-        from prodavan.infrastructure.persistence.models.projects import ProjectModuleBindingRow
 
-        q = await self._session.execute(
-            select(ProjectModuleBindingRow.module_id).where(
-                ProjectModuleBindingRow.project_id == row.id
-            )
-        )
-        bound = list(q.scalars().all())
-        if bound:
-            return bound
-        return await ModuleBindingService(self._session).list_module_ids_for_cabinet(row.cabinet_id)
+        return await ModuleBindingService(self._session).list_module_ids_for_project(row.id)
 
     async def launch(
         self,
@@ -940,9 +931,7 @@ class ProjectCommand:
         principal: Principal,
         employee: EmployeeRow | None,
     ) -> list[str]:
-        from sqlalchemy import select
-
-        from prodavan.infrastructure.persistence.models.projects import ProjectModuleBindingRow
+        from prodavan.application.modules.module_binding_service import ModuleBindingService
 
         row = await self._access.require_access(
             project_id=project_id,
@@ -951,17 +940,7 @@ class ProjectCommand:
             write=False,
             allow_paused=True,
         )
-        q = await self._session.execute(
-            select(ProjectModuleBindingRow.module_id).where(
-                ProjectModuleBindingRow.project_id == row.id
-            )
-        )
-        bound = list(q.scalars().all())
-        if bound:
-            return bound
-        from prodavan.application.modules.module_binding_service import ModuleBindingService
-
-        return await ModuleBindingService(self._session).list_module_ids_for_cabinet(row.cabinet_id)
+        return await ModuleBindingService(self._session).list_module_ids_for_project(row.id)
 
     async def set_module_ids(
         self,
@@ -971,10 +950,8 @@ class ProjectCommand:
         principal: Principal,
         employee: EmployeeRow | None,
     ) -> dict:
-        from sqlalchemy import delete
-
         from prodavan.application.modules.module_binding_service import ModuleBindingService
-        from prodavan.infrastructure.persistence.models.projects import ProjectModuleBindingRow
+        from prodavan.domain.modules import default_project_bind_kind
 
         row = await self._access.require_access(
             project_id=project_id,
@@ -983,9 +960,8 @@ class ProjectCommand:
             write=True,
             allow_paused=True,
         )
-        allowed = set(
-            await ModuleBindingService(self._session).list_module_ids_for_cabinet(row.cabinet_id)
-        )
+        bindings = ModuleBindingService(self._session)
+        allowed = set(await bindings.list_module_ids_for_cabinet(row.cabinet_id))
         unique = list(dict.fromkeys(module_ids))
         for mid in unique:
             if mid not in allowed:
@@ -995,11 +971,14 @@ class ProjectCommand:
                     status=422,
                     detail=f"module not bound to cabinet: {mid}",
                 )
-        await self._session.execute(
-            delete(ProjectModuleBindingRow).where(ProjectModuleBindingRow.project_id == row.id)
-        )
-        for mid in unique:
-            self._session.add(ProjectModuleBindingRow(project_id=row.id, module_id=mid))
+        existing = set(await bindings.list_module_ids_for_project(row.id))
+        wanted = set(unique)
+        for mid in existing - wanted:
+            await bindings.revoke_project(mid, row.id)
+        for mid in wanted - existing:
+            await bindings.bind_project(
+                mid, row.id, bind_kind=default_project_bind_kind(mid)
+            )
         await self._session.commit()
         from prodavan.application.projects.workspace_sync_policy import (
             attach_workspace_sync,
@@ -1012,7 +991,10 @@ class ProjectCommand:
             source="project_modules",
         )
         await self._session.commit()
-        return attach_workspace_sync({"module_ids": unique}, notification)
+        return attach_workspace_sync(
+            {"module_ids": await bindings.list_module_ids_for_project(row.id)},
+            notification,
+        )
 
     async def _wipe_workspace(self, row: ProjectRow) -> dict:
         try:

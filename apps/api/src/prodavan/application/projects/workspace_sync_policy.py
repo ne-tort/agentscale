@@ -136,15 +136,19 @@ async def defer_or_schedule_cabinet_sync(
     cabinet_id: str,
     module_id: str | None,
     source: str,
+    project_ids: list[str] | None = None,
 ) -> WorkspaceSyncNotification:
     if settings.projects_auto_rematerialize_on_cabinet_change:
-        project_ids = await ProjectQuery(session).list_ids(
+        all_ids = await ProjectQuery(session).list_ids(
             cabinet_id=cabinet_id,
             exclude_status=ProjectStatus.DELETED,
         )
+        if project_ids is not None:
+            allow = set(project_ids)
+            all_ids = [pid for pid in all_ids if pid in allow]
         enqueued: list[str] = []
         synced: list[str] = []
-        for project_id in project_ids:
+        for project_id in all_ids:
             result = await request_rematerialize_project(
                 project_id,
                 cabinet_id=cabinet_id,
@@ -181,6 +185,7 @@ async def defer_or_schedule_cabinet_sync(
         session,
         cabinet_id=cabinet_id,
         source=source,
+        project_ids=project_ids,
     )
     return WorkspaceSyncNotification(
         mode="deferred",

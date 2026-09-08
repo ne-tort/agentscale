@@ -1,13 +1,18 @@
-"""Load container env bindings from enabled project modules."""
+"""Load container env bindings from enabled project modules (SoT instance data)."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.modules.module_binding_service import ModuleBindingService
+from prodavan.application.modules.module_instance_service import (
+    OWNER_CABINET,
+    OWNER_PROJECT,
+    ModuleInstanceService,
+)
 from prodavan.application.pod_service.container_env_resolver import (
     field_value_as_env_string,
     field_value_as_secret_ref,
@@ -16,10 +21,9 @@ from prodavan.application.pod_service.container_env_resolver import (
     resolve_secret_env,
 )
 from prodavan.application.projects.materialize_planner import _row_applies_to_project
-from prodavan.infrastructure.cabinets.sql import qident
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 from prodavan.infrastructure.persistence.models.modules import ModuleMetaDocumentRow
-from prodavan.infrastructure.persistence.models.projects import ProjectModuleBindingRow, ProjectRow
+from prodavan.infrastructure.persistence.models.projects import ProjectRow
 from prodavan.infrastructure.secrets.cabinet_secret_store import assert_cabinet_secret_scope
 from prodavan.infrastructure.secrets.store import SecretStore, get_secret_store
 
@@ -48,6 +52,7 @@ class ContainerEnvLoader:
     ) -> None:
         self._session = session
         self._secrets = secrets or get_secret_store()
+        self._instances = ModuleInstanceService(session)
 
     async def load_for_project(
         self,
@@ -68,9 +73,9 @@ class ContainerEnvLoader:
                 plain_cache = await self._build_row_cache(
                     plain_doc,
                     spec_key="value_from",
-                    schema_name=inst.schema_name,
                     module_id=module_id,
                     project_id=project.id,
+                    cabinet_id=project.cabinet_id,
                     secret=False,
                 )
                 plain_groups.append(
@@ -85,9 +90,9 @@ class ContainerEnvLoader:
                 secret_cache = await self._build_row_cache(
                     secret_doc,
                     spec_key="secret_ref_from",
-                    schema_name=inst.schema_name,
                     module_id=module_id,
                     project_id=project.id,
+                    cabinet_id=project.cabinet_id,
                     secret=True,
                 )
                 secret_groups.append(
@@ -115,9 +120,9 @@ class ContainerEnvLoader:
         doc: list,
         *,
         spec_key: str,
-        schema_name: str,
         module_id: str,
         project_id: str,
+        cabinet_id: str,
         secret: bool,
     ) -> dict[tuple[str, str, str], str | None]:
         cache: dict[tuple[str, str, str], str | None] = {}
@@ -131,9 +136,9 @@ class ContainerEnvLoader:
             if key in cache:
                 continue
             body = await self._load_row_body(
-                schema_name=schema_name,
                 module_id=module_id,
                 project_id=project_id,
+                cabinet_id=cabinet_id,
                 spec=spec,
             )
             if body is None:
@@ -149,18 +154,38 @@ class ContainerEnvLoader:
             )
         return cache
 
+    async def _sot_instance_id(self, *, module_id: str, project_id: str, cabinet_id: str) -> str | None:
+        sot = await self._instances.resolve_sot_instance(
+            module_id=module_id,
+            owner_kind=OWNER_PROJECT,
+            owner_id=project_id,
+        )
+        if sot is None:
+            sot = await self._instances.resolve_sot_instance(
+                module_id=module_id,
+                owner_kind=OWNER_CABINET,
+                owner_id=cabinet_id,
+            )
+        return sot.id if sot is not None else None
+
     async def _load_row_body(
         self,
         *,
-        schema_name: str,
         module_id: str,
         project_id: str,
+        cabinet_id: str,
         spec: dict[str, Any],
     ) -> dict[str, Any] | None:
         table_slug = spec.get("table_slug")
         if not isinstance(table_slug, str) or not table_slug.strip():
             return None
         table_slug = table_slug.strip().lower()
+
+        instance_id = await self._sot_instance_id(
+            module_id=module_id, project_id=project_id, cabinet_id=cabinet_id
+        )
+        if instance_id is None:
+            return None
 
         row_id_spec = spec.get("row_id")
         row_id: str | None = None
@@ -170,66 +195,27 @@ class ContainerEnvLoader:
                 row_id = None
 
         if row_id is not None:
-            return await self._fetch_row_body(
-                schema_name=schema_name,
-                module_id=module_id,
-                table_slug=table_slug,
-                row_id=row_id,
+            row = await self._instances.get_data_row(
+                instance_id=instance_id, table_slug=table_slug, row_id=row_id
             )
+            if row is None:
+                return None
+            body = row.get("body")
+            return body if isinstance(body, dict) else {}
 
-        qschema = qident(schema_name)
-        q = await self._session.execute(
-            text(
-                f"""
-                SELECT row_id, body FROM {qschema}.module_data_rows
-                WHERE module_id = :module_id AND table_slug = :table_slug
-                ORDER BY updated_at
-                """
-            ),
-            {"module_id": module_id, "table_slug": table_slug},
+        rows = await self._instances.list_data_rows(
+            instance_id=instance_id, table_slug=table_slug
         )
-        for row in q.fetchall():
-            body = row.body if isinstance(row.body, dict) else {}
+        for row in rows:
+            body = row.get("body") if isinstance(row.get("body"), dict) else {}
             if not _row_applies_to_project(body, project_id):
                 continue
             return body
         return None
 
-    async def _fetch_row_body(
-        self,
-        *,
-        schema_name: str,
-        module_id: str,
-        table_slug: str,
-        row_id: str,
-    ) -> dict[str, Any] | None:
-        qschema = qident(schema_name)
-        q = await self._session.execute(
-            text(
-                f"""
-                SELECT body FROM {qschema}.module_data_rows
-                WHERE module_id = :module_id AND table_slug = :table_slug AND row_id = :row_id
-                """
-            ),
-            {"module_id": module_id, "table_slug": table_slug, "row_id": row_id},
-        )
-        row = q.fetchone()
-        if row is None:
-            return None
-        body = row.body
-        return body if isinstance(body, dict) else {}
-
     async def _enabled_module_ids(self, project: ProjectRow) -> set[str]:
-        q = await self._session.execute(
-            select(ProjectModuleBindingRow.module_id).where(
-                ProjectModuleBindingRow.project_id == project.id
-            )
-        )
-        bound = set(q.scalars().all())
-        if bound:
-            return bound
         return set(
-            await ModuleBindingService(self._session).list_module_ids_for_cabinet(project.cabinet_id)
+            await ModuleBindingService(self._session).list_module_ids_for_project(project.id)
         )
 
     async def _optional_document(self, module_id: str, slug: str) -> list | None:

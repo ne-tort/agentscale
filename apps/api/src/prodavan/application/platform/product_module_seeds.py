@@ -576,7 +576,7 @@ def mod_prompts_meta() -> dict[str, list[Any]]:
                 "view_slug": "prompt_profiles_list",
                 "table_slug": "prompt_profiles",
                 "enabled": True,
-                "instance_owner": "cabinet",
+                "default_project_bind": "global",
                 "nav": {"contour": "employee", "placement": "management"},
             }
         ],
@@ -691,7 +691,7 @@ def mod_files_meta() -> dict[str, list[Any]]:
                 "view_slug": "files_list",
                 "table_slug": "files",
                 "enabled": True,
-                "instance_owner": "cabinet",
+                "default_project_bind": "global",
                 "nav": {"contour": "employee", "placement": "management"},
             }
         ],
@@ -818,7 +818,7 @@ def mod_mcp_meta() -> dict[str, list[Any]]:
                 "view_slug": "mcp_packages_list",
                 "table_slug": "mcp_packages",
                 "enabled": True,
-                "instance_owner": "cabinet",
+                "default_project_bind": "global",
                 "nav": {"contour": "employee", "placement": "management"},
             }
         ],
@@ -2136,7 +2136,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "view_slug": "equipment_hub",
                 "table_slug": "catalogs",
                 "enabled": True,
-                "instance_owner": "project",
+                "default_project_bind": "local",
                 "nav": {"contour": "employee", "placement": "data"},
             }
         ],

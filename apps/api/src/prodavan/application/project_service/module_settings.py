@@ -17,7 +17,7 @@ from prodavan.domain.identity import Principal
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.modules import ModuleCabinetBindingRow, ModuleRow
-from prodavan.infrastructure.persistence.models.projects import ProjectModuleBindingRow, ProjectRow
+from prodavan.infrastructure.persistence.models.projects import ProjectRow
 
 
 def _profile_hub_config(views: list[Any]) -> dict[str, str] | None:
@@ -85,15 +85,9 @@ class ProjectModuleSettingsService:
         )
 
     async def _enabled_module_ids(self, project: ProjectRow) -> set[str]:
-        q = await self._session.execute(
-            select(ProjectModuleBindingRow.module_id).where(
-                ProjectModuleBindingRow.project_id == project.id
-            )
+        return set(
+            await ModuleBindingService(self._session).list_module_ids_for_project(project.id)
         )
-        bound = set(q.scalars().all())
-        if bound:
-            return bound
-        return set(await ModuleBindingService(self._session).list_module_ids_for_cabinet(project.cabinet_id))
 
     async def _cabinet_modules(self, cabinet_id: str) -> list[tuple[str, str]]:
         q = await self._session.execute(
@@ -111,16 +105,22 @@ class ProjectModuleSettingsService:
         module_id: str,
         profile_table: str,
     ) -> list[dict[str, Any]]:
-        inst = await self._instances.ensure_project_instance(
-            project_id=project_id, module_id=module_id
+        from prodavan.application.modules.module_instance_service import OWNER_PROJECT
+
+        sot = await self._instances.resolve_sot_instance(
+            module_id=module_id,
+            owner_kind=OWNER_PROJECT,
+            owner_id=project_id,
         )
+        if sot is None:
+            return []
         rows = await self._instances.list_data_rows(
-            instance_id=inst.id, table_slug=profile_table
+            instance_id=sot.id, table_slug=profile_table
         )
         out: list[dict[str, Any]] = []
         for row in rows:
             body = row.get("body") if isinstance(row.get("body"), dict) else {}
-            out.append({"row_id": str(row["row_id"]), "body": body, "instance_id": inst.id})
+            out.append({"row_id": str(row["row_id"]), "body": body, "instance_id": sot.id})
         return out
 
     def _resolve_active_profile(
@@ -226,11 +226,16 @@ class ProjectModuleSettingsService:
                     profile_id = picked["profile_id"]
                     profile_name = picked["profile_name"]
 
+            binding = await ModuleBindingService(self._session).get_project_binding(
+                module_id, project.id
+            )
             items.append(
                 {
                     "module_id": module_id,
                     "name": name,
                     "enabled": module_id in enabled,
+                    "bind_kind": binding.bind_kind if binding else None,
+                    "child_may_edit": binding.child_may_edit if binding else None,
                     "has_profiles": hub is not None,
                     "profile_table": hub["profile_table"] if hub else None,
                     "profile_id": profile_id,
@@ -347,17 +352,31 @@ class ProjectModuleSettingsService:
         profile_id: str,
         profiles: list[dict[str, Any]],
     ) -> None:
-        inst = await self._instances.ensure_project_instance(
-            project_id=project_id, module_id=module_id
+        from prodavan.application.modules.module_instance_service import OWNER_PROJECT
+
+        if not await self._instances.sot_may_edit(
+            module_id=module_id, owner_kind=OWNER_PROJECT, owner_id=project_id
+        ):
+            raise AppError(
+                code="FORBIDDEN",
+                title="Forbidden",
+                status=403,
+                detail="global module bind is read-only for this project",
+            )
+        sot = await self._instances.resolve_sot_instance(
+            module_id=module_id,
+            owner_kind=OWNER_PROJECT,
+            owner_id=project_id,
         )
+        if sot is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="module SoT not found")
         for item in profiles:
             body = dict(item["body"])
             body["is_default"] = item["row_id"] == profile_id
-            # Leaf isolation — clear legacy project_ids filter noise.
             if "project_ids" in body:
                 body["project_ids"] = []
             await self._instances.upsert_data_row(
-                instance_id=inst.id,
+                instance_id=sot.id,
                 table_slug=profile_table,
                 row_id=item["row_id"],
                 body=body,

@@ -428,6 +428,49 @@ class ProdavanApi {
     }
   }
 
+  /// Projects with an explicit module↔project (MP) bind for [moduleId].
+  Future<List<Map<String, dynamic>>> listModuleBoundProjects({
+    required String cabinetId,
+    required String moduleId,
+  }) async {
+    if (moduleId.isEmpty) return const [];
+    try {
+      final res = await AuthHttp.get(
+        _uri('/cabinets/$cabinetId/modules/$moduleId/bound-projects'),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final items = body['items'];
+      if (items is! List) return const [];
+      return [
+        for (final raw in items)
+          if (raw is Map)
+            {
+              'id': raw['project_id']?.toString() ?? '',
+              'name': raw['name']?.toString() ?? '',
+            },
+      ].where((e) => (e['id'] as String).isNotEmpty).toList();
+    } catch (_) {
+      // Fallback: filter cabinet projects by enabled module list.
+      final projects = await listProjects(cabinetId);
+      if (projects.isEmpty) return const [];
+      final checks = await Future.wait(
+        projects.map((p) async {
+          final id = p['id'] as String?;
+          if (id == null || id.isEmpty) return null;
+          try {
+            final mods = await listProjectModuleIds(id);
+            return mods.contains(moduleId) ? p : null;
+          } catch (_) {
+            return null;
+          }
+        }),
+      );
+      return checks.whereType<Map<String, dynamic>>().toList();
+    }
+  }
+
   Future<Map<String, dynamic>> createProject({
     required String cabinetId,
     required String name,
@@ -738,6 +781,54 @@ class ProdavanApi {
       );
       _throwIfError(res);
       if (res.body.isEmpty) return <String, dynamic>{'module_ids': moduleIds};
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Map<String, dynamic>> bindProjectModule(
+    String projectId, {
+    required String moduleId,
+    required String bindKind,
+    bool? childMayEdit,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final payload = <String, dynamic>{'bind_kind': bindKind};
+      if (childMayEdit != null) payload['child_may_edit'] = childMayEdit;
+      final res = await AuthHttp.post(
+        _uri('/projects/$projectId/modules/$moduleId/bind'),
+        body: jsonEncode(payload),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Map<String, dynamic>> revokeProjectModule(
+    String projectId, {
+    required String moduleId,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.delete(
+        _uri('/projects/$projectId/modules/$moduleId'),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      if (res.body.isEmpty) {
+        return <String, dynamic>{
+          'module_id': moduleId,
+          'project_id': projectId,
+          'status': 'revoked',
+        };
+      }
       return jsonDecode(res.body) as Map<String, dynamic>;
     } finally {
       this.projectId = prevProj;

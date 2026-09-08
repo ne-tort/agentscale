@@ -162,7 +162,7 @@ class _CompanyModuleListPageState extends State<CompanyModuleListPage> {
     final l10n = AppLocalizations.of(context);
     final rows = _modules.map((m) {
       final bindCount = m['cabinet_bindings_count'] as int? ?? 0;
-      final style = companyEntityRowStyle(context, m['source'] as String?);
+      final style = companyModuleRowStyle(context, m);
       return AppEntityRow(
         id: m['id'] as String,
         title: m['name'] as String? ?? m['id'] as String,

@@ -386,6 +386,95 @@ async def patch_project_modules(
     return ids
 
 
+class BindProjectModuleBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    bind_kind: str = Field(default="local", pattern="^(local|global)$")
+    child_may_edit: bool | None = None
+
+
+@router.post("/projects/{project_id}/modules/{module_id}/bind")
+async def bind_project_module(
+    project_id: str,
+    module_id: str,
+    body: BindProjectModuleBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.modules.module_binding_service import ModuleBindingService
+    from prodavan.application.project_service.access import ProjectAccessPolicy
+    from prodavan.application.projects.workspace_sync_policy import (
+        attach_workspace_sync,
+        defer_or_schedule_project_sync,
+    )
+
+    project = await ProjectAccessPolicy(session).require_access(
+        project_id=project_id,
+        principal=principal,
+        employee=employee,
+        write=True,
+        allow_paused=True,
+    )
+    bindings = ModuleBindingService(session)
+    if not await bindings.has_cabinet_binding(module_id, project.cabinet_id):
+        from prodavan.domain.errors import AppError
+
+        raise AppError(
+            code="VALIDATION_ERROR",
+            title="Validation Error",
+            status=422,
+            detail="module not bound to cabinet",
+        )
+    result = await bindings.bind_project(
+        module_id,
+        project_id,
+        bind_kind=body.bind_kind,
+        child_may_edit=body.child_may_edit,
+    )
+    await session.commit()
+    notification = await defer_or_schedule_project_sync(
+        session, project_id=project_id, source="module_bind"
+    )
+    await session.commit()
+    return attach_workspace_sync(result, notification)
+
+
+@router.delete("/projects/{project_id}/modules/{module_id}")
+async def revoke_project_module(
+    project_id: str,
+    module_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.modules.module_binding_service import ModuleBindingService
+    from prodavan.application.project_service.access import ProjectAccessPolicy
+    from prodavan.application.projects.workspace_sync_policy import (
+        attach_workspace_sync,
+        defer_or_schedule_project_sync,
+    )
+
+    await ProjectAccessPolicy(session).require_access(
+        project_id=project_id,
+        principal=principal,
+        employee=employee,
+        write=True,
+        allow_paused=True,
+    )
+    bindings = ModuleBindingService(session)
+    await bindings.revoke_project(module_id, project_id)
+    await session.commit()
+    notification = await defer_or_schedule_project_sync(
+        session, project_id=project_id, source="module_unbind"
+    )
+    await session.commit()
+    return attach_workspace_sync(
+        {"module_id": module_id, "project_id": project_id, "status": "revoked"},
+        notification,
+    )
+
+
 class ProjectRuntimeDataBody(BaseModel):
     model_config = {"extra": "forbid"}
 

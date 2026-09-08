@@ -164,17 +164,30 @@ CabinetNavPlacement cabinetNavPlacementOf(Map<String, dynamic> tab) {
   return CabinetNavPlacement.management;
 }
 
-/// Instance leaf for module data: `cabinet` or `project`.
+/// Instance leaf for module data: `cabinet` (global SoT) or `project` (local).
 ///
-/// Reads `tab['instance_owner']` or `tab['nav']['instance_owner']`.
+/// Prefers `default_project_bind`: `global` → cabinet, `local` → project.
+/// Legacy `instance_owner` / `nav.instance_owner` still accepted if present.
 /// Default: `cabinet` for rail tabs, `project` for management/data.
 String moduleInstanceOwnerOf(Map<String, dynamic> tab) {
-  final top = tab['instance_owner'];
-  if (top is String && top.trim().isNotEmpty) return top.trim();
+  final bind = tab['default_project_bind'];
+  if (bind is String) {
+    final b = bind.trim().toLowerCase();
+    if (b == 'global') return 'cabinet';
+    if (b == 'local') return 'project';
+  }
+  final legacy = tab['instance_owner'];
+  if (legacy is String) {
+    final o = legacy.trim().toLowerCase();
+    if (o == 'cabinet' || o == 'project') return o;
+  }
   final nav = tab['nav'];
   if (nav is Map) {
-    final nested = nav['instance_owner'];
-    if (nested is String && nested.trim().isNotEmpty) return nested.trim();
+    final navOwner = nav['instance_owner'];
+    if (navOwner is String) {
+      final o = navOwner.trim().toLowerCase();
+      if (o == 'cabinet' || o == 'project') return o;
+    }
   }
   if (cabinetNavPlacementOf(tab) == CabinetNavPlacement.rail) {
     return 'cabinet';
@@ -184,6 +197,9 @@ String moduleInstanceOwnerOf(Map<String, dynamic> tab) {
 
 bool isCabinetInstanceOwner(Map tab) =>
     moduleInstanceOwnerOf(Map<String, dynamic>.from(tab)) == 'cabinet';
+
+/// True when tab SoT is cabinet-scoped (`default_project_bind: global`).
+bool usesGlobalProjectBind(Map tab) => isCabinetInstanceOwner(tab);
 
 /// Builds sorted shell nav entries from module list + tab arrays.
 List<ShellNavEntry> mergeShellNavEntries({

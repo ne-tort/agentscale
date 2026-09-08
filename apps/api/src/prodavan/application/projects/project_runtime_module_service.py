@@ -7,6 +7,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.application.modules.module_binding_service import ModuleBindingService
 from prodavan.application.modules.module_instance_service import (
     OWNER_PROJECT,
     ModuleInstanceService,
@@ -25,7 +26,7 @@ from prodavan.infrastructure.persistence.models.modules import (
     ModuleCabinetBindingRow,
     ModuleRow,
 )
-from prodavan.infrastructure.persistence.models.projects import ProjectModuleBindingRow, ProjectRow
+from prodavan.infrastructure.persistence.models.projects import ProjectRow
 
 
 class ProjectRuntimeModuleService:
@@ -53,21 +54,57 @@ class ProjectRuntimeModuleService:
             allow_paused=True,
         )
 
+    async def _sot_for_project(
+        self,
+        *,
+        project_id: str,
+        module_id: str,
+        write: bool,
+    ):
+        from prodavan.application.modules.module_instance_service import OWNER_PROJECT
+        from prodavan.domain.modules import ModuleBindKind
+
+        binding = await ModuleBindingService(self._session).get_project_binding(
+            module_id, project_id
+        )
+        if binding is None:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="module is not bound to project",
+            )
+        if binding.bind_kind == ModuleBindKind.LOCAL:
+            return await self._instances.ensure_project_instance(
+                project_id=project_id, module_id=module_id
+            )
+        if write and not binding.child_may_edit:
+            raise AppError(
+                code="FORBIDDEN",
+                title="Forbidden",
+                status=403,
+                detail="global module bind is read-only for this project",
+            )
+        sot = await self._instances.resolve_sot_instance(
+            module_id=module_id,
+            owner_kind=OWNER_PROJECT,
+            owner_id=project_id,
+        )
+        if sot is None:
+            raise AppError(
+                code="NOT_FOUND",
+                title="Not Found",
+                status=404,
+                detail="module SoT instance not found",
+            )
+        return sot
+
     async def _enabled_module_ids(self, project: ProjectRow) -> set[str]:
-        q = await self._session.execute(
-            select(ProjectModuleBindingRow.module_id).where(
-                ProjectModuleBindingRow.project_id == project.id
-            )
+        from prodavan.application.modules.module_binding_service import ModuleBindingService
+
+        return set(
+            await ModuleBindingService(self._session).list_module_ids_for_project(project.id)
         )
-        bound = set(q.scalars().all())
-        if bound:
-            return bound
-        q2 = await self._session.execute(
-            select(ModuleCabinetBindingRow.module_id).where(
-                ModuleCabinetBindingRow.cabinet_id == project.cabinet_id
-            )
-        )
-        return set(q2.scalars().all())
 
     async def list_modules(
         self,
@@ -94,6 +131,12 @@ class ProjectRuntimeModuleService:
             inst = await self._instances.get_instance(
                 owner_kind=OWNER_PROJECT, owner_id=project_id, module_id=mod.id
             )
+            if inst is None:
+                inst = await self._instances.resolve_sot_instance(
+                    module_id=mod.id,
+                    owner_kind=OWNER_PROJECT,
+                    owner_id=project_id,
+                )
             out.append(
                 {
                     "id": mod.id,
@@ -117,11 +160,9 @@ class ProjectRuntimeModuleService:
         await self._require_project(
             project_id=project_id, principal=principal, employee=employee, write=False
         )
-        inst = await self._instances.ensure_project_instance(
-            project_id=project_id, module_id=module_id
+        inst = await self._sot_for_project(
+            project_id=project_id, module_id=module_id, write=False
         )
-        # Persist fork before returning so subsequent meta slug fetches skip re-fork.
-        await self._session.commit()
         try:
             doc = await self._instances.get_meta_document(instance_id=inst.id, slug=slug)
         except AppError:
@@ -141,8 +182,8 @@ class ProjectRuntimeModuleService:
         await self._require_project(
             project_id=project_id, principal=principal, employee=employee, write=False
         )
-        inst = await self._instances.ensure_project_instance(
-            project_id=project_id, module_id=module_id
+        inst = await self._sot_for_project(
+            project_id=project_id, module_id=module_id, write=False
         )
         rows = await self._instances.list_data_rows(instance_id=inst.id, table_slug=table_slug)
         return [
@@ -170,8 +211,8 @@ class ProjectRuntimeModuleService:
         project = await self._require_project(
             project_id=project_id, principal=principal, employee=employee, write=True
         )
-        inst = await self._instances.ensure_project_instance(
-            project_id=project_id, module_id=module_id
+        inst = await self._sot_for_project(
+            project_id=project_id, module_id=module_id, write=True
         )
         columns_body = await self._instances.resolve_columns_body(
             instance_id=inst.id, module_id=module_id
@@ -255,8 +296,8 @@ class ProjectRuntimeModuleService:
         project = await self._require_project(
             project_id=project_id, principal=principal, employee=employee, write=True
         )
-        inst = await self._instances.ensure_project_instance(
-            project_id=project_id, module_id=module_id
+        inst = await self._sot_for_project(
+            project_id=project_id, module_id=module_id, write=True
         )
         columns_body = await self._instances.resolve_columns_body(
             instance_id=inst.id, module_id=module_id
@@ -337,8 +378,8 @@ class ProjectRuntimeModuleService:
         await self._require_project(
             project_id=project_id, principal=principal, employee=employee, write=True
         )
-        inst = await self._instances.ensure_project_instance(
-            project_id=project_id, module_id=module_id
+        inst = await self._sot_for_project(
+            project_id=project_id, module_id=module_id, write=True
         )
         ok = await self._instances.delete_data_row(
             instance_id=inst.id, table_slug=table_slug, row_id=row_id
