@@ -134,6 +134,11 @@ def _validate_file_ref(name: str, value: Any) -> None:
 
 
 def _validate_secret_ref(name: str, value: Any, *, cabinet_id: str | None = None) -> None:
+    if isinstance(value, str):
+        raise _row_error(
+            f"{name}: plaintext secrets are forbidden — upload via secrets API "
+            f"and store secret_ref object only"
+        )
     if not isinstance(value, dict):
         raise _row_error(f"{name}: secret_ref must be an object")
     ref = value.get("secret_ref")
@@ -150,6 +155,10 @@ def _validate_secret_ref(name: str, value: Any, *, cabinet_id: str | None = None
             assert_cabinet_secret_scope(ref, cabinet_id)
         except AppError as exc:
             raise _row_error(f"{name}: {exc.detail}") from exc
+    # Never persist plaintext alongside the ref.
+    for banned in ("secret", "password", "value", "token"):
+        if banned in value and value.get(banned) not in (None, ""):
+            raise _row_error(f"{name}: plaintext field {banned!r} is forbidden in secret_ref")
     label = value.get("label")
     if label is not None and not isinstance(label, str):
         raise _row_error(f"{name}: secret_ref.label must be a string")

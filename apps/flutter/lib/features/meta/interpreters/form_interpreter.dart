@@ -13,7 +13,6 @@ import 'package:prodavan/features/meta/widgets/fields_schema_editor_field.dart';
 import 'package:prodavan/features/meta/widgets/prompt_files_editor_field.dart';
 import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
 import 'package:prodavan/features/meta/widgets/schema_attrs_field.dart';
-import 'package:prodavan/features/meta/widgets/secret_upload_field.dart';
 import 'package:prodavan/features/meta/widgets/markdown_editor_field.dart';
 import 'package:prodavan/features/meta/widgets/project_multiselect_field.dart';
 import 'package:prodavan/features/meta/widgets/build_slots_field.dart';
@@ -468,21 +467,6 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         onChanged: (ref) => _persist(name, ref),
       );
     }
-    if (widgetKind == 'secret_upload' || type == 'secret_ref') {
-      final scope = ModuleRuntimeScope.maybeOf(context);
-      if (scope == null) {
-        return ListTile(title: Text(label), subtitle: const Text('secret (preview only)'));
-      }
-      return SecretUploadField(
-        label: label,
-        value: value,
-        cabinetId: scope.cabinetId,
-        moduleId: scope.moduleId,
-        api: scope.api,
-        readOnly: fieldReadOnly,
-        onChanged: (ref) => _persist(name, ref),
-      );
-    }
     if (widgetKind == 'ref' || type == 'ref') {
       final refMeta = column['ref'];
       final refTable = refMeta is Map ? refMeta['table_slug'] as String? : null;
@@ -515,7 +499,8 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       );
     }
     if (widgetKind == 'pause_toggle') {
-      final paused = value == true;
+      final invert = fieldCfg?['invert'] == true;
+      final paused = invert ? value != true : value == true;
       final warning = context.appColors.warning;
       final actionLabel = resolveMetaLabel(
         paused
@@ -532,7 +517,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         icon: metaIconFromName(iconName),
         accentColor: warning,
         enabled: !fieldReadOnly,
-        onTap: () => _persist(name, !paused),
+        onTap: () => _persist(name, invert ? paused : !paused),
       );
     }
     if (widgetKind == 'switch' || type == 'bool') {
@@ -584,6 +569,19 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         final maxLines = maxLinesRaw is num
             ? maxLinesRaw.toInt()
             : int.tryParse(maxLinesRaw?.toString() ?? '') ?? 1;
+        final asSecret = type == 'secret_ref' ||
+            fieldCfg?['secret'] == true ||
+            fieldCfg?['obscure'] == true;
+        if (asSecret) {
+          return _buildSecretValueField(
+            name: name,
+            label: label,
+            fieldIcon: fieldIcon,
+            value: value,
+            fieldReadOnly: fieldReadOnly,
+            columnType: type,
+          );
+        }
         return AppValuePreference<String>(
           title: label,
           icon: fieldIcon,
@@ -595,6 +593,47 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
           },
         );
     }
+  }
+
+  Widget _buildSecretValueField({
+    required String name,
+    required String label,
+    required IconData? fieldIcon,
+    required dynamic value,
+    required bool fieldReadOnly,
+    required String? columnType,
+  }) {
+    final scope = ModuleRuntimeScope.maybeOf(context);
+    final hasRef = value is Map &&
+        ((value['secret_ref'] as String?)?.trim().isNotEmpty ?? false);
+    // Core AppValuePreference: same tile as URL/login, obscure mode.
+    return AppValuePreference<String>(
+      title: label,
+      icon: fieldIcon,
+      value: hasRef ? '••••••••' : '',
+      enabled: !fieldReadOnly,
+      obscureText: true,
+      formatInputValue: (_) => '',
+      hintText: hasRef ? '••••••••' : null,
+      onSave: (raw) async {
+        final secret = raw.trim();
+        if (secret.isEmpty) return;
+        if (columnType == 'secret_ref') {
+          if (scope == null) {
+            throw StateError('secret_ref requires module runtime scope');
+          }
+          final ref = await scope.api.uploadCabinetModuleSecret(
+            cabinetId: scope.cabinetId,
+            moduleId: scope.moduleId,
+            secret: secret,
+            label: label,
+          );
+          _persist(name, ref);
+          return;
+        }
+        _persist(name, secret);
+      },
+    );
   }
 
   List<String> _enumChoices(Map<String, dynamic> column) {

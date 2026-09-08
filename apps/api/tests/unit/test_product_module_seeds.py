@@ -191,14 +191,26 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     s4b_form = next(v for v in meta["views"] if v["slug"] == "s4b_settings_form")
     s4b_cols = [f["column"] for f in s4b_form["ui_json"]["fields"]]
     assert s4b_cols == [
-        "project_ids",
         "name",
         "base_url",
         "login",
         "password",
         "mcp_zip",
+        "project_ids",
         "enabled",
     ]
+    name_field = next(f for f in s4b_form["ui_json"]["fields"] if f["column"] == "name")
+    assert name_field["icon"] == "storefront"
+    password_field = next(
+        f for f in s4b_form["ui_json"]["fields"] if f["column"] == "password"
+    )
+    assert password_field["widget"] == "value"
+    assert password_field["secret"] is True
+    enabled_field = next(
+        f for f in s4b_form["ui_json"]["fields"] if f["column"] == "enabled"
+    )
+    assert enabled_field["widget"] == "pause_toggle"
+    assert enabled_field["invert"] is True
     assert any(
         c["name"] == "password" and c["type"] == "secret_ref" for c in meta["columns"]
     )

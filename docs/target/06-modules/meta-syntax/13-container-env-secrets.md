@@ -117,12 +117,18 @@ Like `file_ref`, but stores **reference** after secure upload:
 }
 ```
 
-**UI flow (target):**
-1. User enters secret once in masked field
-2. Platform `RoutingSecretStore.put()` → Vault KV (same pattern as AI keys)
-3. Row stores only `secret_ref` prefix — API never returns secret body
+**UI flow (as-built):**
+1. Column type `secret_ref` rendered with core `AppValuePreference` (`widget: value` + `secret: true` / type `secret_ref`) — same tile as URL/login, obscured.
+2. On save, Flutter calls `POST /cabinets/{id}/modules/{id}/secrets/upload` (requires cabinet write ACL).
+3. Platform `CabinetSecretStore.put(cabinet_id, …)` → `vault://cabinet_secrets/{cabinet_id}/…` or file backend.
+4. Row stores only `{secret_ref, secret_ref_prefix?, label?, created_at?}` — **never** plaintext.
+5. Plaintext strings and extra `password`/`secret` keys in the object are rejected by row validator.
+6. `secret_ref` must include this cabinet's id (`assert_cabinet_secret_scope`) — cannot bind another company's vault path.
+7. Pod env resolve (`container_env_secrets`) re-checks cabinet scope before `SecretStore.get`.
 
-**Gap:** none — P-META-VAULT-01 shipped (column type, upload API, Flutter masked widget).
+**Forbidden:** dedicated `secret_upload` meta widget (removed). Use core value preference + `secret: true`.
+
+**Gap:** none — P-META-VAULT-01 shipped (column type, upload API, Flutter masked core widget).
 
 ## Slug: `secrets` (optional module-level catalog)
 

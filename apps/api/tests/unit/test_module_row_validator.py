@@ -117,6 +117,29 @@ def test_secret_ref_cabinet_scope() -> None:
     assert "belongs to cabinet cab_1" in (exc.value.detail or "")
 
 
+def test_secret_ref_rejects_plaintext() -> None:
+    with pytest.raises(AppError) as exc:
+        validate_row_body(
+            {"name": "ACME", "api_token": "super-secret"},
+            _SECRET_COLUMNS,
+            cabinet_id="cab_1",
+        )
+    assert "plaintext" in (exc.value.detail or "")
+    with pytest.raises(AppError) as exc2:
+        validate_row_body(
+            {
+                "name": "ACME",
+                "api_token": {
+                    "secret_ref": "file://cabinet_secrets/cab_1/sec_abc",
+                    "password": "leak",
+                },
+            },
+            _SECRET_COLUMNS,
+            cabinet_id="cab_1",
+        )
+    assert "password" in (exc2.value.detail or "")
+
+
 _PATH_COLUMNS = [
     {
         "table_slug": "prompt_paths",

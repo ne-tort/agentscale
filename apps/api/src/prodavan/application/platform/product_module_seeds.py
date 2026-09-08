@@ -2235,8 +2235,11 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "mode": "edit",
                     "title": {"ru": "S4B", "en": "S4B"},
                     "fields": [
-                        {"column": "project_ids", "widget": "project_multiselect"},
-                        {"column": "name", "widget": "value"},
+                        {
+                            "column": "name",
+                            "widget": "value",
+                            "icon": "storefront",
+                        },
                         {
                             "column": "base_url",
                             "widget": "value",
@@ -2249,8 +2252,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         },
                         {
                             "column": "password",
-                            "widget": "secret_upload",
+                            "widget": "value",
                             "icon": "password",
+                            "secret": True,
                         },
                         {
                             "column": "mcp_zip",
@@ -2258,7 +2262,20 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "accept": ".zip",
                             "icon": "inventory_2",
                         },
-                        {"column": "enabled", "widget": "switch"},
+                        {"column": "project_ids", "widget": "project_multiselect"},
+                        {
+                            "column": "enabled",
+                            "widget": "pause_toggle",
+                            "invert": True,
+                            "pause_label": {
+                                "ru": "Приостановить",
+                                "en": "Pause",
+                            },
+                            "resume_label": {
+                                "ru": "Возобновить",
+                                "en": "Resume",
+                            },
+                        },
                     ],
                 },
             },

@@ -22,7 +22,7 @@ Product seed: `mod_equipment` — see `product_module_seeds.py`.
 - `equipment_builds` — `name`, `build_kind` (`pc`|`server`), `slots` (`{etype_id: item_row_id}`), denorm `components_count` / `price_total`
 - `trusted_sellers` — `name`, `aliases` (comma-separated); CRUD only
 - `web_shops` — `name`, `url`, `cookies` (free-form paste via `text_editor` nav page); CRUD only
-- `s4b_settings` — `name`, `base_url`, `login`, `password` (`secret_ref`), `mcp_zip` (`file_ref`), `enabled`, `project_ids` (empty = all)
+- `s4b_settings` — `name`, `base_url`, `login`, `password` (`secret_ref` via core `value` + `secret: true`), `mcp_zip` (`file_ref`), `enabled` (`pause_toggle` invert), `project_ids` (empty = all)
 
 ## Meta primitives
 
