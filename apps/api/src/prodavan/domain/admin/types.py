@@ -26,6 +26,64 @@ class CompanyCabinetQuota:
 
 DEFAULT_CABINET_QUOTA = CompanyCabinetQuota()
 
+
+@dataclass(frozen=True)
+class CompanyTenantInfraQuota:
+    """Per-company caps for Pod Tenant Infra Gateway planes."""
+
+    cache_ops_per_minute: int = 120
+    cache_max_keys: int = 500
+    cache_max_value_bytes: int = 65536
+    cache_default_ttl_sec: int = 3600
+    cache_max_ttl_sec: int = 86400 * 7
+    docs_ops_per_minute: int = 120
+    docs_max_collections: int = 20
+    docs_max_docs_per_collection: int = 5000
+    docs_max_doc_bytes: int = 262144
+    userdb_ops_per_minute: int = 60
+    userdb_max_tables: int = 20
+    userdb_max_rows_per_table: int = 10000
+    userdb_max_row_bytes: int = 65536
+    kafka_ops_per_minute: int = 120
+    kafka_max_payload_bytes: int = 65536
+    kafka_max_backlog: int = 1000
+    kafka_retention_sec: int = 86400 * 2
+    objects_ops_per_minute: int = 60
+    objects_max_per_project: int = 100
+    objects_max_bytes: int = 50 * 1024 * 1024
+
+    def validate(self) -> None:
+        pairs = (
+            ("cache_ops_per_minute", self.cache_ops_per_minute, 1),
+            ("cache_max_keys", self.cache_max_keys, 1),
+            ("cache_max_value_bytes", self.cache_max_value_bytes, 1),
+            ("cache_default_ttl_sec", self.cache_default_ttl_sec, 1),
+            ("cache_max_ttl_sec", self.cache_max_ttl_sec, 1),
+            ("docs_ops_per_minute", self.docs_ops_per_minute, 1),
+            ("docs_max_collections", self.docs_max_collections, 1),
+            ("docs_max_docs_per_collection", self.docs_max_docs_per_collection, 1),
+            ("docs_max_doc_bytes", self.docs_max_doc_bytes, 1),
+            ("userdb_ops_per_minute", self.userdb_ops_per_minute, 1),
+            ("userdb_max_tables", self.userdb_max_tables, 1),
+            ("userdb_max_rows_per_table", self.userdb_max_rows_per_table, 1),
+            ("userdb_max_row_bytes", self.userdb_max_row_bytes, 1),
+            ("kafka_ops_per_minute", self.kafka_ops_per_minute, 1),
+            ("kafka_max_payload_bytes", self.kafka_max_payload_bytes, 1),
+            ("kafka_max_backlog", self.kafka_max_backlog, 1),
+            ("kafka_retention_sec", self.kafka_retention_sec, 60),
+            ("objects_ops_per_minute", self.objects_ops_per_minute, 1),
+            ("objects_max_per_project", self.objects_max_per_project, 1),
+            ("objects_max_bytes", self.objects_max_bytes, 1),
+        )
+        for name, value, minimum in pairs:
+            if int(value) < minimum:
+                raise ValueError(f"{name} must be >= {minimum}")
+        if self.cache_default_ttl_sec > self.cache_max_ttl_sec:
+            raise ValueError("cache_default_ttl_sec must be <= cache_max_ttl_sec")
+
+
+DEFAULT_TENANT_INFRA_QUOTA = CompanyTenantInfraQuota()
+
 DEFAULT_MAX_ATTACHMENT_MB = 20
 PLATFORM_MAX_ATTACHMENT_MB = 500
 

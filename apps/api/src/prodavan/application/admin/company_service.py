@@ -10,10 +10,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.admin.quota_service import CompanyQuotaService
 from prodavan.application.metrics.aggregator import CompanyMetricsAggregator
 from prodavan.application.metrics.read_service import MetricsReadService
+from prodavan.application.tenant_infra.quota import TenantInfraQuotaService
 from prodavan.config.settings import settings
+from dataclasses import asdict
+
 from prodavan.domain.admin import (
     CompanyAgentRuntimePolicy,
     CompanyCabinetQuota,
+    CompanyTenantInfraQuota,
     attachment_max_bytes,
     subscription_read_model,
 )
@@ -43,6 +47,10 @@ def _quota_public(quota: CompanyCabinetQuota) -> dict:
         "max_packages_per_cabinet": quota.max_packages_per_cabinet,
         "max_bundle_import_mb": quota.max_bundle_import_mb,
     }
+
+
+def _tenant_infra_quota_public(quota: CompanyTenantInfraQuota) -> dict:
+    return asdict(quota)
 
 
 def _policy_public(
@@ -225,6 +233,9 @@ class AdminCompanyService:
             "keycloak_sub": company.keycloak_sub,
             "created_at": company.created_at.isoformat() if company.created_at else None,
             "cabinet_quota": _quota_public(quota),
+            "tenant_infra_quota": _tenant_infra_quota_public(
+                await TenantInfraQuotaService(self._session).get_quota(company_id)
+            ),
             "agent_policy": _policy_public(
                 policy,
                 webhook_configured=bool(webhook_secret),
@@ -249,6 +260,11 @@ class AdminCompanyService:
 
         await invalidate_company_runtime_cache(company_id)
         return _quota_public(row.to_domain())
+
+    async def set_tenant_infra_quotas(self, company_id: str, quota: CompanyTenantInfraQuota) -> dict:
+        await self._require_company(company_id)
+        saved = await TenantInfraQuotaService(self._session).set_quota(company_id, quota)
+        return _tenant_infra_quota_public(saved)
 
     async def get_ingress_hmac_secrets(self, company_id: str) -> tuple[str | None, str | None]:
         """HMAC secrets always from DB — never Redis (C-CACHE harden)."""

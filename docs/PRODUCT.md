@@ -71,7 +71,7 @@ Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** depe
 | K8s adapter | `infrastructure/k8s/pod_runtime.py`, overlay `infra/k3s/overlays/e2e/` |
 | Backend e2e (API, не UI) | `apps/api/tests/integration/`, `tests/e2e/k8s/`, `tests/e2e/live/` |
 | Document Store (Mongo) | `application/document_store/`, admin `/admin/document-store`, [ADR](02-architecture/ADR-document-store-mongo.md) |
-| Tenant Infra Gateway | `application/tenant_infra/`, Pod Bridge, `:8001` `main_pod`, API hydrate, [design](target/12-layer-docs/tenant-infra-gateway.md) |
+| Tenant Infra Gateway | `application/tenant_infra/` — Cache/Docs/UserDB/Events/Objects via `:8001` + Bridge scopes + company quotas; [as-built](target/12-layer-docs/tenant-infra-gateway.md) |
 | Agent + chat + files | `application/agent/`, `api/v1/agent.py`, content/assets |
 | Flutter UI (частично) | `apps/flutter/lib/features/` |
 | **Employee UI канон** | [`employee-ui/README.md`](employee-ui/README.md) |

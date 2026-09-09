@@ -63,6 +63,7 @@ class KafkaManager(LifespanResource):
         topic_relation_events: str = "prodavan.relation.events",
         topic_metrics_events: str = "prodavan.metrics.events",
         topic_document_events: str = "prodavan.document.events",
+        topic_tenant_events: str = "prodavan.tenant.events",
         required: bool = False,
         buffer_size: int = 200,
         consumer_enabled: bool = False,
@@ -85,6 +86,7 @@ class KafkaManager(LifespanResource):
         self._topic_relation_events = topic_relation_events
         self._topic_metrics_events = topic_metrics_events
         self._topic_document_events = topic_document_events
+        self._topic_tenant_events = topic_tenant_events
         self._required = required
         self._consumer_enabled = consumer_enabled
         self._consumer_group = consumer_group
@@ -174,6 +176,8 @@ class KafkaManager(LifespanResource):
             return self._topic_metrics_events
         if bus == "document":
             return self._topic_document_events
+        if bus == "tenant":
+            return self._topic_tenant_events
         raise ValueError(f"unknown bus: {bus}")
 
     def recent_envelopes(self) -> list[dict[str, Any]]:

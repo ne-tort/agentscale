@@ -3,6 +3,7 @@ kind: Kustomization
 resources:
   - ../../base
   - postgres.yaml
+  - userdb-init.yaml
   - sandboxes
   - cluster-heal-cronjob.yaml
 transformers:

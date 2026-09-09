@@ -16,8 +16,9 @@ This is **not** the deferred cutover of product `module_instances` JSONB to Mong
 2. Add in-proc BC `application/document_store/` with `DocumentStorePort`, Mongo adapter (motor), and in-memory adapter for tests.
 3. Physical collections are `{namespace}.{collection}`; namespace = calling BC id; server enforces slug validation and tenancy (`company_id` required unless namespace ∈ platform/system).
 4. Domain Kafka bus `document` → topic `prodavan.document.events`; metrics via existing `metrics.counter.delta`.
-5. Admin HTTP under `/api/v1/admin/document-store/*` (`platform.admin` only). Pods do not call this API.
-6. Sandbox NetworkPolicy keeps **no** egress to `:27017`.
+5. Admin HTTP under `/api/v1/admin/document-store/*` (`platform.admin` only).
+6. Project Pods access documents only via Tenant Infra Gateway (`/projects/{id}/infra/docs/*`, namespace forced `tenant_infra`) — never `:27017` and never admin routes.
+7. Sandbox NetworkPolicy keeps **no** egress to `:27017`.
 
 ## Consequences
 

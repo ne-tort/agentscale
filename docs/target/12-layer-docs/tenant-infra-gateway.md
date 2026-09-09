@@ -1,13 +1,13 @@
 # Tenant Infra Gateway
 
-**Status:** foundation shipped — Pod Identity Bridge, Cache API, module-scoped routes, **Pod API `:8001`**, API-mediated hydrate (no MinIO egress). Objects / tenant Kafka consume / User DB — later.
+**Status:** as-built — Pod Identity Bridge, **Cache / Documents / UserDB / Events / Objects** via `:8001`, company quotas, lifecycle purge.
 
 **Product pointer:** [PRODUCT.md](../../PRODUCT.md).  
 **Related as-built:** [Document Store BC (Mongo)](../../02-architecture/ADR-document-store-mongo.md) — Pods must not open `:27017`.
 
 ## Goal
 
-Give Project Pods a **network-isolated** window into platform capabilities without broker/MinIO DSNs or access to full API `:8000`.
+Give Project Pods a **network-isolated** window into platform capabilities without broker/MinIO/DB DSNs or access to full API `:8000`.
 
 ## As-built controls
 
@@ -20,8 +20,12 @@ Give Project Pods a **network-isolated** window into platform capabilities witho
 | Allowlist | `internal/pods/`, `projects/{id}/(infra\|modules\|agent)/` |
 | Hydrate | `GET /internal/pods/{pod_id}/workspace-archive` (API packs MinIO → tar) |
 | Credentials | `claims.pod_id == path`; scope `internal:credentials` |
-| Hydrate | `GET .../workspace-archive`; scope `internal:hydrate` |
-| Cache | rewrite `tenant:{company}:proj:{project}:{key}` |
+| Cache | rewrite `tenant:{company}:proj:{project}:{key}`; mandatory TTL; max keys; purge on pause/stop |
+| Documents | Mongo ns `tenant_infra`, collection `p{project}_{user}`; forced company/project fields |
+| User DB | Separate DB `prodavan_userdb`, schema `p_<project>`; structured API (no raw SQL) |
+| Events | Gateway log + optional Kafka topic `prodavan.tenant.events`; backlog/retention caps |
+| Objects | Content assets tagged `tenant_infra` + `project:{id}`; base64 put / binary get |
+| Quotas | `CompanyTenantInfraQuota` — admin `PUT …/tenant-infra-quotas`; 429 `TENANT_INFRA_QUOTA` |
 
 ## Why API hydrate (not presigned MinIO)
 
@@ -29,10 +33,31 @@ Presigned URLs still need egress to MinIO or a public proxy. API-mediated archiv
 
 ## Scopes
 
-`agent:events`, `internal:credentials`, `internal:hydrate`, `infra:cache`, `module:{id}:rows`, `module:{id}:actions` (reserved).
+`agent:events`, `internal:credentials`, `internal:hydrate`, `infra:cache`, `infra:docs`, `infra:userdb`, `infra:events`, `infra:objects`, `module:{id}:rows`, `module:{id}:actions`.
 
 `main_pod` uses a slim lifespan (DB/Redis/Mongo/FileStore/Kafka producer only — no workers/samplers/bootstrap).
 
-## Later
+## Pod API matrix
 
-Objects via Content; tenant Kafka topics; Document Store namespace `tenant_infra`; User DB gateway.
+| Plane | Paths | Isolation | Anti-spam |
+|-------|-------|-----------|-----------|
+| Cache | `/infra/cache/{key}` | Redis key rewrite | ops/min, max keys, max value, **required TTL** |
+| Docs | `/infra/docs/{collection}` | Mongo ns `tenant_infra` | ops/min, max collections/docs/bytes |
+| UserDB | `/infra/userdb/tables…` | DB `prodavan_userdb` schema/project | ops/min, max tables/rows/bytes; no raw SQL |
+| Events | `/infra/events` | project event log (+ Kafka mirror) | ops/min, max payload, max backlog, retention |
+| Objects | `/infra/objects` | Content BC tags | ops/min, max objects/bytes |
+
+## Lifecycle
+
+On pod **pause** / **terminate** (delete/purge/stop): `purge_project_tenant_infra` clears cache index, docs, userdb schema, event log/offsets, and project-tagged objects.
+
+## Where tables/documents live
+
+| Store | Location | Pod access |
+|-------|----------|------------|
+| Platform Postgres (Alembic) | `prodavan` | **Never** — no DSN |
+| User tables | `prodavan_userdb` / schema `p_<project>` | Structured Gateway only |
+| Documents | Mongo db `prodavan`, ns `tenant_infra` | Gateway only |
+| Cache | Redis keys `tenant:…` | Gateway only |
+| Events | Redis/memory log + topic `prodavan.tenant.events` | Gateway only |
+| Blobs | Content/FileStore | Gateway only |

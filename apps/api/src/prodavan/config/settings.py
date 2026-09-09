@@ -67,6 +67,10 @@ class Settings(BaseSettings):
         default=120,
         validation_alias=AliasChoices("TENANT_INFRA_CACHE_OPS_PER_MINUTE"),
     )
+    userdb_url: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("USERDB_URL", "TENANT_USERDB_URL"),
+    )
 
     # P0 object storage (C-OBJECT-STORE). local = keys under storage_root; s3 = MinIO/AWS.
     object_store_backend: str = "local"  # local | s3
@@ -117,6 +121,7 @@ class Settings(BaseSettings):
     metrics_presence_ttl_sec: int = 900
     kafka_topic_metrics_events: str = "prodavan.metrics.events"
     kafka_topic_document_events: str = "prodavan.document.events"
+    kafka_topic_tenant_events: str = "prodavan.tenant.events"
     kafka_metrics_group: str = "prodavan-metrics"
     metrics_sample_ttl_sec: int = 60
     metrics_sample_interval_sec: int = 15

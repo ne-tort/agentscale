@@ -14,6 +14,7 @@ BusName = Literal[
     "relation_event",
     "metrics",
     "document",
+    "tenant",
 ]
 
 

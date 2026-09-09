@@ -1,4 +1,4 @@
-"""Tenant Infra Cache service — rewrite, quotas, events."""
+"""Tenant Infra Cache service — rewrite, quotas, TTL, key index, purge."""
 
 from __future__ import annotations
 
@@ -9,11 +9,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.pod_identity.bridge import SCOPE_INFRA_CACHE, PodBridgeClaims
 from prodavan.application.tenant_infra.adapters.memory_cache import InMemoryTenantCache
 from prodavan.application.tenant_infra.adapters.redis_cache import RedisTenantCache
-from prodavan.application.tenant_infra.keys import rewrite_cache_key
+from prodavan.application.tenant_infra.keys import cache_index_key, rewrite_cache_key
 from prodavan.application.tenant_infra.ports.cache import TenantCachePort
 from prodavan.application.tenant_infra.publish import emit_cache_op_metric, emit_tenant_infra_event
-from prodavan.config.settings import settings
-from prodavan.core.infra.cache import cache_key, rate_limit_enforce
+from prodavan.application.tenant_infra.quota import TenantInfraQuotaService, enforce_ops_rate, quota_exceeded
 from prodavan.domain.errors import AppError
 
 
@@ -34,26 +33,8 @@ class TenantInfraService:
         bridge.require_project(project_id)
         bridge.require_scope(SCOPE_INFRA_CACHE)
 
-    async def _enforce_quota(self, bridge: PodBridgeClaims) -> None:
-        limit = int(settings.tenant_infra_cache_ops_per_minute or 0)
-        if limit < 1:
-            return
-        await rate_limit_enforce(
-            cache_key("rl", "tenant_infra", "cache", bridge.project_id),
-            limit=limit,
-            window_sec=60,
-            detail="tenant infra cache rate limit exceeded",
-        )
-
-    def _check_value_size(self, value: str) -> None:
-        max_b = int(settings.tenant_infra_cache_max_value_bytes or 0)
-        if max_b > 0 and len(value.encode("utf-8")) > max_b:
-            raise AppError(
-                code="VALIDATION_ERROR",
-                title="Validation Error",
-                status=422,
-                detail=f"cache value exceeds {max_b} bytes",
-            )
+    async def _quota(self, bridge: PodBridgeClaims, session: AsyncSession | None):
+        return await TenantInfraQuotaService(session).get_quota(bridge.company_id)
 
     async def get(
         self,
@@ -64,7 +45,14 @@ class TenantInfraService:
         session: AsyncSession | None = None,
     ) -> dict[str, Any]:
         self._require_bridge(bridge, project_id)
-        await self._enforce_quota(bridge)
+        quota = await self._quota(bridge, session)
+        await enforce_ops_rate(
+            plane="cache",
+            company_id=bridge.company_id,
+            project_id=bridge.project_id,
+            limit=quota.cache_ops_per_minute,
+            acting_employee_id=bridge.acting_employee_id,
+        )
         physical = rewrite_cache_key(
             company_id=bridge.company_id, project_id=bridge.project_id, user_key=key
         )
@@ -97,12 +85,36 @@ class TenantInfraService:
         session: AsyncSession | None = None,
     ) -> dict[str, Any]:
         self._require_bridge(bridge, project_id)
-        await self._enforce_quota(bridge)
-        self._check_value_size(value)
+        quota = await self._quota(bridge, session)
+        await enforce_ops_rate(
+            plane="cache",
+            company_id=bridge.company_id,
+            project_id=bridge.project_id,
+            limit=quota.cache_ops_per_minute,
+            acting_employee_id=bridge.acting_employee_id,
+        )
+        if len(value.encode("utf-8")) > quota.cache_max_value_bytes:
+            raise quota_exceeded(f"cache value exceeds {quota.cache_max_value_bytes} bytes")
+        effective_ttl = int(ttl_sec) if ttl_sec is not None else int(quota.cache_default_ttl_sec)
+        if effective_ttl < 1:
+            effective_ttl = int(quota.cache_default_ttl_sec)
+        if effective_ttl > quota.cache_max_ttl_sec:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail=f"ttl_sec exceeds max {quota.cache_max_ttl_sec}",
+            )
         physical = rewrite_cache_key(
             company_id=bridge.company_id, project_id=bridge.project_id, user_key=key
         )
-        ok = await self._cache.set(physical, value, ttl_sec=ttl_sec)
+        index = cache_index_key(company_id=bridge.company_id, project_id=bridge.project_id)
+        exists = await self._cache.get(physical)
+        if exists is None:
+            card = await self._cache.index_card(index)
+            if card >= quota.cache_max_keys:
+                raise quota_exceeded(f"cache max keys {quota.cache_max_keys} exceeded")
+        ok = await self._cache.set(physical, value, ttl_sec=effective_ttl)
         if not ok:
             raise AppError(
                 code="SERVICE_UNAVAILABLE",
@@ -110,13 +122,14 @@ class TenantInfraService:
                 status=503,
                 detail="tenant cache unavailable",
             )
+        await self._cache.index_add(index, physical)
         await emit_tenant_infra_event(
             session=session,
             event_type="tenant_infra.op",
             company_id=bridge.company_id,
             cabinet_id=bridge.cabinet_id,
             project_id=bridge.project_id,
-            payload={"op": "cache.set", "ttl_sec": ttl_sec},
+            payload={"op": "cache.set", "ttl_sec": effective_ttl},
         )
         await emit_cache_op_metric(
             session=session,
@@ -125,7 +138,7 @@ class TenantInfraService:
             project_id=bridge.project_id,
             op="set",
         )
-        return {"key": key, "ok": True}
+        return {"key": key, "ok": True, "ttl_sec": effective_ttl}
 
     async def delete(
         self,
@@ -136,11 +149,20 @@ class TenantInfraService:
         session: AsyncSession | None = None,
     ) -> dict[str, Any]:
         self._require_bridge(bridge, project_id)
-        await self._enforce_quota(bridge)
+        quota = await self._quota(bridge, session)
+        await enforce_ops_rate(
+            plane="cache",
+            company_id=bridge.company_id,
+            project_id=bridge.project_id,
+            limit=quota.cache_ops_per_minute,
+            acting_employee_id=bridge.acting_employee_id,
+        )
         physical = rewrite_cache_key(
             company_id=bridge.company_id, project_id=bridge.project_id, user_key=key
         )
+        index = cache_index_key(company_id=bridge.company_id, project_id=bridge.project_id)
         await self._cache.delete(physical)
+        await self._cache.index_remove(index, physical)
         await emit_tenant_infra_event(
             session=session,
             event_type="tenant_infra.op",
@@ -168,11 +190,26 @@ class TenantInfraService:
         session: AsyncSession | None = None,
     ) -> dict[str, Any]:
         self._require_bridge(bridge, project_id)
-        await self._enforce_quota(bridge)
+        quota = await self._quota(bridge, session)
+        await enforce_ops_rate(
+            plane="cache",
+            company_id=bridge.company_id,
+            project_id=bridge.project_id,
+            limit=quota.cache_ops_per_minute,
+            acting_employee_id=bridge.acting_employee_id,
+        )
         physical = rewrite_cache_key(
             company_id=bridge.company_id, project_id=bridge.project_id, user_key=key
         )
-        value = await self._cache.incr(physical, amount=amount)
+        index = cache_index_key(company_id=bridge.company_id, project_id=bridge.project_id)
+        existed = await self._cache.get(physical)
+        if existed is None:
+            card = await self._cache.index_card(index)
+            if card >= quota.cache_max_keys:
+                raise quota_exceeded(f"cache max keys {quota.cache_max_keys} exceeded")
+        value = await self._cache.incr(
+            physical, amount=amount, ttl_sec=quota.cache_default_ttl_sec
+        )
         if value is None:
             raise AppError(
                 code="SERVICE_UNAVAILABLE",
@@ -180,6 +217,7 @@ class TenantInfraService:
                 status=503,
                 detail="tenant cache unavailable",
             )
+        await self._cache.index_add(index, physical)
         await emit_tenant_infra_event(
             session=session,
             event_type="tenant_infra.op",
@@ -196,3 +234,14 @@ class TenantInfraService:
             op="incr",
         )
         return {"key": key, "value": value}
+
+    async def purge_project(
+        self,
+        *,
+        company_id: str,
+        project_id: str,
+    ) -> int:
+        index = cache_index_key(company_id=company_id, project_id=project_id)
+        members = await self._cache.index_members(index)
+        deleted = await self._cache.purge_keys(members + [index])
+        return deleted

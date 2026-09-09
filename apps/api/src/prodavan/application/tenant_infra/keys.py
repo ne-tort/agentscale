@@ -11,6 +11,7 @@ _PLATFORM_PREFIXES = (
     "prodavan:",
     "celery",
     "tenant:",  # must come from rewrite only
+    "__",  # reserved index / meta keys
 )
 
 
@@ -45,3 +46,11 @@ def canonicalize_user_key(user_key: str) -> str:
 def rewrite_cache_key(*, company_id: str, project_id: str, user_key: str) -> str:
     safe = canonicalize_user_key(user_key)
     return f"tenant:{company_id}:proj:{project_id}:{safe}"
+
+
+def cache_index_key(*, company_id: str, project_id: str) -> str:
+    return f"tenant:{company_id}:proj:{project_id}:__keys"
+
+
+def project_prefix(*, company_id: str, project_id: str) -> str:
+    return f"tenant:{company_id}:proj:{project_id}:"

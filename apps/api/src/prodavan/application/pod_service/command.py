@@ -483,6 +483,7 @@ class PodCommand:
 
     async def _apply_absent(self, project: ProjectRow, pod: ProjectPodRow) -> None:
         from prodavan.application.pod_identity.bridge import bump_pod_bridge_generation
+        from prodavan.application.tenant_infra.lifecycle import purge_project_tenant_infra
 
         await bump_pod_bridge_generation(pod.id)
         ref = pod.runtime_ref or project.container_ref
@@ -490,9 +491,15 @@ class PodCommand:
         if ref:
             await self._runtime.pause(runtime_ref=ref)
         pod.status = PodStatus.PAUSED
+        await purge_project_tenant_infra(
+            company_id=project.company_id,
+            project_id=project.id,
+            session=self._session,
+        )
 
     async def _apply_terminate(self, project: ProjectRow, pod: ProjectPodRow) -> None:
         from prodavan.application.pod_identity.bridge import bump_pod_bridge_generation
+        from prodavan.application.tenant_infra.lifecycle import purge_project_tenant_infra
 
         await bump_pod_bridge_generation(pod.id)
         ref = pod.runtime_ref or project.container_ref
@@ -501,6 +508,11 @@ class PodCommand:
             await self._runtime.terminate(runtime_ref=ref)
         pod.status = PodStatus.TERMINATED
         pod.desired_state = PodDesiredState.ABSENT
+        await purge_project_tenant_infra(
+            company_id=project.company_id,
+            project_id=project.id,
+            session=self._session,
+        )
 
     @staticmethod
     def _runtime_context(

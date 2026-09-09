@@ -13,7 +13,7 @@ from prodavan.api.deps import PlatformAdminDep, PrincipalDep, SessionDep, get_cu
 from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.cabinets.instance_service import CabinetInstanceService
 from prodavan.application.identity.service import EntitlementService
-from prodavan.domain.admin import CompanyAgentRuntimePolicy, CompanyCabinetQuota
+from prodavan.domain.admin import CompanyAgentRuntimePolicy, CompanyCabinetQuota, CompanyTenantInfraQuota
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
@@ -26,6 +26,31 @@ class CabinetQuotaBody(BaseModel):
     max_cabinets: int = Field(ge=1, le=10_000)
     max_packages_per_cabinet: int = Field(ge=0, le=500)
     max_bundle_import_mb: int = Field(ge=1, le=10_000)
+
+
+class TenantInfraQuotaBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    cache_ops_per_minute: int = Field(ge=1, le=100_000)
+    cache_max_keys: int = Field(ge=1, le=1_000_000)
+    cache_max_value_bytes: int = Field(ge=1, le=10_000_000)
+    cache_default_ttl_sec: int = Field(ge=1, le=86400 * 30)
+    cache_max_ttl_sec: int = Field(ge=1, le=86400 * 30)
+    docs_ops_per_minute: int = Field(ge=1, le=100_000)
+    docs_max_collections: int = Field(ge=1, le=10_000)
+    docs_max_docs_per_collection: int = Field(ge=1, le=10_000_000)
+    docs_max_doc_bytes: int = Field(ge=1, le=10_000_000)
+    userdb_ops_per_minute: int = Field(ge=1, le=100_000)
+    userdb_max_tables: int = Field(ge=1, le=10_000)
+    userdb_max_rows_per_table: int = Field(ge=1, le=10_000_000)
+    userdb_max_row_bytes: int = Field(ge=1, le=10_000_000)
+    kafka_ops_per_minute: int = Field(ge=1, le=100_000)
+    kafka_max_payload_bytes: int = Field(ge=1, le=10_000_000)
+    kafka_max_backlog: int = Field(ge=1, le=10_000_000)
+    kafka_retention_sec: int = Field(ge=60, le=86400 * 30)
+    objects_ops_per_minute: int = Field(ge=1, le=100_000)
+    objects_max_per_project: int = Field(ge=1, le=1_000_000)
+    objects_max_bytes: int = Field(ge=1, le=5_000_000_000)
 
 
 class CompanyPatchBody(BaseModel):
@@ -152,6 +177,17 @@ async def set_cabinet_quotas(
         max_bundle_import_mb=body.max_bundle_import_mb,
     )
     return await AdminCompanyService(session).set_cabinet_quotas(company_id, quota)
+
+
+@router.put("/{company_id}/tenant-infra-quotas")
+async def set_tenant_infra_quotas(
+    company_id: str,
+    body: TenantInfraQuotaBody,
+    _: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    quota = CompanyTenantInfraQuota(**body.model_dump())
+    return await AdminCompanyService(session).set_tenant_infra_quotas(company_id, quota)
 
 
 @router.get("/{company_id}/agent-policy")

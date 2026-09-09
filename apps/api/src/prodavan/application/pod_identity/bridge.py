@@ -20,6 +20,10 @@ SCOPE_AGENT_EVENTS = "agent:events"
 SCOPE_INTERNAL_CREDENTIALS = "internal:credentials"
 SCOPE_INTERNAL_HYDRATE = "internal:hydrate"
 SCOPE_INFRA_CACHE = "infra:cache"
+SCOPE_INFRA_DOCS = "infra:docs"
+SCOPE_INFRA_USERDB = "infra:userdb"
+SCOPE_INFRA_EVENTS = "infra:events"
+SCOPE_INFRA_OBJECTS = "infra:objects"
 
 
 def module_rows_scope(module_id: str) -> str:
@@ -36,6 +40,10 @@ def default_platform_scopes() -> list[str]:
         SCOPE_INTERNAL_CREDENTIALS,
         SCOPE_INTERNAL_HYDRATE,
         SCOPE_INFRA_CACHE,
+        SCOPE_INFRA_DOCS,
+        SCOPE_INFRA_USERDB,
+        SCOPE_INFRA_EVENTS,
+        SCOPE_INFRA_OBJECTS,
     ]
 
 

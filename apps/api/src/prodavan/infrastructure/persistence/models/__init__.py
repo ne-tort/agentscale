@@ -3,6 +3,7 @@
 from prodavan.infrastructure.persistence.models.admin import (
     CompanyAgentRuntimePolicyRow,
     CompanyCabinetQuotaRow,
+    CompanyTenantInfraQuotaRow,
 )
 from prodavan.infrastructure.persistence.models.agent import (
     AgentEventRow,
@@ -78,6 +79,7 @@ __all__ = [
     "CompanyAgentRuntimePolicyRow",
     "CompanyAiKeyBindingRow",
     "CompanyCabinetQuotaRow",
+    "CompanyTenantInfraQuotaRow",
     "CompanyRow",
     "ContentAclEntryRow",
     "ContentAliasBindingRow",

@@ -11,8 +11,10 @@ from prodavan.config.settings import settings
 from prodavan.core.infra.cache import cache_delete, cache_get, cache_key, cache_set
 from prodavan.domain.admin import (
     DEFAULT_CABINET_QUOTA,
+    DEFAULT_TENANT_INFRA_QUOTA,
     CompanyAgentRuntimePolicy,
     CompanyCabinetQuota,
+    CompanyTenantInfraQuota,
     subscription_read_model,
 )
 
@@ -31,6 +33,10 @@ def subscription_cache_key(company_id: str) -> str:
 
 def quota_cache_key(company_id: str) -> str:
     return cache_key("company", company_id, "quota")
+
+
+def tenant_infra_quota_cache_key(company_id: str) -> str:
+    return cache_key("company", company_id, "tenant_infra_quota")
 
 
 def policy_to_cache_dict(policy: CompanyAgentRuntimePolicy) -> dict[str, Any]:
@@ -158,7 +164,61 @@ async def set_cached_quota(company_id: str, quota: CompanyCabinetQuota) -> None:
     )
 
 
+def tenant_infra_quota_to_cache_dict(quota: CompanyTenantInfraQuota) -> dict[str, Any]:
+    return {
+        "cache_ops_per_minute": quota.cache_ops_per_minute,
+        "cache_max_keys": quota.cache_max_keys,
+        "cache_max_value_bytes": quota.cache_max_value_bytes,
+        "cache_default_ttl_sec": quota.cache_default_ttl_sec,
+        "cache_max_ttl_sec": quota.cache_max_ttl_sec,
+        "docs_ops_per_minute": quota.docs_ops_per_minute,
+        "docs_max_collections": quota.docs_max_collections,
+        "docs_max_docs_per_collection": quota.docs_max_docs_per_collection,
+        "docs_max_doc_bytes": quota.docs_max_doc_bytes,
+        "userdb_ops_per_minute": quota.userdb_ops_per_minute,
+        "userdb_max_tables": quota.userdb_max_tables,
+        "userdb_max_rows_per_table": quota.userdb_max_rows_per_table,
+        "userdb_max_row_bytes": quota.userdb_max_row_bytes,
+        "kafka_ops_per_minute": quota.kafka_ops_per_minute,
+        "kafka_max_payload_bytes": quota.kafka_max_payload_bytes,
+        "kafka_max_backlog": quota.kafka_max_backlog,
+        "kafka_retention_sec": quota.kafka_retention_sec,
+        "objects_ops_per_minute": quota.objects_ops_per_minute,
+        "objects_max_per_project": quota.objects_max_per_project,
+        "objects_max_bytes": quota.objects_max_bytes,
+    }
+
+
+def tenant_infra_quota_from_cache_dict(data: dict[str, Any]) -> CompanyTenantInfraQuota:
+    base = DEFAULT_TENANT_INFRA_QUOTA
+    return CompanyTenantInfraQuota(
+        **{
+            field: int(data[field]) if data.get(field) is not None else getattr(base, field)
+            for field in tenant_infra_quota_to_cache_dict(base)
+        }
+    )
+
+
+async def get_cached_tenant_infra_quota(company_id: str) -> CompanyTenantInfraQuota | None:
+    raw = await cache_get(tenant_infra_quota_cache_key(company_id))
+    if not raw:
+        return None
+    try:
+        return tenant_infra_quota_from_cache_dict(json.loads(raw))
+    except Exception:
+        return None
+
+
+async def set_cached_tenant_infra_quota(company_id: str, quota: CompanyTenantInfraQuota) -> None:
+    await cache_set(
+        tenant_infra_quota_cache_key(company_id),
+        json.dumps(tenant_infra_quota_to_cache_dict(quota), ensure_ascii=False),
+        ttl_sec=_QUOTA_TTL,
+    )
+
+
 async def invalidate_company_runtime_cache(company_id: str) -> None:
     await cache_delete(agent_policy_cache_key(company_id))
     await cache_delete(subscription_cache_key(company_id))
     await cache_delete(quota_cache_key(company_id))
+    await cache_delete(tenant_infra_quota_cache_key(company_id))
