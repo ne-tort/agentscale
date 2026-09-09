@@ -62,9 +62,10 @@ Legacy single-SA model (`prodavan-sandbox` on API + user Pods) — **removed** (
 
 From [isolation.md](../isolation.md) + P2 hydrate:
 
-- Egress: DNS (UDP 53), internet (80/443), **MinIO in `prodavan` (TCP 9000)**
+- Egress: DNS (UDP/TCP 53), internet (80/443), **API in `prodavan` (TCP 8000)**, **MinIO in `prodavan` (TCP 9000)**
 - Selector: `prodavan.io/managed-by=pod-service` (not legacy `container-runtime`)
-- Deny: cluster metadata abuse, lateral pod-to-pod (except explicit allowlist if needed)
+- Deny: Redis/Kafka/Postgres/Mongo/Keycloak ports; cluster metadata abuse; lateral pod-to-pod
+- Path isolation for Pod→API (module/infra only) is **auth allowlist**, not NP — [tenant-infra-gateway](../../12-layer-docs/tenant-infra-gateway.md)
 
 ## API cluster access
 

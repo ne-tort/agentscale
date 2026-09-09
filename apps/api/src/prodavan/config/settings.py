@@ -42,6 +42,32 @@ class Settings(BaseSettings):
     mongodb_enabled: bool = False
     mongodb_required: bool = False
 
+    # Pod Identity Bridge (scoped JWT for Project Pods). Empty secret → fallback to
+    # POD_AGENT_BRIDGE_AUTH_TOKEN then AUTH_TEST_SECRET.
+    pod_identity_bridge_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "POD_IDENTITY_BRIDGE_SECRET",
+            "POD_BRIDGE_JWT_SECRET",
+        ),
+    )
+    pod_identity_bridge_ttl_seconds: int = Field(
+        default=86400,
+        validation_alias=AliasChoices(
+            "POD_IDENTITY_BRIDGE_TTL_SECONDS",
+            "POD_BRIDGE_JWT_TTL_SECONDS",
+        ),
+    )
+    # Tenant Infra Cache quotas
+    tenant_infra_cache_max_value_bytes: int = Field(
+        default=65536,
+        validation_alias=AliasChoices("TENANT_INFRA_CACHE_MAX_VALUE_BYTES"),
+    )
+    tenant_infra_cache_ops_per_minute: int = Field(
+        default=120,
+        validation_alias=AliasChoices("TENANT_INFRA_CACHE_OPS_PER_MINUTE"),
+    )
+
     # P0 object storage (C-OBJECT-STORE). local = keys under storage_root; s3 = MinIO/AWS.
     object_store_backend: str = "local"  # local | s3
     s3_endpoint_url: str | None = None

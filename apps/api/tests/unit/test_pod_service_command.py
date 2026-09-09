@@ -16,9 +16,15 @@ from prodavan.infrastructure.persistence.models.projects import ProjectPodRow, P
 
 @pytest.fixture(autouse=True)
 def _noop_container_env_loader():
-    with patch(
-        "prodavan.application.pod_service.command.ContainerEnvLoader.load_for_project",
-        new=AsyncMock(return_value=()),
+    with (
+        patch(
+            "prodavan.application.pod_service.command.ContainerEnvLoader.load_for_project",
+            new=AsyncMock(return_value=()),
+        ),
+        patch(
+            "prodavan.application.pod_service.command.PodCommand._mint_pod_bridge_token",
+            new=AsyncMock(return_value="test-pod-bridge-jwt"),
+        ),
     ):
         yield
 

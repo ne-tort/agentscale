@@ -38,7 +38,22 @@ def _build_agent_runtime_container(
     ]
     for name, value in context.extra_env:
         env.append({"name": name, "value": value})
-    if auth_secret_name:
+    if context.pod_auth_token:
+        env.append({"name": "PRODAVAN_AUTH_TOKEN", "value": context.pod_auth_token})
+        if auth_secret_name:
+            env.append(
+                {
+                    "name": "BRIDGE_AUTH_TOKEN",
+                    "valueFrom": {
+                        "secretKeyRef": {
+                            "name": auth_secret_name,
+                            "key": "bridge-token",
+                            "optional": True,
+                        },
+                    },
+                },
+            )
+    elif auth_secret_name:
         env.append(
             {
                 "name": "PRODAVAN_AUTH_TOKEN",

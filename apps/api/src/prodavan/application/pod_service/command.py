@@ -320,9 +320,12 @@ class PodCommand:
             logger.exception("lazy start failed project_id=%s", project_id)
 
     async def force_kill(self, *, pod_id: str, principal: Principal) -> dict:
+        from prodavan.application.pod_identity.bridge import bump_pod_bridge_generation
+
         pod = await self._session.get(ProjectPodRow, pod_id)
         if pod is None:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Pod not found")
+        await bump_pod_bridge_generation(pod.id)
         if pod.runtime_ref:
             await self._runtime.force_kill(runtime_ref=pod.runtime_ref)
         pod.status = PodStatus.TERMINATED
@@ -395,8 +398,10 @@ class PodCommand:
 
     async def _prepare_reload(self, project: ProjectRow, pod: ProjectPodRow) -> None:
         """Terminate live k8s workload and reset pod row so reload always recreates."""
+        from prodavan.application.pod_identity.bridge import bump_pod_bridge_generation
         from prodavan.application.projects.workspace_checkpoint import checkpoint_project_workspace
 
+        await bump_pod_bridge_generation(pod.id)
         await checkpoint_project_workspace(self._session, project_id=project.id, best_effort=True)
         ref = pod.runtime_ref or project.container_ref
         if ref:
@@ -428,7 +433,10 @@ class PodCommand:
         extra_env = await ContainerEnvLoader(self._session).load_for_project(
             project, lifecycle=lifecycle
         )
-        ctx = self._runtime_context(project, pod, extra_env=extra_env)
+        pod_auth_token = await self._mint_pod_bridge_token(project, pod, principal=principal)
+        ctx = self._runtime_context(
+            project, pod, extra_env=extra_env, pod_auth_token=pod_auth_token
+        )
         # Commit before k8s create/wait so pod_reconcile zombie reaper sees the PG row.
         await self._session.commit()
         await self._runtime.ensure_running(runtime_ref=ref, context=ctx)
@@ -446,7 +454,37 @@ class PodCommand:
             payload={"generation": pod.hydrate_generation, "awaiting_verification": True},
         )
 
+    async def _mint_pod_bridge_token(
+        self,
+        project: ProjectRow,
+        pod: ProjectPodRow,
+        *,
+        principal: Principal,
+    ) -> str | None:
+        from prodavan.application.modules.module_binding_service import ModuleBindingService
+        from prodavan.application.pod_identity.bridge import (
+            build_launch_scopes,
+            mint_pod_bridge_token,
+        )
+
+        module_ids = await ModuleBindingService(self._session).list_module_ids_for_project(
+            project.id
+        )
+        scopes = build_launch_scopes(module_ids)
+        token, _claims = await mint_pod_bridge_token(
+            project_id=project.id,
+            cabinet_id=project.cabinet_id,
+            company_id=project.company_id,
+            pod_id=pod.id,
+            scopes=scopes,
+            acting_employee_id=principal.sub or None,
+        )
+        return token
+
     async def _apply_absent(self, project: ProjectRow, pod: ProjectPodRow) -> None:
+        from prodavan.application.pod_identity.bridge import bump_pod_bridge_generation
+
+        await bump_pod_bridge_generation(pod.id)
         ref = pod.runtime_ref or project.container_ref
         pod.status = PodStatus.PAUSING
         if ref:
@@ -454,6 +492,9 @@ class PodCommand:
         pod.status = PodStatus.PAUSED
 
     async def _apply_terminate(self, project: ProjectRow, pod: ProjectPodRow) -> None:
+        from prodavan.application.pod_identity.bridge import bump_pod_bridge_generation
+
+        await bump_pod_bridge_generation(pod.id)
         ref = pod.runtime_ref or project.container_ref
         pod.status = PodStatus.TERMINATING
         if ref:
@@ -467,6 +508,7 @@ class PodCommand:
         pod: ProjectPodRow,
         *,
         extra_env: tuple[tuple[str, str], ...] = (),
+        pod_auth_token: str | None = None,
     ) -> PodRuntimeContext:
         return PodRuntimeContext(
             pod_id=pod.id,
@@ -475,6 +517,7 @@ class PodCommand:
             workspace_key=pod.workspace_key or project.workspace_key,
             hydrate_generation=pod.hydrate_generation,
             extra_env=extra_env,
+            pod_auth_token=pod_auth_token,
         )
 
     @staticmethod

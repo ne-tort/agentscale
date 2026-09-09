@@ -13,3 +13,5 @@ class PodRuntimeContext:
     workspace_key: str
     hydrate_generation: int = 0
     extra_env: tuple[tuple[str, str], ...] = ()
+    # Per-pod Pod Identity Bridge JWT (injected as PRODAVAN_AUTH_TOKEN value).
+    pod_auth_token: str | None = None
