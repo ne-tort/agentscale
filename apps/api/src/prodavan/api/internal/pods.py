@@ -11,7 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.api.agent_auth import AgentAuth, get_agent_auth, require_bridge_pod
 from prodavan.application.agent.credential_broker import AgentCredentialBroker
-from prodavan.application.pod_identity.bridge import SCOPE_INTERNAL_CREDENTIALS
+from prodavan.application.pod_identity.bridge import (
+    SCOPE_INTERNAL_CREDENTIALS,
+    SCOPE_INTERNAL_HYDRATE,
+)
 from prodavan.application.pod_service.workspace_tar_download import download_workspace_tar
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.persistence.database import get_db_session
@@ -44,6 +47,7 @@ async def download_pod_workspace_archive(
     """API-mediated hydrate: Pod initContainer fetches tar (no MinIO egress)."""
     _require_pod_bridge(auth, pod_id)
     assert auth.bridge is not None
+    auth.bridge.require_scope(SCOPE_INTERNAL_HYDRATE)
     pod = await session.get(ProjectPodRow, pod_id)
     if pod is None:
         raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="pod not found")

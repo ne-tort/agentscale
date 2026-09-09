@@ -18,6 +18,7 @@ POD_BRIDGE_TYP = "pod_bridge"
 
 SCOPE_AGENT_EVENTS = "agent:events"
 SCOPE_INTERNAL_CREDENTIALS = "internal:credentials"
+SCOPE_INTERNAL_HYDRATE = "internal:hydrate"
 SCOPE_INFRA_CACHE = "infra:cache"
 
 
@@ -33,6 +34,7 @@ def default_platform_scopes() -> list[str]:
     return [
         SCOPE_AGENT_EVENTS,
         SCOPE_INTERNAL_CREDENTIALS,
+        SCOPE_INTERNAL_HYDRATE,
         SCOPE_INFRA_CACHE,
     ]
 

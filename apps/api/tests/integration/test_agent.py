@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -14,6 +15,7 @@ os.environ.setdefault("AUTH_MODE", "test")
 os.environ.setdefault("AUTH_TEST_SECRET", "dev-only-test-secret-change-me")
 
 from prodavan.application.agent.openclaw_bridge import OpenClawBridgeBootstrap
+from prodavan.application.pod_identity.bridge import build_launch_scopes, mint_pod_bridge_token
 from prodavan.config.settings import settings
 from prodavan.domain.agent import AgentEvent, AgentEventType
 from prodavan.infrastructure.auth.jwt import reset_jwt_validator
@@ -1441,6 +1443,7 @@ def test_append_agent_event_hybrid_write(client: TestClient) -> None:
 @requires_postgres
 def test_pod_agent_service_token_append_and_list(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "pod_agent_bridge_auth_token", "pod-test-secret")
+    monkeypatch.setattr(settings, "pod_identity_bridge_secret", "unit-bridge-secret")
     admin = _token(sub="pod-agent-admin", platform_admin=True)
     admin_h = {"Authorization": f"Bearer {admin}"}
 
@@ -1481,7 +1484,9 @@ def test_pod_agent_service_token_append_and_list(client: TestClient, monkeypatch
     )
     assert proj.status_code == 201, proj.text
     project_id = proj.json()["id"]
-    configure_and_launch(client, owner_h, project_id)
+    launched = configure_and_launch(client, owner_h, project_id)
+    pod_id = (launched.get("runtime") or {}).get("pod_id")
+    assert pod_id, launched
 
     sess = client.post(
         f"/api/v1/projects/{project_id}/agent/sessions",
@@ -1491,7 +1496,16 @@ def test_pod_agent_service_token_append_and_list(client: TestClient, monkeypatch
     assert sess.status_code == 201, sess.text
     session_id = sess.json()["id"]
 
-    pod_h = {"Authorization": "Bearer pod-test-secret"}
+    bridge_token, _ = asyncio.run(
+        mint_pod_bridge_token(
+            project_id=project_id,
+            cabinet_id=cabinet_id,
+            company_id=company_id,
+            pod_id=pod_id,
+            scopes=build_launch_scopes([]),
+        )
+    )
+    pod_h = {"Authorization": f"Bearer {bridge_token}"}
     appended = client.post(
         f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/events",
         headers=pod_h,
@@ -1516,6 +1530,12 @@ def test_pod_agent_service_token_append_and_list(client: TestClient, monkeypatch
         json={"type": "user_message", "data": {"text": "blocked for pod"}},
     )
     assert denied_user.status_code == 422
+
+    shared_denied = client.get(
+        f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/pending-approvals",
+        headers={"Authorization": "Bearer pod-test-secret"},
+    )
+    assert shared_denied.status_code == 403
 
     bad_token = client.get(
         f"/api/v1/projects/{project_id}/agent/sessions/{session_id}/pending-approvals",

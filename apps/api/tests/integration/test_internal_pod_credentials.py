@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -13,6 +14,7 @@ from fastapi.testclient import TestClient
 os.environ.setdefault("AUTH_MODE", "test")
 os.environ.setdefault("AUTH_TEST_SECRET", "dev-only-test-secret-change-me")
 
+from prodavan.application.pod_identity.bridge import build_launch_scopes, mint_pod_bridge_token
 from prodavan.config.settings import settings
 from prodavan.infrastructure.auth.jwt import reset_jwt_validator
 from prodavan.infrastructure.keycloak.invite import reset_invite_client
@@ -44,7 +46,26 @@ def client() -> TestClient:
         yield test_client
 
 
-def _launch_project(client: TestClient) -> tuple[dict[str, str], str, str, str]:
+def _bridge_headers(
+    *,
+    project_id: str,
+    cabinet_id: str,
+    company_id: str,
+    pod_id: str,
+) -> dict[str, str]:
+    token, _ = asyncio.run(
+        mint_pod_bridge_token(
+            project_id=project_id,
+            cabinet_id=cabinet_id,
+            company_id=company_id,
+            pod_id=pod_id,
+            scopes=build_launch_scopes([]),
+        )
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _launch_project(client: TestClient) -> tuple[dict[str, str], str, str, str, str, str]:
     suffix = uuid.uuid4().hex[:8]
     admin_h = {"Authorization": f"Bearer {_token(sub=f'int-cred-admin-{suffix}', platform_admin=True)}"}
     co = client.post(
@@ -102,14 +123,20 @@ def _launch_project(client: TestClient) -> tuple[dict[str, str], str, str, str]:
     runtime = launched.json().get("runtime") or {}
     pod_id = runtime.get("pod_id")
     assert pod_id, launched.text
-    return owner_h, project_id, pod_id, key_id
+    return owner_h, company_id, cabinet_id, project_id, pod_id, key_id
 
 
 @requires_postgres
 def test_internal_list_and_lease_credentials(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "pod_agent_runtime_auth_token", "pod-int-secret")
-    _, _project_id, pod_id, key_id = _launch_project(client)
-    pod_h = {"Authorization": "Bearer pod-int-secret"}
+    monkeypatch.setattr(settings, "pod_identity_bridge_secret", "unit-bridge-secret")
+    _, company_id, cabinet_id, project_id, pod_id, key_id = _launch_project(client)
+    pod_h = _bridge_headers(
+        project_id=project_id,
+        cabinet_id=cabinet_id,
+        company_id=company_id,
+        pod_id=pod_id,
+    )
 
     listed = client.get(f"/api/v1/internal/pods/{pod_id}/credentials", headers=pod_h)
     assert listed.status_code == 200, listed.text
@@ -129,11 +156,18 @@ def test_internal_list_and_lease_credentials(client: TestClient, monkeypatch: py
     assert body["ttl_sec"] == 120
     assert body["lease_id"].startswith("lease_")
 
+    shared_denied = client.get(
+        f"/api/v1/internal/pods/{pod_id}/credentials",
+        headers={"Authorization": "Bearer pod-int-secret"},
+    )
+    assert shared_denied.status_code == 403, shared_denied.text
+
 
 @requires_postgres
 def test_internal_credentials_reject_user_token(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "pod_agent_runtime_auth_token", "pod-int-secret")
-    owner_h, _project_id, pod_id, key_id = _launch_project(client)
+    monkeypatch.setattr(settings, "pod_identity_bridge_secret", "unit-bridge-secret")
+    owner_h, _company_id, _cabinet_id, _project_id, pod_id, key_id = _launch_project(client)
 
     denied = client.get(f"/api/v1/internal/pods/{pod_id}/credentials", headers=owner_h)
     assert denied.status_code == 403, denied.text
@@ -149,9 +183,15 @@ def test_internal_credentials_reject_user_token(client: TestClient, monkeypatch:
 @requires_postgres
 def test_internal_revoke_lease_fails_without_runtime(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "pod_agent_runtime_auth_token", "pod-int-secret")
+    monkeypatch.setattr(settings, "pod_identity_bridge_secret", "unit-bridge-secret")
     monkeypatch.setattr(settings, "pod_agent_runtime_enabled", False)
-    _, _project_id, pod_id, _key_id = _launch_project(client)
-    pod_h = {"Authorization": "Bearer pod-int-secret"}
+    _, company_id, cabinet_id, project_id, pod_id, _key_id = _launch_project(client)
+    pod_h = _bridge_headers(
+        project_id=project_id,
+        cabinet_id=cabinet_id,
+        company_id=company_id,
+        pod_id=pod_id,
+    )
 
     revoked = client.delete(
         f"/api/v1/internal/pods/{pod_id}/credentials/leases/lease_abc123",

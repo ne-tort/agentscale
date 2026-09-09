@@ -12,11 +12,11 @@ from prodavan.api.internal import pods as internal_pods
 from prodavan.api.v1 import agent, health as health_routes, pod_modules, tenant_infra
 from prodavan.config.settings import settings
 from prodavan.core.middleware import register_cors, register_pod_surface_allowlist
-from prodavan.core.wiring import build_lifespan_manager
+from prodavan.core.wiring import build_pod_surface_lifespan_manager
 
 
 def create_pod_app() -> FastAPI:
-    lifespan_manager = build_lifespan_manager()
+    lifespan_manager = build_pod_surface_lifespan_manager()
     app = FastAPI(
         title="Prodavan Pod API",
         version=settings.app_version,

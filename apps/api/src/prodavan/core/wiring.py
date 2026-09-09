@@ -94,3 +94,67 @@ def build_lifespan_manager() -> LifespanManager:
     manager.register(TriggerWorkerResource())
     _lifespan_manager = manager
     return manager
+
+
+def build_pod_surface_lifespan_manager() -> LifespanManager:
+    """Slim lifespan for ``main_pod`` (:8001) — no workers/samplers/bootstrap."""
+    global _lifespan_manager
+    backend = (settings.object_store_backend or "local").strip().lower()
+    if backend not in ("local", "s3"):
+        backend = "local"
+
+    manager = LifespanManager()
+    manager.register(DatabaseEngineResource())
+    manager.register(
+        RedisManager(
+            url=settings.redis_url,
+            required=settings.redis_required,
+        )
+    )
+    manager.register(
+        MongoManager(
+            url=settings.mongodb_url,
+            database=settings.mongodb_db,
+            enabled=settings.mongodb_enabled or bool((settings.mongodb_url or "").strip()),
+            required=settings.mongodb_required,
+        )
+    )
+    manager.register(
+        FileStoreManager(
+            backend=backend,  # type: ignore[arg-type]
+            storage_root=settings.storage_root,
+            s3_endpoint_url=settings.s3_endpoint_url,
+            s3_access_key=settings.s3_access_key,
+            s3_secret_key=settings.s3_secret_key,
+            s3_bucket=settings.s3_bucket,
+            s3_region=settings.s3_region,
+            mirror_local=settings.object_store_mirror_local,
+            required=settings.object_store_required,
+        )
+    )
+    manager.register(
+        KafkaManager(
+            enabled=settings.kafka_enabled,
+            bootstrap_servers=settings.kafka_bootstrap_servers,
+            client_id=f"{settings.kafka_client_id}-pod",
+            topic_platform_events=settings.kafka_topic_platform_events,
+            topic_project_triggers=settings.kafka_topic_project_triggers,
+            topic_auth_commands=settings.kafka_topic_auth_commands,
+            topic_auth_events=settings.kafka_topic_auth_events,
+            topic_relation_events=settings.kafka_topic_relation_events,
+            topic_metrics_events=settings.kafka_topic_metrics_events,
+            topic_document_events=settings.kafka_topic_document_events,
+            required=settings.kafka_required,
+            consumer_enabled=False,
+            consumer_group=settings.kafka_consumer_group,
+            auth_commands_group=settings.kafka_auth_commands_group,
+            auth_events_group=settings.kafka_auth_events_group,
+            relation_events_group=settings.kafka_relation_events_group,
+            drain_debounce_sec=settings.kafka_drain_debounce_sec,
+            consumer_mode=settings.kafka_consumer_mode,
+            rematerialize_via_bus=settings.kafka_rematerialize_via_bus,
+            platform_jobs_group=settings.kafka_platform_jobs_group,
+        )
+    )
+    _lifespan_manager = manager
+    return manager

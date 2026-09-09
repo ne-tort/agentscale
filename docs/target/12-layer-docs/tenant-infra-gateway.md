@@ -20,6 +20,7 @@ Give Project Pods a **network-isolated** window into platform capabilities witho
 | Allowlist | `internal/pods/`, `projects/{id}/(infra\|modules\|agent)/` |
 | Hydrate | `GET /internal/pods/{pod_id}/workspace-archive` (API packs MinIO → tar) |
 | Credentials | `claims.pod_id == path`; scope `internal:credentials` |
+| Hydrate | `GET .../workspace-archive`; scope `internal:hydrate` |
 | Cache | rewrite `tenant:{company}:proj:{project}:{key}` |
 
 ## Why API hydrate (not presigned MinIO)
@@ -28,7 +29,9 @@ Presigned URLs still need egress to MinIO or a public proxy. API-mediated archiv
 
 ## Scopes
 
-`agent:events`, `internal:credentials`, `infra:cache`, `module:{id}:rows`, `module:{id}:actions` (reserved).
+`agent:events`, `internal:credentials`, `internal:hydrate`, `infra:cache`, `module:{id}:rows`, `module:{id}:actions` (reserved).
+
+`main_pod` uses a slim lifespan (DB/Redis/Mongo/FileStore/Kafka producer only — no workers/samplers/bootstrap).
 
 ## Later
 

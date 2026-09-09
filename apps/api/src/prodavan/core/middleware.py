@@ -16,7 +16,7 @@ from prodavan.config.settings import settings
 # Deny-by-default for Bridge JWT (and any residual shared Bearer).
 # Real agent surface is /projects/{id}/agent/... (not /api/v1/agent/...).
 _POD_SURFACE_RE = re.compile(
-    r"^/api/v1/(?:internal/pods/|projects/[^/]+/(?:infra|modules|agent)/)"
+    r"^/api/v1/(?:internal/pods(?:/|$)|projects/[^/]+/(?:infra|modules|agent)(?:/|$))"
 )
 
 

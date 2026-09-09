@@ -123,6 +123,8 @@ spec:
               value: "false"
             - name: POD_RECONCILE_WORKER_ENABLED
               value: "false"
+            - name: METRICS_STORAGE_SAMPLER_ENABLED
+              value: "false"
           volumeMounts:
             - name: storage
               mountPath: /data/storage

@@ -256,9 +256,11 @@ async def list_agent_events(
     session: SessionDep,
 ) -> dict:
     from prodavan.api.agent_auth import require_bridge_project
+    from prodavan.application.pod_identity.bridge import SCOPE_AGENT_EVENTS
 
     if auth.bridge is not None:
         require_bridge_project(auth.bridge, project_id)
+        auth.bridge.require_scope(SCOPE_AGENT_EVENTS)
     items = await AgentSessionService(session).list_events(
         session_id=session_id,
         project_id=project_id,
@@ -279,9 +281,11 @@ async def append_agent_event(
 ) -> dict:
     """Hybrid transcript write from OpenClaw bridge (L03 dual-write)."""
     from prodavan.api.agent_auth import require_bridge_project
+    from prodavan.application.pod_identity.bridge import SCOPE_AGENT_EVENTS
 
     if auth.bridge is not None:
         require_bridge_project(auth.bridge, project_id)
+        auth.bridge.require_scope(SCOPE_AGENT_EVENTS)
     return await AgentSessionService(session).append_event(
         project_id=project_id,
         session_id=session_id,
@@ -334,9 +338,11 @@ async def list_pending_tool_approvals(
     session: SessionDep,
 ) -> dict:
     from prodavan.api.agent_auth import require_bridge_project
+    from prodavan.application.pod_identity.bridge import SCOPE_AGENT_EVENTS
 
     if auth.bridge is not None:
         require_bridge_project(auth.bridge, project_id)
+        auth.bridge.require_scope(SCOPE_AGENT_EVENTS)
     items = await AgentSessionService(session).list_pending_approvals(
         project_id=project_id,
         session_id=session_id,
