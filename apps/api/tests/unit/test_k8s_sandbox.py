@@ -386,6 +386,41 @@ def test_build_pod_body_bridge_auth_used_when_runtime_auth_missing() -> None:
     assert token_env["valueFrom"]["secretKeyRef"]["name"] == "bridge-only-secret"
 
 
+def test_build_pod_body_api_hydrate_with_bridge_token() -> None:
+    ctx = PodRuntimeContext(
+        pod_id="pod_abc",
+        project_id="prj_abc",
+        company_id="cmp_abc",
+        workspace_key="wk_demo",
+        pod_auth_token="bridge.jwt.token",
+    )
+    body = build_pod_body(
+        runtime_ref="pod-wk-demo",
+        namespace="prodavan-sandboxes",
+        context=ctx,
+        image="sandbox:latest",
+        hydrate_image="hydrate:latest",
+        service_account="prodavan-sandbox",
+        cpu_request="100m",
+        cpu_limit="1",
+        memory_request="256Mi",
+        memory_limit="1Gi",
+        minio_secret_name="prodavan-minio-hydrate",
+        agent_runtime_image="prodavan-agent-runtime:latest",
+        agent_runtime_api_base_url="http://prodavan-api.prodavan.svc:8001/api/v1",
+        agent_runtime_auth_secret="prodavan-agent-bridge",
+    )
+    init_env = {e["name"]: e.get("value") for e in body["spec"]["initContainers"][0]["env"]}
+    assert init_env["PRODAVAN_API_BASE_URL"] == "http://prodavan-api.prodavan.svc:8001/api/v1"
+    assert init_env["PRODAVAN_AUTH_TOKEN"] == "bridge.jwt.token"
+    assert init_env["PRODAVAN_POD_ID"] == "pod_abc"
+    assert "MINIO_ENDPOINT" not in init_env
+    runtime_token = next(
+        e for e in body["spec"]["containers"][0]["env"] if e["name"] == "PRODAVAN_AUTH_TOKEN"
+    )
+    assert runtime_token["value"] == "bridge.jwt.token"
+
+
 def test_in_cluster_auth_available(tmp_path: Path) -> None:
     auth = InClusterAuth(token_dir=tmp_path, host="10.0.0.1")
     assert auth.available() is False

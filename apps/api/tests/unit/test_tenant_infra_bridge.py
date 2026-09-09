@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 from httpx import ASGITransport, AsyncClient
 
@@ -115,3 +117,28 @@ async def test_shared_token_cannot_use_infra(monkeypatch) -> None:
             json={"value": "x"},
         )
         assert r.status_code == 403
+
+
+def test_allowlist_allows_project_agent_and_archive_paths() -> None:
+    from prodavan.core.middleware import _POD_SURFACE_RE
+
+    assert _POD_SURFACE_RE.match("/api/v1/projects/prj_x/agent/sessions/s1/events")
+    assert _POD_SURFACE_RE.match("/api/v1/internal/pods/pod_x/workspace-archive")
+    assert _POD_SURFACE_RE.match("/api/v1/projects/prj_x/infra/cache/k")
+    assert not _POD_SURFACE_RE.match("/api/v1/agent/sessions/s1/events")
+    assert not _POD_SURFACE_RE.match("/api/v1/admin/modules")
+
+
+@pytest.mark.asyncio
+async def test_shared_token_rejected_by_agent_auth(monkeypatch) -> None:
+    from prodavan.api.agent_auth import get_agent_auth
+    from prodavan.config.settings import settings
+
+    monkeypatch.setattr(settings, "pod_agent_bridge_auth_token", "shared-pod-token")
+
+    class _Req:
+        headers = {"Authorization": "Bearer shared-pod-token"}
+
+    with pytest.raises(AppError) as exc:
+        await get_agent_auth(_Req(), session=AsyncMock())  # type: ignore[arg-type]
+    assert exc.value.status == 403

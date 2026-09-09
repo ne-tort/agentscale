@@ -18,7 +18,7 @@
 4. `LNN-*.md` — карточка слоя (одна на L00…L09).
 5. [map.md](map.md) — сводная картина связей **по факту реализации**.
 6. План DoD: [11-implementation-plan](../11-implementation-plan/).
-7. [tenant-infra-gateway.md](tenant-infra-gateway.md) — Pod Identity Bridge + Cache + module-scoped routes (foundation); Objects/Kafka/UserDB later.
+7. [tenant-infra-gateway.md](tenant-infra-gateway.md) — Bridge + Cache + modules + **`:8001`** + API hydrate (as-built foundation).
 
 **Агентам / разработчикам:** изменение поведения слоя без обновления его `LNN-*.md` (включая `Quality`) в том же PR — дефект процесса.
 

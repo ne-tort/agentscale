@@ -13,9 +13,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from prodavan.application.pod_identity.bridge import peek_pod_bridge_token
 from prodavan.config.settings import settings
 
-# Deny-by-default for pod credentials (shared Bearer or Bridge JWT).
+# Deny-by-default for Bridge JWT (and any residual shared Bearer).
+# Real agent surface is /projects/{id}/agent/... (not /api/v1/agent/...).
 _POD_SURFACE_RE = re.compile(
-    r"^/api/v1/(?:agent/|internal/pods/|projects/[^/]+/(?:infra|modules)/)"
+    r"^/api/v1/(?:internal/pods/|projects/[^/]+/(?:infra|modules|agent)/)"
 )
 
 
@@ -49,6 +50,8 @@ class PodSurfaceAllowlistMiddleware(BaseHTTPMiddleware):
         token = _bearer(request)
         if token and (_is_shared_pod_token(token) or _is_pod_bridge_token(token)):
             path = request.url.path or ""
+            if path.startswith("/health"):
+                return await call_next(request)
             if not _POD_SURFACE_RE.match(path):
                 return JSONResponse(
                     status_code=403,
@@ -74,4 +77,3 @@ def register_cors(app: FastAPI, *, allow_origins: list[str]) -> None:
 
 def register_pod_surface_allowlist(app: FastAPI) -> None:
     app.add_middleware(PodSurfaceAllowlistMiddleware)
-

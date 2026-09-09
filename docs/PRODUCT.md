@@ -71,7 +71,7 @@ Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** depe
 | K8s adapter | `infrastructure/k8s/pod_runtime.py`, overlay `infra/k3s/overlays/e2e/` |
 | Backend e2e (API, не UI) | `apps/api/tests/integration/`, `tests/e2e/k8s/`, `tests/e2e/live/` |
 | Document Store (Mongo) | `application/document_store/`, admin `/admin/document-store`, [ADR](02-architecture/ADR-document-store-mongo.md) |
-| Tenant Infra Gateway | `application/tenant_infra/`, Pod Bridge + `/projects/{id}/infra` + `/projects/{id}/modules`, [design](target/12-layer-docs/tenant-infra-gateway.md) |
+| Tenant Infra Gateway | `application/tenant_infra/`, Pod Bridge, `:8001` `main_pod`, API hydrate, [design](target/12-layer-docs/tenant-infra-gateway.md) |
 | Agent + chat + files | `application/agent/`, `api/v1/agent.py`, content/assets |
 | Flutter UI (частично) | `apps/flutter/lib/features/` |
 | **Employee UI канон** | [`employee-ui/README.md`](employee-ui/README.md) |
@@ -159,7 +159,7 @@ Product module for computer-equipment matching (hub on **Данные**). Projec
 
 Agent fills `found_offers` / `found_count` through rows APIs (or declarative `mcp_tools`); MCP RO tools query the merged SQLite only.
 
-**S4B:** hub tile → settings form; password via cabinet secrets → Pod `S4B_PASSWORD`; zip materialize reuses `mcp_package` path. Redis/Kafka/Mongo from Pod — **not** direct. Pod reaches platform only via **Pod Identity Bridge** JWT (scopes) + allowlisted Pod API surface: `/projects/{id}/infra/...` (Tenant Infra Gateway) and `/projects/{id}/modules/{mid}/...` (bound modules only). See [tenant-infra-gateway](target/12-layer-docs/tenant-infra-gateway.md). App Document Store (Mongo) is in-proc for platform BCs only — [ADR](02-architecture/ADR-document-store-mongo.md).
+**S4B:** hub tile → settings form; password via cabinet secrets → Pod `S4B_PASSWORD`; zip materialize reuses `mcp_package` path. Redis/Kafka/Mongo/MinIO from Pod — **not** direct. Pod reaches platform only via **Pod API `:8001`** + Bridge JWT (scopes): `/infra`, `/modules`, `/agent`, `/internal/pods` (incl. workspace-archive hydrate). See [tenant-infra-gateway](target/12-layer-docs/tenant-infra-gateway.md). App Document Store (Mongo) is in-proc for platform BCs only — [ADR](02-architecture/ADR-document-store-mongo.md).
 
 Meta primitives: hub + collections, `file_ref`, `column_map`, master–detail, `data.select_row`, `content.index_tabular`, `merge_mapped_sqlite`. See [meta-syntax](target/06-modules/meta-syntax/).
 

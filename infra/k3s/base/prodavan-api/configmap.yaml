@@ -62,12 +62,13 @@ data:
   POD_SANDBOX_IMAGE_PULL_SECRET: ghcr-pull
   POD_SANDBOX_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
   POD_SANDBOX_HYDRATE_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
-  POD_SANDBOX_MINIO_SECRET: prodavan-minio-hydrate
+  # Empty: API-mediated hydrate via Bridge JWT (no MinIO IAM in sandbox).
+  POD_SANDBOX_MINIO_SECRET: ""
   POD_RECONCILE_WORKER_ENABLED: "true"
   # L15 Platform OpenClaw agent-runtime (single container Pod)
   POD_AGENT_RUNTIME_ENABLED: "true"
   POD_AGENT_RUNTIME_IMAGE: ghcr.io/ne-tort/prodavan-agent-runtime:latest
   POD_AGENT_RUNTIME_PORT: "3921"
-  POD_AGENT_RUNTIME_API_BASE_URL: http://prodavan-api.prodavan.svc:8000/api/v1
+  POD_AGENT_RUNTIME_API_BASE_URL: http://prodavan-api.prodavan.svc:8001/api/v1
   POD_AGENT_RUNTIME_BOOTSTRAP_ENABLED: "true"
   POD_AGENT_RUNTIME_AUTH_SECRET: pod-agent-bridge-auth

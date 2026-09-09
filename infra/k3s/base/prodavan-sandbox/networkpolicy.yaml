@@ -14,16 +14,14 @@ spec:
   policyTypes:
     - Egress
   egress:
-    # Hydrate initContainer → in-cluster MinIO + platform API.
+    # Pod API surface only (:8001). No MinIO :9000, no full API :8000.
     - to:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: prodavan
       ports:
         - protocol: TCP
-          port: 9000
-        - protocol: TCP
-          port: 8000
+          port: 8001
     # DNS (kube-dns + upstream resolvers).
     - ports:
         - protocol: UDP
@@ -36,3 +34,28 @@ spec:
           port: 443
         - protocol: TCP
           port: 80
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: prodavan-sandbox-ingress
+  namespace: prodavan-sandboxes
+  labels:
+    app.kubernetes.io/name: prodavan-sandboxes
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: sandbox
+spec:
+  podSelector:
+    matchLabels:
+      prodavan.io/managed-by: pod-service
+  policyTypes:
+    - Ingress
+  ingress:
+    # API → agent-runtime workspace/bridge only.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: prodavan
+      ports:
+        - protocol: TCP
+          port: 3921

@@ -1,5 +1,3 @@
-# API: migrations in initContainer; main process is uvicorn only.
-# Celery/worker overrides command and does not run this Deployment.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -91,6 +89,64 @@ spec:
           resources:
             requests:
               cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+        # Pod-only surface for Project Pods (sandbox NetworkPolicy → :8001 only).
+        - name: api-pod
+          image: ghcr.io/ne-tort/prodavan-api:latest
+          imagePullPolicy: IfNotPresent
+          command:
+            - uvicorn
+            - prodavan.main_pod:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8001"
+          ports:
+            - name: pod-http
+              containerPort: 8001
+          envFrom:
+            - configMapRef:
+                name: prodavan-config
+            - secretRef:
+                name: prodavan-api-secrets
+          env:
+            - name: KAFKA_CONSUMER_ENABLED
+              value: "false"
+            - name: CELERY_ENABLED
+              value: "false"
+            - name: TRIGGER_WORKER_ENABLED
+              value: "false"
+            - name: IDLE_PAUSE_WORKER_ENABLED
+              value: "false"
+            - name: POD_RECONCILE_WORKER_ENABLED
+              value: "false"
+          volumeMounts:
+            - name: storage
+              mountPath: /data/storage
+          startupProbe:
+            httpGet:
+              path: /health/live
+              port: pod-http
+            periodSeconds: 5
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /health/live
+              port: pod-http
+            periodSeconds: 10
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: pod-http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 50m
               memory: 256Mi
             limits:
               cpu: "1"

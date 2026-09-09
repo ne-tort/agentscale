@@ -255,6 +255,10 @@ async def list_agent_events(
     auth: AgentAuthDep,
     session: SessionDep,
 ) -> dict:
+    from prodavan.api.agent_auth import require_bridge_project
+
+    if auth.bridge is not None:
+        require_bridge_project(auth.bridge, project_id)
     items = await AgentSessionService(session).list_events(
         session_id=session_id,
         project_id=project_id,
@@ -274,6 +278,10 @@ async def append_agent_event(
     session: SessionDep,
 ) -> dict:
     """Hybrid transcript write from OpenClaw bridge (L03 dual-write)."""
+    from prodavan.api.agent_auth import require_bridge_project
+
+    if auth.bridge is not None:
+        require_bridge_project(auth.bridge, project_id)
     return await AgentSessionService(session).append_event(
         project_id=project_id,
         session_id=session_id,
@@ -325,6 +333,10 @@ async def list_pending_tool_approvals(
     auth: AgentAuthDep,
     session: SessionDep,
 ) -> dict:
+    from prodavan.api.agent_auth import require_bridge_project
+
+    if auth.bridge is not None:
+        require_bridge_project(auth.bridge, project_id)
     items = await AgentSessionService(session).list_pending_approvals(
         project_id=project_id,
         session_id=session_id,

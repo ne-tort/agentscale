@@ -158,7 +158,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("POD_AGENT_RUNTIME_PORT", "POD_AGENT_BRIDGE_PORT"),
     )
     pod_agent_runtime_api_base_url: str = Field(
-        default="http://prodavan-api.prodavan.svc:8000/api/v1",
+        default="http://prodavan-api.prodavan.svc:8001/api/v1",
         validation_alias=AliasChoices(
             "POD_AGENT_RUNTIME_API_BASE_URL",
             "POD_AGENT_BRIDGE_API_BASE_URL",

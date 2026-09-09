@@ -130,12 +130,12 @@ def build_pod_body(
     minio_secret_name: str | None = None,
     agent_runtime_image: str | None = None,
     agent_runtime_port: int = 3921,
-    agent_runtime_api_base_url: str = "http://prodavan-api.prodavan.svc:8000/api/v1",
+    agent_runtime_api_base_url: str = "http://prodavan-api.prodavan.svc:8001/api/v1",
     agent_runtime_auth_secret: str | None = None,
     # Legacy aliases (deprecated)
     agent_bridge_image: str | None = None,
     agent_bridge_port: int = 3921,
-    agent_bridge_api_base_url: str = "http://prodavan-api.prodavan.svc:8000/api/v1",
+    agent_bridge_api_base_url: str = "http://prodavan-api.prodavan.svc:8001/api/v1",
     agent_bridge_auth_secret: str | None = None,
     image_pull_secret: str | None = None,
 ) -> dict[str, Any]:
@@ -160,8 +160,14 @@ def build_pod_body(
     init_env: list[dict[str, Any]] = [
         {"name": "WORKSPACE_KEY", "value": context.workspace_key},
         {"name": "HYDRATE_TARGET", "value": _WORKSPACE_MOUNT},
+        {"name": "PRODAVAN_POD_ID", "value": context.pod_id},
+        {"name": "PRODAVAN_API_BASE_URL", "value": runtime_api},
     ]
-    if minio_secret_name:
+    # Prefer API-mediated hydrate (Bridge JWT). MinIO IAM only as explicit legacy fallback
+    # when no pod token is minted (local/stub without Bridge).
+    if context.pod_auth_token:
+        init_env.append({"name": "PRODAVAN_AUTH_TOKEN", "value": context.pod_auth_token})
+    elif minio_secret_name:
         init_env.extend(
             [
                 {

@@ -13,3 +13,7 @@ spec:
     - name: http
       port: 8000
       targetPort: http
+    # Sandbox NetworkPolicy targets this port only (Pod Identity Bridge surface).
+    - name: pod-http
+      port: 8001
+      targetPort: pod-http

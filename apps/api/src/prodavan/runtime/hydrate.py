@@ -2,15 +2,64 @@
 
 from __future__ import annotations
 
+import io
 import logging
 import os
 import sys
+import tarfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
+def _sync_from_api(*, target: Path) -> None:
+    """Download workspace tar from prodavan-api pod surface (no MinIO in sandbox)."""
+    base = (os.environ.get("PRODAVAN_API_BASE_URL") or "").rstrip("/")
+    token = (os.environ.get("PRODAVAN_AUTH_TOKEN") or "").strip()
+    pod_id = (os.environ.get("PRODAVAN_POD_ID") or "").strip()
+    if not base or not token or not pod_id:
+        raise RuntimeError("PRODAVAN_API_BASE_URL, PRODAVAN_AUTH_TOKEN, PRODAVAN_POD_ID required")
+
+    url = f"{base}/internal/pods/{pod_id}/workspace-archive"
+    req = urllib.request.Request(
+        url,
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/x-tar"},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = resp.read()
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")[:500]
+        raise RuntimeError(f"hydrate API HTTP {exc.code}: {body}") from exc
+
+    target.mkdir(parents=True, exist_ok=True)
+    if not data:
+        for sub in ("inbox", "runs"):
+            (target / sub).mkdir(parents=True, exist_ok=True)
+        logger.info("hydrate API empty archive → stub dirs target=%s", target)
+        return
+
+    with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as archive:
+        for member in archive.getmembers():
+            if not member.isfile():
+                continue
+            rel = member.name.replace("\\", "/").lstrip("./")
+            if not rel or ".." in rel.split("/") or rel.startswith("/"):
+                continue
+            dest = target / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            extracted = archive.extractfile(member)
+            if extracted is None:
+                continue
+            dest.write_bytes(extracted.read())
+    logger.info("hydrate API complete pod_id=%s target=%s bytes=%s", pod_id, target, len(data))
+
+
 def _sync_from_minio(*, workspace_key: str, target: Path) -> None:
+    """Legacy path — kept for local/dev without API hydrate; not used in k3s GitOps."""
     import boto3
     from botocore.client import Config
 
@@ -21,7 +70,6 @@ def _sync_from_minio(*, workspace_key: str, target: Path) -> None:
     if not endpoint or not access_key or not secret_key:
         raise RuntimeError("MINIO_* env required for hydrate")
 
-    # Object keys are projects/{key}/workspace/{rel}; land files at /workspace/{rel}.
     prefix = f"projects/{workspace_key}/workspace/"
     client = boto3.client(
         "s3",
@@ -46,7 +94,7 @@ def _sync_from_minio(*, workspace_key: str, target: Path) -> None:
             dest.parent.mkdir(parents=True, exist_ok=True)
             client.download_file(bucket, key, str(dest))
             found += 1
-    logger.info("hydrate complete workspace_key=%s objects=%s target=%s", workspace_key, found, target)
+    logger.info("hydrate MinIO complete workspace_key=%s objects=%s target=%s", workspace_key, found, target)
 
 
 def main() -> None:
@@ -56,10 +104,15 @@ def main() -> None:
     if not workspace_key:
         raise SystemExit("WORKSPACE_KEY is required")
     target.mkdir(parents=True, exist_ok=True)
-    if os.environ.get("MINIO_ENDPOINT"):
+
+    api_base = (os.environ.get("PRODAVAN_API_BASE_URL") or "").strip()
+    api_token = (os.environ.get("PRODAVAN_AUTH_TOKEN") or "").strip()
+    pod_id = (os.environ.get("PRODAVAN_POD_ID") or "").strip()
+    if api_base and api_token and pod_id:
+        _sync_from_api(target=target)
+    elif os.environ.get("MINIO_ENDPOINT"):
         _sync_from_minio(workspace_key=workspace_key, target=target)
     else:
-        # Dev/stub: ensure empty workspace tree exists.
         for sub in ("inbox", "runs"):
             (target / sub).mkdir(parents=True, exist_ok=True)
         logger.info("hydrate stub workspace_key=%s target=%s", workspace_key, target)

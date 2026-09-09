@@ -94,7 +94,7 @@ class K8sPodRuntimeAdapter:
             cpu_limit=settings.pod_sandbox_cpu_limit,
             memory_request=settings.pod_sandbox_memory_request,
             memory_limit=settings.pod_sandbox_memory_limit,
-            minio_secret_name=settings.pod_sandbox_minio_secret or None,
+            minio_secret_name=None,
             agent_runtime_image=(
                 settings.pod_agent_runtime_image if settings.pod_agent_runtime_enabled else None
             ),
