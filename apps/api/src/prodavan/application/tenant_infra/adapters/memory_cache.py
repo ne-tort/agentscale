@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import time
 
+_SHARED: InMemoryTenantCache | None = None
+
 
 class InMemoryTenantCache:
     def __init__(self) -> None:
@@ -65,4 +67,23 @@ class InMemoryTenantCache:
             if key in self._data:
                 self._data.pop(key, None)
                 n += 1
+            for bucket in self._indexes.values():
+                bucket.discard(key)
+            if key in self._indexes:
+                self._indexes.pop(key, None)
+                n += 1
         return n
+
+
+def get_shared_memory_tenant_cache() -> InMemoryTenantCache:
+    """Process-wide memory cache — required so HTTP handlers share state without Redis."""
+    global _SHARED
+    if _SHARED is None:
+        _SHARED = InMemoryTenantCache()
+    return _SHARED
+
+
+def reset_shared_memory_tenant_cache() -> None:
+    """Test helper."""
+    global _SHARED
+    _SHARED = None

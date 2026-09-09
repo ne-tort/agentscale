@@ -115,8 +115,16 @@ def _bootstrap(client: TestClient) -> tuple[str, str, str, str, dict[str, str]]:
 
 @requires_postgres
 def test_tenant_infra_cache_docs_events_userdb(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    from prodavan.application.tenant_infra.adapters.memory_cache import reset_shared_memory_tenant_cache
+
     monkeypatch.setattr(settings, "pod_identity_bridge_secret", "unit-bridge-secret")
     monkeypatch.setattr(settings, "tenant_infra_cache_ops_per_minute", 0)
+    # Force shared in-memory cache: CI has no Redis, and Redis manager must not leak across requests.
+    monkeypatch.setattr(
+        "prodavan.core.infra.redis_manager.get_redis_manager",
+        lambda: None,
+    )
+    reset_shared_memory_tenant_cache()
     company_id, cabinet_id, project_id, pod_id, _owner = _bootstrap(client)
     pod_h = _bridge_headers(
         project_id=project_id, cabinet_id=cabinet_id, company_id=company_id, pod_id=pod_id

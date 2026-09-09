@@ -7,7 +7,10 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.pod_identity.bridge import SCOPE_INFRA_CACHE, PodBridgeClaims
-from prodavan.application.tenant_infra.adapters.memory_cache import InMemoryTenantCache
+from prodavan.application.tenant_infra.adapters.memory_cache import (
+    InMemoryTenantCache,
+    get_shared_memory_tenant_cache,
+)
 from prodavan.application.tenant_infra.adapters.redis_cache import RedisTenantCache
 from prodavan.application.tenant_infra.keys import cache_index_key, rewrite_cache_key
 from prodavan.application.tenant_infra.ports.cache import TenantCachePort
@@ -22,7 +25,7 @@ def _default_cache() -> TenantCachePort:
     mgr = get_redis_manager()
     if mgr is not None and mgr.enabled:
         return RedisTenantCache()
-    return InMemoryTenantCache()
+    return get_shared_memory_tenant_cache()
 
 
 class TenantInfraService:

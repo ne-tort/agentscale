@@ -20,7 +20,7 @@ Give Project Pods a **network-isolated** window into platform capabilities witho
 | Allowlist | `internal/pods/`, `projects/{id}/(infra\|modules\|agent)/` |
 | Hydrate | `GET /internal/pods/{pod_id}/workspace-archive` (API packs MinIO → tar) |
 | Credentials | `claims.pod_id == path`; scope `internal:credentials` |
-| Cache | rewrite `tenant:{company}:proj:{project}:{key}`; mandatory TTL; max keys; purge on pause/stop |
+| Cache | rewrite `tenant:{company}:proj:{project}:{key}`; mandatory TTL; max keys; purge on terminate (pause keeps data for resume) |
 | Documents | Mongo ns `tenant_infra`, collection `p{project}_{user}`; forced company/project fields |
 | User DB | Separate DB `prodavan_userdb`, schema `p_<project>`; structured API (no raw SQL) |
 | Events | Gateway log + optional Kafka topic `prodavan.tenant.events`; backlog/retention caps |
@@ -49,7 +49,7 @@ Presigned URLs still need egress to MinIO or a public proxy. API-mediated archiv
 
 ## Lifecycle
 
-On pod **pause** / **terminate** (delete/purge/stop): `purge_project_tenant_infra` clears cache index, docs, userdb schema, event log/offsets, and project-tagged objects.
+On pod **terminate** (delete/purge/stop): `purge_project_tenant_infra` clears cache index, docs, userdb schema, event log/offsets, and project-tagged objects. **Pause** keeps tenant infra for resume (Bridge generation still bumps).
 
 ## Where tables/documents live
 

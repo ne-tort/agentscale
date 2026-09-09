@@ -62,12 +62,12 @@ class TenantDocsService:
         if len(raw.encode("utf-8")) > quota.docs_max_doc_bytes:
             raise quota_exceeded(f"document exceeds {quota.docs_max_doc_bytes} bytes")
         col = _physical_collection(bridge.project_id, collection)
-        from prodavan.application.tenant_infra.adapters.memory_cache import InMemoryTenantCache
+        from prodavan.application.tenant_infra.adapters.memory_cache import get_shared_memory_tenant_cache
         from prodavan.application.tenant_infra.adapters.redis_cache import RedisTenantCache
         from prodavan.core.infra.redis_manager import get_redis_manager
 
         mgr = get_redis_manager()
-        index_cache = RedisTenantCache() if mgr is not None and mgr.enabled else InMemoryTenantCache()
+        index_cache = RedisTenantCache() if mgr is not None and mgr.enabled else get_shared_memory_tenant_cache()
         idx = _cols_index_key(bridge.company_id, bridge.project_id)
         members = await index_cache.index_members(idx)
         if col not in members and len(members) >= quota.docs_max_collections:
@@ -236,12 +236,12 @@ class TenantDocsService:
         return {"collection": collection, "id": doc_id, "deleted": deleted}
 
     async def purge_project(self, *, company_id: str, project_id: str) -> int:
-        from prodavan.application.tenant_infra.adapters.memory_cache import InMemoryTenantCache
+        from prodavan.application.tenant_infra.adapters.memory_cache import get_shared_memory_tenant_cache
         from prodavan.application.tenant_infra.adapters.redis_cache import RedisTenantCache
         from prodavan.core.infra.redis_manager import get_redis_manager
 
         mgr = get_redis_manager()
-        index_cache = RedisTenantCache() if mgr is not None and mgr.enabled else InMemoryTenantCache()
+        index_cache = RedisTenantCache() if mgr is not None and mgr.enabled else get_shared_memory_tenant_cache()
         idx = _cols_index_key(company_id, project_id)
         cols = await index_cache.index_members(idx)
         store = get_document_store_service()

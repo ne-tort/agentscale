@@ -64,6 +64,38 @@ async def test_cache_requires_ttl_and_enforces_max_keys(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+async def test_shared_memory_cache_survives_new_service_instances(monkeypatch) -> None:
+    from prodavan.application.tenant_infra.adapters.memory_cache import reset_shared_memory_tenant_cache
+    from prodavan.config.settings import settings
+
+    reset_shared_memory_tenant_cache()
+    monkeypatch.setattr(settings, "pod_identity_bridge_secret", "unit-bridge-secret")
+    monkeypatch.setattr(
+        "prodavan.application.tenant_infra.quota.TenantInfraQuotaService.get_quota",
+        AsyncMock(return_value=CompanyTenantInfraQuota(cache_ops_per_minute=0)),
+    )
+    monkeypatch.setattr(
+        "prodavan.core.infra.redis_manager.get_redis_manager",
+        lambda: None,
+    )
+    _, bridge = await mint_pod_bridge_token(
+        project_id="proj-share",
+        cabinet_id="cab-1",
+        company_id="co-1",
+        pod_id="pod-share",
+        scopes=build_launch_scopes([]),
+    )
+    await TenantInfraService().set(
+        bridge=bridge, project_id="proj-share", key="k", value="shared", session=None
+    )
+    got = await TenantInfraService().get(
+        bridge=bridge, project_id="proj-share", key="k", session=None
+    )
+    assert got["value"] == "shared"
+    reset_shared_memory_tenant_cache()
+
+
+@pytest.mark.asyncio
 async def test_launch_scopes_include_all_infra_planes(monkeypatch) -> None:
     from prodavan.config.settings import settings
 
