@@ -13,7 +13,7 @@ if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
 $envFile = Join-Path $here '.env'
 if (-not (Test-Path $envFile)) {
     Copy-Item (Join-Path $here '.env.example') $envFile
-    Write-Host "Created .env — set ACCESS_TOKEN (gh auth token) then re-run."
+    Write-Host "Created .env - set ACCESS_TOKEN (gh auth token) then re-run."
     exit 1
 }
 
@@ -22,7 +22,7 @@ Get-Content $envFile | ForEach-Object {
     if ($_ -match '^\s*RUNNER_REPLICAS\s*=\s*(\d+)') { $replicas = [int]$Matches[1] }
     # Strip accidental EPHEMERAL=false (myoung34 treats any non-empty as --ephemeral)
     if ($_ -match '^\s*EPHEMERAL\s*=\s*(false|0|no)\s*$') {
-        Write-Host "WARN: EPHEMERAL=$($Matches[1]) would enable ephemeral in myoung34 image — treating as unset."
+        Write-Host "WARN: EPHEMERAL=$($Matches[1]) would enable ephemeral in myoung34 image - treating as unset."
     }
 }
 
@@ -75,7 +75,7 @@ if (Get-Command gh -ErrorAction SilentlyContinue) {
 Write-Host @"
 
 Check GitHub: gh api repos/ne-tort/prodavan/actions/runners --jq ".runners[]|{name,status,busy,labels:[.labels[].name]}"
-Cache volume: prodavan-ci-cache → /cache (Flutter/pub/Poetry/pip)
+Cache volume: prodavan-ci-cache -> /cache (Flutter/pub/Poetry/pip)
 Logs: docker compose logs -f --tail 50
   Expect: "Listening for Jobs" and NOT "Ephemeral option is enabled"
 Stop:  docker compose down          # keeps cache

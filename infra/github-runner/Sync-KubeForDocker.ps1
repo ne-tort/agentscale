@@ -62,7 +62,7 @@ if ($isAdmin) {
     netsh interface portproxy show v4tov4
     Write-Host "OK portproxy -> $wslIp (127.0.0.1 + 0.0.0.0 for Docker host.docker.internal)"
 } else {
-    Write-Host "WARN: not Admin — skipped portproxy (Terraform apply also attempts it; elevate Start-Runners once if :6443 unreachable)"
+    Write-Host "WARN: not Admin - skipped portproxy (Terraform apply also attempts it; elevate Start-Runners once if :6443 unreachable)"
 }
 
 Write-Host "OK. Docker runners: KUBECONFIG + PRODAVAN_CI_HOST=host.docker.internal"

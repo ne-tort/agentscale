@@ -14,13 +14,13 @@ $daemonPath = Join-Path $dockerDir 'daemon.json'
 New-Item -ItemType Directory -Force -Path $dockerDir | Out-Null
 
 if (-not (Test-Path $daemonPath)) {
-    Write-Host "No $daemonPath — Docker Desktop default DNS (keeps host.docker.internal)."
+    Write-Host "No $daemonPath - Docker Desktop default DNS (keeps host.docker.internal)."
     return
 }
 
 $raw = Get-Content -Raw -Path $daemonPath
 if (-not $raw -or -not $raw.Trim()) {
-    Write-Host "Empty daemon.json — nothing to do."
+    Write-Host "Empty daemon.json - nothing to do."
     return
 }
 
@@ -30,7 +30,7 @@ if ($null -eq $cfgObj.dns) {
     return
 }
 
-Write-Host "Removing daemon.json dns=@($($cfgObj.dns -join ', ')) — restores embedded DNS / host.docker.internal"
+Write-Host "Removing daemon.json dns=@($($cfgObj.dns -join ', ')) - restores embedded DNS / host.docker.internal"
 $hash = [ordered]@{}
 foreach ($p in $cfgObj.PSObject.Properties) {
     if ($p.Name -eq 'dns') { continue }
