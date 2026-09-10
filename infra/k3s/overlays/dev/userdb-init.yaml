@@ -30,11 +30,11 @@ spec:
             - |
               set -e
               until pg_isready -h prodavan-postgres -U prodavan -d prodavan; do sleep 2; done
-              psql -h prodavan-postgres -U prodavan -d prodavan -v ON_ERROR_STOP=1 <<'SQL'
-              SELECT 'create_db'
-              WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = 'prodavan_userdb')\gexec
-              SQL
-              # Portable create if missing:
-              psql -h prodavan-postgres -U prodavan -d prodavan -tc "SELECT 1 FROM pg_database WHERE datname='prodavan_userdb'" | grep -q 1 \
-                || psql -h prodavan-postgres -U prodavan -d prodavan -c "CREATE DATABASE prodavan_userdb OWNER prodavan"
+              # Idempotent create (no \gexec - crashes ON_ERROR_STOP under heredoc).
+              exists=$(psql -h prodavan-postgres -U prodavan -d prodavan -Atc \
+                "SELECT 1 FROM pg_database WHERE datname='prodavan_userdb'")
+              if [ "$exists" != "1" ]; then
+                psql -h prodavan-postgres -U prodavan -d prodavan \
+                  -c "CREATE DATABASE prodavan_userdb OWNER prodavan"
+              fi
               echo "userdb-init: ok"
