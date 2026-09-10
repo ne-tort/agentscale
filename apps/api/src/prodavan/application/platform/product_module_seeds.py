@@ -1540,17 +1540,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "widget": "value",
                             "secret": True,
                             "icon": "link",
-                            "hint": (
-                                "postgresql://user:pass@172.21.176.1:5433/s4b_catalog"
-                                " (k3s-in-WSL: gateway, not LAN IP)"
-                            ),
+                            "hint": "postgresql://user:pass@host:5432/dbname",
                             "visible_when": {"field": "source_kind", "eq": "remote"},
                         },
                         {
                             "column": "remote_database",
                             "widget": "value",
                             "icon": "storage",
-                            "hint": "s4b_catalog",
+                            "hint": "s4b_catalog — только имя БД, не schema.table",
                             "visible_when": {
                                 "all": [
                                     {"field": "source_kind", "eq": "remote"},

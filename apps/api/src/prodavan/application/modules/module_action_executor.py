@@ -683,6 +683,8 @@ class ModuleActionExecutor:
     ) -> dict[str, Any]:
         from prodavan.application.content.remote_sql_probe import (
             check_remote_postgres_connect,
+            is_simple_database_name,
+            normalize_remote_db_and_table,
             postgres_dsn_database_name,
             postgres_dsn_table_query,
             probe_remote_postgres,
@@ -763,8 +765,17 @@ class ModuleActionExecutor:
             if secret_ref.startswith(("file://cabinet_secrets/", "vault://cabinet_secrets/")):
                 assert_cabinet_secret_scope(secret_ref, cabinet_id)
             dsn = get_secret_store().get(secret_ref)
-            body["remote_dsn_has_database"] = (
-                postgres_dsn_database_name(dsn) is not None or bool(remote_database)
+            # Mis-filed schema.table in «Имя БД» / URL path → remote_table.
+            remote_database, remote_table = normalize_remote_db_and_table(
+                dsn=dsn,
+                remote_database_field=remote_database,
+                remote_table_field=remote_table,
+            )
+            body[db_col] = remote_database or None
+            if remote_table:
+                body[table_col] = remote_table
+            body["remote_dsn_has_database"] = bool(
+                postgres_dsn_database_name(dsn) or is_simple_database_name(remote_database)
             )
             # Convenience: persist ?table= from DSN into body, then strip on connect.
             q_table = postgres_dsn_table_query(dsn)
@@ -893,7 +904,10 @@ class ModuleActionExecutor:
         employee: EmployeeRow | None,
         project_id: str | None = None,
     ) -> dict[str, Any]:
-        from prodavan.application.content.remote_sql_probe import list_remote_tables
+        from prodavan.application.content.remote_sql_probe import (
+            list_remote_tables,
+            normalize_remote_db_and_table,
+        )
 
         table_slug = params.get("table_slug")
         if not isinstance(table_slug, str) or not table_slug:
@@ -925,6 +939,7 @@ class ModuleActionExecutor:
         body = dict(target.get("body") or {})
         dsn_col = str(params.get("dsn_column") or "remote_dsn")
         db_col = str(params.get("remote_database_column") or "remote_database")
+        table_col = str(params.get("remote_table_column") or "remote_table")
         secret_ref = field_value_as_secret_ref(body.get(dsn_col))
         if not secret_ref:
             raise AppError(
@@ -937,6 +952,41 @@ class ModuleActionExecutor:
             assert_cabinet_secret_scope(secret_ref, cabinet_id)
         dsn = get_secret_store().get(secret_ref)
         remote_database = str(body.get(db_col) or "").strip()
+        remote_table = str(body.get(table_col) or "").strip()
+        remote_database, remote_table = normalize_remote_db_and_table(
+            dsn=dsn,
+            remote_database_field=remote_database,
+            remote_table_field=remote_table,
+        )
+        # Persist coerce so «Имя БД» is not left holding schema.table.
+        if body.get(db_col) != (remote_database or None) or (
+            remote_table and body.get(table_col) != remote_table
+        ):
+            body[db_col] = remote_database or None
+            if remote_table:
+                body[table_col] = remote_table
+            body["remote_dsn_has_database"] = bool(remote_database)
+            await self._update_module_row(
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                row_id=row_id,
+                body=body,
+                principal=principal,
+                employee=employee,
+                run_actions=False,
+            )
+        if not remote_database:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail=(
+                    "database name is required (e.g. s4b_catalog in the URL path "
+                    "or the Database name field) — schema.table belongs in Table"
+                ),
+            )
         tables = await list_remote_tables(dsn=dsn, remote_database_field=remote_database)
         return {
             "kind": "content.list_remote_sql_tables",

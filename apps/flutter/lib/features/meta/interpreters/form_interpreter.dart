@@ -154,6 +154,35 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     if (name == 'path' && next is String) {
       next = normalizeWorkspaceRelativePath(next);
     }
+    // «Имя БД» must be a bare DB name; schema.table belongs in remote_table.
+    if (name == 'remote_database' && next is String && next.trim().contains('.')) {
+      final raw = next.trim();
+      setState(() {
+        _values['remote_table'] = raw;
+        _values['remote_database'] = '';
+        // Field is only visible when DSN has no /dbname, so unlock is invalid.
+        _values['remote_dsn_has_database'] = false;
+      });
+      if (widget.readOnly) return;
+      try {
+        if (_rowId != null) {
+          final t = widget.seeds.patchField(_rowId!, 'remote_table', raw);
+          if (t is Future) await t;
+          final d = widget.seeds.patchField(_rowId!, 'remote_database', '');
+          if (d is Future) await d;
+          final flag = widget.seeds.patchField(
+            _rowId!,
+            'remote_dsn_has_database',
+            false,
+          );
+          if (flag is Future) await flag;
+        }
+      } catch (e) {
+        if (!mounted) return;
+        AppErrors.showSnack(context, e);
+      }
+      return;
+    }
     setState(() {
       _values[name] = next;
       if (name == 'remote_database' && next is String && next.trim().isNotEmpty) {

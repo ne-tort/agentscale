@@ -110,6 +110,44 @@ def test_resolve_connect_from_database_field() -> None:
     assert dsn.endswith("/s4b_catalog")
 
 
+def test_normalize_moves_schema_table_out_of_database_field() -> None:
+    from prodavan.application.content.remote_sql_probe import normalize_remote_db_and_table
+
+    db, table = normalize_remote_db_and_table(
+        dsn="postgresql://s4b:s4b@h:5433",
+        remote_database_field="public.supplier_price_items",
+        remote_table_field="",
+    )
+    assert db == ""
+    assert table == "public.supplier_price_items"
+
+
+def test_normalize_path_schema_table_needs_database_field() -> None:
+    from prodavan.application.content.remote_sql_probe import normalize_remote_db_and_table
+
+    db, table = normalize_remote_db_and_table(
+        dsn="postgresql://s4b:s4b@h:5433/public.offers",
+        remote_database_field="s4b_catalog",
+        remote_table_field="",
+    )
+    assert db == "s4b_catalog"
+    assert table == "public.offers"
+    connect = resolve_connect_dsn(
+        dsn="postgresql://s4b:s4b@h:5433/public.offers",
+        remote_database_field="s4b_catalog",
+    )
+    assert connect.endswith("/s4b_catalog")
+    assert "public.offers" not in connect
+
+
+def test_resolve_connect_rejects_schema_table_as_database() -> None:
+    with pytest.raises(AppError, match="not schema.table"):
+        resolve_connect_dsn(
+            dsn="postgresql://s4b:s4b@h:5433",
+            remote_database_field="public.supplier_price_items",
+        )
+
+
 @pytest.mark.asyncio
 async def test_probe_remote_postgres_columns_and_count(monkeypatch: pytest.MonkeyPatch) -> None:
     from prodavan.application.content.remote_sql_probe import (

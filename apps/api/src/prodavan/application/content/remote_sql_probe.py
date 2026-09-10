@@ -88,13 +88,39 @@ def parse_remote_table(raw: str) -> tuple[str, str]:
     return schema, table
 
 
+def looks_like_remote_table(raw: str) -> bool:
+    """True when value is table or schema.table (not a bare database name with a dot)."""
+    text = (raw or "").strip()
+    if not text or "." not in text:
+        return False
+    return _TABLE_RE.match(text) is not None
+
+
+def is_simple_database_name(raw: str) -> bool:
+    return bool(_IDENT_RE.match((raw or "").strip()))
+
+
 def postgres_dsn_database_name(dsn: str) -> str | None:
-    """Return database name from URL path, or None when missing."""
+    """Return database name from URL path, or None when missing/misfiled as schema.table."""
     path = (urlparse((dsn or "").strip()).path or "").lstrip("/")
     if not path:
         return None
     name = path.split("/", 1)[0].strip()
-    return name or None
+    if not name:
+        return None
+    # Users sometimes put schema.table into the URL path — that is not a DB name.
+    if looks_like_remote_table(name):
+        return None
+    return name
+
+
+def postgres_dsn_path_as_table(dsn: str) -> str | None:
+    """If URL path looks like schema.table, return it as a SQL relation hint."""
+    path = (urlparse((dsn or "").strip()).path or "").lstrip("/")
+    if not path:
+        return None
+    name = path.split("/", 1)[0].strip()
+    return name if looks_like_remote_table(name) else None
 
 
 def postgres_dsn_table_query(dsn: str) -> str | None:
@@ -118,6 +144,11 @@ def strip_postgres_driver_query(dsn: str) -> str:
     return urlunparse(parsed._replace(query=urlencode(kept)))
 
 
+def _dsn_clear_path(dsn: str) -> str:
+    parsed = urlparse(dsn)
+    return urlunparse(parsed._replace(path=""))
+
+
 def _dsn_with_database(dsn: str, database: str) -> str:
     if not _IDENT_RE.match(database):
         raise AppError(
@@ -130,6 +161,35 @@ def _dsn_with_database(dsn: str, database: str) -> str:
     return urlunparse(parsed._replace(path=f"/{database}"))
 
 
+def normalize_remote_db_and_table(
+    *,
+    dsn: str,
+    remote_database_field: str = "",
+    remote_table_field: str = "",
+) -> tuple[str, str]:
+    """Return (database_name_or_empty, sql_table).
+
+    Mis-filed ``schema.table`` in the database field (or URL path) is moved to the
+    table slot. SoT for the SQL relation remains ``remote_table`` / ``?table=``.
+    """
+    db = (remote_database_field or "").strip()
+    table = (remote_table_field or "").strip()
+    if looks_like_remote_table(db):
+        if not table:
+            table = db
+        db = ""
+    path_table = postgres_dsn_path_as_table(dsn)
+    if path_table and not table:
+        table = path_table
+    q_table = postgres_dsn_table_query(dsn)
+    if q_table and not table:
+        table = q_table
+    path_db = postgres_dsn_database_name(dsn)
+    if path_db:
+        db = path_db
+    return db, table
+
+
 def resolve_connect_dsn(
     *,
     dsn: str,
@@ -137,10 +197,27 @@ def resolve_connect_dsn(
 ) -> str:
     """Resolve connect DSN (database path) without requiring a SQL table."""
     dsn = validate_postgres_dsn(dsn)
-    db = postgres_dsn_database_name(dsn)
-    field = (remote_database_field or "").strip()
+    db, _table = normalize_remote_db_and_table(
+        dsn=dsn,
+        remote_database_field=remote_database_field,
+    )
     if db:
-        return strip_postgres_driver_query(dsn)
+        # Path may still hold a mis-filed schema.table — always rewrite from db.
+        base = strip_postgres_driver_query(_dsn_clear_path(dsn) if postgres_dsn_path_as_table(dsn) else dsn)
+        if postgres_dsn_database_name(base) == db:
+            return strip_postgres_driver_query(base)
+        return strip_postgres_driver_query(_dsn_with_database(base, db))
+    field = (remote_database_field or "").strip()
+    if looks_like_remote_table(field):
+        raise AppError(
+            code="VALIDATION_ERROR",
+            title="Validation Error",
+            status=422,
+            detail=(
+                "database name must be a simple identifier (e.g. s4b_catalog), "
+                "not schema.table — pick the SQL table in the Table field"
+            ),
+        )
     if not field:
         raise AppError(
             code="VALIDATION_ERROR",
@@ -152,12 +229,12 @@ def resolve_connect_dsn(
                 "or fill the database name field"
             ),
         )
-    if "." in field:
+    if not is_simple_database_name(field):
         raise AppError(
             code="VALIDATION_ERROR",
             title="Validation Error",
             status=422,
-            detail="database name must be a simple identifier, not schema.table",
+            detail="database name must be a simple SQL identifier",
         )
     return strip_postgres_driver_query(_dsn_with_database(dsn, field))
 
@@ -173,13 +250,16 @@ def resolve_remote_catalog_target(
     SQL relation: ``?table=`` / ``?remote_table=`` (stripped before connect),
     else [remote_table_field]. No silent default to public.offers.
     """
-    connect_dsn = resolve_connect_dsn(
+    _db, sql_raw = normalize_remote_db_and_table(
         dsn=dsn,
         remote_database_field=remote_database_field,
+        remote_table_field=remote_table_field,
     )
-    q_table = postgres_dsn_table_query(dsn)
-    field = (remote_table_field or "").strip()
-    sql_raw = q_table or field
+    connect_dsn = resolve_connect_dsn(
+        dsn=dsn,
+        remote_database_field=remote_database_field if not looks_like_remote_table(remote_database_field) else "",
+    )
+    # Prefer normalized table (includes mis-filed db / path / query).
     if not sql_raw:
         raise AppError(
             code="VALIDATION_ERROR",
