@@ -320,7 +320,7 @@ EmptyPlaceholder(title: "Метаданные", subtitle: "<parse error code>")
 | `profile_hub` | ProfileHubInterpreter | Nav blocks; radio only when opened without profile context |
 | `form` + `widget: markdown_editor` | MarkdownEditorField | AGENTS.md, prompt items |
 | `form` + `widget: file_upload` | FileUploadField | `file_ref` via `/cabinets/{id}/content/upload` |
-| `form` + `widget: project_multiselect` | ProjectMultiselectField | `project_ids` column; empty = all projects |
+| `form` + `widget: project_multiselect` | ProjectMultiselectField | `project_ids`; choices = **alive module-bound** projects; empty = «Все» (all bound); soft-deleted excluded |
 | `form` + `widget: column_map` | ColumnMapField | map source headers → canonical schema |
 | `form` + `widget: pause_toggle` | AppNavPreference | bool pause/resume action (warning accent) |
 | `form` + `widget: type_ref_picker` | TypeRefPickerField | open types pick collection |

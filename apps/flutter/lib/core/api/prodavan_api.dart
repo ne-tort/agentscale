@@ -433,46 +433,28 @@ class ProdavanApi {
   }
 
   /// Projects with an explicit module↔project (MP) bind for [moduleId].
+  /// Soft-deleted projects are excluded by the API. No cabinet-wide fallback.
   Future<List<Map<String, dynamic>>> listModuleBoundProjects({
     required String cabinetId,
     required String moduleId,
   }) async {
     if (moduleId.isEmpty) return const [];
-    try {
-      final res = await AuthHttp.get(
-        _uri('/cabinets/$cabinetId/modules/$moduleId/bound-projects'),
-        extraHeaders: _workHeaders,
-      );
-      _throwIfError(res);
-      final body = jsonDecode(res.body) as Map<String, dynamic>;
-      final items = body['items'];
-      if (items is! List) return const [];
-      return [
-        for (final raw in items)
-          if (raw is Map)
-            {
-              'id': raw['project_id']?.toString() ?? '',
-              'name': raw['name']?.toString() ?? '',
-            },
-      ].where((e) => (e['id'] as String).isNotEmpty).toList();
-    } catch (_) {
-      // Fallback: filter cabinet projects by enabled module list.
-      final projects = await listProjects(cabinetId);
-      if (projects.isEmpty) return const [];
-      final checks = await Future.wait(
-        projects.map((p) async {
-          final id = p['id'] as String?;
-          if (id == null || id.isEmpty) return null;
-          try {
-            final mods = await listProjectModuleIds(id);
-            return mods.contains(moduleId) ? p : null;
-          } catch (_) {
-            return null;
-          }
-        }),
-      );
-      return checks.whereType<Map<String, dynamic>>().toList();
-    }
+    final res = await AuthHttp.get(
+      _uri('/cabinets/$cabinetId/modules/$moduleId/bound-projects'),
+      extraHeaders: _workHeaders,
+    );
+    _throwIfError(res);
+    final body = jsonDecode(res.body) as Map<String, dynamic>;
+    final items = body['items'];
+    if (items is! List) return const [];
+    return [
+      for (final raw in items)
+        if (raw is Map)
+          {
+            'id': raw['project_id']?.toString() ?? '',
+            'name': raw['name']?.toString() ?? '',
+          },
+    ].where((e) => (e['id'] as String).isNotEmpty).toList();
   }
 
   Future<Map<String, dynamic>> createProject({

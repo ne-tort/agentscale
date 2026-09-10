@@ -59,6 +59,7 @@ class AppCatalogSelectPage extends StatefulWidget {
     this.onCreate,
     this.onEdit,
     this.onDelete,
+    this.resolveToggle,
   });
 
   final String title;
@@ -78,6 +79,14 @@ class AppCatalogSelectPage extends StatefulWidget {
   final Future<void> Function(String name)? onCreate;
   final Future<void> Function(AppCatalogSelectItem item)? onEdit;
   final Future<void> Function(AppCatalogSelectItem item)? onDelete;
+
+  /// Optional multi-select toggle rewrite (e.g. exclusive «All» sentinel).
+  /// [nowSelected] is the desired state of [toggledId] after the tap.
+  final Set<String> Function(
+    Set<String> previous,
+    String toggledId,
+    bool nowSelected,
+  )? resolveToggle;
 
   @override
   State<AppCatalogSelectPage> createState() => _AppCatalogSelectPageState();
@@ -129,7 +138,11 @@ class _AppCatalogSelectPageState extends State<AppCatalogSelectPage> {
     }
     setState(() {
       if (widget.multiSelect) {
-        if (_selected.contains(id)) {
+        final resolve = widget.resolveToggle;
+        if (resolve != null) {
+          final nowSelected = !_selected.contains(id);
+          _selected = resolve({..._selected}, id, nowSelected);
+        } else if (_selected.contains(id)) {
           _selected.remove(id);
         } else {
           _selected.add(id);

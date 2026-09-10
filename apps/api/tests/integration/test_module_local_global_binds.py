@@ -397,6 +397,44 @@ def test_employee_bind_unbind_and_bound_projects(client: TestClient) -> None:
 
 
 @requires_postgres
+def test_bound_projects_excludes_soft_deleted(client: TestClient) -> None:
+    admin, company_id, cab_ws, owner_tok, _ = _setup(client, stamp="softdel")
+    p_live = _create_project(client, cab_ws=cab_ws, owner_tok=owner_tok, name="Live")
+    p_gone = _create_project(client, cab_ws=cab_ws, owner_tok=owner_tok, name="Gone")
+    module_id = _create_module(
+        client,
+        admin=admin,
+        company_id=company_id,
+        cab_ws=cab_ws,
+        owner_tok=owner_tok,
+        name="SoftDel Bound",
+    )
+    for pid in (p_live, p_gone):
+        bound = client.post(
+            f"/api/v1/projects/{pid}/modules/{module_id}/bind",
+            headers={"Authorization": f"Bearer {owner_tok}"},
+            json={"bind_kind": "local"},
+        )
+        assert bound.status_code == 200, bound.text
+
+    deleted = client.delete(
+        f"/api/v1/projects/{p_gone}",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["status"] == "deleted"
+
+    listed = client.get(
+        f"/api/v1/cabinets/{cab_ws}/modules/{module_id}/bound-projects",
+        headers={"Authorization": f"Bearer {owner_tok}"},
+    )
+    assert listed.status_code == 200
+    ids = {i["project_id"] for i in listed.json()["items"]}
+    assert p_live in ids
+    assert p_gone not in ids
+
+
+@requires_postgres
 def test_switch_local_to_global_drops_project_leaf(client: TestClient) -> None:
     admin, company_id, cab_ws, owner_tok, _ = _setup(client, stamp="switch")
     module_id = _create_module(

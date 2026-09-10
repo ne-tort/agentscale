@@ -130,7 +130,7 @@ Product defaults (`default_project_bind` on module meta / tabs):
 
 ### Row `project_ids`
 
-- UI `project_multiselect` lists **only projects bound to the module**. No binds → control hidden.
+- UI `project_multiselect` lists **only alive projects bound to the module** (soft-deleted excluded). No binds → control hidden. Explicit «Все» option in the picker; empty/`null` `project_ids` = all **bound** projects.
 - Empty/`null` `project_ids` = all projects **bound to the module** (not every cabinet project).
 - Fan-out (e.g. equipment catalogs after merge): empty `project_ids` + local MP → materialize into each bound project workspace.
 

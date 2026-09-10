@@ -316,7 +316,7 @@ def _project_ids_column(table_slug: str) -> dict[str, Any]:
         "type": "json",
         "required": False,
         "default": [],
-        "ui": {"widget": "project_multiselect", "empty_means": "all"},
+        "ui": {"widget": "project_multiselect", "empty_means": "all_bound"},
     }
 
 

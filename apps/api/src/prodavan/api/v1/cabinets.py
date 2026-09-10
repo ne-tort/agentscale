@@ -343,9 +343,13 @@ async def list_cabinet_module_bound_projects(
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)] = None,
 ) -> dict:
-    """Projects in this cabinet that have an explicit MP bind to the module."""
+    """Alive projects in this cabinet with an explicit MP bind to the module.
+
+    Soft-deleted projects are excluded even if an MP row still exists.
+    """
     from prodavan.application.cabinets.access import CabinetAccessService
     from prodavan.application.modules.module_binding_service import ModuleBindingService
+    from prodavan.domain.lifecycle import project_alive_clause
     from prodavan.infrastructure.persistence.models.projects import ProjectRow
     from sqlalchemy import select
 
@@ -360,7 +364,11 @@ async def list_cabinet_module_bound_projects(
         return {"items": []}
     q = await session.execute(
         select(ProjectRow.id, ProjectRow.name)
-        .where(ProjectRow.cabinet_id == cabinet_id, ProjectRow.id.in_(bound_ids))
+        .where(
+            ProjectRow.cabinet_id == cabinet_id,
+            ProjectRow.id.in_(bound_ids),
+            project_alive_clause(ProjectRow),
+        )
         .order_by(ProjectRow.name)
     )
     return {"items": [{"project_id": pid, "name": name} for pid, name in q.all()]}

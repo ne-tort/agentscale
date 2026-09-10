@@ -65,7 +65,7 @@ Employee opens Project P
   → local MP → project leaf UI; global MP → cabinet (or higher) SoT UI
 ```
 
-**Row-level scoping:** column `project_ids` (`project_multiselect`). Choices = **module-bound projects only**. Empty list = all bound projects. Orthogonal to bind_kind: MP = module linked to project; `project_ids` = which linked projects receive this row’s artifacts.
+**Row-level scoping:** column `project_ids` (`project_multiselect`). Choices = **alive module-bound projects only** (soft-deleted excluded). Empty list = «Все» (all bound). UI lists an explicit «Все» option; picking concrete projects clears it. Orthogonal to bind_kind: MP = module linked to project; `project_ids` = which linked projects receive this row’s artifacts.
 
 ## Multi-module merge
 
