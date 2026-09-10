@@ -148,6 +148,70 @@ def test_resolve_connect_rejects_schema_table_as_database() -> None:
         )
 
 
+def test_apply_overrides_user_password_and_db() -> None:
+    from prodavan.application.content.remote_sql_probe import apply_remote_connect_overrides
+
+    dsn = apply_remote_connect_overrides(
+        "postgresql://172.21.176.1:5433",
+        database="s4b_catalog",
+        user="s4b",
+        password="secret",
+    )
+    assert dsn.startswith("postgresql://s4b:secret@172.21.176.1:5433/s4b_catalog")
+
+
+def test_list_databases_uses_maintenance_db(monkeypatch: pytest.MonkeyPatch) -> None:
+    from prodavan.application.content.remote_sql_probe import (
+        apply_remote_connect_overrides,
+        resolve_connect_dsn,
+    )
+
+    dsn = resolve_connect_dsn(
+        dsn="postgresql://s4b:s4b@h:5433",
+        for_database_list=True,
+        require_database=False,
+    )
+    assert dsn.endswith("/postgres")
+    assert "s4b:s4b@" in dsn
+
+    overlaid = apply_remote_connect_overrides(
+        "postgresql://h:5433",
+        user="u",
+        password="p",
+        for_database_list=True,
+    )
+    assert overlaid.endswith("/postgres")
+    assert "u:p@" in overlaid
+
+
+def test_trailing_slash_dsn_has_no_database() -> None:
+    assert postgres_dsn_database_name("postgresql://s4b:s4b@h:5433/") is None
+    assert postgres_dsn_database_name("postgresql://s4b:s4b@h:5433") is None
+
+
+@pytest.mark.asyncio
+async def test_list_remote_databases(monkeypatch: pytest.MonkeyPatch) -> None:
+    from prodavan.application.content.remote_sql_probe import list_remote_databases
+
+    class _FakeConn:
+        async def fetch(self, *_a, **_k):
+            return [{"datname": "postgres"}, {"datname": "s4b_catalog"}]
+
+        async def close(self):
+            return None
+
+    async def _connect(**kwargs):
+        assert str(kwargs.get("dsn") or "").endswith("/postgres")
+        return _FakeConn()
+
+    monkeypatch.setattr(
+        "prodavan.application.content.remote_sql_probe.asyncpg.connect",
+        _connect,
+    )
+    dbs = await list_remote_databases(dsn="postgresql://s4b:s4b@h:5433")
+    assert [d.name for d in dbs] == ["postgres", "s4b_catalog"]
+
+
 @pytest.mark.asyncio
 async def test_probe_remote_postgres_columns_and_count(monkeypatch: pytest.MonkeyPatch) -> None:
     from prodavan.application.content.remote_sql_probe import (

@@ -17,6 +17,7 @@ import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
 import 'package:prodavan/features/meta/widgets/schema_attrs_field.dart';
 import 'package:prodavan/features/meta/widgets/markdown_editor_field.dart';
 import 'package:prodavan/features/meta/widgets/project_multiselect_field.dart';
+import 'package:prodavan/features/meta/widgets/remote_database_picker_field.dart';
 import 'package:prodavan/features/meta/widgets/remote_table_picker_field.dart';
 import 'package:prodavan/features/meta/widgets/build_slots_field.dart';
 import 'package:prodavan/features/meta/widgets/text_editor_nav_field.dart';
@@ -115,7 +116,12 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     return [
       body['remote_table'],
       body['remote_database'],
+      body['remote_user'],
+      body['remote_password'],
       body['remote_dsn_has_database'],
+      body['remote_dsn_url_has_database'],
+      body['remote_dsn_has_user'],
+      body['remote_dsn_has_password'],
       body['status'],
       body['row_count'],
       body['columns_json'],
@@ -188,6 +194,9 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       if (name == 'remote_database' && next is String && next.trim().isNotEmpty) {
         _values['remote_dsn_has_database'] = true;
       }
+      if (name == 'remote_user' && next is String && next.trim().isNotEmpty) {
+        _values['remote_dsn_has_user'] = true;
+      }
     });
     if (widget.readOnly) return;
     final tableSlug = widget.view['table_slug'] as String? ?? '';
@@ -215,6 +224,10 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         if (patch is Future) await patch;
         if (name == 'remote_database' && next is String && next.trim().isNotEmpty) {
           final flag = widget.seeds.patchField(_rowId!, 'remote_dsn_has_database', true);
+          if (flag is Future) await flag;
+        }
+        if (name == 'remote_user' && next is String && next.trim().isNotEmpty) {
+          final flag = widget.seeds.patchField(_rowId!, 'remote_dsn_has_user', true);
           if (flag is Future) await flag;
         }
       }
@@ -385,6 +398,34 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
           final open = widget.onOpenView;
           if (open == null || _rowId == null) return;
           open(pickView, rowId: _rowId);
+        },
+      );
+    }
+    if (widgetKind == 'remote_database_picker') {
+      if (_rowId == null) {
+        return AppNavPreference(
+          title: label,
+          icon: fieldIcon ?? Icons.storage_outlined,
+          enabled: false,
+          onTap: () {},
+        );
+      }
+      return RemoteDatabasePickerField(
+        label: label,
+        databaseName: value?.toString(),
+        readOnly: fieldReadOnly,
+        emptyStyleWarning: fieldCfg?['empty_style']?.toString() == 'warning',
+        emptyLabel: remoteDatabaseEmptyLabel(fieldCfg, l10n, locale),
+        listActionId: fieldCfg?['list_action']?.toString() ??
+            'list_catalog_remote_databases',
+        rowId: _rowId!,
+        icon: fieldIcon ?? Icons.storage_outlined,
+        onSelected: (db) async {
+          await _persist(name, db);
+          // Changing DB invalidates table selection.
+          if ((_values['remote_table']?.toString() ?? '').isNotEmpty) {
+            await _persist('remote_table', '');
+          }
         },
       );
     }
@@ -699,7 +740,27 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     final uri = Uri.tryParse(dsn.trim());
     if (uri == null) return false;
     final path = uri.path.replaceFirst(RegExp(r'^/+'), '');
-    return path.isNotEmpty;
+    if (path.isEmpty) return false;
+    final name = path.split('/').first;
+    // schema.table in path is not a database name.
+    if (name.contains('.')) return false;
+    return name.isNotEmpty;
+  }
+
+  bool _postgresDsnHasUser(String dsn) {
+    final uri = Uri.tryParse(dsn.trim());
+    if (uri == null) return false;
+    final info = uri.userInfo;
+    if (info.isEmpty) return false;
+    return info.split(':').first.isNotEmpty;
+  }
+
+  bool _postgresDsnHasPassword(String dsn) {
+    final uri = Uri.tryParse(dsn.trim());
+    if (uri == null) return false;
+    final info = uri.userInfo;
+    final colon = info.indexOf(':');
+    return colon >= 0 && colon < info.length - 1;
   }
 
   Widget _buildSecretValueField({
@@ -727,7 +788,17 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         final secret = raw.trim();
         if (secret.isEmpty) return;
         if (name == 'remote_dsn') {
-          _persist('remote_dsn_has_database', _postgresDsnHasDatabase(secret));
+          final hasDb = _postgresDsnHasDatabase(secret);
+          await _persist('remote_dsn_url_has_database', hasDb);
+          await _persist('remote_dsn_has_database', hasDb);
+          await _persist('remote_dsn_has_user', _postgresDsnHasUser(secret));
+          await _persist(
+            'remote_dsn_has_password',
+            _postgresDsnHasPassword(secret),
+          );
+        }
+        if (name == 'remote_password') {
+          await _persist('remote_dsn_has_password', true);
         }
         if (columnType == 'secret_ref') {
           if (scope == null) {
@@ -739,10 +810,10 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
             secret: secret,
             label: label,
           );
-          _persist(name, ref);
+          await _persist(name, ref);
           return;
         }
-        _persist(name, secret);
+        await _persist(name, secret);
       },
     );
   }

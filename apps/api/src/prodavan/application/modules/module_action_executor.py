@@ -139,6 +139,16 @@ class ModuleActionExecutor:
                 employee=employee,
             )
 
+        if kind == "content.list_remote_sql_databases":
+            return await self._list_remote_sql_databases(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+            )
+
         raise AppError(
             code="NOT_IMPLEMENTED",
             title="Not Implemented",
@@ -670,6 +680,49 @@ class ModuleActionExecutor:
             "columns": indexed_columns,
         }
 
+    def _remote_sql_row_auth(
+        self,
+        *,
+        body: dict[str, Any],
+        params: dict[str, Any],
+        cabinet_id: str,
+        dsn: str,
+    ) -> tuple[str, str, str, str]:
+        """Return (remote_database, remote_table, remote_user, remote_password)."""
+        from prodavan.application.content.remote_sql_probe import (
+            normalize_remote_db_and_table,
+            postgres_dsn_has_password,
+            postgres_dsn_has_user,
+        )
+
+        db_col = str(params.get("remote_database_column") or "remote_database")
+        table_col = str(params.get("remote_table_column") or "remote_table")
+        user_col = str(params.get("remote_user_column") or "remote_user")
+        password_col = str(params.get("remote_password_column") or "remote_password")
+        remote_database = str(body.get(db_col) or "").strip()
+        remote_table = str(body.get(table_col) or "").strip()
+        remote_database, remote_table = normalize_remote_db_and_table(
+            dsn=dsn,
+            remote_database_field=remote_database,
+            remote_table_field=remote_table,
+        )
+        remote_user = ""
+        if not postgres_dsn_has_user(dsn):
+            remote_user = str(body.get(user_col) or "").strip()
+        remote_password = ""
+        if not postgres_dsn_has_password(dsn):
+            pwd_ref = field_value_as_secret_ref(body.get(password_col))
+            if pwd_ref:
+                if pwd_ref.startswith(("file://cabinet_secrets/", "vault://cabinet_secrets/")):
+                    assert_cabinet_secret_scope(pwd_ref, cabinet_id)
+                remote_password = get_secret_store().get(pwd_ref)
+            else:
+                # Plain text fallback (should not persist; UI uses secret_ref).
+                raw = body.get(password_col)
+                if isinstance(raw, str):
+                    remote_password = raw.strip()
+        return remote_database, remote_table, remote_user, remote_password
+
     async def _probe_remote_sql(
         self,
         *,
@@ -684,8 +737,9 @@ class ModuleActionExecutor:
         from prodavan.application.content.remote_sql_probe import (
             check_remote_postgres_connect,
             is_simple_database_name,
-            normalize_remote_db_and_table,
             postgres_dsn_database_name,
+            postgres_dsn_has_password,
+            postgres_dsn_has_user,
             postgres_dsn_table_query,
             probe_remote_postgres,
         )
@@ -738,8 +792,6 @@ class ModuleActionExecutor:
         db_col = str(params.get("remote_database_column") or "remote_database")
 
         secret_ref = field_value_as_secret_ref(body.get(dsn_col))
-        remote_table = str(body.get(table_col) or "").strip()
-        remote_database = str(body.get(db_col) or "").strip()
         if not secret_ref:
             body[status_col] = "draft"
             body[error_col] = None
@@ -765,11 +817,11 @@ class ModuleActionExecutor:
             if secret_ref.startswith(("file://cabinet_secrets/", "vault://cabinet_secrets/")):
                 assert_cabinet_secret_scope(secret_ref, cabinet_id)
             dsn = get_secret_store().get(secret_ref)
-            # Mis-filed schema.table in «Имя БД» / URL path → remote_table.
-            remote_database, remote_table = normalize_remote_db_and_table(
+            remote_database, remote_table, remote_user, remote_password = self._remote_sql_row_auth(
+                body=body,
+                params=params,
+                cabinet_id=cabinet_id,
                 dsn=dsn,
-                remote_database_field=remote_database,
-                remote_table_field=remote_table,
             )
             body[db_col] = remote_database or None
             if remote_table:
@@ -777,16 +829,53 @@ class ModuleActionExecutor:
             body["remote_dsn_has_database"] = bool(
                 postgres_dsn_database_name(dsn) or is_simple_database_name(remote_database)
             )
-            # Convenience: persist ?table= from DSN into body, then strip on connect.
+            body["remote_dsn_url_has_database"] = bool(postgres_dsn_database_name(dsn))
+            body["remote_dsn_has_user"] = postgres_dsn_has_user(dsn) or bool(remote_user)
+            body["remote_dsn_has_password"] = postgres_dsn_has_password(dsn) or bool(
+                field_value_as_secret_ref(body.get(str(params.get("remote_password_column") or "remote_password")))
+            )
             q_table = postgres_dsn_table_query(dsn)
             if q_table and not remote_table:
                 remote_table = q_table
                 body[table_col] = remote_table
 
+            if not remote_database:
+                await check_remote_postgres_connect(
+                    dsn=dsn,
+                    remote_database_field="",
+                    remote_user_field=remote_user,
+                    remote_password_field=remote_password,
+                    allow_missing_database=True,
+                )
+                body[status_col] = "draft"
+                body[error_col] = None
+                body[row_count_col] = 0
+                body[columns_col] = None
+                body.pop("probed_remote_key", None)
+                await self._update_module_row(
+                    cabinet_id=cabinet_id,
+                    project_id=project_id,
+                    module_id=module_id,
+                    table_slug=table_slug,
+                    row_id=row_id,
+                    body=body,
+                    principal=principal,
+                    employee=employee,
+                    run_actions=False,
+                )
+                return {
+                    "kind": "content.probe_remote_sql",
+                    "status": "draft",
+                    "needs_database": True,
+                    "row_id": row_id,
+                }
+
             if not remote_table:
                 await check_remote_postgres_connect(
                     dsn=dsn,
                     remote_database_field=remote_database,
+                    remote_user_field=remote_user,
+                    remote_password_field=remote_password,
                 )
                 body[status_col] = "draft"
                 body[error_col] = None
@@ -829,6 +918,8 @@ class ModuleActionExecutor:
                 dsn=dsn,
                 remote_table=remote_table,
                 remote_database_field=remote_database,
+                remote_user_field=remote_user,
+                remote_password_field=remote_password,
             )
             body[columns_col] = json.dumps(probed.columns, ensure_ascii=False)
             body[row_count_col] = probed.row_count
@@ -836,7 +927,8 @@ class ModuleActionExecutor:
             body[error_col] = None
             body[table_col] = f"{probed.schema}.{probed.table}"
             body["probed_remote_key"] = (
-                f"{secret_ref}|{body[table_col]}|{body.get('remote_dsn_has_database')}"
+                f"{secret_ref}|{body[table_col]}|{body.get('remote_dsn_has_database')}|"
+                f"{remote_database}"
             )
         except AppError as exc:
             body[status_col] = "error"
@@ -893,6 +985,76 @@ class ModuleActionExecutor:
             "columns": probed.columns,
         }
 
+    async def _list_remote_sql_databases(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        row_id: str | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        from prodavan.application.content.remote_sql_probe import list_remote_databases
+
+        table_slug = params.get("table_slug")
+        if not isinstance(table_slug, str) or not table_slug:
+            raise AppError(
+                code="META_VALIDATION",
+                title="Meta validation error",
+                status=422,
+                detail="content.list_remote_sql_databases requires params.table_slug",
+            )
+        if not row_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="row_id required for content.list_remote_sql_databases",
+            )
+
+        rows = await self._list_module_rows(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            principal=principal,
+            employee=employee,
+        )
+        target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
+        if target is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        body = dict(target.get("body") or {})
+        dsn_col = str(params.get("dsn_column") or "remote_dsn")
+        secret_ref = field_value_as_secret_ref(body.get(dsn_col))
+        if not secret_ref:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="remote_dsn is required",
+            )
+        if secret_ref.startswith(("file://cabinet_secrets/", "vault://cabinet_secrets/")):
+            assert_cabinet_secret_scope(secret_ref, cabinet_id)
+        dsn = get_secret_store().get(secret_ref)
+        _db, _table, remote_user, remote_password = self._remote_sql_row_auth(
+            body=body,
+            params=params,
+            cabinet_id=cabinet_id,
+            dsn=dsn,
+        )
+        databases = await list_remote_databases(
+            dsn=dsn,
+            remote_user_field=remote_user,
+            remote_password_field=remote_password,
+        )
+        return {
+            "kind": "content.list_remote_sql_databases",
+            "row_id": row_id,
+            "databases": [{"name": d.name} for d in databases],
+        }
+
     async def _list_remote_sql_tables(
         self,
         *,
@@ -904,10 +1066,7 @@ class ModuleActionExecutor:
         employee: EmployeeRow | None,
         project_id: str | None = None,
     ) -> dict[str, Any]:
-        from prodavan.application.content.remote_sql_probe import (
-            list_remote_tables,
-            normalize_remote_db_and_table,
-        )
+        from prodavan.application.content.remote_sql_probe import list_remote_tables
 
         table_slug = params.get("table_slug")
         if not isinstance(table_slug, str) or not table_slug:
@@ -951,14 +1110,12 @@ class ModuleActionExecutor:
         if secret_ref.startswith(("file://cabinet_secrets/", "vault://cabinet_secrets/")):
             assert_cabinet_secret_scope(secret_ref, cabinet_id)
         dsn = get_secret_store().get(secret_ref)
-        remote_database = str(body.get(db_col) or "").strip()
-        remote_table = str(body.get(table_col) or "").strip()
-        remote_database, remote_table = normalize_remote_db_and_table(
+        remote_database, remote_table, remote_user, remote_password = self._remote_sql_row_auth(
+            body=body,
+            params=params,
+            cabinet_id=cabinet_id,
             dsn=dsn,
-            remote_database_field=remote_database,
-            remote_table_field=remote_table,
         )
-        # Persist coerce so «Имя БД» is not left holding schema.table.
         if body.get(db_col) != (remote_database or None) or (
             remote_table and body.get(table_col) != remote_table
         ):
@@ -983,11 +1140,16 @@ class ModuleActionExecutor:
                 title="Validation Error",
                 status=422,
                 detail=(
-                    "database name is required (e.g. s4b_catalog in the URL path "
-                    "or the Database name field) — schema.table belongs in Table"
+                    "database name is required — pick a database first "
+                    "(schema.table belongs in Table)"
                 ),
             )
-        tables = await list_remote_tables(dsn=dsn, remote_database_field=remote_database)
+        tables = await list_remote_tables(
+            dsn=dsn,
+            remote_database_field=remote_database,
+            remote_user_field=remote_user,
+            remote_password_field=remote_password,
+        )
         return {
             "kind": "content.list_remote_sql_tables",
             "row_id": row_id,

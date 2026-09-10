@@ -960,8 +960,23 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             {
                 "table_slug": "catalogs",
+                "name": "remote_user",
+                "label": {"ru": "Логин", "en": "Username"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "catalogs",
+                "name": "remote_password",
+                "label": {"ru": "Пароль", "en": "Password"},
+                "type": "secret_ref",
+                "required": False,
+            },
+            {
+                "table_slug": "catalogs",
                 "name": "remote_database",
-                "label": {"ru": "Имя БД", "en": "Database name"},
+                "label": {"ru": "База", "en": "Database"},
                 "type": "text",
                 "required": False,
                 "default": "",
@@ -978,6 +993,30 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "table_slug": "catalogs",
                 "name": "remote_dsn_has_database",
                 "label": {"ru": "DSN с БД", "en": "DSN has database"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+            },
+            {
+                "table_slug": "catalogs",
+                "name": "remote_dsn_url_has_database",
+                "label": {"ru": "URL с /dbname", "en": "URL has /dbname"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+            },
+            {
+                "table_slug": "catalogs",
+                "name": "remote_dsn_has_user",
+                "label": {"ru": "DSN с логином", "en": "DSN has user"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+            },
+            {
+                "table_slug": "catalogs",
+                "name": "remote_dsn_has_password",
+                "label": {"ru": "DSN с паролем", "en": "DSN has password"},
                 "type": "bool",
                 "required": False,
                 "default": False,
@@ -1544,16 +1583,51 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "visible_when": {"field": "source_kind", "eq": "remote"},
                         },
                         {
-                            "column": "remote_database",
+                            "column": "remote_user",
                             "widget": "value",
-                            "icon": "storage",
-                            "hint": "s4b_catalog — только имя БД, не schema.table",
+                            "icon": "person_outline",
+                            "visible_when": {
+                                "all": [
+                                    {"field": "source_kind", "eq": "remote"},
+                                    {"field": "remote_dsn_has_user", "eq": False},
+                                ]
+                            },
+                        },
+                        {
+                            "column": "remote_password",
+                            "widget": "value",
+                            "secret": True,
+                            "icon": "lock_outline",
                             "visible_when": {
                                 "all": [
                                     {"field": "source_kind", "eq": "remote"},
                                     {
-                                        "field": "remote_dsn_has_database",
+                                        "field": "remote_dsn_has_password",
                                         "eq": False,
+                                    },
+                                ]
+                            },
+                        },
+                        {
+                            "column": "remote_database",
+                            "widget": "remote_database_picker",
+                            "icon": "storage",
+                            "list_action": "list_catalog_remote_databases",
+                            "empty_style": "warning",
+                            "empty_label": {
+                                "ru": "Не выбрана",
+                                "en": "Not selected",
+                            },
+                            "visible_when": {
+                                "all": [
+                                    {"field": "source_kind", "eq": "remote"},
+                                    {
+                                        "field": "remote_dsn_url_has_database",
+                                        "eq": False,
+                                    },
+                                    {
+                                        "field": "status",
+                                        "in": ["draft", "ready", "indexing"],
                                     },
                                 ]
                             },
@@ -2437,6 +2511,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "dsn_column": "remote_dsn",
                     "remote_table_column": "remote_table",
                     "remote_database_column": "remote_database",
+                    "remote_user_column": "remote_user",
+                    "remote_password_column": "remote_password",
                     "status_column": "status",
                     "row_count_column": "row_count",
                     "columns_json_column": "columns_json",
@@ -2448,6 +2524,20 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "ui": {"placement": ["toolbar"], "icon": "cloud_sync"},
             },
             {
+                "id": "list_catalog_remote_databases",
+                "label": {"ru": "Список баз", "en": "List databases"},
+                "kind": "content.list_remote_sql_databases",
+                "enabled": True,
+                "params": {
+                    "table_slug": "catalogs",
+                    "dsn_column": "remote_dsn",
+                    "remote_user_column": "remote_user",
+                    "remote_password_column": "remote_password",
+                },
+                "trigger": {"on": []},
+                "ui": {"placement": []},
+            },
+            {
                 "id": "list_catalog_remote_tables",
                 "label": {"ru": "Список таблиц", "en": "List tables"},
                 "kind": "content.list_remote_sql_tables",
@@ -2456,6 +2546,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "table_slug": "catalogs",
                     "dsn_column": "remote_dsn",
                     "remote_database_column": "remote_database",
+                    "remote_user_column": "remote_user",
+                    "remote_password_column": "remote_password",
                 },
                 "trigger": {"on": []},
                 "ui": {"placement": []},

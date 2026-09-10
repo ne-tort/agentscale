@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlparse, urlunparse
 
 import asyncpg
 
@@ -17,6 +17,7 @@ _TABLE_RE = re.compile(
 
 # Query keys we parse ourselves — must never reach asyncpg/libpq.
 _APP_QUERY_KEYS = frozenset({"table", "remote_table"})
+_MAINTENANCE_DATABASE = "postgres"
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +37,11 @@ class RemoteSqlTableInfo:
     @property
     def name(self) -> str:
         return f"{self.schema}.{self.table}"
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteSqlDatabaseInfo:
+    name: str
 
 
 def validate_postgres_dsn(dsn: str) -> str:
@@ -108,7 +114,6 @@ def postgres_dsn_database_name(dsn: str) -> str | None:
     name = path.split("/", 1)[0].strip()
     if not name:
         return None
-    # Users sometimes put schema.table into the URL path — that is not a DB name.
     if looks_like_remote_table(name):
         return None
     return name
@@ -121,6 +126,16 @@ def postgres_dsn_path_as_table(dsn: str) -> str | None:
         return None
     name = path.split("/", 1)[0].strip()
     return name if looks_like_remote_table(name) else None
+
+
+def postgres_dsn_has_user(dsn: str) -> bool:
+    user = urlparse((dsn or "").strip()).username
+    return bool(user and unquote(user))
+
+
+def postgres_dsn_has_password(dsn: str) -> bool:
+    parsed = urlparse((dsn or "").strip())
+    return parsed.password is not None and parsed.password != ""
 
 
 def postgres_dsn_table_query(dsn: str) -> str | None:
@@ -149,16 +164,83 @@ def _dsn_clear_path(dsn: str) -> str:
     return urlunparse(parsed._replace(path=""))
 
 
-def _dsn_with_database(dsn: str, database: str) -> str:
-    if not _IDENT_RE.match(database):
-        raise AppError(
-            code="VALIDATION_ERROR",
-            title="Validation Error",
-            status=422,
-            detail="database name must be a simple SQL identifier",
-        )
-    parsed = urlparse(dsn)
-    return urlunparse(parsed._replace(path=f"/{database}"))
+def _rebuild_netloc(
+    *,
+    hostname: str,
+    port: int | None,
+    username: str | None,
+    password: str | None,
+) -> str:
+    host = hostname
+    if port is not None:
+        host = f"{hostname}:{port}"
+    if username is None:
+        return host
+    user = quote(username, safe="")
+    if password is None:
+        return f"{user}@{host}"
+    return f"{user}:{quote(password, safe='')}@{host}"
+
+
+def apply_remote_connect_overrides(
+    dsn: str,
+    *,
+    database: str = "",
+    user: str = "",
+    password: str = "",
+    for_database_list: bool = False,
+) -> str:
+    """Build asyncpg DSN: URL creds/path plus field overlays; strip app query keys.
+
+    When ``for_database_list`` is True and no target database is known, connect to
+    the maintenance database ``postgres``.
+    """
+    dsn = validate_postgres_dsn(dsn)
+    cleaned = strip_postgres_driver_query(dsn)
+    if postgres_dsn_path_as_table(cleaned):
+        cleaned = _dsn_clear_path(cleaned)
+    parsed = urlparse(cleaned)
+
+    url_user = unquote(parsed.username) if parsed.username else None
+    url_password = unquote(parsed.password) if parsed.password is not None else None
+    overlay_user = (user or "").strip() or None
+    overlay_password = (password or "").strip() or None
+
+    final_user = overlay_user or url_user
+    final_password = overlay_password if overlay_password is not None else url_password
+    if overlay_user and overlay_password is None and url_password is not None:
+        final_password = url_password
+
+    hostname = parsed.hostname or ""
+    netloc = _rebuild_netloc(
+        hostname=hostname,
+        port=parsed.port,
+        username=final_user,
+        password=final_password if final_user is not None else None,
+    )
+
+    db_field = (database or "").strip()
+    if looks_like_remote_table(db_field):
+        db_field = ""
+    path_db = postgres_dsn_database_name(cleaned)
+    if for_database_list and not db_field and not path_db:
+        target_db = _MAINTENANCE_DATABASE
+    elif db_field:
+        if not is_simple_database_name(db_field):
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="database name must be a simple SQL identifier",
+            )
+        target_db = db_field
+    elif path_db:
+        target_db = path_db
+    else:
+        target_db = ""
+
+    path = f"/{target_db}" if target_db else ""
+    return urlunparse((parsed.scheme, netloc, path, "", parsed.query, ""))
 
 
 def normalize_remote_db_and_table(
@@ -194,31 +276,34 @@ def resolve_connect_dsn(
     *,
     dsn: str,
     remote_database_field: str = "",
+    remote_user_field: str = "",
+    remote_password_field: str = "",
+    for_database_list: bool = False,
+    require_database: bool = True,
 ) -> str:
-    """Resolve connect DSN (database path) without requiring a SQL table."""
+    """Resolve connect DSN with optional user/password/database overlays."""
     dsn = validate_postgres_dsn(dsn)
     db, _table = normalize_remote_db_and_table(
         dsn=dsn,
         remote_database_field=remote_database_field,
     )
-    if db:
-        # Path may still hold a mis-filed schema.table — always rewrite from db.
-        base = strip_postgres_driver_query(_dsn_clear_path(dsn) if postgres_dsn_path_as_table(dsn) else dsn)
-        if postgres_dsn_database_name(base) == db:
-            return strip_postgres_driver_query(base)
-        return strip_postgres_driver_query(_dsn_with_database(base, db))
     field = (remote_database_field or "").strip()
     if looks_like_remote_table(field):
-        raise AppError(
-            code="VALIDATION_ERROR",
-            title="Validation Error",
-            status=422,
-            detail=(
-                "database name must be a simple identifier (e.g. s4b_catalog), "
-                "not schema.table — pick the SQL table in the Table field"
-            ),
-        )
-    if not field:
+        field = ""
+    if not db and field and is_simple_database_name(field):
+        db = field
+
+    if require_database and not db and not for_database_list:
+        if looks_like_remote_table((remote_database_field or "").strip()):
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail=(
+                    "database name must be a simple identifier (e.g. s4b_catalog), "
+                    "not schema.table — pick the SQL table in the Table field"
+                ),
+            )
         raise AppError(
             code="VALIDATION_ERROR",
             title="Validation Error",
@@ -226,17 +311,17 @@ def resolve_connect_dsn(
             detail=(
                 "remote DSN must include /database "
                 "(e.g. postgresql://user:pass@host:5432/dbname) "
-                "or fill the database name field"
+                "or pick a database"
             ),
         )
-    if not is_simple_database_name(field):
-        raise AppError(
-            code="VALIDATION_ERROR",
-            title="Validation Error",
-            status=422,
-            detail="database name must be a simple SQL identifier",
-        )
-    return strip_postgres_driver_query(_dsn_with_database(dsn, field))
+
+    return apply_remote_connect_overrides(
+        dsn,
+        database=db,
+        user=remote_user_field,
+        password=remote_password_field,
+        for_database_list=for_database_list or (not db and not require_database),
+    )
 
 
 def resolve_remote_catalog_target(
@@ -244,12 +329,10 @@ def resolve_remote_catalog_target(
     dsn: str,
     remote_table_field: str,
     remote_database_field: str = "",
+    remote_user_field: str = "",
+    remote_password_field: str = "",
 ) -> tuple[str, str, str]:
-    """Resolve connect DSN + schema.table. Requires an explicit SQL table.
-
-    SQL relation: ``?table=`` / ``?remote_table=`` (stripped before connect),
-    else [remote_table_field]. No silent default to public.offers.
-    """
+    """Resolve connect DSN + schema.table. Requires an explicit SQL table."""
     _db, sql_raw = normalize_remote_db_and_table(
         dsn=dsn,
         remote_database_field=remote_database_field,
@@ -257,9 +340,12 @@ def resolve_remote_catalog_target(
     )
     connect_dsn = resolve_connect_dsn(
         dsn=dsn,
-        remote_database_field=remote_database_field if not looks_like_remote_table(remote_database_field) else "",
+        remote_database_field=remote_database_field
+        if not looks_like_remote_table(remote_database_field)
+        else "",
+        remote_user_field=remote_user_field,
+        remote_password_field=remote_password_field,
     )
-    # Prefer normalized table (includes mis-filed db / path / query).
     if not sql_raw:
         raise AppError(
             code="VALIDATION_ERROR",
@@ -290,14 +376,31 @@ def _connect_error(dsn: str, exc: Exception) -> AppError:
         status=503,
         detail=(
             f"remote SQL probe failed ({host}): {exc}. "
-            "Check host reachability from the API and that the URL includes /dbname."
+            "Check host reachability from the API and credentials / database name."
         ),
     )
 
 
-async def check_remote_postgres_connect(*, dsn: str, remote_database_field: str = "") -> str:
-    """Verify TCP/auth/database; return stripped connect DSN."""
-    connect_dsn = resolve_connect_dsn(dsn=dsn, remote_database_field=remote_database_field)
+async def check_remote_postgres_connect(
+    *,
+    dsn: str,
+    remote_database_field: str = "",
+    remote_user_field: str = "",
+    remote_password_field: str = "",
+    allow_missing_database: bool = False,
+) -> str:
+    """Verify TCP/auth/(database); return stripped connect DSN."""
+    missing_db = not (
+        postgres_dsn_database_name(dsn) or is_simple_database_name(remote_database_field)
+    )
+    connect_dsn = resolve_connect_dsn(
+        dsn=dsn,
+        remote_database_field=remote_database_field,
+        remote_user_field=remote_user_field,
+        remote_password_field=remote_password_field,
+        require_database=not allow_missing_database,
+        for_database_list=allow_missing_database and missing_db,
+    )
     conn: asyncpg.Connection | None = None
     try:
         conn = await asyncpg.connect(dsn=connect_dsn, timeout=10.0, command_timeout=30.0)
@@ -312,13 +415,60 @@ async def check_remote_postgres_connect(*, dsn: str, remote_database_field: str 
             await conn.close()
 
 
+async def list_remote_databases(
+    *,
+    dsn: str,
+    remote_user_field: str = "",
+    remote_password_field: str = "",
+) -> list[RemoteSqlDatabaseInfo]:
+    """List non-template databases (connect via maintenance DB ``postgres``)."""
+    connect_dsn = resolve_connect_dsn(
+        dsn=dsn,
+        remote_user_field=remote_user_field,
+        remote_password_field=remote_password_field,
+        for_database_list=True,
+        require_database=False,
+    )
+    conn: asyncpg.Connection | None = None
+    try:
+        conn = await asyncpg.connect(dsn=connect_dsn, timeout=10.0, command_timeout=30.0)
+        rows = await conn.fetch(
+            """
+            SELECT datname
+            FROM pg_database
+            WHERE datistemplate = false
+            ORDER BY datname
+            """
+        )
+        out: list[RemoteSqlDatabaseInfo] = []
+        for r in rows:
+            name = str(r["datname"] or "").strip()
+            if is_simple_database_name(name):
+                out.append(RemoteSqlDatabaseInfo(name=name))
+        return out
+    except AppError:
+        raise
+    except Exception as exc:
+        raise _connect_error(connect_dsn, exc) from exc
+    finally:
+        if conn is not None:
+            await conn.close()
+
+
 async def list_remote_tables(
     *,
     dsn: str,
     remote_database_field: str = "",
+    remote_user_field: str = "",
+    remote_password_field: str = "",
 ) -> list[RemoteSqlTableInfo]:
     """List user BASE TABLEs with exact COUNT(*) (picker)."""
-    connect_dsn = resolve_connect_dsn(dsn=dsn, remote_database_field=remote_database_field)
+    connect_dsn = resolve_connect_dsn(
+        dsn=dsn,
+        remote_database_field=remote_database_field,
+        remote_user_field=remote_user_field,
+        remote_password_field=remote_password_field,
+    )
     conn: asyncpg.Connection | None = None
     try:
         conn = await asyncpg.connect(dsn=connect_dsn, timeout=10.0, command_timeout=120.0)
@@ -355,12 +505,16 @@ async def probe_remote_postgres(
     dsn: str,
     remote_table: str,
     remote_database_field: str = "",
+    remote_user_field: str = "",
+    remote_password_field: str = "",
 ) -> RemoteSqlProbeResult:
     """Connect briefly: list columns + COUNT(*) — never SELECT *."""
     connect_dsn, schema, table = resolve_remote_catalog_target(
         dsn=dsn,
         remote_table_field=remote_table,
         remote_database_field=remote_database_field,
+        remote_user_field=remote_user_field,
+        remote_password_field=remote_password_field,
     )
     conn: asyncpg.Connection | None = None
     try:
