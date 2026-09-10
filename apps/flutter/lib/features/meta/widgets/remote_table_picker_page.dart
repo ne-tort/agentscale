@@ -18,11 +18,13 @@ class RemoteTablePickerPage extends StatefulWidget {
     required this.moduleId,
     required this.listActionId,
     required this.rowId,
+    this.projectId,
     this.selectedTable,
   });
 
   final ProdavanApi api;
   final String cabinetId;
+  final String? projectId;
   final String moduleId;
   final String listActionId;
   final String rowId;
@@ -54,6 +56,7 @@ class _RemoteTablePickerPageState extends State<RemoteTablePickerPage> {
         moduleId: widget.moduleId,
         actionId: widget.listActionId,
         rowId: widget.rowId,
+        projectId: widget.projectId,
       );
       final raw = result['tables'];
       final tables = <_RemoteTableRow>[];

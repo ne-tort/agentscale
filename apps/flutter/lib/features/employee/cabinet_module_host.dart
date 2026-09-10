@@ -175,6 +175,7 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
           onOpenView: _openView,
           wrapBody: (page) => ModuleRuntimeScope(
             cabinetId: widget.cabinetId,
+            projectId: widget.projectId,
             moduleId: widget.entry.moduleId,
             api: workContext.api,
             child: page,
@@ -212,6 +213,7 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
 
     final body = ModuleRuntimeScope(
       cabinetId: widget.cabinetId,
+      projectId: widget.projectId,
       moduleId: widget.entry.moduleId,
       api: workContext.api,
       child: ViewInterpreterHost(

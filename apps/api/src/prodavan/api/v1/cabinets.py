@@ -50,6 +50,8 @@ class ActionInvokeBody(BaseModel):
     model_config = {"extra": "forbid"}
 
     row_id: str | None = None
+    # When set, row SoT is the project leaf instance (hubs), not cabinet.
+    project_id: str | None = Field(default=None, min_length=3, max_length=40)
 
 
 class SecretUploadBody(BaseModel):
@@ -499,6 +501,7 @@ async def invoke_module_action(
         principal=principal,
         employee=employee,
         row_id=body.row_id,
+        project_id=body.project_id,
     )
 
 

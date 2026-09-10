@@ -345,13 +345,17 @@ class ProdavanApi {
     required String moduleId,
     required String actionId,
     String? rowId,
+    String? projectId,
   }) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;
     try {
       final res = await AuthHttp.post(
         _uri('/cabinets/$cabinetId/modules/$moduleId/actions/$actionId/invoke'),
-        body: jsonEncode({if (rowId != null) 'row_id': rowId}),
+        body: jsonEncode({
+          if (rowId != null) 'row_id': rowId,
+          if (projectId != null && projectId.isNotEmpty) 'project_id': projectId,
+        }),
         extraHeaders: _workHeaders,
       );
       _throwIfError(res);

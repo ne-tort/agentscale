@@ -59,6 +59,7 @@ class RemoteDatabasePickerField extends StatelessWidget {
             builder: (_) => RemoteDatabasePickerPage(
               api: scope.api,
               cabinetId: scope.cabinetId,
+              projectId: scope.projectId,
               moduleId: scope.moduleId,
               listActionId: listActionId,
               rowId: rowId,

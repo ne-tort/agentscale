@@ -19,11 +19,13 @@ class RemoteDatabasePickerPage extends StatefulWidget {
     required this.moduleId,
     required this.listActionId,
     required this.rowId,
+    this.projectId,
     this.selectedDatabase,
   });
 
   final ProdavanApi api;
   final String cabinetId;
+  final String? projectId;
   final String moduleId;
   final String listActionId;
   final String rowId;
@@ -56,6 +58,7 @@ class _RemoteDatabasePickerPageState extends State<RemoteDatabasePickerPage> {
         moduleId: widget.moduleId,
         actionId: widget.listActionId,
         rowId: widget.rowId,
+        projectId: widget.projectId,
       );
       final raw = result['databases'];
       final names = <String>[];

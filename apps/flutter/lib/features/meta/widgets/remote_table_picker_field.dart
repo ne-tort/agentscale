@@ -58,6 +58,7 @@ class RemoteTablePickerField extends StatelessWidget {
             builder: (_) => RemoteTablePickerPage(
               api: scope.api,
               cabinetId: scope.cabinetId,
+              projectId: scope.projectId,
               moduleId: scope.moduleId,
               listActionId: listActionId,
               rowId: rowId,

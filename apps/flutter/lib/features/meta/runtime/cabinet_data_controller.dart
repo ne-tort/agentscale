@@ -201,6 +201,7 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
       moduleId: moduleId,
       actionId: actionId,
       rowId: rowId,
+      projectId: projectId,
     );
     await loadAll();
   }

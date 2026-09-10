@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from prodavan.application.modules.module_action_executor import ModuleActionExecutor
@@ -70,3 +72,75 @@ async def test_unknown_action_kind() -> None:
             employee=None,
         )
     assert exc.value.status == 501
+
+
+@pytest.mark.asyncio
+async def test_list_remote_databases_uses_project_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = ModuleActionExecutor(
+        session=_FakeSession(  # type: ignore[arg-type]
+            [
+                {
+                    "id": "list_catalog_remote_databases",
+                    "kind": "content.list_remote_sql_databases",
+                    "enabled": True,
+                    "params": {"table_slug": "catalogs", "dsn_column": "remote_dsn"},
+                }
+            ]
+        )
+    )
+
+    seen: dict[str, object] = {}
+
+    async def _assert_project(**kwargs):  # noqa: ANN003
+        seen["assert"] = kwargs
+
+    async def _list_dbs(**kwargs):  # noqa: ANN003
+        seen["list"] = kwargs
+        return {"kind": "content.list_remote_sql_databases", "databases": []}
+
+    monkeypatch.setattr(executor, "_assert_project_in_cabinet", _assert_project)
+    monkeypatch.setattr(executor, "_list_remote_sql_databases", _list_dbs)
+
+    result = await executor.invoke(
+        cabinet_id="cab_1",
+        module_id="mod_equipment",
+        action_id="list_catalog_remote_databases",
+        principal=Principal(sub="u1", roles=frozenset()),
+        employee=None,
+        row_id="row_1",
+        project_id="proj_1",
+    )
+    assert result["kind"] == "content.list_remote_sql_databases"
+    assert seen["assert"]["project_id"] == "proj_1"
+    assert seen["assert"]["cabinet_id"] == "cab_1"
+    assert seen["list"]["project_id"] == "proj_1"
+    assert seen["list"]["row_id"] == "row_1"
+
+
+@pytest.mark.asyncio
+async def test_assert_project_rejects_foreign_cabinet(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = ModuleActionExecutor(session=_FakeSession([]))  # type: ignore[arg-type]
+
+    class _Policy:
+        def __init__(self, _session):  # noqa: ANN001
+            pass
+
+        async def require_access(self, **kwargs):  # noqa: ANN003
+            return SimpleNamespace(cabinet_id="cab_other", id=kwargs["project_id"])
+
+    monkeypatch.setattr(
+        "prodavan.application.project_service.access.ProjectAccessPolicy",
+        _Policy,
+    )
+    with pytest.raises(AppError) as exc:
+        await executor._assert_project_in_cabinet(
+            cabinet_id="cab_1",
+            project_id="proj_1",
+            principal=Principal(sub="u1", roles=frozenset()),
+            employee=None,
+        )
+    assert exc.value.status == 422

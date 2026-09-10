@@ -57,6 +57,7 @@ class ModuleActionExecutor:
         principal: Principal,
         employee: EmployeeRow | None,
         row_id: str | None = None,
+        project_id: str | None = None,
     ) -> dict[str, Any]:
         action = await self._load_action(module_id=module_id, action_id=action_id)
         if action.get("enabled") is False:
@@ -68,6 +69,14 @@ class ModuleActionExecutor:
             )
         kind = str(action.get("kind") or "")
         params = action.get("params") if isinstance(action.get("params"), dict) else {}
+        project_id = (project_id or "").strip() or None
+        if project_id:
+            await self._assert_project_in_cabinet(
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+                principal=principal,
+                employee=employee,
+            )
 
         if kind == "data.create_row":
             table_slug = params.get("table_slug")
@@ -134,6 +143,7 @@ class ModuleActionExecutor:
                 row_id=row_id,
                 principal=principal,
                 employee=employee,
+                project_id=project_id,
             )
 
         if kind == "content.probe_remote_sql":
@@ -144,6 +154,7 @@ class ModuleActionExecutor:
                 row_id=row_id,
                 principal=principal,
                 employee=employee,
+                project_id=project_id,
             )
 
         if kind == "content.list_remote_sql_tables":
@@ -154,6 +165,7 @@ class ModuleActionExecutor:
                 row_id=row_id,
                 principal=principal,
                 employee=employee,
+                project_id=project_id,
             )
 
         if kind == "content.list_remote_sql_databases":
@@ -164,6 +176,7 @@ class ModuleActionExecutor:
                 row_id=row_id,
                 principal=principal,
                 employee=employee,
+                project_id=project_id,
             )
 
         raise AppError(
@@ -354,6 +367,31 @@ class ModuleActionExecutor:
                     status=422,
                     detail=f"probe_remote_sql failed: {exc}",
                 ) from exc
+
+    async def _assert_project_in_cabinet(
+        self,
+        *,
+        cabinet_id: str,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> None:
+        from prodavan.application.project_service.access import ProjectAccessPolicy
+
+        project = await ProjectAccessPolicy(self._session).require_access(
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            write=False,
+            allow_paused=True,
+        )
+        if str(project.cabinet_id) != cabinet_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="project_id does not belong to cabinet",
+            )
 
     async def _list_module_rows(
         self,
