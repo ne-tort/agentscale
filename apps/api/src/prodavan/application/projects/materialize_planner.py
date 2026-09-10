@@ -483,6 +483,12 @@ class MaterializePlanner:
             ws_path = self._substitute(str(target.get("workspace_path") or ""), ctx)
             if not ws_path:
                 return []
+            # Remote catalogs stay live (DSN in Pod env) — never merge into SQLite.
+            local_rows = [
+                body
+                for body in rows
+                if str(body.get("source_kind") or "local").strip().lower() != "remote"
+            ]
             return [
                 MaterializeOp(
                     rule_id=rule_id,
@@ -491,7 +497,7 @@ class MaterializePlanner:
                     format="merge_mapped_sqlite",
                     source_type="rows",
                     priority=priority,
-                    rows_bodies=rows,
+                    rows_bodies=local_rows,
                     merge_params={
                         "artifact_field": str(
                             target.get("artifact_field") or field or "artifact_ref"

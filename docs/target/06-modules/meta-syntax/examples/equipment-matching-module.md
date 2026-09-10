@@ -1,6 +1,6 @@
 # Example: Equipment matching module
 
-Hub on **Данные** (`nav.placement: data`): catalogs (file → SQLite artifact → merged project DB), request lines, found offers with single-select, equipment characteristics + component types, PC/server builds.
+Hub on **Данные** (`nav.placement: data`): catalogs (local file → SQLite artifact → merged project DB, **or** remote PostgreSQL live), request lines, found offers with single-select, equipment characteristics + component types, PC/server builds.
 
 Product seed: `mod_equipment` — see `product_module_seeds.py`.
 
@@ -9,12 +9,14 @@ Product seed: `mod_equipment` — see `product_module_seeds.py`.
 | Data | SoT |
 |------|-----|
 | Module rows (UI + agent) | Postgres instance JSONB |
-| Raw parsed price index | Content blob SQLite (`artifact_ref`) — rematerialize input |
-| Project search DB | Materialize `merge_mapped_sqlite` → `/workspace/catalogs/catalog.sqlite` |
+| Local price index | Content blob SQLite (`artifact_ref`) — rematerialize input |
+| Remote price source | External PostgreSQL (live); DSN in Vault `secret_ref` |
+| Project search DB (local only) | Materialize `merge_mapped_sqlite` → `/workspace/catalogs/catalog.sqlite` |
+| Remote DSN in Pod | `EQUIPMENT_CATALOG_DSN_<ROW>` + `EQUIPMENT_REMOTE_CATALOGS` JSON (no data copy) |
 
 ## Tables (sketch)
 
-- `catalogs` — `name`, `source_file`, `artifact_ref`, `status`, `paused`, `row_count`, `columns_json`, `column_map`, `error`, `project_ids`
+- `catalogs` — `name`, `source_kind` (`local`\|`remote`), `source_file`, `remote_dsn` (`secret_ref`), `remote_table`, `artifact_ref`, `status`, `paused`, `row_count`, `columns_json`, `column_map`, `error`, `project_ids`
 - `request_lines` — `title`, `part_number`, `qty`, `found_count`, `selected_offer_id`, `status`
 - `found_offers` — `line_id` (ref), `title`, `part_number`, `price`, `catalog_id`, `score`, `match_kind`, `is_selected`, `source_title`
 - `equipment_types` — `name`, `sort_order`, `build_scope` (`all`|`pc`|`server`), `fields_json` (`[{key,label}]`); seed 13 PC/server types (incl. case fans; RAID/HBA/backplane/BMC server-only)
@@ -27,17 +29,18 @@ Product seed: `mod_equipment` — see `product_module_seeds.py`.
 ## Meta primitives
 
 - Hub tiles → collections with `scaffold.title` (AppBar titles, not view slugs)
-- Catalogs: collection + `inline_add` + `added_at` from `row.created_at`; settings with `file_upload`, `column_map`, `project_multiselect`, `paused`
+- Catalogs: collection + `inline_add` + `added_at` from `row.created_at`; settings with **Тип** (`source_kind`), local `file_upload` / remote DSN+table, `column_map` (autosave), `project_multiselect`, `paused`
 - Found offers: `inline_add` on title; `line_id` optional `ref` selector in form
 - Line row_tap → offers collection with `context_bind` + `selection` → `data.select_row`
 - Equipment items: `type_ref_picker` for offer (`found_offers_pick`) then type (`equipment_types_pick`); pick views use `selection.control: switch` + `placement: trailing` + `disable_row_tap`; `schema_attrs` section title «Характеристики»
 - Types: list without «Порядок» column (sort still by `sort_order`); `fields_schema_editor` on type settings; seeded latin keys for MCP
 - Builds: `build_slots` lists types filtered by `build_scope` vs `build_kind`; pick item via `equipment_items_pick` (ephemeral pickContext `type_id` filter + `map_field: slots`); recompute count/price from linked offers
-- Action `content.index_tabular` after catalog file write
-- Materialize `merge_mapped_sqlite` for ready + non-paused catalogs (skip incomplete maps)
+- Action `content.index_tabular` after **local** catalog file write
+- Action `content.probe_remote_sql` after **remote** DSN/table write — `information_schema` + `COUNT(*)` only (no SQLite snapshot)
+- Materialize `merge_mapped_sqlite` for ready + non-paused **local** catalogs only (remote skipped)
 - Materialize `mcp_package` from enabled `s4b_settings.mcp_zip` → `/workspace/packages/{name}` + OpenClaw/mcp.json
-- `container_env` / `container_env_secrets`: `S4B_BASE_URL`, `S4B_LOGIN`, `S4B_PASSWORD` from enabled row applying to the project
-- Declarative `mcp_tools` for agent surface
+- `container_env` / `container_env_secrets`: `S4B_*` from enabled row; remote catalogs via `foreach_rows` → `EQUIPMENT_CATALOG_DSN_*` + `EQUIPMENT_REMOTE_CATALOGS`
+- Declarative `mcp_tools` for agent surface; live remote SQL MCP query is a follow-up
 
 ## Agent / MCP contract
 

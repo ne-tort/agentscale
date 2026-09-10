@@ -151,6 +151,47 @@ def test_pick_active_profile_filters_by_project_ids() -> None:
     assert _pick_active_profile(rows, "proj3") == "prof_all"
 
 
+def test_merge_mapped_sqlite_skips_remote_source_kind() -> None:
+    """Remote catalogs stay live — merge ops must only include local rows."""
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    planner = MaterializePlanner(session=None)  # type: ignore[arg-type]
+    planner._fetch_rows = AsyncMock(  # type: ignore[method-assign]
+        return_value=[
+            {"name": "local", "source_kind": "local", "status": "ready", "paused": False},
+            {"name": "legacy", "status": "ready", "paused": False},  # missing kind = local
+            {"name": "remote", "source_kind": "remote", "status": "ready", "paused": False},
+        ]
+    )
+    inst = SimpleNamespace(schema_name="cab_x")
+    ops = asyncio.run(
+        planner._plan_rows_ops(
+            inst=inst,
+            module_id="mod_equipment",
+            rule_id="catalogs_merge",
+            source={"type": "rows", "table_slug": "catalogs", "filter": {"status": "ready"}},
+            target={
+                "workspace_path": "catalogs/catalog.sqlite",
+                "format": "merge_mapped_sqlite",
+                "artifact_field": "artifact_ref",
+                "map_field": "column_map",
+                "schema": [{"key": "title"}],
+                "required_map_keys": ["title"],
+            },
+            fmt="merge_mapped_sqlite",
+            active_profile_id=None,
+            project_id="proj_1",
+            cabinet_id="cab_1",
+            priority=10,
+        )
+    )
+    assert len(ops) == 1
+    names = [b.get("name") for b in ops[0].rows_bodies or []]
+    assert names == ["local", "legacy"]
+
+
 def test_active_profile_paths_only_expand_matching_profile() -> None:
     """Simulate materialize filter: only active profile's prompt_paths land in ops."""
     active = _pick_active_profile(

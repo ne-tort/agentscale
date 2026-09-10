@@ -96,3 +96,122 @@ def test_row_eligible_for_env_respects_project_ids_and_enabled() -> None:
     assert not row_eligible_for_env(
         {"enabled": True, "project_ids": ["proj_b"]}, "proj_a"
     )
+
+
+def test_resolve_secret_env_skips_foreach_rows_entries() -> None:
+    entries = [
+        {
+            "foreach_rows": {
+                "table_slug": "catalogs",
+                "field": "remote_dsn",
+                "env_name_prefix": "EQUIPMENT_CATALOG_DSN_",
+            },
+            "when": ["project.launch"],
+        },
+        {"env_name": "API_TOKEN", "secret_ref": "file://tok", "when": ["project.launch"]},
+    ]
+    resolved = resolve_secret_env(
+        entries,
+        lifecycle="project.launch",
+        secret_getter=lambda ref: f"secret:{ref}",
+    )
+    assert resolved == [("API_TOKEN", "secret:file://tok")]
+
+
+def test_foreach_rows_emits_multi_dsn_and_registry() -> None:
+    """ContainerEnvLoader expands one DSN env per ready remote catalog row."""
+    import asyncio
+    import json
+    from unittest.mock import AsyncMock, MagicMock
+
+    from prodavan.application.pod_service.container_env_loader import ContainerEnvLoader
+
+    secrets = MagicMock()
+    secrets.get = MagicMock(side_effect=lambda ref: f"dsn:{ref}")
+    loader = ContainerEnvLoader(session=MagicMock(), secrets=secrets)
+    loader._sot_instance_id = AsyncMock(return_value="inst_1")  # type: ignore[method-assign]
+    loader._instances.list_data_rows = AsyncMock(
+        return_value=[
+            {
+                "row_id": "row_local",
+                "body": {
+                    "name": "Local CSV",
+                    "source_kind": "local",
+                    "status": "ready",
+                    "paused": False,
+                },
+            },
+            {
+                "row_id": "row_a",
+                "body": {
+                    "name": "PG A",
+                    "source_kind": "remote",
+                    "status": "ready",
+                    "paused": False,
+                    "remote_table": "public.prices",
+                    "remote_dsn": {"secret_ref": "file://cabinet_secrets/cab1/a"},
+                    "column_map": {"title": "name"},
+                    "row_count": 10,
+                },
+            },
+            {
+                "row_id": "row_b",
+                "body": {
+                    "name": "PG B",
+                    "source_kind": "remote",
+                    "status": "ready",
+                    "paused": False,
+                    "remote_table": "sales.items",
+                    "remote_dsn": "file://cabinet_secrets/cab1/b",
+                    "column_map": {},
+                    "row_count": 3,
+                },
+            },
+            {
+                "row_id": "row_paused",
+                "body": {
+                    "name": "Paused",
+                    "source_kind": "remote",
+                    "status": "ready",
+                    "paused": True,
+                    "remote_dsn": "file://cabinet_secrets/cab1/c",
+                    "remote_table": "t",
+                },
+            },
+        ]
+    )
+
+    plain, secret_bindings = asyncio.run(
+        loader._resolve_foreach_rows(
+            [
+                {
+                    "foreach_rows": {
+                        "table_slug": "catalogs",
+                        "field": "remote_dsn",
+                        "env_name_prefix": "EQUIPMENT_CATALOG_DSN_",
+                        "match": {"source_kind": "remote", "status": "ready"},
+                        "registry_env_name": "EQUIPMENT_REMOTE_CATALOGS",
+                    },
+                    "when": ["project.launch"],
+                }
+            ],
+            lifecycle="project.launch",
+            module_id="mod_equipment",
+            project_id="proj_1",
+            cabinet_id="cab1",
+        )
+    )
+    secret_names = [n for n, _ in secret_bindings]
+    assert secret_names == [
+        "EQUIPMENT_CATALOG_DSN_ROW_A",
+        "EQUIPMENT_CATALOG_DSN_ROW_B",
+    ]
+    assert dict(secret_bindings)["EQUIPMENT_CATALOG_DSN_ROW_A"] == (
+        "dsn:file://cabinet_secrets/cab1/a"
+    )
+    assert len(plain) == 1
+    assert plain[0][0] == "EQUIPMENT_REMOTE_CATALOGS"
+    registry = json.loads(plain[0][1])
+    assert [r["id"] for r in registry] == ["row_a", "row_b"]
+    assert registry[0]["dsn_env"] == "EQUIPMENT_CATALOG_DSN_ROW_A"
+    assert registry[0]["table"] == "public.prices"

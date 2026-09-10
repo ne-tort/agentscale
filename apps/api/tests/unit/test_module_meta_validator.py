@@ -119,6 +119,16 @@ def test_container_env_documents_validate() -> None:
     ]
     slug_map["container_env_secrets"] = [
         {"env_name": "API_TOKEN", "secret_ref": "file://tok_1", "when": ["project.launch"]},
+        {
+            "foreach_rows": {
+                "table_slug": "suppliers",
+                "field": "token",
+                "env_name_prefix": "SUPPLIER_DSN_",
+                "match": {"status": "ready"},
+                "registry_env_name": "SUPPLIER_REMOTE",
+            },
+            "when": ["project.launch"],
+        },
     ]
     validate_merged_slug_map(slug_map)
 

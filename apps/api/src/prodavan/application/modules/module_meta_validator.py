@@ -296,13 +296,45 @@ def _validate_container_env_secrets_doc(body: Any) -> None:
     for idx, entry in enumerate(body):
         if not isinstance(entry, dict):
             raise _meta_error(f"container_env_secrets[{idx}] must be an object")
-        env_name = entry.get("env_name")
-        if not isinstance(env_name, str) or not _ENV_NAME_RE.match(env_name):
-            raise _meta_error(f"container_env_secrets[{idx}] invalid env_name: {env_name!r}")
-        has_ref = isinstance(entry.get("secret_ref"), str) and bool(entry.get("secret_ref", "").strip())
-        has_ref_from = isinstance(entry.get("secret_ref_from"), dict)
-        if not has_ref and not has_ref_from:
-            raise _meta_error(f"container_env_secrets[{idx}] requires secret_ref or secret_ref_from")
+        foreach = entry.get("foreach_rows")
+        if isinstance(foreach, dict):
+            table_slug = foreach.get("table_slug")
+            field = foreach.get("field")
+            prefix = foreach.get("env_name_prefix")
+            if not isinstance(table_slug, str) or not table_slug.strip():
+                raise _meta_error(f"container_env_secrets[{idx}] foreach_rows.table_slug required")
+            if not isinstance(field, str) or not field.strip():
+                raise _meta_error(f"container_env_secrets[{idx}] foreach_rows.field required")
+            if not isinstance(prefix, str) or not prefix.strip():
+                raise _meta_error(
+                    f"container_env_secrets[{idx}] foreach_rows.env_name_prefix required"
+                )
+            # Prefix must yield valid env names when a suffix is appended.
+            if not re.match(r"^[A-Z][A-Z0-9_]*_$", prefix) and not _ENV_NAME_RE.match(
+                prefix.rstrip("_")
+            ):
+                raise _meta_error(
+                    f"container_env_secrets[{idx}] invalid foreach_rows.env_name_prefix: {prefix!r}"
+                )
+            registry = foreach.get("registry_env_name")
+            if registry is not None and (
+                not isinstance(registry, str) or not _ENV_NAME_RE.match(registry)
+            ):
+                raise _meta_error(
+                    f"container_env_secrets[{idx}] invalid foreach_rows.registry_env_name"
+                )
+        else:
+            env_name = entry.get("env_name")
+            if not isinstance(env_name, str) or not _ENV_NAME_RE.match(env_name):
+                raise _meta_error(f"container_env_secrets[{idx}] invalid env_name: {env_name!r}")
+            has_ref = isinstance(entry.get("secret_ref"), str) and bool(
+                entry.get("secret_ref", "").strip()
+            )
+            has_ref_from = isinstance(entry.get("secret_ref_from"), dict)
+            if not has_ref and not has_ref_from:
+                raise _meta_error(
+                    f"container_env_secrets[{idx}] requires secret_ref or secret_ref_from"
+                )
         when = entry.get("when")
         if when is not None:
             if not isinstance(when, list):

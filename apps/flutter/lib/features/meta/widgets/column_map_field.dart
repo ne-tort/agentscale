@@ -194,7 +194,7 @@ class _ColumnMapFieldState extends State<ColumnMapField> {
     final l10n = AppLocalizations.of(context);
     final locale = Localizations.localeOf(context);
     final title = resolveMetaLabel(widget.label, l10n, locale: locale);
-    final result = await Navigator.of(context).push<Map<String, String?>>(
+    await Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (_) => _ColumnMapEditorPage(
           title: title,
@@ -202,12 +202,14 @@ class _ColumnMapFieldState extends State<ColumnMapField> {
           sourceColumns: _sources(),
           schema: widget.schema,
           readOnly: widget.readOnly,
+          onChanged: (next) {
+            final cleaned = _cleanMap(next);
+            setState(() => _map = cleaned);
+            widget.onChanged(cleaned);
+          },
         ),
       ),
     );
-    if (!mounted || result == null) return;
-    setState(() => _map = result);
-    widget.onChanged(_cleanMap(result));
   }
 
   @override
@@ -219,10 +221,12 @@ class _ColumnMapFieldState extends State<ColumnMapField> {
     final mapped = _mappedCount();
     final total = widget.schema.length;
     final subtitleText = sources.isEmpty
-        ? (locale.languageCode == 'ru' ? 'Нет столбцов в файле' : 'No columns in file')
+        ? (locale.languageCode == 'ru'
+            ? 'Нет столбцов источника'
+            : 'No source columns')
         : (locale.languageCode == 'ru'
-            ? '$mapped из $total · ${sources.length} столбцов файла'
-            : '$mapped of $total · ${sources.length} file columns');
+            ? '$mapped из $total · ${sources.length} столбцов источника'
+            : '$mapped of $total · ${sources.length} source columns');
 
     return AppNavPreference(
       title: title,
@@ -241,6 +245,7 @@ class _ColumnMapEditorPage extends StatefulWidget {
     required this.sourceColumns,
     required this.schema,
     required this.readOnly,
+    required this.onChanged,
   });
 
   final String title;
@@ -248,6 +253,7 @@ class _ColumnMapEditorPage extends StatefulWidget {
   final List<String> sourceColumns;
   final List<Map<String, dynamic>> schema;
   final bool readOnly;
+  final void Function(Map<String, String?> map) onChanged;
 
   @override
   State<_ColumnMapEditorPage> createState() => _ColumnMapEditorPageState();
@@ -269,6 +275,7 @@ class _ColumnMapEditorPageState extends State<_ColumnMapEditorPage> {
         key: (source == null || source.isEmpty) ? null : source,
       };
     });
+    widget.onChanged(_map);
   }
 
   @override
@@ -280,13 +287,6 @@ class _ColumnMapEditorPageState extends State<_ColumnMapEditorPage> {
 
     return AppScaffold(
       title: Text(widget.title),
-      actions: [
-        if (!widget.readOnly)
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(_map),
-            child: Text(locale.languageCode == 'ru' ? 'Готово' : 'Done'),
-          ),
-      ],
       body: ListView(
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         children: [

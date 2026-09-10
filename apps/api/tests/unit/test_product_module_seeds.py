@@ -156,6 +156,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     }
     kinds = {a["kind"] for a in meta["actions"]}
     assert "content.index_tabular" in kinds
+    assert "content.probe_remote_sql" in kinds
     assert "data.select_row" in kinds
     assert any(r["target"]["format"] == "merge_mapped_sqlite" for r in meta["materialize"])
     assert any(r["id"] == "s4b_mcp_package" for r in meta["materialize"])
@@ -166,7 +167,18 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert not any(r["target"]["format"] == "copy_blob" for r in meta["materialize"])
     env_names = {e["env_name"] for e in meta["container_env"]}
     assert env_names == {"S4B_BASE_URL", "S4B_LOGIN"}
-    assert meta["container_env_secrets"][0]["env_name"] == "S4B_PASSWORD"
+    secret_entries = meta["container_env_secrets"]
+    assert secret_entries[0]["env_name"] == "S4B_PASSWORD"
+    foreach = next(e for e in secret_entries if isinstance(e.get("foreach_rows"), dict))
+    assert foreach["foreach_rows"]["table_slug"] == "catalogs"
+    assert foreach["foreach_rows"]["env_name_prefix"] == "EQUIPMENT_CATALOG_DSN_"
+    catalog_cols = {c["name"] for c in meta["columns"] if c["table_slug"] == "catalogs"}
+    assert {"source_kind", "remote_dsn", "remote_table"} <= catalog_cols
+    settings = next(v for v in meta["views"] if v["slug"] == "catalogs_settings")
+    field_cols = [f["column"] for f in settings["ui_json"]["fields"]]
+    assert field_cols[:3] == ["name", "source_kind", "source_file"]
+    assert "remote_dsn" in field_cols
+    assert "remote_table" in field_cols
     tool_names = {t["name"] for t in meta["mcp_tools"]}
     assert "equipment_catalog_query" in tool_names
     assert "equipment_offers_upsert" in tool_names

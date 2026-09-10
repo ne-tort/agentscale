@@ -931,10 +931,40 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             {
                 "table_slug": "catalogs",
+                "name": "source_kind",
+                "label": {"ru": "Тип", "en": "Type"},
+                "type": "enum",
+                "required": True,
+                "default": "local",
+                "enum": {
+                    "values": ["local", "remote"],
+                    "labels": {
+                        "local": "Локальная",
+                        "remote": "Удалённая",
+                    },
+                },
+            },
+            {
+                "table_slug": "catalogs",
                 "name": "source_file",
                 "label": {"ru": "Файл", "en": "File"},
                 "type": "file_ref",
                 "required": False,
+            },
+            {
+                "table_slug": "catalogs",
+                "name": "remote_dsn",
+                "label": {"ru": "Ссылка БД", "en": "Database URL"},
+                "type": "secret_ref",
+                "required": False,
+            },
+            {
+                "table_slug": "catalogs",
+                "name": "remote_table",
+                "label": {"ru": "Таблица", "en": "Table"},
+                "type": "text",
+                "required": False,
+                "default": "",
             },
             {
                 "table_slug": "catalogs",
@@ -1463,11 +1493,32 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "fields": [
                         {"column": "name", "widget": "value", "icon": "storage"},
                         {
+                            "column": "source_kind",
+                            "widget": "choice",
+                            "icon": "category",
+                        },
+                        {
                             "column": "source_file",
                             "widget": "file_upload",
                             "accept": ".csv,.xlsx,.xls",
                             "subtitle_from": "row_count",
                             "empty_style": "warning",
+                            "visible_when": {"field": "source_kind", "eq": "local"},
+                        },
+                        {
+                            "column": "remote_dsn",
+                            "widget": "value",
+                            "secret": True,
+                            "icon": "link",
+                            "hint": "postgresql://user:pass@host:5432/dbname",
+                            "visible_when": {"field": "source_kind", "eq": "remote"},
+                        },
+                        {
+                            "column": "remote_table",
+                            "widget": "value",
+                            "icon": "table_chart",
+                            "hint": "public.prices",
+                            "visible_when": {"field": "source_kind", "eq": "remote"},
                         },
                         {
                             "column": "error",
@@ -2308,9 +2359,30 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "row_count_column": "row_count",
                     "columns_json_column": "columns_json",
                     "error_column": "error",
+                    "source_kind_column": "source_kind",
+                    "expected_source_kind": "local",
                 },
                 "trigger": {"on": ["row.created", "row.updated"], "async": True},
                 "ui": {"placement": ["toolbar"], "icon": "sync"},
+            },
+            {
+                "id": "probe_catalog_remote",
+                "label": {"ru": "Проверить БД", "en": "Probe database"},
+                "kind": "content.probe_remote_sql",
+                "enabled": True,
+                "params": {
+                    "table_slug": "catalogs",
+                    "dsn_column": "remote_dsn",
+                    "remote_table_column": "remote_table",
+                    "status_column": "status",
+                    "row_count_column": "row_count",
+                    "columns_json_column": "columns_json",
+                    "error_column": "error",
+                    "source_kind_column": "source_kind",
+                    "expected_source_kind": "remote",
+                },
+                "trigger": {"on": ["row.created", "row.updated"], "async": True},
+                "ui": {"placement": ["toolbar"], "icon": "cloud_sync"},
             },
             {
                 "id": "select_offer_primary",
@@ -2390,7 +2462,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "label": "List equipment catalogs",
                 "description": (
                     "List ready non-paused catalog cards (Postgres SoT); "
-                    "merged RO search file is /workspace/catalogs/catalog.sqlite"
+                    "includes source_kind local|remote. Local search file is "
+                    "/workspace/catalogs/catalog.sqlite; remote DSN is injected "
+                    "as EQUIPMENT_CATALOG_DSN_<ROW> for future MCP live query."
                 ),
                 "enabled": True,
                 "kind": "rows_query",
@@ -2594,6 +2668,21 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "secret_ref_from": {
                     "table_slug": "s4b_settings",
                     "field": "password",
+                },
+                "when": [
+                    "project.launch",
+                    "project.sync",
+                    "project.resumed",
+                    "project.reload",
+                ],
+            },
+            {
+                "foreach_rows": {
+                    "table_slug": "catalogs",
+                    "field": "remote_dsn",
+                    "env_name_prefix": "EQUIPMENT_CATALOG_DSN_",
+                    "match": {"source_kind": "remote", "status": "ready"},
+                    "registry_env_name": "EQUIPMENT_REMOTE_CATALOGS",
                 },
                 "when": [
                     "project.launch",

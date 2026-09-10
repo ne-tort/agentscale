@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.cabinets.cabinet_module_service import CabinetModuleService
 from prodavan.application.content.tabular_index import index_tabular_bytes
 from prodavan.application.content.upload_service import UploadService
+from prodavan.application.pod_service.container_env_resolver import field_value_as_secret_ref
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.infrastructure.files.manager import ensure_file_store
@@ -19,6 +20,8 @@ from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceR
 from prodavan.infrastructure.persistence.models.content import ContentBlobVersionRow
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.modules import ModuleMetaDocumentRow
+from prodavan.infrastructure.secrets.cabinet_secret_store import assert_cabinet_secret_scope
+from prodavan.infrastructure.secrets.store import get_secret_store
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +119,16 @@ class ModuleActionExecutor:
                 employee=employee,
             )
 
+        if kind == "content.probe_remote_sql":
+            return await self._probe_remote_sql(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+            )
+
         raise AppError(
             code="NOT_IMPLEMENTED",
             title="Not Implemented",
@@ -161,6 +174,11 @@ class ModuleActionExecutor:
             if target is None:
                 continue
             body = target.get("body") if isinstance(target.get("body"), dict) else {}
+            kind_col = str(params.get("source_kind_column") or "source_kind")
+            expected_kind = str(params.get("expected_source_kind") or "local").strip().lower()
+            actual_kind = str(body.get(kind_col) or "local").strip().lower()
+            if actual_kind != expected_kind:
+                continue
             if not isinstance(body.get(source_column), dict):
                 continue
             status = str(body.get(status_col) or "")
@@ -206,6 +224,98 @@ class ModuleActionExecutor:
                     title="Validation Error",
                     status=422,
                     detail=f"index_tabular failed: {exc}",
+                ) from exc
+        await self.maybe_auto_probe_remote_sql(
+            cabinet_id=cabinet_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            row_id=row_id,
+            principal=principal,
+            employee=employee,
+            project_id=project_id,
+        )
+
+    async def maybe_auto_probe_remote_sql(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        table_slug: str,
+        row_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+    ) -> None:
+        """Best-effort: run content.probe_remote_sql after remote catalog row write."""
+        for action in await self._list_actions(module_id=module_id):
+            if action.get("enabled") is False:
+                continue
+            if str(action.get("kind") or "") != "content.probe_remote_sql":
+                continue
+            params = action.get("params") if isinstance(action.get("params"), dict) else {}
+            if str(params.get("table_slug") or "") != table_slug:
+                continue
+            trigger = action.get("trigger") if isinstance(action.get("trigger"), dict) else {}
+            on = trigger.get("on") if isinstance(trigger.get("on"), list) else ["row.created", "row.updated"]
+            if "row.created" not in on and "row.updated" not in on:
+                continue
+            rows = await self._list_module_rows(
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                principal=principal,
+                employee=employee,
+            )
+            target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
+            if target is None:
+                continue
+            body = target.get("body") if isinstance(target.get("body"), dict) else {}
+            kind_col = str(params.get("source_kind_column") or "source_kind")
+            expected_kind = str(params.get("expected_source_kind") or "remote").strip().lower()
+            actual_kind = str(body.get(kind_col) or "local").strip().lower()
+            if actual_kind != expected_kind:
+                continue
+            dsn_col = str(params.get("dsn_column") or "remote_dsn")
+            table_col = str(params.get("remote_table_column") or "remote_table")
+            status_col = str(params.get("status_column") or "status")
+            if field_value_as_secret_ref(body.get(dsn_col)) is None:
+                continue
+            if not str(body.get(table_col) or "").strip():
+                continue
+            status = str(body.get(status_col) or "")
+            if status == "indexing":
+                continue
+            probe_key = (
+                f"{field_value_as_secret_ref(body.get(dsn_col))}|"
+                f"{str(body.get(table_col) or '').strip()}"
+            )
+            if status == "ready" and probe_key == str(body.get("probed_remote_key") or ""):
+                continue
+            try:
+                await self._probe_remote_sql(
+                    cabinet_id=cabinet_id,
+                    project_id=project_id,
+                    module_id=module_id,
+                    params=params,
+                    row_id=row_id,
+                    principal=principal,
+                    employee=employee,
+                )
+            except AppError:
+                raise
+            except Exception as exc:
+                logger.exception(
+                    "auto probe_remote_sql failed module=%s table=%s row=%s",
+                    module_id,
+                    table_slug,
+                    row_id,
+                )
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail=f"probe_remote_sql failed: {exc}",
                 ) from exc
 
     async def _list_module_rows(
@@ -419,6 +529,16 @@ class ModuleActionExecutor:
         if target is None:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
         body = dict(target.get("body") or {})
+        kind_col = str(params.get("source_kind_column") or "source_kind")
+        expected_kind = str(params.get("expected_source_kind") or "local").strip().lower()
+        actual_kind = str(body.get(kind_col) or "local").strip().lower()
+        if actual_kind != expected_kind:
+            return {
+                "kind": "content.index_tabular",
+                "status": "skipped",
+                "reason": f"source_kind={actual_kind}",
+                "row_id": row_id,
+            }
         status_col = str(params.get("status_column") or "status")
         error_col = str(params.get("error_column") or "error")
         artifact_col = str(params.get("artifact_column") or "artifact_ref")
@@ -538,6 +658,166 @@ class ModuleActionExecutor:
             "row_id": row_id,
             "row_count": body.get(row_count_col),
             "columns": indexed_columns,
+        }
+
+    async def _probe_remote_sql(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        row_id: str | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        from prodavan.application.content.remote_sql_probe import probe_remote_postgres
+
+        table_slug = params.get("table_slug")
+        if not isinstance(table_slug, str) or not table_slug:
+            raise AppError(
+                code="META_VALIDATION",
+                title="Meta validation error",
+                status=422,
+                detail="content.probe_remote_sql requires params.table_slug",
+            )
+        if not row_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="row_id required for content.probe_remote_sql",
+            )
+
+        rows = await self._list_module_rows(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            principal=principal,
+            employee=employee,
+        )
+        target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
+        if target is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        body = dict(target.get("body") or {})
+        kind_col = str(params.get("source_kind_column") or "source_kind")
+        expected_kind = str(params.get("expected_source_kind") or "remote").strip().lower()
+        actual_kind = str(body.get(kind_col) or "local").strip().lower()
+        if actual_kind != expected_kind:
+            return {
+                "kind": "content.probe_remote_sql",
+                "status": "skipped",
+                "reason": f"source_kind={actual_kind}",
+                "row_id": row_id,
+            }
+
+        status_col = str(params.get("status_column") or "status")
+        error_col = str(params.get("error_column") or "error")
+        row_count_col = str(params.get("row_count_column") or "row_count")
+        columns_col = str(params.get("columns_json_column") or "columns_json")
+        dsn_col = str(params.get("dsn_column") or "remote_dsn")
+        table_col = str(params.get("remote_table_column") or "remote_table")
+
+        secret_ref = field_value_as_secret_ref(body.get(dsn_col))
+        remote_table = str(body.get(table_col) or "").strip()
+        if not secret_ref or not remote_table:
+            body[status_col] = "draft"
+            body[error_col] = None
+            await self._update_module_row(
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                row_id=row_id,
+                body=body,
+                principal=principal,
+                employee=employee,
+                run_actions=False,
+            )
+            return {"kind": "content.probe_remote_sql", "status": "draft", "row_id": row_id}
+
+        body[status_col] = "indexing"
+        body[error_col] = None
+        # Remote catalogs are live — drop local file artifacts.
+        body["source_file"] = None
+        body["artifact_ref"] = None
+        body.pop("indexed_source_key", None)
+        await self._update_module_row(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            row_id=row_id,
+            body=body,
+            principal=principal,
+            employee=employee,
+            run_actions=False,
+        )
+
+        try:
+            if secret_ref.startswith(("file://cabinet_secrets/", "vault://cabinet_secrets/")):
+                assert_cabinet_secret_scope(secret_ref, cabinet_id)
+            dsn = get_secret_store().get(secret_ref)
+            probed = await probe_remote_postgres(dsn=dsn, remote_table=remote_table)
+            body[columns_col] = json.dumps(probed.columns, ensure_ascii=False)
+            body[row_count_col] = probed.row_count
+            body[status_col] = "ready"
+            body[error_col] = None
+            body["probed_remote_key"] = f"{secret_ref}|{remote_table}"
+        except AppError as exc:
+            body[status_col] = "error"
+            body[error_col] = str(exc.detail or exc)[:500]
+            await self._update_module_row(
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                row_id=row_id,
+                body=body,
+                principal=principal,
+                employee=employee,
+                run_actions=False,
+            )
+            raise
+        except Exception as exc:
+            body[status_col] = "error"
+            body[error_col] = str(exc)[:500]
+            await self._update_module_row(
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                row_id=row_id,
+                body=body,
+                principal=principal,
+                employee=employee,
+                run_actions=False,
+            )
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail=f"probe_remote_sql failed: {exc}",
+            ) from exc
+
+        await self._update_module_row(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            row_id=row_id,
+            body=body,
+            principal=principal,
+            employee=employee,
+            run_actions=False,
+        )
+        return {
+            "kind": "content.probe_remote_sql",
+            "status": "ready",
+            "row_id": row_id,
+            "row_count": body.get(row_count_col),
+            "columns": probed.columns,
         }
 
     async def _list_actions(self, *, module_id: str) -> list[dict[str, Any]]:

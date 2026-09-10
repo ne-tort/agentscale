@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from sqlalchemy import select
@@ -14,8 +15,10 @@ from prodavan.application.modules.module_instance_service import (
     ModuleInstanceService,
 )
 from prodavan.application.pod_service.container_env_resolver import (
+    build_foreach_dsn_env_name,
     field_value_as_env_string,
     field_value_as_secret_ref,
+    foreach_rows_match,
     merge_env_bindings,
     resolve_plain_env,
     resolve_secret_env,
@@ -42,6 +45,9 @@ def row_eligible_for_env(body: dict[str, Any], project_id: str) -> bool:
         return False
     # Explicit enabled=false must not inject env (S4B and similar).
     if body.get("enabled") is False:
+        return False
+    # Catalog pause toggle.
+    if body.get("paused") is True:
         return False
     return True
 
@@ -113,7 +119,87 @@ class ContainerEnvLoader:
                         row_field_getter=_cache_getter(secret_cache),
                     )
                 )
+                foreach_plain, foreach_secret = await self._resolve_foreach_rows(
+                    secret_doc,
+                    lifecycle=lifecycle,
+                    module_id=module_id,
+                    project_id=project.id,
+                    cabinet_id=project.cabinet_id,
+                )
+                if foreach_plain:
+                    plain_groups.append(foreach_plain)
+                if foreach_secret:
+                    secret_groups.append(foreach_secret)
         return merge_env_bindings(*plain_groups, *secret_groups)
+
+    async def _resolve_foreach_rows(
+        self,
+        secret_doc: list,
+        *,
+        lifecycle: str,
+        module_id: str,
+        project_id: str,
+        cabinet_id: str,
+    ) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+        from prodavan.application.pod_service.container_env_resolver import when_matches
+
+        plain: list[tuple[str, str]] = []
+        secrets: list[tuple[str, str]] = []
+        secret_getter = self._cabinet_scoped_secret_getter(cabinet_id)
+        for entry in secret_doc:
+            if not isinstance(entry, dict):
+                continue
+            foreach = entry.get("foreach_rows")
+            if not isinstance(foreach, dict):
+                continue
+            if not when_matches(entry, lifecycle):
+                continue
+            table_slug = str(foreach.get("table_slug") or "").strip().lower()
+            field = str(foreach.get("field") or "").strip()
+            prefix = str(foreach.get("env_name_prefix") or "").strip()
+            if not table_slug or not field or not prefix:
+                continue
+            match = foreach.get("match") if isinstance(foreach.get("match"), dict) else {}
+            instance_id = await self._sot_instance_id(
+                module_id=module_id, project_id=project_id, cabinet_id=cabinet_id
+            )
+            if instance_id is None:
+                continue
+            rows = await self._instances.list_data_rows(
+                instance_id=instance_id, table_slug=table_slug
+            )
+            registry: list[dict[str, Any]] = []
+            for row in rows:
+                body = row.get("body") if isinstance(row.get("body"), dict) else {}
+                row_id = str(row.get("row_id") or "")
+                if not row_id or not row_eligible_for_env(body, project_id):
+                    continue
+                if not foreach_rows_match(body, match):
+                    continue
+                secret_ref = field_value_as_secret_ref(body.get(field))
+                if not secret_ref:
+                    continue
+                env_name = build_foreach_dsn_env_name(prefix, row_id)
+                if not env_name:
+                    continue
+                try:
+                    secrets.append((env_name, secret_getter(secret_ref)))
+                except Exception:
+                    continue
+                registry.append(
+                    {
+                        "id": row_id,
+                        "name": body.get("name"),
+                        "table": body.get("remote_table"),
+                        "column_map": body.get("column_map") or {},
+                        "row_count": body.get("row_count"),
+                        "dsn_env": env_name,
+                    }
+                )
+            registry_env = foreach.get("registry_env_name")
+            if isinstance(registry_env, str) and registry_env.strip() and registry:
+                plain.append((registry_env.strip(), json.dumps(registry, ensure_ascii=False)))
+        return plain, secrets
 
     def _cabinet_scoped_secret_getter(self, cabinet_id: str):
         store = self._secrets
@@ -138,6 +224,8 @@ class ContainerEnvLoader:
         cache: dict[tuple[str, str, str], str | None] = {}
         for entry in doc:
             if not isinstance(entry, dict):
+                continue
+            if isinstance(entry.get("foreach_rows"), dict):
                 continue
             spec = entry.get(spec_key)
             if not isinstance(spec, dict):

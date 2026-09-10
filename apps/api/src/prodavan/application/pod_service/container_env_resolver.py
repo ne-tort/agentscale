@@ -21,6 +21,11 @@ def _when_matches(entry: dict[str, Any], lifecycle: str) -> bool:
     return lifecycle in [str(item) for item in when]
 
 
+def when_matches(entry: dict[str, Any], lifecycle: str) -> bool:
+    """Public alias for lifecycle ``when`` matching."""
+    return _when_matches(entry, lifecycle)
+
+
 def field_value_as_env_string(value: Any) -> str | None:
     if value is None:
         return None
@@ -85,10 +90,16 @@ def resolve_secret_env(
     secret_getter: Callable[[str], str],
     row_field_getter: RowFieldGetter | None = None,
 ) -> list[tuple[str, str]]:
-    """Resolve static and row-backed container_env_secrets entries."""
+    """Resolve static and row-backed container_env_secrets entries.
+
+    Entries with ``foreach_rows`` are skipped here — resolved by
+    :class:`ContainerEnvLoader` which expands one binding per matching row.
+    """
     out: list[tuple[str, str]] = []
     seen: set[str] = set()
     for entry in entries:
+        if isinstance(entry.get("foreach_rows"), dict):
+            continue
         if not _when_matches(entry, lifecycle):
             continue
         env_name = entry.get("env_name")
@@ -112,6 +123,36 @@ def resolve_secret_env(
         seen.add(env_name)
         out.append((env_name, secret_getter(secret_ref)))
     return out
+
+
+def foreach_rows_match(body: dict[str, Any], match: dict[str, Any] | None) -> bool:
+    """Equality match on body fields; ``paused: false`` also rejects paused=true."""
+    if not match:
+        return True
+    for key, expected in match.items():
+        actual = body.get(key)
+        if expected is False:
+            if actual is True:
+                return False
+            continue
+        if actual != expected:
+            return False
+    return True
+
+
+def build_foreach_dsn_env_name(prefix: str, row_id: str) -> str | None:
+    from prodavan.application.content.remote_sql_probe import sanitize_env_row_id
+
+    pref = (prefix or "").strip()
+    if not pref.endswith("_"):
+        pref = pref + "_"
+    suffix = sanitize_env_row_id(row_id)
+    name = f"{pref}{suffix}"
+    if not _ENV_NAME_RE.match(name) or len(name) > 64:
+        name = name[:64]
+        while name and not _ENV_NAME_RE.match(name):
+            name = name[:-1]
+    return name if name and _ENV_NAME_RE.match(name) else None
 
 
 def merge_env_bindings(*groups: Iterable[tuple[str, str]]) -> tuple[tuple[str, str], ...]:

@@ -81,13 +81,40 @@ Maps Pod env names to **secret references**, resolved at launch by platform (nev
 |-------|-------------|
 | `secret_ref` | Static platform ref (`vault://…`, `file://…` dev) |
 | `secret_ref_from` | Dynamic ref from row field (column type `secret_ref`) |
+| `foreach_rows` | Expand one secret env **per matching row** (see below) |
+
+### `foreach_rows` (multi-row secrets)
+
+When many module rows each carry a `secret_ref` (e.g. remote equipment catalogs), emit unique Pod env vars:
+
+```json
+{
+  "foreach_rows": {
+    "table_slug": "catalogs",
+    "field": "remote_dsn",
+    "env_name_prefix": "EQUIPMENT_CATALOG_DSN_",
+    "match": {"source_kind": "remote", "status": "ready"},
+    "registry_env_name": "EQUIPMENT_REMOTE_CATALOGS"
+  },
+  "when": ["project.launch", "project.sync", "project.resumed", "project.reload"]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `table_slug` / `field` | Row table + `secret_ref` column |
+| `env_name_prefix` | Prefix + sanitized `row_id` → env name (≤64, `UPPER_SNAKE`) |
+| `match` | Optional body equality filter (`paused: false` rejects paused) |
+| `registry_env_name` | Optional plain JSON env listing `{id,name,table,column_map,dsn_env}` (no secrets) |
+
+Resolved by [`ContainerEnvLoader`](../../../apps/api/src/prodavan/application/pod_service/container_env_loader.py). Rows must apply to the project (`project_ids`) and not be paused/`enabled=false`.
 
 **Runtime (target):**
 1. `PodCommand.sync_desired(RUNNING)` loads enabled project's module bindings
-2. Merge `container_env` + resolved `container_env_secrets`
+2. Merge `container_env` + resolved `container_env_secrets` (+ foreach expansions)
 3. `pod_spec.py` adds env / envFrom Secret (k8s Secret created per Pod or shared SA)
 
-**Gap:** P-META-ENV-01 — **done** (#162); P-META-ENV-02 row refs — **done** (#163).
+**Gap:** P-META-ENV-01 — **done** (#162); P-META-ENV-02 row refs — **done** (#163); foreach_rows — **as-built** (equipment remote catalogs).
 
 ## Column type: `secret_ref` (row storage)
 
