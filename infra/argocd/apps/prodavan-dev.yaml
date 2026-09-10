@@ -30,6 +30,7 @@ spec:
         factor: 2
         maxDuration: 3m
   # Fixed-name Jobs + controller status fields churn under selfHeal without this.
+  # PVCs: local-path binder fills volumeName/storageClassName - never sync-Replace.
   ignoreDifferences:
     - group: batch
       kind: Job
@@ -44,4 +45,10 @@ spec:
     - group: apps
       kind: StatefulSet
       jsonPointers:
+        - /status
+    - group: ""
+      kind: PersistentVolumeClaim
+      jsonPointers:
+        - /spec/volumeName
+        - /spec/storageClassName
         - /status
