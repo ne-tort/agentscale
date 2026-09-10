@@ -244,6 +244,7 @@ _CATALOG_MERGE_SCHEMA = [
     "title",
     "price",
     "part_number",
+    "brand",
     "supplier",
     "lead_time",
     "source_catalog",
@@ -287,10 +288,24 @@ _CATALOG_COLUMN_MAP_SCHEMA = [
         ],
     },
     {
+        "key": "brand",
+        "label": {"ru": "Бренд", "en": "Brand"},
+        "required": False,
+        "synonyms": [
+            "brand",
+            "бренд",
+            "make",
+            "manufacturer",
+            "производитель",
+            "vendor_brand",
+            "марка",
+        ],
+    },
+    {
         "key": "supplier",
         "label": {"ru": "Поставщик", "en": "Supplier"},
         "required": False,
-        "synonyms": ["supplier", "vendor", "поставщик", "продавец", "brand", "бренд"],
+        "synonyms": ["supplier", "vendor", "поставщик", "продавец", "seller"],
     },
     {
         "key": "lead_time",
@@ -1537,11 +1552,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "label": {"ru": "Тип", "en": "Type"},
                         },
                         {"field": "row_count", "label": {"ru": "Строк", "en": "Rows"}},
-                        {
-                            "field": "added_at",
-                            "label": {"ru": "Добавлено", "en": "Added"},
-                            "source": "row.created_at",
-                        },
                     ],
                     "row_style": [
                         {
@@ -2700,7 +2710,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "label": "Query catalog SQLite",
                 "description": (
                     "RO search in merged /workspace/catalogs/catalog.sqlite "
-                    "(canonical columns: title, price, part_number, supplier, "
+                    "(canonical columns: title, price, part_number, brand, supplier, "
                     "lead_time, source_catalog). Prefer part_number exact; else title LIKE."
                 ),
                 "enabled": True,

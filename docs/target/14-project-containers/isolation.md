@@ -10,14 +10,14 @@ Pod проекта изолирован от:
 - чужих Project Pod (ingress только из ns `prodavan` на `:3921`);
 - hostPath и platform secrets (MinIO IAM в sandbox не используется).
 
-Разрешено (as-built NetworkPolicy): DNS; интернет 80/443; к ns `prodavan` — **только TCP 8001**.
+Разрешено (as-built NetworkPolicy): DNS; интернет 80/443; к ns `prodavan` — **только TCP 8001**; **TCP 5432/5433** → любой non-cluster host (remote equipment catalogs, в т.ч. WSL/Windows gateway вроде `172.21.176.1`).
 
 См. [tenant-infra-gateway.md](../12-layer-docs/tenant-infra-gateway.md).
 
 ## Правила
 
 1. Отдельный ServiceAccount sandbox (не API SA).
-2. NetworkPolicy egress: DNS; 80/443; TCP **8001** → `prodavan`. **Нет** 8000/9000/6379/9092/5432/27017.
+2. NetworkPolicy egress: DNS; 80/443; TCP **8001** → `prodavan`; TCP **5432/5433** → `0.0.0.0/0` except pod/svc CIDRs (`10.42/16`, `10.43/16`). **Нет** 8000/9000/6379/9092/27017.
 3. NetworkPolicy ingress: только из `prodavan` на agent-runtime `:3921`.
 4. Нет mount Secret с DB/OIDC/Redis/Mongo/MinIO IAM.
 5. AI credentials — узкий inject на сессию / credential broker по Bridge `pod_id`.
@@ -32,6 +32,7 @@ egress:
   - DNS → kube-dns (UDP/TCP 53)
   - TCP 80,443 → internet
   - TCP 8001 → namespace prodavan   # Pod API surface only
+  - TCP 5432,5433 → 0.0.0.0/0 except 10.42/16,10.43/16  # remote PG catalogs
 ingress:
   - TCP 3921 ← namespace prodavan    # API → agent-runtime
 ```

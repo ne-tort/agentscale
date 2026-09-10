@@ -342,7 +342,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert catalogs["ui_json"]["scaffold"]["title"]["ru"] == "Базы данных"
     assert catalogs["ui_json"]["empty"]["icon"] == "storage"
     assert "primary_action" not in catalogs["ui_json"]
-    assert any(c.get("source") == "row.created_at" for c in catalogs["ui_json"]["columns"])
+    assert all(c.get("source") != "row.created_at" for c in catalogs["ui_json"]["columns"])
 
     settings = next(v for v in meta["views"] if v["slug"] == "catalogs_settings")
     file_field = next(
@@ -377,6 +377,11 @@ def test_equipment_meta_hub_on_data_placement() -> None:
 
     catalogs_list = next(v for v in meta["views"] if v["slug"] == "catalogs_list")
     assert all(c["field"] != "status" for c in catalogs_list["ui_json"]["columns"])
+    assert all(c["field"] != "added_at" for c in catalogs_list["ui_json"]["columns"])
+    map_schema = next(
+        f for f in settings["ui_json"]["fields"] if f["column"] == "column_map"
+    )["schema"]
+    assert any(item["key"] == "brand" and item["label"]["ru"] == "Бренд" for item in map_schema)
 
     name_col = next(c for c in meta["columns"] if c["name"] == "name" and c["table_slug"] == "catalogs")
     assert name_col["label"]["ru"] == "Название"
@@ -392,6 +397,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     merge_rule = next(r for r in meta["materialize"] if r["id"] == "catalog_merged_sqlite")
     assert merge_rule["source"]["filter"] == {"status": "ready", "paused": False}
     assert merge_rule["target"]["workspace_path"] == "catalogs/catalog.sqlite"
+    assert "brand" in merge_rule["target"]["schema"]
 
     lines = next(v for v in meta["views"] if v["slug"] == "request_lines_list")
     assert lines["ui_json"]["scaffold"]["title"]["ru"] == "Позиции заказчика"

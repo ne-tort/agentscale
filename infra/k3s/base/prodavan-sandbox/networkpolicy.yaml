@@ -34,9 +34,16 @@ spec:
           port: 443
         - protocol: TCP
           port: 80
-    # Remote equipment catalogs (live PostgreSQL). Probe runs on API;
-    # agent MCP may open the same ports later.
-    - ports:
+    # Remote equipment catalogs (live PostgreSQL) — any non-cluster host.
+    # Explicit 0.0.0.0/0 so CNI cannot treat “ports-only” as cluster-internal.
+    # Covers WSL/Windows host gateways (e.g. 172.21.176.1:5433) and LAN DBs.
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.42.0.0/16
+              - 10.43.0.0/16
+      ports:
         - protocol: TCP
           port: 5432
         - protocol: TCP

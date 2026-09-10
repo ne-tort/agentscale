@@ -13,6 +13,7 @@ DEFAULT_SCHEMA = (
     "title",
     "price",
     "part_number",
+    "brand",
     "supplier",
     "lead_time",
     "source_catalog",
