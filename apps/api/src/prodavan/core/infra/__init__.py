@@ -1,4 +1,8 @@
-"""Infrastructure lifespan resources + managers (P0)."""
+"""Infrastructure lifespan resources + managers (P0).
+
+Keep this package init light: importing ``prodavan.core.infra.cache`` must not
+pull agent/trigger stacks (avoids circular imports via bridge → cache → infra).
+"""
 
 from prodavan.core.infra.database_resource import DatabaseEngineResource
 from prodavan.core.infra.kafka_manager import (
@@ -14,7 +18,6 @@ from prodavan.core.infra.mongo_manager import (
     set_mongo_manager,
 )
 from prodavan.core.infra.redis_manager import RedisManager, get_redis_manager, set_redis_manager
-from prodavan.core.infra.trigger_worker_resource import TriggerWorkerResource
 from prodavan.core.infra.worker_manager import WorkerManager, get_celery_app, get_worker_manager
 from prodavan.infrastructure.files.manager import (
     FileStoreManager,
@@ -30,7 +33,6 @@ __all__ = [
     "KafkaManager",
     "MongoManager",
     "RedisManager",
-    "TriggerWorkerResource",
     "WorkerManager",
     "ensure_file_store",
     "get_celery_app",

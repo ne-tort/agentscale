@@ -4493,7 +4493,7 @@ abstract class AppLocalizations {
   /// No description provided for @sessionRestoreOffline.
   ///
   /// In en, this message translates to:
-  /// **'Server unavailable. Your session is saved.'**
+  /// **'Server unavailable. Check your connection.'**
   String get sessionRestoreOffline;
 
   /// No description provided for @settingsLanguage.

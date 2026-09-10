@@ -10,7 +10,6 @@ from uuid import uuid4
 import jwt
 
 from prodavan.config.settings import settings
-from prodavan.core.infra.cache import cache_get, cache_key, cache_set
 from prodavan.domain.errors import AppError
 
 POD_BRIDGE_AUD = "prodavan-pod-bridge"
@@ -115,10 +114,14 @@ _GEN_FALLBACK: dict[str, int] = {}
 
 
 def _gen_key(pod_id: str) -> str:
+    from prodavan.core.infra.cache import cache_key
+
     return cache_key("pod_bridge", "gen", pod_id)
 
 
 async def get_pod_bridge_generation(pod_id: str) -> int:
+    from prodavan.core.infra.cache import cache_get
+
     raw = await cache_get(_gen_key(pod_id))
     if raw is None:
         return int(_GEN_FALLBACK.get(pod_id, 0))
@@ -130,6 +133,8 @@ async def get_pod_bridge_generation(pod_id: str) -> int:
 
 async def bump_pod_bridge_generation(pod_id: str) -> int:
     """Invalidate all JWTs for this pod (pause/stop/delete/reload)."""
+    from prodavan.core.infra.cache import cache_set
+
     current = await get_pod_bridge_generation(pod_id)
     nxt = current + 1
     _GEN_FALLBACK[pod_id] = nxt

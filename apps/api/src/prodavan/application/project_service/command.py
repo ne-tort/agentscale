@@ -12,7 +12,7 @@ from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.admin.quota_service import CompanyQuotaService
 from prodavan.application.admin.subscription_gate import CompanySubscriptionGate
 from prodavan.application.cabinets.access import CabinetAccessService
-from prodavan.application.pod_service import PodCommand
+from prodavan.application.pod_service.command import PodCommand
 from prodavan.application.project_service.access import ProjectAccessPolicy
 from prodavan.application.project_service.lifecycle_emitter import ProjectLifecycleEmitter
 from prodavan.application.project_service.public import normalize_agent_provider

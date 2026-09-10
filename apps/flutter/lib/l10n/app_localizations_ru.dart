@@ -2515,7 +2515,8 @@ class AppLocalizationsRu extends AppLocalizations {
   String get settings => 'Настройки';
 
   @override
-  String get sessionRestoreOffline => 'Сервер недоступен. Сессия сохранена.';
+  String get sessionRestoreOffline =>
+      'Сервер недоступен. Проверьте подключение.';
 
   @override
   String get settingsLanguage => 'Язык';

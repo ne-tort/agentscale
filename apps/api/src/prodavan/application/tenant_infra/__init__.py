@@ -1,5 +1,8 @@
-"""Tenant Infra Gateway BC (in-proc)."""
+"""Tenant Infra Gateway BC (in-proc).
 
-from prodavan.application.tenant_infra.service import TenantInfraService
+Do not eagerly import services here — that creates a circular import:
+``bridge`` → ``core.infra.cache`` → … → ``tenant_infra.service`` → ``bridge``.
+Import concrete modules (``service``, ``quota``, …) directly at call sites.
+"""
 
-__all__ = ["TenantInfraService"]
+__all__: list[str] = []
