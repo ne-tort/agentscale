@@ -213,6 +213,17 @@ Collection `selection.set_on_context` (type pick): radio writes fields onto `con
 { "field": "status", "eq": "ready" }
 { "field": "status", "in": ["ready", "error"] }
 { "field": "error", "not_empty": true }
+{ "field": "paused", "eq": false }
+{ "all": [ {"field": "source_kind", "eq": "remote"}, {"field": "remote_dsn_has_database", "eq": false} ] }
+```
+
+Collection `row_style` (first match wins):
+
+```json
+"row_style": [
+  {"when": {"field": "status", "eq": "error"}, "accent": "error"},
+  {"when": {"field": "paused", "eq": true}, "accent": "warning"}
+]
 ```
 
 `column_map` field shape:

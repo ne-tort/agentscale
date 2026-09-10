@@ -961,10 +961,18 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             {
                 "table_slug": "catalogs",
                 "name": "remote_table",
-                "label": {"ru": "Таблица", "en": "Table"},
+                "label": {"ru": "Имя БД", "en": "Database name"},
                 "type": "text",
                 "required": False,
                 "default": "",
+            },
+            {
+                "table_slug": "catalogs",
+                "name": "remote_dsn_has_database",
+                "label": {"ru": "DSN с БД", "en": "DSN has database"},
+                "type": "bool",
+                "required": False,
+                "default": False,
             },
             {
                 "table_slug": "catalogs",
@@ -1469,11 +1477,25 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "field": "name",
                             "label": {"ru": "Название", "en": "Name"},
                         },
+                        {
+                            "field": "source_kind",
+                            "label": {"ru": "Тип", "en": "Type"},
+                        },
                         {"field": "row_count", "label": {"ru": "Строк", "en": "Rows"}},
                         {
                             "field": "added_at",
                             "label": {"ru": "Добавлено", "en": "Added"},
                             "source": "row.created_at",
+                        },
+                    ],
+                    "row_style": [
+                        {
+                            "when": {"field": "status", "eq": "error"},
+                            "accent": "error",
+                        },
+                        {
+                            "when": {"field": "paused", "eq": True},
+                            "accent": "warning",
                         },
                     ],
                     "row_tap": {"kind": "open_view", "view": "catalogs_settings"},
@@ -1510,20 +1532,34 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "widget": "value",
                             "secret": True,
                             "icon": "link",
-                            "hint": "postgresql://user:pass@host:5432/dbname",
+                            "hint": (
+                                "postgresql://user:pass@172.21.176.1:5433/s4b_catalog"
+                                " (k3s-in-WSL: gateway, not LAN IP)"
+                            ),
                             "visible_when": {"field": "source_kind", "eq": "remote"},
                         },
                         {
                             "column": "remote_table",
                             "widget": "value",
                             "icon": "table_chart",
-                            "hint": "public.prices",
-                            "visible_when": {"field": "source_kind", "eq": "remote"},
+                            "hint": "s4b_catalog",
+                            "visible_when": {
+                                "all": [
+                                    {"field": "source_kind", "eq": "remote"},
+                                    {
+                                        "field": "remote_dsn_has_database",
+                                        "eq": False,
+                                    },
+                                ]
+                            },
                         },
                         {
                             "column": "error",
                             "widget": "value",
                             "read_only": True,
+                            "copy_on_tap": True,
+                            "icon": "error_outline",
+                            "accent": "error",
                             "visible_when": {"field": "status", "eq": "error"},
                         },
                         {
@@ -1553,10 +1589,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             },
                             "pause_icon": "pause_outlined",
                             "resume_icon": "play_arrow_outlined",
-                            "visible_when": {
-                                "field": "status",
-                                "in": ["ready", "error"],
-                            },
+                            "visible_when": {"field": "status", "eq": "ready"},
                         },
                     ],
                 },
@@ -2374,6 +2407,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "table_slug": "catalogs",
                     "dsn_column": "remote_dsn",
                     "remote_table_column": "remote_table",
+                    "default_remote_table": "public.offers",
                     "status_column": "status",
                     "row_count_column": "row_count",
                     "columns_json_column": "columns_json",

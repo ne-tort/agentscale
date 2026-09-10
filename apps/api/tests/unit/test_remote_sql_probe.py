@@ -55,6 +55,45 @@ def test_foreach_rows_match() -> None:
     assert not foreach_rows_match({**body, "paused": True}, {"paused": False})
 
 
+def test_resolve_remote_catalog_target_db_in_url_defaults_table() -> None:
+    from prodavan.application.content.remote_sql_probe import resolve_remote_catalog_target
+
+    dsn, schema, table = resolve_remote_catalog_target(
+        dsn="postgresql://s4b:s4b@172.21.176.1:5433/s4b_catalog",
+        remote_table_field="",
+    )
+    assert "/s4b_catalog" in dsn
+    assert (schema, table) == ("public", "offers")
+
+
+def test_resolve_remote_catalog_target_db_from_field() -> None:
+    from prodavan.application.content.remote_sql_probe import resolve_remote_catalog_target
+
+    dsn, schema, table = resolve_remote_catalog_target(
+        dsn="postgresql://s4b:s4b@172.21.176.1:5433",
+        remote_table_field="s4b_catalog",
+    )
+    assert dsn.endswith("/s4b_catalog")
+    assert (schema, table) == ("public", "offers")
+
+
+def test_resolve_remote_catalog_target_query_table() -> None:
+    from prodavan.application.content.remote_sql_probe import resolve_remote_catalog_target
+
+    _, schema, table = resolve_remote_catalog_target(
+        dsn="postgresql://s4b:s4b@h:5433/s4b_catalog?table=sales.prices",
+        remote_table_field="",
+    )
+    assert (schema, table) == ("sales", "prices")
+
+
+def test_postgres_dsn_database_name() -> None:
+    from prodavan.application.content.remote_sql_probe import postgres_dsn_database_name
+
+    assert postgres_dsn_database_name("postgresql://u:p@h:1/s4b_catalog") == "s4b_catalog"
+    assert postgres_dsn_database_name("postgresql://u:p@h:1") is None
+
+
 @pytest.mark.asyncio
 async def test_probe_remote_postgres_columns_and_count(monkeypatch: pytest.MonkeyPatch) -> None:
     from prodavan.application.content.remote_sql_probe import (

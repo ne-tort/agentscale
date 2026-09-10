@@ -281,14 +281,14 @@ class ModuleActionExecutor:
             status_col = str(params.get("status_column") or "status")
             if field_value_as_secret_ref(body.get(dsn_col)) is None:
                 continue
-            if not str(body.get(table_col) or "").strip():
-                continue
+            # remote_table may be empty when DSN already has /dbname (default SQL table).
             status = str(body.get(status_col) or "")
             if status == "indexing":
                 continue
             probe_key = (
                 f"{field_value_as_secret_ref(body.get(dsn_col))}|"
-                f"{str(body.get(table_col) or '').strip()}"
+                f"{str(body.get(table_col) or '').strip()}|"
+                f"{body.get('remote_dsn_has_database')}"
             )
             if status == "ready" and probe_key == str(body.get("probed_remote_key") or ""):
                 continue
@@ -721,7 +721,7 @@ class ModuleActionExecutor:
 
         secret_ref = field_value_as_secret_ref(body.get(dsn_col))
         remote_table = str(body.get(table_col) or "").strip()
-        if not secret_ref or not remote_table:
+        if not secret_ref:
             body[status_col] = "draft"
             body[error_col] = None
             await self._update_module_row(
@@ -755,16 +755,30 @@ class ModuleActionExecutor:
             run_actions=False,
         )
 
+        default_sql_table = str(
+            params.get("default_remote_table") or "public.offers"
+        ).strip() or "public.offers"
         try:
             if secret_ref.startswith(("file://cabinet_secrets/", "vault://cabinet_secrets/")):
                 assert_cabinet_secret_scope(secret_ref, cabinet_id)
             dsn = get_secret_store().get(secret_ref)
-            probed = await probe_remote_postgres(dsn=dsn, remote_table=remote_table)
+            from prodavan.application.content.remote_sql_probe import (
+                postgres_dsn_database_name,
+            )
+
+            body["remote_dsn_has_database"] = postgres_dsn_database_name(dsn) is not None
+            probed = await probe_remote_postgres(
+                dsn=dsn,
+                remote_table=remote_table,
+                default_sql_table=default_sql_table,
+            )
             body[columns_col] = json.dumps(probed.columns, ensure_ascii=False)
             body[row_count_col] = probed.row_count
             body[status_col] = "ready"
             body[error_col] = None
-            body["probed_remote_key"] = f"{secret_ref}|{remote_table}"
+            body["probed_remote_key"] = (
+                f"{secret_ref}|{remote_table}|{body.get('remote_dsn_has_database')}"
+            )
         except AppError as exc:
             body[status_col] = "error"
             body[error_col] = str(exc.detail or exc)[:500]

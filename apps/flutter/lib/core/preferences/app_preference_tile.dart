@@ -47,7 +47,7 @@ class AppPreferenceTile extends StatelessWidget {
                   icon,
                   size: 24,
                   color: enabled
-                      ? Theme.of(context).colorScheme.onSurfaceVariant
+                      ? (accentColor ?? Theme.of(context).colorScheme.onSurfaceVariant)
                       : Theme.of(context).disabledColor,
                 )
               : null),

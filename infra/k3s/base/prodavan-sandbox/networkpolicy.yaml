@@ -34,6 +34,13 @@ spec:
           port: 443
         - protocol: TCP
           port: 80
+    # Remote equipment catalogs (live PostgreSQL). Probe runs on API;
+    # agent MCP may open the same ports later.
+    - ports:
+        - protocol: TCP
+          port: 5432
+        - protocol: TCP
+          port: 5433
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy

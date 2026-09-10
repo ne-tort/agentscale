@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/app_value_preference.dart';
+import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_icon_button.dart';
@@ -68,7 +69,8 @@ class CollectionViewInterpreter extends StatelessWidget {
         // Primary column already shows title_field — do not repeat it as a data column.
         final columns = allColumns.where((c) => c.id != titleField).toList();
         final rawRows = _filteredRows(seeds, tableSlug, uiJson);
-        final rows = _withSelection(context, uiJson, rawRows);
+        final styled = _applyRowStyles(context, uiJson, rawRows);
+        final rows = _withSelection(context, uiJson, styled);
         final hasInline = _hasInlineAdd(uiJson);
         final toolbar = _toolbar(context, uiJson, tableSlug, l10n, skipCreate: hasInline);
         final emptyUi = uiJson['empty'];
@@ -159,6 +161,66 @@ class CollectionViewInterpreter extends StatelessWidget {
     return header is Map &&
         contextRowId != null &&
         contextRowId!.isNotEmpty;
+  }
+
+  List<AppEntityRow> _applyRowStyles(
+    BuildContext context,
+    Map<String, dynamic> uiJson,
+    List<AppEntityRow> rows,
+  ) {
+    final styleRules = uiJson['row_style'];
+    if (styleRules is! List || styleRules.isEmpty) return rows;
+    final colors = context.appColors;
+    return rows.map((row) {
+      final item = seeds.itemById(row.id);
+      final body = item is Map && item['body'] is Map
+          ? Map<String, dynamic>.from(item['body'] as Map)
+          : <String, dynamic>{};
+      Color? accent;
+      for (final rule in styleRules.whereType<Map>()) {
+        final when = rule['when'];
+        if (when is! Map) continue;
+        if (!_bodyMatchesWhen(body, Map<String, dynamic>.from(when))) continue;
+        final kind = rule['accent']?.toString();
+        if (kind == 'error') {
+          accent = colors.danger;
+          break;
+        }
+        if (kind == 'warning') {
+          accent = colors.warning;
+          break;
+        }
+      }
+      if (accent == null) return row;
+      return AppEntityRow(
+        id: row.id,
+        title: row.title,
+        subtitle: row.subtitle,
+        cells: row.cells,
+        cellWidgets: row.cellWidgets,
+        leading: row.leading,
+        trailing: row.trailing,
+        titleColor: row.titleColor,
+        rowColor: accent,
+        titleBold: row.titleBold,
+      );
+    }).toList();
+  }
+
+  bool _bodyMatchesWhen(Map<String, dynamic> body, Map<String, dynamic> when) {
+    final field = when['field']?.toString();
+    if (field == null || field.isEmpty) return true;
+    final actual = body[field];
+    if (when.containsKey('eq')) {
+      final expected = when['eq'];
+      if (expected is bool) return (actual == true) == expected;
+      return actual?.toString() == expected?.toString();
+    }
+    if (when['in'] is List) {
+      final allowed = (when['in'] as List).map((e) => e.toString()).toSet();
+      return actual != null && allowed.contains(actual.toString());
+    }
+    return true;
   }
 
   List<AppEntityRow> _filteredRows(dynamic seeds, String tableSlug, Map<String, dynamic> uiJson) {

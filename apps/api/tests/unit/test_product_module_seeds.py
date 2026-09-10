@@ -173,12 +173,16 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert foreach["foreach_rows"]["table_slug"] == "catalogs"
     assert foreach["foreach_rows"]["env_name_prefix"] == "EQUIPMENT_CATALOG_DSN_"
     catalog_cols = {c["name"] for c in meta["columns"] if c["table_slug"] == "catalogs"}
-    assert {"source_kind", "remote_dsn", "remote_table"} <= catalog_cols
+    assert {"source_kind", "remote_dsn", "remote_table", "remote_dsn_has_database"} <= catalog_cols
     settings = next(v for v in meta["views"] if v["slug"] == "catalogs_settings")
     field_cols = [f["column"] for f in settings["ui_json"]["fields"]]
     assert field_cols[:3] == ["name", "source_kind", "source_file"]
     assert "remote_dsn" in field_cols
     assert "remote_table" in field_cols
+    catalogs_list = next(v for v in meta["views"] if v["slug"] == "catalogs_list")
+    list_fields = [c["field"] for c in catalogs_list["ui_json"]["columns"]]
+    assert "source_kind" in list_fields
+    assert catalogs_list["ui_json"]["row_style"][0]["accent"] == "error"
     tool_names = {t["name"] for t in meta["mcp_tools"]}
     assert "equipment_catalog_query" in tool_names
     assert "equipment_offers_upsert" in tool_names
@@ -337,6 +341,8 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert name_field["icon"] == "storage"
     error_field = next(f for f in settings["ui_json"]["fields"] if f["column"] == "error")
     assert error_field["visible_when"] == {"field": "status", "eq": "error"}
+    assert error_field["accent"] == "error"
+    assert error_field["copy_on_tap"] is True
     map_field = next(f for f in settings["ui_json"]["fields"] if f["column"] == "column_map")
     assert map_field["widget"] == "column_map"
     map_col = next(c for c in meta["columns"] if c["name"] == "column_map")
@@ -347,7 +353,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert paused_field["widget"] == "pause_toggle"
     assert paused_field["pause_label"]["ru"] == "Приостановить"
     assert paused_field["resume_label"]["ru"] == "Возобновить"
-    assert paused_field["visible_when"]["in"] == ["ready", "error"]
+    assert paused_field["visible_when"] == {"field": "status", "eq": "ready"}
     meta_fields = [
         f
         for f in settings["ui_json"]["fields"]

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
@@ -255,12 +257,28 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     if (fieldCfg == null) return true;
     final when = fieldCfg['visible_when'];
     if (when is! Map) return true;
+    return _matchVisibleWhen(Map<String, dynamic>.from(when));
+  }
+
+  bool _matchVisibleWhen(Map<String, dynamic> when) {
+    final all = when['all'];
+    if (all is List) {
+      for (final part in all) {
+        if (part is! Map) return false;
+        if (!_matchVisibleWhen(Map<String, dynamic>.from(part))) return false;
+      }
+      return true;
+    }
     final field = when['field']?.toString();
     if (field == null || field.isEmpty) return true;
     final actual = _values[field];
     final actualText = actual?.toString();
     if (when.containsKey('eq')) {
-      return actualText == when['eq']?.toString();
+      final expected = when['eq'];
+      if (expected is bool) {
+        return (actual == true) == expected;
+      }
+      return actualText == expected?.toString();
     }
     if (when['in'] is List) {
       final allowed = (when['in'] as List).map((e) => e.toString()).toSet();
@@ -580,19 +598,44 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
             value: value,
             fieldReadOnly: fieldReadOnly,
             columnType: type,
+            hintText: fieldCfg?['hint']?.toString(),
           );
         }
+        final accent = _fieldAccent(context, fieldCfg);
+        final copyOnTap = fieldCfg?['copy_on_tap'] == true;
+        final text = value?.toString() ?? '';
         return AppValuePreference<String>(
           title: label,
           icon: fieldIcon,
-          value: value?.toString() ?? '',
-          enabled: !fieldReadOnly,
+          value: text,
+          enabled: !fieldReadOnly && !copyOnTap,
+          accentColor: accent,
           maxLines: maxLines < 1 ? 1 : maxLines,
+          onTap: copyOnTap && text.isNotEmpty
+              ? () {
+                  Clipboard.setData(ClipboardData(text: text));
+                  AppSnackBar.info(context, l10n.containerErrorCopied);
+                }
+              : null,
           onSave: (v) async {
             _persist(name, v);
           },
         );
     }
+  }
+
+  Color? _fieldAccent(BuildContext context, Map<String, dynamic>? fieldCfg) {
+    final accent = fieldCfg?['accent']?.toString();
+    if (accent == 'error') return context.appColors.danger;
+    if (accent == 'warning') return context.appColors.warning;
+    return null;
+  }
+
+  bool _postgresDsnHasDatabase(String dsn) {
+    final uri = Uri.tryParse(dsn.trim());
+    if (uri == null) return false;
+    final path = uri.path.replaceFirst(RegExp(r'^/+'), '');
+    return path.isNotEmpty;
   }
 
   Widget _buildSecretValueField({
@@ -602,6 +645,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     required dynamic value,
     required bool fieldReadOnly,
     required String? columnType,
+    String? hintText,
   }) {
     final scope = ModuleRuntimeScope.maybeOf(context);
     final hasRef = value is Map &&
@@ -614,10 +658,13 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       enabled: !fieldReadOnly,
       obscureText: true,
       formatInputValue: (_) => '',
-      hintText: hasRef ? '••••••••' : null,
+      hintText: hintText ?? (hasRef ? '••••••••' : null),
       onSave: (raw) async {
         final secret = raw.trim();
         if (secret.isEmpty) return;
+        if (name == 'remote_dsn') {
+          _persist('remote_dsn_has_database', _postgresDsnHasDatabase(secret));
+        }
         if (columnType == 'secret_ref') {
           if (scope == null) {
             throw StateError('secret_ref requires module runtime scope');

@@ -247,7 +247,15 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
       for (final col in columnDefs) {
         final field = col['field'] as String? ?? '';
         if (field.isEmpty) continue;
-        cells[field] = _cellValue(item, body, col);
+        final merged = Map<String, dynamic>.from(col);
+        final metaCol = _manifest.columnsForTable(tableSlug).cast<Map<String, dynamic>?>().firstWhere(
+              (c) => c?['name'] == field,
+              orElse: () => null,
+            );
+        if (metaCol != null && metaCol['enum'] is Map && merged['enum'] == null) {
+          merged['enum'] = metaCol['enum'];
+        }
+        cells[field] = _cellValue(item, body, merged);
       }
       return AppEntityRow(
         id: rowId,

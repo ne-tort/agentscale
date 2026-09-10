@@ -40,6 +40,7 @@ class AppValuePreference<T> extends StatefulWidget {
     this.keyboardType,
     this.maxLines = 1,
     this.onTap,
+    this.accentColor,
   });
 
   final String title;
@@ -60,6 +61,7 @@ class AppValuePreference<T> extends StatefulWidget {
   final T? Function(String raw)? inputToValue;
   final TextInputType? keyboardType;
   final int maxLines;
+  final Color? accentColor;
 
   @override
   State<AppValuePreference<T>> createState() => _AppValuePreferenceState<T>();
@@ -185,6 +187,7 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
       return AppPreferenceTile(
         title: widget.title,
         icon: widget.icon,
+        accentColor: widget.accentColor,
         enabled: widget.enabled && !_saving,
         subtitle: TextField(
           controller: _controller,
@@ -201,6 +204,7 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
           textInputAction: TextInputAction.done,
           style: theme.textTheme.bodyMedium?.copyWith(
             fontFamily: widget.digitsOnly ? 'monospace' : null,
+            color: widget.accentColor,
           ),
           decoration: kBorderlessInputDecoration.copyWith(hintText: widget.hintText),
           onSubmitted: (_) => _save(),
@@ -218,16 +222,21 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
         ? null
         : Text(
             widget.obscureText ? '••••••••' : _display(widget.value),
-            style: theme.textTheme.bodyMedium,
+            style: theme.textTheme.bodyMedium?.copyWith(color: widget.accentColor),
           );
 
     return AppPreferenceTile(
       title: widget.title,
       icon: widget.icon,
+      accentColor: widget.accentColor,
       enabled: widget.enabled || widget.onTap != null,
       subtitle: subtitle,
       trailing: widget.onTap != null
-          ? Icon(Icons.copy_outlined, size: 20, color: theme.colorScheme.onSurfaceVariant)
+          ? Icon(
+              Icons.copy_outlined,
+              size: 20,
+              color: widget.accentColor ?? theme.colorScheme.onSurfaceVariant,
+            )
           : const AppTrailingChevron(),
       onTap: _handleTap,
     );

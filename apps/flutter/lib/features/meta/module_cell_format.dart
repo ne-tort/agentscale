@@ -63,6 +63,14 @@ String formatModuleCell({
   if (field == 'path') {
     return formatPathCell(raw);
   }
+
+  final enumMeta = col['enum'];
+  if (enumMeta is Map && enumMeta['labels'] is Map) {
+    final labels = Map<String, dynamic>.from(enumMeta['labels'] as Map);
+    final key = raw?.toString() ?? '';
+    if (labels.containsKey(key)) return labels[key].toString();
+  }
+
   return raw?.toString() ?? '';
 }
 
