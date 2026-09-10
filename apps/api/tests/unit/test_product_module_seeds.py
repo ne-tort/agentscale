@@ -173,16 +173,22 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert foreach["foreach_rows"]["table_slug"] == "catalogs"
     assert foreach["foreach_rows"]["env_name_prefix"] == "EQUIPMENT_CATALOG_DSN_"
     catalog_cols = {c["name"] for c in meta["columns"] if c["table_slug"] == "catalogs"}
-    assert {"source_kind", "remote_dsn", "remote_table", "remote_dsn_has_database"} <= catalog_cols
+    assert {"source_kind", "remote_dsn", "remote_table", "remote_database", "remote_dsn_has_database"} <= catalog_cols
     settings = next(v for v in meta["views"] if v["slug"] == "catalogs_settings")
     field_cols = [f["column"] for f in settings["ui_json"]["fields"]]
     assert field_cols[:3] == ["name", "source_kind", "source_file"]
     assert "remote_dsn" in field_cols
     assert "remote_table" in field_cols
+    assert "remote_database" in field_cols
+    table_field = next(f for f in settings["ui_json"]["fields"] if f["column"] == "remote_table")
+    assert table_field["widget"] == "remote_table_picker"
     catalogs_list = next(v for v in meta["views"] if v["slug"] == "catalogs_list")
     list_fields = [c["field"] for c in catalogs_list["ui_json"]["columns"]]
     assert "source_kind" in list_fields
     assert catalogs_list["ui_json"]["row_style"][0]["accent"] == "error"
+    actions = {a["id"]: a for a in meta["actions"]}
+    assert actions["list_catalog_remote_tables"]["kind"] == "content.list_remote_sql_tables"
+    assert "default_remote_table" not in actions["probe_catalog_remote"]["params"]
     tool_names = {t["name"] for t in meta["mcp_tools"]}
     assert "equipment_catalog_query" in tool_names
     assert "equipment_offers_upsert" in tool_names

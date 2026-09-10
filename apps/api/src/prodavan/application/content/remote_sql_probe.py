@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from urllib.parse import parse_qs, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import asyncpg
 
@@ -15,8 +15,8 @@ _TABLE_RE = re.compile(
     r"^(?:(?P<schema>[A-Za-z_][A-Za-z0-9_]*)\.)?(?P<table>[A-Za-z_][A-Za-z0-9_]*)$"
 )
 
-# Default SQL relation when DSN already has /dbname and UI hides the table field.
-DEFAULT_REMOTE_SQL_TABLE = "public.offers"
+# Query keys we parse ourselves — must never reach asyncpg/libpq.
+_APP_QUERY_KEYS = frozenset({"table", "remote_table"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,6 +25,17 @@ class RemoteSqlProbeResult:
     row_count: int
     schema: str
     table: str
+
+
+@dataclass(frozen=True, slots=True)
+class RemoteSqlTableInfo:
+    schema: str
+    table: str
+    row_count: int
+
+    @property
+    def name(self) -> str:
+        return f"{self.schema}.{self.table}"
 
 
 def validate_postgres_dsn(dsn: str) -> str:
@@ -87,13 +98,24 @@ def postgres_dsn_database_name(dsn: str) -> str | None:
 
 
 def postgres_dsn_table_query(dsn: str) -> str | None:
-    """Optional `?table=` / `?remote_table=` override for the SQL relation."""
-    qs = parse_qs(urlparse((dsn or "").strip()).query)
+    """Optional `?table=` / `?remote_table=` (app-level; stripped before connect)."""
+    qs = dict(parse_qsl(urlparse((dsn or "").strip()).query, keep_blank_values=False))
     for key in ("table", "remote_table"):
-        vals = qs.get(key)
-        if vals and str(vals[0]).strip():
-            return str(vals[0]).strip()
+        val = qs.get(key)
+        if val and str(val).strip():
+            return str(val).strip()
     return None
+
+
+def strip_postgres_driver_query(dsn: str) -> str:
+    """Remove app-only query keys so asyncpg/libpq never see them."""
+    parsed = urlparse((dsn or "").strip())
+    kept = [
+        (k, v)
+        for k, v in parse_qsl(parsed.query, keep_blank_values=True)
+        if k not in _APP_QUERY_KEYS
+    ]
+    return urlunparse(parsed._replace(query=urlencode(kept)))
 
 
 def _dsn_with_database(dsn: str, database: str) -> str:
@@ -108,55 +130,63 @@ def _dsn_with_database(dsn: str, database: str) -> str:
     return urlunparse(parsed._replace(path=f"/{database}"))
 
 
+def resolve_connect_dsn(
+    *,
+    dsn: str,
+    remote_database_field: str = "",
+) -> str:
+    """Resolve connect DSN (database path) without requiring a SQL table."""
+    dsn = validate_postgres_dsn(dsn)
+    db = postgres_dsn_database_name(dsn)
+    field = (remote_database_field or "").strip()
+    if db:
+        return strip_postgres_driver_query(dsn)
+    if not field:
+        raise AppError(
+            code="VALIDATION_ERROR",
+            title="Validation Error",
+            status=422,
+            detail=(
+                "remote DSN must include /database "
+                "(e.g. postgresql://user:pass@host:5432/dbname) "
+                "or fill the database name field"
+            ),
+        )
+    if "." in field:
+        raise AppError(
+            code="VALIDATION_ERROR",
+            title="Validation Error",
+            status=422,
+            detail="database name must be a simple identifier, not schema.table",
+        )
+    return strip_postgres_driver_query(_dsn_with_database(dsn, field))
+
+
 def resolve_remote_catalog_target(
     *,
     dsn: str,
     remote_table_field: str,
-    default_sql_table: str = DEFAULT_REMOTE_SQL_TABLE,
+    remote_database_field: str = "",
 ) -> tuple[str, str, str]:
-    """Resolve connect DSN + schema.table for a remote catalog row.
+    """Resolve connect DSN + schema.table. Requires an explicit SQL table.
 
-    - Database comes from URL path ``/dbname``, else from [remote_table_field]
-      when that value is a simple identifier (UI field shown only if path missing).
-    - SQL relation comes from ``?table=``, else field when it looks like
-      ``table`` / ``schema.table`` *and* database is already in the URL, else
-      [default_sql_table].
+    SQL relation: ``?table=`` / ``?remote_table=`` (stripped before connect),
+    else [remote_table_field]. No silent default to public.offers.
     """
-    dsn = validate_postgres_dsn(dsn)
-    db = postgres_dsn_database_name(dsn)
+    connect_dsn = resolve_connect_dsn(
+        dsn=dsn,
+        remote_database_field=remote_database_field,
+    )
     q_table = postgres_dsn_table_query(dsn)
     field = (remote_table_field or "").strip()
-
-    if not db:
-        if not field:
-            raise AppError(
-                code="VALIDATION_ERROR",
-                title="Validation Error",
-                status=422,
-                detail=(
-                    "remote DSN must include /database "
-                    "(e.g. postgresql://user:pass@host:5432/dbname) "
-                    "or fill the database name field"
-                ),
-            )
-        if "." in field:
-            raise AppError(
-                code="VALIDATION_ERROR",
-                title="Validation Error",
-                status=422,
-                detail="put /database in the DSN when specifying schema.table",
-            )
-        connect_dsn = _dsn_with_database(dsn, field)
-        sql_raw = q_table or default_sql_table
-    else:
-        connect_dsn = dsn
-        if q_table:
-            sql_raw = q_table
-        elif field:
-            sql_raw = field
-        else:
-            sql_raw = default_sql_table
-
+    sql_raw = q_table or field
+    if not sql_raw:
+        raise AppError(
+            code="VALIDATION_ERROR",
+            title="Validation Error",
+            status=422,
+            detail="remote_table is required (pick a table)",
+        )
     schema, table = parse_remote_table(sql_raw)
     return connect_dsn, schema, table
 
@@ -172,17 +202,85 @@ def quote_ident(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+def _connect_error(dsn: str, exc: Exception) -> AppError:
+    host = urlparse(dsn).hostname or "?"
+    return AppError(
+        code="SERVICE_UNAVAILABLE",
+        title="Service Unavailable",
+        status=503,
+        detail=(
+            f"remote SQL probe failed ({host}): {exc}. "
+            "Check host reachability from the API and that the URL includes /dbname."
+        ),
+    )
+
+
+async def check_remote_postgres_connect(*, dsn: str, remote_database_field: str = "") -> str:
+    """Verify TCP/auth/database; return stripped connect DSN."""
+    connect_dsn = resolve_connect_dsn(dsn=dsn, remote_database_field=remote_database_field)
+    conn: asyncpg.Connection | None = None
+    try:
+        conn = await asyncpg.connect(dsn=connect_dsn, timeout=10.0, command_timeout=30.0)
+        await conn.fetchval("SELECT 1")
+        return connect_dsn
+    except AppError:
+        raise
+    except Exception as exc:
+        raise _connect_error(connect_dsn, exc) from exc
+    finally:
+        if conn is not None:
+            await conn.close()
+
+
+async def list_remote_tables(
+    *,
+    dsn: str,
+    remote_database_field: str = "",
+) -> list[RemoteSqlTableInfo]:
+    """List user BASE TABLEs with exact COUNT(*) (picker)."""
+    connect_dsn = resolve_connect_dsn(dsn=dsn, remote_database_field=remote_database_field)
+    conn: asyncpg.Connection | None = None
+    try:
+        conn = await asyncpg.connect(dsn=connect_dsn, timeout=10.0, command_timeout=120.0)
+        rows = await conn.fetch(
+            """
+            SELECT table_schema, table_name
+            FROM information_schema.tables
+            WHERE table_type = 'BASE TABLE'
+              AND table_schema NOT IN ('pg_catalog', 'information_schema')
+            ORDER BY table_schema, table_name
+            """
+        )
+        out: list[RemoteSqlTableInfo] = []
+        for r in rows:
+            schema = str(r["table_schema"])
+            table = str(r["table_name"])
+            if not _IDENT_RE.match(schema) or not _IDENT_RE.match(table):
+                continue
+            qualified = f"{quote_ident(schema)}.{quote_ident(table)}"
+            count = int(await conn.fetchval(f"SELECT COUNT(*) FROM {qualified}"))
+            out.append(RemoteSqlTableInfo(schema=schema, table=table, row_count=count))
+        return out
+    except AppError:
+        raise
+    except Exception as exc:
+        raise _connect_error(connect_dsn, exc) from exc
+    finally:
+        if conn is not None:
+            await conn.close()
+
+
 async def probe_remote_postgres(
     *,
     dsn: str,
     remote_table: str,
-    default_sql_table: str = DEFAULT_REMOTE_SQL_TABLE,
+    remote_database_field: str = "",
 ) -> RemoteSqlProbeResult:
     """Connect briefly: list columns + COUNT(*) — never SELECT *."""
     connect_dsn, schema, table = resolve_remote_catalog_target(
         dsn=dsn,
         remote_table_field=remote_table,
-        default_sql_table=default_sql_table,
+        remote_database_field=remote_database_field,
     )
     conn: asyncpg.Connection | None = None
     try:
@@ -216,17 +314,7 @@ async def probe_remote_postgres(
     except AppError:
         raise
     except Exception as exc:
-        host = urlparse(connect_dsn).hostname or "?"
-        raise AppError(
-            code="SERVICE_UNAVAILABLE",
-            title="Service Unavailable",
-            status=503,
-            detail=(
-                f"remote SQL probe failed ({host}): {exc}. "
-                "From k3s-in-WSL use the Windows host gateway "
-                "(e.g. 172.21.176.1), not the LAN IP; ensure /dbname is set."
-            ),
-        ) from exc
+        raise _connect_error(connect_dsn, exc) from exc
     finally:
         if conn is not None:
             await conn.close()

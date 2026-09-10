@@ -6,7 +6,12 @@ import pytest
 
 from prodavan.application.content.remote_sql_probe import (
     parse_remote_table,
+    postgres_dsn_database_name,
+    postgres_dsn_table_query,
+    resolve_connect_dsn,
+    resolve_remote_catalog_target,
     sanitize_env_row_id,
+    strip_postgres_driver_query,
     validate_postgres_dsn,
 )
 from prodavan.application.pod_service.container_env_resolver import (
@@ -55,43 +60,54 @@ def test_foreach_rows_match() -> None:
     assert not foreach_rows_match({**body, "paused": True}, {"paused": False})
 
 
-def test_resolve_remote_catalog_target_db_in_url_defaults_table() -> None:
-    from prodavan.application.content.remote_sql_probe import resolve_remote_catalog_target
+def test_strip_postgres_driver_query_removes_table() -> None:
+    raw = "postgresql://s4b:s4b@h:5433/s4b_catalog?table=public.offers&sslmode=prefer"
+    stripped = strip_postgres_driver_query(raw)
+    assert "table=" not in stripped
+    assert "sslmode=prefer" in stripped
+    assert postgres_dsn_table_query(raw) == "public.offers"
 
-    dsn, schema, table = resolve_remote_catalog_target(
-        dsn="postgresql://s4b:s4b@172.21.176.1:5433/s4b_catalog",
-        remote_table_field="",
+
+def test_resolve_connect_dsn_strips_table_query() -> None:
+    dsn = resolve_connect_dsn(
+        dsn="postgresql://s4b:s4b@h:5433/s4b_catalog?table=public.supplier_price_items"
     )
+    assert "table=" not in dsn
     assert "/s4b_catalog" in dsn
-    assert (schema, table) == ("public", "offers")
 
 
-def test_resolve_remote_catalog_target_db_from_field() -> None:
-    from prodavan.application.content.remote_sql_probe import resolve_remote_catalog_target
-
-    dsn, schema, table = resolve_remote_catalog_target(
-        dsn="postgresql://s4b:s4b@172.21.176.1:5433",
-        remote_table_field="s4b_catalog",
-    )
-    assert dsn.endswith("/s4b_catalog")
-    assert (schema, table) == ("public", "offers")
+def test_resolve_remote_requires_table() -> None:
+    with pytest.raises(AppError, match="remote_table is required"):
+        resolve_remote_catalog_target(
+            dsn="postgresql://s4b:s4b@h:5433/s4b_catalog",
+            remote_table_field="",
+        )
 
 
-def test_resolve_remote_catalog_target_query_table() -> None:
-    from prodavan.application.content.remote_sql_probe import resolve_remote_catalog_target
-
-    _, schema, table = resolve_remote_catalog_target(
-        dsn="postgresql://s4b:s4b@h:5433/s4b_catalog?table=sales.prices",
+def test_resolve_remote_from_query_table() -> None:
+    connect, schema, table = resolve_remote_catalog_target(
+        dsn="postgresql://s4b:s4b@h:5433/s4b_catalog?table=public.supplier_price_items",
         remote_table_field="",
+    )
+    assert "table=" not in connect
+    assert (schema, table) == ("public", "supplier_price_items")
+
+
+def test_resolve_remote_from_field() -> None:
+    connect, schema, table = resolve_remote_catalog_target(
+        dsn="postgresql://s4b:s4b@h:5433/s4b_catalog",
+        remote_table_field="sales.prices",
     )
     assert (schema, table) == ("sales", "prices")
+    assert postgres_dsn_database_name(connect) == "s4b_catalog"
 
 
-def test_postgres_dsn_database_name() -> None:
-    from prodavan.application.content.remote_sql_probe import postgres_dsn_database_name
-
-    assert postgres_dsn_database_name("postgresql://u:p@h:1/s4b_catalog") == "s4b_catalog"
-    assert postgres_dsn_database_name("postgresql://u:p@h:1") is None
+def test_resolve_connect_from_database_field() -> None:
+    dsn = resolve_connect_dsn(
+        dsn="postgresql://s4b:s4b@h:5433",
+        remote_database_field="s4b_catalog",
+    )
+    assert dsn.endswith("/s4b_catalog")
 
 
 @pytest.mark.asyncio
@@ -111,7 +127,8 @@ async def test_probe_remote_postgres_columns_and_count(monkeypatch: pytest.Monke
         async def close(self):
             return None
 
-    async def _connect(**_kwargs):
+    async def _connect(**kwargs):
+        assert "table=" not in str(kwargs.get("dsn") or "")
         return _FakeConn()
 
     monkeypatch.setattr(
@@ -119,8 +136,8 @@ async def test_probe_remote_postgres_columns_and_count(monkeypatch: pytest.Monke
         _connect,
     )
     result = await probe_remote_postgres(
-        dsn="postgresql://u:p@localhost:5432/db",
-        remote_table="public.prices",
+        dsn="postgresql://u:p@localhost:5432/db?table=public.prices",
+        remote_table="",
     )
     assert isinstance(result, RemoteSqlProbeResult)
     assert result.columns == ["sku", "price"]

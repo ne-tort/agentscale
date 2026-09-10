@@ -146,7 +146,7 @@ Product module for computer-equipment matching (hub on **Данные**). Projec
 |-------|-----|--------|
 | Catalog cards, request lines, found offers, selection | Project leaf instance rows | Editable UI + agent via rows API |
 | Local parsed price tables (csv/xlsx → index) | MinIO content blob (**raw SQLite artifact**) | Kept for rematerialize; not copied 1:1 into Pod |
-| Remote PostgreSQL catalogs | External DB (live) | DSN in Vault `secret_ref`; probe columns + `COUNT(*)` only — **no** download into SQLite. From **k3s-in-WSL** use the Windows host **gateway** (e.g. `172.21.176.1`), not the LAN IP (`192.168.0.104` often fails from pods). URL must include `/dbname` (or fill **Имя БД**). Default SQL relation `public.offers` (override with `?table=schema.table`). Sandbox NetworkPolicy allows egress `:5432`/`:5433` (probe itself runs on API). |
+| Remote PostgreSQL catalogs | External DB (live) | DSN in Vault `secret_ref`; probe columns + `COUNT(*)` only — **no** download into SQLite. URL must include `/dbname` (or fill **Имя БД**). SQL table is chosen in UI (**Таблица** picker) or via `?table=` (stripped before connect — never sent to libpq). No silent default to `public.offers`. Sandbox NetworkPolicy allows egress `:5432`/`:5433` (probe itself runs on API). |
 | Normalized merged catalog (local only) | Materialize `merge_mapped_sqlite` | Single RO `/workspace/catalogs/catalog.sqlite` |
 | Remote DSN in Pod | `container_env_secrets` foreach | `EQUIPMENT_CATALOG_DSN_<ROW>` + `EQUIPMENT_REMOTE_CATALOGS` JSON for future MCP |
 

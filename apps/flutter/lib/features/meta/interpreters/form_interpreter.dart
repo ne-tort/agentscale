@@ -17,6 +17,7 @@ import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
 import 'package:prodavan/features/meta/widgets/schema_attrs_field.dart';
 import 'package:prodavan/features/meta/widgets/markdown_editor_field.dart';
 import 'package:prodavan/features/meta/widgets/project_multiselect_field.dart';
+import 'package:prodavan/features/meta/widgets/remote_table_picker_field.dart';
 import 'package:prodavan/features/meta/widgets/build_slots_field.dart';
 import 'package:prodavan/features/meta/widgets/text_editor_nav_field.dart';
 import 'package:prodavan/features/meta/widgets/type_ref_picker_field.dart';
@@ -112,6 +113,9 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     final file = body['source_file'];
     final fileKey = file is Map ? '${file['storage_key']}|${file['asset_id']}' : '$file';
     return [
+      body['remote_table'],
+      body['remote_database'],
+      body['remote_dsn_has_database'],
       body['status'],
       body['row_count'],
       body['columns_json'],
@@ -150,7 +154,12 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     if (name == 'path' && next is String) {
       next = normalizeWorkspaceRelativePath(next);
     }
-    setState(() => _values[name] = next);
+    setState(() {
+      _values[name] = next;
+      if (name == 'remote_database' && next is String && next.trim().isNotEmpty) {
+        _values['remote_dsn_has_database'] = true;
+      }
+    });
     if (widget.readOnly) return;
     final tableSlug = widget.view['table_slug'] as String? ?? '';
     try {
@@ -175,6 +184,10 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       } else {
         final patch = widget.seeds.patchField(_rowId!, name, next);
         if (patch is Future) await patch;
+        if (name == 'remote_database' && next is String && next.trim().isNotEmpty) {
+          final flag = widget.seeds.patchField(_rowId!, 'remote_dsn_has_database', true);
+          if (flag is Future) await flag;
+        }
       }
       if (!mounted || _rowId == null) return;
       final item = widget.seeds.itemById(_rowId!);
@@ -344,6 +357,28 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
           if (open == null || _rowId == null) return;
           open(pickView, rowId: _rowId);
         },
+      );
+    }
+    if (widgetKind == 'remote_table_picker') {
+      if (_rowId == null) {
+        return AppNavPreference(
+          title: label,
+          icon: fieldIcon ?? Icons.table_chart_outlined,
+          enabled: false,
+          onTap: () {},
+        );
+      }
+      return RemoteTablePickerField(
+        label: label,
+        tableName: value?.toString(),
+        readOnly: fieldReadOnly,
+        emptyStyleWarning: fieldCfg?['empty_style']?.toString() == 'warning',
+        emptyLabel: remoteTableEmptyLabel(fieldCfg, l10n, locale),
+        listActionId:
+            fieldCfg?['list_action']?.toString() ?? 'list_catalog_remote_tables',
+        rowId: _rowId!,
+        icon: fieldIcon ?? Icons.table_chart_outlined,
+        onSelected: (table) => _persist(name, table),
       );
     }
     if (widgetKind == 'schema_attrs') {

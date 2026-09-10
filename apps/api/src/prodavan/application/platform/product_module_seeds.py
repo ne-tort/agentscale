@@ -960,8 +960,16 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             {
                 "table_slug": "catalogs",
-                "name": "remote_table",
+                "name": "remote_database",
                 "label": {"ru": "Имя БД", "en": "Database name"},
+                "type": "text",
+                "required": False,
+                "default": "",
+            },
+            {
+                "table_slug": "catalogs",
+                "name": "remote_table",
+                "label": {"ru": "Таблица", "en": "Table"},
                 "type": "text",
                 "required": False,
                 "default": "",
@@ -1539,9 +1547,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "visible_when": {"field": "source_kind", "eq": "remote"},
                         },
                         {
-                            "column": "remote_table",
+                            "column": "remote_database",
                             "widget": "value",
-                            "icon": "table_chart",
+                            "icon": "storage",
                             "hint": "s4b_catalog",
                             "visible_when": {
                                 "all": [
@@ -1549,6 +1557,30 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                     {
                                         "field": "remote_dsn_has_database",
                                         "eq": False,
+                                    },
+                                ]
+                            },
+                        },
+                        {
+                            "column": "remote_table",
+                            "widget": "remote_table_picker",
+                            "icon": "table_chart",
+                            "list_action": "list_catalog_remote_tables",
+                            "empty_style": "warning",
+                            "empty_label": {
+                                "ru": "Не выбрана",
+                                "en": "Not selected",
+                            },
+                            "visible_when": {
+                                "all": [
+                                    {"field": "source_kind", "eq": "remote"},
+                                    {
+                                        "field": "remote_dsn_has_database",
+                                        "eq": True,
+                                    },
+                                    {
+                                        "field": "status",
+                                        "in": ["draft", "ready", "indexing"],
                                     },
                                 ]
                             },
@@ -2407,7 +2439,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "table_slug": "catalogs",
                     "dsn_column": "remote_dsn",
                     "remote_table_column": "remote_table",
-                    "default_remote_table": "public.offers",
+                    "remote_database_column": "remote_database",
                     "status_column": "status",
                     "row_count_column": "row_count",
                     "columns_json_column": "columns_json",
@@ -2417,6 +2449,19 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 },
                 "trigger": {"on": ["row.created", "row.updated"], "async": True},
                 "ui": {"placement": ["toolbar"], "icon": "cloud_sync"},
+            },
+            {
+                "id": "list_catalog_remote_tables",
+                "label": {"ru": "Список таблиц", "en": "List tables"},
+                "kind": "content.list_remote_sql_tables",
+                "enabled": True,
+                "params": {
+                    "table_slug": "catalogs",
+                    "dsn_column": "remote_dsn",
+                    "remote_database_column": "remote_database",
+                },
+                "trigger": {"on": []},
+                "ui": {"placement": []},
             },
             {
                 "id": "select_offer_primary",
