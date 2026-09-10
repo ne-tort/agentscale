@@ -2502,7 +2502,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get sessionRestoreOffline =>
-      'Server unavailable. Check your connection.';
+      'Server unavailable. Check your connection';
 
   @override
   String get settingsLanguage => 'Language';

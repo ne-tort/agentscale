@@ -1376,7 +1376,7 @@
   "employeePasswordChanged": "Password updated",
   "employeeContactEmailSaved": "Email saved",
   "settings": "Settings",
-  "sessionRestoreOffline": "Server unavailable. Check your connection.",
+  "sessionRestoreOffline": "Server unavailable. Check your connection",
   "settingsLanguage": "Language",
   "settingsLanguageEn": "English",
   "settingsLanguageRu": "Русский",

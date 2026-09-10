@@ -17,6 +17,7 @@ class SettingsPage extends StatelessWidget {
     super.key,
     this.embedded = false,
     this.leadingChildren = const [],
+    this.showSignOut = true,
   });
 
   /// When true, render inside shell [IndexedStack] without app bar chrome.
@@ -24,6 +25,9 @@ class SettingsPage extends StatelessWidget {
 
   /// Widgets inserted before language/theme (e.g. company credentials).
   final List<Widget> leadingChildren;
+
+  /// Hide sign-out on login / offline gate (session may still look authenticated).
+  final bool showSignOut;
 
   static const _locales = ['ru', 'en'];
   static const _themes = ['light', 'dark', 'ultraDark'];
@@ -96,7 +100,7 @@ class SettingsPage extends StatelessWidget {
               presentValue: (v) => _refreshLabel(l10n, v),
               onSave: (v) async => appSettings.setAutoRefreshSeconds(v),
             ),
-            if (tokenSession.isAuthenticated)
+            if (showSignOut && tokenSession.isAuthenticated)
               AppNavPreference(
                 title: l10n.authSignOut,
                 icon: Icons.logout_rounded,

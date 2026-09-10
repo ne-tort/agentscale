@@ -11,7 +11,7 @@ import 'package:prodavan/core/theme/app_theme.dart';
 import 'package:prodavan/core/widgets/app_card.dart';
 import 'package:prodavan/core/widgets/app_icon_button.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_section_header.dart';
+import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/auth/login_page.dart';
 import 'package:prodavan/features/settings/open_app_settings.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -128,17 +128,29 @@ class _SessionGatePageState extends State<SessionGatePage> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: AppSpacing.sm,
-                        ),
-                        child: AppSectionHeader(
-                          title: l10n.sessionRestoreOffline,
-                          trailing: AppIconButton(
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.sm,
+                          ),
+                          child: AppIconButton(
                             icon: Icons.settings_outlined,
                             tooltip: l10n.settings,
-                            onPressed: () => openAppSettings(context),
+                            onPressed: () => openAppSettings(
+                              context,
+                              showSignOut: false,
+                            ),
                           ),
+                        ),
+                      ),
+                      EmptyPlaceholder(
+                        icon: Icons.cloud_off_outlined,
+                        title: l10n.sessionRestoreOffline,
+                        fillViewport: false,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.sm,
+                          vertical: AppSpacing.md,
                         ),
                       ),
                       if (_checking)

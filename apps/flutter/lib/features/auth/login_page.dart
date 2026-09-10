@@ -142,7 +142,10 @@ class _LoginPageState extends State<LoginPage> {
                                 trailing: AppIconButton(
                                   icon: Icons.settings_outlined,
                                   tooltip: l10n.settings,
-                                  onPressed: () => openAppSettings(context),
+                                  onPressed: () => openAppSettings(
+                                    context,
+                                    showSignOut: false,
+                                  ),
                                 ),
                               ),
                             ),

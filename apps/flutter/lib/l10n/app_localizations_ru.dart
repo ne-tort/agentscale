@@ -2516,7 +2516,7 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get sessionRestoreOffline =>
-      'Сервер недоступен. Проверьте подключение.';
+      'Сервер недоступен. Проверьте подключение';
 
   @override
   String get settingsLanguage => 'Язык';

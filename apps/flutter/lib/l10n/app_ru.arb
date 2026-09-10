@@ -1378,7 +1378,7 @@
   "employeePasswordChanged": "Пароль обновлён",
   "employeeContactEmailSaved": "Email сохранён",
   "settings": "Настройки",
-  "sessionRestoreOffline": "Сервер недоступен. Проверьте подключение.",
+  "sessionRestoreOffline": "Сервер недоступен. Проверьте подключение",
   "settingsLanguage": "Язык",
   "settingsLanguageEn": "English",
   "settingsLanguageRu": "Русский",
