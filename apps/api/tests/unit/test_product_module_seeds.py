@@ -194,6 +194,9 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert actions["list_catalog_remote_tables"]["kind"] == "content.list_remote_sql_tables"
     assert actions["list_catalog_remote_databases"]["kind"] == "content.list_remote_sql_databases"
     assert "default_remote_table" not in actions["probe_catalog_remote"]["params"]
+    assert "remote_auth_failed" in catalog_cols
+    user_field = next(f for f in settings["ui_json"]["fields"] if f["column"] == "remote_user")
+    assert "any" in user_field["visible_when"]
     tool_names = {t["name"] for t in meta["mcp_tools"]}
     assert "equipment_catalog_query" in tool_names
     assert "equipment_offers_upsert" in tool_names

@@ -166,6 +166,7 @@ abstract final class AppErrors {
       'NOT_FOUND' => l10n.errorNotFound,
       'CONFLICT' || 'PROJECT_EXISTS' => l10n.errorConflict,
       'VALIDATION_ERROR' || 'ROW_VALIDATION' || 'META_VALIDATION' => l10n.errorValidation,
+      'REMOTE_AUTH_FAILED' => l10n.errorInvalidCredentials,
       'RATE_LIMITED' => l10n.errorRateLimited,
       'PROJECT_PAUSED' || 'ENTITY_PAUSED' => l10n.errorProjectPaused,
       'CABINET_ARCHIVED' || 'CABINET_NOT_ARCHIVED' || 'CABINET_NOT_SOFT_DELETED' =>

@@ -7,6 +7,7 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_switch.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
+import 'package:prodavan/features/meta/widgets/remote_database_picker_field.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Selector: remote SQL databases; trailing [AppSwitch] single-select.
@@ -73,6 +74,11 @@ class _RemoteDatabasePickerPageState extends State<RemoteDatabasePickerPage> {
       });
     } catch (e) {
       if (!mounted) return;
+      AppErrors.showSnack(context, e);
+      if (remotePickerIsAuthFailure(e)) {
+        Navigator.of(context).pop();
+        return;
+      }
       setState(() {
         _error = e;
         _loading = false;

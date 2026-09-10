@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/preferences/app_nav_preference.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/features/meta/meta_icon.dart';
@@ -20,6 +21,7 @@ class RemoteDatabasePickerField extends StatelessWidget {
     required this.listActionId,
     required this.rowId,
     required this.onSelected,
+    this.onClosed,
     this.icon = Icons.storage_outlined,
   });
 
@@ -31,6 +33,7 @@ class RemoteDatabasePickerField extends StatelessWidget {
   final String listActionId;
   final String rowId;
   final Future<void> Function(String databaseName) onSelected;
+  final Future<void> Function()? onClosed;
   final IconData icon;
 
   @override
@@ -63,7 +66,11 @@ class RemoteDatabasePickerField extends StatelessWidget {
             ),
           ),
         );
-        if (picked == null || picked.isEmpty) return;
+        if (picked == null || picked.isEmpty) {
+          final closed = onClosed;
+          if (closed != null) await closed();
+          return;
+        }
         await onSelected(picked);
       },
     );
@@ -83,3 +90,8 @@ String remoteDatabaseEmptyLabel(
 
 IconData remoteDatabaseIcon(String? name) =>
     metaIconFromName(name, fallback: Icons.storage_outlined);
+
+bool remotePickerIsAuthFailure(Object error) {
+  if (error is! ProdavanApiException) return false;
+  return error.body.contains('REMOTE_AUTH_FAILED');
+}

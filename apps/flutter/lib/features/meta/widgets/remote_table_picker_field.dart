@@ -20,6 +20,7 @@ class RemoteTablePickerField extends StatelessWidget {
     required this.listActionId,
     required this.rowId,
     required this.onSelected,
+    this.onClosed,
     this.icon = Icons.table_chart_outlined,
   });
 
@@ -31,6 +32,7 @@ class RemoteTablePickerField extends StatelessWidget {
   final String listActionId;
   final String rowId;
   final Future<void> Function(String tableName) onSelected;
+  final Future<void> Function()? onClosed;
   final IconData icon;
 
   @override
@@ -63,7 +65,11 @@ class RemoteTablePickerField extends StatelessWidget {
             ),
           ),
         );
-        if (picked == null || picked.isEmpty) return;
+        if (picked == null || picked.isEmpty) {
+          final closed = onClosed;
+          if (closed != null) await closed();
+          return;
+        }
         await onSelected(picked);
       },
     );

@@ -1023,6 +1023,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             {
                 "table_slug": "catalogs",
+                "name": "remote_auth_failed",
+                "label": {"ru": "Ошибка входа", "en": "Auth failed"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+            },
+            {
+                "table_slug": "catalogs",
                 "name": "artifact_ref",
                 "label": {"ru": "SQLite", "en": "SQLite"},
                 "type": "file_ref",
@@ -1587,9 +1595,31 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "widget": "value",
                             "icon": "person_outline",
                             "visible_when": {
-                                "all": [
-                                    {"field": "source_kind", "eq": "remote"},
-                                    {"field": "remote_dsn_has_user", "eq": False},
+                                "any": [
+                                    {
+                                        "all": [
+                                            {
+                                                "field": "source_kind",
+                                                "eq": "remote",
+                                            },
+                                            {
+                                                "field": "remote_dsn_has_user",
+                                                "eq": False,
+                                            },
+                                        ]
+                                    },
+                                    {
+                                        "all": [
+                                            {
+                                                "field": "source_kind",
+                                                "eq": "remote",
+                                            },
+                                            {
+                                                "field": "remote_auth_failed",
+                                                "eq": True,
+                                            },
+                                        ]
+                                    },
                                 ]
                             },
                         },
@@ -1599,11 +1629,30 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "secret": True,
                             "icon": "lock_outline",
                             "visible_when": {
-                                "all": [
-                                    {"field": "source_kind", "eq": "remote"},
+                                "any": [
                                     {
-                                        "field": "remote_dsn_has_password",
-                                        "eq": False,
+                                        "all": [
+                                            {
+                                                "field": "source_kind",
+                                                "eq": "remote",
+                                            },
+                                            {
+                                                "field": "remote_dsn_has_password",
+                                                "eq": False,
+                                            },
+                                        ]
+                                    },
+                                    {
+                                        "all": [
+                                            {
+                                                "field": "source_kind",
+                                                "eq": "remote",
+                                            },
+                                            {
+                                                "field": "remote_auth_failed",
+                                                "eq": True,
+                                            },
+                                        ]
                                     },
                                 ]
                             },

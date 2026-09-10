@@ -122,6 +122,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       body['remote_dsn_url_has_database'],
       body['remote_dsn_has_user'],
       body['remote_dsn_has_password'],
+      body['remote_auth_failed'],
       body['status'],
       body['row_count'],
       body['columns_json'],
@@ -196,6 +197,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       }
       if (name == 'remote_user' && next is String && next.trim().isNotEmpty) {
         _values['remote_dsn_has_user'] = true;
+        _values['remote_auth_failed'] = false;
       }
     });
     if (widget.readOnly) return;
@@ -229,6 +231,8 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         if (name == 'remote_user' && next is String && next.trim().isNotEmpty) {
           final flag = widget.seeds.patchField(_rowId!, 'remote_dsn_has_user', true);
           if (flag is Future) await flag;
+          final auth = widget.seeds.patchField(_rowId!, 'remote_auth_failed', false);
+          if (auth is Future) await auth;
         }
       }
       if (!mounted || _rowId == null) return;
@@ -316,6 +320,16 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
   }
 
   bool _matchVisibleWhen(Map<String, dynamic> when) {
+    final any = when['any'];
+    if (any is List) {
+      for (final part in any) {
+        if (part is Map &&
+            _matchVisibleWhen(Map<String, dynamic>.from(part))) {
+          return true;
+        }
+      }
+      return false;
+    }
     final all = when['all'];
     if (all is List) {
       for (final part in all) {
@@ -420,6 +434,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
             'list_catalog_remote_databases',
         rowId: _rowId!,
         icon: fieldIcon ?? Icons.storage_outlined,
+        onClosed: _reloadRowAfterFailure,
         onSelected: (db) async {
           await _persist(name, db);
           // Changing DB invalidates table selection.
@@ -448,6 +463,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
             fieldCfg?['list_action']?.toString() ?? 'list_catalog_remote_tables',
         rowId: _rowId!,
         icon: fieldIcon ?? Icons.table_chart_outlined,
+        onClosed: _reloadRowAfterFailure,
         onSelected: (table) => _persist(name, table),
       );
     }
@@ -796,9 +812,11 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
             'remote_dsn_has_password',
             _postgresDsnHasPassword(secret),
           );
+          await _persist('remote_auth_failed', false);
         }
         if (name == 'remote_password') {
           await _persist('remote_dsn_has_password', true);
+          await _persist('remote_auth_failed', false);
         }
         if (columnType == 'secret_ref') {
           if (scope == null) {

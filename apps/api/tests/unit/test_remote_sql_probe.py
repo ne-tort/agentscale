@@ -189,6 +189,31 @@ def test_trailing_slash_dsn_has_no_database() -> None:
     assert postgres_dsn_database_name("postgresql://s4b:s4b@h:5433") is None
 
 
+def test_is_remote_auth_failure() -> None:
+    from prodavan.application.content.remote_sql_probe import is_remote_auth_failure
+
+    assert is_remote_auth_failure(Exception("password authentication failed for user"))
+    assert is_remote_auth_failure(Exception("error 28P01"))
+    assert not is_remote_auth_failure(Exception("connection refused"))
+
+
+def test_product_seed_action_fallback() -> None:
+    from prodavan.application.modules.module_action_executor import _product_seed_action
+
+    action = _product_seed_action(
+        module_id="mod_equipment",
+        action_id="list_catalog_remote_databases",
+    )
+    assert action is not None
+    assert action["kind"] == "content.list_remote_sql_databases"
+    tables = _product_seed_action(
+        module_id="mod_equipment",
+        action_id="list_catalog_remote_tables",
+    )
+    assert tables is not None
+    assert tables["kind"] == "content.list_remote_sql_tables"
+
+
 @pytest.mark.asyncio
 async def test_list_remote_databases(monkeypatch: pytest.MonkeyPatch) -> None:
     from prodavan.application.content.remote_sql_probe import list_remote_databases

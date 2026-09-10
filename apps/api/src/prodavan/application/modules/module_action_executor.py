@@ -26,6 +26,23 @@ from prodavan.infrastructure.secrets.store import get_secret_store
 logger = logging.getLogger(__name__)
 
 
+def _product_seed_action(*, module_id: str, action_id: str) -> dict[str, Any] | None:
+    """Fallback when DB meta lags behind product seeds (avoids picker 404)."""
+    from prodavan.application.platform.product_module_seeds import PRODUCT_MODULES
+
+    for mid, _name, slugs in PRODUCT_MODULES:
+        if mid != module_id:
+            continue
+        actions = slugs.get("actions")
+        if not isinstance(actions, list):
+            return None
+        for item in actions:
+            if isinstance(item, dict) and str(item.get("id")) == action_id:
+                return dict(item)
+        return None
+    return None
+
+
 class ModuleActionExecutor:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -847,6 +864,7 @@ class ModuleActionExecutor:
                     remote_password_field=remote_password,
                     allow_missing_database=True,
                 )
+                body["remote_auth_failed"] = False
                 body[status_col] = "draft"
                 body[error_col] = None
                 body[row_count_col] = 0
@@ -877,6 +895,7 @@ class ModuleActionExecutor:
                     remote_user_field=remote_user,
                     remote_password_field=remote_password,
                 )
+                body["remote_auth_failed"] = False
                 body[status_col] = "draft"
                 body[error_col] = None
                 body[row_count_col] = 0
@@ -925,14 +944,20 @@ class ModuleActionExecutor:
             body[row_count_col] = probed.row_count
             body[status_col] = "ready"
             body[error_col] = None
+            body["remote_auth_failed"] = False
             body[table_col] = f"{probed.schema}.{probed.table}"
             body["probed_remote_key"] = (
                 f"{secret_ref}|{body[table_col]}|{body.get('remote_dsn_has_database')}|"
                 f"{remote_database}"
             )
         except AppError as exc:
-            body[status_col] = "error"
-            body[error_col] = str(exc.detail or exc)[:500]
+            if exc.code == "REMOTE_AUTH_FAILED":
+                body["remote_auth_failed"] = True
+                body[status_col] = "draft"
+                body[error_col] = None
+            else:
+                body[status_col] = "error"
+                body[error_col] = str(exc.detail or exc)[:500]
             await self._update_module_row(
                 cabinet_id=cabinet_id,
                 project_id=project_id,
@@ -1044,11 +1069,42 @@ class ModuleActionExecutor:
             cabinet_id=cabinet_id,
             dsn=dsn,
         )
-        databases = await list_remote_databases(
-            dsn=dsn,
-            remote_user_field=remote_user,
-            remote_password_field=remote_password,
-        )
+        try:
+            databases = await list_remote_databases(
+                dsn=dsn,
+                remote_user_field=remote_user,
+                remote_password_field=remote_password,
+            )
+        except AppError as exc:
+            if exc.code == "REMOTE_AUTH_FAILED":
+                body["remote_auth_failed"] = True
+                body["status"] = "draft"
+                body["error"] = None
+                await self._update_module_row(
+                    cabinet_id=cabinet_id,
+                    project_id=project_id,
+                    module_id=module_id,
+                    table_slug=table_slug,
+                    row_id=row_id,
+                    body=body,
+                    principal=principal,
+                    employee=employee,
+                    run_actions=False,
+                )
+            raise
+        if body.get("remote_auth_failed"):
+            body["remote_auth_failed"] = False
+            await self._update_module_row(
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                row_id=row_id,
+                body=body,
+                principal=principal,
+                employee=employee,
+                run_actions=False,
+            )
         return {
             "kind": "content.list_remote_sql_databases",
             "row_id": row_id,
@@ -1144,12 +1200,43 @@ class ModuleActionExecutor:
                     "(schema.table belongs in Table)"
                 ),
             )
-        tables = await list_remote_tables(
-            dsn=dsn,
-            remote_database_field=remote_database,
-            remote_user_field=remote_user,
-            remote_password_field=remote_password,
-        )
+        try:
+            tables = await list_remote_tables(
+                dsn=dsn,
+                remote_database_field=remote_database,
+                remote_user_field=remote_user,
+                remote_password_field=remote_password,
+            )
+        except AppError as exc:
+            if exc.code == "REMOTE_AUTH_FAILED":
+                body["remote_auth_failed"] = True
+                body["status"] = "draft"
+                body["error"] = None
+                await self._update_module_row(
+                    cabinet_id=cabinet_id,
+                    project_id=project_id,
+                    module_id=module_id,
+                    table_slug=table_slug,
+                    row_id=row_id,
+                    body=body,
+                    principal=principal,
+                    employee=employee,
+                    run_actions=False,
+                )
+            raise
+        if body.get("remote_auth_failed"):
+            body["remote_auth_failed"] = False
+            await self._update_module_row(
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                row_id=row_id,
+                body=body,
+                principal=principal,
+                employee=employee,
+                run_actions=False,
+            )
         return {
             "kind": "content.list_remote_sql_tables",
             "row_id": row_id,
@@ -1180,4 +1267,7 @@ class ModuleActionExecutor:
         for item in await self._list_actions(module_id=module_id):
             if str(item.get("id")) == action_id:
                 return item
+        seeded = _product_seed_action(module_id=module_id, action_id=action_id)
+        if seeded is not None:
+            return seeded
         raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="action not found")

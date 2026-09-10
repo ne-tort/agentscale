@@ -370,6 +370,16 @@ def quote_ident(name: str) -> str:
 
 def _connect_error(dsn: str, exc: Exception) -> AppError:
     host = urlparse(dsn).hostname or "?"
+    if is_remote_auth_failure(exc):
+        return AppError(
+            code="REMOTE_AUTH_FAILED",
+            title="Authentication Failed",
+            status=422,
+            detail=(
+                f"invalid credentials for {host}. "
+                "Enter login and password, then try again."
+            ),
+        )
     return AppError(
         code="SERVICE_UNAVAILABLE",
         title="Service Unavailable",
@@ -378,6 +388,22 @@ def _connect_error(dsn: str, exc: Exception) -> AppError:
             f"remote SQL probe failed ({host}): {exc}. "
             "Check host reachability from the API and credentials / database name."
         ),
+    )
+
+
+def is_remote_auth_failure(exc: BaseException) -> bool:
+    """True for Postgres password / auth failures (show login fields, not status=error)."""
+    text = f"{type(exc).__name__} {exc}".lower()
+    return any(
+        marker in text
+        for marker in (
+            "password authentication failed",
+            "28p01",
+            "authentication failed",
+            "invalidpassword",
+            "invalidauthorization",
+            "no password supplied",
+        )
     )
 
 

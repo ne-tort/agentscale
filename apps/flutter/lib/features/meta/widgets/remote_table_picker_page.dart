@@ -80,6 +80,12 @@ class _RemoteTablePickerPageState extends State<RemoteTablePickerPage> {
       });
     } catch (e) {
       if (!mounted) return;
+      AppErrors.showSnack(context, e);
+      final body = e is ProdavanApiException ? e.body : '';
+      if (body.contains('REMOTE_AUTH_FAILED')) {
+        Navigator.of(context).pop();
+        return;
+      }
       setState(() {
         _error = e;
         _loading = false;
