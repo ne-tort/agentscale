@@ -3,21 +3,20 @@
 # Peak parallel jobs in CI Gate: infra + api + flutter + schemas = 4
 # Persistent /cache volume: Flutter SDK, pub, Poetry, pip (project-dedicated runners).
 #
+# IMPORTANT: do NOT use `docker compose --scale` for this image.
+# Each replica needs its own RUNNER_NAME + CONFIGURED_ACTIONS_RUNNER_FILES_DIR volume,
+# otherwise Docker Desktop / WSL restarts leave corrupt `.runner` files and crash-loop
+# ("already configured" / configuredSettings null).
+#
 # Usage (PowerShell):
 #   copy .env.example .env   # set ACCESS_TOKEN
 #   .\Start-Runners.ps1
-#   docker compose down      # keeps volumes
-#   docker compose down -v   # WIPES caches
-#
-# DNS:
-#   - Runner containers: explicit dns below (never rely on Docker Desktop default alone).
-#   - docker build / sibling containers via docker.sock use the *engine* DNS — see
-#     Ensure-DockerDns.ps1 / daemon.json "dns" (Start-Runners applies this).
+#   docker compose down      # keeps volumes (cache + registration)
+#   docker compose down -v   # WIPES caches AND registration — re-registers next start
 
 name: prodavan-runners
 
 x-cache-env: &cache-env
-  # Shared across all replicas via named volume prodavan-ci-cache
   PRODAVAN_CI_CACHE: /cache
   RUNNER_TOOL_CACHE: /cache/toolcache
   AGENT_TOOLSDIRECTORY: /cache/toolcache
@@ -29,46 +28,96 @@ x-cache-env: &cache-env
   POETRY_VIRTUALENVS_PATH: /cache/poetry-venvs
   POETRY_VIRTUALENVS_IN_PROJECT: "false"
   XDG_CACHE_HOME: /cache/xdg
-  # Jobs reach published ports / WSL portproxy via Docker Desktop gateway
   PRODAVAN_CI_HOST: host.docker.internal
   KUBECONFIG: /home/runner/.kube/prodavan-dev.yaml
 
+x-runner-common: &runner-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: prodavan-github-runner:py312
+  restart: unless-stopped
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
+  dns:
+    - 8.8.8.8
+    - 1.1.1.1
+  dns_opt:
+    - timeout:2
+    - attempts:3
+    - use-vc
+  networks:
+    - runners
+
+x-runner-env: &runner-env
+  <<: *cache-env
+  REPO_URL: ${REPO_URL:-https://github.com/ne-tort/prodavan}
+  ACCESS_TOKEN: ${ACCESS_TOKEN:-}
+  RUNNER_TOKEN: ${RUNNER_TOKEN:-}
+  RUNNER_SCOPE: repo
+  LABELS: ${LABELS:-self-hosted,linux,docker,docker-desktop}
+  DISABLE_AUTO_UPDATE: "true"
+  # Persist registration across Docker Desktop / WSL restarts (required).
+  CONFIGURED_ACTIONS_RUNNER_FILES_DIR: /runner-files
+  # Required when CONFIGURED_ACTIONS_RUNNER_FILES_DIR is set — else entrypoint exits 1
+  # right after "Storing data to /runner-files" (myoung34 PR #427).
+  DISABLE_AUTOMATIC_DEREGISTRATION: "true"
+  # myoung34: ANY non-empty EPHEMERAL enables --ephemeral. Keep empty.
+  EPHEMERAL: ${EPHEMERAL:-}
+
+x-runner-volumes: &runner-volumes
+  - /var/run/docker.sock:/var/run/docker.sock
+  - ${USERPROFILE}/.kube:/home/runner/.kube:ro
+  - prodavan-ci-cache:/cache
+
 services:
-  runner:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: prodavan-github-runner:py312
-    restart: unless-stopped
+  runner-1:
+    <<: *runner-common
+    container_name: prodavan-runners-runner-1
     environment:
-      <<: *cache-env
-      REPO_URL: ${REPO_URL:-https://github.com/ne-tort/prodavan}
-      ACCESS_TOKEN: ${ACCESS_TOKEN:-}
-      RUNNER_TOKEN: ${RUNNER_TOKEN:-}
-      RUNNER_NAME_PREFIX: ${RUNNER_NAME_PREFIX:-dd-prodavan}
-      RUNNER_SCOPE: repo
-      LABELS: ${LABELS:-self-hosted,linux,docker,docker-desktop}
-      DISABLE_AUTO_UPDATE: "true"
-      # myoung34 entrypoint: ANY non-empty EPHEMERAL enables --ephemeral
-      # (EPHEMERAL=false still counts!). Leave empty for persistent pack; set 1 only for one-shot.
-      EPHEMERAL: ${EPHEMERAL:-}
+      <<: *runner-env
+      RUNNER_NAME: ${RUNNER_NAME_PREFIX:-dd-prodavan}-1
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${USERPROFILE}/.kube:/home/runner/.kube:ro
       - prodavan-ci-cache:/cache
-    extra_hosts:
-      # Force IPv4 gateway — avoid AAAA-first flakiness for host.docker.internal
-      - "host.docker.internal:host-gateway"
-    # Explicit upstream resolvers (compose → ExtServers). Do not omit.
-    dns:
-      - 8.8.8.8
-      - 1.1.1.1
-    dns_opt:
-      - timeout:2
-      - attempts:3
-      - use-vc
-    networks:
-      - runners
+      - runner-1-files:/runner-files
+
+  runner-2:
+    <<: *runner-common
+    container_name: prodavan-runners-runner-2
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: ${RUNNER_NAME_PREFIX:-dd-prodavan}-2
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${USERPROFILE}/.kube:/home/runner/.kube:ro
+      - prodavan-ci-cache:/cache
+      - runner-2-files:/runner-files
+
+  runner-3:
+    <<: *runner-common
+    container_name: prodavan-runners-runner-3
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: ${RUNNER_NAME_PREFIX:-dd-prodavan}-3
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${USERPROFILE}/.kube:/home/runner/.kube:ro
+      - prodavan-ci-cache:/cache
+      - runner-3-files:/runner-files
+
+  runner-4:
+    <<: *runner-common
+    container_name: prodavan-runners-runner-4
+    environment:
+      <<: *runner-env
+      RUNNER_NAME: ${RUNNER_NAME_PREFIX:-dd-prodavan}-4
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${USERPROFILE}/.kube:/home/runner/.kube:ro
+      - prodavan-ci-cache:/cache
+      - runner-4-files:/runner-files
 
 networks:
   runners:
@@ -76,6 +125,13 @@ networks:
     driver: bridge
 
 volumes:
-  # Survives `docker compose down` (use down -v to wipe)
   prodavan-ci-cache:
     name: prodavan-ci-cache
+  runner-1-files:
+    name: prodavan-runner-1-files
+  runner-2-files:
+    name: prodavan-runner-2-files
+  runner-3-files:
+    name: prodavan-runner-3-files
+  runner-4-files:
+    name: prodavan-runner-4-files

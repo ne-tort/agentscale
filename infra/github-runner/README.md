@@ -13,7 +13,24 @@
 | CI Images | build-api + build-web = 2 |
 | Verify Dev | 1 |
 
-Канон: `RUNNER_REPLICAS=4`.
+Канон: **4 named services** `runner-1..4` (не `docker compose --scale`).
+
+## Почему дохли после рестарта WSL / Docker Desktop
+
+Образ `myoung34/github-runner` при старте **переконфигурирует** раннер, если нет
+`CONFIGURED_ACTIONS_RUNNER_FILES_DIR` с сохранённым `.runner`.
+
+`--scale 4` даёт четыре контейнера с **общим** (или пустым) registration state → после
+жёсткого рестарта Docker Desktop:
+
+1. локальный `.runner` «уже есть», но `configuredSettings` битый;
+2. deregister падает;
+3. контейнер exit 2 → `restart: unless-stopped` → crash-loop;
+4. на GitHub остаются **offline** `dd-prodavan-*`.
+
+Фикс: у каждого сервиса свой `RUNNER_NAME` + volume `prodavan-runner-N-files` на `/runner-files`
+и **`DISABLE_AUTOMATIC_DEREGISTRATION=true`** (без него myoung34 делает `exit 1` сразу после
+«Storing data to /runner-files»).
 
 ## Quick start
 
@@ -27,8 +44,15 @@ copy .env.example .env   # ACCESS_TOKEN=gh auth token
 
 1. Пишет явный DNS в `%USERPROFILE%\.docker\daemon.json` (`Ensure-DockerDns.ps1`) — нужен **restart Docker Desktop**, если DNS менялся.
 2. Синкает kubeconfig + portproxy (`Sync-KubeForDocker.ps1`).
-3. Нормализует `EPHEMERAL=` (см. ниже) и поднимает `×4` replicas.
+3. Нормализует `EPHEMERAL=` (см. ниже) и поднимает `runner-1..4`.
 4. Удаляет offline registrations на GitHub.
+
+После reboot / WSL restart:
+
+```powershell
+.\Ensure-RunnersHealthy.ps1
+# или просто tools\win-wsl-keepalive.ps1 — он вызывает Ensure
+```
 
 Для **Verify Dev** (kubectl к API k3s из контейнера): Sync или `TF_VAR_export_docker_kubeconfig=true` при apply.  
 Это **не** нужно, чтобы открыть страницу в браузере.
@@ -39,7 +63,8 @@ docker compose ps
 gh api repos/ne-tort/prodavan/actions/runners --jq '.runners[]|{name,status,busy}'
 ```
 
-Stop: `docker compose down` · wipe cache: `docker compose down -v`
+Stop: `docker compose down` · wipe cache+reg: `docker compose down -v`  
+Reset только registration: `$env:PRODAVAN_RUNNER_RESET_REG=1; .\Start-Runners.ps1`
 
 ## DNS
 
@@ -55,7 +80,7 @@ Stop: `docker compose down` · wipe cache: `docker compose down -v`
 Проверка:
 
 ```powershell
-docker compose exec runner cat /etc/resolv.conf
+docker compose exec runner-1 cat /etc/resolv.conf
 # ExtServers: [8.8.8.8 1.1.1.1]
 
 docker run --rm alpine getent hosts host.docker.internal
@@ -78,6 +103,19 @@ EPHEMERAL=1       →  one-job + exit (только если сознатель�
 
 В логах должно быть **Listening for Jobs** и **не** должно быть `Ephemeral option is enabled`.
 
-## Cache / labels / files
+## Session Conflict после hard-kill
 
-См. volume `prodavan-ci-cache`, labels `self-hosted,linux,docker`, `Start-Runners.ps1`, `Sync-KubeForDocker.ps1`, `Ensure-DockerDns.ps1`.
+`DISABLE_AUTOMATIC_DEREGISTRATION=true` обязателен вместе с persist-volume, но после
+жёсткого kill (Docker Desktop / WSL) GitHub ещё держит старую session → в логах
+`A session for this runner already exists` / `Conflict. Retrying…`.
+
+`Ensure-RunnersHealthy.ps1` (из keepalive) детектит это по логам за последние 5 минут
+и делает wipe registration volumes + re-register. Не делай `docker compose restart`
+пока runners busy — лучше дождаться idle или вызвать Ensure.
+
+| Что | Где |
+|-----|-----|
+| Общий CI cache | volume `prodavan-ci-cache` → `/cache` |
+| Registration per runner | `prodavan-runner-1-files` … `-4-files` → `/runner-files` |
+| Labels | `self-hosted,linux,docker,docker-desktop` |
+| Heal | `Ensure-RunnersHealthy.ps1` (из keepalive) |

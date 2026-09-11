@@ -33,3 +33,10 @@ if (Test-Path $repoSync) {
   Write-Host "Refreshing Windows kubeconfig for Docker runners..."
   try { & $repoSync } catch { Write-Warning $_.Exception.Message }
 }
+
+# Heal Actions runners after Docker Desktop / WSL reboot (crash-loop on stale .runner).
+$ensureRunners = Join-Path $repoRoot 'infra\github-runner\Ensure-RunnersHealthy.ps1'
+if (Test-Path $ensureRunners) {
+  Write-Host "Ensuring Docker GitHub runners are healthy..."
+  try { & $ensureRunners } catch { Write-Warning $_.Exception.Message }
+}
