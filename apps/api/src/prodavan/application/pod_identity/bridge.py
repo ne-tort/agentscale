@@ -33,6 +33,10 @@ def module_actions_scope(module_id: str) -> str:
     return f"module:{module_id}:actions"
 
 
+def module_meta_scope(module_id: str) -> str:
+    return f"module:{module_id}:meta"
+
+
 def default_platform_scopes() -> list[str]:
     return [
         SCOPE_AGENT_EVENTS,
@@ -54,6 +58,7 @@ def build_launch_scopes(module_ids: list[str]) -> list[str]:
             continue
         scopes.append(module_rows_scope(mid_s))
         scopes.append(module_actions_scope(mid_s))
+        scopes.append(module_meta_scope(mid_s))
     # stable unique order
     seen: set[str] = set()
     out: list[str] = []

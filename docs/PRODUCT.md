@@ -71,7 +71,7 @@ Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** depe
 | K8s adapter | `infrastructure/k8s/pod_runtime.py`, overlay `infra/k3s/overlays/e2e/` |
 | Backend e2e (API, не UI) | `apps/api/tests/integration/`, `tests/e2e/k8s/`, `tests/e2e/live/` |
 | Document Store (Mongo) | `application/document_store/`, admin `/admin/document-store`, [ADR](02-architecture/ADR-document-store-mongo.md) |
-| Tenant Infra Gateway | `application/tenant_infra/` — Cache/Docs/UserDB/Events/Objects via `:8001` + Bridge scopes + company quotas; [as-built](target/12-layer-docs/tenant-infra-gateway.md) |
+| Tenant Infra Gateway | `application/tenant_infra/` — Cache/Docs/UserDB/Events/Objects + module data/meta/actions via `:8001` + Bridge scopes + company quotas; first-party MCP `prodavan-modules`; [as-built](target/12-layer-docs/tenant-infra-gateway.md) |
 | Agent + chat + files | `application/agent/`, `api/v1/agent.py`, content/assets |
 | Flutter UI (частично) | `apps/flutter/lib/features/` |
 | **Employee UI канон** | [`employee-ui/README.md`](employee-ui/README.md) |
@@ -167,7 +167,7 @@ Product module for computer-equipment matching (hub on **Данные**). Projec
 
 Agent fills `found_offers` / `found_count` through rows APIs (or declarative `mcp_tools`); MCP RO tools query the merged SQLite for **local** catalogs. Live remote SQL via MCP is a follow-up (DSN already in Pod env).
 
-**S4B:** hub tile → settings form; password via cabinet secrets → Pod `S4B_PASSWORD`; zip materialize reuses `mcp_package` path. Redis/Kafka/Mongo/MinIO from Pod — **not** direct. Pod reaches platform only via **Pod API `:8001`** + Bridge JWT (scopes): `/infra`, `/modules`, `/agent`, `/internal/pods` (incl. workspace-archive hydrate). See [tenant-infra-gateway](target/12-layer-docs/tenant-infra-gateway.md). App Document Store (Mongo) is in-proc for platform BCs only — [ADR](02-architecture/ADR-document-store-mongo.md).
+**S4B:** hub tile → settings form; password via cabinet secrets → Pod `S4B_PASSWORD`; zip materialize reuses `mcp_package` path. Redis/Kafka/Mongo/MinIO from Pod — **not** direct. Pod reaches platform only via **Pod API `:8001`** + Bridge JWT (scopes): `/infra`, `/modules` (data + **meta documents** + actions), `/agent`, `/internal/pods` (incl. workspace-archive hydrate). First-party MCP `prodavan-modules` is materialized into the workspace for agent tool access. See [tenant-infra-gateway](target/12-layer-docs/tenant-infra-gateway.md). App Document Store (Mongo) is in-proc for platform BCs only — [ADR](02-architecture/ADR-document-store-mongo.md).
 
 Meta primitives: hub + collections, `file_ref`, `secret_ref`, `column_map`, master–detail, `data.select_row`, `content.index_tabular`, `content.probe_remote_sql`, `merge_mapped_sqlite`, `foreach_rows` env. See [meta-syntax](target/06-modules/meta-syntax/).
 

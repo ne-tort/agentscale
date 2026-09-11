@@ -33,7 +33,7 @@ Presigned URLs still need egress to MinIO or a public proxy. API-mediated archiv
 
 ## Scopes
 
-`agent:events`, `internal:credentials`, `internal:hydrate`, `infra:cache`, `infra:docs`, `infra:userdb`, `infra:events`, `infra:objects`, `module:{id}:rows`, `module:{id}:actions`.
+`agent:events`, `internal:credentials`, `internal:hydrate`, `infra:cache`, `infra:docs`, `infra:userdb`, `infra:events`, `infra:objects`, `module:{id}:rows`, `module:{id}:actions`, `module:{id}:meta`.
 
 `main_pod` uses a slim lifespan (DB/Redis/Mongo/FileStore/Kafka producer only — no workers/samplers/bootstrap).
 
@@ -46,6 +46,13 @@ Presigned URLs still need egress to MinIO or a public proxy. API-mediated archiv
 | UserDB | `/infra/userdb/tables…` | DB `prodavan_userdb` schema/project | ops/min, max tables/rows/bytes; no raw SQL |
 | Events | `/infra/events` | project event log (+ Kafka mirror) | ops/min, max payload, max backlog, retention |
 | Objects | `/infra/objects` | Content BC tags | ops/min, max objects/bytes |
+| Modules data | `/projects/{id}/modules/…/data/…` | Bridge + `module:{id}:rows`; SoT write ACL | bound modules only |
+| Modules meta | `/projects/{id}/modules/…/meta/documents/…` | Bridge + `module:{id}:meta`; **instance SoT only** (local / unlocked global) | marks workspace outdated |
+| Modules actions | `/projects/{id}/modules/…/actions/…/invoke` | Bridge + `module:{id}:actions` | same as UI actions |
+
+## First-party MCP (`prodavan-modules`)
+
+On materialize, workspace gets `packages/prodavan-modules/server.py` and an entry in `mcp.json` / OpenClaw `mcp.servers`. Tools wrap the Pod module routes using `PRODAVAN_API_BASE_URL` + `PRODAVAN_AUTH_TOKEN` + `PRODAVAN_PROJECT_ID`.
 
 ## Lifecycle
 

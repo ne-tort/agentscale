@@ -169,6 +169,15 @@ class ProjectMaterializeService:
             writer=writer, cabinet_id=cabinet_id, ops=ops
         )
 
+        from prodavan.application.mcp.platform_modules_mcp import (
+            materialize_platform_modules_mcp,
+            merge_platform_modules_mcp,
+        )
+
+        platform_pkg = materialize_platform_modules_mcp(writer)
+        mcp_packages = merge_platform_modules_mcp(mcp_packages, platform_pkg=platform_pkg)
+        written.append(f"packages/{platform_pkg['name']}/server.py")
+
         module_paths: dict[str, list[str]] = dict(manifest or {})
         for op in ops:
             if op.workspace_path:
@@ -186,8 +195,7 @@ class ProjectMaterializeService:
             agents_source = "default"
 
         writer.write_agents(cabinet_name=cab_name, project_name=proj_name, agents_md=agents_md)
-        if not mcp_packages:
-            writer.write_mcp_config(cabinet_id=cabinet_id, packages=[])
+        writer.write_mcp_config(cabinet_id=cabinet_id, packages=mcp_packages)
 
         await self._write_openclaw_config(
             session=session,

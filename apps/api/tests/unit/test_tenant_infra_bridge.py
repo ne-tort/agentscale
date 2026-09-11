@@ -12,6 +12,7 @@ from prodavan.application.pod_identity.bridge import (
     bump_pod_bridge_generation,
     build_launch_scopes,
     mint_pod_bridge_token,
+    module_meta_scope,
     module_rows_scope,
     verify_pod_bridge_token,
 )
@@ -36,6 +37,7 @@ async def test_mint_verify_and_revoke(monkeypatch) -> None:
     )
     assert SCOPE_INFRA_CACHE in claims.scopes
     assert module_rows_scope("mod-a") in claims.scopes
+    assert module_meta_scope("mod-a") in claims.scopes
     verified = await verify_pod_bridge_token(token)
     assert verified.project_id == "proj-1"
     await bump_pod_bridge_generation("pod-1")
@@ -124,6 +126,8 @@ def test_allowlist_allows_project_agent_and_archive_paths() -> None:
 
     assert _POD_SURFACE_RE.match("/api/v1/projects/prj_x/agent/sessions/s1/events")
     assert _POD_SURFACE_RE.match("/api/v1/projects/prj_x/modules")
+    assert _POD_SURFACE_RE.match("/api/v1/projects/prj_x/modules/mod_a/meta/documents/tables")
+    assert _POD_SURFACE_RE.match("/api/v1/projects/prj_x/modules/mod_a/actions/x/invoke")
     assert _POD_SURFACE_RE.match("/api/v1/projects/prj_x/infra")
     assert _POD_SURFACE_RE.match("/api/v1/internal/pods")
     assert _POD_SURFACE_RE.match("/api/v1/internal/pods/pod_x/workspace-archive")

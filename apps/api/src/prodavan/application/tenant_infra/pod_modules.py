@@ -1,4 +1,4 @@
-"""Pod-facing module data access under Bridge scopes."""
+"""Pod-facing module meta + data access under Bridge scopes."""
 
 from __future__ import annotations
 
@@ -7,26 +7,47 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.modules.module_binding_service import ModuleBindingService
-from prodavan.application.modules.module_instance_service import ModuleInstanceService
+from prodavan.application.modules.module_instance_service import (
+    OWNER_PROJECT,
+    ModuleInstanceService,
+)
+from prodavan.application.modules.module_meta_service import ModuleMetaDocumentService
+from prodavan.application.modules.module_meta_validator import (
+    META_DOCUMENT_SLUGS,
+    validate_document_body,
+)
 from prodavan.application.modules.module_row_helpers import (
     check_table_slug,
     ensure_row_body,
     merge_column_defaults,
     validate_row_with_columns,
 )
-from prodavan.application.pod_identity.bridge import PodBridgeClaims, module_rows_scope
+from prodavan.application.pod_identity.bridge import (
+    PodBridgeClaims,
+    module_actions_scope,
+    module_meta_scope,
+    module_rows_scope,
+)
 from prodavan.application.projects.project_runtime_module_service import ProjectRuntimeModuleService
 from prodavan.domain.errors import AppError
+from prodavan.domain.identity import ROLE_PLATFORM_ADMIN, Principal
+from prodavan.domain.modules import ModuleBindKind
+from prodavan.infrastructure.persistence.models.modules import ModuleRow
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+# Alias kept for existing imports / tests.
+PodModuleAccessService = None  # set below after class def
 
 
 class PodModuleDataService:
-    """Rows CRUD for Project Pods — Bridge JWT + module:{id}:rows scope only."""
+    """Meta + rows + actions for Project Pods — Bridge JWT + module scopes."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._runtime = ProjectRuntimeModuleService(session)
         self._instances = ModuleInstanceService(session)
+        self._bindings = ModuleBindingService(session)
+        self._template_meta = ModuleMetaDocumentService(session)
 
     async def _require_project_row(self, project_id: str, bridge: PodBridgeClaims) -> ProjectRow:
         bridge.require_project(project_id)
@@ -44,6 +65,167 @@ class PodModuleDataService:
 
     def _require_module_rows(self, bridge: PodBridgeClaims, module_id: str) -> None:
         bridge.require_scope(module_rows_scope(module_id))
+
+    def _require_module_meta(self, bridge: PodBridgeClaims, module_id: str) -> None:
+        bridge.require_scope(module_meta_scope(module_id))
+
+    def _require_module_actions(self, bridge: PodBridgeClaims, module_id: str) -> None:
+        bridge.require_scope(module_actions_scope(module_id))
+
+    def _pod_principal(self, bridge: PodBridgeClaims) -> Principal:
+        """Privileged principal for nested ModuleActionExecutor after Bridge ACL."""
+        return Principal(
+            sub=f"pod:{bridge.pod_id}",
+            roles=frozenset({ROLE_PLATFORM_ADMIN}),
+        )
+
+    async def _binding_flags(
+        self, *, project_id: str, module_id: str
+    ) -> tuple[str, bool, bool]:
+        binding = await self._bindings.get_project_binding(module_id, project_id)
+        if binding is None:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="module is not bound to project",
+            )
+        bind_kind = str(binding.bind_kind or ModuleBindKind.LOCAL)
+        data_writable = bind_kind == ModuleBindKind.LOCAL or bool(binding.child_may_edit)
+        meta_writable = data_writable
+        return bind_kind, meta_writable, data_writable
+
+    async def list_bound_modules(
+        self, *, bridge: PodBridgeClaims, project_id: str
+    ) -> list[dict[str, Any]]:
+        await self._require_project_row(project_id, bridge)
+        module_ids = await self._bindings.list_module_ids_for_project(project_id)
+        out: list[dict[str, Any]] = []
+        for mid in module_ids:
+            mod = await self._session.get(ModuleRow, mid)
+            bind_kind, meta_writable, data_writable = await self._binding_flags(
+                project_id=project_id, module_id=mid
+            )
+            inst = await self._instances.get_instance(
+                owner_kind=OWNER_PROJECT, owner_id=project_id, module_id=mid
+            )
+            if inst is None:
+                inst = await self._instances.resolve_sot_instance(
+                    module_id=mid,
+                    owner_kind=OWNER_PROJECT,
+                    owner_id=project_id,
+                )
+            out.append(
+                {
+                    "id": mid,
+                    "module_id": mid,
+                    "name": mod.name if mod is not None else mid,
+                    "status": mod.status if mod is not None else None,
+                    "bind_kind": bind_kind,
+                    "meta_writable": meta_writable,
+                    "data_writable": data_writable,
+                    "instance_id": inst.id if inst else None,
+                }
+            )
+        return out
+
+    async def list_meta_documents(
+        self, *, bridge: PodBridgeClaims, project_id: str, module_id: str
+    ) -> list[dict[str, Any]]:
+        await self._require_project_row(project_id, bridge)
+        self._require_module_meta(bridge, module_id)
+        inst = await self._runtime._sot_for_project(
+            project_id=project_id, module_id=module_id, write=False
+        )
+        docs = await self._instances.list_meta_documents(instance_id=inst.id)
+        if docs:
+            return [
+                {"module_id": module_id, "instance_id": inst.id, "slug": d["slug"]}
+                for d in docs
+            ]
+        # Fall back to template slugs when instance has no docs yet.
+        template = await self._template_meta.list_documents(module_id=module_id)
+        return [
+            {"module_id": module_id, "instance_id": inst.id, "slug": d["slug"]}
+            for d in template
+        ]
+
+    async def get_meta_document(
+        self,
+        *,
+        bridge: PodBridgeClaims,
+        project_id: str,
+        module_id: str,
+        slug: str,
+    ) -> dict[str, Any]:
+        await self._require_project_row(project_id, bridge)
+        self._require_module_meta(bridge, module_id)
+        slug = (slug or "").strip()
+        if slug not in META_DOCUMENT_SLUGS:
+            raise AppError(
+                code="META_VALIDATION",
+                title="Meta validation error",
+                status=422,
+                detail=f"unknown meta document slug: {slug}",
+            )
+        inst = await self._runtime._sot_for_project(
+            project_id=project_id, module_id=module_id, write=False
+        )
+        try:
+            doc = await self._instances.get_meta_document(instance_id=inst.id, slug=slug)
+        except AppError:
+            doc = await self._template_meta.get_document(module_id=module_id, slug=slug)
+        return {"module_id": module_id, "instance_id": inst.id, **doc}
+
+    async def put_meta_document(
+        self,
+        *,
+        bridge: PodBridgeClaims,
+        project_id: str,
+        module_id: str,
+        slug: str,
+        body: Any,
+    ) -> dict[str, Any]:
+        await self._require_project_row(project_id, bridge)
+        self._require_module_meta(bridge, module_id)
+        slug = (slug or "").strip()
+        if slug not in META_DOCUMENT_SLUGS:
+            raise AppError(
+                code="META_VALIDATION",
+                title="Meta validation error",
+                status=422,
+                detail=f"unknown meta document slug: {slug}",
+            )
+        validate_document_body(slug, body)
+        inst = await self._runtime._sot_for_project(
+            project_id=project_id, module_id=module_id, write=True
+        )
+        # Writable SoT must be the project leaf (local copy) or unlocked global —
+        # put only on the resolved instance, never the catalog template.
+        doc = await self._instances.put_meta_document(
+            instance_id=inst.id, slug=slug, body=body
+        )
+        await self._session.flush()
+        from prodavan.application.projects.workspace_outdated import (
+            mark_workspace_outdated_for_project,
+        )
+        from prodavan.application.projects.workspace_sync_policy import (
+            defer_or_schedule_project_sync,
+        )
+
+        await mark_workspace_outdated_for_project(self._session, project_id=project_id)
+        await self._session.commit()
+        notification = await defer_or_schedule_project_sync(
+            self._session,
+            project_id=project_id,
+            source="pod_module_meta",
+        )
+        return {
+            "module_id": module_id,
+            "instance_id": inst.id,
+            **doc,
+            "rematerialize": notification.rematerialize_alias(),
+        }
 
     async def list_data_rows(
         self,
@@ -165,8 +347,37 @@ class PodModuleDataService:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
         return {"module_id": module_id, "deleted": True, "row_id": row_id}
 
-    async def list_bound_modules(
-        self, *, bridge: PodBridgeClaims, project_id: str
-    ) -> list[str]:
-        await self._require_project_row(project_id, bridge)
-        return await ModuleBindingService(self._session).list_module_ids_for_project(project_id)
+    async def invoke_action(
+        self,
+        *,
+        bridge: PodBridgeClaims,
+        project_id: str,
+        module_id: str,
+        action_id: str,
+        row_id: str | None = None,
+    ) -> dict[str, Any]:
+        project = await self._require_project_row(project_id, bridge)
+        self._require_module_actions(bridge, module_id)
+        binding = await self._bindings.get_project_binding(module_id, project_id)
+        if binding is None:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="module is not bound to project",
+            )
+        from prodavan.application.modules.module_action_executor import ModuleActionExecutor
+
+        result = await ModuleActionExecutor(self._session).invoke(
+            cabinet_id=project.cabinet_id,
+            module_id=module_id,
+            action_id=action_id,
+            principal=self._pod_principal(bridge),
+            employee=None,
+            row_id=row_id,
+            project_id=project_id,
+        )
+        return {"module_id": module_id, **result}
+
+
+PodModuleAccessService = PodModuleDataService
