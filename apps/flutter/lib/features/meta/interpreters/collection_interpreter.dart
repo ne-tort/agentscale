@@ -393,6 +393,18 @@ class CollectionViewInterpreter extends StatelessWidget {
               onPressed: () => _invokeAction(context, actionId, rowId: contextRowId),
             ),
           );
+        } else if ((kind == 'open_view' || kind == 'open_form') && onOpenForm != null) {
+          final targetView = t['view'] as String? ?? '';
+          if (targetView.isEmpty) continue;
+          final label = resolveMetaLabel(t['label'], l10n, locale: Localizations.localeOf(context));
+          final iconName = t['icon'] as String?;
+          items.add(
+            AppIconButton(
+              icon: metaIconFromName(iconName),
+              tooltip: label.isNotEmpty ? label : targetView,
+              onPressed: () => onOpenForm!(targetView),
+            ),
+          );
         }
       }
     }

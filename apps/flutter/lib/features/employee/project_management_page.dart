@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/containers/project_container_poll.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
@@ -85,7 +86,14 @@ class _ProjectManagementPageState extends State<ProjectManagementPage> {
     AppSnackBar.info(context, l10n.projectResumeStartingSnack);
     setState(() => _resuming = true);
     try {
-      await workContext.api.resumeProject(widget.projectId);
+      try {
+        await workContext.api.resumeProject(widget.projectId);
+      } on ProdavanApiException catch (e) {
+        if (e.statusCode != 422 ||
+            !e.body.toLowerCase().contains('not paused')) {
+          rethrow;
+        }
+      }
       final container = await pollProjectContainerUntilSettled(
         api: workContext.api,
         projectId: widget.projectId,
@@ -96,8 +104,12 @@ class _ProjectManagementPageState extends State<ProjectManagementPage> {
         AppErrors.showSnack(context, failure);
       }
       await _load();
+      workContext.notifyProjectLifecycleChanged();
     } catch (e) {
-      if (mounted) AppErrors.showSnack(context, e);
+      if (mounted) {
+        await _load();
+        AppErrors.showSnack(context, e);
+      }
     } finally {
       if (mounted) setState(() => _resuming = false);
     }

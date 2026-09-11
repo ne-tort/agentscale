@@ -1861,6 +1861,9 @@ class AppLocalizationsRu extends AppLocalizations {
       'Проект не отвечает. Перезагрузить?';
 
   @override
+  String get projectChatNeedsUpdate => 'Проект требует обновления. Обновить?';
+
+  @override
   String get projectChatCancelled => 'Отменено';
 
   @override

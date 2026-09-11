@@ -31,6 +31,10 @@ class ChatComposer extends StatefulWidget {
     this.wakeMode = false,
     this.waking = false,
     this.onWake,
+    this.updateMode = false,
+    this.updating = false,
+    this.onUpdate,
+    this.onDismissUpdate,
   });
 
   final ChatComposerSend onSend;
@@ -46,6 +50,11 @@ class ChatComposer extends StatefulWidget {
   /// In-progress resume/reload — spinner on wake panel, ignore further taps.
   final bool waking;
   final VoidCallback? onWake;
+  /// Workspace outdated — block input; tap updates, X dismisses the mark.
+  final bool updateMode;
+  final bool updating;
+  final VoidCallback? onUpdate;
+  final VoidCallback? onDismissUpdate;
 
   @override
   State<ChatComposer> createState() => _ChatComposerState();
@@ -280,12 +289,20 @@ class _ChatComposerState extends State<ChatComposer> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final scheme = Theme.of(context).colorScheme;
-    final multiline = !widget.wakeMode && _computeMultiline(context);
+    final multiline = !widget.wakeMode && !widget.updateMode && _computeMultiline(context);
+
     if (multiline != _multiline) {
       _multiline = multiline;
     }
 
-    final field = widget.wakeMode ? _wakePanel(context) : _textField(context);
+    final Widget field;
+    if (widget.wakeMode) {
+      field = _wakePanel(context);
+    } else if (widget.updateMode) {
+      field = _updatePanel(context);
+    } else {
+      field = _textField(context);
+    }
 
     return SafeArea(
       top: false,
@@ -321,7 +338,7 @@ class _ChatComposerState extends State<ChatComposer> {
                 horizontal: AppSpacing.xs,
                 vertical: AppSpacing.xs,
               ),
-              child: widget.wakeMode
+              child: (widget.wakeMode || widget.updateMode)
                   ? field
                   : multiline
                       ? Column(
@@ -350,6 +367,48 @@ class _ChatComposerState extends State<ChatComposer> {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _updatePanel(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final warning = context.appColors.warning;
+    final label = widget.disabledHint ?? l10n.projectChatNeedsUpdate;
+    final canTap = !widget.updating && widget.onUpdate != null;
+    return Padding(
+      padding: EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.sm,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: MouseRegion(
+              cursor: canTap ? SystemMouseCursors.click : SystemMouseCursors.basic,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: canTap ? widget.onUpdate : null,
+                child: Text(label, style: TextStyle(color: warning)),
+              ),
+            ),
+          ),
+          if (widget.updating)
+            SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2, color: warning),
+            )
+          else if (widget.onDismissUpdate != null)
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+              tooltip: l10n.commonCancel,
+              onPressed: widget.onDismissUpdate,
+              icon: Icon(Icons.close, color: warning),
+            ),
+        ],
       ),
     );
   }

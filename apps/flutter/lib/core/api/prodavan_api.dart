@@ -863,6 +863,21 @@ class ProdavanApi {
     }
   }
 
+  Future<Map<String, dynamic>> dismissWorkspaceOutdated(String projectId) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.post(
+        _uri('/projects/$projectId/dismiss-workspace-outdated'),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
   Future<Map<String, dynamic>> resetProjectAgent(String projectId) async {
     final prevProj = this.projectId;
     this.projectId = projectId;

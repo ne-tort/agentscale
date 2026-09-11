@@ -7,6 +7,7 @@ from prodavan.domain.modules.types import (
     ModuleStatus,
     default_cabinet_bind_kind,
     default_child_may_edit,
+    default_company_grant_bind_kind,
     default_project_bind_kind,
 )
 
@@ -17,5 +18,6 @@ __all__ = [
     "ModuleStatus",
     "default_cabinet_bind_kind",
     "default_child_may_edit",
+    "default_company_grant_bind_kind",
     "default_project_bind_kind",
 ]

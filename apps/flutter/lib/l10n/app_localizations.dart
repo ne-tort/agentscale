@@ -3344,6 +3344,12 @@ abstract class AppLocalizations {
   /// **'Project not responding. Reload?'**
   String get projectChatWakeUnresponsive;
 
+  /// No description provided for @projectChatNeedsUpdate.
+  ///
+  /// In en, this message translates to:
+  /// **'Project needs an update. Update?'**
+  String get projectChatNeedsUpdate;
+
   /// No description provided for @projectChatCancelled.
   ///
   /// In en, this message translates to:

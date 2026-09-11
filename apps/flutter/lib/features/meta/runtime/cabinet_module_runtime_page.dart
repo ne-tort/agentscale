@@ -81,11 +81,7 @@ class _CabinetModuleRuntimePageState extends State<CabinetModuleRuntimePage> {
             : l10n.cabinetModuleRematerializeScheduled(count);
         AppSnackBar.info(context, message);
       };
-      data.onWorkspaceOutdated = () {
-        if (!mounted) return;
-        final l10n = AppLocalizations.of(context);
-        AppSnackBar.info(context, l10n.cabinetModuleWorkspaceOutdated);
-      };
+      data.onWorkspaceOutdated = null;
       await data.loadAll();
       if (!mounted) return;
       setState(() {

@@ -585,6 +585,28 @@ class ProjectCommand:
 
         return self._rematerialize_result(row, mat, live_pod)
 
+    async def dismiss_workspace_outdated(
+        self,
+        *,
+        project_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        """Clear workspace_outdated_at without rematerialize (user declined update)."""
+        row = await self._access.require_access(
+            project_id=project_id,
+            principal=principal,
+            employee=employee,
+            write=True,
+            allow_paused=True,
+        )
+        from prodavan.application.projects.workspace_outdated import clear_workspace_outdated
+
+        clear_workspace_outdated(row)
+        await self._session.commit()
+        await self._session.refresh(row)
+        return await self._project_public(row)
+
     async def pause(
         self,
         *,
@@ -644,6 +666,11 @@ class ProjectCommand:
             write=True,
             allow_paused=True,
         )
+        # Idempotent: already active or resume in flight — do not 422 (UI double-tap / race).
+        if row.status == ProjectStatus.ACTIVE:
+            return await self._project_public(row)
+        if row.launch_phase == "resuming":
+            return await self._project_public(row)
         if row.status not in {ProjectStatus.PAUSED, ProjectStatus.COMPLETED}:
             raise AppError(
                 code="VALIDATION_ERROR",

@@ -693,6 +693,18 @@ async def sync_project(
     )
 
 
+@router.post("/projects/{project_id}/dismiss-workspace-outdated")
+async def dismiss_workspace_outdated(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await ProjectCommand(session).dismiss_workspace_outdated(
+        project_id=project_id, principal=principal, employee=employee
+    )
+
+
 @router.post("/projects/{project_id}/agent/reset")
 async def reset_project_agent(
     project_id: str,

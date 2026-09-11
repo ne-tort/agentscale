@@ -123,6 +123,13 @@ class ModuleMetaDocumentService:
             self._session.add(row)
         else:
             row.body = body
+        from prodavan.application.projects.workspace_outdated import (
+            mark_workspace_outdated_for_module,
+        )
+
+        await mark_workspace_outdated_for_module(
+            self._session, module_id=module_id, source="module_meta"
+        )
         await self._session.commit()
         await self._mirror_to_owner_instance(module_id=module_id, slug=slug, body=body)
         return await self.get_document(module_id=module_id, slug=slug)

@@ -153,6 +153,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "trusted_sellers",
         "web_shops",
         "s4b_settings",
+        "equipment_mcp",
     }
     kinds = {a["kind"] for a in meta["actions"]}
     assert "content.index_tabular" in kinds
@@ -378,6 +379,13 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     catalogs_list = next(v for v in meta["views"] if v["slug"] == "catalogs_list")
     assert all(c["field"] != "status" for c in catalogs_list["ui_json"]["columns"])
     assert all(c["field"] != "added_at" for c in catalogs_list["ui_json"]["columns"])
+    toolbar = catalogs_list["ui_json"].get("toolbar") or []
+    assert any(
+        t.get("kind") == "open_view" and t.get("view") == "equipment_mcp_list" for t in toolbar
+    )
+    assert any(t.get("slug") == "equipment_mcp" for t in meta["tables"])
+    assert any(v["slug"] == "equipment_mcp_list" for v in meta["views"])
+    assert any(r["id"] == "equipment_mcp_package" for r in meta["materialize"])
     map_schema = next(
         f for f in settings["ui_json"]["fields"] if f["column"] == "column_map"
     )["schema"]

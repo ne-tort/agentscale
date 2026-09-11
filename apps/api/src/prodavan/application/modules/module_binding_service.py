@@ -384,18 +384,13 @@ class ModuleBindingService:
             await self._session.delete(row)
         await self._session.flush()
         for cid in unique:
-            mod = await self._session.get(ModuleRow, module_id)
-            bind_kind = "local"
-            child_may_edit = True
-            if mod is not None and mod.owner_scope == "platform":
-                bind_kind = "global"
-                child_may_edit = False
+            # Admin→company is always a local copy (fork). Global grants stay opt-in via API.
             self._session.add(
                 ModuleCompanyGrantRow(
                     module_id=module_id,
                     company_id=cid,
-                    bind_kind=bind_kind,
-                    child_may_edit=child_may_edit,
+                    bind_kind="local",
+                    child_may_edit=True,
                 )
             )
         await self._session.flush()
@@ -404,9 +399,6 @@ class ModuleBindingService:
         instances = ModuleInstanceService(self._session)
         for cid in unique:
             if cid not in old_ids:
-                mod = await self._session.get(ModuleRow, module_id)
-                if mod is not None and mod.owner_scope == "platform":
-                    continue  # global grant — no company fork
                 await instances.ensure_company_instance(company_id=cid, module_id=module_id)
         return unique
 

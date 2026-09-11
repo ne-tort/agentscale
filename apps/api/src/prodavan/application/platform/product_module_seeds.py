@@ -935,6 +935,13 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enabled": True,
                 "scope": {"projects": "all"},
             },
+            {
+                "slug": "equipment_mcp",
+                "label": {"ru": "MCP", "en": "MCP"},
+                "storage_kind": "json_document",
+                "enabled": True,
+                "scope": {"projects": "all"},
+            },
         ],
         "columns": [
             {
@@ -1459,6 +1466,37 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "default": True,
             },
             _project_ids_column("s4b_settings"),
+            {
+                "table_slug": "equipment_mcp",
+                "name": "name",
+                "label": "Имя",
+                "type": "text",
+                "required": True,
+            },
+            {
+                "table_slug": "equipment_mcp",
+                "name": "version",
+                "label": "Version",
+                "type": "text",
+                "required": True,
+                "default": "1.0.0",
+            },
+            {
+                "table_slug": "equipment_mcp",
+                "name": "enabled",
+                "label": "Enabled",
+                "type": "bool",
+                "required": False,
+                "default": True,
+            },
+            {
+                "table_slug": "equipment_mcp",
+                "name": "file_ref",
+                "label": "Zip package",
+                "type": "file_ref",
+                "required": False,
+            },
+            _project_ids_column("equipment_mcp"),
         ],
         "views": [
             {
@@ -1565,7 +1603,64 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     ],
                     "row_tap": {"kind": "open_view", "view": "catalogs_settings"},
                     "inline_add": {"field": "name", "title": "Добавить базу"},
+                    "toolbar": [
+                        {
+                            "kind": "open_view",
+                            "view": "equipment_mcp_list",
+                            "icon": "hub",
+                            "label": {"ru": "MCP", "en": "MCP"},
+                        }
+                    ],
                     "empty": _empty("Нет баз", "No databases", icon="storage"),
+                },
+            },
+            {
+                "slug": "equipment_mcp_list",
+                "table_slug": "equipment_mcp",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {
+                        "title": {"ru": "MCP", "en": "MCP"},
+                    },
+                    "title_field": "name",
+                    "subtitle_fields": ["version"],
+                    "columns": [
+                        {
+                            "field": "name",
+                            "label": {"ru": "Название", "en": "Name"},
+                        },
+                        {
+                            "field": "version",
+                            "label": {"ru": "Версия", "en": "Version"},
+                        },
+                    ],
+                    "row_tap": {"kind": "open_form", "view": "equipment_mcp_form"},
+                    "inline_add": {"field": "name", "title": "Добавить MCP"},
+                    "empty": _empty("Нет MCP", "No MCP", icon="hub"),
+                },
+            },
+            {
+                "slug": "equipment_mcp_form",
+                "table_slug": "equipment_mcp",
+                "kind": "form",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "form",
+                    "mode": "edit",
+                    "title": {"ru": "MCP", "en": "MCP"},
+                    "fields": [
+                        {"column": "project_ids", "widget": "project_multiselect"},
+                        {"column": "name", "widget": "value"},
+                        {"column": "version", "widget": "value"},
+                        {"column": "enabled", "widget": "switch"},
+                        {
+                            "column": "file_ref",
+                            "widget": "file_upload",
+                            "accept": ".zip",
+                        },
+                    ],
                 },
             },
             {
@@ -2679,6 +2774,22 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "workspace_path": "packages/{{name}}",
                     "format": "mcp_package",
                     "field": "mcp_zip",
+                },
+            },
+            {
+                "id": "equipment_mcp_package",
+                "enabled": True,
+                "when": ["project.created", "project.resumed", "project.sync"],
+                "priority": 66,
+                "source": {
+                    "type": "rows",
+                    "table_slug": "equipment_mcp",
+                    "filter": {"enabled": True},
+                },
+                "target": {
+                    "workspace_path": "packages/{{name}}",
+                    "format": "mcp_package",
+                    "field": "file_ref",
                 },
             },
         ],

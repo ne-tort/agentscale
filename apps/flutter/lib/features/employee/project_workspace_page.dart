@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/chat/controller/chat_session_controller.dart';
 import 'package:prodavan/core/chat/widgets/chat_scaffold.dart';
+import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/containers/container_runtime_presenter.dart';
 import 'package:prodavan/core/containers/project_container_poll.dart';
 import 'package:prodavan/core/session/work_context.dart';
@@ -44,6 +45,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   bool _chatReadable = true;
   bool _chatSendable = true;
   bool _waking = false;
+  bool _updating = false;
   Map<String, dynamic>? _project;
   Object? _lastSnackError;
   late String _title;
@@ -122,7 +124,11 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     try {
       if (paused) {
         AppSnackBar.info(context, l10n.projectResumeStartingSnack);
-        await workContext.api.resumeProject(widget.projectId);
+        try {
+          await workContext.api.resumeProject(widget.projectId);
+        } on ProdavanApiException catch (e) {
+          if (!_isAlreadyResumedError(e)) rethrow;
+        }
       } else {
         await workContext.api.reloadProject(widget.projectId);
         if (!mounted) return;
@@ -147,10 +153,45 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       }
       workContext.notifyProjectLifecycleChanged();
     } catch (e) {
-      if (mounted) AppErrors.showSnack(context, e);
+      if (mounted) {
+        await _refreshProjectFlags();
+        if (!_chatSendable) AppErrors.showSnack(context, e);
+      }
     } finally {
       if (mounted) setState(() => _waking = false);
     }
+  }
+
+  Future<void> _updateProjectWorkspace() async {
+    if (_updating) return;
+    setState(() => _updating = true);
+    try {
+      await workContext.api.syncProject(widget.projectId);
+      if (!mounted) return;
+      await _refreshProjectFlags();
+      workContext.notifyProjectLifecycleChanged();
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    } finally {
+      if (mounted) setState(() => _updating = false);
+    }
+  }
+
+  Future<void> _dismissWorkspaceUpdate() async {
+    try {
+      await workContext.api.dismissWorkspaceOutdated(widget.projectId);
+      if (!mounted) return;
+      await _refreshProjectFlags();
+      if (mounted) setState(() {});
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    }
+  }
+
+  bool _isAlreadyResumedError(ProdavanApiException e) {
+    if (e.statusCode != 422) return false;
+    final body = e.body.toLowerCase();
+    return body.contains('not paused') || body.contains('not paused or completed');
   }
 
   Future<void> _openChatSettings() async {
@@ -207,11 +248,17 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     return paused ? l10n.projectChatWakePaused : l10n.projectChatWakeUnresponsive;
   }
 
+  bool get _needsWorkspaceUpdate {
+    final raw = _project?['workspace_outdated_at'];
+    return raw is String && raw.isNotEmpty;
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final needsWake = projectChatNeedsWake(_project) || (!_chatSendable && _chatReadable);
-    final showChat = _chatReadable || _waking;
+    final needsUpdate = !needsWake && _chatSendable && _needsWorkspaceUpdate;
+    final showChat = _chatReadable || _waking || _updating;
     return AppScaffold(
       title: Text(showChat ? _displayTitle : widget.projectName),
       actions: [
@@ -245,12 +292,18 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
           : ChatScaffold(
               controller: _chat,
               api: workContext.api,
-              chatSendable: _chatSendable,
+              chatSendable: _chatSendable && !needsUpdate,
               loading: _loading,
-              disabledHint: _wakeHint(l10n),
+              disabledHint: needsWake
+                  ? _wakeHint(l10n)
+                  : (needsUpdate ? l10n.projectChatNeedsUpdate : null),
               wakeMode: needsWake || _waking,
               waking: _waking,
               onWake: needsWake && !_waking ? _wakeProject : null,
+              updateMode: needsUpdate || _updating,
+              updating: _updating,
+              onUpdate: needsUpdate && !_updating ? _updateProjectWorkspace : null,
+              onDismissUpdate: needsUpdate && !_updating ? _dismissWorkspaceUpdate : null,
               title: Text(_displayTitle),
               onOpenChatSettings: _openChatSettings,
             ),

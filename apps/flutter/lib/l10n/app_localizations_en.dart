@@ -1847,6 +1847,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectChatWakeUnresponsive => 'Project not responding. Reload?';
 
   @override
+  String get projectChatNeedsUpdate => 'Project needs an update. Update?';
+
+  @override
   String get projectChatCancelled => 'Cancelled';
 
   @override

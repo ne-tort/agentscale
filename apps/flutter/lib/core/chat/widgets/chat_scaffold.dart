@@ -357,6 +357,10 @@ class ChatScaffold extends StatelessWidget {
     this.wakeMode = false,
     this.waking = false,
     this.onWake,
+    this.updateMode = false,
+    this.updating = false,
+    this.onUpdate,
+    this.onDismissUpdate,
   });
 
   final ChatSessionController controller;
@@ -369,6 +373,10 @@ class ChatScaffold extends StatelessWidget {
   final bool wakeMode;
   final bool waking;
   final VoidCallback? onWake;
+  final bool updateMode;
+  final bool updating;
+  final VoidCallback? onUpdate;
+  final VoidCallback? onDismissUpdate;
 
   double _columnMaxWidth(double width) {
     if (width < 600) return width;
@@ -409,12 +417,16 @@ class ChatScaffold extends StatelessWidget {
                 ChatComposer(
                   projectId: controller.projectId,
                   api: api,
-                  enabled: chatSendable,
+                  enabled: chatSendable && !updateMode,
                   streaming: controller.streaming,
                   disabledHint: disabledHint,
                   wakeMode: wakeMode,
                   waking: waking,
                   onWake: onWake,
+                  updateMode: updateMode,
+                  updating: updating,
+                  onUpdate: onUpdate,
+                  onDismissUpdate: onDismissUpdate,
                   onSend: (text, refs) => controller.send(text, attachmentRefs: refs),
                   onCancel: controller.streaming ? () => controller.cancelStream() : null,
                   onOpenSettings: onOpenChatSettings,

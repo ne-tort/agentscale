@@ -27,6 +27,10 @@ async def test_platform_delete_targets_platform_instance_only() -> None:
         patch.object(svc._instances, "ensure_platform_instance", AsyncMock(return_value=platform)) as ensure,
         patch.object(svc._instances, "delete_data_row", AsyncMock(return_value=True)) as delete,
         patch.object(svc._instances, "ensure_company_instance", AsyncMock()) as ensure_company,
+        patch(
+            "prodavan.application.projects.workspace_outdated.mark_workspace_outdated_for_module",
+            AsyncMock(return_value={"marked_outdated": 0}),
+        ) as mark,
     ):
         out = await svc.delete_data_row(
             owner_kind=OWNER_PLATFORM,
@@ -45,6 +49,7 @@ async def test_platform_delete_targets_platform_instance_only() -> None:
         row_id="row_a",
     )
     ensure_company.assert_not_awaited()
+    mark.assert_awaited_once()
     session.commit.assert_awaited()
 
 
@@ -60,6 +65,10 @@ async def test_company_delete_targets_company_instance_only() -> None:
         patch.object(svc._instances, "ensure_company_instance", AsyncMock(return_value=company)) as ensure,
         patch.object(svc._instances, "delete_data_row", AsyncMock(return_value=True)) as delete,
         patch.object(svc._instances, "ensure_platform_instance", AsyncMock()) as ensure_platform,
+        patch(
+            "prodavan.application.projects.workspace_outdated.mark_workspace_outdated_for_module",
+            AsyncMock(return_value={"marked_outdated": 0}),
+        ) as mark,
     ):
         out = await svc.delete_data_row(
             owner_kind=OWNER_COMPANY,
@@ -78,6 +87,7 @@ async def test_company_delete_targets_company_instance_only() -> None:
         row_id="row_b",
     )
     ensure_platform.assert_not_awaited()
+    mark.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -90,6 +100,10 @@ async def test_delete_missing_row_raises_not_found() -> None:
     with (
         patch.object(svc._instances, "ensure_platform_instance", AsyncMock(return_value=platform)),
         patch.object(svc._instances, "delete_data_row", AsyncMock(return_value=False)),
+        patch(
+            "prodavan.application.projects.workspace_outdated.mark_workspace_outdated_for_module",
+            AsyncMock(),
+        ) as mark,
     ):
         with pytest.raises(AppError) as ei:
             await svc.delete_data_row(
@@ -102,3 +116,4 @@ async def test_delete_missing_row_raises_not_found() -> None:
 
     assert ei.value.status == 404
     session.commit.assert_not_awaited()
+    mark.assert_not_awaited()

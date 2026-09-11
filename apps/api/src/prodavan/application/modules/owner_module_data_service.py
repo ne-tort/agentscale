@@ -109,6 +109,13 @@ class OwnerModuleDataService:
             body=body,
             created_by=created_by,
         )
+        from prodavan.application.projects.workspace_outdated import (
+            mark_workspace_outdated_for_module,
+        )
+
+        await mark_workspace_outdated_for_module(
+            self._session, module_id=module_id, source="owner_module_data"
+        )
         await self._session.commit()
         return {"module_id": module_id, "instance_id": inst.id, **row}
 
@@ -147,6 +154,13 @@ class OwnerModuleDataService:
             row_id=row_id,
             body=body,
         )
+        from prodavan.application.projects.workspace_outdated import (
+            mark_workspace_outdated_for_module,
+        )
+
+        await mark_workspace_outdated_for_module(
+            self._session, module_id=module_id, source="owner_module_data"
+        )
         await self._session.commit()
         return {"module_id": module_id, "instance_id": inst.id, **row}
 
@@ -168,6 +182,13 @@ class OwnerModuleDataService:
         )
         if not ok:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        from prodavan.application.projects.workspace_outdated import (
+            mark_workspace_outdated_for_module,
+        )
+
+        await mark_workspace_outdated_for_module(
+            self._session, module_id=module_id, source="owner_module_data"
+        )
         await self._session.commit()
         return {
             "deleted": True,

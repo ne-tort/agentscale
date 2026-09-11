@@ -1046,6 +1046,7 @@
   "projectChatAddAction": "Настройки чата",
   "projectChatWakePaused": "Проект приостановлен. Возобновить?",
   "projectChatWakeUnresponsive": "Проект не отвечает. Перезагрузить?",
+  "projectChatNeedsUpdate": "Проект требует обновления. Обновить?",
   "projectChatCancelled": "Отменено",
   "projectChatSidechainOffline": "Sidechain недоступен — контейнер не запущен",
   "projectChatGroupThinking": "Размышление ({count})",

@@ -121,12 +121,18 @@ Product module seed changes ship only via Alembic calling `upsert_product_module
 | **local** | Child gets own instance (fork) | Child owns and edits its copy |
 | **global** | Child has no instance; uses parent SoT | Locked unless `child_may_edit=true` (lock icon in bind UI) |
 
-Product defaults (`default_project_bind` on module meta / tabs):
+| Layer | Typical bind |
+|-------|----------------|
+| Admin → company (grant) | **local** copy (fork) |
+| Company → cabinet (MC) | **local** copy (fork) — cabinet UI edits this SoT |
+| Cabinet → project (MP) | **global** for `mod_prompts` / `mod_mcp` / `mod_files`; **local** for `mod_equipment` |
 
-| Module | Typical cabinet→project bind |
-|--------|------------------------------|
-| `mod_prompts`, `mod_mcp`, `mod_files` | **global** |
-| `mod_equipment` | **local** |
+Product defaults (`default_project_bind` / `default_cabinet_bind_kind`):
+
+| Module | Typical cabinet→project bind | Company→cabinet |
+|--------|------------------------------|-----------------|
+| `mod_prompts`, `mod_mcp`, `mod_files` | **global** | **local** |
+| `mod_equipment` | **local** | **local** |
 
 ### Row `project_ids`
 

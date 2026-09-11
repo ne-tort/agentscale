@@ -32,6 +32,12 @@ def default_cabinet_bind_kind(module_id: str) -> ModuleBindKind:
     return ModuleBindKind.LOCAL
 
 
+def default_company_grant_bind_kind(module_id: str) -> ModuleBindKind:
+    """Admin→company grants default to a local company copy."""
+    _ = module_id
+    return ModuleBindKind.LOCAL
+
+
 def default_child_may_edit(bind_kind: ModuleBindKind | str) -> bool:
     return bind_kind == ModuleBindKind.LOCAL or bind_kind == "local"
 
