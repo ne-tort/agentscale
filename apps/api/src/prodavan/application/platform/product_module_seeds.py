@@ -23,6 +23,27 @@ def _empty(title_ru: str, title_en: str, *, icon: str | None = None) -> dict[str
     return out
 
 
+def _equipment_mcp_list_header() -> dict[str, Any]:
+    """Shared MCP zip upload strip for catalogs / request_lines / found_offers lists."""
+    return {
+        "table_slug": "equipment_mcp",
+        "ensure_row": {
+            "name": "prodavan-equipment",
+            "version": "1.0.0",
+            "enabled": True,
+        },
+        "fields": [
+            {
+                "column": "file_ref",
+                "widget": "file_upload",
+                "accept": ".zip",
+                "label": {"ru": "MCP", "en": "MCP"},
+                "empty_style": "warning",
+            }
+        ],
+    }
+
+
 def _eq_field(key: str, label_ru: str, label_en: str) -> dict[str, Any]:
     return {"key": key, "label": {"ru": label_ru, "en": label_en}}
 
@@ -1618,23 +1639,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     ],
                     "row_tap": {"kind": "open_view", "view": "catalogs_settings"},
                     "inline_add": {"field": "name", "title": "Добавить базу"},
-                    "list_header": {
-                        "table_slug": "equipment_mcp",
-                        "ensure_row": {
-                            "name": "MCP",
-                            "version": "1.0.0",
-                            "enabled": True,
-                        },
-                        "fields": [
-                            {
-                                "column": "file_ref",
-                                "widget": "file_upload",
-                                "accept": ".zip",
-                                "label": {"ru": "MCP", "en": "MCP"},
-                                "empty_style": "warning",
-                            }
-                        ],
-                    },
+                    "list_header": _equipment_mcp_list_header(),
                     "empty": _empty("Нет баз", "No databases", icon="storage"),
                 },
             },
@@ -1936,6 +1941,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     ],
                     "row_tap": {"kind": "open_view", "view": "offers_for_line"},
                     "inline_add": {"field": "title", "title": "Добавить позицию"},
+                    "list_header": _equipment_mcp_list_header(),
                     "empty": _empty("Нет позиций", "No lines", icon="list_alt"),
                 },
             },
@@ -2009,6 +2015,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     ],
                     "row_tap": {"kind": "open_form", "view": "found_offers_form"},
                     "inline_add": {"field": "title", "title": "Добавить товар"},
+                    "list_header": _equipment_mcp_list_header(),
                     "empty": _empty("Нет товаров", "No offers", icon="inventory_2"),
                 },
             },
@@ -3158,7 +3165,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "table_slug": "equipment_mcp",
                     "row_id": "equipment_mcp_default",
                     "body": {
-                        "name": "MCP",
+                        "name": "prodavan-equipment",
                         "version": "1.0.0",
                         "enabled": True,
                     },

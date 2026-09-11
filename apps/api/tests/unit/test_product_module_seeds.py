@@ -318,6 +318,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     mcp_seed = next(s for s in seed_items if s["row_id"] == "equipment_mcp_default")
     assert mcp_seed["table_slug"] == "equipment_mcp"
     assert mcp_seed["body"]["enabled"] is True
+    assert mcp_seed["body"]["name"] == "prodavan-equipment"
     assert seed_items[-1]["row_id"] == "equipment_mcp_default"
 
     sellers_list = next(v for v in meta["views"] if v["slug"] == "trusted_sellers_list")
@@ -384,6 +385,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert all(c["field"] != "added_at" for c in catalogs_list["ui_json"]["columns"])
     list_header = catalogs_list["ui_json"].get("list_header") or {}
     assert list_header.get("table_slug") == "equipment_mcp"
+    assert list_header.get("ensure_row", {}).get("name") == "prodavan-equipment"
     mcp_fields = list_header.get("fields") or []
     assert any(
         f.get("column") == "file_ref"
@@ -419,9 +421,11 @@ def test_equipment_meta_hub_on_data_placement() -> None:
 
     lines = next(v for v in meta["views"] if v["slug"] == "request_lines_list")
     assert lines["ui_json"]["scaffold"]["title"]["ru"] == "Позиции заказчика"
+    assert lines["ui_json"].get("list_header") == list_header
 
     offers = next(v for v in meta["views"] if v["slug"] == "found_offers_list")
     assert offers["ui_json"]["inline_add"]["field"] == "title"
+    assert offers["ui_json"].get("list_header") == list_header
     offer_cols = [c["field"] for c in offers["ui_json"]["columns"]]
     assert "brand" in offer_cols
     assert any(

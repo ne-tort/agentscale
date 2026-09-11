@@ -1,0 +1,20 @@
+{
+  "format": "mcp.package",
+  "format_version": 1,
+  "name": "prodavan-equipment",
+  "version": "1.0.0",
+  "entry": {
+    "command": "python",
+    "args": ["packages/prodavan-equipment/server.py"]
+  },
+  "tools": [
+    "equipment_catalog_sources",
+    "equipment_catalog_search",
+    "request_lines_list",
+    "request_lines_get",
+    "request_lines_upsert",
+    "found_offers_list",
+    "found_offers_get",
+    "found_offers_upsert"
+  ]
+}

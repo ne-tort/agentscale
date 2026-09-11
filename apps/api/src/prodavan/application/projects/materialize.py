@@ -182,10 +182,15 @@ class ProjectMaterializeService:
         mcp_packages = merge_platform_modules_mcp(mcp_packages, platform_pkg=platform_pkg)
         written.append(f"packages/{platform_pkg['name']}/server.py")
 
-        equipment_pkg = materialize_platform_equipment_mcp(writer)
-        mcp_packages = merge_platform_equipment_mcp(mcp_packages, platform_pkg=equipment_pkg)
-        written.append(f"packages/{equipment_pkg['name']}/server.py")
-        written.append(f"packages/{equipment_pkg['name']}/equipment_catalog_search.py")
+        # Zip from equipment_mcp.file_ref wins; code copy is fallback only.
+        has_equipment_zip = any(
+            isinstance(p, dict) and p.get("name") == "prodavan-equipment" for p in mcp_packages
+        )
+        if not has_equipment_zip:
+            equipment_pkg = materialize_platform_equipment_mcp(writer)
+            mcp_packages = merge_platform_equipment_mcp(mcp_packages, platform_pkg=equipment_pkg)
+            written.append(f"packages/{equipment_pkg['name']}/server.py")
+            written.append(f"packages/{equipment_pkg['name']}/equipment_catalog_search.py")
 
         module_paths: dict[str, list[str]] = dict(manifest or {})
         for op in ops:
