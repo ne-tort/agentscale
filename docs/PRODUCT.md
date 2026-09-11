@@ -153,8 +153,8 @@ Product module for computer-equipment matching (hub on **Данные**). Projec
 | Catalog cards, request lines, found offers, selection | Project leaf instance rows | Editable UI + agent via rows API |
 | Local parsed price tables (csv/xlsx → index) | MinIO content blob (**raw SQLite artifact**) | Kept for rematerialize; not copied 1:1 into Pod |
 | Remote PostgreSQL catalogs | External DB (live) | DSN in Vault `secret_ref`; probe columns + `COUNT(*)` only — **no** download into SQLite. If URL has no `/dbname`, pick **База** in UI (`remote_database`); then **Таблица**. Creds from URL, or **Логин** + **Пароль** (password → Vault) when missing. `?table=` stripped before connect. No silent default to `public.offers`. Sandbox NetworkPolicy allows egress `:5432`/`:5433` to non-cluster hosts (incl. WSL/Windows gateway e.g. `172.21.176.1`); probe itself runs on API. |
+| Remote DSN in Pod | `container_env_secrets` foreach | `EQUIPMENT_CATALOG_DSN_<ROW>` + `EQUIPMENT_REMOTE_CATALOGS` JSON for live MCP |
 | Normalized merged catalog (local only) | Materialize `merge_mapped_sqlite` | Single RO `/workspace/catalogs/catalog.sqlite` |
-| Remote DSN in Pod | `container_env_secrets` foreach | `EQUIPMENT_CATALOG_DSN_<ROW>` + `EQUIPMENT_REMOTE_CATALOGS` JSON for future MCP |
 
 **Hybrid (fixed):** heavy **local** catalogs are not JSONB rows. Ingest is `content.index_tabular`. **Remote** catalogs stay live — platform action `content.probe_remote_sql` only introspects schema/`COUNT(*)`; data is never snapshotted. Per-catalog `column_map` maps source headers → canonical columns (autosave in UI). Materialize merges ready non-paused **local** catalogs (`source_kind!=remote`) that apply (`project_ids` empty = all **module-bound** projects).
 
@@ -162,10 +162,10 @@ Product module for computer-equipment matching (hub on **Данные**). Projec
 |-------|--------------|------|
 | `catalogs` | project leaf (+ row `project_ids`) | name, `source_kind` local\|remote, file or remote DSN/table, artifact (local), status, paused, column_map, project_ids |
 | `request_lines` | project leaf | customer line: title, P/N, qty, found_count, selected_offer_id |
-| `found_offers` | project leaf | candidates linked to a line; exactly one `is_selected` primary |
+| `found_offers` | project leaf | candidates linked via `line_id` (**Запрос** picker → request_lines); `catalog_id` provenance only (not on form); exactly one `is_selected` primary |
 | `s4b_settings` | project leaf (+ row `project_ids`) | S4B URL/login/password(secret)/MCP zip; empty `project_ids` = all bound projects; injects `S4B_*` env + materialize `mcp_package` |
 
-Agent fills `found_offers` / `found_count` through rows APIs (or declarative `mcp_tools`); MCP RO tools query the merged SQLite for **local** catalogs. Live remote SQL via MCP is a follow-up (DSN already in Pod env).
+Agent fills `found_offers` / `found_count` through first-party MCP `prodavan-equipment` (typed tools) or rows APIs. **Unified catalog search** (`equipment_catalog_search`) queries local merged SQLite **and** live remote PG with the same canonical contract after `column_map` (pagination, match+price sort, default in-stock filter). First-party MCP packages `prodavan-modules` + `prodavan-equipment` are materialized into the workspace.
 
 **S4B:** hub tile → settings form; password via cabinet secrets → Pod `S4B_PASSWORD`; zip materialize reuses `mcp_package` path. Redis/Kafka/Mongo/MinIO from Pod — **not** direct. Pod reaches platform only via **Pod API `:8001`** + Bridge JWT (scopes): `/infra`, `/modules` (data + **meta documents** + actions), `/agent`, `/internal/pods` (incl. workspace-archive hydrate). First-party MCP `prodavan-modules` is materialized into the workspace for agent tool access. See [tenant-infra-gateway](target/12-layer-docs/tenant-infra-gateway.md). App Document Store (Mongo) is in-proc for platform BCs only — [ADR](02-architecture/ADR-document-store-mongo.md).
 

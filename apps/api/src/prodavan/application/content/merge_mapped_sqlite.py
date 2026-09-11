@@ -126,6 +126,20 @@ def merge_mapped_sqlite_bytes(
             finally:
                 tmp_path.unlink(missing_ok=True)
 
+        # Helpful indexes for agent catalog search (exact PN / title / brand).
+        colset = set(cols)
+        if "part_number" in colset:
+            out.execute(
+                'CREATE INDEX IF NOT EXISTS idx_rows_part_number_lower '
+                'ON rows (lower("part_number"))'
+            )
+        if "title" in colset:
+            out.execute('CREATE INDEX IF NOT EXISTS idx_rows_title ON rows ("title")')
+        if "brand" in colset:
+            out.execute(
+                'CREATE INDEX IF NOT EXISTS idx_rows_brand_lower ON rows (lower("brand"))'
+            )
+
         out.commit()
         blob = out.serialize()
     finally:

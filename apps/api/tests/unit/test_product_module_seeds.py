@@ -435,3 +435,14 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert any(clause.get("field") == "remote_dsn_reachable" for clause in reach["any"])
     line_col = next(c for c in meta["columns"] if c["name"] == "line_id")
     assert line_col["required"] is False
+    assert line_col["label"]["ru"] == "Запрос"
+    form = next(v for v in meta["views"] if v["slug"] == "found_offers_form")
+    form_cols = [f["column"] for f in form["ui_json"]["fields"]]
+    assert "catalog_id" not in form_cols
+    assert "source_title" not in form_cols
+    line_field = next(f for f in form["ui_json"]["fields"] if f["column"] == "line_id")
+    assert line_field["widget"] == "type_ref_picker"
+    assert line_field["pick_view"] == "request_lines_pick"
+    pick = next(v for v in meta["views"] if v["slug"] == "request_lines_pick")
+    also = pick["ui_json"]["selection"]["set_on_context"]["also_copy"]
+    assert {"from": "title", "to": "source_title"} in also

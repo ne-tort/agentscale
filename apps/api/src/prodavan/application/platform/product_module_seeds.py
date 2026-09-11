@@ -1178,7 +1178,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             {
                 "table_slug": "found_offers",
                 "name": "line_id",
-                "label": {"ru": "Позиция", "en": "Line"},
+                "label": {"ru": "Запрос", "en": "Request"},
                 "type": "ref",
                 "required": False,
                 "ref": {"table_slug": "request_lines"},
@@ -2023,15 +2023,25 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "title": {"ru": "Найденный товар", "en": "Offer"},
                     "fields": [
                         {"column": "title", "widget": "value"},
-                        {"column": "line_id", "widget": "ref"},
+                        {
+                            "column": "line_id",
+                            "widget": "type_ref_picker",
+                            "pick_view": "request_lines_pick",
+                            "title_field": "source_title",
+                            "icon": "request_page",
+                            "empty_style": "warning",
+                            "empty_label": {
+                                "ru": "Не выбран",
+                                "en": "Not selected",
+                            },
+                            "label": {"ru": "Запрос", "en": "Request"},
+                        },
                         {"column": "brand", "widget": "value"},
                         {"column": "part_number", "widget": "value"},
                         {"column": "price", "widget": "value"},
-                        {"column": "catalog_id", "widget": "ref"},
                         {"column": "score", "widget": "value"},
                         {"column": "match_kind", "widget": "choice"},
                         {"column": "is_selected", "widget": "switch"},
-                        {"column": "source_title", "widget": "value"},
                         {"column": "project_ids", "widget": "project_multiselect"},
                     ],
                 },
@@ -2235,6 +2245,51 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "Нет типов",
                         "No types",
                         icon="category",
+                    ),
+                },
+            },
+            {
+                "slug": "request_lines_pick",
+                "table_slug": "request_lines",
+                "kind": "collection",
+                "ui_json": {
+                    "version": 1,
+                    "kind": "collection",
+                    "scaffold": {
+                        "title": {
+                            "ru": "Выбор позиции заказчика",
+                            "en": "Select request line",
+                        }
+                    },
+                    "title_field": "title",
+                    "subtitle_fields": ["part_number", "qty"],
+                    "columns": [
+                        {
+                            "field": "title",
+                            "label": {"ru": "Позиция", "en": "Line"},
+                        },
+                        {
+                            "field": "part_number",
+                            "label": {"ru": "Партномер", "en": "Part number"},
+                        },
+                    ],
+                    "selection": {
+                        "kind": "single",
+                        "control": "switch",
+                        "placement": "trailing",
+                        "disable_row_tap": True,
+                        "match_context_field": "line_id",
+                        "set_on_context": {
+                            "field": "line_id",
+                            "value_from": "row_id",
+                            "also_copy": [{"from": "title", "to": "source_title"}],
+                            "pop_after": True,
+                        },
+                    },
+                    "empty": _empty(
+                        "Нет позиций",
+                        "No request lines",
+                        icon="list_alt",
                     ),
                 },
             },

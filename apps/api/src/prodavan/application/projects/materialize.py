@@ -173,10 +173,19 @@ class ProjectMaterializeService:
             materialize_platform_modules_mcp,
             merge_platform_modules_mcp,
         )
+        from prodavan.application.mcp.platform_equipment_mcp import (
+            materialize_platform_equipment_mcp,
+            merge_platform_equipment_mcp,
+        )
 
         platform_pkg = materialize_platform_modules_mcp(writer)
         mcp_packages = merge_platform_modules_mcp(mcp_packages, platform_pkg=platform_pkg)
         written.append(f"packages/{platform_pkg['name']}/server.py")
+
+        equipment_pkg = materialize_platform_equipment_mcp(writer)
+        mcp_packages = merge_platform_equipment_mcp(mcp_packages, platform_pkg=equipment_pkg)
+        written.append(f"packages/{equipment_pkg['name']}/server.py")
+        written.append(f"packages/{equipment_pkg['name']}/equipment_catalog_search.py")
 
         module_paths: dict[str, list[str]] = dict(manifest or {})
         for op in ops:
