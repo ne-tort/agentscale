@@ -307,15 +307,18 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert "section_title" not in slots_field
 
     seed_items = meta["seed_rows"]["items"]
-    assert len(seed_items) == 13
+    assert len(seed_items) == 14
     assert seed_items[0]["row_id"] == "etype_cpu"
     assert seed_items[0]["body"]["sort_order"] == 10
     assert seed_items[0]["body"]["build_scope"] == "all"
     assert any(f["key"] == "cores" for f in seed_items[0]["body"]["fields_json"])
     assert any(f["key"] == "memory_channels" for f in seed_items[0]["body"]["fields_json"])
     assert any(s["row_id"] == "etype_case_fans" for s in seed_items)
-    assert seed_items[-1]["row_id"] == "etype_bmc"
-    assert seed_items[-1]["body"]["build_scope"] == "server"
+    assert any(s["row_id"] == "etype_bmc" for s in seed_items)
+    mcp_seed = next(s for s in seed_items if s["row_id"] == "equipment_mcp_default")
+    assert mcp_seed["table_slug"] == "equipment_mcp"
+    assert mcp_seed["body"]["enabled"] is True
+    assert seed_items[-1]["row_id"] == "equipment_mcp_default"
 
     sellers_list = next(v for v in meta["views"] if v["slug"] == "trusted_sellers_list")
     assert sellers_list["ui_json"]["inline_add"]["field"] == "name"
@@ -379,10 +382,17 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     catalogs_list = next(v for v in meta["views"] if v["slug"] == "catalogs_list")
     assert all(c["field"] != "status" for c in catalogs_list["ui_json"]["columns"])
     assert all(c["field"] != "added_at" for c in catalogs_list["ui_json"]["columns"])
-    toolbar = catalogs_list["ui_json"].get("toolbar") or []
+    list_header = catalogs_list["ui_json"].get("list_header") or {}
+    assert list_header.get("table_slug") == "equipment_mcp"
+    mcp_fields = list_header.get("fields") or []
     assert any(
-        t.get("kind") == "open_view" and t.get("view") == "equipment_mcp_list" for t in toolbar
+        f.get("column") == "file_ref"
+        and f.get("widget") == "file_upload"
+        and f.get("empty_style") == "warning"
+        and f.get("subtitle_from") is None
+        for f in mcp_fields
     )
+    assert "toolbar" not in catalogs_list["ui_json"]
     assert any(t.get("slug") == "equipment_mcp" for t in meta["tables"])
     assert any(v["slug"] == "equipment_mcp_list" for v in meta["views"])
     assert any(r["id"] == "equipment_mcp_package" for r in meta["materialize"])

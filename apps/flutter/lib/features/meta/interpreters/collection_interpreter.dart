@@ -13,8 +13,10 @@ import 'package:prodavan/features/meta/meta_label.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/preview/preview_stub.dart';
 import 'package:prodavan/features/meta/runtime/cabinet_data_controller.dart';
+import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/features/meta/runtime/owner_module_data_controller.dart';
 import 'package:prodavan/features/meta/runtime/runtime_data_adapter.dart';
+import 'package:prodavan/features/meta/widgets/file_upload_field.dart';
 import 'package:prodavan/features/meta/widgets/project_multiselect_field.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -128,11 +130,20 @@ class CollectionViewInterpreter extends StatelessWidget {
                 },
         );
 
-        if (!hasInline && !_hasContextHeader(uiJson)) return collection;
+        if (!hasInline && !_hasContextHeader(uiJson) && !_hasListHeader(uiJson)) {
+          return collection;
+        }
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (_hasListHeader(uiJson))
+              _CollectionListHeader(
+                headerConfig: Map<String, dynamic>.from(uiJson['list_header'] as Map),
+                seeds: seeds,
+                manifest: manifest,
+                readOnly: readOnly,
+              ),
             if (_hasContextHeader(uiJson))
               _CollectionContextHeader(
                 headerConfig: Map<String, dynamic>.from(uiJson['context_header'] as Map),
@@ -154,6 +165,11 @@ class CollectionViewInterpreter extends StatelessWidget {
         );
       },
     );
+  }
+
+  bool _hasListHeader(Map<String, dynamic> uiJson) {
+    final header = uiJson['list_header'];
+    return header is Map && (header['table_slug'] as String? ?? '').isNotEmpty;
   }
 
   bool _hasContextHeader(Map<String, dynamic> uiJson) {
@@ -713,6 +729,201 @@ class CollectionViewInterpreter extends StatelessWidget {
     if (formView != null && onOpenForm != null) {
       onOpenForm!(formView, rowId: rowId);
     }
+  }
+}
+
+/// Singleton-row preference fields above a collection (e.g. MCP zip on databases list).
+class _CollectionListHeader extends StatefulWidget {
+  const _CollectionListHeader({
+    required this.headerConfig,
+    required this.seeds,
+    required this.manifest,
+    required this.readOnly,
+  });
+
+  final Map<String, dynamic> headerConfig;
+  final dynamic seeds;
+  final ModuleMetaManifest manifest;
+  final bool readOnly;
+
+  @override
+  State<_CollectionListHeader> createState() => _CollectionListHeaderState();
+}
+
+class _CollectionListHeaderState extends State<_CollectionListHeader> {
+  String? _rowId;
+  bool _ensuring = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _ensureRow());
+  }
+
+  @override
+  void didUpdateWidget(covariant _CollectionListHeader oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.seeds != widget.seeds ||
+        oldWidget.headerConfig != widget.headerConfig) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _ensureRow());
+    }
+  }
+
+  Future<void> _ensureRow() async {
+    if (!mounted || _ensuring) return;
+    final tableSlug = widget.headerConfig['table_slug'] as String? ?? '';
+    if (tableSlug.isEmpty) return;
+    final existing = widget.seeds.itemsForTable(tableSlug) as List;
+    if (existing.isNotEmpty) {
+      final id = existing.first['row_id']?.toString();
+      if (id != null && id.isNotEmpty && id != _rowId) {
+        setState(() => _rowId = id);
+      }
+      return;
+    }
+    _ensuring = true;
+    try {
+      final ensure = widget.headerConfig['ensure_row'];
+      final body = <String, dynamic>{
+        if (ensure is Map) ...Map<String, dynamic>.from(ensure),
+      };
+      final adapter = widget.seeds;
+      String? createdId;
+      if (adapter is RuntimeDataAdapter) {
+        createdId = await adapter.createRowAsync(tableSlug, initial: body);
+      } else if (adapter is CabinetDataController) {
+        createdId = await adapter.createRow(tableSlug, initial: body);
+      } else if (adapter is OwnerModuleDataController) {
+        createdId = await adapter.createRow(tableSlug, initial: body);
+      } else {
+        createdId = adapter.createRow(tableSlug) as String?;
+        if (createdId != null) {
+          final upsert = adapter.upsertBody(createdId, body);
+          if (upsert is Future) await upsert;
+        }
+      }
+      if (!mounted) return;
+      if (createdId != null && createdId.isNotEmpty) {
+        setState(() => _rowId = createdId);
+      }
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    } finally {
+      _ensuring = false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable:
+          widget.seeds is Listenable ? widget.seeds as Listenable : ValueNotifier(0),
+      builder: (context, _) {
+        final tableSlug = widget.headerConfig['table_slug'] as String? ?? '';
+        final fieldsRaw = widget.headerConfig['fields'];
+        if (tableSlug.isEmpty || fieldsRaw is! List) {
+          return const SizedBox.shrink();
+        }
+        var rowId = _rowId;
+        if (rowId == null || rowId.isEmpty) {
+          final items = widget.seeds.itemsForTable(tableSlug) as List;
+          if (items.isNotEmpty) {
+            rowId = items.first['row_id']?.toString();
+          }
+        }
+        if (rowId == null || rowId.isEmpty) {
+          return const SizedBox.shrink();
+        }
+        final l10n = AppLocalizations.of(context);
+        final locale = Localizations.localeOf(context);
+        final body = Map<String, dynamic>.from(
+          widget.seeds.bodyFor(rowId) as Map? ?? const {},
+        );
+        final columns = widget.manifest.columnsForTable(tableSlug);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final raw in fieldsRaw.whereType<Map>())
+              _buildField(
+                context,
+                Map<String, dynamic>.from(raw),
+                columns: columns,
+                body: body,
+                rowId: rowId,
+                l10n: l10n,
+                locale: locale,
+              ),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildField(
+    BuildContext context,
+    Map<String, dynamic> fieldCfg, {
+    required List<Map<String, dynamic>> columns,
+    required Map<String, dynamic> body,
+    required String rowId,
+    required AppLocalizations l10n,
+    required Locale locale,
+  }) {
+    final columnName = fieldCfg['column'] as String? ?? '';
+    if (columnName.isEmpty) return const SizedBox.shrink();
+    final col = columns.cast<Map<String, dynamic>?>().firstWhere(
+          (c) => c?['name'] == columnName,
+          orElse: () => null,
+        );
+    final labelRaw = fieldCfg['label'] ?? col?['label'] ?? columnName;
+    final label = resolveMetaLabel(labelRaw, l10n, locale: locale);
+    final widgetKind = fieldCfg['widget'] as String? ?? 'value';
+    final value = body[columnName];
+
+    Future<void> persist(dynamic next) async {
+      try {
+        final patch = widget.seeds.patchField(rowId, columnName, next);
+        if (patch is Future) await patch;
+      } catch (e) {
+        if (context.mounted) AppErrors.showSnack(context, e);
+      }
+    }
+
+    if (widgetKind == 'file_upload') {
+      final scope = ModuleRuntimeScope.maybeOf(context);
+      if (scope == null) {
+        return ListTile(title: Text(label), subtitle: const Text('file (preview only)'));
+      }
+      return FileUploadField(
+        label: label.isNotEmpty ? label : columnName,
+        value: value,
+        cabinetId: scope.cabinetId,
+        api: scope.api,
+        readOnly: widget.readOnly,
+        accept: fieldCfg['accept'] as String?,
+        // No subtitle — warning chrome only when empty.
+        subtitle: null,
+        warnWhenEmpty: fieldCfg['empty_style']?.toString() == 'warning',
+        onChanged: persist,
+      );
+    }
+
+    if (widgetKind == 'project_multiselect') {
+      return ProjectMultiselectField(
+        label: label,
+        value: value,
+        readOnly: widget.readOnly,
+        subtitleMode: fieldCfg['subtitle']?.toString(),
+        onChanged: (ids) => persist(ids),
+      );
+    }
+
+    return AppValuePreference<String>(
+      title: label.isNotEmpty ? label : columnName,
+      value: value?.toString() ?? '',
+      icon: Icons.badge_outlined,
+      enabled: !widget.readOnly,
+      onSave: (v) async => persist(v.trim()),
+    );
   }
 }
 

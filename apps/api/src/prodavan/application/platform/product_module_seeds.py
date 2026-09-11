@@ -1603,14 +1603,23 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     ],
                     "row_tap": {"kind": "open_view", "view": "catalogs_settings"},
                     "inline_add": {"field": "name", "title": "Добавить базу"},
-                    "toolbar": [
-                        {
-                            "kind": "open_view",
-                            "view": "equipment_mcp_list",
-                            "icon": "hub",
-                            "label": {"ru": "MCP", "en": "MCP"},
-                        }
-                    ],
+                    "list_header": {
+                        "table_slug": "equipment_mcp",
+                        "ensure_row": {
+                            "name": "MCP",
+                            "version": "1.0.0",
+                            "enabled": True,
+                        },
+                        "fields": [
+                            {
+                                "column": "file_ref",
+                                "widget": "file_upload",
+                                "accept": ".zip",
+                                "label": {"ru": "MCP", "en": "MCP"},
+                                "empty_style": "warning",
+                            }
+                        ],
+                    },
                     "empty": _empty("Нет баз", "No databases", icon="storage"),
                 },
             },
@@ -3030,7 +3039,20 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 ],
             },
         ],
-        "seed_rows": {"items": _equipment_type_seed_rows()},
+        "seed_rows": {
+            "items": [
+                *_equipment_type_seed_rows(),
+                {
+                    "table_slug": "equipment_mcp",
+                    "row_id": "equipment_mcp_default",
+                    "body": {
+                        "name": "MCP",
+                        "version": "1.0.0",
+                        "enabled": True,
+                    },
+                },
+            ]
+        },
     }
 
 
