@@ -1053,6 +1053,14 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             {
                 "table_slug": "catalogs",
+                "name": "remote_dsn_reachable",
+                "label": {"ru": "DSN доступен", "en": "DSN reachable"},
+                "type": "bool",
+                "required": False,
+                "default": False,
+            },
+            {
+                "table_slug": "catalogs",
                 "name": "artifact_ref",
                 "label": {"ru": "SQLite", "en": "SQLite"},
                 "type": "file_ref",
@@ -1186,6 +1194,13 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "table_slug": "found_offers",
                 "name": "part_number",
                 "label": {"ru": "Партномер", "en": "Part number"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "found_offers",
+                "name": "brand",
+                "label": {"ru": "Бренд", "en": "Brand"},
                 "type": "text",
                 "required": False,
             },
@@ -1717,6 +1732,10 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                                 "eq": "remote",
                                             },
                                             {
+                                                "field": "remote_dsn",
+                                                "not_empty": True,
+                                            },
+                                            {
                                                 "field": "remote_dsn_has_user",
                                                 "eq": False,
                                             },
@@ -1727,6 +1746,10 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                             {
                                                 "field": "source_kind",
                                                 "eq": "remote",
+                                            },
+                                            {
+                                                "field": "remote_dsn",
+                                                "not_empty": True,
                                             },
                                             {
                                                 "field": "remote_auth_failed",
@@ -1751,6 +1774,10 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                                 "eq": "remote",
                                             },
                                             {
+                                                "field": "remote_dsn",
+                                                "not_empty": True,
+                                            },
+                                            {
                                                 "field": "remote_dsn_has_password",
                                                 "eq": False,
                                             },
@@ -1761,6 +1788,10 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                             {
                                                 "field": "source_kind",
                                                 "eq": "remote",
+                                            },
+                                            {
+                                                "field": "remote_dsn",
+                                                "not_empty": True,
                                             },
                                             {
                                                 "field": "remote_auth_failed",
@@ -1792,6 +1823,18 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                         "field": "status",
                                         "in": ["draft", "ready", "indexing"],
                                     },
+                                    {
+                                        "any": [
+                                            {
+                                                "field": "remote_dsn_reachable",
+                                                "eq": True,
+                                            },
+                                            {
+                                                "field": "status",
+                                                "in": ["ready", "indexing"],
+                                            },
+                                        ]
+                                    },
                                 ]
                             },
                         },
@@ -1815,6 +1858,18 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                     {
                                         "field": "status",
                                         "in": ["draft", "ready", "indexing"],
+                                    },
+                                    {
+                                        "any": [
+                                            {
+                                                "field": "remote_dsn_reachable",
+                                                "eq": True,
+                                            },
+                                            {
+                                                "field": "status",
+                                                "in": ["ready", "indexing"],
+                                            },
+                                        ]
                                     },
                                 ]
                             },
@@ -1945,6 +2000,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "subtitle_fields": ["source_title", "match_kind"],
                     "columns": [
                         {"field": "title", "label": {"ru": "Товар", "en": "Title"}},
+                        {"field": "brand", "label": {"ru": "Бренд", "en": "Brand"}},
                         {"field": "part_number", "label": {"ru": "Партномер", "en": "P/N"}},
                         {"field": "price", "label": {"ru": "Цена", "en": "Price"}},
                         {"field": "match_kind", "label": {"ru": "Совпадение", "en": "Match"}},
@@ -1968,6 +2024,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "fields": [
                         {"column": "title", "widget": "value"},
                         {"column": "line_id", "widget": "ref"},
+                        {"column": "brand", "widget": "value"},
                         {"column": "part_number", "widget": "value"},
                         {"column": "price", "widget": "value"},
                         {"column": "catalog_id", "widget": "ref"},

@@ -41,6 +41,7 @@ class AppValuePreference<T> extends StatefulWidget {
     this.maxLines = 1,
     this.onTap,
     this.accentColor,
+    this.busy = false,
   });
 
   final String title;
@@ -62,6 +63,8 @@ class AppValuePreference<T> extends StatefulWidget {
   final TextInputType? keyboardType;
   final int maxLines;
   final Color? accentColor;
+  /// External busy (e.g. remote DSN probe) — spinner on the tile.
+  final bool busy;
 
   @override
   State<AppValuePreference<T>> createState() => _AppValuePreferenceState<T>();
@@ -130,7 +133,7 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
   }
 
   Future<void> _save() async {
-    if (_saving || !widget.enabled) return;
+    if (_saving || !widget.enabled || widget.busy) return;
     final raw = _controller.text.trim();
     if (widget.validateInput != null && !widget.validateInput!(raw)) {
       final msg = widget.invalidMessage;
@@ -169,7 +172,7 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
   }
 
   void _beginEdit() {
-    if (!widget.enabled || _expanded) return;
+    if (!widget.enabled || _expanded || widget.busy || _saving) return;
     _controller.text = _editText(widget.value);
     _startedBlank = _editText(widget.value).isEmpty;
     setState(() => _expanded = true);
@@ -178,12 +181,24 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
 
   void _guardBlur() => _ignoreNextBlur = true;
 
+  Widget _busyTrailing(ThemeData theme) {
+    return SizedBox(
+      width: 20,
+      height: 20,
+      child: CircularProgressIndicator(
+        strokeWidth: 2,
+        color: widget.accentColor ?? theme.colorScheme.primary,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isBlank = _editText(widget.value).isEmpty;
+    final showBusy = widget.busy || _saving;
 
-    if (_expanded) {
+    if (_expanded && !showBusy) {
       return AppPreferenceTile(
         title: widget.title,
         icon: widget.icon,
@@ -229,16 +244,18 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
       title: widget.title,
       icon: widget.icon,
       accentColor: widget.accentColor,
-      enabled: widget.enabled || widget.onTap != null,
+      enabled: (widget.enabled || widget.onTap != null) && !showBusy,
       subtitle: subtitle,
-      trailing: widget.onTap != null
-          ? Icon(
-              Icons.copy_outlined,
-              size: 20,
-              color: widget.accentColor ?? theme.colorScheme.onSurfaceVariant,
-            )
-          : const AppTrailingChevron(),
-      onTap: _handleTap,
+      trailing: showBusy
+          ? _busyTrailing(theme)
+          : widget.onTap != null
+              ? Icon(
+                  Icons.copy_outlined,
+                  size: 20,
+                  color: widget.accentColor ?? theme.colorScheme.onSurfaceVariant,
+                )
+              : const AppTrailingChevron(),
+      onTap: showBusy ? null : _handleTap,
     );
   }
 }

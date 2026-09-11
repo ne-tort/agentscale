@@ -422,5 +422,16 @@ def test_equipment_meta_hub_on_data_placement() -> None:
 
     offers = next(v for v in meta["views"] if v["slug"] == "found_offers_list")
     assert offers["ui_json"]["inline_add"]["field"] == "title"
+    offer_cols = [c["field"] for c in offers["ui_json"]["columns"]]
+    assert "brand" in offer_cols
+    assert any(
+        c["name"] == "brand" and c["table_slug"] == "found_offers" for c in meta["columns"]
+    )
+    assert "remote_dsn_reachable" in catalog_cols
+    db_picker = next(f for f in settings["ui_json"]["fields"] if f["column"] == "remote_database")
+    reach = next(
+        part for part in db_picker["visible_when"]["all"] if isinstance(part.get("any"), list)
+    )
+    assert any(clause.get("field") == "remote_dsn_reachable" for clause in reach["any"])
     line_col = next(c for c in meta["columns"] if c["name"] == "line_id")
     assert line_col["required"] is False

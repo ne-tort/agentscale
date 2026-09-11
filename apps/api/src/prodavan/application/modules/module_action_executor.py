@@ -850,6 +850,7 @@ class ModuleActionExecutor:
         if not secret_ref:
             body[status_col] = "draft"
             body[error_col] = None
+            body["remote_dsn_reachable"] = False
             await self._update_module_row(
                 cabinet_id=cabinet_id,
                 project_id=project_id,
@@ -868,6 +869,7 @@ class ModuleActionExecutor:
         body["artifact_ref"] = None
         body.pop("indexed_source_key", None)
 
+        remote_database = str(body.get(db_col) or "").strip()
         try:
             if secret_ref.startswith(("file://cabinet_secrets/", "vault://cabinet_secrets/")):
                 assert_cabinet_secret_scope(secret_ref, cabinet_id)
@@ -903,6 +905,7 @@ class ModuleActionExecutor:
                     allow_missing_database=True,
                 )
                 body["remote_auth_failed"] = False
+                body["remote_dsn_reachable"] = True
                 body[status_col] = "draft"
                 body[error_col] = None
                 body[row_count_col] = 0
@@ -934,6 +937,7 @@ class ModuleActionExecutor:
                     remote_password_field=remote_password,
                 )
                 body["remote_auth_failed"] = False
+                body["remote_dsn_reachable"] = True
                 body[status_col] = "draft"
                 body[error_col] = None
                 body[row_count_col] = 0
@@ -959,6 +963,7 @@ class ModuleActionExecutor:
 
             body[status_col] = "indexing"
             body[error_col] = None
+            body["remote_dsn_reachable"] = True
             await self._update_module_row(
                 cabinet_id=cabinet_id,
                 project_id=project_id,
@@ -983,6 +988,7 @@ class ModuleActionExecutor:
             body[status_col] = "ready"
             body[error_col] = None
             body["remote_auth_failed"] = False
+            body["remote_dsn_reachable"] = True
             body[table_col] = f"{probed.schema}.{probed.table}"
             body["probed_remote_key"] = (
                 f"{secret_ref}|{body[table_col]}|{body.get('remote_dsn_has_database')}|"
@@ -993,9 +999,12 @@ class ModuleActionExecutor:
                 body["remote_auth_failed"] = True
                 body[status_col] = "draft"
                 body[error_col] = None
+                # Host is reachable; wrong creds for selected DB keep pickers visible.
+                body["remote_dsn_reachable"] = bool(remote_database)
             else:
                 body[status_col] = "error"
                 body[error_col] = str(exc.detail or exc)[:500]
+                body["remote_dsn_reachable"] = False
             await self._update_module_row(
                 cabinet_id=cabinet_id,
                 project_id=project_id,
@@ -1011,6 +1020,7 @@ class ModuleActionExecutor:
         except Exception as exc:
             body[status_col] = "error"
             body[error_col] = str(exc)[:500]
+            body["remote_dsn_reachable"] = False
             await self._update_module_row(
                 cabinet_id=cabinet_id,
                 project_id=project_id,

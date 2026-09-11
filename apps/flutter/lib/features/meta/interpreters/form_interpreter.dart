@@ -123,6 +123,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       body['remote_dsn_has_user'],
       body['remote_dsn_has_password'],
       body['remote_auth_failed'],
+      body['remote_dsn_reachable'],
       body['status'],
       body['row_count'],
       body['columns_json'],
@@ -804,15 +805,22 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         final secret = raw.trim();
         if (secret.isEmpty) return;
         if (name == 'remote_dsn') {
-          final hasDb = _postgresDsnHasDatabase(secret);
-          await _persist('remote_dsn_url_has_database', hasDb);
-          await _persist('remote_dsn_has_database', hasDb);
+          // Hide DB/table pickers until auto-probe finishes successfully.
+          await _persist('remote_dsn_reachable', false);
+          await _persist('remote_auth_failed', false);
+          await _persist(
+            'remote_dsn_url_has_database',
+            _postgresDsnHasDatabase(secret),
+          );
+          await _persist(
+            'remote_dsn_has_database',
+            _postgresDsnHasDatabase(secret),
+          );
           await _persist('remote_dsn_has_user', _postgresDsnHasUser(secret));
           await _persist(
             'remote_dsn_has_password',
             _postgresDsnHasPassword(secret),
           );
-          await _persist('remote_auth_failed', false);
         }
         if (name == 'remote_password') {
           await _persist('remote_dsn_has_password', true);
@@ -828,6 +836,8 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
             secret: secret,
             label: label,
           );
+          // Persisting DSN/password triggers server auto-probe; keep spinner via
+          // AppValuePreference._saving until that round-trip finishes.
           await _persist(name, ref);
           return;
         }

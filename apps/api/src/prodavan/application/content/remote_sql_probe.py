@@ -11,6 +11,8 @@ import asyncpg
 from prodavan.domain.errors import AppError
 
 _IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+# Postgres DB names commonly include hyphens; allow them for connect/list.
+_DB_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]{0,62}$")
 _TABLE_RE = re.compile(
     r"^(?:(?P<schema>[A-Za-z_][A-Za-z0-9_]*)\.)?(?P<table>[A-Za-z_][A-Za-z0-9_]*)$"
 )
@@ -103,7 +105,7 @@ def looks_like_remote_table(raw: str) -> bool:
 
 
 def is_simple_database_name(raw: str) -> bool:
-    return bool(_IDENT_RE.match((raw or "").strip()))
+    return bool(_DB_NAME_RE.match((raw or "").strip()))
 
 
 def postgres_dsn_database_name(dsn: str) -> str | None:
@@ -111,7 +113,7 @@ def postgres_dsn_database_name(dsn: str) -> str | None:
     path = (urlparse((dsn or "").strip()).path or "").lstrip("/")
     if not path:
         return None
-    name = path.split("/", 1)[0].strip()
+    name = unquote(path.split("/", 1)[0].strip())
     if not name:
         return None
     if looks_like_remote_table(name):
@@ -219,7 +221,7 @@ def apply_remote_connect_overrides(
         password=final_password if final_user is not None else None,
     )
 
-    db_field = (database or "").strip()
+    db_field = unquote((database or "").strip())
     if looks_like_remote_table(db_field):
         db_field = ""
     path_db = postgres_dsn_database_name(cleaned)
@@ -231,10 +233,24 @@ def apply_remote_connect_overrides(
                 code="VALIDATION_ERROR",
                 title="Validation Error",
                 status=422,
-                detail="database name must be a simple SQL identifier",
+                detail=(
+                    "database name must be a simple identifier "
+                    "(letters, digits, underscore, hyphen; e.g. s4b_catalog), "
+                    "not a URL or schema.table"
+                ),
             )
         target_db = db_field
     elif path_db:
+        if not is_simple_database_name(path_db):
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail=(
+                    f"database name in URL path is invalid: {path_db!r}. "
+                    "Use a simple identifier (e.g. /s4b_catalog)."
+                ),
+            )
         target_db = path_db
     else:
         target_db = ""
@@ -378,6 +394,30 @@ def _connect_error(dsn: str, exc: Exception) -> AppError:
             detail=(
                 f"invalid credentials for {host}. "
                 "Enter login and password, then try again."
+            ),
+        )
+    text = f"{type(exc).__name__} {exc}".lower()
+    if any(
+        marker in text
+        for marker in (
+            "connection_lost",
+            "connection reset",
+            "broken pipe",
+            "network is unreachable",
+            "no route to host",
+            "timed out",
+            "timeout",
+            "connection refused",
+        )
+    ):
+        return AppError(
+            code="SERVICE_UNAVAILABLE",
+            title="Service Unavailable",
+            status=503,
+            detail=(
+                f"remote SQL probe failed ({host}): host unreachable from the API "
+                f"({exc}). Check that Postgres accepts connections from the cluster "
+                "network (not only localhost/LAN to your PC), firewall, and DSN."
             ),
         )
     return AppError(

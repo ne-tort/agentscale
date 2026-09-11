@@ -197,6 +197,27 @@ def test_is_remote_auth_failure() -> None:
     assert not is_remote_auth_failure(Exception("connection refused"))
 
 
+
+def test_is_simple_database_name_allows_hyphen() -> None:
+    from prodavan.application.content.remote_sql_probe import is_simple_database_name
+
+    assert is_simple_database_name("s4b_catalog")
+    assert is_simple_database_name("my-db")
+    assert not is_simple_database_name("public.offers")
+    assert not is_simple_database_name("bad;drop")
+
+
+def test_connect_error_connection_lost_is_actionable() -> None:
+    from prodavan.application.content.remote_sql_probe import _connect_error
+
+    err = _connect_error(
+        "postgresql://u:p@192.168.0.104:5432/db",
+        Exception("unexpected connection_lost() call"),
+    )
+    assert err.status == 503
+    assert "unreachable" in (err.detail or "").lower()
+    assert "192.168.0.104" in (err.detail or "")
+
 def test_product_seed_action_fallback() -> None:
     from prodavan.application.modules.module_action_executor import _product_seed_action
 
