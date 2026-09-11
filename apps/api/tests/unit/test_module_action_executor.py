@@ -144,3 +144,90 @@ async def test_assert_project_rejects_foreign_cabinet(
             employee=None,
         )
     assert exc.value.status == 422
+
+
+def test_remote_probe_connection_key_ignores_ui_flags() -> None:
+    from prodavan.application.modules.module_action_executor import remote_probe_connection_key
+
+    params = {
+        "dsn_column": "remote_dsn",
+        "remote_table_column": "remote_table",
+        "remote_database_column": "remote_database",
+        "remote_user_column": "remote_user",
+        "remote_password_column": "remote_password",
+    }
+    base = {
+        "remote_dsn": {"secret_ref": "vault://cabinet_secrets/a"},
+        "remote_database": "",
+        "remote_table": "",
+        "remote_user": "",
+        "remote_password": None,
+        "remote_dsn_has_user": False,
+        "remote_dsn_reachable": False,
+    }
+    flagged = {
+        **base,
+        "remote_dsn_has_user": True,
+        "remote_dsn_reachable": True,
+        "remote_auth_failed": True,
+        "status": "error",
+    }
+    assert remote_probe_connection_key(base, params) == remote_probe_connection_key(flagged, params)
+    changed = {**base, "remote_dsn": {"secret_ref": "vault://cabinet_secrets/b"}}
+    assert remote_probe_connection_key(base, params) != remote_probe_connection_key(changed, params)
+
+
+@pytest.mark.asyncio
+async def test_auto_probe_skips_when_connection_inputs_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    executor = ModuleActionExecutor(session=_FakeSession([  # type: ignore[arg-type]
+        {
+            "id": "probe_catalog_remote",
+            "kind": "content.probe_remote_sql",
+            "params": {"table_slug": "catalogs"},
+        }
+    ]))
+    body = {
+        "source_kind": "remote",
+        "remote_dsn": {"secret_ref": "vault://cabinet_secrets/old"},
+        "remote_database": "",
+        "remote_table": "",
+        "status": "error",
+    }
+    called: list[str] = []
+
+    async def _list_rows(**kwargs):  # noqa: ANN003
+        return [{"row_id": "r1", "body": dict(body)}]
+
+    async def _probe(**kwargs):  # noqa: ANN003
+        called.append("probe")
+        return {}
+
+    monkeypatch.setattr(executor, "_list_module_rows", _list_rows)
+    monkeypatch.setattr(executor, "_probe_remote_sql", _probe)
+
+    await executor.maybe_auto_probe_remote_sql(
+        cabinet_id="cab_1",
+        module_id="mod_equipment",
+        table_slug="catalogs",
+        row_id="r1",
+        principal=Principal(sub="u1", roles=frozenset()),
+        employee=None,
+        previous_body=dict(body),
+    )
+    assert called == []
+
+    await executor.maybe_auto_probe_remote_sql(
+        cabinet_id="cab_1",
+        module_id="mod_equipment",
+        table_slug="catalogs",
+        row_id="r1",
+        principal=Principal(sub="u1", roles=frozenset()),
+        employee=None,
+        previous_body={
+            **body,
+            "remote_dsn": {"secret_ref": "vault://cabinet_secrets/older"},
+        },
+    )
+    assert called == ["probe"]

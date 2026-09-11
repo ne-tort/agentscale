@@ -262,6 +262,11 @@ class CabinetModuleService:
                     row_id=row_id,
                     principal=principal,
                     employee=employee,
+                    previous_body=(
+                        existing.get("body")
+                        if isinstance(existing.get("body"), dict)
+                        else None
+                    ),
                 )
             except AppError as exc:
                 action_error = exc
@@ -320,6 +325,7 @@ class CabinetModuleService:
         row_id: str,
         principal: Principal,
         employee: EmployeeRow | None,
+        previous_body: dict | None = None,
     ) -> None:
         if not row_id:
             return
@@ -332,6 +338,7 @@ class CabinetModuleService:
             row_id=row_id,
             principal=principal,
             employee=employee,
+            previous_body=previous_body,
         )
 
     async def _require_module_binding(self, *, cabinet_id: str, module_id: str) -> None:

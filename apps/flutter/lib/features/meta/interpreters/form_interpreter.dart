@@ -250,6 +250,61 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     }
   }
 
+  /// Single-row upsert for several fields (one auto-probe, one error).
+  Future<void> _persistFields(Map<String, dynamic> fields) async {
+    if (fields.isEmpty) return;
+    setState(() {
+      _values.addAll(fields);
+      final db = fields['remote_database'];
+      if (db is String && db.trim().isNotEmpty) {
+        _values['remote_dsn_has_database'] = true;
+      }
+      final user = fields['remote_user'];
+      if (user is String && user.trim().isNotEmpty) {
+        _values['remote_dsn_has_user'] = true;
+        _values['remote_auth_failed'] = false;
+      }
+    });
+    if (widget.readOnly) return;
+    final tableSlug = widget.view['table_slug'] as String? ?? '';
+    try {
+      if (_rowId == null) {
+        final ui = widget.view['ui_json'];
+        final hidden = ui is Map ? ui['hidden_defaults'] : null;
+        if (hidden is Map) {
+          _values.addAll(Map<String, dynamic>.from(hidden));
+        }
+        if (widget.rowId != null) {
+          final profileField = widget.view['table_slug'] == 'agents_md' ? 'profile_id' : null;
+          if (profileField != null) {
+            _values[profileField] = widget.rowId;
+          }
+        }
+        final created = widget.seeds.createRow(tableSlug);
+        _rowId = created is Future ? await created as String : created as String;
+        final body = widget.seeds.bodyFor(_rowId!);
+        body.addAll(_values);
+        final upsert = widget.seeds.upsertBody(_rowId!, body);
+        if (upsert is Future) await upsert;
+      } else {
+        final body = Map<String, dynamic>.from(widget.seeds.bodyFor(_rowId!));
+        body.addAll(fields);
+        final upsert = widget.seeds.upsertBody(_rowId!, body);
+        if (upsert is Future) await upsert;
+      }
+      if (!mounted || _rowId == null) return;
+      final item = widget.seeds.itemById(_rowId!);
+      if (item != null) {
+        setState(() {
+          _values = Map<String, dynamic>.from(widget.seeds.bodyFor(_rowId!));
+        });
+      }
+    } catch (e) {
+      await _reloadRowAfterFailure();
+      rethrow;
+    }
+  }
+
   Future<void> _reloadRowAfterFailure() async {
     if (_rowId == null) return;
     try {
@@ -804,28 +859,6 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       onSave: (raw) async {
         final secret = raw.trim();
         if (secret.isEmpty) return;
-        if (name == 'remote_dsn') {
-          // Hide DB/table pickers until auto-probe finishes successfully.
-          await _persist('remote_dsn_reachable', false);
-          await _persist('remote_auth_failed', false);
-          await _persist(
-            'remote_dsn_url_has_database',
-            _postgresDsnHasDatabase(secret),
-          );
-          await _persist(
-            'remote_dsn_has_database',
-            _postgresDsnHasDatabase(secret),
-          );
-          await _persist('remote_dsn_has_user', _postgresDsnHasUser(secret));
-          await _persist(
-            'remote_dsn_has_password',
-            _postgresDsnHasPassword(secret),
-          );
-        }
-        if (name == 'remote_password') {
-          await _persist('remote_dsn_has_password', true);
-          await _persist('remote_auth_failed', false);
-        }
         if (columnType == 'secret_ref') {
           if (scope == null) {
             throw StateError('secret_ref requires module runtime scope');
@@ -836,8 +869,30 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
             secret: secret,
             label: label,
           );
-          // Persisting DSN/password triggers server auto-probe; keep spinner via
-          // AppValuePreference._saving until that round-trip finishes.
+          if (name == 'remote_dsn') {
+            final hasDb = _postgresDsnHasDatabase(secret);
+            // One upsert: flags + new DSN together → single auto-probe on the new host.
+            await _persistFields({
+              'remote_dsn_reachable': false,
+              'remote_auth_failed': false,
+              'remote_dsn_url_has_database': hasDb,
+              'remote_dsn_has_database': hasDb,
+              'remote_dsn_has_user': _postgresDsnHasUser(secret),
+              'remote_dsn_has_password': _postgresDsnHasPassword(secret),
+              'remote_database': '',
+              'remote_table': '',
+              'remote_dsn': ref,
+            });
+            return;
+          }
+          if (name == 'remote_password') {
+            await _persistFields({
+              'remote_dsn_has_password': true,
+              'remote_auth_failed': false,
+              'remote_password': ref,
+            });
+            return;
+          }
           await _persist(name, ref);
           return;
         }

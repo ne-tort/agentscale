@@ -347,6 +347,11 @@ class ProjectRuntimeModuleService:
                     row_id=row_id,
                     principal=principal,
                     employee=employee,
+                    previous_body=(
+                        existing.get("body")
+                        if isinstance(existing.get("body"), dict)
+                        else None
+                    ),
                 )
             except AppError as exc:
                 action_error = exc
@@ -409,6 +414,7 @@ class ProjectRuntimeModuleService:
         row_id: str,
         principal: Principal,
         employee: EmployeeRow | None,
+        previous_body: dict | None = None,
     ) -> None:
         if not row_id:
             return
@@ -422,4 +428,5 @@ class ProjectRuntimeModuleService:
             row_id=row_id,
             principal=principal,
             employee=employee,
+            previous_body=previous_body,
         )

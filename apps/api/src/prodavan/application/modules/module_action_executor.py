@@ -26,6 +26,28 @@ from prodavan.infrastructure.secrets.store import get_secret_store
 logger = logging.getLogger(__name__)
 
 
+def remote_probe_connection_key(body: dict[str, Any], params: dict[str, Any]) -> str:
+    """Stable key of fields that actually affect remote SQL connect/probe.
+
+    UI-only flags (``remote_dsn_has_*``, ``remote_dsn_reachable``, …) are excluded so
+    partial client patches do not re-probe the previous DSN.
+    """
+    dsn_col = str(params.get("dsn_column") or "remote_dsn")
+    table_col = str(params.get("remote_table_column") or "remote_table")
+    db_col = str(params.get("remote_database_column") or "remote_database")
+    user_col = str(params.get("remote_user_column") or "remote_user")
+    password_col = str(params.get("remote_password_column") or "remote_password")
+    return "|".join(
+        [
+            field_value_as_secret_ref(body.get(dsn_col)) or "",
+            str(body.get(db_col) or "").strip(),
+            str(body.get(table_col) or "").strip(),
+            str(body.get(user_col) or "").strip(),
+            field_value_as_secret_ref(body.get(password_col)) or "",
+        ]
+    )
+
+
 def _product_seed_action(*, module_id: str, action_id: str) -> dict[str, Any] | None:
     """Fallback when DB meta lags behind product seeds (avoids picker 404)."""
     from prodavan.application.platform.product_module_seeds import PRODUCT_MODULES
@@ -196,6 +218,7 @@ class ModuleActionExecutor:
         principal: Principal,
         employee: EmployeeRow | None,
         project_id: str | None = None,
+        previous_body: dict[str, Any] | None = None,
     ) -> None:
         """Best-effort: run content.index_tabular actions matching table after row write."""
         for action in await self._list_actions(module_id=module_id):
@@ -283,6 +306,7 @@ class ModuleActionExecutor:
             principal=principal,
             employee=employee,
             project_id=project_id,
+            previous_body=previous_body,
         )
 
     async def maybe_auto_probe_remote_sql(
@@ -295,6 +319,7 @@ class ModuleActionExecutor:
         principal: Principal,
         employee: EmployeeRow | None,
         project_id: str | None = None,
+        previous_body: dict[str, Any] | None = None,
     ) -> None:
         """Best-effort: run content.probe_remote_sql after remote catalog row write."""
         for action in await self._list_actions(module_id=module_id):
@@ -331,6 +356,12 @@ class ModuleActionExecutor:
             status_col = str(params.get("status_column") or "status")
             if field_value_as_secret_ref(body.get(dsn_col)) is None:
                 continue
+            # Skip when only UI flags changed — do not re-probe the previous DSN.
+            conn_key = remote_probe_connection_key(body, params)
+            if previous_body is not None:
+                prev = previous_body if isinstance(previous_body, dict) else {}
+                if remote_probe_connection_key(prev, params) == conn_key:
+                    continue
             # remote_table may be empty when DSN already has /dbname (default SQL table).
             status = str(body.get(status_col) or "")
             if status == "indexing":
