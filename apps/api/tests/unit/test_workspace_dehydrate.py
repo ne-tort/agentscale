@@ -74,3 +74,11 @@ def test_hydrate_prefix_lands_under_workspace_root() -> None:
 
     src = inspect.getsource(hydrate_mod._sync_from_minio)
     assert 'f"projects/{workspace_key}/workspace/"' in src
+
+
+def test_upload_preserves_dot_prodavan_config(file_store: FileStoreManager) -> None:
+    tar = _tar_bytes({".prodavan/config.yaml": b"version: 1\n"})
+    out = upload_workspace_tar(workspace_key="ws_dot", tar_bytes=tar, store=file_store)
+    assert out.uploaded == 1
+    key = "projects/ws_dot/workspace/.prodavan/config.yaml"
+    assert file_store.get_bytes_sync(key) == b"version: 1\n"

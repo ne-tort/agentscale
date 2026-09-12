@@ -18,8 +18,8 @@ Add `reference-ui/*/` to `.gitignore` if clones are kept locally.
 
 | Pattern | LibreChat | Open WebUI | Prodavan target |
 |---------|-----------|------------|-----------------|
-| SSE streaming bubbles | yes | yes | `POST /chat/stream` + transcript reload |
-| Tool call cards | yes | yes | `role=tool` + sidechain transcript API |
+| SSE streaming bubbles | yes | yes | `POST /chat/stream` + transcript reload; **append-only** live deltas (no client overlap merge) |
+| Tool call cards | yes | yes | `role=tool` + sidechain transcript API; close streaming text segment on `tool_call` |
 | HITL approve modal | partial | yes | `ToolApprovePage` + pending-approvals |
 | Session list / fork | yes | yes | `GET /agent/sessions`, `POST .../fork` |
 | Attachments | yes | yes | `attachment_refs` on send |

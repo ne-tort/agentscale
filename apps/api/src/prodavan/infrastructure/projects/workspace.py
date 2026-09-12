@@ -14,6 +14,25 @@ from prodavan.core.infra.object_keys import workspace_object_key
 from prodavan.infrastructure.files.manager import ensure_file_store
 
 
+def _zip_member_relpath(filename: str, *, package_name: str) -> str | None:
+    """Map zip member → path under packages/{name}/ (flat root preferred)."""
+    rel = (filename or "").replace("\\", "/")
+    while rel.startswith("./"):
+        rel = rel[2:]
+    rel = rel.lstrip("/")
+    if not rel or rel.endswith("/"):
+        return None
+    parts = [p for p in rel.split("/") if p and p != "."]
+    if not parts or any(p == ".." for p in parts):
+        return None
+    # Nested zip root packages/{name}/{name}/file → strip one matching prefix.
+    if len(parts) >= 2 and parts[0] == package_name:
+        parts = parts[1:]
+    if not parts:
+        return None
+    return "/".join(parts)
+
+
 class WorkspaceLayoutWriter:
     """Idempotent /workspace layout per container.md.
 
@@ -117,24 +136,52 @@ class WorkspaceLayoutWriter:
         return True
 
     def extract_packages(self, artifacts: list[tuple[str, bytes]]) -> list[str]:
+        """Persist zip + extracted tree into object store (hydrate SoT), and locally."""
         from prodavan.infrastructure.projects.mcp_sandbox import stop_all_package_processes
 
         stop_all_package_processes(workspace_root=self._root)
         names: list[str] = []
         for pkg_name, raw in artifacts:
-            # Persist zip in object store (SoT for package blob in workspace prefix).
+            safe = Path(pkg_name).name
+            # Persist zip in object store (artifact / ensure_package_tree fallback).
             self._put_workspace_bytes(
-                f"packages/{pkg_name}.zip",
+                f"packages/{safe}.zip",
                 raw,
                 content_type="application/zip",
             )
-            dest = self._root / "packages" / pkg_name
+            # Hydrate reads ONLY object store — each file must be put, not only local extract.
+            with zipfile.ZipFile(BytesIO(raw)) as zf:
+                for info in zf.infolist():
+                    if info.is_dir():
+                        continue
+                    inner = _zip_member_relpath(info.filename, package_name=safe)
+                    if inner is None:
+                        continue
+                    data = zf.read(info)
+                    self._put_workspace_bytes(
+                        f"packages/{safe}/{inner}",
+                        data,
+                        content_type="application/octet-stream",
+                    )
+            dest = self._root / "packages" / safe
             if dest.exists():
                 shutil.rmtree(dest)
             dest.mkdir(parents=True, exist_ok=True)
             with zipfile.ZipFile(BytesIO(raw)) as zf:
                 zf.extractall(dest)
-            names.append(pkg_name)
+            # Flatten accidental packages/{name}/{name}/… from nested zip roots.
+            nested = dest / safe
+            if nested.is_dir() and not (dest / "server.py").exists() and (nested / "server.py").exists():
+                for child in nested.iterdir():
+                    target = dest / child.name
+                    if target.exists():
+                        if target.is_dir():
+                            shutil.rmtree(target)
+                        else:
+                            target.unlink()
+                    shutil.move(str(child), str(target))
+                shutil.rmtree(nested, ignore_errors=True)
+            names.append(safe)
         return names
 
     def store_inbox_attachment(self, *, filename: str, raw: bytes) -> Path:

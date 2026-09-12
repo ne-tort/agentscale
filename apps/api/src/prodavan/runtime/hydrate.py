@@ -42,12 +42,14 @@ def _sync_from_api(*, target: Path) -> None:
         logger.info("hydrate API empty archive → stub dirs target=%s", target)
         return
 
+    from prodavan.infrastructure.projects.tar_paths import tar_member_relpath
+
     with tarfile.open(fileobj=io.BytesIO(data), mode="r:*") as archive:
         for member in archive.getmembers():
             if not member.isfile():
                 continue
-            rel = member.name.replace("\\", "/").lstrip("./")
-            if not rel or ".." in rel.split("/") or rel.startswith("/"):
+            rel = tar_member_relpath(member.name)
+            if not rel:
                 continue
             dest = target / rel
             dest.parent.mkdir(parents=True, exist_ok=True)

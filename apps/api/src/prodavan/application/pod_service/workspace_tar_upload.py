@@ -12,6 +12,7 @@ from prodavan.application.pod_service.ports.dehydrate import DehydrateResult
 from prodavan.application.pod_service.workspace_dehydrate_rules import is_excluded_rel, max_file_bytes
 from prodavan.core.infra.object_keys import workspace_object_key
 from prodavan.infrastructure.files.manager import ensure_file_store
+from prodavan.infrastructure.projects.tar_paths import tar_member_relpath
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ def upload_workspace_tar(
         for member in archive.getmembers():
             if not member.isfile():
                 continue
-            rel = member.name.replace("\\", "/").lstrip("./")
+            rel = tar_member_relpath(member.name)
             if not rel or is_excluded_rel(rel):
                 skipped += 1
                 continue

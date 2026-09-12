@@ -191,9 +191,12 @@ class MaterializeExecutor:
         from prodavan.application.mcp.package_validator import McpPackageValidator
 
         manifest = McpPackageValidator().validate_zip(raw)
-        name = op.mcp_package_name or manifest.get("name") or "package"
+        # Manifest name is SoT for packages/{name}/ (row label may be a UI title).
+        name = str(manifest.get("name") or op.mcp_package_name or "package").strip() or "package"
         adapter = McpMaterializeAdapter(self._session)
-        return await adapter.extract_to_workspace(writer=writer, package_name=name, zip_bytes=raw, manifest=manifest)
+        return await adapter.extract_to_workspace(
+            writer=writer, package_name=name, zip_bytes=raw, manifest=manifest
+        )
 
     async def _load_file_ref(self, ref: dict[str, Any]) -> bytes | None:
         storage_key = ref.get("storage_key")

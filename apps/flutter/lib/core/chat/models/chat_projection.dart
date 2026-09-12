@@ -8,7 +8,10 @@ List<ChatBlock> chatBlocksFromTranscript(List<dynamic>? raw) {
       .toList();
 }
 
-/// Cumulative SDK delta → incremental append (mirrors API [normalize_text_delta]).
+/// Cumulative SDK delta → incremental append (API / transcript rebuild only).
+///
+/// Live SSE from Prodavan API is already incremental ([TurnStreamNormalizer]);
+/// do **not** run this on the Flutter live path — overlap heuristics swallow tokens.
 ({String incremental, String cumulative}) normalizeTextDelta(String previous, String chunk) {
   if (chunk.isEmpty) return (incremental: '', cumulative: previous);
   if (chunk.startsWith(previous)) {
@@ -27,7 +30,16 @@ List<ChatBlock> chatBlocksFromTranscript(List<dynamic>? raw) {
   return (incremental: chunk, cumulative: previous + chunk);
 }
 
-void _applyNormalizedDelta({
+void _closeStreamingKind(List<ChatBlock> next, String kind) {
+  for (var i = 0; i < next.length; i++) {
+    if (next[i].kind == kind && next[i].isStreaming) {
+      next[i] = next[i].copyWithRaw({'_streaming': false});
+    }
+  }
+}
+
+/// Append-only apply for wire-incremental deltas (Open WebUI / Ollama-style).
+void _applyIncrementalDelta({
   required List<ChatBlock> next,
   required String kind,
   required String chunk,
@@ -37,21 +49,19 @@ void _applyNormalizedDelta({
   if (lastIdx >= 0) {
     final prev = next[lastIdx];
     final base = prev.raw[baseKey] as String? ?? prev.text;
-    final normalized = normalizeTextDelta(base, chunk);
-    if (normalized.incremental.isEmpty) return;
+    final cumulative = base + chunk;
     next[lastIdx] = prev.copyWithRaw({
-      'text': normalized.cumulative,
-      baseKey: normalized.cumulative,
+      'text': cumulative,
+      baseKey: cumulative,
       '_streaming': true,
     });
     return;
   }
-  final normalized = normalizeTextDelta('', chunk);
   next.add(ChatBlock(
     kind: kind,
     raw: {
-      'text': normalized.cumulative,
-      baseKey: normalized.cumulative,
+      'text': chunk,
+      baseKey: chunk,
       '_streaming': true,
     },
   ));
@@ -70,7 +80,7 @@ List<ChatBlock> applyStreamEvent(List<ChatBlock> blocks, Map<String, dynamic> ev
     case 'text_delta':
       final chunk = payload['text'] as String? ?? '';
       if (chunk.isEmpty) return next;
-      _applyNormalizedDelta(
+      _applyIncrementalDelta(
         next: next,
         kind: 'assistant_markdown',
         chunk: chunk,
@@ -78,9 +88,11 @@ List<ChatBlock> applyStreamEvent(List<ChatBlock> blocks, Map<String, dynamic> ev
       );
       break;
     case 'thinking_delta':
+      // Mirror API TurnStreamNormalizer: thinking starts a new text segment after.
+      _closeStreamingKind(next, 'assistant_markdown');
       final chunk = payload['text'] as String? ?? '';
       if (chunk.isEmpty) break;
-      _applyNormalizedDelta(
+      _applyIncrementalDelta(
         next: next,
         kind: 'thinking',
         chunk: chunk,
@@ -98,6 +110,9 @@ List<ChatBlock> applyStreamEvent(List<ChatBlock> blocks, Map<String, dynamic> ev
       }
       break;
     case 'tool_call':
+      // Close streaming assistant so post-tool text starts a new block (no glue).
+      _closeStreamingKind(next, 'assistant_markdown');
+      _closeStreamingKind(next, 'thinking');
       next.add(ChatBlock(kind: 'tool_call', raw: {
         'id': payload['id'],
         'name': payload['name'],

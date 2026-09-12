@@ -13,27 +13,39 @@ void main() {
     expect(blocks.first.isStreaming, isTrue);
   });
 
-  test('applyStreamEvent dedupes cumulative text_delta', () {
-    var blocks = <ChatBlock>[];
-    blocks = applyStreamEvent(blocks, {'type': 'text_delta', 'data': {'text': 'При'}});
-    blocks = applyStreamEvent(blocks, {'type': 'text_delta', 'data': {'text': 'Привет'}});
-    blocks = applyStreamEvent(blocks, {'type': 'text_delta', 'data': {'text': 'Привет!'}});
-    expect(blocks.single.text, 'Привет!');
+  test('applyStreamEvent does not swallow suffix-overlap incremental chunks', () {
+    // Wire is already incremental; "lo" after "Hello" must append, not overlap-merge away.
+    var blocks = applyStreamEvent([], {
+      'type': 'text_delta',
+      'data': {'text': 'Hello'},
+    });
+    blocks = applyStreamEvent(blocks, {
+      'type': 'text_delta',
+      'data': {'text': 'lo'},
+    });
+    expect(blocks.single.text, 'Hellolo');
   });
 
-  test('normalizeTextDelta appends incremental chunks', () {
+  test('applyStreamEvent does not swallow cyrillic suffix overlap', () {
+    var blocks = applyStreamEvent([], {
+      'type': 'text_delta',
+      'data': {'text': 'Найденные'},
+    });
+    blocks = applyStreamEvent(blocks, {
+      'type': 'text_delta',
+      'data': {'text': 'денные'},
+    });
+    expect(blocks.single.text, 'Найденныеденные');
+  });
+
+  test('normalizeTextDelta still merges cumulative SDK chunks (API/transcript)', () {
     var cum = '';
     var r = normalizeTextDelta(cum, 'Hel');
     cum = r.cumulative;
     r = normalizeTextDelta(cum, 'lo');
     expect(r.cumulative, 'Hello');
-  });
-
-  test('normalizeTextDelta merges suffix/prefix overlap', () {
-    var r = normalizeTextDelta('Проверка', 'роверка прошла');
+    r = normalizeTextDelta('Проверка', 'роверка прошла');
     expect(r.cumulative, 'Проверка прошла');
-    r = normalizeTextDelta(r.cumulative, ' успешно');
-    expect(r.cumulative, 'Проверка прошла успешно');
   });
 
   test('finalizeTurnBlocks clears streaming flag', () {
@@ -44,13 +56,27 @@ void main() {
     expect(done.first.isStreaming, isFalse);
   });
 
-  test('applyStreamEvent adds tool_call block', () {
-    final blocks = applyStreamEvent([], {
+  test('tool_call closes streaming assistant so later text is a new block', () {
+    var blocks = applyStreamEvent([], {
+      'type': 'text_delta',
+      'data': {'text': 'Before '},
+    });
+    blocks = applyStreamEvent(blocks, {
       'type': 'tool_call',
       'data': {'id': 't1', 'name': 'Read', 'input': {'path': 'a.md'}},
     });
-    expect(blocks.single.kind, 'tool_call');
-    expect(blocks.single.raw['name'], 'Read');
+    blocks = applyStreamEvent(blocks, {
+      'type': 'text_delta',
+      'data': {'text': 'After'},
+    });
+    expect(blocks.length, 3);
+    expect(blocks[0].kind, 'assistant_markdown');
+    expect(blocks[0].text, 'Before ');
+    expect(blocks[0].isStreaming, isFalse);
+    expect(blocks[1].kind, 'tool_call');
+    expect(blocks[2].kind, 'assistant_markdown');
+    expect(blocks[2].text, 'After');
+    expect(blocks[2].isStreaming, isTrue);
   });
 
   test('applyStreamEvent merges usage blocks', () {

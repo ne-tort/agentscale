@@ -92,3 +92,28 @@ async def test_ensure_package_tree_hydrates_from_object_store(
     )
     assert writer.ensure_package_tree("missing") is False
     await mgr.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_extract_packages_puts_tree_in_object_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import zipfile
+    from io import BytesIO
+
+    set_file_store(None)
+    mgr = FileStoreManager(backend="local", storage_root=tmp_path)
+    await mgr.startup()
+    monkeypatch.setattr("prodavan.infrastructure.projects.workspace.settings.storage_root", tmp_path)
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("server.py", "print('ok')\n")
+        zf.writestr("manifest.json", '{"format":"mcp.package","name":"demo"}\n')
+    writer = WorkspaceLayoutWriter(workspace_key="wk3")
+    writer.ensure_dirs()
+    names = writer.extract_packages([("demo", buf.getvalue())])
+    assert names == ["demo"]
+    assert await mgr.get_bytes("projects/wk3/workspace/packages/demo.zip")
+    assert await mgr.get_bytes("projects/wk3/workspace/packages/demo/server.py") == b"print('ok')\n"
+    assert await mgr.get_bytes("projects/wk3/workspace/packages/demo/manifest.json")
+    await mgr.shutdown()
