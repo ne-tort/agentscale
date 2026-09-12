@@ -43,9 +43,14 @@ void main() {
     var r = normalizeTextDelta(cum, 'Hel');
     cum = r.cumulative;
     r = normalizeTextDelta(cum, 'lo');
+    // Incremental "lo" after "Hel" appends (not cumulative "Hello").
     expect(r.cumulative, 'Hello');
     r = normalizeTextDelta('Проверка', 'роверка прошла');
-    expect(r.cumulative, 'Проверка прошла');
+    // No overlap merge: verbatim append.
+    expect(r.cumulative, 'Проверкароверка прошла');
+    r = normalizeTextDelta('конф', 'конфигурацию');
+    expect(r.cumulative, 'конфигурацию');
+    expect(r.incremental, 'игурацию');
   });
 
   test('finalizeTurnBlocks clears streaming flag', () {

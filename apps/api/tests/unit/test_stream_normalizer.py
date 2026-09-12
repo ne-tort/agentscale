@@ -29,14 +29,27 @@ def test_normalizer_passes_through_non_delta_events() -> None:
     assert done.type == AgentEventType.DONE
 
 
-def test_normalizer_overlap_merge() -> None:
+def test_normalizer_incremental_tokens_not_swallowed() -> None:
+    """Incremental pieces that share a suffix/prefix must not be overlap-stripped."""
     normalizer = TurnStreamNormalizer()
     out: list[str] = []
-    for chunk in ["Проверка", "роверка прошла", " успешно"]:
+    for chunk in ["Найденные", " проблемы", " конфигурации"]:
         event = normalizer.normalize_event(AgentEvent.now(AgentEventType.TEXT_DELTA, {"text": chunk}))
         if event is not None:
             out.append(str(event.data["text"]))
-    assert "".join(out) == "Проверка прошла успешно"
+    assert "".join(out) == "Найденные проблемы конфигурации"
+
+
+def test_normalizer_does_not_drop_shared_syllable_incremental() -> None:
+    normalizer = TurnStreamNormalizer()
+    # After "конф", an incremental "ден" (new text) must stay — not treated as overlap.
+    # Cumulative "конфигурацию" still works via startswith.
+    e1 = normalizer.normalize_event(AgentEvent.now(AgentEventType.TEXT_DELTA, {"text": "конф"}))
+    assert e1 is not None and e1.data["text"] == "конф"
+    e2 = normalizer.normalize_event(
+        AgentEvent.now(AgentEventType.TEXT_DELTA, {"text": "конфигурацию"})
+    )
+    assert e2 is not None and e2.data["text"] == "игурацию"
 
 
 def test_normalizer_resets_text_on_tool_call() -> None:

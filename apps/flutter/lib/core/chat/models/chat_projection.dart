@@ -10,8 +10,9 @@ List<ChatBlock> chatBlocksFromTranscript(List<dynamic>? raw) {
 
 /// Cumulative SDK delta → incremental append (API / transcript rebuild only).
 ///
-/// Live SSE from Prodavan API is already incremental ([TurnStreamNormalizer]);
-/// do **not** run this on the Flutter live path — overlap heuristics swallow tokens.
+/// Live SSE uses append-only ([_applyIncrementalDelta]). This helper mirrors
+/// API [normalize_text_delta]: cumulative prefix OR verbatim append — **no**
+/// suffix/prefix overlap merge (that swallowed syllables on incremental streams).
 ({String incremental, String cumulative}) normalizeTextDelta(String previous, String chunk) {
   if (chunk.isEmpty) return (incremental: '', cumulative: previous);
   if (chunk.startsWith(previous)) {
@@ -19,13 +20,6 @@ List<ChatBlock> chatBlocksFromTranscript(List<dynamic>? raw) {
   }
   if (previous.startsWith(chunk)) {
     return (incremental: '', cumulative: previous);
-  }
-  final maxK = previous.length < chunk.length ? previous.length : chunk.length;
-  for (var k = maxK; k > 1; k--) {
-    if (previous.substring(previous.length - k) == chunk.substring(0, k)) {
-      final incremental = chunk.substring(k);
-      return (incremental: incremental, cumulative: previous + incremental);
-    }
   }
   return (incremental: chunk, cumulative: previous + chunk);
 }
