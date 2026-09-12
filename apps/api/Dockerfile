@@ -21,10 +21,12 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 
 # Single COPY layer: ORM + Alembic revisions must not desync (buildx layer cache).
 # CI Images runs ./scripts/migrate.sh on the built image before push.
+# Keep seed_mcp_packages/ — SeedMcpBootstrap builds zips from it at API startup.
 COPY apps/api /tmp/api-full/
-RUN rm -rf ./src ./alembic \
+RUN rm -rf ./src ./alembic ./seed_mcp_packages \
   && mv /tmp/api-full/src ./src \
   && mv /tmp/api-full/alembic ./alembic \
+  && mv /tmp/api-full/seed_mcp_packages ./seed_mcp_packages \
   && rm -rf /tmp/api-full
 COPY apps/api/alembic.ini ./
 COPY apps/api/scripts/migrate.sh ./scripts/migrate.sh

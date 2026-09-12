@@ -37,6 +37,17 @@ def test_build_seed_mcp_zip_contains_sources() -> None:
     assert load_manifest(spec)["version"] == "1.0.0"
 
 
+def test_load_manifest_fallback_when_seed_dir_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    import prodavan.application.mcp.seed_mcp_builder as builder
+
+    monkeypatch.setattr(builder, "_SEED_ROOT", Path("/nonexistent/seed_mcp_packages"))
+    spec = SEED_PACKAGES[0]
+    manifest = builder.load_manifest(spec)
+    assert manifest["name"] == "prodavan-equipment"
+    assert manifest["format"] == "mcp.package"
+    assert "equipment_catalog_search" in manifest["tools"]
+
+
 @pytest.mark.asyncio
 async def test_attach_equipment_mcp_sets_file_ref_when_empty() -> None:
     session = AsyncMock()

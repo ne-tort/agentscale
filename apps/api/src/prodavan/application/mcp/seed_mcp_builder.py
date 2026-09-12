@@ -9,10 +9,11 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
-# apps/api/
+# …/prodavan/application/mcp/seed_mcp_builder.py → prodavan package root
+_PKG_ROOT = Path(__file__).resolve().parents[2]
+# Docker: /app ; local editable: apps/api
 _API_ROOT = Path(__file__).resolve().parents[4]
 _SEED_ROOT = _API_ROOT / "seed_mcp_packages"
-_SRC_ROOT = _API_ROOT / "src" / "prodavan"
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,11 +31,11 @@ def _equipment_sources() -> tuple[tuple[str, Path], ...]:
     return (
         (
             "server.py",
-            _SRC_ROOT / "application" / "mcp" / "prodavan_equipment_mcp" / "server.py",
+            _PKG_ROOT / "application" / "mcp" / "prodavan_equipment_mcp" / "server.py",
         ),
         (
             "equipment_catalog_search.py",
-            _SRC_ROOT / "application" / "modules" / "equipment_catalog_search.py",
+            _PKG_ROOT / "application" / "modules" / "equipment_catalog_search.py",
         ),
     )
 
@@ -52,9 +53,32 @@ def seed_mcp_root() -> Path:
     return _SEED_ROOT
 
 
+def _fallback_manifest(spec: SeedPackageSpec) -> dict[str, Any]:
+    """Build manifest from code when seed_mcp_packages/ is not in the image."""
+    if spec.name != "prodavan-equipment":
+        raise FileNotFoundError(
+            f"seed MCP manifest missing and no fallback for {spec.name}: "
+            f"{_SEED_ROOT / spec.manifest_dir / 'manifest.json'}"
+        )
+    from prodavan.application.mcp.platform_equipment_mcp import platform_equipment_mcp_package
+
+    pkg = platform_equipment_mcp_package()
+    return {
+        "format": "mcp.package",
+        "format_version": 1,
+        "name": pkg["name"],
+        "version": pkg["version"],
+        "entry": {"command": pkg["command"], "args": list(pkg["args"])},
+        "tools": list(pkg["tools"]),
+    }
+
+
 def load_manifest(spec: SeedPackageSpec) -> dict[str, Any]:
     path = _SEED_ROOT / spec.manifest_dir / "manifest.json"
-    data = json.loads(path.read_text(encoding="utf-8"))
+    if not path.is_file():
+        data = _fallback_manifest(spec)
+    else:
+        data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"invalid manifest: {path}")
     if data.get("format") != "mcp.package":
