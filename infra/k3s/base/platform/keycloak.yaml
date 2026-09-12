@@ -228,13 +228,14 @@ spec:
                 "$KC" create roles -r prodavan -s name="$ROLE" 2>/dev/null || true
               done
 
-              # Audience client scope + mapper
+              # Audience client scope + mapper (KC26 rejects attributes.* on create)
               if [ -z "$(scope_id prodavan-audience)" ]; then
                 "$KC" create client-scopes -r prodavan \
-                  -s name=prodavan-audience -s protocol=openid-connect \
-                  -s 'attributes.include.in.token.scope=true' \
-                  -s 'attributes.display.on.consent.screen=false'
+                  -s name=prodavan-audience -s protocol=openid-connect
                 AUD_ID=$(scope_id prodavan-audience)
+                "$KC" update "client-scopes/${AUD_ID}" -r prodavan \
+                  -s 'attributes.include.in.token.scope=true' \
+                  -s 'attributes.display.on.consent.screen=false' 2>/dev/null || true
                 "$KC" create "client-scopes/${AUD_ID}/protocol-mappers/models" -r prodavan \
                   -s name=aud-prodavan-api -s protocol=openid-connect \
                   -s protocolMapper=oidc-audience-mapper \
@@ -257,8 +258,13 @@ spec:
                 -s name="Prodavan Flutter" -s enabled=true -s publicClient=true \
                 -s directAccessGrantsEnabled=true -s standardFlowEnabled=true \
                 -s 'redirectUris=["http://127.0.0.1:*","http://localhost:*","prodavan://*"]' \
-                -s 'webOrigins=["+"]' -s fullScopeAllowed=true \
-                -s 'attributes.pkce.code.challenge.method=S256'
+                -s 'webOrigins=["+"]' -s fullScopeAllowed=true
+              FLUTTER_TMP=$("$KC" get clients -r prodavan -q clientId=prodavan-flutter --fields id --format csv --noquotes \
+                | grep -E '^[0-9a-f-]{8,}' | head -1 || true)
+              if [ -n "$FLUTTER_TMP" ]; then
+                "$KC" update "clients/${FLUTTER_TMP}" -r prodavan \
+                  -s 'attributes.pkce.code.challenge.method=S256' 2>/dev/null || true
+              fi
 
               ensure_client prodavan-api \
                 -s name="Prodavan API audience" -s enabled=true -s publicClient=true \
