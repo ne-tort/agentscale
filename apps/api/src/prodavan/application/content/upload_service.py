@@ -27,7 +27,7 @@ class UploadService:
         self,
         *,
         data: bytes,
-        owner_company_id: str,
+        owner_company_id: str | None,
         principal: Principal,
         employee: EmployeeRow | None,
         mime: str | None,
@@ -35,7 +35,10 @@ class UploadService:
         link_kind: str | None = None,
         link_id: str | None = None,
     ) -> tuple[str, str]:
-        """Create asset + v1 blob; optional domain link. Returns (asset_id, version_id)."""
+        """Create asset + v1 blob; optional domain link. Returns (asset_id, version_id).
+
+        ``owner_company_id=None`` → platform-owned asset (admin module editors).
+        """
         asset = await self._assets.create(
             principal=principal,
             employee=employee,

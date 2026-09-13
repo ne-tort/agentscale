@@ -1,6 +1,6 @@
 # Seed rows (optional meta slug)
 
-Предзаполнение **cabinet** `module_data_rows` при MC bind. Шаблон остаётся shared; строки появляются **в каждом кабинете**, куда модуль привязан.
+Предзаполнение **module instance** data rows при создании/upsert platform instance и local fork. Шаблон `seed_rows` в meta — SoT для **миграций** (insert-only); интерактивное редактирование данных (включая MCP zip) идёт через **live instance** UI, не через этот документ.
 
 ## Document
 
@@ -32,28 +32,28 @@ Body:
 
 ## Runtime
 
-На `ModuleMaterializeService.install`:
+1. Alembic `upsert_product_modules` → `_apply_seed_rows_to_instances` → `module_instance_data_rows` **`ON CONFLICT DO NOTHING`** (никогда не затирает body).
+2. Local bind → `fork_instance` копирует instance meta+data (включая `file_ref`) в child.
+3. API bootstrap (`SeedMcpBootstrapService`) кладёт MCP zip в object store и пишет `file_ref` **только если пуст**.
+4. Admin/company «Предзаполнение» и cabinet hubs правят **instance rows** через owner/cabinet data API + owner-scoped content upload.
 
-1. Ensure schema + `module_installations`
-2. Read `module_meta_documents` where `slug=seed_rows`
-3. `INSERT … ON CONFLICT (module_id, table_slug, row_id) DO NOTHING`
-
-Re-bind / re-install **не** перетирает изменённые пользователем строки с тем же `row_id`.  
-Unbind → delete all `module_data_rows` for module (включая seed).
+Legacy: при MC install ещё может писаться `cab_*.module_data_rows` (insert-only) — канон SoT для UI/агента — `module_instances`.
 
 ## vs column `default` vs materialize
 
 | Механизм | Что делает |
 |----------|------------|
 | `columns[].default` | Значение поля при **новой** строке |
-| `seed_rows` | Готовые строки в БД кабинета при bind |
+| `seed_rows` | Готовые строки в instance DB при upsert/fork (insert-only) |
 | `materialize` | Файлы в Project workspace / Pod (не DB rows) |
 
 ## Authoring
 
 ```bash
-# Admin API
+# Template seed (migrations / product packs)
 PUT /api/v1/admin/modules/{module_id}/meta/documents/seed_rows
-```
 
-Без заморочек: отредактировать JSON в admin module meta editor и сохранить slug `seed_rows`.
+# Live instance data (UI «Предзаполнение»)
+GET/POST/PATCH /api/v1/admin/modules/{module_id}/data/{table_slug}
+POST /api/v1/admin/modules/{module_id}/content/upload
+```

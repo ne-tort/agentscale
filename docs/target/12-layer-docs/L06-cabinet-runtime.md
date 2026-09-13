@@ -7,7 +7,7 @@
 | Quality note | API Runtime: instance+meta+rows+MCP+bundle+packages; UI interpreters L05; sandbox start L07; L04 quotas soft stub |
 | Plan | [L06](../11-implementation-plan/L06-cabinet-runtime.md) |
 | Canon | [05-cabinets](../05-cabinets/) |
-| Last updated | 2026-08-27 — admin module preview = seed_rows editor |
+| Last updated | 2026-09-13 — admin «Предзаполнение» = live platform/company instance |
 | Owners | — |
 
 ---
@@ -18,7 +18,7 @@ CabinetInstance: schema-per-instance, meta+UI, cabinet.*, MCP packages, bundles.
 
 **Не** container (L07); не AgentPort (L08); не static pack.
 
-**Module seed:** optional meta slug `seed_rows` edited in Flutter admin/company «Предзаполнение» (former stub preview). On MC bind → copy into `module_data_rows`. Template (`tables`/`columns`) stays separate from seed data.
+**Module seed:** template meta slug `seed_rows` is insert-only into `module_instance_data_rows` (Alembic / ensure instance). Admin/company Flutter «Предзаполнение» opens the live platform/company instance shell (same interpreters as cabinet, with owner-scoped content upload). Cabinet hubs edit the SoT instance returned by resolve.
 
 ## Что сделано
 

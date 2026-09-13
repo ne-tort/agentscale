@@ -415,6 +415,47 @@ class ProdavanApi {
     }
   }
 
+  Future<Map<String, dynamic>> uploadAdminModuleContent({
+    required String moduleId,
+    required String filename,
+    required List<int> bytes,
+    String? mime,
+  }) async {
+    final req = http.MultipartRequest(
+      'POST',
+      _uri('/admin/modules/$moduleId/content/upload'),
+    );
+    final h = await AuthHttp.headers();
+    h.remove('Content-Type');
+    req.headers.addAll(h);
+    req.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    final streamed = await req.send();
+    final res = await http.Response.fromStream(streamed);
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> uploadCompanyModuleContent({
+    required String companyId,
+    required String moduleId,
+    required String filename,
+    required List<int> bytes,
+    String? mime,
+  }) async {
+    final req = http.MultipartRequest(
+      'POST',
+      _uri('/companies/$companyId/modules/$moduleId/content/upload'),
+    );
+    final h = await AuthHttp.headers();
+    h.remove('Content-Type');
+    req.headers.addAll(h);
+    req.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    final streamed = await req.send();
+    final res = await http.Response.fromStream(streamed);
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<List<Map<String, dynamic>>> listProjects(String cabinetId) async {
     final prev = this.cabinetId;
     this.cabinetId = cabinetId;

@@ -11,6 +11,7 @@ import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/meta_view_scaffold_page.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/module_meta_repository.dart';
+import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/features/meta/runtime/owner_module_data_controller.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -101,6 +102,48 @@ class _ModuleShellNavPageState extends State<ModuleShellNavPage> {
     }
   }
 
+  Widget _wrapScope(Widget child) {
+    final companyId = widget.companyId;
+    if (companyId != null && companyId.isNotEmpty) {
+      final api = companyContext.api;
+      return ModuleRuntimeScope.company(
+        companyId: companyId,
+        moduleId: widget.entry.moduleId,
+        uploadContentFn: ({
+          required String filename,
+          required List<int> bytes,
+          String? mime,
+        }) {
+          return api.uploadModuleContent(
+            companyId: companyId,
+            moduleId: widget.entry.moduleId,
+            filename: filename,
+            bytes: bytes,
+            mime: mime,
+          );
+        },
+        child: child,
+      );
+    }
+    final api = adminContext.api;
+    return ModuleRuntimeScope.platform(
+      moduleId: widget.entry.moduleId,
+      uploadContentFn: ({
+        required String filename,
+        required List<int> bytes,
+        String? mime,
+      }) {
+        return api.uploadModuleContent(
+          moduleId: widget.entry.moduleId,
+          filename: filename,
+          bytes: bytes,
+          mime: mime,
+        );
+      },
+      child: child,
+    );
+  }
+
   void _openView(String viewSlug, {String? rowId}) {
     final manifest = _manifest;
     final seeds = _seeds;
@@ -116,6 +159,7 @@ class _ModuleShellNavPageState extends State<ModuleShellNavPage> {
           rowId: rowId,
           readOnly: false,
           onOpenView: _openView,
+          wrapBody: (page) => _wrapScope(page),
         ),
       ),
     );
@@ -149,12 +193,14 @@ class _ModuleShellNavPageState extends State<ModuleShellNavPage> {
       return EmptyPlaceholder(title: l10n.adminMetaInvalid);
     }
 
-    final body = ViewInterpreterHost(
-      manifest: manifest,
-      view: view,
-      seeds: seeds,
-      readOnly: false,
-      onOpenView: _openView,
+    final body = _wrapScope(
+      ViewInterpreterHost(
+        manifest: manifest,
+        view: view,
+        seeds: seeds,
+        readOnly: false,
+        onOpenView: _openView,
+      ),
     );
 
     if (widget.embedded) return body;
@@ -164,4 +210,34 @@ class _ModuleShellNavPageState extends State<ModuleShellNavPage> {
       body: body,
     );
   }
+}
+
+/// Opens live platform/company instance data for a module (admin «Предзаполнение»).
+///
+/// Prefers hub views, then first enabled tab by order — works for employee-only
+/// modules like [mod_equipment] that never appear on the admin shell rail.
+ShellNavEntry? shellNavEntryForModuleSeed({
+  required String moduleId,
+  required String moduleName,
+  required ModuleMetaManifest manifest,
+}) {
+  final tabs = manifest.enabledTabs();
+  if (tabs.isEmpty) return null;
+  Map<String, dynamic>? chosen;
+  for (final tab in tabs) {
+    final slug = tab['view_slug'] as String? ?? '';
+    final view = slug.isEmpty ? null : manifest.viewBySlug(slug);
+    if (view != null && (view['kind'] as String?) == 'hub') {
+      chosen = tab;
+      break;
+    }
+  }
+  chosen ??= tabs.first;
+  final title = chosen['title'] as String? ?? moduleName;
+  return ShellNavEntry(
+    moduleId: moduleId,
+    moduleName: moduleName,
+    tab: chosen,
+    label: title,
+  );
 }

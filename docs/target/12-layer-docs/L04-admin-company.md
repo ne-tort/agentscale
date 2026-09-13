@@ -21,7 +21,7 @@ Platform Admin — компании, keys (L03), квоты/policy, metrics read
 | Сделано | Gaps |
 |---------|------|
 | AdminShell NavigationBar: Overview + Companies + AI Keys + Bundles | E2E widget tests |
-| Module meta `nav.contour` → preview shell nav mock in seed editor | Live Admin/Company catalog merge (follow-up) |
+| Module meta `nav.contour` → Admin/Company live instance shell («Предзаполнение») | Employee contour modules open via module detail seed entry |
 | Platform Overview tab + no-keys / key-expiring / subscription alerts | |
 | Create company inline name → detail | |
 | AI Keys: list, create, bind, disable, renew, rotate | |

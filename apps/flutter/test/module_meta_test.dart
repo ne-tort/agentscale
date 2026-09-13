@@ -10,6 +10,7 @@ import 'package:prodavan/core/widgets/app_json_editor_field.dart';
 import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/module_meta_validator.dart';
+import 'package:prodavan/features/meta/module_shell_nav_page.dart';
 import 'package:prodavan/features/meta/preview/module_meta_preview_page.dart';
 import 'package:prodavan/features/meta/preview/seed_data_controller.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -463,6 +464,41 @@ void main() {
       final split = splitShellNavEntries([railOnly, mgmtOnly, both]);
       expect(split.rail.map((e) => e.label), ['Rail', 'Both']);
       expect(split.management.map((e) => e.label), ['Mgmt', 'Both']);
+    });
+  });
+
+  group('shellNavEntryForModuleSeed', () {
+    test('prefers hub view when present', () {
+      final manifest = ModuleMetaManifest(
+        views: [
+          {'slug': 'list_a', 'kind': 'collection'},
+          {'slug': 'hub_a', 'kind': 'hub'},
+        ],
+        tabs: [
+          {
+            'id': 't1',
+            'title': 'List',
+            'order': 1,
+            'view_slug': 'list_a',
+            'enabled': true,
+          },
+          {
+            'id': 't2',
+            'title': 'Hub',
+            'order': 2,
+            'view_slug': 'hub_a',
+            'enabled': true,
+          },
+        ],
+      );
+      final entry = shellNavEntryForModuleSeed(
+        moduleId: 'mod_x',
+        moduleName: 'X',
+        manifest: manifest,
+      );
+      expect(entry, isNotNull);
+      expect(entry!.viewSlug, 'hub_a');
+      expect(entry.label, 'Hub');
     });
   });
 

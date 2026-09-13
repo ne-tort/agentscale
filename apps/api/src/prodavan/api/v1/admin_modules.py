@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, File, UploadFile
 from pydantic import BaseModel, Field
 
 from prodavan.api.deps import PlatformAdminDep, PrincipalDep, SessionDep
+from prodavan.application.content.module_upload_service import ModuleContentUploadService
 from prodavan.application.modules.module_instance_service import (
     OWNER_PLATFORM,
     PLATFORM_OWNER_ID,
@@ -188,6 +189,24 @@ async def revoke_project(
     session: SessionDep,
 ) -> dict:
     return await ModuleService(session).revoke_project(module_id=module_id, project_id=project_id)
+
+
+@router.post("/{module_id}/content/upload")
+async def upload_platform_module_content(
+    module_id: str,
+    principal: PrincipalDep,
+    _: PlatformAdminDep,
+    session: SessionDep,
+    file: UploadFile = File(...),
+) -> dict:
+    data = await file.read()
+    return await ModuleContentUploadService(session).upload_for_platform_module(
+        module_id=module_id,
+        data=data,
+        filename=file.filename or "upload.bin",
+        mime=file.content_type,
+        principal=principal,
+    )
 
 
 @router.get("/{module_id}/data/{table_slug}")

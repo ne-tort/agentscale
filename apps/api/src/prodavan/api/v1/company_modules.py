@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, File, UploadFile
 from pydantic import BaseModel, Field
 
 from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
+from prodavan.application.content.module_upload_service import ModuleContentUploadService
 from prodavan.application.identity.service import EntitlementService
 from prodavan.application.modules.company_module_service import CompanyModuleService
 from prodavan.application.modules.module_instance_service import OWNER_COMPANY
@@ -175,14 +176,36 @@ async def put_company_module_meta(
     )
 
 
+@router.post("/{module_id}/content/upload")
+async def upload_company_module_content(
+    company_id: str,
+    module_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+    file: UploadFile = File(...),
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    data = await file.read()
+    return await ModuleContentUploadService(session).upload_for_company_module(
+        company_id=company_id,
+        module_id=module_id,
+        data=data,
+        filename=file.filename or "upload.bin",
+        mime=file.content_type,
+        principal=principal,
+        employee=employee,
+    )
+
+
 @router.get("/{module_id}/data/{table_slug}")
 async def list_company_module_data(
     company_id: str,
     module_id: str,
-    table_slug: str,
     principal: PrincipalDep,
     session: SessionDep,
     employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+    table_slug: str,
 ) -> dict:
     await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
     await CompanyModuleService(session).get_for_company(company_id=company_id, module_id=module_id)

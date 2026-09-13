@@ -631,7 +631,10 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     if (widgetKind == 'file_upload') {
       final scope = ModuleRuntimeScope.maybeOf(context);
       if (scope == null) {
-        return ListTile(title: Text(label), subtitle: const Text('file (preview only)'));
+        return ListTile(
+          title: Text(label),
+          subtitle: const Text('Upload unavailable (no module scope)'),
+        );
       }
       final accept = fieldCfg?['accept'] as String?;
       final warnWhenEmpty = fieldCfg?['empty_style']?.toString() == 'warning';
@@ -651,8 +654,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       return FileUploadField(
         label: label,
         value: value,
-        cabinetId: scope.cabinetId,
-        api: scope.api,
+        scope: scope,
         readOnly: fieldReadOnly || indexing,
         accept: accept,
         subtitle: indexing
@@ -863,8 +865,13 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
           if (scope == null) {
             throw StateError('secret_ref requires module runtime scope');
           }
-          final ref = await scope.api.uploadCabinetModuleSecret(
-            cabinetId: scope.cabinetId,
+          final cabinetId = scope.cabinetId;
+          final api = scope.api;
+          if (cabinetId == null || cabinetId.isEmpty || api == null) {
+            throw StateError('secret_ref requires cabinet-scoped module runtime');
+          }
+          final ref = await api.uploadCabinetModuleSecret(
+            cabinetId: cabinetId,
             moduleId: scope.moduleId,
             secret: secret,
             label: label,

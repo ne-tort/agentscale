@@ -169,7 +169,7 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
           seeds: adapter,
           rowId: rowId,
           onOpenView: _openView,
-          wrapBody: (page) => ModuleRuntimeScope(
+          wrapBody: (page) => ModuleRuntimeScope.cabinet(
             cabinetId: widget.cabinetId,
             projectId: widget.projectId,
             moduleId: widget.entry.moduleId,
@@ -207,7 +207,7 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
       return EmptyPlaceholder(title: l10n.adminMetaInvalid);
     }
 
-    final body = ModuleRuntimeScope(
+    final body = ModuleRuntimeScope.cabinet(
       cabinetId: widget.cabinetId,
       projectId: widget.projectId,
       moduleId: widget.entry.moduleId,

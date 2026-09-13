@@ -54,11 +54,14 @@ class RemoteDatabasePickerField extends StatelessWidget {
       onTap: () async {
         final scope = ModuleRuntimeScope.maybeOf(context);
         if (scope == null) return;
+        final cabinetId = scope.cabinetId;
+        final api = scope.api;
+        if (cabinetId == null || cabinetId.isEmpty || api == null) return;
         final picked = await Navigator.of(context).push<String>(
           MaterialPageRoute(
             builder: (_) => RemoteDatabasePickerPage(
-              api: scope.api,
-              cabinetId: scope.cabinetId,
+              api: api,
+              cabinetId: cabinetId,
               projectId: scope.projectId,
               moduleId: scope.moduleId,
               listActionId: listActionId,

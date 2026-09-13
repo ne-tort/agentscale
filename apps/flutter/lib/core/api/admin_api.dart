@@ -806,6 +806,26 @@ class AdminApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> uploadModuleContent({
+    required String moduleId,
+    required String filename,
+    required List<int> bytes,
+    String? mime,
+  }) async {
+    final req = http.MultipartRequest(
+      'POST',
+      _uri('/admin/modules/$moduleId/content/upload'),
+    );
+    final h = await AuthHttp.headers();
+    h.remove('Content-Type');
+    req.headers.addAll(h);
+    req.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename));
+    final streamed = await req.send();
+    final res = await http.Response.fromStream(streamed);
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   void _throwIfError(http.Response res) {
     if (res.statusCode >= 400) {
       throw ProdavanApiException(res.statusCode, res.body);

@@ -891,13 +891,15 @@ class _CollectionListHeaderState extends State<_CollectionListHeader> {
     if (widgetKind == 'file_upload') {
       final scope = ModuleRuntimeScope.maybeOf(context);
       if (scope == null) {
-        return ListTile(title: Text(label), subtitle: const Text('file (preview only)'));
+        return ListTile(
+          title: Text(label),
+          subtitle: const Text('Upload unavailable (no module scope)'),
+        );
       }
       return FileUploadField(
         label: label.isNotEmpty ? label : columnName,
         value: value,
-        cabinetId: scope.cabinetId,
-        api: scope.api,
+        scope: scope,
         readOnly: widget.readOnly,
         accept: fieldCfg['accept'] as String?,
         // No subtitle — warning chrome only when empty.

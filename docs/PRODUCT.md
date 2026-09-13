@@ -110,9 +110,12 @@ Template (modules + module_meta_documents)
 | **Materialize** | Module runs for a project **only** with an explicit MP row. Row `project_ids` further filters entities (empty = all **bound** projects for that module). Bind alone does not dump every row into the workspace |
 | **Materialize rules** | From template meta slug `materialize` (MVP) |
 | **Seed upsert (Alembic)** | Meta refresh for all instances; data rows insert-only (`ON CONFLICT DO NOTHING`) |
+| **Admin/company «Предзаполнение»** | Live **platform/company instance** editor (`ModuleShellNavPage` + owner data API) — same interpreters as cabinet, including `file_upload` |
+| **Content upload** | Cabinet: `POST /cabinets/{id}/content/upload`. Platform: `POST /admin/modules/{id}/content/upload`. Company: `POST /companies/{id}/modules/{mid}/content/upload`. Same FileRef shape |
+| **MCP / seed files** | API bootstrap attaches zip to empty `file_ref` once; UI replace wins; bootstrap/Alembic never overwrite user `file_ref` |
 | **Storage** | Postgres JSONB for module instances. App Document Store on Mongo — [ADR](02-architecture/ADR-document-store-mongo.md). Module-instance→Mongo cutover still deferred — [backlog ADR](02-architecture/ADR-backlog-module-instance-mongo.md) |
 
-Product module seed changes ship only via Alembic calling `upsert_product_modules`.
+Product module seed changes ship only via Alembic calling `upsert_product_modules`. Template slug `seed_rows` is **migration insert-only** into instances — not an interactive file editor.
 
 ### Bind kinds (UI: «Локальная» / «Глобальная»)
 

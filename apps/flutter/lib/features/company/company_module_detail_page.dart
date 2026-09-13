@@ -9,7 +9,7 @@ import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/company/company_module_json_page.dart';
 import 'package:prodavan/features/meta/company_module_meta_repository.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
-import 'package:prodavan/features/meta/preview/module_meta_preview_page.dart';
+import 'package:prodavan/features/meta/module_shell_nav_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Company module detail — RO for platform-assigned; cabinet bind for all visible modules.
@@ -136,11 +136,17 @@ class _CompanyModuleDetailPageState extends State<CompanyModuleDetailPage> {
   Future<void> _openPreview() async {
     final manifest = _manifest;
     if (manifest == null || !manifest.hasContent) return;
+    final entry = shellNavEntryForModuleSeed(
+      moduleId: widget.moduleId,
+      moduleName: _name,
+      manifest: manifest,
+    );
+    if (entry == null) return;
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
-        builder: (_) => ModuleMetaPreviewPage(
-          manifest: manifest,
-          moduleName: _name,
+        builder: (_) => ModuleShellNavPage(
+          entry: entry,
+          companyId: widget.companyId,
         ),
       ),
     );

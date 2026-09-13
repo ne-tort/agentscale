@@ -140,7 +140,7 @@ class _CabinetModuleRuntimePageState extends State<CabinetModuleRuntimePage> {
       return EmptyPlaceholder(title: l10n.adminMetaInvalid);
     }
 
-    return ModuleRuntimeScope(
+    return ModuleRuntimeScope.cabinet(
       cabinetId: widget.cabinetId,
       moduleId: widget.moduleId,
       api: workContext.api,

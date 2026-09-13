@@ -4,13 +4,13 @@ import 'dart:convert';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
-import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/preferences/app_preference_tile.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
+import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 
-/// Upload file via cabinet content API; stores FileRef map in form state.
+/// Upload file via owner-scoped content API; stores FileRef map in form state.
 ///
 /// Preference-tile chrome (same row pattern as [AppNavPreference]): tap to pick.
 /// When [warnWhenEmpty] and no file — title uses warning color and [subtitle] is omitted.
@@ -19,8 +19,7 @@ class FileUploadField extends StatelessWidget {
     super.key,
     required this.label,
     required this.value,
-    required this.cabinetId,
-    required this.api,
+    required this.scope,
     required this.onChanged,
     this.readOnly = false,
     this.accept,
@@ -30,8 +29,7 @@ class FileUploadField extends StatelessWidget {
 
   final String label;
   final dynamic value;
-  final String cabinetId;
-  final ProdavanApi api;
+  final ModuleRuntimeScope scope;
   final FutureOr<void> Function(Map<String, dynamic>?) onChanged;
   final bool readOnly;
   final String? accept;
@@ -56,8 +54,7 @@ class FileUploadField extends StatelessWidget {
     if (bytes == null) return;
     if (!context.mounted) return;
     try {
-      final ref = await api.uploadCabinetContent(
-        cabinetId: cabinetId,
+      final ref = await scope.uploadContent(
         filename: file.name,
         bytes: bytes,
         mime: _guessMime(file.name),

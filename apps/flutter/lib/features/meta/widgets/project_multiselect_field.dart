@@ -102,8 +102,18 @@ class _ProjectMultiselectFieldState extends State<ProjectMultiselectField> {
       return;
     }
     try {
-      final rows = await scope.api.listModuleBoundProjects(
-        cabinetId: scope.cabinetId,
+      final cabinetId = scope.cabinetId;
+      final api = scope.api;
+      if (cabinetId == null || cabinetId.isEmpty || api == null) {
+        setState(() {
+          _projects = const [];
+          _loading = false;
+          _error = null;
+        });
+        return;
+      }
+      final rows = await api.listModuleBoundProjects(
+        cabinetId: cabinetId,
         moduleId: moduleId,
       );
       if (!mounted) return;

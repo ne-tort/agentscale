@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/app_nav_preference.dart';
@@ -14,7 +12,7 @@ import 'package:prodavan/features/meta/company_module_meta_repository.dart';
 import 'package:prodavan/features/meta/module_meta_autosave.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/module_meta_validator.dart';
-import 'package:prodavan/features/meta/preview/module_meta_preview_page.dart';
+import 'package:prodavan/features/meta/module_shell_nav_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Company module JSON — read-only for platform-assigned; autosave for local modules.
@@ -105,37 +103,34 @@ class _CompanyModuleJsonPageState extends State<CompanyModuleJsonPage> {
 
   String? _validateManifest(Object? parsed) => ModuleMetaValidator.validate(parsed);
 
-  void _openPreview() async {
+  Future<void> _openSeedData() async {
     final l10n = AppLocalizations.of(context);
-    final text = _jsonController.text.trim();
-    if (text.isEmpty) {
-      AppSnackBar.warning(context, l10n.adminModulePreviewEmpty);
-      return;
-    }
+    await _autosave?.flushIfDirty();
+    if (!mounted) return;
     try {
-      final decoded = jsonDecode(text);
-      final domainError = _validateManifest(decoded);
-      if (domainError != null) {
-        AppSnackBar.warning(context, domainError);
+      final manifest = await CompanyModuleMetaRepository.load(
+        companyContext.api,
+        companyId: widget.companyId,
+        moduleId: widget.moduleId,
+      );
+      if (!mounted) return;
+      final entry = shellNavEntryForModuleSeed(
+        moduleId: widget.moduleId,
+        moduleName: widget.moduleName,
+        manifest: manifest,
+      );
+      if (entry == null) {
+        AppSnackBar.warning(context, l10n.adminModulePreviewEmpty);
         return;
       }
-      final manifest = ModuleMetaManifest.fromJson(decoded);
-      final updated = await Navigator.of(context).push<ModuleMetaManifest>(
-        MaterialPageRoute(
-          builder: (_) => ModuleMetaPreviewPage(
-            manifest: manifest,
-            moduleName: widget.moduleName,
-            readOnly: !widget.writable,
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => ModuleShellNavPage(
+            entry: entry,
+            companyId: widget.companyId,
           ),
         ),
       );
-      if (!mounted || updated == null || !widget.writable) return;
-      final pretty = updated.toPrettyJson();
-      _jsonController.text = pretty;
-      final canSave = ModuleMetaValidator.validate(updated.toJson()) == null;
-      _autosave?.onTextChanged(pretty, canSave: canSave);
-      if (canSave) await _autosave?.flushIfDirty();
-      setState(() {});
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     }
@@ -183,8 +178,8 @@ class _CompanyModuleJsonPageState extends State<CompanyModuleJsonPage> {
                   ),
                 AppNavPreference(
                   title: l10n.adminModulePreview,
-                  icon: Icons.visibility_outlined,
-                  onTap: _openPreview,
+                  icon: Icons.storage_outlined,
+                  onTap: _openSeedData,
                 ),
               ],
             ),
