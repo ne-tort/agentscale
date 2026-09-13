@@ -32,9 +32,9 @@ def test_build_seed_mcp_zip_contains_sources() -> None:
     assert "server.py" in names
     assert "equipment_catalog_search.py" not in names
     assert storage_key_for(spec, version=str(manifest["version"])) == (
-        "platform/seed-mcp/prodavan-equipment-1.0.0.zip"
+        "platform/seed-mcp/prodavan-equipment-1.1.0.zip"
     )
-    assert load_manifest(spec)["version"] == "1.0.0"
+    assert load_manifest(spec)["version"] == "1.1.0"
 
 
 def test_load_manifest_fallback_when_seed_dir_missing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -71,13 +71,17 @@ async def test_attach_equipment_mcp_sets_file_ref_when_empty() -> None:
         svc._get_or_create_mcp_row = AsyncMock(return_value=row)  # type: ignore[method-assign]
 
         attached, skipped = await svc._attach_equipment_mcp(
-            {"storage_key": "platform/seed-mcp/prodavan-equipment-1.0.0.zip", "asset_id": "a1"},
-            {"version": "1.0.0"},
+            {
+                "storage_key": "platform/seed-mcp/prodavan-equipment-1.1.0.zip",
+                "asset_id": "a1",
+                "sha256": "new",
+            },
+            {"version": "1.1.0"},
         )
 
     assert attached == 1
     assert skipped == 0
-    assert row.body["file_ref"]["storage_key"].endswith("prodavan-equipment-1.0.0.zip")
+    assert row.body["file_ref"]["storage_key"].endswith("prodavan-equipment-1.1.0.zip")
     assert row.body["name"] == "prodavan-equipment"
 
 
@@ -101,12 +105,47 @@ async def test_attach_equipment_mcp_skips_user_replace() -> None:
     svc._get_or_create_mcp_row = AsyncMock(return_value=row)  # type: ignore[method-assign]
 
     attached, skipped = await svc._attach_equipment_mcp(
-        {"storage_key": "platform/seed-mcp/prodavan-equipment-1.0.0.zip"},
-        {"version": "1.0.0"},
+        {"storage_key": "platform/seed-mcp/prodavan-equipment-1.1.0.zip", "sha256": "x"},
+        {"version": "1.1.0"},
     )
     assert attached == 0
     assert skipped == 1
     assert row.body["file_ref"]["storage_key"] == "user/custom.zip"
+
+
+@pytest.mark.asyncio
+async def test_attach_equipment_mcp_refreshes_stale_seed_ref() -> None:
+    session = AsyncMock()
+    session.flush = AsyncMock()
+    svc = SeedMcpBootstrapService(session)
+    inst = SimpleNamespace(id="minst_3")
+    row = SimpleNamespace(
+        body={
+            "name": "prodavan-equipment",
+            "file_ref": {
+                "storage_key": "platform/seed-mcp/prodavan-equipment-1.0.0.zip",
+                "sha256": "old",
+            },
+        }
+    )
+    session.execute = AsyncMock(
+        return_value=SimpleNamespace(
+            scalars=lambda: SimpleNamespace(all=lambda: [inst]),
+        )
+    )
+    svc._get_or_create_mcp_row = AsyncMock(return_value=row)  # type: ignore[method-assign]
+
+    attached, skipped = await svc._attach_equipment_mcp(
+        {
+            "storage_key": "platform/seed-mcp/prodavan-equipment-1.1.0.zip",
+            "sha256": "new",
+        },
+        {"version": "1.1.0"},
+    )
+    assert attached == 1
+    assert skipped == 0
+    assert row.body["file_ref"]["storage_key"].endswith("1.1.0.zip")
+    assert row.body["version"] == "1.1.0"
 
 
 @pytest.mark.asyncio

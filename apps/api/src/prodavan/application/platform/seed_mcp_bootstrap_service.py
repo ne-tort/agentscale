@@ -162,8 +162,16 @@ class SeedMcpBootstrapService:
             if isinstance(existing_ref, dict) and (
                 existing_ref.get("storage_key") or existing_ref.get("asset_id")
             ):
-                skipped += 1
-                continue
+                existing_key = str(existing_ref.get("storage_key") or "")
+                # Never clobber a user-uploaded / non-seed package.
+                if not existing_key.startswith("platform/seed-mcp/"):
+                    skipped += 1
+                    continue
+                same_key = existing_key == file_ref.get("storage_key")
+                same_sha = existing_ref.get("sha256") == file_ref.get("sha256")
+                if same_key and same_sha:
+                    skipped += 1
+                    continue
             body["name"] = "prodavan-equipment"
             body["version"] = version
             body["enabled"] = True if body.get("enabled") is None else body.get("enabled")
