@@ -717,6 +717,19 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
         onTap: () => _persist(name, invert ? paused : !paused),
       );
     }
+    if (widgetKind == 'value' && type == 'enum') {
+      final raw = value?.toString() ?? '';
+      final text = raw.isEmpty ? '' : _enumLabel(column, raw);
+      final accent = _fieldAccent(context, fieldCfg, value: raw);
+      return AppValuePreference<String>(
+        title: label,
+        icon: fieldIcon,
+        value: text,
+        enabled: false,
+        accentColor: accent,
+        onSave: (_) async {},
+      );
+    }
     if (widgetKind == 'switch' || type == 'bool') {
       return AppSwitchPreference(
         title: label,
@@ -780,7 +793,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
             hintText: fieldCfg?['hint']?.toString(),
           );
         }
-        final accent = _fieldAccent(context, fieldCfg);
+        final accent = _fieldAccent(context, fieldCfg, value: value);
         final copyOnTap = fieldCfg?['copy_on_tap'] == true;
         final text = value?.toString() ?? '';
         return AppValuePreference<String>(
@@ -803,10 +816,27 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
     }
   }
 
-  Color? _fieldAccent(BuildContext context, Map<String, dynamic>? fieldCfg) {
-    final accent = fieldCfg?['accent']?.toString();
+  Color? _fieldAccent(
+    BuildContext context,
+    Map<String, dynamic>? fieldCfg, {
+    dynamic value,
+  }) {
+    if (fieldCfg == null) return null;
+    final map = fieldCfg['accent_map'];
+    if (map is Map && value != null) {
+      final key = value.toString();
+      final fromMap = map[key]?.toString();
+      if (fromMap != null) {
+        return _accentColor(context, fromMap);
+      }
+    }
+    return _accentColor(context, fieldCfg['accent']?.toString());
+  }
+
+  Color? _accentColor(BuildContext context, String? accent) {
     if (accent == 'error') return context.appColors.danger;
     if (accent == 'warning') return context.appColors.warning;
+    if (accent == 'success') return context.appColors.success;
     return null;
   }
 

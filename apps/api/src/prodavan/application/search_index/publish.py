@@ -105,6 +105,67 @@ async def emit_search_document_deleted(
     )
 
 
+async def emit_equipment_catalog_index_accepted(
+    *,
+    session: AsyncSession | None = None,
+    company_id: str | None,
+    cabinet_id: str | None,
+    project_id: str | None,
+    catalog_row_id: str,
+    instance_id: str,
+    index: str,
+) -> None:
+    """Celery worker accepted catalog reindex into work."""
+    await _emit_search(
+        session=session,
+        event_type="search.equipment_catalog.index.accepted",
+        company_id=company_id,
+        cabinet_id=cabinet_id,
+        project_id=project_id,
+        payload={
+            "catalog_row_id": catalog_row_id,
+            "instance_id": instance_id,
+            "namespace": "equipment",
+            "index": index,
+        },
+    )
+
+
+async def emit_equipment_catalog_index_completed(
+    *,
+    session: AsyncSession | None = None,
+    company_id: str | None,
+    cabinet_id: str | None,
+    project_id: str | None,
+    catalog_row_id: str,
+    instance_id: str,
+    index: str,
+    ok: bool,
+    indexed: int | None = None,
+    error: str | None = None,
+) -> None:
+    """Celery worker finished catalog reindex (success or failure)."""
+    payload: dict[str, Any] = {
+        "catalog_row_id": catalog_row_id,
+        "instance_id": instance_id,
+        "namespace": "equipment",
+        "index": index,
+        "ok": ok,
+    }
+    if indexed is not None:
+        payload["indexed"] = int(indexed)
+    if error:
+        payload["error"] = str(error)[:500]
+    await _emit_search(
+        session=session,
+        event_type="search.equipment_catalog.index.completed",
+        company_id=company_id,
+        cabinet_id=cabinet_id,
+        project_id=project_id,
+        payload=payload,
+    )
+
+
 async def emit_op_metric(
     *,
     session: AsyncSession | None,

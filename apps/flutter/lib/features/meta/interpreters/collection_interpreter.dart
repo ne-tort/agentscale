@@ -206,6 +206,10 @@ class CollectionViewInterpreter extends StatelessWidget {
           accent = colors.warning;
           break;
         }
+        if (kind == 'success') {
+          accent = colors.success;
+          break;
+        }
       }
       if (accent == null) return row;
       return AppEntityRow(

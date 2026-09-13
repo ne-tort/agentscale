@@ -459,7 +459,8 @@ class ModuleActionExecutor:
                 f"{str(body.get(table_col) or '').strip()}|"
                 f"{body.get('remote_dsn_has_database')}"
             )
-            if status == "ready" and probe_key == str(body.get("probed_remote_key") or ""):
+            # Schema already probed for this DSN/table (status stays draft until OS index).
+            if probe_key == str(body.get("probed_remote_key") or ""):
                 continue
             try:
                 await self._probe_remote_sql(
@@ -969,7 +970,7 @@ class ModuleActionExecutor:
                 ) from exc
 
         if not column_map_ready(body):
-            if source_kind == "local" and not isinstance(body.get(file_col), dict):
+            if str(body.get(status_col) or "") != "error":
                 body[status_col] = "draft"
                 body[error_col] = None
                 await self._update_module_row(
@@ -983,15 +984,9 @@ class ModuleActionExecutor:
                     employee=employee,
                     run_actions=False,
                 )
-                return {
-                    "kind": "content.index_opensearch",
-                    "status": "draft",
-                    "row_id": row_id,
-                    "reason": "source_file missing",
-                }
             return {
                 "kind": "content.index_opensearch",
-                "status": str(body.get(status_col) or "draft"),
+                "status": "draft",
                 "row_id": row_id,
                 "reason": "column_map incomplete",
             }
@@ -1267,7 +1262,7 @@ class ModuleActionExecutor:
                     "row_id": row_id,
                 }
 
-            body[status_col] = "indexing"
+            body[status_col] = "draft"
             body[error_col] = None
             body["remote_dsn_reachable"] = True
             await self._update_module_row(
@@ -1291,7 +1286,8 @@ class ModuleActionExecutor:
             )
             body[columns_col] = json.dumps(probed.columns, ensure_ascii=False)
             body[row_count_col] = probed.row_count
-            body[status_col] = "ready"
+            # Schema probe only — OpenSearch index status stays draft until Celery finishes.
+            body[status_col] = "draft"
             body[error_col] = None
             body["remote_auth_failed"] = False
             body["remote_dsn_reachable"] = True
@@ -1358,7 +1354,7 @@ class ModuleActionExecutor:
         )
         return {
             "kind": "content.probe_remote_sql",
-            "status": "ready",
+            "status": "draft",
             "row_id": row_id,
             "row_count": body.get(row_count_col),
             "columns": probed.columns,

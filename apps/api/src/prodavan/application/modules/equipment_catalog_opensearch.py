@@ -165,7 +165,7 @@ async def run_index_equipment_catalog(
     body = dict(row.get("body") or {})
     column_map = _normalize_column_map(body.get("column_map"))
     if not _column_map_ready(column_map):
-        body["status"] = "ready"
+        body["status"] = "draft"
         body["error"] = "column_map incomplete (title, price required)"
         await inst_svc.upsert_data_row(
             instance_id=instance_id, table_slug="catalogs", row_id=row_id, body=body
@@ -180,6 +180,11 @@ async def run_index_equipment_catalog(
     if not cid:
         return {"ok": False, "error": "company_id_required", "row_id": row_id}
 
+    from prodavan.application.search_index.publish import (
+        emit_equipment_catalog_index_accepted,
+        emit_equipment_catalog_index_completed,
+    )
+
     body["status"] = "indexing"
     body["error"] = None
     body["index_name"] = f"{OS_NAMESPACE}__{index_name}"
@@ -187,6 +192,15 @@ async def run_index_equipment_catalog(
         instance_id=instance_id, table_slug="catalogs", row_id=row_id, body=body
     )
     await session.commit()
+    await emit_equipment_catalog_index_accepted(
+        session=None,
+        company_id=cid,
+        cabinet_id=cabinet_id,
+        project_id=project_id,
+        catalog_row_id=row_id,
+        instance_id=instance_id,
+        index=index_name,
+    )
 
     svc = get_search_index_service()
     try:
@@ -241,6 +255,17 @@ async def run_index_equipment_catalog(
             instance_id=instance_id, table_slug="catalogs", row_id=row_id, body=body
         )
         await session.commit()
+        await emit_equipment_catalog_index_completed(
+            session=None,
+            company_id=cid,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            catalog_row_id=row_id,
+            instance_id=instance_id,
+            index=index_name,
+            ok=False,
+            error=str(exc)[:300],
+        )
         return {"ok": False, "error": str(exc)[:300], "row_id": row_id}
 
     body["status"] = "ready"
@@ -252,6 +277,17 @@ async def run_index_equipment_catalog(
         instance_id=instance_id, table_slug="catalogs", row_id=row_id, body=body
     )
     await session.commit()
+    await emit_equipment_catalog_index_completed(
+        session=None,
+        company_id=cid,
+        cabinet_id=cabinet_id,
+        project_id=project_id,
+        catalog_row_id=row_id,
+        instance_id=instance_id,
+        index=index_name,
+        ok=True,
+        indexed=indexed,
+    )
     return {
         "ok": True,
         "row_id": row_id,

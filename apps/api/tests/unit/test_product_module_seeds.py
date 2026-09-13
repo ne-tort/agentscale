@@ -178,7 +178,19 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert "artifact_ref" not in catalog_cols
     settings = next(v for v in meta["views"] if v["slug"] == "catalogs_settings")
     field_cols = [f["column"] for f in settings["ui_json"]["fields"]]
-    assert field_cols[:3] == ["name", "source_kind", "source_file"]
+    assert field_cols[:3] == ["name", "status", "source_kind"]
+    status_field = next(f for f in settings["ui_json"]["fields"] if f["column"] == "status")
+    assert status_field.get("read_only") is True
+    assert status_field.get("accent_map") == {
+        "draft": "warning",
+        "indexing": "warning",
+        "ready": "success",
+        "error": "error",
+    }
+    status_col = next(c for c in meta["columns"] if c["table_slug"] == "catalogs" and c["name"] == "status")
+    assert status_col["enum"]["labels"]["draft"] == "Без индексирования"
+    assert status_col["enum"]["labels"]["indexing"] == "В процессе"
+    assert status_col["enum"]["labels"]["ready"] == "Обработано"
     assert "remote_dsn" in field_cols
     assert "remote_table" in field_cols
     assert "remote_database" in field_cols
@@ -191,7 +203,12 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     catalogs_list = next(v for v in meta["views"] if v["slug"] == "catalogs_list")
     list_fields = [c["field"] for c in catalogs_list["ui_json"]["columns"]]
     assert "source_kind" in list_fields
+    assert "status" in list_fields
     assert catalogs_list["ui_json"]["row_style"][0]["accent"] == "error"
+    accents = {r["when"]["eq"]: r["accent"] for r in catalogs_list["ui_json"]["row_style"] if r.get("when", {}).get("field") == "status"}
+    assert accents["draft"] == "warning"
+    assert accents["indexing"] == "warning"
+    assert accents["ready"] == "success"
     actions = {a["id"]: a for a in meta["actions"]}
     assert actions["list_catalog_remote_tables"]["kind"] == "content.list_remote_sql_tables"
     assert actions["list_catalog_remote_databases"]["kind"] == "content.list_remote_sql_databases"
@@ -356,7 +373,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     )
     assert file_field["subtitle_from"] == "row_count"
     assert file_field["empty_style"] == "warning"
-    assert not any(f["column"] == "status" for f in settings["ui_json"]["fields"])
+    assert any(f["column"] == "status" for f in settings["ui_json"]["fields"])
     name_field = next(f for f in settings["ui_json"]["fields"] if f["column"] == "name")
     assert name_field["icon"] == "storage"
     error_field = next(f for f in settings["ui_json"]["fields"] if f["column"] == "error")
@@ -388,7 +405,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert "any" in proj_vis
 
     catalogs_list = next(v for v in meta["views"] if v["slug"] == "catalogs_list")
-    assert all(c["field"] != "status" for c in catalogs_list["ui_json"]["columns"])
+    assert any(c["field"] == "status" for c in catalogs_list["ui_json"]["columns"])
     assert all(c["field"] != "added_at" for c in catalogs_list["ui_json"]["columns"])
     list_header = catalogs_list["ui_json"].get("list_header") or {}
     assert list_header.get("table_slug") == "equipment_mcp"

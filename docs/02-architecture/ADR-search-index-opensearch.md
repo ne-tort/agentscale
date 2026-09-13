@@ -15,7 +15,7 @@ This does **not** replace equipment catalog search (`equipment_catalog_search` /
 1. Deploy OpenSearch in GitOps (`prodavan-opensearch` StatefulSet in `infra/k3s/base/platform/`).
 2. Add in-proc BC `application/search_index/` with `SearchIndexPort`, OpenSearch HTTP adapter (httpx), and in-memory adapter for tests.
 3. Physical indexes are `{namespace}__{index}`; namespace = calling BC id; server enforces slug validation and tenancy (`company_id` required unless namespace ∈ platform/system).
-4. Domain Kafka bus `search` → topic `prodavan.search.events`; metrics via existing `metrics.counter.delta`.
+4. Domain Kafka bus `search` → topic `prodavan.search.events`; metrics via existing `metrics.counter.delta`. Equipment catalog Celery reindex also emits `search.equipment_catalog.index.accepted` / `.completed`.
 5. Admin HTTP under `/api/v1/admin/search-index/*` (`platform.admin` only).
 6. MVP: OpenSearch **security plugin disabled** locally; ACL + quotas live in `SearchIndexService`; sandbox NetworkPolicy keeps **no** egress to `:9200`.
 7. Company ownership for empty indexes is stored in OpenSearch `mappings._meta.company_id` (never in index `settings` — unknown settings 400).

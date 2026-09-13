@@ -1090,9 +1090,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "enum": {
                     "values": ["draft", "indexing", "ready", "error"],
                     "labels": {
-                        "draft": "Черновик",
-                        "indexing": "Индексация",
-                        "ready": "Готово",
+                        "draft": "Без индексирования",
+                        "indexing": "В процессе",
+                        "ready": "Обработано",
                         "error": "Ошибка",
                     },
                 },
@@ -1643,12 +1643,28 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "field": "source_kind",
                             "label": {"ru": "Тип", "en": "Type"},
                         },
+                        {
+                            "field": "status",
+                            "label": {"ru": "Статус", "en": "Status"},
+                        },
                         {"field": "row_count", "label": {"ru": "Строк", "en": "Rows"}},
                     ],
                     "row_style": [
                         {
                             "when": {"field": "status", "eq": "error"},
                             "accent": "error",
+                        },
+                        {
+                            "when": {"field": "status", "eq": "indexing"},
+                            "accent": "warning",
+                        },
+                        {
+                            "when": {"field": "status", "eq": "draft"},
+                            "accent": "warning",
+                        },
+                        {
+                            "when": {"field": "status", "eq": "ready"},
+                            "accent": "success",
                         },
                         {
                             "when": {"field": "paused", "eq": True},
@@ -1721,6 +1737,18 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "title": {"ru": "Настройки БД", "en": "Database settings"},
                     "fields": [
                         {"column": "name", "widget": "value", "icon": "storage"},
+                        {
+                            "column": "status",
+                            "widget": "value",
+                            "read_only": True,
+                            "icon": "sync",
+                            "accent_map": {
+                                "draft": "warning",
+                                "indexing": "warning",
+                                "ready": "success",
+                                "error": "error",
+                            },
+                        },
                         {
                             "column": "source_kind",
                             "widget": "choice",
