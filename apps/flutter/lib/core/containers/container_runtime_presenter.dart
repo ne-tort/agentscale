@@ -18,6 +18,29 @@ String? _observedState(Map<String, dynamic>? item) {
   return null;
 }
 
+/// Public observed_state accessor for job labels / buttons.
+String? containerObservedState(Map<String, dynamic>? item) => _observedState(item);
+
+const _inFlightObservedStates = {
+  'preparing',
+  'provisioning',
+  'pulling',
+  'hydrating',
+  'starting',
+};
+
+bool containerIsInFlight(Map<String, dynamic>? item) {
+  final state = _observedState(item);
+  return state != null && _inFlightObservedStates.contains(state);
+}
+
+bool projectHasLivePod(Map<String, dynamic>? project) {
+  if (runtimeMap(project) != null) return true;
+  final state = _observedState(project);
+  if (state == null) return false;
+  return state != 'absent' && state != 'unknown';
+}
+
 String? _runtimeString(Map<String, dynamic>? item, String key) {
   final runtime = runtimeMap(item);
   final v = runtime?[key] ?? item?[key];
@@ -30,6 +53,7 @@ String _formatObservedState(String state, AppLocalizations l10n) {
   return switch (state) {
     'preparing' => l10n.containerObservedPreparing,
     'provisioning' => l10n.containerObservedProvisioning,
+    'pulling' => l10n.containerObservedPulling,
     'hydrating' => l10n.containerObservedHydrating,
     'starting' => l10n.containerObservedStarting,
     'running' => l10n.containerObservedRunning,

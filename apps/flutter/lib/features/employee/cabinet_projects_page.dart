@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/containers/container_runtime_presenter.dart';
+import 'package:prodavan/core/jobs/app_job_store.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
@@ -35,22 +38,52 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
   bool _loading = true;
   Object? _error;
   List<Map<String, dynamic>> _projects = const [];
+  final Map<String, AppJobStatus?> _jobStatusSeen = {};
 
   @override
   void initState() {
     super.initState();
     workContext.addListener(_onCtx);
+    appJobStore.addListener(_onJobs);
     _reload();
   }
 
   @override
   void dispose() {
     workContext.removeListener(_onCtx);
+    appJobStore.removeListener(_onJobs);
     super.dispose();
   }
 
   void _onCtx() {
     if (mounted) setState(() {});
+  }
+
+  void _onJobs() {
+    if (!mounted) return;
+    setState(() {});
+    var finished = false;
+    for (final p in _projects) {
+      final id = p['id'] as String?;
+      if (id == null) continue;
+      for (final kind in [
+        AppJobKinds.projectLaunch,
+        AppJobKinds.projectReload,
+        AppJobKinds.projectResume,
+      ]) {
+        final key = '$kind:$id';
+        final status = appJobStore.bySubject(kind: kind, subjectId: id)?.status;
+        final prev = _jobStatusSeen[key];
+        _jobStatusSeen[key] = status;
+        if (prev == AppJobStatus.running &&
+            (status == AppJobStatus.succeeded || status == AppJobStatus.failed)) {
+          finished = true;
+        }
+      }
+    }
+    if (finished) {
+      unawaited(_reload());
+    }
   }
 
   Future<void> _reload() async {
@@ -161,6 +194,13 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
     final selected = id != null && id == workContext.selectedProjectId;
     if (status == 'error' || projectShowsContainerError(project)) {
       return context.appColors.danger;
+    }
+    if (id != null &&
+        (appJobStore.isActive(kind: AppJobKinds.projectLaunch, subjectId: id) ||
+            appJobStore.isActive(kind: AppJobKinds.projectReload, subjectId: id) ||
+            appJobStore.isActive(kind: AppJobKinds.projectResume, subjectId: id) ||
+            containerIsInFlight(project))) {
+      return context.appColors.warning;
     }
     if (selected &&
         status == 'active' &&

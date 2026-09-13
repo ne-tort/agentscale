@@ -2,9 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/containers/container_runtime_presenter.dart';
 import 'package:prodavan/core/containers/project_container_poll.dart';
+import 'package:prodavan/core/jobs/app_job_store.dart';
+import 'package:prodavan/core/jobs/project_lifecycle_jobs.dart';
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
@@ -51,12 +52,17 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
   bool _launching = false;
   bool _reloading = false;
   bool _resuming = false;
+  String? _jobLabel;
+  AppJobStatus? _seenLaunchStatus;
+  AppJobStatus? _seenReloadStatus;
+  AppJobStatus? _seenResumeStatus;
 
   bool get _busy => _launching || _reloading || _resuming;
 
   @override
   void initState() {
     super.initState();
+    appJobStore.addListener(_onJobs);
     unawaited(
       workContext.selectProject(
         cabinetId: widget.cabinetId,
@@ -64,6 +70,52 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
       ),
     );
     _load();
+  }
+
+  @override
+  void dispose() {
+    appJobStore.removeListener(_onJobs);
+    super.dispose();
+  }
+
+  void _onJobs() {
+    if (!mounted) return;
+    final launch = appJobStore.bySubject(
+      kind: AppJobKinds.projectLaunch,
+      subjectId: widget.projectId,
+    );
+    final reload = appJobStore.bySubject(
+      kind: AppJobKinds.projectReload,
+      subjectId: widget.projectId,
+    );
+    final resume = appJobStore.bySubject(
+      kind: AppJobKinds.projectResume,
+      subjectId: widget.projectId,
+    );
+    final launchStatus = launch?.status;
+    final reloadStatus = reload?.status;
+    final resumeStatus = resume?.status;
+    final finished = (_seenLaunchStatus == AppJobStatus.running &&
+            (launchStatus == AppJobStatus.succeeded ||
+                launchStatus == AppJobStatus.failed)) ||
+        (_seenReloadStatus == AppJobStatus.running &&
+            (reloadStatus == AppJobStatus.succeeded ||
+                reloadStatus == AppJobStatus.failed)) ||
+        (_seenResumeStatus == AppJobStatus.running &&
+            (resumeStatus == AppJobStatus.succeeded ||
+                resumeStatus == AppJobStatus.failed));
+    _seenLaunchStatus = launchStatus;
+    _seenReloadStatus = reloadStatus;
+    _seenResumeStatus = resumeStatus;
+    setState(() {
+      _launching = launchStatus == AppJobStatus.running;
+      _reloading = reloadStatus == AppJobStatus.running;
+      _resuming = resumeStatus == AppJobStatus.running;
+      _jobLabel = (launch ?? reload ?? resume)?.label;
+    });
+    if (finished) {
+      unawaited(_load());
+    }
   }
 
   Future<void> _load() async {
@@ -104,11 +156,24 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
         _runtime = project['runtime'] is Map
             ? Map<String, dynamic>.from(project['runtime'] as Map)
             : null;
-        _hasPod = _runtime != null;
+        _hasPod = _runtime != null || projectHasLivePod(project);
         _availableKeys = keys;
         _metrics = metrics;
         _loading = false;
       });
+      // Join in-flight start if pod already exists while status still draft.
+      final inFlight = containerIsInFlight({
+        'runtime': _runtime,
+        'observed_state': _runtime?['observed_state'],
+      });
+      if (inFlight &&
+          !_launched &&
+          !appJobStore.isActive(
+            kind: AppJobKinds.projectLaunch,
+            subjectId: widget.projectId,
+          )) {
+        unawaited(_joinLaunch());
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -141,6 +206,21 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
             'last_error': _runtime?['last_error'],
             'observed_state': _runtime?['observed_state'],
           }));
+
+  bool get _showLaunch {
+    if (_busy) return false;
+    if (_launched) return false;
+    if (_hasPod) return false;
+    if (!_configuredForLaunch) return false;
+    if (_showReload) return false;
+    if (containerIsInFlight({
+      'runtime': _runtime,
+      'observed_state': _runtime?['observed_state'],
+    })) {
+      return false;
+    }
+    return true;
+  }
 
   bool get _aiProviderNeedsSelection =>
       _availableKeys.length >= 2 && (_resolvedKeyId ?? '').isEmpty;
@@ -222,18 +302,12 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
   Future<void> _launch() async {
     final l10n = AppLocalizations.of(context);
     AppSnackBar.info(context, l10n.projectLaunchStartingSnack);
-    setState(() => _launching = true);
     try {
-      final result = await workContext.api.launchProject(widget.projectId);
-      if (!mounted) return;
-      if (result['status'] == 'error') {
-        await _load();
-        workContext.notifyProjectLifecycleChanged();
-        return;
-      }
-      final container = await pollProjectContainerUntilSettled(
+      final container = await runProjectLaunchJob(
+        store: appJobStore,
         api: workContext.api,
         projectId: widget.projectId,
+        l10n: l10n,
       );
       if (!mounted) return;
       final failure = containerObservedFailureMessage(container);
@@ -243,35 +317,46 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
         AppSnackBar.success(context, l10n.projectLaunchSuccess);
       }
       await _load();
-      workContext.notifyProjectLifecycleChanged();
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
-    } finally {
-      if (mounted) setState(() => _launching = false);
+      await _load();
+    }
+  }
+
+  Future<void> _joinLaunch() async {
+    final l10n = AppLocalizations.of(context);
+    try {
+      await runProjectLaunchJob(
+        store: appJobStore,
+        api: workContext.api,
+        projectId: widget.projectId,
+        l10n: l10n,
+      );
+      if (mounted) await _load();
+    } catch (_) {
+      if (mounted) await _load();
     }
   }
 
   Future<void> _reload() async {
-    setState(() => _reloading = true);
+    final l10n = AppLocalizations.of(context);
     try {
-      await workContext.api.reloadProject(widget.projectId);
-      if (!mounted) return;
-      AppSnackBar.success(context, AppLocalizations.of(context).projectReloadSuccess);
-      final container = await pollProjectContainerUntilSettled(
+      final container = await runProjectReloadJob(
+        store: appJobStore,
         api: workContext.api,
         projectId: widget.projectId,
+        l10n: l10n,
       );
       if (!mounted) return;
+      AppSnackBar.success(context, l10n.projectReloadSuccess);
       final failure = containerObservedFailureMessage(container);
       if (failure != null) {
         AppErrors.showSnack(context, failure);
       }
       await _load();
-      workContext.notifyProjectLifecycleChanged();
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
-    } finally {
-      if (mounted) setState(() => _reloading = false);
+      await _load();
     }
   }
 
@@ -300,19 +385,12 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
   Future<void> _resumeProject() async {
     final l10n = AppLocalizations.of(context);
     AppSnackBar.info(context, l10n.projectResumeStartingSnack);
-    setState(() => _resuming = true);
     try {
-      try {
-        await workContext.api.resumeProject(widget.projectId);
-      } on ProdavanApiException catch (e) {
-        if (e.statusCode != 422 ||
-            !e.body.toLowerCase().contains('not paused')) {
-          rethrow;
-        }
-      }
-      final container = await pollProjectContainerUntilSettled(
+      final container = await runProjectResumeJob(
+        store: appJobStore,
         api: workContext.api,
         projectId: widget.projectId,
+        l10n: l10n,
       );
       if (!mounted) return;
       final failure = containerObservedFailureMessage(container);
@@ -320,14 +398,11 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
         AppErrors.showSnack(context, failure);
       }
       await _load();
-      workContext.notifyProjectLifecycleChanged();
     } catch (e) {
       if (mounted) {
         await _load();
         AppErrors.showSnack(context, e);
       }
-    } finally {
-      if (mounted) setState(() => _resuming = false);
     }
   }
 
@@ -444,17 +519,24 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
             enabled: !_busy,
             onTap: _openModules,
           ),
-          if (!_launched && _configuredForLaunch && !_showReload)
+          if (_busy)
+            AppPreferenceTile(
+              title: _jobLabel ?? l10n.projectLaunchInProgress,
+              icon: Icons.hourglass_top_outlined,
+              accentColor: warning,
+              subtitle: Text(l10n.projectLaunchInProgress),
+            ),
+          if (_showLaunch)
             AppNavPreference(
               title: l10n.projectLaunchProject,
               icon: Icons.rocket_launch_outlined,
               enabled: !_busy,
               loading: _launching,
-              loadingLabel: l10n.projectLaunchInProgress,
+              loadingLabel: _jobLabel ?? l10n.projectLaunchInProgress,
               accentColor: success,
               onTap: _launch,
             ),
-          if (_launched)
+          if (_launched || _hasPod)
             AppNavPreference(
               title: l10n.projectContainer,
               icon: Icons.dns_outlined,
@@ -469,7 +551,7 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
               accentColor: warning,
               enabled: !_busy,
               loading: _reloading,
-              loadingLabel: l10n.projectReload,
+              loadingLabel: _jobLabel ?? l10n.projectReload,
               onTap: _reload,
             ),
           if (_launched && paused && _hasPod)
@@ -479,7 +561,7 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
               accentColor: warning,
               enabled: !_busy,
               loading: _resuming,
-              loadingLabel: l10n.projectResumeInProgress,
+              loadingLabel: _jobLabel ?? l10n.projectResumeInProgress,
               onTap: _resumeProject,
             ),
           if (_launched && !paused && _hasPod && !_showReload && !_containerUnhealthy)

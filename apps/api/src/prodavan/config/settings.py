@@ -156,7 +156,8 @@ class Settings(BaseSettings):
     pod_sandbox_cpu_limit: str = "1000m"
     pod_sandbox_memory_request: str = "256Mi"
     pod_sandbox_memory_limit: str = "1Gi"
-    pod_ready_timeout_sec: int = 180
+    pod_ready_timeout_sec: int = 20
+    pod_image_pull_timeout_sec: int = 600
     # L15 agent-runtime — single container Pod workload (Platform OpenClaw + SDK adapters).
     pod_agent_runtime_enabled: bool = Field(
         default=False,
@@ -275,7 +276,7 @@ class Settings(BaseSettings):
     def pod_agent_bridge_bootstrap_enabled(self, value: bool) -> None:
         self.pod_agent_runtime_bootstrap_enabled = value
     pod_metrics_grace_sec: int = 30
-    pod_provisioning_timeout_sec: int = 300
+    pod_provisioning_timeout_sec: int = 120
     pod_preparing_timeout_sec: int = 120
     pod_k8s_required: bool = False
     sandbox_k8s_pvc: str = "prodavan-api-storage"

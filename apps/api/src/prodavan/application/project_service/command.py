@@ -198,11 +198,15 @@ class ProjectCommand:
         )
         live_pod = await self._get_live_pod(row.id)
         if live_pod is not None:
+            from prodavan.application.pod_service.query import PodQuery
+
+            runtime = await PodQuery(self._session).runtime_view(row.id)
             raise AppError(
                 code="POD_ALREADY_EXISTS",
                 title="Conflict",
                 status=409,
                 detail="project pod already exists",
+                extra={"runtime": runtime} if runtime else None,
             )
         if row.status not in {ProjectStatus.DRAFT, ProjectStatus.ACTIVE}:
             raise AppError(

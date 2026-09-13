@@ -123,6 +123,109 @@ def test_parse_snapshot_includes_fatal_failure() -> None:
     assert "ErrImagePull" in snap.fatal_failure
 
 
+def test_parse_snapshot_pulling_agent_image() -> None:
+    body = {
+        "metadata": {"name": "pod-x", "labels": {}},
+        "status": {
+            "phase": "Pending",
+            "initContainerStatuses": [
+                {
+                    "name": "hydrate",
+                    "state": {"terminated": {"exitCode": 0, "reason": "Completed"}},
+                }
+            ],
+            "containerStatuses": [
+                {
+                    "name": "agent-runtime",
+                    "state": {"waiting": {"reason": "PodInitializing"}},
+                    "ready": False,
+                    "restartCount": 0,
+                }
+            ],
+        },
+    }
+    snap = _parse_snapshot(body)
+    assert snap.pulling is True
+    assert snap.hydrating is False
+    assert snap.waiting_reason == "PodInitializing"
+
+
+def test_parse_snapshot_hydrate_pulling_counts_as_pulling() -> None:
+    body = {
+        "metadata": {"name": "pod-x", "labels": {}},
+        "status": {
+            "phase": "Pending",
+            "initContainerStatuses": [
+                {
+                    "name": "hydrate",
+                    "state": {"waiting": {"reason": "Pulling"}},
+                }
+            ],
+        },
+    }
+    snap = _parse_snapshot(body)
+    assert snap.pulling is True
+    assert snap.hydrating is False
+
+
+@pytest.mark.asyncio
+async def test_wait_ready_extends_budget_while_pulling(monkeypatch: pytest.MonkeyPatch) -> None:
+    from prodavan.config import settings as settings_mod
+
+    monkeypatch.setattr(settings_mod.settings, "pod_ready_timeout_sec", 1)
+    monkeypatch.setattr(settings_mod.settings, "pod_image_pull_timeout_sec", 30)
+
+    auth = MagicMock(spec=InClusterAuth)
+    auth.api_base.return_value = "https://k8s.example"
+    auth.headers.return_value = {"Authorization": "Bearer x"}
+    auth.client_kwargs.return_value = {"verify": False, "timeout": 1.0}
+    client = K8sSandboxClient(namespace="prodavan-sandboxes", auth=auth)
+
+    pulling_body = {
+        "metadata": {"name": "pod-wk-demo", "labels": {}},
+        "status": {
+            "phase": "Pending",
+            "containerStatuses": [
+                {
+                    "name": "agent-runtime",
+                    "state": {"waiting": {"reason": "Pulling"}},
+                    "ready": False,
+                    "restartCount": 0,
+                }
+            ],
+        },
+    }
+    ready_body = {
+        "metadata": {"name": "pod-wk-demo", "labels": {}, "uid": "u1"},
+        "status": {
+            "phase": "Running",
+            "conditions": [{"type": "Ready", "status": "True"}],
+            "containerStatuses": [
+                {
+                    "name": "agent-runtime",
+                    "state": {"running": {"startedAt": "2026-01-01T00:00:00Z"}},
+                    "ready": True,
+                    "restartCount": 0,
+                }
+            ],
+        },
+    }
+    responses = [pulling_body, pulling_body, ready_body]
+
+    async def _get(*_a, **_k):  # noqa: ANN003
+        body = responses.pop(0) if responses else ready_body
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = body
+        return mock_response
+
+    with patch("prodavan.infrastructure.k8s.sandbox.client.httpx.AsyncClient") as ac:
+        ac.return_value.__aenter__.return_value.get = AsyncMock(side_effect=_get)
+        with patch("prodavan.infrastructure.k8s.sandbox.client.asyncio.sleep", new=AsyncMock()):
+            snap = await client.wait_ready("pod-wk-demo")
+    assert snap.ready is True
+
+
 @pytest.mark.asyncio
 async def test_wait_ready_fails_fast_on_image_pull_backoff() -> None:
     auth = MagicMock(spec=InClusterAuth)

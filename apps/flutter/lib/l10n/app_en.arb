@@ -469,6 +469,7 @@
   },
   "containerObservedPreparing": "Preparing",
   "containerObservedProvisioning": "Provisioning",
+  "containerObservedPulling": "Downloading image",
   "containerObservedHydrating": "Hydrating",
   "containerObservedStarting": "Starting",
   "containerObservedRunning": "Running",

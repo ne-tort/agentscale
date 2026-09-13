@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'package:prodavan/core/jobs/app_job_scope.dart';
+import 'package:prodavan/core/jobs/app_job_store.dart';
 import 'package:prodavan/core/settings/app_settings_controller.dart';
 import 'package:prodavan/core/theme/app_theme.dart';
 import 'package:prodavan/features/auth/session_gate_page.dart';
@@ -48,6 +50,12 @@ class _ProdavanAppState extends State<ProdavanApp> {
           ],
           home: const SessionGatePage(),
           debugShowCheckedModeBanner: kDebugMode,
+          builder: (context, child) {
+            return AppJobScope(
+              store: appJobStore,
+              child: child ?? const SizedBox.shrink(),
+            );
+          },
         );
       },
     );

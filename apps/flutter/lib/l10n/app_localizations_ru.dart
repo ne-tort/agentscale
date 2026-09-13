@@ -728,6 +728,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get containerObservedProvisioning => 'Создание';
 
   @override
+  String get containerObservedPulling => 'Скачивание образа';
+
+  @override
   String get containerObservedHydrating => 'Загрузка файлов';
 
   @override

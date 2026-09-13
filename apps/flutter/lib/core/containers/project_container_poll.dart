@@ -19,13 +19,15 @@ bool containerObservedSettled(Map<String, dynamic>? item) {
 Future<Map<String, dynamic>?> pollProjectContainerUntilSettled({
   required ProdavanApi api,
   required String projectId,
-  Duration interval = const Duration(seconds: 2),
-  Duration timeout = const Duration(minutes: 2),
+  Duration interval = const Duration(seconds: 1),
+  Duration timeout = const Duration(minutes: 12),
+  void Function(Map<String, dynamic>? item)? onTick,
 }) async {
   final deadline = DateTime.now().add(timeout);
   Map<String, dynamic>? last;
   while (DateTime.now().isBefore(deadline)) {
     last = await api.getProjectContainer(projectId);
+    onTick?.call(last);
     if (containerObservedSettled(last)) return last;
     await Future<void>.delayed(interval);
   }

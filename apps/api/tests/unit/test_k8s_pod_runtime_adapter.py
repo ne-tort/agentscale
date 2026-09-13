@@ -38,7 +38,7 @@ async def test_ensure_running_idempotent_when_running() -> None:
     await adapter.ensure_running(runtime_ref="pod-wk", context=ctx)
 
     client.create_pod.assert_not_awaited()
-    client.wait_ready.assert_awaited_once()
+    client.wait_ready.assert_not_awaited()
 
 
 @pytest.mark.asyncio

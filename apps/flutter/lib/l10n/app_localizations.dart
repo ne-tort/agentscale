@@ -1316,6 +1316,12 @@ abstract class AppLocalizations {
   /// **'Provisioning'**
   String get containerObservedProvisioning;
 
+  /// No description provided for @containerObservedPulling.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading image'**
+  String get containerObservedPulling;
+
   /// No description provided for @containerObservedHydrating.
   ///
   /// In en, this message translates to:

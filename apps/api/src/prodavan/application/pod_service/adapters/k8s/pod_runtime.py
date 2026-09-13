@@ -74,10 +74,7 @@ class K8sPodRuntimeAdapter:
                     raise PermanentK8sError(
                         f"pod {runtime_ref} cannot start: {existing.fatal_failure}"
                     )
-                await self._client.wait_ready(
-                    runtime_ref,
-                    timeout=float(settings.pod_ready_timeout_sec),
-                )
+                # Do not block on Ready — observe/reconcile promotes RUNNING.
                 return
             elif existing.phase == "Failed":
                 await self._delete_and_wait(runtime_ref)
@@ -105,7 +102,7 @@ class K8sPodRuntimeAdapter:
         )
         await self._client.create_pod(body)
         await self._client.wait_exists(runtime_ref)
-        await self._client.wait_ready(runtime_ref, timeout=float(settings.pod_ready_timeout_sec))
+        # Ready is observed asynchronously — keep launch HTTP short.
 
     async def _delete_and_wait(self, runtime_ref: str) -> None:
         try:

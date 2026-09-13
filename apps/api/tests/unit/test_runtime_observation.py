@@ -244,6 +244,40 @@ async def test_promote_or_demote_recovers_failed_when_running() -> None:
 
 
 @pytest.mark.asyncio
+async def test_observe_k8s_pulling() -> None:
+    session = AsyncMock()
+    svc = RuntimeObservationService(session)
+    project = _project()
+    pod = _pod(status=PodStatus.PROVISIONING)
+    svc._metrics_query.get_project_runtime_metrics = AsyncMock(return_value=None)  # type: ignore[method-assign]
+
+    runtime_mock = AsyncMock()
+    runtime_mock.get_status = AsyncMock(
+        return_value={
+            "phase": "Pending",
+            "ready": False,
+            "pulling": True,
+            "waiting_reason": "Pulling",
+            "restarts": 0,
+            "stub": False,
+        }
+    )
+
+    with patch("prodavan.application.pod_service.runtime_observation.settings") as mock_settings:
+        mock_settings.pod_runtime_mode = "k8s"
+        mock_settings.pod_provisioning_timeout_sec = 300
+        mock_settings.pod_image_pull_timeout_sec = 600
+        mock_settings.metrics_sample_ttl_sec = 900
+        with patch(
+            "prodavan.application.pod_service.runtime_observation.build_pod_runtime",
+            return_value=runtime_mock,
+        ):
+            out = await svc.observe(project=project, pod=pod)
+    assert out["observed_state"] == ObservedState.PULLING.value
+    assert out.get("waiting_reason") == "Pulling"
+
+
+@pytest.mark.asyncio
 async def test_observe_k8s_running_without_metrics() -> None:
     session = AsyncMock()
     svc = RuntimeObservationService(session)

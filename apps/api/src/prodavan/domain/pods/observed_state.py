@@ -9,6 +9,7 @@ class ObservedState(StrEnum):
     ABSENT = "absent"
     PREPARING = "preparing"
     PROVISIONING = "provisioning"
+    PULLING = "pulling"
     HYDRATING = "hydrating"
     STARTING = "starting"
     RUNNING = "running"

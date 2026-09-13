@@ -13,9 +13,11 @@ class AppError(Exception):
         title: str,
         status: int = 400,
         detail: str | None = None,
+        extra: dict | None = None,
     ) -> None:
         self.code = code
         self.title = title
         self.status = status
         self.detail = detail
+        self.extra = dict(extra) if extra else {}
         super().__init__(detail or title)

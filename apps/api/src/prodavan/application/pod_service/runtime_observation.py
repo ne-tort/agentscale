@@ -32,6 +32,7 @@ _TRANSITIONAL_OBSERVED = frozenset(
     {
         ObservedState.PREPARING.value,
         ObservedState.PROVISIONING.value,
+        ObservedState.PULLING.value,
         ObservedState.HYDRATING.value,
         ObservedState.STARTING.value,
     }
@@ -134,7 +135,10 @@ class RuntimeObservationService:
             return obs
 
         deadline = datetime.now(UTC).timestamp() + float(
-            timeout_sec or settings.pod_provisioning_timeout_sec
+            timeout_sec
+            or (
+                settings.pod_image_pull_timeout_sec + settings.pod_ready_timeout_sec
+            )
         )
         last: dict[str, Any] | None = None
         while datetime.now(UTC).timestamp() < deadline:
@@ -155,7 +159,8 @@ class RuntimeObservationService:
                 )
             await asyncio.sleep(poll_sec)
         raise RuntimeError(
-            f"pod not verified running within {timeout_sec or settings.pod_provisioning_timeout_sec}s; "
+            f"pod not verified running within "
+            f"{timeout_sec or (settings.pod_image_pull_timeout_sec + settings.pod_ready_timeout_sec)}s; "
             f"last={last}"
         )
 
@@ -178,7 +183,12 @@ class RuntimeObservationService:
             fail_observed = state == ObservedState.FAILED.value or (
                 state == ObservedState.UNKNOWN.value and bool(obs.get("last_error"))
             )
-            if age > settings.pod_provisioning_timeout_sec or fail_observed:
+            budget = (
+                settings.pod_image_pull_timeout_sec
+                if state == ObservedState.PULLING.value
+                else settings.pod_provisioning_timeout_sec
+            )
+            if age > budget or fail_observed:
                 pod.status = PodStatus.FAILED
                 pod.last_error = obs.get("last_error") or f"provisioning timeout after {int(age)}s"
                 if project.status == ProjectStatus.ACTIVE:
@@ -344,6 +354,8 @@ class RuntimeObservationService:
         ready = bool(k8s_status.get("ready"))
         hydrating = bool(k8s_status.get("hydrating"))
         hydrate_failed = bool(k8s_status.get("hydrate_failed"))
+        pulling = bool(k8s_status.get("pulling"))
+        waiting_reason = str(k8s_status.get("waiting_reason") or "").strip() or None
         fatal_failure = str(k8s_status.get("fatal_failure") or "").strip() or None
         timing: dict[str, Any] = {}
         if k8s_status.get("started_at"):
@@ -352,7 +364,7 @@ class RuntimeObservationService:
             timing["k8s_created_at"] = k8s_status["created_at"]
 
         def obs(state: ObservedState, **kw: Any) -> dict[str, Any]:
-            return self._summary(state, **timing, **kw)
+            return self._summary(state, waiting_reason=waiting_reason, **timing, **kw)
 
         if hydrate_failed:
             return obs(
@@ -402,6 +414,27 @@ class RuntimeObservationService:
                 phase=phase,
                 ready=ready,
                 last_error=pod.last_error or "k8s pod failed",
+                restarts=k8s_status.get("restarts"),
+            )
+
+        if pulling:
+            age = (datetime.now(UTC) - self._as_utc(pod.updated_at)).total_seconds()
+            if age > settings.pod_image_pull_timeout_sec:
+                return obs(
+                    ObservedState.FAILED,
+                    orchestrator_status=pod.status,
+                    desired_state=pod.desired_state,
+                    phase=phase,
+                    ready=ready,
+                    last_error=f"image pull timeout after {int(age)}s",
+                    restarts=k8s_status.get("restarts"),
+                )
+            return obs(
+                ObservedState.PULLING,
+                orchestrator_status=pod.status,
+                desired_state=pod.desired_state,
+                phase=phase,
+                ready=False,
                 restarts=k8s_status.get("restarts"),
             )
 
@@ -601,6 +634,7 @@ class RuntimeObservationService:
         stub: bool = False,
         started_at: str | None = None,
         k8s_created_at: str | None = None,
+        waiting_reason: str | None = None,
     ) -> dict[str, Any]:
         out: dict[str, Any] = {
             "observed_state": observed_state.value,
@@ -614,6 +648,8 @@ class RuntimeObservationService:
             out["phase"] = phase
         if ready is not None:
             out["ready"] = ready
+        if waiting_reason:
+            out["waiting_reason"] = waiting_reason
         if metrics:
             out["metrics"] = metrics
         out["metrics_fresh"] = metrics_fresh

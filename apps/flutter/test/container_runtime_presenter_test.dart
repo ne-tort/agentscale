@@ -125,4 +125,24 @@ void main() {
       isFalse,
     );
   });
+
+  test('containerIsInFlight covers pulling and provisioning', () {
+    expect(containerIsInFlight(const {'observed_state': 'pulling'}), isTrue);
+    expect(containerIsInFlight(const {'observed_state': 'provisioning'}), isTrue);
+    expect(containerIsInFlight(const {'observed_state': 'running'}), isFalse);
+    expect(
+      containerIsInFlight(const {
+        'runtime': {'observed_state': 'hydrating'},
+      }),
+      isTrue,
+    );
+  });
+
+  test('formatContainerStateValue localizes pulling', () {
+    final l10n = AppLocalizationsRu();
+    expect(
+      formatContainerStateValue(const {'observed_state': 'pulling'}, l10n),
+      l10n.containerObservedPulling,
+    );
+  });
 }

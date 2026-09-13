@@ -722,6 +722,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get containerObservedProvisioning => 'Provisioning';
 
   @override
+  String get containerObservedPulling => 'Downloading image';
+
+  @override
   String get containerObservedHydrating => 'Hydrating';
 
   @override

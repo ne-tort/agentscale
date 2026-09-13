@@ -38,6 +38,13 @@ _FATAL_WAITING_REASONS = frozenset(
     }
 )
 _FATAL_TERMINATED_REASONS = frozenset({"Error", "OOMKilled", "ContainerCannotRun"})
+_PULLING_WAITING_REASONS = frozenset(
+    {
+        "Pulling",
+        "ImagePull",
+        "PodInitializing",  # common while main container image is still downloading
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -52,6 +59,8 @@ class PodSnapshot:
     hydrating: bool = False
     hydrate_failed: bool = False
     fatal_failure: str | None = None
+    waiting_reason: str | None = None
+    pulling: bool = False
     created_at: str | None = None
     started_at: str | None = None
     pod_ip: str | None = None
@@ -66,7 +75,10 @@ class PodSnapshot:
             "stub": False,
             "hydrating": self.hydrating,
             "hydrate_failed": self.hydrate_failed,
+            "pulling": self.pulling,
         }
+        if self.waiting_reason:
+            out["waiting_reason"] = self.waiting_reason
         if self.created_at:
             out["created_at"] = self.created_at
         if self.started_at:
@@ -80,13 +92,21 @@ class PodSnapshot:
 
 
 def _init_hydrate_state(status: dict[str, Any]) -> tuple[bool, bool]:
-    """Return (hydrating, hydrate_failed) for initContainer ``hydrate``."""
+    """Return (hydrating, hydrate_failed) for initContainer ``hydrate``.
+
+    Image pull for hydrate counts as pulling (not hydrating) so dual-timeout
+    can extend the pull budget.
+    """
     init_statuses = status.get("initContainerStatuses") or []
     for ics in init_statuses:
         if str(ics.get("name") or "") != "hydrate":
             continue
         state = ics.get("state") or {}
-        if state.get("waiting") or state.get("running"):
+        waiting = state.get("waiting") or {}
+        reason = str(waiting.get("reason") or "")
+        if waiting and reason in _PULLING_WAITING_REASONS:
+            return False, False
+        if waiting or state.get("running"):
             return True, False
         terminated = state.get("terminated") or {}
         exit_code = terminated.get("exitCode")
@@ -94,6 +114,42 @@ def _init_hydrate_state(status: dict[str, Any]) -> tuple[bool, bool]:
             return False, True
         return False, False
     return False, False
+
+
+def _pod_waiting_reason(status: dict[str, Any]) -> str | None:
+    for ics in status.get("initContainerStatuses") or []:
+        waiting = (ics.get("state") or {}).get("waiting") or {}
+        reason = waiting.get("reason")
+        if reason:
+            return str(reason)
+    for cs in status.get("containerStatuses") or []:
+        waiting = (cs.get("state") or {}).get("waiting") or {}
+        reason = waiting.get("reason")
+        if reason:
+            return str(reason)
+    return None
+
+
+def _pod_pulling(status: dict[str, Any], *, hydrating: bool) -> bool:
+    if hydrating:
+        return False
+    reason = _pod_waiting_reason(status)
+    if reason and reason in _PULLING_WAITING_REASONS:
+        return True
+    # No containerStatuses yet while kubelet pulls the first image.
+    phase = str(status.get("phase") or "")
+    if phase in {"Pending", "ContainerCreating", "PodInitializing"}:
+        has_running = False
+        for group in ("initContainerStatuses", "containerStatuses"):
+            for cs in status.get(group) or []:
+                if (cs.get("state") or {}).get("running"):
+                    has_running = True
+                    break
+            if has_running:
+                break
+        if not has_running and not (status.get("containerStatuses") or []):
+            return True
+    return False
 
 
 def _format_container_state(state: dict[str, Any] | None) -> str:
@@ -196,6 +252,8 @@ def _parse_snapshot(body: dict[str, Any]) -> PodSnapshot:
     hydrate_gen = int(gen_raw) if gen_raw is not None and str(gen_raw).isdigit() else None
     hydrating, hydrate_failed = _init_hydrate_state(status)
     fatal_failure = _pod_fatal_failure(status)
+    waiting_reason = _pod_waiting_reason(status)
+    pulling = _pod_pulling(status, hydrating=hydrating)
     return PodSnapshot(
         name=str(meta.get("name") or ""),
         uid=meta.get("uid"),
@@ -207,6 +265,8 @@ def _parse_snapshot(body: dict[str, Any]) -> PodSnapshot:
         hydrating=hydrating,
         hydrate_failed=hydrate_failed,
         fatal_failure=fatal_failure,
+        waiting_reason=waiting_reason,
+        pulling=pulling,
         created_at=meta.get("creationTimestamp"),
         started_at=_container_started_at(status),
         pod_ip=status.get("podIP") or None,
@@ -338,10 +398,37 @@ class K8sSandboxClient:
         detail = _pod_diagnostics(body) if body else headline
         raise PermanentK8sError(f"pod {name} {headline}; {detail}")
 
-    async def wait_ready(self, name: str, *, timeout: float) -> PodSnapshot:
-        deadline = time.monotonic() + timeout
+    async def wait_ready(
+        self,
+        name: str,
+        *,
+        timeout: float | None = None,
+        image_pull_timeout: float | None = None,
+    ) -> PodSnapshot:
+        """Wait until Ready.
+
+        Dual budget: while ``pulling`` (image download) use
+        ``image_pull_timeout`` from wall clock; non-pull phases accumulate
+        against ``timeout`` (default 20s).
+        """
+        from prodavan.config.settings import settings
+
+        ready_budget = float(
+            settings.pod_ready_timeout_sec if timeout is None else timeout
+        )
+        pull_budget = float(
+            settings.pod_image_pull_timeout_sec
+            if image_pull_timeout is None
+            else image_pull_timeout
+        )
+        started = time.monotonic()
+        last_tick = started
+        non_pull_elapsed = 0.0
         last: PodSnapshot | None = None
-        while time.monotonic() < deadline:
+        while True:
+            now = time.monotonic()
+            dt = max(0.0, now - last_tick)
+            last_tick = now
             snap = await self.get_pod(name)
             if snap is None:
                 snap = await self._await_pod_visible(
@@ -367,14 +454,26 @@ class K8sSandboxClient:
             if snap.hydrate_failed:
                 body = await self._get_pod_body(name)
                 self._raise_pod_failure(name, headline="hydrate failed", body=body)
+
+            if snap.pulling:
+                if now - started > pull_budget:
+                    break
+            else:
+                non_pull_elapsed += dt
+                if non_pull_elapsed > ready_budget:
+                    break
             await asyncio.sleep(_POLL_INTERVAL_SEC)
+
         body = await self._get_pod_body(name)
         if body:
             fatal = _pod_fatal_failure(body.get("status") or {})
             if fatal:
                 self._raise_pod_failure(name, headline=f"cannot start: {fatal}", body=body)
         detail = _pod_diagnostics(body) if body else str(last)
-        raise classify_http_status(408, f"pod {name} not ready within {timeout}s; {detail}")
+        used = f"ready_budget={ready_budget:.0f}s pull_budget={pull_budget:.0f}s non_pull={non_pull_elapsed:.0f}s"
+        raise classify_http_status(
+            408, f"pod {name} not ready within timeout ({used}); {detail}"
+        )
 
     async def get_pod_metrics(self, name: str) -> dict[str, Any] | None:
         url = (

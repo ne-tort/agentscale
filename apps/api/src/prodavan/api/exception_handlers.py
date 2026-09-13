@@ -16,6 +16,7 @@ def problem_response(
     title: str,
     detail: str | None = None,
     trace_id: str | None = None,
+    extra: dict | None = None,
 ) -> JSONResponse:
     body: dict[str, object] = {
         "type": f"https://prodavan.dev/errors/{code}",
@@ -28,6 +29,8 @@ def problem_response(
         body["message"] = detail
     if trace_id:
         body["trace_id"] = trace_id
+    if extra:
+        body.update(extra)
     return JSONResponse(status_code=status, content=body, media_type="application/problem+json")
 
 
@@ -37,6 +40,7 @@ async def app_error_handler(_request: Request, exc: AppError) -> JSONResponse:
         code=exc.code,
         title=exc.title,
         detail=exc.detail,
+        extra=exc.extra or None,
     )
 
 
