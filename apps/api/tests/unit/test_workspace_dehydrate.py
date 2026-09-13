@@ -36,10 +36,11 @@ def test_is_excluded_rel_denylist() -> None:
     assert is_excluded_rel("node_modules/pkg/index.js")
     assert is_excluded_rel(".git/config")
     assert is_excluded_rel("src/__pycache__/x.pyc")
+    assert is_excluded_rel(".openclaw-data/session-map.json")
+    assert is_excluded_rel(".openclaw-data/transcripts/x.jsonl")
     assert not is_excluded_rel("AGENTS.md")
     assert not is_excluded_rel("out/report.txt")
-    assert not is_excluded_rel(".openclaw-data/session-map.json")
-
+    assert not is_excluded_rel(".prodavan/config.yaml")
 
 def test_upload_workspace_tar_overwrites_and_deletes_orphans(file_store: FileStoreManager) -> None:
     file_store.put_bytes_sync("projects/ws1/workspace/old.txt", b"gone")

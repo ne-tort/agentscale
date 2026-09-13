@@ -326,6 +326,8 @@ class _CabinetShellState extends State<CabinetShell> {
     final sessionId = chat['session_id'] as String?;
     final projectId = chat['project_id'] as String?;
     if (sessionId == null || projectId == null) return;
+    // Same dialog already open — do not remount workspace from scratch.
+    if (_activeSessionId == sessionId) return;
     final projectName = chat['project_name'] as String? ?? projectId;
     setState(() => _activeSessionId = sessionId);
     final page = ProjectWorkspacePage(

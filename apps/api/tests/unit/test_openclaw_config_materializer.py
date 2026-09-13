@@ -24,11 +24,13 @@ def test_mcp_packages_to_openclaw_servers() -> None:
                 "name": "echo",
                 "command": "node",
                 "args": ["packages/echo/server.mjs"],
+                "env": {"PRODAVAN_PROJECT_ID": "${PRODAVAN_PROJECT_ID}"},
             }
         ]
     )
     assert servers["echo"]["command"] == "node"
     assert servers["echo"]["args"] == ["${WORKSPACE}/packages/echo/server.mjs"]
+    assert servers["echo"]["env"] == {"PRODAVAN_PROJECT_ID": "${PRODAVAN_PROJECT_ID}"}
 
 
 def test_chat_readonly_preset_permissions() -> None:

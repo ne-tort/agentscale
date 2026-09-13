@@ -14,6 +14,35 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 
+def _workspace_owner_ids() -> tuple[int, int]:
+    """Uid/gid for agent-runtime (Dockerfile USER node → 1000)."""
+    uid = int(os.environ.get("WORKSPACE_UID", "1000"))
+    gid = int(os.environ.get("WORKSPACE_GID", str(uid)))
+    return uid, gid
+
+
+def fix_workspace_ownership(target: Path) -> None:
+    """Make hydrated tree writable by agent-runtime (hydrate init runs as root)."""
+    if not hasattr(os, "chown"):
+        return
+    uid, gid = _workspace_owner_ids()
+    try:
+        os.chown(target, uid, gid)
+    except OSError as exc:
+        logger.warning("hydrate chown root failed target=%s err=%s", target, exc)
+    for root, _dirs, files in os.walk(target):
+        try:
+            os.chown(root, uid, gid)
+        except OSError as exc:
+            logger.warning("hydrate chown dir failed path=%s err=%s", root, exc)
+        for name in files:
+            path = Path(root) / name
+            try:
+                os.chown(path, uid, gid)
+            except OSError as exc:
+                logger.warning("hydrate chown file failed path=%s err=%s", path, exc)
+
+
 def _sync_from_api(*, target: Path) -> None:
     """Download workspace tar from prodavan-api pod surface (no MinIO in sandbox)."""
     base = (os.environ.get("PRODAVAN_API_BASE_URL") or "").rstrip("/")
@@ -118,6 +147,8 @@ def main() -> None:
         for sub in ("inbox", "runs"):
             (target / sub).mkdir(parents=True, exist_ok=True)
         logger.info("hydrate stub workspace_key=%s target=%s", workspace_key, target)
+
+    fix_workspace_ownership(target)
     print(f"ok hydrate {workspace_key} -> {target}", flush=True)
 
 

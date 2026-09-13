@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from prodavan.application.mcp.bridge_env import platform_mcp_bridge_env_refs
 from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
 
 PACKAGE_NAME = "prodavan-modules"
@@ -30,6 +31,7 @@ def platform_modules_mcp_package() -> dict[str, Any]:
         "command": "python",
         "args": [f"packages/{PACKAGE_NAME}/server.py"],
         "tools": list(_TOOL_NAMES),
+        "env": platform_mcp_bridge_env_refs(),
     }
 
 

@@ -16,6 +16,9 @@ _EXCLUDED_NAME_PARTS = frozenset(
         ".mypy_cache",
         ".pytest_cache",
         ".ruff_cache",
+        # Agent runtime crash-buffer / local session files — SoT is Postgres.
+        # Round-tripping root-owned hydrate of these causes EACCES in agent-runtime.
+        ".openclaw-data",
     }
 )
 

@@ -51,7 +51,11 @@ def mcp_packages_to_openclaw_servers(packages: list[dict[str, Any]]) -> dict[str
             if text.startswith("packages/"):
                 text = f"${{WORKSPACE}}/{text}"
             normalized_args.append(text)
-        servers[name] = {"command": str(command), "args": normalized_args}
+        entry: dict[str, Any] = {"command": str(command), "args": normalized_args}
+        raw_env = pkg.get("env")
+        if isinstance(raw_env, dict) and raw_env:
+            entry["env"] = {str(k): str(v) for k, v in raw_env.items() if str(k).strip()}
+        servers[name] = entry
     return servers
 
 
