@@ -984,7 +984,7 @@
   "errorNotFound": "The requested item was not found.",
   "errorRateLimited": "Too many requests. Please wait a moment.",
   "errorServer": "Internal server error. Please try again later.",
-  "errorUnauthorized": "Session expired. Please sign in again.",
+  "errorUnauthorized": "Authorization failed. Please sign in again.",
   "errorInvalidCredentials": "Incorrect username or password",
   "errorUnexpected": "Something went wrong.",
   "errorValidation": "Please check the entered data.",

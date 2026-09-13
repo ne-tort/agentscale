@@ -12,6 +12,7 @@ os.environ.setdefault("AUTH_MODE", "test")
 
 from prodavan.config.settings import settings
 from prodavan.domain.errors import AppError
+from prodavan.infrastructure.auth import jwt as jwt_mod
 from prodavan.infrastructure.auth.jwt import JwtValidator, reset_jwt_validator
 
 
@@ -54,3 +55,23 @@ def test_test_mode_accepts_hs256(monkeypatch: pytest.MonkeyPatch) -> None:
     p = JwtValidator().validate(tok)
     assert p.sub == "s1"
     assert p.is_platform_admin
+
+
+def test_test_mode_rejects_bad_token_with_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "auth_mode", "test")
+    monkeypatch.setattr(settings, "app_env", "dev")
+    reset_jwt_validator()
+    with pytest.raises(AppError) as ei:
+        JwtValidator().validate("not-a-jwt")
+    assert ei.value.code == "UNAUTHORIZED"
+    assert "Invalid or expired token" in ei.value.detail
+    assert "(" in ei.value.detail
+
+
+def test_token_error_detail_hides_reason_in_prod(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(settings, "app_env", "prod")
+    assert jwt_mod._token_error_detail(ValueError("Audience doesn't match")) == (
+        "Invalid or expired token"
+    )
+    monkeypatch.setattr(settings, "app_env", "dev")
+    assert "Audience" in jwt_mod._token_error_detail(ValueError("Audience doesn't match"))

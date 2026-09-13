@@ -175,6 +175,8 @@ spec:
             - -c
             - |
               set -eu
+              export HOME=/tmp
+              mkdir -p /tmp/.keycloak
               KC="/opt/keycloak/bin/kcadm.sh"
               SERVER="http://prodavan-keycloak:8080"
               i=0
@@ -214,12 +216,21 @@ spec:
                 return 0
               }
 
+              # KC Admin API uses PUT (kcadm update), not POST create, for scope assignment.
               attach_default_scope() {
                 client_id="$1"
                 scope_name="$2"
                 sid=$(scope_id "$scope_name")
                 [ -n "$sid" ] || return 0
-                "$KC" create "clients/${client_id}/default-client-scopes/${sid}" -r prodavan 2>/dev/null || true
+                "$KC" update "clients/${client_id}/default-client-scopes/${sid}" -r prodavan 2>/dev/null || true
+              }
+
+              attach_optional_scope() {
+                client_id="$1"
+                scope_name="$2"
+                sid=$(scope_id "$scope_name")
+                [ -n "$sid" ] || return 0
+                "$KC" update "clients/${client_id}/optional-client-scopes/${sid}" -r prodavan 2>/dev/null || true
               }
 
               ensure_realm
@@ -229,19 +240,25 @@ spec:
               done
 
               # Audience client scope + mapper (KC26 rejects attributes.* on create)
-              if [ -z "$(scope_id prodavan-audience)" ]; then
+              AUD_ID=$(scope_id prodavan-audience)
+              if [ -z "$AUD_ID" ]; then
                 "$KC" create client-scopes -r prodavan \
                   -s name=prodavan-audience -s protocol=openid-connect
                 AUD_ID=$(scope_id prodavan-audience)
+              fi
+              if [ -n "$AUD_ID" ]; then
                 "$KC" update "client-scopes/${AUD_ID}" -r prodavan \
                   -s 'attributes.include.in.token.scope=true' \
                   -s 'attributes.display.on.consent.screen=false' 2>/dev/null || true
-                "$KC" create "client-scopes/${AUD_ID}/protocol-mappers/models" -r prodavan \
-                  -s name=aud-prodavan-api -s protocol=openid-connect \
-                  -s protocolMapper=oidc-audience-mapper \
-                  -s 'config."included.client.audience"=prodavan-api' \
-                  -s 'config."id.token.claim"=false' \
-                  -s 'config."access.token.claim"=true' || true
+                if ! "$KC" get "client-scopes/${AUD_ID}/protocol-mappers/models" -r prodavan 2>/dev/null \
+                    | grep -q aud-prodavan-api; then
+                  "$KC" create "client-scopes/${AUD_ID}/protocol-mappers/models" -r prodavan \
+                    -s name=aud-prodavan-api -s protocol=openid-connect \
+                    -s protocolMapper=oidc-audience-mapper \
+                    -s 'config."included.client.audience"=prodavan-api' \
+                    -s 'config."id.token.claim"=false' \
+                    -s 'config."access.token.claim"=true' || true
+                fi
               fi
 
               ensure_client() {
@@ -282,9 +299,14 @@ spec:
               for SCOPE in roles profile email web-origins acr prodavan-audience; do
                 attach_default_scope "$FLUTTER_ID" "$SCOPE"
               done
-              OFF_ID=$(scope_id offline_access)
-              if [ -n "$OFF_ID" ]; then
-                "$KC" create "clients/${FLUTTER_ID}/optional-client-scopes/${OFF_ID}" -r prodavan 2>/dev/null || true
+              attach_optional_scope "$FLUTTER_ID" offline_access
+
+              SERVICES_ID=$("$KC" get clients -r prodavan -q clientId=prodavan-services --fields id --format csv --noquotes \
+                | grep -E '^[0-9a-f-]{8,}' | head -1 || true)
+              if [ -n "${SERVICES_ID:-}" ]; then
+                for SCOPE in roles profile email prodavan-audience; do
+                  attach_default_scope "$SERVICES_ID" "$SCOPE"
+                done
               fi
 
               # Platform admin user admin/admin

@@ -65,7 +65,7 @@ class JwtValidator:
                 code="UNAUTHORIZED",
                 title="Unauthorized",
                 status=401,
-                detail="Invalid or expired token",
+                detail=_token_error_detail(exc),
             ) from exc
         return _principal_from_claims(claims)
 
@@ -84,9 +84,17 @@ class JwtValidator:
                 code="UNAUTHORIZED",
                 title="Unauthorized",
                 status=401,
-                detail="Invalid or expired token",
+                detail=_token_error_detail(exc),
             ) from exc
         return _principal_from_claims(claims)
+
+
+def _token_error_detail(exc: BaseException) -> str:
+    """Keep prod generic; surface PyJWT reason in non-prod (audience/issuer/exp)."""
+    if settings.app_env == "prod":
+        return "Invalid or expired token"
+    reason = str(exc).strip() or type(exc).__name__
+    return f"Invalid or expired token ({reason})"
 
 
 def _principal_from_claims(claims: dict[str, Any]) -> Principal:

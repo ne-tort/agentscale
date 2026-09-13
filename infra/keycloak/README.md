@@ -35,6 +35,8 @@ Flutter requests `offline_access` so refresh survives days/weeks without re-logi
 
 Client scope `prodavan-audience` (mapper `aud-prodavan-api`) is attached as **default** on `prodavan-flutter` and `prodavan-services`. After import, confirm access tokens contain `"aud": "prodavan-api"` (or array including it).
 
+Keycloak Admin API assigns scopes with **PUT** (`kcadm.sh update clients/.../default-client-scopes/<scopeId>`). Using `create` returns 404 and silently leaves tokens without `aud=prodavan-api` (API then rejects with UNAUTHORIZED).
+
 ## Service account checklist (`prodavan-services`)
 
 After import, in Keycloak Admin → Clients → `prodavan-services` → Service account roles → `realm-management`:

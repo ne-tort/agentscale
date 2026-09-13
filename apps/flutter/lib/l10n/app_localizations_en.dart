@@ -1692,7 +1692,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get errorServer => 'Internal server error. Please try again later.';
 
   @override
-  String get errorUnauthorized => 'Session expired. Please sign in again.';
+  String get errorUnauthorized => 'Authorization failed. Please sign in again.';
 
   @override
   String get errorInvalidCredentials => 'Incorrect username or password';

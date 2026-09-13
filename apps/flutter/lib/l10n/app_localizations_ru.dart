@@ -1704,7 +1704,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get errorServer => 'Внутренняя ошибка сервера. Попробуйте позже.';
 
   @override
-  String get errorUnauthorized => 'Сессия истекла. Войдите снова.';
+  String get errorUnauthorized => 'Авторизация не прошла. Войдите снова.';
 
   @override
   String get errorInvalidCredentials => 'Неправильный логин или пароль';

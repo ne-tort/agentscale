@@ -144,8 +144,16 @@ abstract final class AppErrors {
       // Non-JSON body (proxy text, plain string).
     }
 
-    final display = _messageForCode(l10n, code) ??
-        _statusMessage(l10n, statusCode);
+    final codeMessage = _messageForCode(l10n, code);
+    final fallbackDetail = (detail ?? message ?? oauthDescription ?? '').trim();
+    // Prefer specific API detail over generic UNAUTHORIZED copy (e.g. audience mismatch).
+    final display = switch (code) {
+      'UNAUTHORIZED' || 'NOT_AUTHENTICATED'
+          when fallbackDetail.isNotEmpty &&
+              fallbackDetail != 'Invalid or expired token' =>
+        fallbackDetail,
+      _ => codeMessage ?? _statusMessage(l10n, statusCode),
+    };
     return AppErrorPresentation(
       display: display,
       diagnostic: _diagnostic(
