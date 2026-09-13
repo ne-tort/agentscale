@@ -1,21 +1,18 @@
 import 'package:flutter/material.dart';
 
-import 'package:prodavan/core/preferences/app_nav_preference.dart';
 import 'package:prodavan/core/session/admin_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_json_editor_field.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/meta/module_meta_autosave.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/module_meta_repository.dart';
 import 'package:prodavan/features/meta/module_meta_validator.dart';
-import 'package:prodavan/features/meta/module_shell_nav_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Admin module manifest JSON editor — autosave + live instance seed editor.
+/// Admin module manifest JSON editor — autosave only (seed UI lives on module detail).
 class AdminModuleJsonPage extends StatefulWidget {
   const AdminModuleJsonPage({
     super.key,
@@ -91,32 +88,6 @@ class _AdminModuleJsonPageState extends State<AdminModuleJsonPage> {
     return ModuleMetaValidator.validate(parsed);
   }
 
-  Future<void> _openSeedData() async {
-    final l10n = AppLocalizations.of(context);
-    await _autosave.flushIfDirty();
-    if (!mounted) return;
-    try {
-      final manifest = await ModuleMetaRepository.load(adminContext.api, widget.moduleId);
-      if (!mounted) return;
-      final entry = shellNavEntryForModuleSeed(
-        moduleId: widget.moduleId,
-        moduleName: widget.moduleName,
-        manifest: manifest,
-      );
-      if (entry == null) {
-        AppSnackBar.warning(context, l10n.adminModulePreviewEmpty);
-        return;
-      }
-      await Navigator.of(context).push<void>(
-        MaterialPageRoute<void>(
-          builder: (_) => ModuleShellNavPage(entry: entry),
-        ),
-      );
-    } catch (e) {
-      if (mounted) AppErrors.showSnack(context, e);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -156,11 +127,6 @@ class _AdminModuleJsonPageState extends State<AdminModuleJsonPage> {
                       message: domainError,
                     ),
                   ),
-                AppNavPreference(
-                  title: l10n.adminModulePreview,
-                  icon: Icons.storage_outlined,
-                  onTap: _openSeedData,
-                ),
               ],
             ),
     );

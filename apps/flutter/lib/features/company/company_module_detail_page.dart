@@ -5,6 +5,7 @@ import 'package:prodavan/core/session/company_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/company/company_module_json_page.dart';
 import 'package:prodavan/features/meta/company_module_meta_repository.dart';
@@ -133,15 +134,22 @@ class _CompanyModuleDetailPageState extends State<CompanyModuleDetailPage> {
     await _load();
   }
 
-  Future<void> _openPreview() async {
+  Future<void> _openSeedData() async {
+    final l10n = AppLocalizations.of(context);
     final manifest = _manifest;
-    if (manifest == null || !manifest.hasContent) return;
+    if (manifest == null || !manifest.hasContent) {
+      AppSnackBar.warning(context, l10n.adminModulePreviewEmpty);
+      return;
+    }
     final entry = shellNavEntryForModuleSeed(
       moduleId: widget.moduleId,
       moduleName: _name,
       manifest: manifest,
     );
-    if (entry == null) return;
+    if (entry == null) {
+      AppSnackBar.warning(context, l10n.adminModulePreviewEmpty);
+      return;
+    }
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => ModuleShellNavPage(
@@ -219,8 +227,8 @@ class _CompanyModuleDetailPageState extends State<CompanyModuleDetailPage> {
                 if (_jsonConfigured && _manifest != null && _manifest!.hasContent)
                   AppNavPreference(
                     title: l10n.adminModulePreview,
-                    icon: Icons.visibility_outlined,
-                    onTap: _openPreview,
+                    icon: Icons.storage_outlined,
+                    onTap: _openSeedData,
                   ),
               ],
             ),

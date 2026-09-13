@@ -1,21 +1,19 @@
 import 'package:flutter/material.dart';
 
-import 'package:prodavan/core/preferences/app_nav_preference.dart';
 import 'package:prodavan/core/session/company_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_json_editor_field.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/meta/company_module_meta_repository.dart';
 import 'package:prodavan/features/meta/module_meta_autosave.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/module_meta_validator.dart';
-import 'package:prodavan/features/meta/module_shell_nav_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Company module JSON — read-only for platform-assigned; autosave for local modules.
+/// Seed / «Предзаполнение» is on the module detail screen, not here.
 class CompanyModuleJsonPage extends StatefulWidget {
   const CompanyModuleJsonPage({
     super.key,
@@ -103,39 +101,6 @@ class _CompanyModuleJsonPageState extends State<CompanyModuleJsonPage> {
 
   String? _validateManifest(Object? parsed) => ModuleMetaValidator.validate(parsed);
 
-  Future<void> _openSeedData() async {
-    final l10n = AppLocalizations.of(context);
-    await _autosave?.flushIfDirty();
-    if (!mounted) return;
-    try {
-      final manifest = await CompanyModuleMetaRepository.load(
-        companyContext.api,
-        companyId: widget.companyId,
-        moduleId: widget.moduleId,
-      );
-      if (!mounted) return;
-      final entry = shellNavEntryForModuleSeed(
-        moduleId: widget.moduleId,
-        moduleName: widget.moduleName,
-        manifest: manifest,
-      );
-      if (entry == null) {
-        AppSnackBar.warning(context, l10n.adminModulePreviewEmpty);
-        return;
-      }
-      await Navigator.of(context).push<void>(
-        MaterialPageRoute<void>(
-          builder: (_) => ModuleShellNavPage(
-            entry: entry,
-            companyId: widget.companyId,
-          ),
-        ),
-      );
-    } catch (e) {
-      if (mounted) AppErrors.showSnack(context, e);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -176,11 +141,6 @@ class _CompanyModuleJsonPageState extends State<CompanyModuleJsonPage> {
                       message: domainError,
                     ),
                   ),
-                AppNavPreference(
-                  title: l10n.adminModulePreview,
-                  icon: Icons.storage_outlined,
-                  onTap: _openSeedData,
-                ),
               ],
             ),
     );

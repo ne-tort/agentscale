@@ -653,8 +653,8 @@ void main() {
     });
   });
 
-  group('AdminModuleJsonPage preview nav', () {
-    testWidgets('shows preview row for non-empty manifest', (tester) async {
+  group('module detail seed nav', () {
+    testWidgets('shows seed row for non-empty manifest', (tester) async {
       await tester.pumpWidget(
         _ruApp(
           Scaffold(
@@ -668,7 +668,7 @@ void main() {
                     ))
                       AppNavPreference(
                         title: l10n.adminModulePreview,
-                        icon: Icons.visibility_outlined,
+                        icon: Icons.storage_outlined,
                         onTap: () {},
                       ),
                   ],
@@ -683,7 +683,7 @@ void main() {
       expect(find.byType(AppNavPreference), findsOneWidget);
     });
 
-    testWidgets('hides preview row for empty stub', (tester) async {
+    testWidgets('hides seed row for empty stub', (tester) async {
       await tester.pumpWidget(
         _ruApp(
           Scaffold(
@@ -698,7 +698,7 @@ void main() {
                     if (show)
                       AppNavPreference(
                         title: l10n.adminModulePreview,
-                        icon: Icons.visibility_outlined,
+                        icon: Icons.storage_outlined,
                         onTap: () {},
                       ),
                   ],

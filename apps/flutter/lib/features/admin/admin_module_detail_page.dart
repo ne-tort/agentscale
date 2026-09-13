@@ -6,8 +6,11 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/features/admin/admin_module_json_page.dart';
+import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/module_meta_repository.dart';
+import 'package:prodavan/features/meta/module_shell_nav_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Admin module detail — name, cabinet/company grants, project Local/Global binds.
@@ -35,6 +38,7 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
   List<Map<String, dynamic>> _cabinets = const [];
   List<Map<String, dynamic>> _projectBinds = const [];
   bool _jsonConfigured = false;
+  ModuleMetaManifest? _manifest;
 
   @override
   void initState() {
@@ -68,6 +72,7 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
         _cabinets = cabinets;
         _projectBinds = projectBinds;
         _jsonConfigured = manifest.hasContent;
+        _manifest = manifest;
         _loading = false;
       });
     } catch (e) {
@@ -169,6 +174,29 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
     );
     if (!mounted) return;
     await _load();
+  }
+
+  Future<void> _openSeedData() async {
+    final l10n = AppLocalizations.of(context);
+    final manifest = _manifest;
+    if (manifest == null || !manifest.hasContent) {
+      AppSnackBar.warning(context, l10n.adminModulePreviewEmpty);
+      return;
+    }
+    final entry = shellNavEntryForModuleSeed(
+      moduleId: widget.moduleId,
+      moduleName: _name.isEmpty ? widget.moduleName : _name,
+      manifest: manifest,
+    );
+    if (entry == null) {
+      AppSnackBar.warning(context, l10n.adminModulePreviewEmpty);
+      return;
+    }
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ModuleShellNavPage(entry: entry),
+      ),
+    );
   }
 
   String _companyLabel(String id) {
@@ -313,6 +341,12 @@ class _AdminModuleDetailPageState extends State<AdminModuleDetailPage> {
                   ),
                   onTap: _openJsonPage,
                 ),
+                if (_jsonConfigured && _manifest != null && _manifest!.hasContent)
+                  AppNavPreference(
+                    title: l10n.adminModulePreview,
+                    icon: Icons.storage_outlined,
+                    onTap: _openSeedData,
+                  ),
               ],
             ),
     );
