@@ -201,4 +201,5 @@ async def test_kafka_ensure_topics_creates_missing(monkeypatch: pytest.MonkeyPat
         "prodavan.relation.events",
         "prodavan.metrics.events",
         "prodavan.document.events",
+        "prodavan.search.events",
     ]
