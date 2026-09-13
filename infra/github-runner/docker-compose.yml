@@ -119,6 +119,36 @@ services:
       - prodavan-ci-cache:/cache
       - runner-4-files:/runner-files
 
+  # prodavan-claw CI/images — private repo cannot use ubuntu-latest (no hosted minutes).
+  # Same labels; separate REPO_URL. Start with: docker compose --profile claw up -d
+  claw-runner-1:
+    <<: *runner-common
+    profiles: ["claw"]
+    container_name: prodavan-runners-claw-1
+    environment:
+      <<: *runner-env
+      REPO_URL: https://github.com/ne-tort/prodavan-claw
+      RUNNER_NAME: ${CLAW_RUNNER_NAME_PREFIX:-dd-claw}-1
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${USERPROFILE}/.kube:/home/runner/.kube:ro
+      - prodavan-ci-cache:/cache
+      - claw-runner-1-files:/runner-files
+
+  claw-runner-2:
+    <<: *runner-common
+    profiles: ["claw"]
+    container_name: prodavan-runners-claw-2
+    environment:
+      <<: *runner-env
+      REPO_URL: https://github.com/ne-tort/prodavan-claw
+      RUNNER_NAME: ${CLAW_RUNNER_NAME_PREFIX:-dd-claw}-2
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${USERPROFILE}/.kube:/home/runner/.kube:ro
+      - prodavan-ci-cache:/cache
+      - claw-runner-2-files:/runner-files
+
 networks:
   runners:
     name: prodavan-runners
@@ -135,3 +165,7 @@ volumes:
     name: prodavan-runner-3-files
   runner-4-files:
     name: prodavan-runner-4-files
+  claw-runner-1-files:
+    name: prodavan-claw-runner-1-files
+  claw-runner-2-files:
+    name: prodavan-claw-runner-2-files

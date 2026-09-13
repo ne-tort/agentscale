@@ -63,8 +63,22 @@ docker compose ps
 gh api repos/ne-tort/prodavan/actions/runners --jq '.runners[]|{name,status,busy}'
 ```
 
-Stop: `docker compose down` · wipe cache+reg: `docker compose down -v`  
+Стоп: `docker compose down` · wipe cache+reg: `docker compose down -v`  
 Reset только registration: `$env:PRODAVAN_RUNNER_RESET_REG=1; .\Start-Runners.ps1`
+
+## prodavan-claw runners
+
+Private `ne-tort/prodavan-claw` больше не получает GitHub-hosted runner (job 0 steps / 3s fail).
+CI/images там тоже `runs-on: [self-hosted, linux, docker]`.
+
+```powershell
+docker compose --profile claw up -d claw-runner-1 claw-runner-2
+gh api repos/ne-tort/prodavan-claw/actions/runners --jq '.runners[]|{name,status,busy}'
+```
+
+Поставка claw: `openclaw-ci` (PR) → Auto-merge squash → `openclaw-images` → GHCR
+`ghcr.io/ne-tort/prodavan-agent-runtime:latest` (dev ConfigMap `POD_AGENT_RUNTIME_IMAGE`).
+После нового `:latest` — **reload** project Pod (imagePullPolicy Always).
 
 ## DNS
 
