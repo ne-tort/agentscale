@@ -71,6 +71,7 @@ Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** depe
 | K8s adapter | `infrastructure/k8s/pod_runtime.py`, overlay `infra/k3s/overlays/e2e/` |
 | Backend e2e (API, не UI) | `apps/api/tests/integration/`, `tests/e2e/k8s/`, `tests/e2e/live/` |
 | Document Store (Mongo) | `application/document_store/`, admin `/admin/document-store`, [ADR](02-architecture/ADR-document-store-mongo.md) |
+| Search Index (OpenSearch) | `application/search_index/`, admin `/admin/search-index`, [ADR](02-architecture/ADR-search-index-opensearch.md) |
 | Tenant Infra Gateway | `application/tenant_infra/` — Cache/Docs/UserDB/Events/Objects + module data/meta/actions via `:8001` + Bridge scopes + company quotas; first-party MCP `prodavan-modules`; [as-built](target/12-layer-docs/tenant-infra-gateway.md) |
 | Agent + chat + files | `application/agent/`, `api/v1/agent.py`, content/assets |
 | Flutter UI (частично) | `apps/flutter/lib/features/` |
@@ -113,7 +114,7 @@ Template (modules + module_meta_documents)
 | **Admin/company «Предзаполнение»** | Live **platform/company instance** editor (`ModuleShellNavPage` + owner data API) — same interpreters as cabinet, including `file_upload` |
 | **Content upload** | Cabinet: `POST /cabinets/{id}/content/upload`. Platform: `POST /admin/modules/{id}/content/upload`. Company: `POST /companies/{id}/modules/{mid}/content/upload`. Same FileRef shape |
 | **MCP / seed files** | API bootstrap attaches zip to empty `file_ref` once; UI replace wins; bootstrap/Alembic never overwrite user `file_ref` |
-| **Storage** | Postgres JSONB for module instances. App Document Store on Mongo — [ADR](02-architecture/ADR-document-store-mongo.md). Module-instance→Mongo cutover still deferred — [backlog ADR](02-architecture/ADR-backlog-module-instance-mongo.md) |
+| **Storage** | Postgres JSONB for module instances. App Document Store on Mongo — [ADR](02-architecture/ADR-document-store-mongo.md). Search Index on OpenSearch — [ADR](02-architecture/ADR-search-index-opensearch.md). Module-instance→Mongo cutover still deferred — [backlog ADR](02-architecture/ADR-backlog-module-instance-mongo.md) |
 
 Product module seed changes ship only via Alembic calling `upsert_product_modules`. Template slug `seed_rows` is **migration insert-only** into instances — not an interactive file editor.
 
@@ -170,7 +171,7 @@ Product module for computer-equipment matching (hub on **Данные**). Projec
 
 Agent fills `found_offers` / `found_count` through first-party MCP `prodavan-equipment` (typed tools) or rows APIs. **Unified catalog search** (`equipment_catalog_search`) queries local merged SQLite **and** live remote PG with the same canonical contract after `column_map` (pagination, match+price sort, default in-stock filter). First-party MCP packages `prodavan-modules` + `prodavan-equipment` are materialized into the workspace; `mcp.json` / OpenClaw `mcp.servers` carry `env: ${PRODAVAN_*}` placeholders (no plaintext tokens in MinIO). Cursor SDK stdio MCP **не** наследует pod env — bridge expands placeholders and injects `PRODAVAN_*` / `EQUIPMENT_*` / `S4B_*` into `Agent.create({ mcpServers })`.
 
-**S4B:** hub tile → settings form; password via cabinet secrets → Pod `S4B_PASSWORD`; zip materialize reuses `mcp_package` path. Redis/Kafka/Mongo/MinIO from Pod — **not** direct. Pod reaches platform only via **Pod API `:8001`** + Bridge JWT (scopes): `/infra`, `/modules` (data + **meta documents** + actions), `/agent`, `/internal/pods` (incl. workspace-archive hydrate). First-party MCP `prodavan-modules` is materialized into the workspace for agent tool access. See [tenant-infra-gateway](target/12-layer-docs/tenant-infra-gateway.md). App Document Store (Mongo) is in-proc for platform BCs only — [ADR](02-architecture/ADR-document-store-mongo.md).
+**S4B:** hub tile → settings form; password via cabinet secrets → Pod `S4B_PASSWORD`; zip materialize reuses `mcp_package` path. Redis/Kafka/Mongo/OpenSearch/MinIO from Pod — **not** direct. Pod reaches platform only via **Pod API `:8001`** + Bridge JWT (scopes): `/infra`, `/modules` (data + **meta documents** + actions), `/agent`, `/internal/pods` (incl. workspace-archive hydrate). First-party MCP `prodavan-modules` is materialized into the workspace for agent tool access. See [tenant-infra-gateway](target/12-layer-docs/tenant-infra-gateway.md). App Document Store (Mongo) and Search Index (OpenSearch) are in-proc for platform BCs only — [ADR Document Store](02-architecture/ADR-document-store-mongo.md), [ADR Search Index](02-architecture/ADR-search-index-opensearch.md).
 
 Meta primitives: hub + collections, `file_ref`, `secret_ref`, `column_map`, master–detail, `data.select_row`, `content.index_tabular`, `content.probe_remote_sql`, `merge_mapped_sqlite`, `foreach_rows` env. See [meta-syntax](target/06-modules/meta-syntax/).
 

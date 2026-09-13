@@ -1,0 +1,1 @@
+"""Search Index domain package."""

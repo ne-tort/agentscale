@@ -15,6 +15,7 @@ BusName = Literal[
     "metrics",
     "document",
     "tenant",
+    "search",
 ]
 
 
@@ -172,6 +173,28 @@ def document_envelope(
 ) -> EventEnvelope:
     return EventEnvelope(
         bus="document",
+        event_id=event_id,
+        event_type=event_type,
+        occurred_at=occurred_at or EventEnvelope.now_iso(),
+        company_id=company_id,
+        project_id=project_id,
+        cabinet_id=cabinet_id,
+        payload=payload or {},
+    )
+
+
+def search_envelope(
+    *,
+    event_id: str,
+    event_type: str,
+    company_id: str | None = None,
+    project_id: str | None = None,
+    cabinet_id: str | None = None,
+    payload: dict[str, Any] | None = None,
+    occurred_at: str | None = None,
+) -> EventEnvelope:
+    return EventEnvelope(
+        bus="search",
         event_id=event_id,
         event_type=event_type,
         occurred_at=occurred_at or EventEnvelope.now_iso(),

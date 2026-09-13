@@ -16,6 +16,6 @@ def test_live_platform_ready_checks(live_client) -> None:
     checks = body.get("checks") or {}
     assert checks.get("database") == "ok"
     resources = body.get("resources") or {}
-    for name in ("kafka", "file_store", "k8s"):
+    for name in ("kafka", "file_store", "k8s", "mongodb", "opensearch"):
         if name in resources:
             assert resources[name] in {"ok", "n/a", "fail"}

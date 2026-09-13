@@ -183,3 +183,30 @@ def schedule_document_event_publish(
             occurred_at=occurred_at,
         ),
     )
+
+
+def schedule_search_event_publish(
+    session: AsyncSession,
+    *,
+    event_id: str,
+    event_type: str,
+    company_id: str | None = None,
+    project_id: str | None = None,
+    cabinet_id: str | None = None,
+    payload: dict[str, Any] | None = None,
+    occurred_at: str | None = None,
+) -> None:
+    from prodavan.core.events.envelope import search_envelope
+
+    schedule_envelope_publish(
+        session,
+        search_envelope(
+            event_id=event_id,
+            event_type=event_type,
+            company_id=company_id,
+            project_id=project_id,
+            cabinet_id=cabinet_id,
+            payload=payload,
+            occurred_at=occurred_at,
+        ),
+    )

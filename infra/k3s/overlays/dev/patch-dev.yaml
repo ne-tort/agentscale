@@ -108,6 +108,14 @@ data:
   KAFKA_CONSUMER_ENABLED: "true"
   KAFKA_CONSUMER_MODE: kick
   KAFKA_REQUIRED: "true"
+  KAFKA_TOPIC_DOCUMENT_EVENTS: prodavan.document.events
+  KAFKA_TOPIC_SEARCH_EVENTS: prodavan.search.events
+  MONGODB_ENABLED: "true"
+  MONGODB_DB: prodavan
+  MONGODB_REQUIRED: "true"
+  OPENSEARCH_ENABLED: "true"
+  OPENSEARCH_URL: http://prodavan-opensearch:9200
+  OPENSEARCH_REQUIRED: "true"
   CELERY_REQUIRED: "false"
   MCP_SANDBOX_SPAWN: "false"
   SANDBOX_K8S_JOBS: "false"

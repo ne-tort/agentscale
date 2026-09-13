@@ -63,6 +63,7 @@ class KafkaManager(LifespanResource):
         topic_relation_events: str = "prodavan.relation.events",
         topic_metrics_events: str = "prodavan.metrics.events",
         topic_document_events: str = "prodavan.document.events",
+        topic_search_events: str = "prodavan.search.events",
         topic_tenant_events: str = "prodavan.tenant.events",
         required: bool = False,
         buffer_size: int = 200,
@@ -86,6 +87,7 @@ class KafkaManager(LifespanResource):
         self._topic_relation_events = topic_relation_events
         self._topic_metrics_events = topic_metrics_events
         self._topic_document_events = topic_document_events
+        self._topic_search_events = topic_search_events
         self._topic_tenant_events = topic_tenant_events
         self._required = required
         self._consumer_enabled = consumer_enabled
@@ -176,6 +178,8 @@ class KafkaManager(LifespanResource):
             return self._topic_metrics_events
         if bus == "document":
             return self._topic_document_events
+        if bus == "search":
+            return self._topic_search_events
         if bus == "tenant":
             return self._topic_tenant_events
         raise ValueError(f"unknown bus: {bus}")
@@ -578,6 +582,7 @@ class KafkaManager(LifespanResource):
             self._topic_relation_events,
             self._topic_metrics_events,
             self._topic_document_events,
+            self._topic_search_events,
         ]
         try:
             from aiokafka.admin import AIOKafkaAdminClient, NewTopic

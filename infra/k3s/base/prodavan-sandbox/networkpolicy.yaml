@@ -14,7 +14,8 @@ spec:
   policyTypes:
     - Egress
   egress:
-    # Pod API surface only (:8001). No MinIO :9000, no full API :8000.
+    # Pod API surface only (:8001). No MinIO :9000, Mongo :27017, OpenSearch :9200,
+    # or full API :8000.
     - to:
         - namespaceSelector:
             matchLabels:

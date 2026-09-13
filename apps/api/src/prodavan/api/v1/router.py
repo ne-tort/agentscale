@@ -12,6 +12,7 @@ from prodavan.api.v1 import (
     admin_modules,
     admin_object_store,
     admin_document_store,
+    admin_search_index,
     admin_platform_events,
     admin_profile,
     admin_projects,
@@ -57,6 +58,7 @@ router.include_router(admin_recycle.router)
 router.include_router(admin_modules.router)
 router.include_router(admin_object_store.router)
 router.include_router(admin_document_store.router)
+router.include_router(admin_search_index.router)
 router.include_router(admin_catalogs.router)
 router.include_router(ai_keys.router)
 router.include_router(cabinets.router)

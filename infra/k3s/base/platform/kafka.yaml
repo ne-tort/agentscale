@@ -205,6 +205,7 @@ spec:
               rpk topic create prodavan.relation.events -p 1 -r 1 -X brokers=$BROKERS || true
               rpk topic create prodavan.metrics.events -p 1 -r 1 -X brokers=$BROKERS || true
               rpk topic create prodavan.document.events -p 1 -r 1 -X brokers=$BROKERS || true
+              rpk topic create prodavan.search.events -p 1 -r 1 -X brokers=$BROKERS || true
               rpk cluster config set write_caching_default false -X brokers=$BROKERS -X admin.hosts=$ADMIN
               rpk cluster config set auto_create_topics_enabled false -X brokers=$BROKERS -X admin.hosts=$ADMIN
               rpk cluster config set default_topic_replications 1 -X brokers=$BROKERS -X admin.hosts=$ADMIN
@@ -216,7 +217,7 @@ spec:
               # RF=1 → min.isr must be 1 or acks=all producers stall (API enable_idempotence).
               for t in prodavan.platform.events prodavan.project.triggers prodavan.ops.health \
                        prodavan.auth.commands prodavan.auth.events prodavan.relation.events \
-                       prodavan.metrics.events prodavan.document.events; do
+                       prodavan.metrics.events prodavan.document.events prodavan.search.events; do
                 rpk topic alter-config "$t" \
                   --set cleanup.policy=delete \
                   --set min.insync.replicas=1 \

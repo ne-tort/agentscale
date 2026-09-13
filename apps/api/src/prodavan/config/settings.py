@@ -42,6 +42,13 @@ class Settings(BaseSettings):
     mongodb_enabled: bool = False
     mongodb_required: bool = False
 
+    # Search Index (OpenSearch). Empty URL = in-memory adapter (tests / local without OS).
+    opensearch_url: str | None = None
+    opensearch_enabled: bool = False
+    opensearch_required: bool = False
+    opensearch_username: str | None = None
+    opensearch_password: str | None = None
+
     # Pod Identity Bridge (scoped JWT for Project Pods). Empty secret → fallback to
     # POD_AGENT_BRIDGE_AUTH_TOKEN then AUTH_TEST_SECRET.
     pod_identity_bridge_secret: str = Field(
@@ -121,6 +128,7 @@ class Settings(BaseSettings):
     metrics_presence_ttl_sec: int = 900
     kafka_topic_metrics_events: str = "prodavan.metrics.events"
     kafka_topic_document_events: str = "prodavan.document.events"
+    kafka_topic_search_events: str = "prodavan.search.events"
     kafka_topic_tenant_events: str = "prodavan.tenant.events"
     kafka_metrics_group: str = "prodavan-metrics"
     metrics_sample_ttl_sec: int = 60

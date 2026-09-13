@@ -55,3 +55,18 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/name: prodavan-postgres
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: prodavan-opensearch
+  labels:
+    app.kubernetes.io/name: prodavan-opensearch
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: opensearch
+spec:
+  maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prodavan-opensearch
+

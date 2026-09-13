@@ -24,6 +24,7 @@ REQUIRED_SNIPPETS = (
     "redis:7.4.11-alpine",
     "minio/minio:RELEASE.2024-10-02T17-50-41Z",
     "mongo:7.0.14",
+    "opensearchproject/opensearch:2.17.1",
     "redpanda:v24.2.4",
     "quay.io/keycloak/keycloak:26.0",
     "bitnamilegacy/kubectl:1.31.4",
@@ -234,6 +235,7 @@ def validate_all() -> None:
         raise RuntimeError("dev overlay must reference imagePullSecrets ghcr-pull")
     _require_api_migrate_always(manifest)
     _require_minio_pvc(manifest)
+    _require_opensearch(manifest)
     print("ok")
 
     print("prodavan-ops validate OK")
@@ -294,6 +296,43 @@ def _require_keycloak(manifest: str) -> None:
         # ConfigMap data is unquoted in our overlays
         if "AUTH_MODE: oidc" not in manifest:
             raise RuntimeError("dev overlay must set AUTH_MODE: oidc")
+
+
+def _require_opensearch(manifest: str) -> None:
+    """OpenSearch STS + PVC + init Job (Search Index BC)."""
+    found_pvc = False
+    for doc in yaml.safe_load_all(manifest):
+        if not isinstance(doc, dict):
+            continue
+        if doc.get("kind") != "PersistentVolumeClaim":
+            continue
+        meta = doc.get("metadata") or {}
+        if meta.get("name") == "prodavan-opensearch-data":
+            found_pvc = True
+            break
+    if not found_pvc:
+        raise RuntimeError("overlay render must include PVC prodavan-opensearch-data")
+    if "prodavan-opensearch" not in manifest:
+        raise RuntimeError("overlay render must include prodavan-opensearch")
+    if "prodavan-opensearch-init" not in manifest:
+        raise RuntimeError("overlay render must include prodavan-opensearch-init Job")
+    for doc in yaml.safe_load_all(manifest):
+        if not isinstance(doc, dict) or doc.get("kind") != "Job":
+            continue
+        meta = doc.get("metadata") or {}
+        if meta.get("name") != "prodavan-opensearch-init":
+            continue
+        ann = meta.get("annotations") or {}
+        if ann.get("argocd.argoproj.io/hook") != "Sync":
+            raise RuntimeError(
+                "prodavan-opensearch-init must use argocd hook Sync "
+                "so cluster is ready before prodavan-api wave 10"
+            )
+        wave = str(ann.get("argocd.argoproj.io/sync-wave", ""))
+        if wave != "9":
+            raise RuntimeError("prodavan-opensearch-init sync-wave must be 9")
+        return
+    raise RuntimeError("prodavan-opensearch-init Job missing from overlay render")
 
 
 def _require_minio_init_hook(manifest: str) -> None:

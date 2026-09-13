@@ -26,6 +26,9 @@
 | `MONGODB_DB` | prodavan | prodavan | prodavan | | Logical database name |
 | `MONGODB_ENABLED` | true | true | true | | Lifespan connects when URL set |
 | `MONGODB_REQUIRED` | true | true | true | | Fail ready if Mongo down |
+| `OPENSEARCH_URL` | http://prodavan-opensearch:9200 | ✓ | ✓ | | OpenSearch HTTP endpoint (Search Index BC) |
+| `OPENSEARCH_ENABLED` | true | true | true | | Lifespan connects when URL set |
+| `OPENSEARCH_REQUIRED` | true | true | true | | Fail ready if OpenSearch down |
 | `REDIS_URL` | ✓ | ✓ | ✓ | ○ | Rate limit cache / Celery broker |
 | `JWT_SECRET` / `JWT_PRIVATE_KEY` | dev key | ✓ 🔒 | ✓ 🔒 | 🔒 | Token signing (legacy; OIDC uses JWKS) |
 | `AUTH_MODE` | oidc | oidc | oidc | | `test` only for pytest |
@@ -50,6 +53,7 @@
 | `KAFKA_TOPIC_AUTH_COMMANDS` | prodavan.auth.commands | same | same | | Auth Service register |
 | `KAFKA_TOPIC_AUTH_EVENTS` | prodavan.auth.events | same | same | | registered / failed |
 | `KAFKA_TOPIC_DOCUMENT_EVENTS` | prodavan.document.events | same | same | | Document Store BC domain events |
+| `KAFKA_TOPIC_SEARCH_EVENTS` | prodavan.search.events | same | same | | Search Index BC domain events |
 | `KAFKA_CONSUMER_ENABLED` | true | true | true | | |
 | `KAFKA_CONSUMER_GROUP` | prodavan-api-triggers | same | same | | Project triggers |
 | `KAFKA_AUTH_COMMANDS_GROUP` | prodavan-auth-commands | same | same | | Auth register handler |

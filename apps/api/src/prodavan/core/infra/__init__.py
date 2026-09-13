@@ -17,6 +17,12 @@ from prodavan.core.infra.mongo_manager import (
     get_mongo_manager,
     set_mongo_manager,
 )
+from prodavan.core.infra.opensearch_manager import (
+    OpenSearchManager,
+    get_opensearch_manager,
+    get_search_index_service,
+    set_opensearch_manager,
+)
 from prodavan.core.infra.redis_manager import RedisManager, get_redis_manager, set_redis_manager
 from prodavan.core.infra.worker_manager import WorkerManager, get_celery_app, get_worker_manager
 from prodavan.infrastructure.files.manager import (
@@ -32,6 +38,7 @@ __all__ = [
     "FileStoreManager",
     "KafkaManager",
     "MongoManager",
+    "OpenSearchManager",
     "RedisManager",
     "WorkerManager",
     "ensure_file_store",
@@ -42,10 +49,13 @@ __all__ = [
     "get_kafka_manager",
     "get_kafka_manager_optional",
     "get_mongo_manager",
+    "get_opensearch_manager",
     "get_redis_manager",
+    "get_search_index_service",
     "get_worker_manager",
     "set_file_store",
     "set_kafka_manager",
     "set_mongo_manager",
+    "set_opensearch_manager",
     "set_redis_manager",
 ]

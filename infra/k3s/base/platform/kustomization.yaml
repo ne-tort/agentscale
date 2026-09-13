@@ -4,6 +4,7 @@ resources:
   - redis.yaml
   - minio.yaml
   - mongodb.yaml
+  - opensearch.yaml
   - kafka.yaml
   - celery.yaml
   - keycloak.yaml

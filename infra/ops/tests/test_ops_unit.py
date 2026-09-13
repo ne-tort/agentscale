@@ -119,6 +119,7 @@ postgres:16.15
 redis:7.4.11-alpine
 minio/minio:RELEASE.2024-10-02T17-50-41Z
 mongo:7.0.14
+opensearchproject/opensearch:2.17.1
 redpanda:v24.2.4
 quay.io/keycloak/keycloak:26.0
 bitnamilegacy/kubectl:1.31.4

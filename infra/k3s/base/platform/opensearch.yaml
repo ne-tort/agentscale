@@ -1,0 +1,173 @@
+# OpenSearch — Search Index BC (full-text / document index adapter).
+# Sandbox NetworkPolicy must NOT allow egress to :9200 (security plugin off for local;
+# ACL lives in SearchIndexService + cluster NetworkPolicy).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: prodavan-opensearch
+  labels:
+    app.kubernetes.io/name: prodavan-opensearch
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: opensearch
+stringData:
+  # Reserved for future security-plugin enablement; MVP uses DISABLE_SECURITY_PLUGIN.
+  admin-user: admin
+  admin-password: prodavan-opensearch-admin
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prodavan-opensearch-data
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+  labels:
+    app.kubernetes.io/name: prodavan-opensearch
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: opensearch
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prodavan-opensearch
+  labels:
+    app.kubernetes.io/name: prodavan-opensearch
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: opensearch
+spec:
+  ports:
+    - name: http
+      port: 9200
+      targetPort: 9200
+    - name: transport
+      port: 9300
+      targetPort: 9300
+  selector:
+    app.kubernetes.io/name: prodavan-opensearch
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: prodavan-opensearch
+  labels:
+    app.kubernetes.io/name: prodavan-opensearch
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: opensearch
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  serviceName: prodavan-opensearch
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prodavan-opensearch
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prodavan-opensearch
+        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/component: opensearch
+    spec:
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: opensearch
+          image: opensearchproject/opensearch:2.17.1
+          env:
+            - name: cluster.name
+              value: prodavan-opensearch
+            - name: node.name
+              value: prodavan-opensearch-0
+            - name: discovery.type
+              value: single-node
+            - name: bootstrap.memory_lock
+              value: "false"
+            - name: DISABLE_INSTALL_DEMO_CONFIG
+              value: "true"
+            - name: DISABLE_SECURITY_PLUGIN
+              value: "true"
+            - name: OPENSEARCH_JAVA_OPTS
+              value: "-Xms512m -Xmx512m"
+          ports:
+            - name: http
+              containerPort: 9200
+            - name: transport
+              containerPort: 9300
+          volumeMounts:
+            - name: data
+              mountPath: /usr/share/opensearch/data
+          startupProbe:
+            httpGet:
+              path: /_cluster/health
+              port: http
+            failureThreshold: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /_cluster/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /_cluster/health
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 200m
+              memory: 768Mi
+            limits:
+              memory: 1536Mi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: prodavan-opensearch-data
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: prodavan-opensearch-init
+  labels:
+    app.kubernetes.io/name: prodavan-opensearch-init
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: opensearch-init
+  annotations:
+    argocd.argoproj.io/hook: Sync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation,HookSucceeded
+    argocd.argoproj.io/sync-wave: "9"
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prodavan-opensearch-init
+        app.kubernetes.io/part-of: prodavan
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: curl
+          image: curlimages/curl:8.10.1
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              i=0
+              until curl -sf "http://prodavan-opensearch:9200/_cluster/health" >/dev/null; do
+                i=$((i+1))
+                if [ "$i" -gt 90 ]; then echo "opensearch not ready"; exit 1; fi
+                sleep 2
+              done
+              curl -sf "http://prodavan-opensearch:9200/_cluster/health?pretty"
+              echo "opensearch-init: ok"

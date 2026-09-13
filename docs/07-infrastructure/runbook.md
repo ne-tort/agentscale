@@ -118,6 +118,21 @@ Document Store BC: in-proc Port + admin HTTP; Kafka bus `document` → `prodavan
 
 ---
 
+## 5c. OpenSearch (Search Index)
+
+| Компонент | Значение |
+|-----------|----------|
+| Service | `prodavan-opensearch:9200` (ns `prodavan`) |
+| Init Job | `prodavan-opensearch-init` — Sync hook wave 9; smoke `/_cluster/health` |
+| API | `OPENSEARCH_URL`, `OPENSEARCH_ENABLED`, `OPENSEARCH_REQUIRED` in `prodavan-config` |
+| Security | MVP: `DISABLE_SECURITY_PLUGIN=true`; ACL in Search Index BC |
+| PVC | `prodavan-opensearch-data` (10Gi, RWO) |
+| Sandbox | **нет** egress на 9200 — только API process |
+
+Search Index BC: in-proc Port + admin HTTP `/admin/search-index`; Kafka bus `search` → `prodavan.search.events`.
+
+---
+
 ## 6. Keycloak (identity)
 
 | Компонент | Значение |

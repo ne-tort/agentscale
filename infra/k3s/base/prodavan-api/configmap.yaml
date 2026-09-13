@@ -39,9 +39,13 @@ data:
   KAFKA_CONSUMER_MODE: kick
   KAFKA_REQUIRED: "true"
   KAFKA_TOPIC_DOCUMENT_EVENTS: prodavan.document.events
+  KAFKA_TOPIC_SEARCH_EVENTS: prodavan.search.events
   MONGODB_ENABLED: "true"
   MONGODB_DB: prodavan
   MONGODB_REQUIRED: "true"
+  OPENSEARCH_ENABLED: "true"
+  OPENSEARCH_URL: http://prodavan-opensearch:9200
+  OPENSEARCH_REQUIRED: "true"
   CELERY_REQUIRED: "false"
   # Project MCP sandbox: local process spawn only (no k8s Job/Pod isolator yet)
   MCP_SANDBOX_SPAWN: "false"
