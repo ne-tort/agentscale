@@ -25,6 +25,7 @@ REQUIRED_SNIPPETS = (
     "minio/minio:RELEASE.2024-10-02T17-50-41Z",
     "mongo:7.0.14",
     "opensearchproject/opensearch:2.17.1",
+    "curlimages/curl:8.10.1",
     "redpanda:v24.2.4",
     "quay.io/keycloak/keycloak:26.0",
     "bitnamilegacy/kubectl:1.31.4",

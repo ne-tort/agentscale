@@ -65,17 +65,22 @@ class OpenSearchStore:
     ) -> IndexResult:
         name = physical_index(namespace, index)
         exists = await self._client.head(f"/{name}")
+        safe_settings = {
+            k: v for k, v in (spec.settings or {}).items() if not str(k).startswith("_")
+        }
         body: dict[str, Any] = {}
-        if spec.settings:
-            body["settings"] = spec.settings
+        if safe_settings:
+            body["settings"] = safe_settings
         if spec.mappings:
             body["mappings"] = spec.mappings
         if exists.status_code == 200:
+            mapping_body: dict[str, Any] = {}
             if spec.mappings.get("properties"):
-                await self._client.put(
-                    f"/{name}/_mapping",
-                    json={"properties": spec.mappings["properties"]},
-                )
+                mapping_body["properties"] = spec.mappings["properties"]
+            if spec.mappings.get("_meta"):
+                mapping_body["_meta"] = spec.mappings["_meta"]
+            if mapping_body:
+                await self._client.put(f"/{name}/_mapping", json=mapping_body)
             return IndexResult(index=name, created=False, acknowledged=True)
         resp = await self._client.put(f"/{name}", json=body if body else {})
         resp.raise_for_status()
@@ -100,16 +105,32 @@ class OpenSearchStore:
         namespace: str | None = None,
         company_id: str | None = None,
     ) -> list[str]:
-        _ = company_id
         pattern = f"{namespace}__*" if namespace else "*,-.*"
-        resp = await self._client.get(f"/_cat/indices/{pattern}", params={"format": "json", "h": "index"})
+        resp = await self._client.get(
+            f"/_cat/indices/{pattern}", params={"format": "json", "h": "index"}
+        )
         if resp.status_code == 404:
             return []
         resp.raise_for_status()
         rows = resp.json()
         if not isinstance(rows, list):
             return []
-        return sorted(str(r.get("index")) for r in rows if r.get("index"))
+        names = sorted(str(r.get("index")) for r in rows if r.get("index"))
+        if not company_id:
+            return names
+        owned: list[str] = []
+        for name in names:
+            map_resp = await self._client.get(f"/{name}/_mapping")
+            if map_resp.status_code == 404:
+                continue
+            map_resp.raise_for_status()
+            payload = map_resp.json() or {}
+            entry = payload.get(name) or next(iter(payload.values()), {}) or {}
+            mappings = entry.get("mappings") or {}
+            meta = mappings.get("_meta") or {}
+            if meta.get("company_id") == company_id:
+                owned.append(name)
+        return owned
 
     async def index_document(
         self,

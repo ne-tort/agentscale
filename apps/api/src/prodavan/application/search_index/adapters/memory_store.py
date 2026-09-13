@@ -74,16 +74,16 @@ class InMemorySearchIndexStore:
             prefix = f"{namespace}__"
             keys = [k for k in keys if k.startswith(prefix)]
         if company_id:
-            # Index exists if any doc carries company_id or index was ensured under tenancy.
             filtered: list[str] = []
             for key in keys:
                 docs = self._docs.get(key, {})
                 if any(d.get("company_id") == company_id for d in docs.values()):
                     filtered.append(key)
                     continue
-                # Empty indexes still count toward company quota when tagged.
+                # Empty indexes still count toward company quota via mappings._meta.
                 meta = self._indexes.get(key)
-                if meta and meta.settings.get("_company_id") == company_id:
+                owned = (meta.mappings.get("_meta") or {}).get("company_id") if meta else None
+                if owned == company_id:
                     filtered.append(key)
             return filtered
         return keys

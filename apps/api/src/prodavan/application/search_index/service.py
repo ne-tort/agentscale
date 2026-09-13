@@ -148,9 +148,26 @@ class SearchIndexService:
                     status=429,
                     detail=f"company index quota exceeded ({MAX_INDEXES_PER_COMPANY})",
                 )
-            settings = {**settings, "_company_id": cid}
+            # Ownership lives in mappings._meta (OpenSearch-safe), never in settings.
+            meta = dict(mappings.get("_meta") or {})
+            meta["company_id"] = cid
+            mappings["_meta"] = meta
+            props = dict(mappings.get("properties") or {})
+            if "company_id" not in props:
+                props["company_id"] = {"type": "keyword"}
+                mappings["properties"] = props
+        # Drop internal/underscore settings keys — OpenSearch rejects unknown settings.
+        settings = {k: v for k, v in settings.items() if not str(k).startswith("_")}
         spec = IndexMappingSpec(mappings=mappings, settings=settings)
-        result = await self._store.ensure_index(namespace=ns, index=idx, spec=spec)
+        try:
+            result = await self._store.ensure_index(namespace=ns, index=idx, spec=spec)
+        except Exception as exc:
+            raise AppError(
+                code="SEARCH_INDEX_BACKEND",
+                title="Search Index Backend Error",
+                status=502,
+                detail=str(exc)[:300],
+            ) from exc
         await emit_search_index_ensured(
             session=session,
             namespace=ns,

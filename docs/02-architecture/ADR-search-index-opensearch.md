@@ -18,7 +18,8 @@ This does **not** replace equipment catalog search (`equipment_catalog_search` /
 4. Domain Kafka bus `search` → topic `prodavan.search.events`; metrics via existing `metrics.counter.delta`.
 5. Admin HTTP under `/api/v1/admin/search-index/*` (`platform.admin` only).
 6. MVP: OpenSearch **security plugin disabled** locally; ACL + quotas live in `SearchIndexService`; sandbox NetworkPolicy keeps **no** egress to `:9200`.
-7. Project Pods do **not** open `:9200` — Tenant Infra `/infra/search` is a follow-up.
+7. Company ownership for empty indexes is stored in OpenSearch `mappings._meta.company_id` (never in index `settings` — unknown settings 400).
+8. Project Pods do **not** open `:9200` — Tenant Infra `/infra/search` is a follow-up.
 
 ## Consequences
 

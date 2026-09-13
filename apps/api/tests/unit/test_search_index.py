@@ -123,6 +123,36 @@ async def test_bulk_index_and_search_size_cap(svc: SearchIndexService) -> None:
 
 
 @pytest.mark.asyncio
+async def test_tenant_ensure_stores_company_meta(svc: SearchIndexService) -> None:
+    result = await svc.ensure_index(
+        namespace="equipment",
+        index="offers",
+        mappings={"properties": {"sku": {"type": "keyword"}}},
+        company_id="co_1",
+    )
+    assert result.created is True
+    store = svc._store  # type: ignore[attr-defined]
+    assert isinstance(store, InMemorySearchIndexStore)
+    meta = store._indexes["equipment__offers"].mappings.get("_meta") or {}
+    assert meta.get("company_id") == "co_1"
+    listed = await store.list_indexes(namespace="equipment", company_id="co_1")
+    assert "equipment__offers" in listed
+
+
+@pytest.mark.asyncio
+async def test_tenant_index_quota(svc: SearchIndexService, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "prodavan.application.search_index.service.MAX_INDEXES_PER_COMPANY",
+        2,
+    )
+    await svc.ensure_index(namespace="equipment", index="a", company_id="co_q")
+    await svc.ensure_index(namespace="equipment", index="b", company_id="co_q")
+    with pytest.raises(AppError) as exc:
+        await svc.ensure_index(namespace="equipment", index="c", company_id="co_q")
+    assert exc.value.status == 429
+
+
+@pytest.mark.asyncio
 async def test_delete_index(svc: SearchIndexService) -> None:
     await svc.ensure_index(namespace="platform", index="tmp")
     assert await svc.delete_index(namespace="platform", index="tmp") is True
