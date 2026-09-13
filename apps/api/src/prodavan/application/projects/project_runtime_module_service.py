@@ -391,6 +391,23 @@ class ProjectRuntimeModuleService:
         )
         if not ok:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        if module_id == "mod_equipment" and table_slug == "catalogs":
+            try:
+                from prodavan.application.modules.equipment_catalog_opensearch import (
+                    delete_equipment_catalog_index,
+                )
+                from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+                project = await self._session.get(ProjectRow, project_id)
+                if project is not None and project.company_id:
+                    await delete_equipment_catalog_index(
+                        row_id=row_id,
+                        company_id=str(project.company_id),
+                        cabinet_id=str(project.cabinet_id),
+                        project_id=project_id,
+                    )
+            except Exception:
+                pass
         await self._session.commit()
         from prodavan.application.projects.workspace_sync_policy import (
             defer_or_schedule_project_sync,

@@ -30,7 +30,7 @@ def test_build_seed_mcp_zip_contains_sources() -> None:
         names = set(zf.namelist())
     assert "manifest.json" in names
     assert "server.py" in names
-    assert "equipment_catalog_search.py" in names
+    assert "equipment_catalog_search.py" not in names
     assert storage_key_for(spec, version=str(manifest["version"])) == (
         "platform/seed-mcp/prodavan-equipment-1.0.0.zip"
     )

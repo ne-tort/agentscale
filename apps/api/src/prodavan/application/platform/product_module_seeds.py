@@ -1082,13 +1082,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             },
             {
                 "table_slug": "catalogs",
-                "name": "artifact_ref",
-                "label": {"ru": "SQLite", "en": "SQLite"},
-                "type": "file_ref",
-                "required": False,
-            },
-            {
-                "table_slug": "catalogs",
                 "name": "status",
                 "label": {"ru": "Статус", "en": "Status"},
                 "type": "enum",
@@ -1137,6 +1130,31 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "type": "json",
                 "required": False,
                 "default": {},
+            },
+            {
+                "table_slug": "catalogs",
+                "name": "last_indexed_at",
+                "label": {"ru": "Индексировано", "en": "Last indexed"},
+                "type": "text",
+                "required": False,
+            },
+            {
+                "table_slug": "catalogs",
+                "name": "reindex_interval_hours",
+                "label": {
+                    "ru": "Интервал реиндекса (ч)",
+                    "en": "Reindex interval (h)",
+                },
+                "type": "number",
+                "required": False,
+                "default": 24,
+            },
+            {
+                "table_slug": "catalogs",
+                "name": "index_name",
+                "label": {"ru": "Индекс OS", "en": "OS index"},
+                "type": "text",
+                "required": False,
             },
             {
                 "table_slug": "catalogs",
@@ -1893,13 +1911,50 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "widget": "column_map",
                             "source_columns_from": "columns_json",
                             "schema": _CATALOG_COLUMN_MAP_SCHEMA,
-                            "visible_when": {"field": "status", "eq": "ready"},
+                            "visible_when": {
+                                "field": "columns_json",
+                                "not_empty": True,
+                            },
+                        },
+                        {
+                            "column": "reindex_interval_hours",
+                            "widget": "value",
+                            "icon": "schedule",
+                            "visible_when": {"field": "source_kind", "eq": "remote"},
+                        },
+                        {
+                            "column": "last_indexed_at",
+                            "widget": "value",
+                            "read_only": True,
+                            "icon": "update",
+                            "visible_when": {
+                                "field": "last_indexed_at",
+                                "not_empty": True,
+                            },
+                        },
+                        {
+                            "column": "index_name",
+                            "widget": "value",
+                            "read_only": True,
+                            "icon": "dns",
+                            "visible_when": {
+                                "field": "index_name",
+                                "not_empty": True,
+                            },
                         },
                         {
                             "column": "project_ids",
                             "widget": "project_multiselect",
                             "icon": "folder_outlined",
-                            "visible_when": {"field": "status", "eq": "ready"},
+                            "visible_when": {
+                                "any": [
+                                    {"field": "status", "eq": "ready"},
+                                    {
+                                        "field": "columns_json",
+                                        "not_empty": True,
+                                    },
+                                ]
+                            },
                         },
                         {
                             "column": "paused",
@@ -2765,20 +2820,19 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
         ],
         "actions": [
             {
-                "id": "index_catalog_file",
-                "label": {"ru": "Индексировать", "en": "Index"},
-                "kind": "content.index_tabular",
+                "id": "index_catalog_opensearch",
+                "label": {"ru": "Переиндексировать", "en": "Reindex"},
+                "kind": "content.index_opensearch",
                 "enabled": True,
                 "params": {
                     "table_slug": "catalogs",
-                    "source_column": "source_file",
-                    "artifact_column": "artifact_ref",
-                    "status_column": "status",
-                    "row_count_column": "row_count",
-                    "columns_json_column": "columns_json",
-                    "error_column": "error",
                     "source_kind_column": "source_kind",
-                    "expected_source_kind": "local",
+                    "file_column": "source_file",
+                    "map_field": "column_map",
+                    "status_column": "status",
+                    "error_column": "error",
+                    "columns_json_column": "columns_json",
+                    "os_namespace": "equipment",
                 },
                 "trigger": {"on": ["row.created", "row.updated"], "async": True},
                 "ui": {"placement": ["toolbar"], "icon": "sync"},
@@ -2854,26 +2908,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
         ],
         "materialize": [
             {
-                "id": "catalog_merged_sqlite",
-                "enabled": True,
-                "when": ["project.created", "project.resumed", "project.sync"],
-                "priority": 40,
-                "source": {
-                    "type": "rows",
-                    "table_slug": "catalogs",
-                    "filter": {"status": "ready", "paused": False},
-                },
-                "target": {
-                    "workspace_path": "catalogs/catalog.sqlite",
-                    "format": "merge_mapped_sqlite",
-                    "artifact_field": "artifact_ref",
-                    "map_field": "column_map",
-                    "schema": list(_CATALOG_MERGE_SCHEMA),
-                    "required_map_keys": ["title", "price"],
-                    "provenance": {"target": "source_catalog", "from": "name"},
-                },
-            },
-            {
                 "id": "catalog_manifest",
                 "enabled": True,
                 "when": ["project.created", "project.resumed", "project.sync"],
@@ -2928,9 +2962,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "label": "List equipment catalogs",
                 "description": (
                     "List ready non-paused catalog cards (Postgres SoT); "
-                    "includes source_kind local|remote. Local search file is "
-                    "/workspace/catalogs/catalog.sqlite; remote DSN is injected "
-                    "as EQUIPMENT_CATALOG_DSN_<ROW> for future MCP live query."
+                    "includes source_kind local|remote. Search is OpenSearch via "
+                    "Pod catalog-search (no catalog.sqlite / EQUIPMENT_* env)."
                 ),
                 "enabled": True,
                 "kind": "rows_query",
@@ -3134,21 +3167,6 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "secret_ref_from": {
                     "table_slug": "s4b_settings",
                     "field": "password",
-                },
-                "when": [
-                    "project.launch",
-                    "project.sync",
-                    "project.resumed",
-                    "project.reload",
-                ],
-            },
-            {
-                "foreach_rows": {
-                    "table_slug": "catalogs",
-                    "field": "remote_dsn",
-                    "env_name_prefix": "EQUIPMENT_CATALOG_DSN_",
-                    "match": {"source_kind": "remote", "status": "ready"},
-                    "registry_env_name": "EQUIPMENT_REMOTE_CATALOGS",
                 },
                 "when": [
                     "project.launch",

@@ -196,6 +196,10 @@ class WorkerManager(LifespanResource):
                     run_every=max(float(app_settings.metrics_sample_interval_sec), 15.0)
                 ),
             }
+        beat["prodavan-equipment-catalog-reindex"] = {
+            "task": job_names.SWEEP_EQUIPMENT_CATALOG_REINDEX,
+            "schedule": schedule(run_every=3600.0),
+        }
         app.conf.beat_schedule = beat
         job_tasks.register_tasks(app)
         return app

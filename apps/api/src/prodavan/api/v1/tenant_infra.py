@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from prodavan.api.agent_auth import PodBridgeDep
 from prodavan.api.deps import SessionDep
 from prodavan.application.tenant_infra.docs_service import TenantDocsService
+from prodavan.application.tenant_infra.equipment_catalog_search_service import TenantSearchService
 from prodavan.application.tenant_infra.events_service import TenantEventsService
 from prodavan.application.tenant_infra.objects_service import TenantObjectsService
 from prodavan.application.tenant_infra.service import TenantInfraService
@@ -50,6 +51,16 @@ class ObjectPutBody(BaseModel):
     name: str = "object"
     content_b64: str
     mime: str | None = None
+
+
+class SearchQueryBody(BaseModel):
+    namespace: str
+    index: str
+    query: dict[str, Any] | None = None
+    from_: int = Field(default=0, ge=0, alias="from")
+    size: int = Field(default=20, ge=1, le=100)
+
+    model_config = {"populate_by_name": True}
 
 
 @router.get("/projects/{project_id}/infra/cache/{key:path}")
@@ -354,4 +365,31 @@ async def objects_delete(
 ) -> dict[str, Any]:
     return await TenantObjectsService(session).delete(
         bridge=bridge, project_id=project_id, asset_id=asset_id
+    )
+
+
+@router.get("/projects/{project_id}/infra/search/health")
+async def search_health(
+    project_id: str,
+    bridge: PodBridgeDep,
+) -> dict[str, Any]:
+    return await TenantSearchService().health(bridge=bridge, project_id=project_id)
+
+
+@router.post("/projects/{project_id}/infra/search/query")
+async def search_query(
+    project_id: str,
+    body: SearchQueryBody,
+    bridge: PodBridgeDep,
+    session: SessionDep,
+) -> dict[str, Any]:
+    return await TenantSearchService().query(
+        bridge=bridge,
+        project_id=project_id,
+        namespace=body.namespace,
+        index=body.index,
+        query=body.query,
+        from_=body.from_,
+        size=body.size,
+        session=session,
     )

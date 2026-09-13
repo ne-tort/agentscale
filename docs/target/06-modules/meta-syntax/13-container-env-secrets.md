@@ -114,7 +114,7 @@ Resolved by [`ContainerEnvLoader`](../../../apps/api/src/prodavan/application/po
 2. Merge `container_env` + resolved `container_env_secrets` (+ foreach expansions)
 3. `pod_spec.py` adds env / envFrom Secret (k8s Secret created per Pod or shared SA)
 
-**Gap:** P-META-ENV-01 — **done** (#162); P-META-ENV-02 row refs — **done** (#163); foreach_rows — **as-built** (equipment remote catalogs).
+**Gap:** P-META-ENV-01 — **done** (#162); P-META-ENV-02 row refs — **done** (#163); foreach_rows — **as-built** (generic). Equipment catalogs **no longer** inject `EQUIPMENT_CATALOG_DSN_*` / `EQUIPMENT_REMOTE_CATALOGS` — search is OpenSearch via Pod Bridge.
 
 ## Column type: `secret_ref` (row storage)
 

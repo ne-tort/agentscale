@@ -168,6 +168,17 @@ class ModuleActionExecutor:
                 project_id=project_id,
             )
 
+        if kind == "content.index_opensearch":
+            return await self._index_opensearch(
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+                params=params,
+                row_id=row_id,
+                principal=principal,
+                employee=employee,
+                project_id=project_id,
+            )
+
         if kind == "content.probe_remote_sql":
             return await self._probe_remote_sql(
                 cabinet_id=cabinet_id,
@@ -308,6 +319,83 @@ class ModuleActionExecutor:
             project_id=project_id,
             previous_body=previous_body,
         )
+        await self.maybe_auto_index_opensearch(
+            cabinet_id=cabinet_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            row_id=row_id,
+            principal=principal,
+            employee=employee,
+            project_id=project_id,
+            previous_body=previous_body,
+        )
+
+    async def maybe_auto_index_opensearch(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        table_slug: str,
+        row_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+        previous_body: dict[str, Any] | None = None,
+    ) -> None:
+        """Best-effort: enqueue content.index_opensearch after catalog row write."""
+        _ = previous_body
+        for action in await self._list_actions(module_id=module_id):
+            if action.get("enabled") is False:
+                continue
+            if str(action.get("kind") or "") != "content.index_opensearch":
+                continue
+            params = action.get("params") if isinstance(action.get("params"), dict) else {}
+            if str(params.get("table_slug") or "") != table_slug:
+                continue
+            trigger = action.get("trigger") if isinstance(action.get("trigger"), dict) else {}
+            on = trigger.get("on") if isinstance(trigger.get("on"), list) else ["row.created", "row.updated"]
+            if "row.created" not in on and "row.updated" not in on:
+                continue
+            rows = await self._list_module_rows(
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                principal=principal,
+                employee=employee,
+            )
+            target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
+            if target is None:
+                continue
+            body = target.get("body") if isinstance(target.get("body"), dict) else {}
+            status_col = str(params.get("status_column") or "status")
+            if str(body.get(status_col) or "") == "indexing":
+                continue
+            try:
+                await self._index_opensearch(
+                    cabinet_id=cabinet_id,
+                    project_id=project_id,
+                    module_id=module_id,
+                    params=params,
+                    row_id=row_id,
+                    principal=principal,
+                    employee=employee,
+                )
+            except AppError:
+                raise
+            except Exception as exc:
+                logger.exception(
+                    "auto index_opensearch failed module=%s table=%s row=%s",
+                    module_id,
+                    table_slug,
+                    row_id,
+                )
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail=f"index_opensearch failed: {exc}",
+                ) from exc
 
     async def maybe_auto_probe_remote_sql(
         self,
@@ -764,6 +852,193 @@ class ModuleActionExecutor:
             "row_id": row_id,
             "row_count": body.get(row_count_col),
             "columns": indexed_columns,
+        }
+
+    async def _index_opensearch(
+        self,
+        *,
+        cabinet_id: str,
+        module_id: str,
+        params: dict[str, Any],
+        row_id: str | None,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        from prodavan.application.modules.equipment_catalog_opensearch import (
+            column_map_ready,
+            extract_local_columns,
+            run_index_equipment_catalog,
+        )
+        from prodavan.application.modules.module_instance_service import ModuleInstanceService
+        from prodavan.core.jobs.enqueue import enqueue_index_equipment_catalog
+
+        table_slug = params.get("table_slug")
+        if not isinstance(table_slug, str) or not table_slug:
+            raise AppError(
+                code="META_VALIDATION",
+                title="Meta validation error",
+                status=422,
+                detail="content.index_opensearch requires params.table_slug",
+            )
+        if not row_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="row_id required for content.index_opensearch",
+            )
+
+        rows = await self._list_module_rows(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            principal=principal,
+            employee=employee,
+        )
+        target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
+        if target is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        body = dict(target.get("body") or {})
+        instance_id = str(target.get("instance_id") or "").strip()
+        if not instance_id:
+            if project_id:
+                inst = await ModuleInstanceService(self._session).ensure_project_instance(
+                    project_id=project_id, module_id=module_id
+                )
+            else:
+                inst = await ModuleInstanceService(self._session).ensure_cabinet_instance(
+                    cabinet_id=cabinet_id, module_id=module_id
+                )
+            instance_id = str(inst.id)
+
+        status_col = str(params.get("status_column") or "status")
+        error_col = str(params.get("error_column") or "error")
+        columns_col = str(params.get("columns_json_column") or "columns_json")
+        file_col = str(params.get("file_column") or params.get("source_column") or "source_file")
+        kind_col = str(params.get("source_kind_column") or "source_kind")
+        source_kind = str(body.get(kind_col) or "local").strip().lower()
+
+        cab = await self._session.get(CabinetInstanceRow, cabinet_id)
+        if cab is None or not cab.company_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="cabinet has no company for OpenSearch index",
+            )
+        company_id = str(cab.company_id)
+
+        # Local: light header probe (sync) for column_map UI.
+        if source_kind == "local" and isinstance(body.get(file_col), dict):
+            try:
+                cols = await extract_local_columns(body)
+                if cols:
+                    body[columns_col] = json.dumps(cols, ensure_ascii=False)
+                    await self._update_module_row(
+                        cabinet_id=cabinet_id,
+                        project_id=project_id,
+                        module_id=module_id,
+                        table_slug=table_slug,
+                        row_id=row_id,
+                        body=body,
+                        principal=principal,
+                        employee=employee,
+                        run_actions=False,
+                    )
+            except Exception as exc:
+                body[status_col] = "error"
+                body[error_col] = str(exc)[:500]
+                await self._update_module_row(
+                    cabinet_id=cabinet_id,
+                    project_id=project_id,
+                    module_id=module_id,
+                    table_slug=table_slug,
+                    row_id=row_id,
+                    body=body,
+                    principal=principal,
+                    employee=employee,
+                    run_actions=False,
+                )
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail=f"index_opensearch header probe failed: {exc}",
+                ) from exc
+
+        if not column_map_ready(body):
+            if source_kind == "local" and not isinstance(body.get(file_col), dict):
+                body[status_col] = "draft"
+                body[error_col] = None
+                await self._update_module_row(
+                    cabinet_id=cabinet_id,
+                    project_id=project_id,
+                    module_id=module_id,
+                    table_slug=table_slug,
+                    row_id=row_id,
+                    body=body,
+                    principal=principal,
+                    employee=employee,
+                    run_actions=False,
+                )
+                return {
+                    "kind": "content.index_opensearch",
+                    "status": "draft",
+                    "row_id": row_id,
+                    "reason": "source_file missing",
+                }
+            return {
+                "kind": "content.index_opensearch",
+                "status": str(body.get(status_col) or "draft"),
+                "row_id": row_id,
+                "reason": "column_map incomplete",
+            }
+
+        body[status_col] = "indexing"
+        body[error_col] = None
+        await self._update_module_row(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            row_id=row_id,
+            body=body,
+            principal=principal,
+            employee=employee,
+            run_actions=False,
+        )
+
+        enq = enqueue_index_equipment_catalog(
+            instance_id=instance_id,
+            row_id=row_id,
+            company_id=company_id,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+        )
+        if enq.get("inline"):
+            result = await run_index_equipment_catalog(
+                self._session,
+                instance_id=instance_id,
+                row_id=row_id,
+                company_id=company_id,
+                cabinet_id=cabinet_id,
+                project_id=project_id,
+            )
+            return {
+                "kind": "content.index_opensearch",
+                "status": "ready" if result.get("ok") else "error",
+                "row_id": row_id,
+                "inline": True,
+                **result,
+            }
+        return {
+            "kind": "content.index_opensearch",
+            "status": "indexing",
+            "row_id": row_id,
+            "enqueued": bool(enq.get("enqueued")),
+            "task_id": enq.get("task_id"),
         }
 
     def _remote_sql_row_auth(

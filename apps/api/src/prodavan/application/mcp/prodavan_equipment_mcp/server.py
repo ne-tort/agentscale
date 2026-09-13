@@ -4,10 +4,8 @@ Stdio JSON-RPC (MCP tools/list + tools/call).
 
 Env:
   PRODAVAN_API_BASE_URL, PRODAVAN_AUTH_TOKEN, PRODAVAN_PROJECT_ID
-  WORKSPACE_ROOT (default /workspace)
-  EQUIPMENT_REMOTE_CATALOGS + EQUIPMENT_CATALOG_DSN_* (remote)
 
-Catalog search uses sibling equipment_catalog_search.py (local SQLite + remote PG).
+Catalog search goes through Pod Bridge → OpenSearch (no local SQLite / EQUIPMENT_*).
 SoT rows go through Bridge JWT (:8001).
 """
 
@@ -18,23 +16,7 @@ import os
 import sys
 import urllib.error
 import urllib.request
-from pathlib import Path
 from typing import Any, Sequence
-
-_DIR = Path(__file__).resolve().parent
-if str(_DIR) not in sys.path:
-    sys.path.insert(0, str(_DIR))
-
-try:
-    from prodavan.application.modules.equipment_catalog_search import (
-        list_catalog_sources,
-        search_catalogs,
-    )
-except ImportError:  # Pod workspace copy (sibling module next to server.py)
-    from equipment_catalog_search import (  # type: ignore[import-not-found]
-        list_catalog_sources,
-        search_catalogs,
-    )
 
 DEFAULT_MODULE_ID = "mod_equipment"
 LINE_STATUSES = frozenset({"open", "matched", "selected"})
@@ -48,31 +30,22 @@ def _env() -> tuple[str, str, str]:
     return api, token, project_id
 
 
-def _workspace_root() -> Path:
-    raw = os.environ.get("WORKSPACE_ROOT") or os.environ.get("WORKSPACE") or "/workspace"
-    return Path(raw)
-
-
 TOOLS: list[dict[str, Any]] = [
     {
         "name": "equipment_catalog_sources",
         "description": (
-            "List catalog sources for this project: merged local SQLite "
-            "(/workspace/catalogs/catalog.sqlite) plus remote PostgreSQL entries "
-            "from EQUIPMENT_REMOTE_CATALOGS. Same canonical columns via column_map."
+            "List ready OpenSearch-backed catalog sources for this project "
+            "(status=ready, not paused). Canonical columns via column_map at index time."
         ),
         "inputSchema": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
         "name": "equipment_catalog_search",
         "description": (
-            "Unified RO search across local + remote catalogs. Results always use "
-            "canonical fields (part_number, title, brand, price, supplier, lead_time) "
-            "after column_map — local and remote look the same. "
-            "Prefer part_number for million-row remotes; title ILIKE is expensive. "
-            "Default in_stock_only=true (empty/dash/нет/no/под заказ → excluded). "
-            "Sort: match_rank (exact_pn > pn_prefix > title) then price ASC. "
-            "Deep offset across many remotes is costly — narrow with PN/brand."
+            "Unified RO search across OpenSearch equipment catalog indexes. "
+            "Results always use canonical fields (part_number, title, brand, price, "
+            "supplier, lead_time). Prefer part_number for large catalogs. "
+            "Default in_stock_only=true. Sort: match_rank then price ASC."
         ),
         "inputSchema": {
             "type": "object",
@@ -309,44 +282,37 @@ def _bump_found_count(module_id: str, line_id: str) -> None:
 
 
 def _catalog_sources() -> dict[str, Any]:
-    sources = list_catalog_sources(_workspace_root())
-    return {
-        "items": [
-            {
-                "id": s.id,
-                "name": s.name,
-                "kind": s.kind,
-                "column_map": s.column_map,
-                "row_count": s.row_count,
-                "table": s.table,
-                "dsn_env": s.dsn_env,
-                "has_dsn": bool(s.dsn),
-                "sqlite_path": str(s.sqlite_path) if s.sqlite_path else None,
-            }
-            for s in sources
-        ]
-    }
+    _, _, project_id = _env()
+    return _http(
+        "GET",
+        f"/projects/{project_id}/modules/mod_equipment/equipment/catalog-sources",
+    )
 
 
 def _catalog_search(arguments: dict[str, Any]) -> dict[str, Any]:
-    sources = list_catalog_sources(_workspace_root())
+    _, _, project_id = _env()
     in_stock_only = arguments.get("in_stock_only")
     if in_stock_only is None:
         in_stock_only = True
     catalog_ids = arguments.get("catalog_ids")
     if catalog_ids is not None and not isinstance(catalog_ids, list):
         raise RuntimeError("catalog_ids must be an array of strings")
-    return search_catalogs(
-        sources,
-        part_number=arguments.get("part_number"),
-        query=arguments.get("query"),
-        brand=arguments.get("brand"),
-        price_min=arguments.get("price_min"),
-        price_max=arguments.get("price_max"),
-        in_stock_only=bool(in_stock_only),
-        catalog_ids=[str(x) for x in catalog_ids] if catalog_ids else None,
-        limit=int(arguments.get("limit") or 20),
-        offset=int(arguments.get("offset") or 0),
+    payload: dict[str, Any] = {
+        "query": arguments.get("query"),
+        "part_number": arguments.get("part_number"),
+        "brand": arguments.get("brand"),
+        "price_min": arguments.get("price_min"),
+        "price_max": arguments.get("price_max"),
+        "in_stock_only": bool(in_stock_only),
+        "limit": int(arguments.get("limit") or 20),
+        "offset": int(arguments.get("offset") or 0),
+    }
+    if catalog_ids is not None:
+        payload["catalog_ids"] = [str(x) for x in catalog_ids]
+    return _http(
+        "POST",
+        f"/projects/{project_id}/modules/mod_equipment/equipment/catalog-search",
+        payload,
     )
 
 

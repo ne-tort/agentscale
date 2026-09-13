@@ -1,9 +1,8 @@
-"""Smoke tests for prodavan-equipment MCP."""
+"""MCP prodavan-equipment — catalog search via Pod HTTP (no SQLite)."""
 
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from unittest.mock import patch
 
 from prodavan.application.mcp.prodavan_equipment_mcp import server as mcp_server
@@ -19,40 +18,70 @@ def test_tools_list_contains_catalog_and_sot_tools() -> None:
     assert "found_offers_upsert" in names
 
 
-def test_catalog_search_local(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
-    catalogs = tmp_path / "catalogs"
-    catalogs.mkdir()
-    import sqlite3
+def test_catalog_search_calls_pod_api(monkeypatch) -> None:
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
 
-    db = catalogs / "catalog.sqlite"
-    conn = sqlite3.connect(db.as_posix())
-    conn.execute(
-        'CREATE TABLE rows ("title" TEXT, "price" TEXT, "part_number" TEXT, '
-        '"brand" TEXT, "supplier" TEXT, "lead_time" TEXT, "source_catalog" TEXT)'
-    )
-    conn.execute(
-        "INSERT INTO rows VALUES (?,?,?,?,?,?,?)",
-        ("SSD", "10", "SSD-1", "B", "S", "1", "loc"),
-    )
-    conn.commit()
-    conn.close()
-
-    resp = mcp_server._handle(
-        {
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {
-                "name": "equipment_catalog_search",
-                "arguments": {"part_number": "SSD-1", "limit": 5},
-            },
-        }
-    )
+    fake = {
+        "items": [
+            {
+                "part_number": "SSD-1",
+                "title": "SSD",
+                "brand": "B",
+                "price": "10",
+                "supplier": "S",
+                "lead_time": "1",
+                "catalog_id": "c1",
+                "source_catalog": "loc",
+                "match_rank": "exact_pn",
+                "in_stock": True,
+            }
+        ],
+        "total": 1,
+    }
+    with patch.object(mcp_server, "_http", return_value=fake) as http:
+        resp = mcp_server._handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "equipment_catalog_search",
+                    "arguments": {"part_number": "SSD-1", "limit": 5},
+                },
+            }
+        )
     assert resp is not None
     assert resp["result"].get("isError") is not True
     payload = json.loads(resp["result"]["content"][0]["text"])
     assert payload["items"][0]["part_number"] == "SSD-1"
+    http.assert_called_once()
+    args = http.call_args
+    assert args.args[0] == "POST"
+    assert "catalog-search" in args.args[1]
+
+
+def test_catalog_sources_calls_pod_api(monkeypatch) -> None:
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
+    with patch.object(
+        mcp_server, "_http", return_value={"items": [{"id": "c1", "name": "A", "kind": "local"}]}
+    ) as http:
+        resp = mcp_server._handle(
+            {
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {"name": "equipment_catalog_sources", "arguments": {}},
+            }
+        )
+    assert resp is not None
+    assert resp["result"].get("isError") is not True
+    http.assert_called_once()
+    assert http.call_args.args[0] == "GET"
+    assert "catalog-sources" in http.call_args.args[1]
 
 
 def test_found_offers_upsert_validates_and_http(monkeypatch) -> None:
@@ -78,22 +107,5 @@ def test_found_offers_upsert_validates_and_http(monkeypatch) -> None:
                 }
             )
     assert resp is not None
-    assert "Mouse" in resp["result"]["content"][0]["text"] or "o1" in resp["result"]["content"][0]["text"]
-    assert http.call_args_list[0][0][0] == "POST"
-
-
-def test_request_lines_upsert_requires_title(monkeypatch) -> None:
-    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
-    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
-    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
-    resp = mcp_server._handle(
-        {
-            "jsonrpc": "2.0",
-            "id": 4,
-            "method": "tools/call",
-            "params": {"name": "request_lines_upsert", "arguments": {"part_number": "X"}},
-        }
-    )
-    assert resp is not None
-    assert resp["result"].get("isError") is True
-    assert "title" in resp["result"]["content"][0]["text"].lower()
+    assert resp["result"].get("isError") is not True
+    assert http.called

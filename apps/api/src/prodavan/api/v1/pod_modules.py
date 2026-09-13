@@ -9,6 +9,9 @@ from pydantic import BaseModel, Field
 
 from prodavan.api.agent_auth import PodBridgeDep
 from prodavan.api.deps import SessionDep
+from prodavan.application.tenant_infra.equipment_catalog_search_service import (
+    EquipmentCatalogPodSearchService,
+)
 from prodavan.application.tenant_infra.pod_modules import PodModuleDataService
 
 router = APIRouter(tags=["pod-modules"])
@@ -24,6 +27,18 @@ class PodModuleMetaBody(BaseModel):
 
 class PodModuleActionBody(BaseModel):
     row_id: str | None = None
+
+
+class EquipmentCatalogSearchBody(BaseModel):
+    query: str | None = None
+    part_number: str | None = None
+    brand: str | None = None
+    price_min: float | None = None
+    price_max: float | None = None
+    in_stock_only: bool = True
+    catalog_ids: list[str] | None = None
+    limit: int = Field(default=20, ge=1, le=100)
+    offset: int = Field(default=0, ge=0)
 
 
 @router.get("/projects/{project_id}/modules")
@@ -175,4 +190,37 @@ async def invoke_pod_module_action(
         module_id=module_id,
         action_id=action_id,
         row_id=body.row_id if body else None,
+    )
+
+
+@router.get("/projects/{project_id}/modules/mod_equipment/equipment/catalog-sources")
+async def equipment_catalog_sources(
+    project_id: str,
+    bridge: PodBridgeDep,
+    session: SessionDep,
+) -> dict[str, Any]:
+    return await EquipmentCatalogPodSearchService(session).catalog_sources(
+        bridge=bridge, project_id=project_id
+    )
+
+
+@router.post("/projects/{project_id}/modules/mod_equipment/equipment/catalog-search")
+async def equipment_catalog_search(
+    project_id: str,
+    body: EquipmentCatalogSearchBody,
+    bridge: PodBridgeDep,
+    session: SessionDep,
+) -> dict[str, Any]:
+    return await EquipmentCatalogPodSearchService(session).catalog_search(
+        bridge=bridge,
+        project_id=project_id,
+        query=body.query,
+        part_number=body.part_number,
+        brand=body.brand,
+        price_min=body.price_min,
+        price_max=body.price_max,
+        in_stock_only=body.in_stock_only,
+        catalog_ids=body.catalog_ids,
+        limit=body.limit,
+        offset=body.offset,
     )

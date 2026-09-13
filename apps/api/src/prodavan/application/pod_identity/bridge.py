@@ -23,6 +23,7 @@ SCOPE_INFRA_DOCS = "infra:docs"
 SCOPE_INFRA_USERDB = "infra:userdb"
 SCOPE_INFRA_EVENTS = "infra:events"
 SCOPE_INFRA_OBJECTS = "infra:objects"
+SCOPE_INFRA_SEARCH = "infra:search"
 
 
 def module_rows_scope(module_id: str) -> str:
@@ -47,6 +48,7 @@ def default_platform_scopes() -> list[str]:
         SCOPE_INFRA_USERDB,
         SCOPE_INFRA_EVENTS,
         SCOPE_INFRA_OBJECTS,
+        SCOPE_INFRA_SEARCH,
     ]
 
 

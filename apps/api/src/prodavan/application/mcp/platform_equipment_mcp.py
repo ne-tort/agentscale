@@ -35,14 +35,9 @@ def platform_equipment_mcp_package() -> dict[str, Any]:
 
 
 def materialize_platform_equipment_mcp(writer: WorkspaceLayoutWriter) -> dict[str, Any]:
-    """Copy stdio MCP server + search helper into workspace packages/."""
+    """Copy stdio MCP server into workspace packages/ (search via Pod API)."""
     mcp_dir = Path(__file__).resolve().parent
-    search_src = mcp_dir.parent / "modules" / "equipment_catalog_search.py"
     server_src = mcp_dir / "prodavan_equipment_mcp" / "server.py"
-    writer.write_text_file(
-        relative_path=f"packages/{PACKAGE_NAME}/equipment_catalog_search.py",
-        text=search_src.read_text(encoding="utf-8"),
-    )
     writer.write_text_file(
         relative_path=f"packages/{PACKAGE_NAME}/server.py",
         text=server_src.read_text(encoding="utf-8"),
@@ -57,7 +52,6 @@ def merge_platform_equipment_mcp(
 ) -> list[dict[str, Any]]:
     """Ensure equipment package is present and unique by name."""
     others = [p for p in packages if isinstance(p, dict) and p.get("name") != PACKAGE_NAME]
-    # Keep modules first if present, then equipment, then rest
     modules = [p for p in others if p.get("name") == "prodavan-modules"]
     rest = [p for p in others if p.get("name") != "prodavan-modules"]
     return [*modules, platform_pkg, *rest]

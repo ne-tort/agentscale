@@ -207,3 +207,34 @@ def enqueue_cascade_company_deleted(company_id: str, *, actor_sub: str = "system
         "task_id": task_id,
     }
 
+
+def enqueue_index_equipment_catalog(
+    *,
+    instance_id: str,
+    row_id: str,
+    company_id: str,
+    cabinet_id: str | None = None,
+    project_id: str | None = None,
+) -> dict[str, Any]:
+    from prodavan.application.modules.equipment_catalog_opensearch import (
+        enqueue_or_run_index_equipment_catalog,
+    )
+
+    return enqueue_or_run_index_equipment_catalog(
+        instance_id=instance_id,
+        row_id=row_id,
+        company_id=company_id,
+        cabinet_id=cabinet_id,
+        project_id=project_id,
+    )
+
+
+def enqueue_sweep_equipment_catalog_reindex() -> dict[str, Any]:
+    from prodavan.core.infra.worker_manager import get_worker_manager
+
+    mgr = get_worker_manager()
+    if mgr is None or not mgr.enabled:
+        return {"enqueued": False, "reason": "celery_disabled"}
+    mgr.send_task(job_names.SWEEP_EQUIPMENT_CATALOG_REINDEX)
+    return {"enqueued": True, "task": job_names.SWEEP_EQUIPMENT_CATALOG_REINDEX}
+

@@ -19,7 +19,7 @@ This does **not** replace equipment catalog search (`equipment_catalog_search` /
 5. Admin HTTP under `/api/v1/admin/search-index/*` (`platform.admin` only).
 6. MVP: OpenSearch **security plugin disabled** locally; ACL + quotas live in `SearchIndexService`; sandbox NetworkPolicy keeps **no** egress to `:9200`.
 7. Company ownership for empty indexes is stored in OpenSearch `mappings._meta.company_id` (never in index `settings` — unknown settings 400).
-8. Project Pods do **not** open `:9200` — Tenant Infra `/infra/search` is a follow-up.
+8. Project Pods do **not** open `:9200` — search goes through Tenant Infra `/infra/search` + equipment `catalog-search` (Bridge scope `infra:search`).
 
 ## Consequences
 

@@ -35,3 +35,8 @@ def wipe_project_tree_task_id(workspace_key: str) -> str:
 def cascade_company_deleted_task_id(company_id: str) -> str:
     cid = (company_id or "").strip()
     return f"{job_names.CASCADE_COMPANY_DELETED}:{cid}"
+
+
+def index_equipment_catalog_task_id(row_id: str) -> str:
+    rid = (row_id or "").strip()
+    return f"{job_names.INDEX_EQUIPMENT_CATALOG}:{rid}"

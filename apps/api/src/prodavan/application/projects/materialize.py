@@ -190,7 +190,6 @@ class ProjectMaterializeService:
             equipment_pkg = materialize_platform_equipment_mcp(writer)
             mcp_packages = merge_platform_equipment_mcp(mcp_packages, platform_pkg=equipment_pkg)
             written.append(f"packages/{equipment_pkg['name']}/server.py")
-            written.append(f"packages/{equipment_pkg['name']}/equipment_catalog_search.py")
 
         module_paths: dict[str, list[str]] = dict(manifest or {})
         for op in ops:

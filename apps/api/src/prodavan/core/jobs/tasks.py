@@ -16,26 +16,56 @@ logger = logging.getLogger(__name__)
 
 
 def _register_worker_k8s_bootstrap(app) -> None:
-    """Start K8sManager in Celery worker processes when pod_runtime_mode=k8s."""
+    """Start K8sManager + OpenSearch + FileStore in Celery worker processes."""
     from celery.signals import worker_process_init
 
     @worker_process_init.connect(weak=False)
-    def _bootstrap_k8s(**_kwargs) -> None:
+    def _bootstrap_worker_infra(**_kwargs) -> None:
         from prodavan.config.settings import settings
         from prodavan.core.infra.k8s_manager import get_k8s_manager, k8s_manager_from_settings
-
-        mode = (settings.pod_runtime_mode or "stub").strip().lower()
-        if mode != "k8s":
-            return
-        if get_k8s_manager() is not None:
-            return
-        mgr = k8s_manager_from_settings()
+        from prodavan.core.infra.opensearch_manager import OpenSearchManager, get_opensearch_manager
+        from prodavan.infrastructure.files.manager import FileStoreManager, get_file_store_optional
 
         async def _start() -> None:
-            await mgr.startup()
+            mode = (settings.pod_runtime_mode or "stub").strip().lower()
+            if mode == "k8s" and get_k8s_manager() is None:
+                mgr = k8s_manager_from_settings()
+                await mgr.startup()
+                logger.info(
+                    "worker: K8sManager started namespace=%s", settings.pod_sandbox_namespace
+                )
+
+            if get_opensearch_manager() is None:
+                os_mgr = OpenSearchManager(
+                    url=settings.opensearch_url,
+                    enabled=settings.opensearch_enabled
+                    or bool((settings.opensearch_url or "").strip()),
+                    required=False,
+                    username=settings.opensearch_username,
+                    password=settings.opensearch_password,
+                )
+                await os_mgr.startup()
+                logger.info("worker: OpenSearchManager started enabled=%s", os_mgr.enabled)
+
+            if get_file_store_optional() is None or get_file_store_optional()._primary is None:
+                backend = (settings.object_store_backend or "local").strip().lower()
+                if backend not in ("local", "s3"):
+                    backend = "local"
+                fs = FileStoreManager(
+                    backend=backend,  # type: ignore[arg-type]
+                    storage_root=settings.storage_root,
+                    s3_endpoint_url=settings.s3_endpoint_url,
+                    s3_access_key=settings.s3_access_key,
+                    s3_secret_key=settings.s3_secret_key,
+                    s3_bucket=settings.s3_bucket,
+                    s3_region=settings.s3_region,
+                    mirror_local=settings.object_store_mirror_local,
+                    required=False,
+                )
+                await fs.startup()
+                logger.info("worker: FileStoreManager started backend=%s", backend)
 
         run_async(_start())
-        logger.info("worker: K8sManager started namespace=%s", settings.pod_sandbox_namespace)
 
 
 def _get_app():
@@ -238,4 +268,63 @@ def register_tasks(app) -> None:
             )
 
         logger.info("celery task %s", job_names.POD_RECONCILE)
+        return run_async(_run())
+
+    @app.task(name=job_names.INDEX_EQUIPMENT_CATALOG, bind=False)
+    def index_equipment_catalog(
+        instance_id: str,
+        row_id: str,
+        company_id: str,
+        cabinet_id: str | None = None,
+        project_id: str | None = None,
+    ) -> dict[str, Any]:
+        from prodavan.application.modules.equipment_catalog_opensearch import (
+            run_index_equipment_catalog,
+        )
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        async def _run() -> dict[str, Any]:
+            rid = (row_id or "").strip()
+
+            async def _work() -> dict[str, Any]:
+                factory = get_session_factory()
+                async with factory() as session:
+                    return await run_index_equipment_catalog(
+                        session,
+                        instance_id=(instance_id or "").strip(),
+                        row_id=rid,
+                        company_id=(company_id or "").strip(),
+                        cabinet_id=cabinet_id,
+                        project_id=project_id,
+                    )
+
+            return await run_with_job_lock(f"index_os:{rid}", ttl_sec=3600, fn=_work)
+
+        logger.info(
+            "celery task %s row_id=%s",
+            job_names.INDEX_EQUIPMENT_CATALOG,
+            row_id,
+        )
+        return run_async(_run())
+
+    @app.task(name=job_names.SWEEP_EQUIPMENT_CATALOG_REINDEX, bind=False)
+    def sweep_equipment_catalog_reindex() -> dict[str, Any]:
+        from prodavan.application.modules.equipment_catalog_reindex_sweep import (
+            sweep_due_equipment_catalogs,
+        )
+        from prodavan.infrastructure.persistence.database import get_session_factory
+
+        async def _run() -> dict[str, Any]:
+            async def _sweep() -> dict[str, Any]:
+                factory = get_session_factory()
+                async with factory() as session:
+                    return await sweep_due_equipment_catalogs(session)
+
+            return await run_with_job_lock(
+                "sweep_equipment_catalog_reindex",
+                ttl_sec=600,
+                fn=_sweep,
+            )
+
+        logger.info("celery task %s", job_names.SWEEP_EQUIPMENT_CATALOG_REINDEX)
         return run_async(_run())

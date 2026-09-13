@@ -72,7 +72,7 @@ Slug: `materialize` — массив `MaterializeRule[]`.
 | `json_single` | One row body object |
 | `template` | Mustache-style `{{field}}` in template field |
 | `copy_blob` | Binary copy from Content Service blob (`storage_key` / `version_id`) |
-| `merge_mapped_sqlite` | Merge N row SQLite artifacts via per-row `column_map` into one canonical `rows` table |
+| `merge_mapped_sqlite` | Merge N row SQLite artifacts via per-row `column_map` into one canonical `rows` table (**legacy**; equipment catalogs use OpenSearch instead) |
 | `prompt_paths` | Expand `prompt_paths.files_json` → one `raw` file per entry under `path`/`name`.md; skip row if `files_json` empty |
 
 ### `prompt_paths`

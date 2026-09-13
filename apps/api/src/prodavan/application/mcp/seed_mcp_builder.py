@@ -33,10 +33,6 @@ def _equipment_sources() -> tuple[tuple[str, Path], ...]:
             "server.py",
             _PKG_ROOT / "application" / "mcp" / "prodavan_equipment_mcp" / "server.py",
         ),
-        (
-            "equipment_catalog_search.py",
-            _PKG_ROOT / "application" / "modules" / "equipment_catalog_search.py",
-        ),
     )
 
 

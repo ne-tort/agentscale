@@ -12,6 +12,7 @@ from prodavan.application.pod_identity.bridge import (
     SCOPE_INFRA_DOCS,
     SCOPE_INFRA_EVENTS,
     SCOPE_INFRA_OBJECTS,
+    SCOPE_INFRA_SEARCH,
     SCOPE_INFRA_USERDB,
     build_launch_scopes,
     mint_pod_bridge_token,
@@ -113,6 +114,7 @@ async def test_launch_scopes_include_all_infra_planes(monkeypatch) -> None:
         SCOPE_INFRA_USERDB,
         SCOPE_INFRA_EVENTS,
         SCOPE_INFRA_OBJECTS,
+        SCOPE_INFRA_SEARCH,
     ):
         assert scope in claims.scopes
 

@@ -156,10 +156,11 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         "equipment_mcp",
     }
     kinds = {a["kind"] for a in meta["actions"]}
-    assert "content.index_tabular" in kinds
+    assert "content.index_opensearch" in kinds
     assert "content.probe_remote_sql" in kinds
     assert "data.select_row" in kinds
-    assert any(r["target"]["format"] == "merge_mapped_sqlite" for r in meta["materialize"])
+    assert not any(r["target"]["format"] == "merge_mapped_sqlite" for r in meta["materialize"])
+    assert any(r["id"] == "catalog_manifest" for r in meta["materialize"])
     assert any(r["id"] == "s4b_mcp_package" for r in meta["materialize"])
     s4b_rule = next(r for r in meta["materialize"] if r["id"] == "s4b_mcp_package")
     assert s4b_rule["target"]["format"] == "mcp_package"
@@ -170,11 +171,11 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert env_names == {"S4B_BASE_URL", "S4B_LOGIN"}
     secret_entries = meta["container_env_secrets"]
     assert secret_entries[0]["env_name"] == "S4B_PASSWORD"
-    foreach = next(e for e in secret_entries if isinstance(e.get("foreach_rows"), dict))
-    assert foreach["foreach_rows"]["table_slug"] == "catalogs"
-    assert foreach["foreach_rows"]["env_name_prefix"] == "EQUIPMENT_CATALOG_DSN_"
+    assert not any(isinstance(e.get("foreach_rows"), dict) for e in secret_entries)
     catalog_cols = {c["name"] for c in meta["columns"] if c["table_slug"] == "catalogs"}
     assert {"source_kind", "remote_dsn", "remote_table", "remote_database", "remote_dsn_has_database", "remote_user", "remote_password"} <= catalog_cols
+    assert {"last_indexed_at", "reindex_interval_hours", "index_name"} <= catalog_cols
+    assert "artifact_ref" not in catalog_cols
     settings = next(v for v in meta["views"] if v["slug"] == "catalogs_settings")
     field_cols = [f["column"] for f in settings["ui_json"]["fields"]]
     assert field_cols[:3] == ["name", "source_kind", "source_file"]
@@ -366,7 +367,10 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert map_field["widget"] == "column_map"
     map_col = next(c for c in meta["columns"] if c["name"] == "column_map")
     assert map_col["label"]["ru"] == "Сопоставление колонок"
-    assert map_field["visible_when"]["eq"] == "ready"
+    assert map_field["visible_when"] == {
+        "field": "columns_json",
+        "not_empty": True,
+    }
     assert not any(f["column"] == "row_count" for f in settings["ui_json"]["fields"])
     paused_field = next(f for f in settings["ui_json"]["fields"] if f["column"] == "paused")
     assert paused_field["widget"] == "pause_toggle"
@@ -378,7 +382,10 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         for f in settings["ui_json"]["fields"]
         if f["column"] in ("column_map", "project_ids")
     ]
-    assert all(f["visible_when"]["eq"] == "ready" for f in meta_fields)
+    map_vis = next(f for f in meta_fields if f["column"] == "column_map")["visible_when"]
+    assert map_vis == {"field": "columns_json", "not_empty": True}
+    proj_vis = next(f for f in meta_fields if f["column"] == "project_ids")["visible_when"]
+    assert "any" in proj_vis
 
     catalogs_list = next(v for v in meta["views"] if v["slug"] == "catalogs_list")
     assert all(c["field"] != "status" for c in catalogs_list["ui_json"]["columns"])
@@ -414,10 +421,9 @@ def test_equipment_meta_hub_on_data_placement() -> None:
         c["name"] == "build_scope" and c["table_slug"] == "equipment_types" for c in meta["columns"]
     )
 
-    merge_rule = next(r for r in meta["materialize"] if r["id"] == "catalog_merged_sqlite")
-    assert merge_rule["source"]["filter"] == {"status": "ready", "paused": False}
-    assert merge_rule["target"]["workspace_path"] == "catalogs/catalog.sqlite"
-    assert "brand" in merge_rule["target"]["schema"]
+    assert not any(r["id"] == "catalog_merged_sqlite" for r in meta["materialize"])
+    assert any(c["name"] == "index_name" for c in meta["columns"] if c["table_slug"] == "catalogs")
+    assert actions["index_catalog_opensearch"]["kind"] == "content.index_opensearch"
 
     lines = next(v for v in meta["views"] if v["slug"] == "request_lines_list")
     assert lines["ui_json"]["scaffold"]["title"]["ru"] == "Позиции заказчика"

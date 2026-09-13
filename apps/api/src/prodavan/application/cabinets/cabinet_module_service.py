@@ -20,6 +20,7 @@ from prodavan.application.modules.module_row_helpers import (
 )
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
+from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.modules import (
     ModuleCabinetBindingRow,
@@ -303,6 +304,22 @@ class CabinetModuleService:
         )
         if not ok:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        if module_id == "mod_equipment" and table_slug == "catalogs":
+            try:
+                from prodavan.application.modules.equipment_catalog_opensearch import (
+                    delete_equipment_catalog_index,
+                )
+
+                cab = await self._session.get(CabinetInstanceRow, cabinet_id)
+                company_id = str(cab.company_id) if cab is not None and cab.company_id else ""
+                if company_id:
+                    await delete_equipment_catalog_index(
+                        row_id=row_id,
+                        company_id=company_id,
+                        cabinet_id=cabinet_id,
+                    )
+            except Exception:
+                pass
         await self._session.commit()
         remat = await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id)
         return {"deleted": True, "row_id": row_id, "rematerialize": remat}

@@ -45,6 +45,7 @@ Actions описывают **функциональную логику** без 
 | `data.delete_row` | DELETE row | `table_slug` |
 | `data.select_row` | Clear siblings + set selected | `table_slug`, `select_field`, `group_by`, optional `parent` |
 | `content.index_tabular` | Parse csv/xlsx → SQLite artifact FileRef | `table_slug`, `source_column`, metadata columns |
+| `content.index_opensearch` | Enqueue OpenSearch wipe+bulk (Celery); local header probe sync | `table_slug`, `file_column`, `map_field`, `os_namespace` |
 | `materialize.file` | MinIO get → put workspace prefix | `source`, `target` |
 | `materialize.rows` | Export rows JSON/CSV to workspace | `table_slug`, `filter`, `target` |
 | `materialize.template` | Render template field → file | `source_row`, `field`, `target_path` |
@@ -95,6 +96,28 @@ Semantics: for all rows with the same `group_by` value as the target row, set `s
 ```
 
 Accepts csv / xlsx (first sheet). Writes SQLite blob (`CREATE TABLE rows (...);`) as Content asset FileRef. Updates metadata columns. Status enum typically `draft|indexing|ready|error`.
+
+### `content.index_opensearch`
+
+```json
+{
+  "id": "index_catalog_opensearch",
+  "kind": "content.index_opensearch",
+  "params": {
+    "table_slug": "catalogs",
+    "source_kind_column": "source_kind",
+    "file_column": "source_file",
+    "map_field": "column_map",
+    "status_column": "status",
+    "error_column": "error",
+    "columns_json_column": "columns_json",
+    "os_namespace": "equipment"
+  },
+  "trigger": { "on": ["row.created", "row.updated"], "async": true }
+}
+```
+
+Sets `status=indexing`, enqueues Celery `prodavan.jobs.index_equipment_catalog` (inline fallback when Celery disabled). Job **deletes** physical index `equipment__c_{row_id}` then bulk-indexes mapped docs. Local: sync header probe into `columns_json` before enqueue. Requires `column_map` with `title` + `price`.
 
 ## Triggers (when action runs)
 
