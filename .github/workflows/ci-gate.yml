@@ -10,8 +10,9 @@ on:
 
 concurrency:
   group: ci-gate-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  # Docker Desktop runner pack (4×). Stuck run: gh api -X POST .../actions/runs/<id>/force-cancel
-  cancel-in-progress: false
+  # Newer push supersedes older Gate; false left orphan gate jobs queued forever
+  # when a second run was pending (auto-merge never saw success).
+  cancel-in-progress: true
 
 jobs:
   infra:
