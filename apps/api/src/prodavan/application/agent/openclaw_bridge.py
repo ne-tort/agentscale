@@ -161,6 +161,8 @@ class OpenClawBridgeBootstrap:
                         pod_ip=pod_ip,
                         session_id=payload.session_id,
                         adapter_state=payload.adapter_state,
+                        provider_key_id=payload.provider_key_id,
+                        model=_explicit_bridge_model(payload.model),
                     )
                 logger.info(
                     "openclaw bootstrap: registered session %s on pod %s",
@@ -184,13 +186,25 @@ class OpenClawBridgeBootstrap:
         pod_ip: str,
         session_id: str,
         adapter_state: dict,
+        provider_key_id: str | None = None,
+        model: str | None = None,
     ) -> bool:
+        """PATCH adapter_state; always re-send key/model when known.
+
+        Older agent-runtime builds spread undefined patch fields and wipe
+        ``providerKeyId`` / ``model`` if only ``adapter_state`` is sent.
+        """
         url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/sessions/{session_id}"
+        body: dict[str, object] = {"adapter_state": adapter_state}
+        if provider_key_id:
+            body["provider_key_id"] = provider_key_id
+        if model:
+            body["model"] = model
         try:
             async with self._http_client(timeout=5.0) as client:
                 response = await client.patch(
                     url,
-                    json={"adapter_state": adapter_state},
+                    json=body,
                     headers=_runtime_request_headers(),
                 )
             return response.status_code in (200, 204)
@@ -260,6 +274,19 @@ class OpenClawBridgeBootstrap:
                     },
                 )
                 return
+
+            if bootstrap is not None and bootstrap.provider_key_id:
+                # Heal sessions wiped by older bridge PATCH (undefined fields cleared key/model).
+                await self._patch_adapter_state(
+                    pod_ip=pod_ip,
+                    session_id=session_id,
+                    adapter_state=bootstrap.adapter_state
+                    if isinstance(bootstrap.adapter_state, dict)
+                    else {},
+                    provider_key_id=bootstrap.provider_key_id,
+                    model=_explicit_bridge_model(model)
+                    or _explicit_bridge_model(bootstrap.model),
+                )
 
             async for event in self._stream_send(
                 pod_ip=pod_ip,
