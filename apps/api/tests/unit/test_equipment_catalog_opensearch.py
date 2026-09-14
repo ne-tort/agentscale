@@ -8,10 +8,12 @@ import pytest
 
 from prodavan.application.modules.equipment_catalog_opensearch import (
     OS_NAMESPACE,
+    PLATFORM_OS_COMPANY_ID,
     catalog_doc_id,
     catalog_os_index_name,
     column_map_ready,
     enqueue_or_run_index_equipment_catalog,
+    resolve_equipment_catalog_tenancy,
 )
 
 
@@ -36,6 +38,20 @@ def test_column_map_ready_requires_title_price() -> None:
     assert column_map_ready(
         {"column_map": {"title": "Name", "price": "Cost", "brand": "Brand"}}
     )
+
+
+@pytest.mark.asyncio
+async def test_resolve_tenancy_platform_uses_sentinel() -> None:
+    session = MagicMock()
+    session.get = AsyncMock(
+        return_value=MagicMock(owner_kind="platform", owner_id="platform")
+    )
+    company_id, cabinet_id, project_id = await resolve_equipment_catalog_tenancy(
+        session, instance_id="inst_1"
+    )
+    assert company_id == PLATFORM_OS_COMPANY_ID
+    assert cabinet_id is None
+    assert project_id is None
 
 
 def test_enqueue_inline_when_celery_disabled(monkeypatch) -> None:

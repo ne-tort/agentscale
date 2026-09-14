@@ -147,6 +147,13 @@ class EquipmentCatalogPodSearchService:
         )
         if inst is None:
             return []
+        from prodavan.application.modules.equipment_catalog_opensearch import (
+            resolve_equipment_catalog_tenancy,
+        )
+
+        os_company_id, _, _ = await resolve_equipment_catalog_tenancy(
+            self._session, inst=inst
+        )
         rows = await ModuleInstanceService(self._session).list_data_rows(
             instance_id=inst.id, table_slug=_CATALOGS
         )
@@ -177,6 +184,7 @@ class EquipmentCatalogPodSearchService:
                     "column_map": body.get("column_map")
                     if isinstance(body.get("column_map"), dict)
                     else {},
+                    "os_company_id": os_company_id,
                 }
             )
         return out
@@ -258,8 +266,9 @@ class EquipmentCatalogPodSearchService:
                     query=os_query,
                     from_=0,
                     size=per,
-                    company_id=bridge.company_id,
-                    cabinet_id=bridge.cabinet_id,
+                    # Match docs by SoT tenancy (platform SoT → company_id="platform").
+                    company_id=str(cat.get("os_company_id") or bridge.company_id or ""),
+                    cabinet_id=None,
                     # Project scope is via ready-catalog list + project_ids, not OS term filter
                     # (cabinet/global indexes omit project_id on docs).
                     project_id=None,

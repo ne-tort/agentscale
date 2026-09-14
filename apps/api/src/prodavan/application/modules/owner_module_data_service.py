@@ -7,10 +7,8 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.modules.module_instance_service import (
-    OWNER_CABINET,
     OWNER_COMPANY,
     OWNER_PLATFORM,
-    OWNER_PROJECT,
     PLATFORM_OWNER_ID,
     ModuleInstanceService,
 )
@@ -119,6 +117,31 @@ class OwnerModuleDataService:
             self._session, module_id=module_id, source="owner_module_data"
         )
         await self._session.commit()
+        try:
+            await self._maybe_run_owner_row_actions(
+                owner_kind=owner_kind,
+                owner_id=owner_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                row_id=str(row.get("row_id") or ""),
+                previous_body=None,
+            )
+        except AppError:
+            refreshed = await self._instances.get_data_row(
+                instance_id=inst.id,
+                table_slug=table_slug,
+                row_id=str(row.get("row_id") or ""),
+            )
+            if refreshed is not None:
+                return {"module_id": module_id, "instance_id": inst.id, **refreshed}
+            raise
+        refreshed = await self._instances.get_data_row(
+            instance_id=inst.id,
+            table_slug=table_slug,
+            row_id=str(row.get("row_id") or ""),
+        )
+        if refreshed is not None:
+            row = refreshed
         return {"module_id": module_id, "instance_id": inst.id, **row}
 
     async def update_data_row(
@@ -130,6 +153,7 @@ class OwnerModuleDataService:
         table_slug: str,
         row_id: str,
         body: Any,
+        run_actions: bool = True,
     ) -> dict[str, Any]:
         table_slug = check_table_slug(table_slug)
         body = ensure_row_body(body)
@@ -167,22 +191,23 @@ class OwnerModuleDataService:
             self._session, module_id=module_id, source="owner_module_data"
         )
         await self._session.commit()
-        try:
-            await self._maybe_run_owner_row_actions(
-                owner_kind=owner_kind,
-                owner_id=owner_id,
-                module_id=module_id,
-                table_slug=table_slug,
-                row_id=row_id,
-                previous_body=previous_body,
-            )
-        except AppError:
-            refreshed = await self._instances.get_data_row(
-                instance_id=inst.id, table_slug=table_slug, row_id=row_id
-            )
-            if refreshed is not None:
-                return {"module_id": module_id, "instance_id": inst.id, **refreshed}
-            raise
+        if run_actions:
+            try:
+                await self._maybe_run_owner_row_actions(
+                    owner_kind=owner_kind,
+                    owner_id=owner_id,
+                    module_id=module_id,
+                    table_slug=table_slug,
+                    row_id=row_id,
+                    previous_body=previous_body,
+                )
+            except AppError:
+                refreshed = await self._instances.get_data_row(
+                    instance_id=inst.id, table_slug=table_slug, row_id=row_id
+                )
+                if refreshed is not None:
+                    return {"module_id": module_id, "instance_id": inst.id, **refreshed}
+                raise
         refreshed = await self._instances.get_data_row(
             instance_id=inst.id, table_slug=table_slug, row_id=row_id
         )
@@ -203,12 +228,27 @@ class OwnerModuleDataService:
         from prodavan.application.modules.module_action_executor import ModuleActionExecutor
         from prodavan.domain.identity import Principal
 
-        await ModuleActionExecutor(self._session).maybe_auto_probe_remote_sql(
+        if not row_id:
+            return
+        executor = ModuleActionExecutor(self._session)
+        principal = Principal(sub="owner-module", roles=frozenset())
+        await executor.maybe_auto_probe_remote_sql(
             cabinet_id="",
             module_id=module_id,
             table_slug=table_slug,
             row_id=row_id,
-            principal=Principal(sub="owner-module", roles=frozenset()),
+            principal=principal,
+            employee=None,
+            previous_body=previous_body,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
+        )
+        await executor.maybe_auto_index_opensearch(
+            cabinet_id="",
+            module_id=module_id,
+            table_slug=table_slug,
+            row_id=row_id,
+            principal=principal,
             employee=None,
             previous_body=previous_body,
             owner_kind=owner_kind,
@@ -236,24 +276,12 @@ class OwnerModuleDataService:
         if module_id == "mod_equipment" and table_slug == "catalogs":
             from prodavan.application.modules.equipment_catalog_opensearch import (
                 delete_equipment_catalog_index,
+                resolve_equipment_catalog_tenancy,
             )
-            from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
-            from prodavan.infrastructure.persistence.models.projects import ProjectRow
 
-            company_id = ""
-            cabinet_id: str | None = None
-            project_id: str | None = None
-            if owner_kind == OWNER_CABINET:
-                cabinet_id = owner_id
-                cab = await self._session.get(CabinetInstanceRow, owner_id)
-                if cab is not None and cab.company_id:
-                    company_id = str(cab.company_id)
-            elif owner_kind == OWNER_PROJECT:
-                project_id = owner_id
-                proj = await self._session.get(ProjectRow, owner_id)
-                if proj is not None:
-                    company_id = str(proj.company_id or "")
-                    cabinet_id = str(proj.cabinet_id) if proj.cabinet_id else None
+            company_id, cabinet_id, project_id = await resolve_equipment_catalog_tenancy(
+                self._session, instance_id=inst.id
+            )
             if company_id:
                 await delete_equipment_catalog_index(
                     row_id=row_id,

@@ -30,6 +30,7 @@ _OWNER_REMOTE_KINDS = frozenset(
         "content.probe_remote_sql",
         "content.list_remote_sql_databases",
         "content.list_remote_sql_tables",
+        "content.index_opensearch",
     }
 )
 
@@ -237,7 +238,7 @@ class ModuleActionExecutor:
         row_id: str | None = None,
         principal: Principal,
     ) -> dict[str, Any]:
-        """Platform/company module instance — remote SQL actions only."""
+        """Platform/company module instance — remote SQL + OpenSearch index actions."""
         action = await self._load_action(module_id=module_id, action_id=action_id)
         if action.get("enabled") is False:
             raise AppError(
@@ -272,6 +273,8 @@ class ModuleActionExecutor:
             return await self._list_remote_sql_databases(**common)
         if kind == "content.list_remote_sql_tables":
             return await self._list_remote_sql_tables(**common)
+        if kind == "content.index_opensearch":
+            return await self._index_opensearch(**common)
         raise AppError(
             code="NOT_IMPLEMENTED",
             title="Not Implemented",
@@ -401,6 +404,8 @@ class ModuleActionExecutor:
         employee: EmployeeRow | None,
         project_id: str | None = None,
         previous_body: dict[str, Any] | None = None,
+        owner_kind: str | None = None,
+        owner_id: str | None = None,
     ) -> None:
         """Best-effort: enqueue content.index_opensearch after catalog row write."""
         _ = previous_body
@@ -416,13 +421,15 @@ class ModuleActionExecutor:
             on = trigger.get("on") if isinstance(trigger.get("on"), list) else ["row.created", "row.updated"]
             if "row.created" not in on and "row.updated" not in on:
                 continue
-            rows = await self._list_module_rows(
+            rows = await self._list_rows_for_scope(
                 cabinet_id=cabinet_id,
                 project_id=project_id,
                 module_id=module_id,
                 table_slug=table_slug,
                 principal=principal,
                 employee=employee,
+                owner_kind=owner_kind,
+                owner_id=owner_id,
             )
             target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
             if target is None:
@@ -440,6 +447,8 @@ class ModuleActionExecutor:
                     row_id=row_id,
                     principal=principal,
                     employee=employee,
+                    owner_kind=owner_kind,
+                    owner_id=owner_id,
                 )
             except AppError:
                 raise
@@ -707,6 +716,7 @@ class ModuleActionExecutor:
                 table_slug=table_slug,
                 row_id=row_id,
                 body=body,
+                run_actions=run_actions,
             )
         return await self._update_module_row(
             cabinet_id=cabinet_id,
@@ -1021,6 +1031,7 @@ class ModuleActionExecutor:
         from prodavan.application.modules.equipment_catalog_opensearch import (
             column_map_ready,
             extract_local_columns,
+            resolve_equipment_catalog_tenancy,
             run_index_equipment_catalog,
         )
         from prodavan.application.modules.module_instance_service import ModuleInstanceService
@@ -1058,15 +1069,38 @@ class ModuleActionExecutor:
         body = dict(target.get("body") or {})
         instance_id = str(target.get("instance_id") or "").strip()
         if not instance_id:
-            if project_id:
-                inst = await ModuleInstanceService(self._session).ensure_project_instance(
+            inst_svc = ModuleInstanceService(self._session)
+            if owner_kind and owner_id:
+                from prodavan.application.modules.owner_module_data_service import (
+                    OwnerModuleDataService,
+                )
+
+                # Resolve SoT the same way owner data CRUD does.
+                owner_rows = await OwnerModuleDataService(self._session).list_data_rows(
+                    owner_kind=owner_kind,
+                    owner_id=owner_id,
+                    module_id=module_id,
+                    table_slug=table_slug,
+                )
+                hit = next((r for r in owner_rows if str(r.get("row_id")) == row_id), None)
+                instance_id = str((hit or {}).get("instance_id") or "").strip()
+                if not instance_id:
+                    raise AppError(
+                        code="VALIDATION_ERROR",
+                        title="Validation Error",
+                        status=422,
+                        detail="module instance missing for OpenSearch index",
+                    )
+            elif project_id:
+                inst = await inst_svc.ensure_project_instance(
                     project_id=project_id, module_id=module_id
                 )
+                instance_id = str(inst.id)
             else:
-                inst = await ModuleInstanceService(self._session).ensure_cabinet_instance(
+                inst = await inst_svc.ensure_cabinet_instance(
                     cabinet_id=cabinet_id, module_id=module_id
                 )
-            instance_id = str(inst.id)
+                instance_id = str(inst.id)
 
         status_col = str(params.get("status_column") or "status")
         error_col = str(params.get("error_column") or "error")
@@ -1075,15 +1109,28 @@ class ModuleActionExecutor:
         kind_col = str(params.get("source_kind_column") or "source_kind")
         source_kind = str(body.get(kind_col) or "local").strip().lower()
 
-        cab = await self._session.get(CabinetInstanceRow, cabinet_id)
-        if cab is None or not cab.company_id:
+        company_id, os_cabinet_id, os_project_id = await resolve_equipment_catalog_tenancy(
+            self._session, instance_id=instance_id
+        )
+        if not company_id:
+            # Legacy cabinet path when instance tenancy is incomplete.
+            cab = await self._session.get(CabinetInstanceRow, cabinet_id) if cabinet_id else None
+            if cab is not None and cab.company_id:
+                company_id = str(cab.company_id)
+                os_cabinet_id = str(cab.id)
+                os_project_id = project_id
+        if not company_id:
             raise AppError(
                 code="VALIDATION_ERROR",
                 title="Validation Error",
                 status=422,
-                detail="cabinet has no company for OpenSearch index",
+                detail="no company tenancy for OpenSearch index",
             )
-        company_id = str(cab.company_id)
+        # Prefer SoT tenancy; fall back to caller scope for cabinet/project leaves.
+        index_cabinet_id = os_cabinet_id if os_cabinet_id is not None else (cabinet_id or None)
+        index_project_id = os_project_id if os_project_id is not None else project_id
+        if index_cabinet_id == "":
+            index_cabinet_id = None
 
         # Local: light header probe (sync) for column_map UI.
         if source_kind == "local" and isinstance(body.get(file_col), dict):
@@ -1091,7 +1138,7 @@ class ModuleActionExecutor:
                 cols = await extract_local_columns(body)
                 if cols:
                     body[columns_col] = json.dumps(cols, ensure_ascii=False)
-                    await self._update_module_row(
+                    await self._update_row_for_scope(
                         cabinet_id=cabinet_id,
                         project_id=project_id,
                         module_id=module_id,
@@ -1100,6 +1147,8 @@ class ModuleActionExecutor:
                         body=body,
                         principal=principal,
                         employee=employee,
+                        owner_kind=owner_kind,
+                        owner_id=owner_id,
                         run_actions=False,
                     )
             except Exception as exc:
@@ -1169,8 +1218,8 @@ class ModuleActionExecutor:
             instance_id=instance_id,
             row_id=row_id,
             company_id=company_id,
-            cabinet_id=cabinet_id,
-            project_id=project_id,
+            cabinet_id=index_cabinet_id,
+            project_id=index_project_id,
         )
         if enq.get("inline"):
             result = await run_index_equipment_catalog(
@@ -1178,8 +1227,8 @@ class ModuleActionExecutor:
                 instance_id=instance_id,
                 row_id=row_id,
                 company_id=company_id,
-                cabinet_id=cabinet_id,
-                project_id=project_id,
+                cabinet_id=index_cabinet_id,
+                project_id=index_project_id,
             )
             return {
                 "kind": "content.index_opensearch",

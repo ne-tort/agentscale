@@ -31,10 +31,53 @@ from prodavan.infrastructure.files.manager import ensure_file_store
 logger = logging.getLogger(__name__)
 
 OS_NAMESPACE = "equipment"
+# OpenSearch tenancy key for platform SoT catalogs (shared across companies).
+PLATFORM_OS_COMPANY_ID = "platform"
 REQUIRED_MAP_KEYS = ("title", "price")
 DEFAULT_REINDEX_INTERVAL_HOURS = 24
 
 _INDEX_SAFE = re.compile(r"[^a-z0-9_]+")
+
+
+async def resolve_equipment_catalog_tenancy(
+    session: AsyncSession,
+    *,
+    instance_id: str | None = None,
+    inst: Any | None = None,
+) -> tuple[str | None, str | None, str | None]:
+    """Return ``(company_id, cabinet_id, project_id)`` for catalog OpenSearch ops.
+
+    Platform SoT uses ``PLATFORM_OS_COMPANY_ID`` so indexes are searchable from every
+    company that resolves to the shared platform instance.
+    """
+    from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
+    from prodavan.infrastructure.persistence.models.modules import ModuleInstanceRow
+    from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+    row = inst
+    if row is None:
+        if not instance_id:
+            return None, None, None
+        row = await session.get(ModuleInstanceRow, str(instance_id))
+    if row is None:
+        return None, None, None
+    kind = str(row.owner_kind or "")
+    oid = str(row.owner_id or "")
+    if kind == "project":
+        project = await session.get(ProjectRow, oid)
+        if project is None:
+            return None, None, None
+        return str(project.company_id), str(project.cabinet_id), str(project.id)
+    if kind == "cabinet":
+        cab = await session.get(CabinetInstanceRow, oid)
+        if cab is None or not cab.company_id:
+            return None, oid or None, None
+        return str(cab.company_id), str(cab.id), None
+    if kind == "company":
+        return oid or None, None, None
+    if kind == "platform":
+        return PLATFORM_OS_COMPANY_ID, None, None
+    return None, None, None
 
 
 def catalog_os_index_name(row_id: str) -> str:
@@ -402,6 +445,8 @@ async def _index_remote_rows(
     if not secret_ref:
         raise ValueError("remote_dsn missing")
     if secret_ref.startswith(("file://cabinet_secrets/", "vault://cabinet_secrets/")):
+        if not cabinet_id:
+            raise ValueError("cabinet_id required for cabinet_secrets DSN")
         assert_cabinet_secret_scope(secret_ref, cabinet_id)
     dsn = get_secret_store().get(secret_ref)
     if not dsn:

@@ -188,6 +188,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     assert field_cols[:3] == ["name", "status", "source_kind"]
     status_field = next(f for f in settings["ui_json"]["fields"] if f["column"] == "status")
     assert status_field.get("read_only") is True
+    assert status_field.get("trailing_action", {}).get("action_id") == "index_catalog_opensearch"
     assert status_field.get("accent_map") == {
         "draft": "warning",
         "indexing": "warning",

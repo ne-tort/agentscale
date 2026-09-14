@@ -11,13 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.modules.equipment_catalog_opensearch import (
     enqueue_or_run_index_equipment_catalog,
+    resolve_equipment_catalog_tenancy,
 )
-from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 from prodavan.infrastructure.persistence.models.modules import (
     ModuleInstanceDataRow,
     ModuleInstanceRow,
 )
-from prodavan.infrastructure.persistence.models.projects import ProjectRow
 
 logger = logging.getLogger(__name__)
 
@@ -60,25 +59,6 @@ def _due(row: dict[str, Any], *, now: datetime) -> bool:
     return age_h >= _interval_hours(row)
 
 
-async def _tenancy_for_instance(
-    session: AsyncSession, inst: ModuleInstanceRow
-) -> tuple[str | None, str | None, str | None]:
-    """Return (company_id, cabinet_id, project_id)."""
-    if inst.owner_kind == "project":
-        project = await session.get(ProjectRow, str(inst.owner_id))
-        if project is None:
-            return None, None, None
-        return str(project.company_id), str(project.cabinet_id), str(project.id)
-    if inst.owner_kind == "cabinet":
-        cab = await session.get(CabinetInstanceRow, str(inst.owner_id))
-        if cab is None or not cab.company_id:
-            return None, str(inst.owner_id), None
-        return str(cab.company_id), str(cab.id), None
-    if inst.owner_kind == "company":
-        return str(inst.owner_id), None, None
-    return None, None, None
-
-
 async def sweep_due_equipment_catalogs(session: AsyncSession) -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     enqueued = 0
@@ -99,7 +79,9 @@ async def sweep_due_equipment_catalogs(session: AsyncSession) -> dict[str, Any]:
         scanned += 1
         if not _due(body, now=now):
             continue
-        company_id, cabinet_id, project_id = await _tenancy_for_instance(session, inst)
+        company_id, cabinet_id, project_id = await resolve_equipment_catalog_tenancy(
+            session, inst=inst
+        )
         if not company_id:
             continue
         row_id = str(data_row.row_id or "").strip()

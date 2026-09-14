@@ -721,12 +721,15 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       final raw = value?.toString() ?? '';
       final text = raw.isEmpty ? '' : _enumLabel(column, raw);
       final accent = _fieldAccent(context, fieldCfg, value: raw);
+      final indexing = raw == 'indexing';
       return AppValuePreference<String>(
         title: label,
         icon: fieldIcon,
         value: text,
         enabled: false,
         accentColor: accent,
+        busy: indexing,
+        trailing: _trailingAction(context, fieldCfg, busy: indexing),
         onSave: (_) async {},
       );
     }
@@ -829,6 +832,49 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
           },
         );
     }
+  }
+
+  Widget? _trailingAction(
+    BuildContext context,
+    Map<String, dynamic>? fieldCfg, {
+    bool busy = false,
+  }) {
+    final raw = fieldCfg?['trailing_action'];
+    if (raw is! Map) return null;
+    final actionId = raw['action_id']?.toString() ?? '';
+    if (actionId.isEmpty) return null;
+    final scope = ModuleRuntimeScope.maybeOf(context);
+    if (scope == null || scope.invokeActionFn == null) return null;
+    final l10n = AppLocalizations.of(context);
+    final locale = Localizations.localeOf(context);
+    final tooltip = resolveMetaLabel(raw['tooltip'], l10n, locale: locale);
+    final icon = metaIconFromName(
+      raw['icon']?.toString(),
+      fallback: Icons.refresh,
+    );
+    return IconButton(
+      icon: Icon(icon, size: 20),
+      tooltip: tooltip.isNotEmpty ? tooltip : actionId,
+      onPressed: busy
+          ? null
+          : () async {
+              final rowId = _rowId;
+              if (rowId == null || rowId.isEmpty) return;
+              try {
+                await scope.invokeAction(actionId: actionId, rowId: rowId);
+                await _reloadRowAfterFailure();
+                if (!context.mounted) return;
+                AppSnackBar.info(
+                  context,
+                  tooltip.isNotEmpty ? tooltip : actionId,
+                );
+              } catch (e) {
+                if (!context.mounted) return;
+                AppErrors.showSnack(context, e);
+                await _reloadRowAfterFailure();
+              }
+            },
+    );
   }
 
   Color? _fieldAccent(

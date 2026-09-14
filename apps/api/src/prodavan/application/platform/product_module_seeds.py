@@ -1746,7 +1746,15 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "column": "status",
                             "widget": "value",
                             "read_only": True,
-                            "icon": "sync",
+                            "icon": "flag_outlined",
+                            "trailing_action": {
+                                "action_id": "index_catalog_opensearch",
+                                "icon": "refresh",
+                                "tooltip": {
+                                    "ru": "Обновить индекс",
+                                    "en": "Reindex",
+                                },
+                            },
                             "accent_map": {
                                 "draft": "warning",
                                 "indexing": "warning",

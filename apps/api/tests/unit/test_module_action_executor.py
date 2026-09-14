@@ -247,3 +247,32 @@ async def test_invoke_owner_rejects_non_remote_actions() -> None:
             principal=Principal(sub="admin", roles=frozenset({"platform_admin"})),
         )
     assert exc.value.code == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_invoke_owner_allows_index_opensearch_kind() -> None:
+    """Owner whitelist includes content.index_opensearch (manual reindex button)."""
+    from unittest.mock import AsyncMock, patch
+
+    executor = ModuleActionExecutor(session=_FakeSession([  # type: ignore[arg-type]
+        {
+            "id": "index_catalog_opensearch",
+            "kind": "content.index_opensearch",
+            "params": {"table_slug": "catalogs"},
+        },
+    ]))
+    with patch.object(
+        executor,
+        "_index_opensearch",
+        new=AsyncMock(return_value={"kind": "content.index_opensearch", "status": "indexing"}),
+    ) as mocked:
+        out = await executor.invoke_owner(
+            owner_kind="platform",
+            owner_id="platform",
+            module_id="mod_equipment",
+            action_id="index_catalog_opensearch",
+            row_id="cat_1",
+            principal=Principal(sub="admin", roles=frozenset({"platform_admin"})),
+        )
+    assert out["status"] == "indexing"
+    mocked.assert_awaited_once()

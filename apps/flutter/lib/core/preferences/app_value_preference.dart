@@ -42,6 +42,7 @@ class AppValuePreference<T> extends StatefulWidget {
     this.onTap,
     this.accentColor,
     this.busy = false,
+    this.trailing,
   });
 
   final String title;
@@ -65,6 +66,8 @@ class AppValuePreference<T> extends StatefulWidget {
   final Color? accentColor;
   /// External busy (e.g. remote DSN probe) — spinner on the tile.
   final bool busy;
+  /// Replaces the default chevron / copy trailing control when set.
+  final Widget? trailing;
 
   @override
   State<AppValuePreference<T>> createState() => _AppValuePreferenceState<T>();
@@ -248,13 +251,14 @@ class _AppValuePreferenceState<T> extends State<AppValuePreference<T>> {
       subtitle: subtitle,
       trailing: showBusy
           ? _busyTrailing(theme)
-          : widget.onTap != null
-              ? Icon(
-                  Icons.copy_outlined,
-                  size: 20,
-                  color: widget.accentColor ?? theme.colorScheme.onSurfaceVariant,
-                )
-              : const AppTrailingChevron(),
+          : widget.trailing ??
+              (widget.onTap != null
+                  ? Icon(
+                      Icons.copy_outlined,
+                      size: 20,
+                      color: widget.accentColor ?? theme.colorScheme.onSurfaceVariant,
+                    )
+                  : const AppTrailingChevron()),
       onTap: showBusy ? null : _handleTap,
     );
   }
