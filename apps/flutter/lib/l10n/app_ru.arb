@@ -1364,6 +1364,8 @@
   "projectLaunchSuccess": "Проект запущен",
   "projectLaunchInProgress": "Запуск проекта…",
   "projectLaunchStartingSnack": "Проект запускается…",
+  "projectReloadInProgress": "Перезагрузка проекта…",
+  "projectLifecycleTimedOut": "Превышено время ожидания запуска контейнера",
   "projectResumeInProgress": "Возобновление проекта…",
   "projectResumeStartingSnack": "Проект возобновляется…",
   "projectPauseConfirmMessage": "При приостановке проекта агент будет недоступен.",

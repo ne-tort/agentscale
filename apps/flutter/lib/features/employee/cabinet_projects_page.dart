@@ -66,11 +66,7 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
     for (final p in _projects) {
       final id = p['id'] as String?;
       if (id == null) continue;
-      for (final kind in [
-        AppJobKinds.projectLaunch,
-        AppJobKinds.projectReload,
-        AppJobKinds.projectResume,
-      ]) {
+      for (final kind in AppJobKinds.lifecycle) {
         final key = '$kind:$id';
         final status = appJobStore.bySubject(kind: kind, subjectId: id)?.status;
         final prev = _jobStatusSeen[key];
@@ -196,10 +192,7 @@ class _CabinetProjectsPageState extends State<CabinetProjectsPage> {
       return context.appColors.danger;
     }
     if (id != null &&
-        (appJobStore.isActive(kind: AppJobKinds.projectLaunch, subjectId: id) ||
-            appJobStore.isActive(kind: AppJobKinds.projectReload, subjectId: id) ||
-            appJobStore.isActive(kind: AppJobKinds.projectResume, subjectId: id) ||
-            containerIsInFlight(project))) {
+        (appJobStore.isLifecycleActive(id) || containerIsInFlight(project))) {
       return context.appColors.warning;
     }
     if (selected &&

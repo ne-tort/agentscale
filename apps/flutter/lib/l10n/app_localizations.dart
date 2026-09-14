@@ -4406,6 +4406,18 @@ abstract class AppLocalizations {
   /// **'Project is launching…'**
   String get projectLaunchStartingSnack;
 
+  /// No description provided for @projectReloadInProgress.
+  ///
+  /// In en, this message translates to:
+  /// **'Reloading project…'**
+  String get projectReloadInProgress;
+
+  /// No description provided for @projectLifecycleTimedOut.
+  ///
+  /// In en, this message translates to:
+  /// **'Container start timed out'**
+  String get projectLifecycleTimedOut;
+
   /// No description provided for @projectResumeInProgress.
   ///
   /// In en, this message translates to:

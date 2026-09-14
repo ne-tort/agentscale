@@ -1362,6 +1362,8 @@
   "projectLaunchSuccess": "Project launched",
   "projectLaunchInProgress": "Launching project…",
   "projectLaunchStartingSnack": "Project is launching…",
+  "projectReloadInProgress": "Reloading project…",
+  "projectLifecycleTimedOut": "Container start timed out",
   "projectResumeInProgress": "Resuming project…",
   "projectResumeStartingSnack": "Project is resuming…",
   "projectPauseConfirmMessage": "While paused, the agent will be unavailable.",

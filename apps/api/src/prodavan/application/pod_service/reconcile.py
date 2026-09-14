@@ -14,6 +14,7 @@ from prodavan.application.pod_service.lifecycle_emitter import PodLifecycleEmitt
 from prodavan.application.pod_service.ports.pod_runtime import PodRuntimePort
 from prodavan.application.pod_service.query import PodQuery
 from prodavan.application.pod_service.runtime_observation import RuntimeObservationService
+from prodavan.config.settings import settings
 from prodavan.domain.identity import Principal
 from prodavan.domain.pods import PodDesiredState, PodStatus
 from prodavan.domain.projects import ProjectStatus
@@ -22,8 +23,10 @@ from prodavan.infrastructure.persistence.models.projects import ProjectPodRow, P
 logger = logging.getLogger(__name__)
 
 _SYSTEM = Principal(sub="system:pod-reconcile", roles=frozenset({"platform.admin"}))
-# Do not reap pods still starting — launch may not have committed the PG row yet.
-_PROVISIONING_GRACE_SEC = 120.0
+# Do not reap pods still pulling images (pull budget + Ready + slack).
+_PROVISIONING_GRACE_SEC = float(
+    settings.pod_image_pull_timeout_sec + settings.pod_ready_timeout_sec + 40
+)
 
 
 def _managed_pod_age_sec(item: dict) -> float | None:

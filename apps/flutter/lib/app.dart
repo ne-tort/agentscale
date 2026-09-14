@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -22,6 +24,7 @@ class _ProdavanAppState extends State<ProdavanApp> {
   void initState() {
     super.initState();
     appSettings.load();
+    unawaited(appJobStore.ensureHydrated());
   }
 
   @override

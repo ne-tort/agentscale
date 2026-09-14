@@ -31,13 +31,13 @@ class AppNavPreference extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final effectiveTitle = loading && loadingLabel != null ? loadingLabel! : title;
+    final progressSubtitle = loading ? (loadingLabel ?? '') : null;
     final iconColor = enabled && !loading
         ? (accentColor ?? scheme.onSurfaceVariant)
         : Theme.of(context).disabledColor;
 
     return AppPreferenceTile(
-      title: effectiveTitle,
+      title: title,
       icon: icon,
       enabled: enabled && !loading,
       leading: loading
@@ -55,7 +55,9 @@ class AppNavPreference extends StatelessWidget {
                 size: 24,
                 color: iconColor,
               ),
-      subtitle: subtitle,
+      subtitle: progressSubtitle != null && progressSubtitle.isNotEmpty
+          ? Text(progressSubtitle)
+          : subtitle,
       accentColor: accentColor,
       trailing: loading ? null : const AppTrailingChevron(),
       onTap: enabled && !loading ? onTap : null,

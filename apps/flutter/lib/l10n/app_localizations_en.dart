@@ -2458,6 +2458,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectLaunchStartingSnack => 'Project is launching…';
 
   @override
+  String get projectReloadInProgress => 'Reloading project…';
+
+  @override
+  String get projectLifecycleTimedOut => 'Container start timed out';
+
+  @override
   String get projectResumeInProgress => 'Resuming project…';
 
   @override

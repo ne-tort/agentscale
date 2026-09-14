@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from prodavan.application.pod_service.reconcile import PodReconcileService
+from prodavan.config.settings import settings
 
 
 @pytest.mark.asyncio
@@ -40,7 +41,11 @@ async def test_reap_zombies_skips_young_managed_pod() -> None:
 async def test_reap_zombies_deletes_stale_untracked_pod() -> None:
     session = AsyncMock()
     runtime = AsyncMock()
-    old = (datetime.now(UTC) - timedelta(minutes=10)).isoformat().replace("+00:00", "Z")
+    # Older than pull+ready grace (image pull budget + ready + slack).
+    grace = settings.pod_image_pull_timeout_sec + settings.pod_ready_timeout_sec + 40
+    old = (
+        datetime.now(UTC) - timedelta(seconds=grace + 60)
+    ).isoformat().replace("+00:00", "Z")
     runtime.list_managed_pods = AsyncMock(
         return_value=[
             {

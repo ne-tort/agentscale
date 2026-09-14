@@ -1,6 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/containers/container_runtime_presenter.dart';
+import 'package:prodavan/core/containers/project_container_poll.dart';
+import 'package:prodavan/core/jobs/app_job_store.dart';
+import 'package:prodavan/core/jobs/project_lifecycle_jobs.dart';
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
@@ -32,25 +37,54 @@ class ProjectContainerPage extends StatefulWidget {
 class _ProjectContainerPageState extends State<ProjectContainerPage> {
   late final AppAutoRefreshBinder _autoRefresh;
   bool _loading = true;
-  bool _reloading = false;
   Map<String, dynamic>? _container;
   Map<String, dynamic>? _metrics;
   Map<String, dynamic>? _projectMetrics;
 
+  AppJob? get _job => appJobStore.lifecycleFor(widget.projectId);
+
+  bool get _busy {
+    final job = _job;
+    return job != null && job.status == AppJobStatus.running && !job.isExpired;
+  }
+
   @override
   void initState() {
     super.initState();
+    appJobStore.addListener(_onJobs);
     _autoRefresh = AppAutoRefreshBinder(
       onTick: () => _load(silent: true),
       isActive: () => appAutoRefreshIsActive(context),
     )..attach();
-    _load();
+    unawaited(_bootstrap());
+  }
+
+  Future<void> _bootstrap() async {
+    await appJobStore.ensureHydrated();
+    if (!mounted) return;
+    final job = appJobStore.lifecycleFor(widget.projectId);
+    if (job != null && job.status == AppJobStatus.running && !job.isExpired) {
+      unawaited(
+        resumePersistedLifecycleJob(
+          store: appJobStore,
+          api: workContext.api,
+          projectId: widget.projectId,
+          l10n: AppLocalizations.of(context),
+        ),
+      );
+    }
+    await _load();
   }
 
   @override
   void dispose() {
+    appJobStore.removeListener(_onJobs);
     _autoRefresh.dispose();
     super.dispose();
+  }
+
+  void _onJobs() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _load({bool silent = false}) async {
@@ -88,16 +122,25 @@ class _ProjectContainerPageState extends State<ProjectContainerPage> {
   }
 
   Future<void> _reload() async {
-    setState(() => _reloading = true);
+    final l10n = AppLocalizations.of(context);
     try {
-      await workContext.api.reloadProject(widget.projectId);
+      final container = await runProjectReloadJob(
+        store: appJobStore,
+        api: workContext.api,
+        projectId: widget.projectId,
+        l10n: l10n,
+      );
       if (!mounted) return;
-      AppSnackBar.success(context, AppLocalizations.of(context).projectReloadSuccess);
+      final failure = containerObservedFailureMessage(container);
+      if (failure != null) {
+        AppErrors.showSnack(context, failure);
+      } else {
+        AppSnackBar.success(context, l10n.projectReloadSuccess);
+      }
       await _load();
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
-    } finally {
-      if (mounted) setState(() => _reloading = false);
+      await _load();
     }
   }
 
@@ -105,6 +148,8 @@ class _ProjectContainerPageState extends State<ProjectContainerPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final warning = context.appColors.warning;
+    final job = _job;
+    final showProgress = _busy && job != null;
 
     return AppScaffold(
       title: Text(widget.projectName),
@@ -122,6 +167,7 @@ class _ProjectContainerPageState extends State<ProjectContainerPage> {
                   AppNavPreference(
                     title: l10n.projectWorkspaceFiles,
                     icon: Icons.folder_outlined,
+                    enabled: !_busy,
                     onTap: () {
                       Navigator.of(context).push(
                         MaterialPageRoute<void>(
@@ -136,15 +182,26 @@ class _ProjectContainerPageState extends State<ProjectContainerPage> {
                       );
                     },
                   ),
-                AppNavPreference(
-                  title: l10n.projectReload,
-                  icon: Icons.refresh_outlined,
-                  accentColor: warning,
-                  enabled: !_reloading,
-                  loading: _reloading,
-                  loadingLabel: l10n.projectReload,
-                  onTap: _reload,
-                ),
+                if (showProgress)
+                  AppNavPreference(
+                    title: job.title.isNotEmpty
+                        ? job.title
+                        : l10n.projectReloadInProgress,
+                    icon: Icons.refresh_outlined,
+                    accentColor: warning,
+                    loading: true,
+                    loadingLabel: job.subtitle.isNotEmpty
+                        ? job.subtitle
+                        : l10n.projectLaunchStartingSnack,
+                    onTap: () {},
+                  )
+                else
+                  AppNavPreference(
+                    title: l10n.projectReload,
+                    icon: Icons.refresh_outlined,
+                    accentColor: warning,
+                    onTap: _reload,
+                  ),
               ],
             ),
     );

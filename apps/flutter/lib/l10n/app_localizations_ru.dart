@@ -2472,6 +2472,12 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectLaunchStartingSnack => 'Проект запускается…';
 
   @override
+  String get projectReloadInProgress => 'Перезагрузка проекта…';
+
+  @override
+  String get projectLifecycleTimedOut => 'Превышено время ожидания запуска контейнера';
+
+  @override
   String get projectResumeInProgress => 'Возобновление проекта…';
 
   @override

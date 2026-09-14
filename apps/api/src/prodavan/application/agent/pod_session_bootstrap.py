@@ -24,8 +24,6 @@ from prodavan.infrastructure.persistence.models.projects import ProjectPodRow
 
 logger = logging.getLogger(__name__)
 
-_BOOTSTRAP_WAIT_SEC = 120
-
 
 def _bootstrap_payload(row: AgentSessionRow) -> BridgeSessionBootstrap:
     adapter_state = row.adapter_state
@@ -60,7 +58,8 @@ class PodSessionBootstrap:
             try:
                 await RuntimeObservationService(self._session).wait_for_running(
                     project_id=project_id,
-                    timeout_sec=_BOOTSTRAP_WAIT_SEC,
+                    # Pull (600s) + Ready (20s); do not abort mid-image-download.
+                    timeout_sec=None,
                 )
             except Exception as exc:
                 logger.warning(
