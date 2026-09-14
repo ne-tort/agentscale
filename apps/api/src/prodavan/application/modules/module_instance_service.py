@@ -406,9 +406,42 @@ class ModuleInstanceService:
         row = await self._session.get(ModuleInstanceRow, instance_id)
         if row is None:
             return False
+        if row.module_id == "mod_equipment":
+            await self._cleanup_equipment_os_for_instance(row)
         await self._session.delete(row)
         await self._session.flush()
         return True
+
+    async def _cleanup_equipment_os_for_instance(self, row: ModuleInstanceRow) -> None:
+        from prodavan.application.modules.equipment_catalog_opensearch import (
+            cleanup_equipment_indexes_for_instance,
+        )
+        from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
+        from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+        company_id = ""
+        cabinet_id: str | None = None
+        project_id: str | None = None
+        if row.owner_kind == OWNER_CABINET:
+            cabinet_id = row.owner_id
+            cab = await self._session.get(CabinetInstanceRow, row.owner_id)
+            if cab is not None and cab.company_id:
+                company_id = str(cab.company_id)
+        elif row.owner_kind == OWNER_PROJECT:
+            project_id = row.owner_id
+            proj = await self._session.get(ProjectRow, row.owner_id)
+            if proj is not None:
+                company_id = str(proj.company_id or "")
+                cabinet_id = str(proj.cabinet_id) if proj.cabinet_id else None
+        if not company_id:
+            return
+        await cleanup_equipment_indexes_for_instance(
+            session=self._session,
+            instance_id=row.id,
+            company_id=company_id,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+        )
 
     async def delete_cabinet_module_instances(self, *, cabinet_id: str, module_id: str) -> int:
         """Delete cabinet instance and project leaf instances for projects in that cabinet."""
@@ -424,12 +457,11 @@ class ModuleInstanceService:
                 owner_kind=OWNER_PROJECT, owner_id=project_id, module_id=module_id
             )
             if pr is not None:
-                await self._session.delete(pr)
+                await self.delete_instance(instance_id=pr.id)
                 deleted += 1
         if cab is not None:
-            await self._session.delete(cab)
+            await self.delete_instance(instance_id=cab.id)
             deleted += 1
-        await self._session.flush()
         return deleted
 
     async def refresh_meta_from_template(self, *, instance_id: str, module_id: str) -> None:

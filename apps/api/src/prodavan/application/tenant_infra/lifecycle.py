@@ -63,4 +63,32 @@ async def purge_project_tenant_infra(
         except Exception:
             logger.exception("tenant_infra objects purge failed project=%s", project_id)
             stats["objects"] = 0
+        try:
+            from prodavan.application.modules.equipment_catalog_opensearch import (
+                cleanup_equipment_indexes_for_instance,
+            )
+            from prodavan.application.modules.module_instance_service import (
+                OWNER_PROJECT,
+                ModuleInstanceService,
+            )
+
+            # Local leaf only — global MP shares cabinet indexes (do not delete).
+            leaf = await ModuleInstanceService(session).get_instance(
+                owner_kind=OWNER_PROJECT,
+                owner_id=project_id,
+                module_id="mod_equipment",
+            )
+            if leaf is not None:
+                deleted = await cleanup_equipment_indexes_for_instance(
+                    session=session,
+                    instance_id=leaf.id,
+                    company_id=company_id,
+                    project_id=project_id,
+                )
+                stats["equipment_os"] = len(deleted)
+            else:
+                stats["equipment_os"] = 0
+        except Exception:
+            logger.exception("equipment OS purge failed project=%s", project_id)
+            stats["equipment_os"] = 0
     return stats

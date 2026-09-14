@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from sqlalchemy import select
@@ -28,6 +29,8 @@ from prodavan.infrastructure.persistence.models.modules import (
     ModuleRow,
 )
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+logger = logging.getLogger(__name__)
 
 
 class ProjectRuntimeModuleService:
@@ -463,7 +466,11 @@ class ProjectRuntimeModuleService:
                         project_id=project_id,
                     )
             except Exception:
-                pass
+                logger.exception(
+                    "equipment catalog OS delete failed project=%s row=%s",
+                    project_id,
+                    row_id,
+                )
         await self._session.commit()
         from prodavan.application.projects.workspace_sync_policy import (
             defer_or_schedule_project_sync,

@@ -529,13 +529,112 @@ async def delete_equipment_catalog_index(
     project_id: str | None = None,
 ) -> bool:
     svc = get_search_index_service()
-    return await svc.delete_index(
-        namespace=OS_NAMESPACE,
-        index=catalog_os_index_name(row_id),
-        company_id=company_id,
-        cabinet_id=cabinet_id,
-        project_id=project_id,
+    try:
+        return await svc.delete_index(
+            namespace=OS_NAMESPACE,
+            index=catalog_os_index_name(row_id),
+            company_id=company_id,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+        )
+    except Exception:
+        logger.exception(
+            "delete_equipment_catalog_index failed row_id=%s company=%s",
+            row_id,
+            company_id,
+        )
+        return False
+
+
+async def cleanup_equipment_indexes_for_instance(
+    *,
+    session: Any,
+    instance_id: str,
+    company_id: str,
+    cabinet_id: str | None = None,
+    project_id: str | None = None,
+) -> list[str]:
+    """Delete OpenSearch indexes for all catalogs rows on a module instance."""
+    from sqlalchemy import select
+
+    from prodavan.infrastructure.persistence.models.modules import ModuleInstanceDataRow
+
+    q = await session.execute(
+        select(ModuleInstanceDataRow).where(
+            ModuleInstanceDataRow.instance_id == instance_id,
+            ModuleInstanceDataRow.table_slug == "catalogs",
+        )
     )
+    deleted: list[str] = []
+    for row in q.scalars().all():
+        rid = str(row.row_id or "").strip()
+        if not rid:
+            continue
+        ok = await delete_equipment_catalog_index(
+            row_id=rid,
+            company_id=company_id,
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+        )
+        if ok:
+            deleted.append(rid)
+    return deleted
+
+
+async def reconcile_orphan_equipment_indexes(
+    *,
+    session: Any,
+    company_id: str | None = None,
+) -> dict[str, Any]:
+    """Delete physical equipment indexes with no matching catalogs row in DB."""
+    from sqlalchemy import select
+
+    from prodavan.domain.search_index.types import physical_index
+    from prodavan.infrastructure.persistence.models.modules import ModuleInstanceDataRow
+
+    svc = get_search_index_service()
+    physical_names = await svc.list_indexes(
+        namespace=OS_NAMESPACE, company_id=company_id
+    )
+    live_physical: set[str] = set()
+    q = await session.execute(
+        select(ModuleInstanceDataRow).where(ModuleInstanceDataRow.table_slug == "catalogs")
+    )
+    for row in q.scalars().all():
+        body = row.body if isinstance(row.body, dict) else {}
+        stored = str(body.get("index_name") or "").strip()
+        rid = str(row.row_id or "").strip()
+        if stored:
+            live_physical.add(stored)
+        if rid:
+            live_physical.add(physical_index(OS_NAMESPACE, catalog_os_index_name(rid)))
+
+    prefix = f"{OS_NAMESPACE}__"
+    deleted: list[str] = []
+    kept = 0
+    for name in physical_names:
+        if not name.startswith(prefix):
+            continue
+        if name in live_physical:
+            kept += 1
+            continue
+        logical = name[len(prefix) :]
+        try:
+            if company_id:
+                ok = await svc.delete_index(
+                    namespace=OS_NAMESPACE,
+                    index=logical,
+                    company_id=company_id,
+                )
+            else:
+                # Admin reconcile across tenants — drop orphan physical index directly.
+                ok = await svc._store.delete_index(namespace=OS_NAMESPACE, index=logical)
+        except Exception:
+            logger.exception("reconcile delete failed index=%s", name)
+            continue
+        if ok:
+            deleted.append(name)
+    return {"deleted": deleted, "kept": kept, "scanned": len(physical_names)}
 
 
 async def extract_local_columns(body: dict[str, Any]) -> list[str]:

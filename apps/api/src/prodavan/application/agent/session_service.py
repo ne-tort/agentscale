@@ -165,6 +165,7 @@ class AgentSessionService:
         principal: Principal,
         employee: EmployeeRow | None,
         model: str | None = None,
+        title: str | None = None,
     ) -> dict:
         """Start an agent session — blocked while project is paused (runtime)."""
         project = await self._projects.require_access(
@@ -199,7 +200,10 @@ class AgentSessionService:
             .where(AgentSessionRow.project_id == project_id)
         )
         existing_count = int(existing_q.scalar_one() or 0)
-        default_title = _dialog_title_for_ordinal(existing_count + 1)
+        cleaned_title = (title or "").strip()
+        default_title = (
+            cleaned_title[:200] if cleaned_title else _dialog_title_for_ordinal(existing_count + 1)
+        )
         vendor_agent_id: str
         model_name = sanitize_runtime_model(opts.model)
         if settings.pod_agent_runtime_enabled:
@@ -324,6 +328,8 @@ class AgentSessionService:
         employee: EmployeeRow | None,
         limit: int = 50,
     ) -> list[dict]:
+        from prodavan.infrastructure.persistence.models.agent import EmployeeChatPinRow
+
         await self._projects.require_access(
             project_id=project_id, principal=principal, employee=employee, write=False
         )
@@ -333,7 +339,22 @@ class AgentSessionService:
             .order_by(AgentSessionRow.created_at.desc())
             .limit(limit)
         )
-        return [_session_public(r) for r in q.scalars().all()]
+        rows = list(q.scalars().all())
+        pinned_ids: set[str] = set()
+        if employee is not None and rows:
+            pin_q = await self._session.execute(
+                select(EmployeeChatPinRow.session_id).where(
+                    EmployeeChatPinRow.employee_id == employee.id,
+                    EmployeeChatPinRow.session_id.in_([r.id for r in rows]),
+                )
+            )
+            pinned_ids = {sid for sid in pin_q.scalars().all()}
+        out: list[dict] = []
+        for r in rows:
+            item = _session_public(r)
+            item["pinned"] = r.id in pinned_ids
+            out.append(item)
+        return out
 
     async def patch_session(
         self,

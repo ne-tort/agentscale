@@ -20,9 +20,11 @@ This does **not** replace equipment catalog search (`equipment_catalog_search` /
 6. MVP: OpenSearch **security plugin disabled** locally; ACL + quotas live in `SearchIndexService`; sandbox NetworkPolicy keeps **no** egress to `:9200`.
 7. Company ownership for empty indexes is stored in OpenSearch `mappings._meta.company_id` (never in index `settings` — unknown settings 400).
 8. Project Pods do **not** open `:9200` — search goes through Tenant Infra `/infra/search` + equipment `catalog-search` (Bridge scope `infra:search`).
+9. Equipment catalogs: one index per row (`equipment__c_{row_id}`); pod search fan-out by ready catalogs (not a global mega-index). Cascade delete of OS indexes on instance/row purge; admin `POST …/admin/search-index/reconcile-equipment` removes orphans.
 
 ## Consequences
 
 - Other BCs call `SearchIndexService` / Port synchronously; Kafka is side-effects only.
 - Ops: `OPENSEARCH_URL` in API ConfigMap; init Job smokes `/_cluster/health`; PVC `prodavan-opensearch-data`.
 - MVP omits security plugin, ISM policies, multi-node, and product catalog migration onto OpenSearch.
+- After deleting projects/catalogs outside the UI delete path, run reconcile-equipment on Dev to clear orphan indexes.

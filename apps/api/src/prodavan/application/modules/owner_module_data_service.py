@@ -7,8 +7,10 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.modules.module_instance_service import (
+    OWNER_CABINET,
     OWNER_COMPANY,
     OWNER_PLATFORM,
+    OWNER_PROJECT,
     PLATFORM_OWNER_ID,
     ModuleInstanceService,
 )
@@ -182,6 +184,34 @@ class OwnerModuleDataService:
         )
         if not ok:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        if module_id == "mod_equipment" and table_slug == "catalogs":
+            from prodavan.application.modules.equipment_catalog_opensearch import (
+                delete_equipment_catalog_index,
+            )
+            from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
+            from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+            company_id = ""
+            cabinet_id: str | None = None
+            project_id: str | None = None
+            if owner_kind == OWNER_CABINET:
+                cabinet_id = owner_id
+                cab = await self._session.get(CabinetInstanceRow, owner_id)
+                if cab is not None and cab.company_id:
+                    company_id = str(cab.company_id)
+            elif owner_kind == OWNER_PROJECT:
+                project_id = owner_id
+                proj = await self._session.get(ProjectRow, owner_id)
+                if proj is not None:
+                    company_id = str(proj.company_id or "")
+                    cabinet_id = str(proj.cabinet_id) if proj.cabinet_id else None
+            if company_id:
+                await delete_equipment_catalog_index(
+                    row_id=row_id,
+                    company_id=company_id,
+                    cabinet_id=cabinet_id,
+                    project_id=project_id,
+                )
         from prodavan.application.projects.workspace_outdated import (
             mark_workspace_outdated_for_module,
         )

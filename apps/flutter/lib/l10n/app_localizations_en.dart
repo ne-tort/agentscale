@@ -2379,6 +2379,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectAboutLabel => 'About';
 
   @override
+  String get projectDescriptionLabel => 'Description';
+
+  @override
+  String get projectDialogsLabel => 'Dialogs';
+
+  @override
+  String get projectCreateDialogHint => 'Create dialog';
+
+  @override
   String get projectAboutColumn => 'About';
 
   @override

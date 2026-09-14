@@ -1203,6 +1203,7 @@ class ProdavanApi {
   Future<Map<String, dynamic>> createAgentSession({
     required String projectId,
     String? model,
+    String? title,
   }) async {
     final prevProj = this.projectId;
     this.projectId = projectId;
@@ -1211,6 +1212,7 @@ class ProdavanApi {
         _uri('/projects/$projectId/agent/sessions'),
         body: jsonEncode({
           if (model != null && model.isNotEmpty) 'model': model,
+          if (title != null && title.trim().isNotEmpty) 'title': title.trim(),
         }),
         extraHeaders: _workHeaders,
       );

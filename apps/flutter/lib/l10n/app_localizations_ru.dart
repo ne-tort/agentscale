@@ -2392,6 +2392,15 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectAboutLabel => 'О проекте';
 
   @override
+  String get projectDescriptionLabel => 'Описание';
+
+  @override
+  String get projectDialogsLabel => 'Диалоги';
+
+  @override
+  String get projectCreateDialogHint => 'Создать диалог';
+
+  @override
   String get projectAboutColumn => 'О проекте';
 
   @override

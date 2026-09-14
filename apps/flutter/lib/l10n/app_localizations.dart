@@ -4250,6 +4250,24 @@ abstract class AppLocalizations {
   /// **'About'**
   String get projectAboutLabel;
 
+  /// No description provided for @projectDescriptionLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Description'**
+  String get projectDescriptionLabel;
+
+  /// No description provided for @projectDialogsLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Dialogs'**
+  String get projectDialogsLabel;
+
+  /// No description provided for @projectCreateDialogHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Create dialog'**
+  String get projectCreateDialogHint;
+
   /// No description provided for @projectAboutColumn.
   ///
   /// In en, this message translates to:

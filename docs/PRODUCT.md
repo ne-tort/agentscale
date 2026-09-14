@@ -171,7 +171,7 @@ Product module for computer-equipment matching (hub on **Данные**). Cabine
 | Remote PostgreSQL catalogs | External DB → OpenSearch snapshot | DSN in Vault; `content.probe_remote_sql` for headers/`COUNT`; full scan indexed by Celery; beat reindex via `reindex_interval_hours` (default 24) |
 | Search for agent | Pod API → Search Index BC | **No** `catalog.sqlite`, **no** `EQUIPMENT_*` env in Pod |
 
-**Indexing (fixed):** local and remote catalogs land in OpenSearch (`equipment` / `c_{row_id}`). Reindex **wipes** the physical index then bulk-loads. Per-catalog `column_map` maps source headers → canonical columns. Ready non-paused catalogs apply via `project_ids` (empty = all **module-bound** projects). Catalog `status` in settings: **Без индексирования** (`draft`, warning) → **В процессе** (`indexing`, warning) → **Обработано** (`ready`, success); Celery emits Kafka `search.equipment_catalog.index.accepted|completed` on `prodavan.search.events`.
+**Indexing (fixed):** local and remote catalogs land in OpenSearch (`equipment` / `c_{row_id}` — **one physical index per catalog row**). Agent search fan-out hits only ready catalogs visible to the project (`project_ids` + SoT via `resolve_sot_instance`). Reindex **wipes** the physical index then bulk-loads. Cascade: deleting a catalogs row / module instance / local leaf purge removes the OS index; shared cabinet indexes survive project soft-delete when MP is global. Admin: `POST /api/v1/admin/search-index/reconcile-equipment` drops orphan indexes.
 
 | Table | Scope intent | Role |
 |-------|--------------|------|

@@ -157,8 +157,8 @@ async def test_delete_cabinet_module_instances_cascades_project_leaves() -> None
     session.delete = AsyncMock()
     svc = ModuleInstanceService(session)
 
-    cab = SimpleNamespace(id="minst_cab")
-    prj = SimpleNamespace(id="minst_prj")
+    cab = SimpleNamespace(id="minst_cab", module_id="mod_1", owner_kind=OWNER_CABINET, owner_id="cab_1")
+    prj = SimpleNamespace(id="minst_prj", module_id="mod_1", owner_kind=OWNER_PROJECT, owner_id="prj_1")
     projects_q = MagicMock()
     projects_q.all.return_value = [("prj_1",), ("prj_2",)]
 
@@ -169,7 +169,15 @@ async def test_delete_cabinet_module_instances_cascades_project_leaves() -> None
             return prj
         return None
 
+    async def session_get(model, key):
+        if key == "minst_prj":
+            return prj
+        if key == "minst_cab":
+            return cab
+        return None
+
     session.execute = AsyncMock(return_value=projects_q)
+    session.get = AsyncMock(side_effect=session_get)
 
     with patch.object(svc, "get_instance", side_effect=get_instance):
         deleted = await svc.delete_cabinet_module_instances(

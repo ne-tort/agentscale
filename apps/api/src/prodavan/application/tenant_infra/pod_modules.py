@@ -387,9 +387,23 @@ class PodModuleDataService:
         deleted = await self._instances.delete_data_row(
             instance_id=inst.id, table_slug=table_slug, row_id=row_id
         )
-        await self._session.commit()
         if not deleted:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        if module_id == "mod_equipment" and table_slug == "catalogs":
+            from prodavan.application.modules.equipment_catalog_opensearch import (
+                delete_equipment_catalog_index,
+            )
+            from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+            project = await self._session.get(ProjectRow, project_id)
+            if project is not None and project.company_id:
+                await delete_equipment_catalog_index(
+                    row_id=row_id,
+                    company_id=str(project.company_id),
+                    cabinet_id=str(project.cabinet_id) if project.cabinet_id else None,
+                    project_id=project_id,
+                )
+        await self._session.commit()
         return {"module_id": module_id, "deleted": True, "row_id": row_id}
 
     async def invoke_action(

@@ -2,16 +2,22 @@
 
 `CabinetProjectSettingsPage` — после create или из списка.
 
-## Поля
+## Поля / подстраницы
 
 | Поле | API | UI |
 |------|-----|-----|
-| Name | `PATCH /projects/{id}` | `AppValuePreference` |
-| About | `PATCH` `about` | multiline preference |
+| Name | `PATCH /projects/{id}` | `AppValuePreference` на корне |
+| **О проекте** | nav → `ProjectAboutPage` | Описание (`about`), Бюджет, Создатель (RO) |
+| **Диалоги** | nav → `ProjectDialogsPage` (когда проект chat-ready) | таблица сессий, inline create, delete, tap → chat settings |
 | Modules | nav tile → `ProjectModulesListPage` | table on subpage; row → `ProjectModuleEditPage` |
-| Creator | `created_by_login` | read-only |
-| Провайдер AI | `PATCH` `resolved_ai_key_id` | табличный picker scoped AI-ключей; backend выставляет `agent_provider` из ключа |
+| Провайдер AI | `PATCH` `resolved_ai_key_id` | табличный picker scoped AI-ключей |
 | Metrics | `GET /projects/{id}/metrics` | `ProjectMetricsWrap` (usage: tokens, storage) |
+
+## Диалоги
+
+- `GET /projects/{id}/agent/sessions` — список; create с optional `title`.
+- Tap row → `ProjectChatSettingsPage` (без live controller: title/pin/delete).
+- Workspace AppBar title — бесшовный rename (`AppBarTitleEditor`, save on blur).
 
 ## Провайдер AI
 
@@ -41,5 +47,3 @@
 Изменения модулей (`PATCH .../modules`) и метаданных **не** попадают в Pod до **Обновить проект**.
 
 При **создании проекта** для модулей с профилями backend выставляет `project_ids` на профиль **Default** (по имени), иначе `is_default`, иначе первый по алфавиту — пока пользователь не переопределит.
-
-Agent chat workspace — **не** на этой странице (legacy удалён).

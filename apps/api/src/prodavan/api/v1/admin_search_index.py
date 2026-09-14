@@ -96,6 +96,23 @@ async def _rate_limit() -> None:
     )
 
 
+@router.post("/reconcile-equipment")
+async def search_index_reconcile_equipment(
+    _: PlatformAdminDep,
+    session: SessionDep,
+    company_id: str | None = None,
+) -> dict[str, Any]:
+    """Delete orphan ``equipment__c_*`` indexes with no catalogs row in Postgres."""
+    await _rate_limit()
+    from prodavan.application.modules.equipment_catalog_opensearch import (
+        reconcile_orphan_equipment_indexes,
+    )
+
+    return await reconcile_orphan_equipment_indexes(
+        session=session, company_id=company_id
+    )
+
+
 @router.get("/health")
 async def search_index_health(_: PlatformAdminDep) -> dict[str, Any]:
     mgr = get_opensearch_manager()

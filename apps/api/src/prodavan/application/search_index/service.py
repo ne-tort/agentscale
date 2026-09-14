@@ -210,6 +210,14 @@ class SearchIndexService:
         )
         return deleted
 
+    async def list_indexes(
+        self,
+        *,
+        namespace: str | None = None,
+        company_id: str | None = None,
+    ) -> list[str]:
+        return await self._store.list_indexes(namespace=namespace, company_id=company_id)
+
     async def index_document(
         self,
         *,

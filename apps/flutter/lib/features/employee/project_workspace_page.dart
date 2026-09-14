@@ -8,6 +8,7 @@ import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/containers/container_runtime_presenter.dart';
 import 'package:prodavan/core/containers/project_container_poll.dart';
 import 'package:prodavan/core/session/work_context.dart';
+import 'package:prodavan/core/widgets/app_bar_title_editor.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
@@ -260,7 +261,27 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     final needsUpdate = !needsWake && _chatSendable && _needsWorkspaceUpdate;
     final showChat = _chatReadable || _waking || _updating;
     return AppScaffold(
-      title: Text(showChat ? _displayTitle : widget.projectName),
+      title: showChat
+          ? AppBarTitleEditor(
+              value: _title,
+              hintText: l10n.chatUntitled,
+              onSave: (v) async {
+                try {
+                  final body = await workContext.api.patchAgentSession(
+                    projectId: widget.projectId,
+                    sessionId: widget.sessionId,
+                    title: v,
+                  );
+                  if (!mounted) return;
+                  setState(() {
+                    _title = (body['title'] as String?)?.trim() ?? v;
+                  });
+                } catch (e) {
+                  if (mounted) showAgentChatSnack(context, e);
+                }
+              },
+            )
+          : Text(widget.projectName),
       actions: [
         if (showChat) ...[
           IconButton(

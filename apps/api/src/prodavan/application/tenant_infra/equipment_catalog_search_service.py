@@ -19,7 +19,10 @@ from prodavan.application.modules.equipment_catalog_search import (
     CatalogHit,
     parse_price,
 )
-from prodavan.application.modules.module_instance_service import ModuleInstanceService
+from prodavan.application.modules.module_instance_service import (
+    OWNER_PROJECT,
+    ModuleInstanceService,
+)
 from prodavan.application.pod_identity.bridge import (
     SCOPE_INFRA_SEARCH,
     PodBridgeClaims,
@@ -135,9 +138,15 @@ class EquipmentCatalogPodSearchService:
     async def _ready_catalogs(
         self, *, project_id: str, catalog_ids: list[str] | None = None
     ) -> list[dict[str, Any]]:
-        inst = await ModuleInstanceService(self._session).ensure_project_instance(
-            project_id=project_id, module_id=_MODULE_ID
+        # Global MP → cabinet SoT; local MP → project leaf. Never ensure_project_instance
+        # (that creates a leaf and fails for global binds).
+        inst = await ModuleInstanceService(self._session).resolve_sot_instance(
+            module_id=_MODULE_ID,
+            owner_kind=OWNER_PROJECT,
+            owner_id=project_id,
         )
+        if inst is None:
+            return []
         rows = await ModuleInstanceService(self._session).list_data_rows(
             instance_id=inst.id, table_slug=_CATALOGS
         )
@@ -251,7 +260,9 @@ class EquipmentCatalogPodSearchService:
                     size=per,
                     company_id=bridge.company_id,
                     cabinet_id=bridge.cabinet_id,
-                    project_id=bridge.project_id,
+                    # Project scope is via ready-catalog list + project_ids, not OS term filter
+                    # (cabinet/global indexes omit project_id on docs).
+                    project_id=None,
                     session=self._session,
                 )
             except AppError:
@@ -356,6 +367,25 @@ class TenantSearchService:
                 status=403,
                 detail="index not allowed for pod search",
             )
+        if session is None:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="session required for equipment catalog ACL",
+            )
+        # Same ACL as catalog-search: index must map to a ready catalog visible to project.
+        pod = EquipmentCatalogPodSearchService(session)
+        ready = await pod._ready_catalogs(project_id=project_id)
+        allowed = {str(c["id"]) for c in ready}
+        allowed_indexes = {catalog_os_index_name(cid) for cid in allowed}
+        if idx not in allowed_indexes:
+            raise AppError(
+                code="FORBIDDEN",
+                title="Forbidden",
+                status=403,
+                detail="catalog index not visible for this project",
+            )
         size = max(1, min(int(size or 20), 100))
         from_ = max(0, int(from_ or 0))
         svc = get_search_index_service()
@@ -367,7 +397,7 @@ class TenantSearchService:
             size=size,
             company_id=bridge.company_id,
             cabinet_id=bridge.cabinet_id,
-            project_id=bridge.project_id,
+            project_id=None,
             session=session,
         )
         return {

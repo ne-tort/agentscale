@@ -36,6 +36,7 @@ class CreateSessionBody(BaseModel):
     model_config = {"extra": "forbid"}
 
     model: str | None = Field(default=None, max_length=128)
+    title: str | None = Field(default=None, max_length=200)
 
 
 class ChatTurnBody(BaseModel):
@@ -95,6 +96,7 @@ async def create_agent_session(
         principal=principal,
         employee=employee,
         model=body.model,
+        title=body.title,
     )
 
 

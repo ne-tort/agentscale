@@ -13,11 +13,11 @@ import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 import 'package:prodavan/features/employee/project_chat_model_select_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Chat settings — model, title, pin for the current agent session.
+/// Chat settings — title, pin, optional model (when [controller] is set), delete.
 class ProjectChatSettingsPage extends StatefulWidget {
   const ProjectChatSettingsPage({
     super.key,
-    required this.controller,
+    this.controller,
     required this.projectId,
     required this.sessionId,
     required this.title,
@@ -26,7 +26,8 @@ class ProjectChatSettingsPage extends StatefulWidget {
     required this.onPinnedChanged,
   });
 
-  final ChatSessionController controller;
+  /// Live chat controller — when null, model picker is hidden.
+  final ChatSessionController? controller;
   final String projectId;
   final String sessionId;
   final String title;
@@ -48,7 +49,7 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
     super.initState();
     _title = widget.title;
     _pinned = widget.pinned;
-    widget.controller.changes.listen((_) {
+    widget.controller?.changes.listen((_) {
       if (mounted) setState(() {});
     });
   }
@@ -61,16 +62,17 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
   }
 
   Future<void> _pickModel() async {
-    if (widget.controller.streaming || _deleting) return;
+    final controller = widget.controller;
+    if (controller == null || controller.streaming || _deleting) return;
     final picked = await ProjectChatModelSelectPage.push(
       context,
-      models: widget.controller.availableModels,
-      selectedModelId: widget.controller.selectedModel ?? widget.controller.defaultModel,
-      enabled: !widget.controller.streaming,
+      models: controller.availableModels,
+      selectedModelId: controller.selectedModel ?? controller.defaultModel,
+      enabled: !controller.streaming,
     );
     if (picked == null || !mounted) return;
-    widget.controller.selectedModel = picked;
-    widget.controller.notifyImmediate();
+    controller.selectedModel = picked;
+    controller.notifyImmediate();
     setState(() {});
   }
 
@@ -97,7 +99,8 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
   }
 
   Future<void> _deleteDialog() async {
-    if (_deleting || widget.controller.streaming) return;
+    final streaming = widget.controller?.streaming == true;
+    if (_deleting || streaming) return;
     final l10n = AppLocalizations.of(context);
     final ok = await AppConfirmPage.push(
       context,
@@ -127,7 +130,8 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final warning = context.appColors.warning;
-    final enabled = !_deleting && !widget.controller.streaming;
+    final controller = widget.controller;
+    final enabled = !_deleting && controller?.streaming != true;
     return AppScaffold(
       title: Text(l10n.projectChatSettingsTitle),
       body: ListView(
@@ -146,13 +150,14 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
             enabled: enabled,
             onChanged: _setPinned,
           ),
-          AppPreferenceTile(
-            title: l10n.projectChatModelLabel,
-            subtitle: Text(widget.controller.selectedModelLabel),
-            trailing: const AppTrailingChevron(),
-            enabled: enabled,
-            onTap: _pickModel,
-          ),
+          if (controller != null)
+            AppPreferenceTile(
+              title: l10n.projectChatModelLabel,
+              subtitle: Text(controller.selectedModelLabel),
+              trailing: const AppTrailingChevron(),
+              enabled: enabled,
+              onTap: _pickModel,
+            ),
           AppNavPreference(
             title: l10n.chatDeleteDialog,
             icon: Icons.delete_outline,

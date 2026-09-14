@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from sqlalchemy import select
@@ -26,6 +27,8 @@ from prodavan.infrastructure.persistence.models.modules import (
     ModuleCabinetBindingRow,
     ModuleRow,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _attach_rematerialize(row: dict[str, Any], remat: dict[str, Any]) -> dict[str, Any]:
@@ -319,12 +322,11 @@ class CabinetModuleService:
                         cabinet_id=cabinet_id,
                     )
             except Exception:
-                pass
-        await self._session.commit()
-        remat = await self._schedule_rematerialize(cabinet_id=cabinet_id, module_id=module_id)
-        return {"deleted": True, "row_id": row_id, "rematerialize": remat}
-
-    async def _schedule_rematerialize(self, *, cabinet_id: str, module_id: str) -> dict:
+                logger.exception(
+                    "equipment catalog OS delete failed cabinet=%s row=%s",
+                    cabinet_id,
+                    row_id,
+                )
         from prodavan.application.projects.rematerialize_scheduler import schedule_cabinet_rematerialize
 
         return await schedule_cabinet_rematerialize(

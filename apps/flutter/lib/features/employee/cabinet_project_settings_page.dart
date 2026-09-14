@@ -15,11 +15,12 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 import 'package:prodavan/core/widgets/project_metrics_wrap.dart';
+import 'package:prodavan/features/employee/project_about_page.dart';
 import 'package:prodavan/features/employee/project_ai_key_select_page.dart';
 import 'package:prodavan/features/employee/project_container_page.dart';
+import 'package:prodavan/features/employee/project_dialogs_page.dart';
 import 'package:prodavan/features/employee/project_management_page.dart';
 import 'package:prodavan/features/employee/project_modules_list_page.dart';
-import 'package:prodavan/features/employee/project_workspace_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Project settings — name, about, launch/pause/resume, AI provider, modules nav.
@@ -39,10 +40,7 @@ class CabinetProjectSettingsPage extends StatefulWidget {
 
 class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage> {
   String _name = '';
-  String _about = '';
-  String _budget = '';
   String? _resolvedKeyId;
-  String? _creatorName;
   String? _status;
   Map<String, dynamic>? _runtime;
   bool _hasPod = false;
@@ -149,12 +147,7 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
 
       setState(() {
         _name = project['name'] as String? ?? '';
-        _about = project['about'] as String? ?? '';
-        final budgetTokens = project['budget_tokens'];
-        _budget = budgetTokens == null ? '' : '$budgetTokens';
         _resolvedKeyId = resolvedKeyId;
-        _creatorName = project['created_by_login'] as String? ??
-            project['created_by_employee_id'] as String?;
         _status = project['status'] as String? ?? 'draft';
         _runtime = project['runtime'] is Map
             ? Map<String, dynamic>.from(project['runtime'] as Map)
@@ -242,29 +235,6 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
     if (mounted) setState(() => _name = name);
   }
 
-  Future<void> _saveAbout(String v) async {
-    await workContext.api.patchProject(projectId: widget.projectId, about: v.trim());
-    if (mounted) setState(() => _about = v.trim());
-  }
-
-  Future<void> _saveBudget(String v) async {
-    final trimmed = v.trim();
-    final tokens = trimmed.isEmpty ? null : int.parse(trimmed);
-    await workContext.api.patchProject(
-      projectId: widget.projectId,
-      budgetTokens: tokens,
-      updateBudgetTokens: true,
-    );
-    if (mounted) setState(() => _budget = trimmed);
-  }
-
-  bool _validBudgetInput(String raw) {
-    final trimmed = raw.trim();
-    if (trimmed.isEmpty) return true;
-    final n = int.tryParse(trimmed);
-    return n != null && n >= 0;
-  }
-
   Future<void> _saveKey(String keyId) async {
     await workContext.api.patchProject(
       projectId: widget.projectId,
@@ -286,6 +256,29 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     }
+  }
+
+  void _openAbout() {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ProjectAboutPage(
+          projectId: widget.projectId,
+          projectName: _name,
+        ),
+      ),
+    );
+  }
+
+  void _openDialogs() {
+    Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => ProjectDialogsPage(
+          cabinetId: widget.cabinetId,
+          projectId: widget.projectId,
+          projectName: _name.isNotEmpty ? _name : widget.projectId,
+        ),
+      ),
+    ).then((_) => workContext.notifyProjectLifecycleChanged());
   }
 
   void _openModules() {
@@ -446,61 +439,15 @@ class _CabinetProjectSettingsPageState extends State<CabinetProjectSettingsPage>
                 'runtime': _runtime,
                 'observed_state': _runtime?['observed_state'],
               }))
-            AppPreferenceTile(
-              title: l10n.projectOpenChat,
-              icon: Icons.chat_bubble_outline,
-              trailing: const AppTrailingChevron(),
-              onTap: () async {
-                try {
-                  await workContext.selectProject(
-                    cabinetId: widget.cabinetId,
-                    projectId: widget.projectId,
-                  );
-                  final created = await workContext.api.createAgentSession(
-                    projectId: widget.projectId,
-                  );
-                  final sessionId = created['id'] as String?;
-                  if (sessionId == null) return;
-                  if (!mounted) return;
-                  await Navigator.of(context).push<void>(
-                    MaterialPageRoute<void>(
-                      builder: (_) => ProjectWorkspacePage(
-                        cabinetId: widget.cabinetId,
-                        projectId: widget.projectId,
-                        projectName: _name.isNotEmpty ? _name : widget.projectId,
-                        sessionId: sessionId,
-                        initialTitle: created['title'] as String?,
-                      ),
-                    ),
-                  );
-                  workContext.notifyProjectLifecycleChanged();
-                } catch (e) {
-                  if (!mounted) return;
-                  AppErrors.showSnack(context, e);
-                }
-              },
+            AppNavPreference(
+              title: l10n.projectDialogsLabel,
+              icon: Icons.forum_outlined,
+              onTap: _openDialogs,
             ),
-          AppValuePreference<String>(
+          AppNavPreference(
             title: l10n.projectAboutLabel,
-            icon: Icons.notes_outlined,
-            value: _about,
-            onSave: _saveAbout,
-          ),
-          AppValuePreference<String>(
-            title: l10n.projectBudgetLabel,
-            icon: Icons.account_balance_wallet_outlined,
-            value: _budget,
-            digitsOnly: true,
-            validateInput: _validBudgetInput,
-            invalidMessage: l10n.errorValidation,
-            onSave: _saveBudget,
-          ),
-          AppValuePreference<String>(
-            title: l10n.projectCreatorLabel,
-            icon: Icons.person_outline,
-            value: _creatorName ?? '—',
-            enabled: false,
-            onSave: (_) async {},
+            icon: Icons.info_outline,
+            onTap: _openAbout,
           ),
           if (_availableKeys.isNotEmpty)
             AppPreferenceTile(
