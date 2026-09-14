@@ -2436,9 +2436,6 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectAiKeyColumnSubscription => 'Subscription';
 
   @override
-  String get projectModuleProfileColumn => 'Profile';
-
-  @override
   String get projectSelectModuleProfile => 'Select profile';
 
   @override

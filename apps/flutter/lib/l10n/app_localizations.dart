@@ -4364,12 +4364,6 @@ abstract class AppLocalizations {
   /// **'Subscription'**
   String get projectAiKeyColumnSubscription;
 
-  /// No description provided for @projectModuleProfileColumn.
-  ///
-  /// In en, this message translates to:
-  /// **'Profile'**
-  String get projectModuleProfileColumn;
-
   /// No description provided for @projectSelectModuleProfile.
   ///
   /// In en, this message translates to:

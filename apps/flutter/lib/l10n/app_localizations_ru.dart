@@ -2450,9 +2450,6 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectAiKeyColumnSubscription => 'Подписка';
 
   @override
-  String get projectModuleProfileColumn => 'Профиль';
-
-  @override
   String get projectSelectModuleProfile => 'Выбор профиля';
 
   @override

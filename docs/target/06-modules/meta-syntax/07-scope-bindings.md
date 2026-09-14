@@ -21,7 +21,7 @@ Module ──MP────► Project    (local = project leaf; global = parent
 | local | fork created | child instance |
 | global | none | resolve parent |
 
-Product defaults: prompts/MCP/files → `default_project_bind: global`; equipment → `local`.
+Product defaults: cabinet→project `default_project_bind` / `default_project_bind_kind` → **global** (share cabinet SoT). Opt into local fork via `LOCAL_DEFAULT_PROJECT_MODULES` or explicit bind UI.
 
 ## Scope block
 

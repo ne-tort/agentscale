@@ -49,7 +49,7 @@ class CopyAdminModuleBody(BaseModel):
 class BindProjectBody(BaseModel):
     model_config = {"extra": "forbid"}
 
-    bind_kind: str = Field(default="local", pattern="^(local|global)$")
+    bind_kind: str | None = Field(default=None, pattern="^(local|global)$")
     child_may_edit: bool | None = None
 
 
@@ -172,11 +172,14 @@ async def bind_project(
     session: SessionDep,
     body: BindProjectBody | None = None,
 ) -> dict:
+    from prodavan.domain.modules import default_project_bind_kind
+
     payload = body or BindProjectBody()
+    kind = payload.bind_kind or default_project_bind_kind(module_id).value
     return await ModuleService(session).bind_project(
         module_id=module_id,
         project_id=project_id,
-        bind_kind=payload.bind_kind,
+        bind_kind=kind,
         child_may_edit=payload.child_may_edit,
     )
 

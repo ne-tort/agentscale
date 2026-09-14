@@ -1355,7 +1355,6 @@
   "projectAiProviderNotSelected": "Not selected",
   "projectAiKeyColumnProvider": "Provider",
   "projectAiKeyColumnSubscription": "Subscription",
-  "projectModuleProfileColumn": "Profile",
   "projectSelectModuleProfile": "Select profile",
   "projectModuleNoProfiles": "This module has no profiles",
   "projectLaunchSuccess": "Project launched",

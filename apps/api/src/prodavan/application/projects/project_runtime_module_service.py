@@ -21,6 +21,7 @@ from prodavan.application.modules.module_row_helpers import (
 )
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
+from prodavan.domain.modules import ModuleBindKind, default_project_bind_kind
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.modules import (
     ModuleCabinetBindingRow,
@@ -118,6 +119,7 @@ class ProjectRuntimeModuleService:
         )
         await self._instances.ensure_project_instances_for_cabinet_modules(project_id=project_id)
         enabled = await self._enabled_module_ids(project)
+        bindings = ModuleBindingService(self._session)
         q = await self._session.execute(
             select(ModuleCabinetBindingRow, ModuleRow)
             .join(ModuleRow, ModuleRow.id == ModuleCabinetBindingRow.module_id)
@@ -128,6 +130,13 @@ class ProjectRuntimeModuleService:
         for _bind, mod in q.all():
             if mod.id not in enabled:
                 continue
+            mp = await bindings.get_project_binding(mod.id, project_id)
+            if mp is not None:
+                bind_kind = str(mp.bind_kind)
+                child_may_edit = bool(mp.child_may_edit)
+            else:
+                bind_kind = default_project_bind_kind(mod.id).value
+                child_may_edit = bind_kind == ModuleBindKind.LOCAL.value
             inst = await self._instances.get_instance(
                 owner_kind=OWNER_PROJECT, owner_id=project_id, module_id=mod.id
             )
@@ -144,6 +153,8 @@ class ProjectRuntimeModuleService:
                     "name": mod.name,
                     "status": mod.status,
                     "instance_id": inst.id if inst else None,
+                    "bind_kind": bind_kind,
+                    "child_may_edit": child_may_edit,
                 }
             )
         return out

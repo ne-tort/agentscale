@@ -2847,7 +2847,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "view_slug": "equipment_hub",
                 "table_slug": "catalogs",
                 "enabled": True,
-                "default_project_bind": "local",
+                "default_project_bind": "global",
                 "nav": {"contour": "employee", "placement": "data"},
             }
         ],

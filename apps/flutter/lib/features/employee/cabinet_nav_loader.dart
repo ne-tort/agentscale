@@ -12,12 +12,19 @@ class CabinetNavEntry {
     required this.moduleName,
     required this.tab,
     required this.label,
+    this.bindKind,
   });
 
   final String moduleId;
   final String moduleName;
   final Map<String, dynamic> tab;
   final String label;
+
+  /// Actual MP `bind_kind` when loaded in project context.
+  ///
+  /// For cabinet-only hubs (no selected project) loaders set `'global'` so the
+  /// host opens cabinet SoT regardless of tab seed `default_project_bind`.
+  final String? bindKind;
 
   String get viewSlug => tab['view_slug'] as String? ?? '';
 
@@ -34,8 +41,13 @@ class CabinetNavEntry {
   int get order => tab['order'] is int ? tab['order'] as int : 999;
 
   /// `cabinet` or `project` — which instance leaf hosts this tab's data.
-  /// Derived from `default_project_bind` (global→cabinet, local→project).
-  String get instanceOwner => moduleInstanceOwnerOf(tab);
+  /// Prefers [bindKind]; falls back to tab `default_project_bind` for tests.
+  String get instanceOwner {
+    final kind = bindKind?.trim().toLowerCase();
+    if (kind == 'local') return 'project';
+    if (kind == 'global') return 'cabinet';
+    return moduleInstanceOwnerOf(tab);
+  }
 
   /// True when the tab needs a project leaf (local bind); false for global→cabinet SoT.
   bool get usesProjectLeaf => instanceOwner != 'cabinet';
@@ -64,15 +76,26 @@ List<CabinetNavEntry> _finalizeCabinetNavEntries(List<CabinetNavEntry> raw) {
           moduleName: e.moduleName,
           tab: e.tab,
           label: '${e.label} · ${e.moduleName}',
+          bindKind: e.bindKind,
         )
       else
         e,
   ];
 }
 
+String? _bindKindFromModule(Map<String, dynamic> mod) {
+  final raw = mod['bind_kind'];
+  if (raw is String) {
+    final k = raw.trim().toLowerCase();
+    if (k == 'local' || k == 'global') return k;
+  }
+  return null;
+}
+
 Future<List<CabinetNavEntry>> _loadRawFromModules(
   List<Map<String, dynamic>> modules, {
   required Future<Map<String, dynamic>> Function(String moduleId) fetchTabs,
+  String? Function(Map<String, dynamic> mod)? bindKindOf,
 }) async {
   final raw = <CabinetNavEntry>[];
 
@@ -80,6 +103,7 @@ Future<List<CabinetNavEntry>> _loadRawFromModules(
     final moduleId = mod['module_id'] as String? ?? mod['id'] as String? ?? '';
     if (moduleId.isEmpty) continue;
     final moduleName = mod['name'] as String? ?? moduleId;
+    final bindKind = bindKindOf?.call(mod);
     try {
       final doc = await fetchTabs(moduleId);
       final body = doc['body'];
@@ -95,6 +119,7 @@ Future<List<CabinetNavEntry>> _loadRawFromModules(
             moduleName: moduleName,
             tab: map,
             label: map['title'] as String? ?? '—',
+            bindKind: bindKind,
           ),
         );
       }
@@ -106,7 +131,10 @@ Future<List<CabinetNavEntry>> _loadRawFromModules(
   return raw;
 }
 
-Future<List<CabinetNavEntry>> _loadRawCabinetNavEntries(String cabinetId) async {
+Future<List<CabinetNavEntry>> _loadRawCabinetNavEntries(
+  String cabinetId, {
+  String? forceBindKind,
+}) async {
   final api = workContext.api;
   final modules = await api.listCabinetModules(cabinetId);
   return _loadRawFromModules(
@@ -116,10 +144,11 @@ Future<List<CabinetNavEntry>> _loadRawCabinetNavEntries(String cabinetId) async 
       moduleId: moduleId,
       slug: ModuleMetaSlugs.tabs,
     ),
+    bindKindOf: forceBindKind == null ? null : (_) => forceBindKind,
   );
 }
 
-/// Loads Management/Data hub tabs from the selected project's leaf instances.
+/// Loads Management/Data hub tabs from the selected project's bound modules.
 Future<List<CabinetNavEntry>> _loadRawProjectNavEntries(String projectId) async {
   final api = workContext.api;
   final modules = await api.listProjectRuntimeModules(projectId);
@@ -130,35 +159,18 @@ Future<List<CabinetNavEntry>> _loadRawProjectNavEntries(String projectId) async 
       moduleId: moduleId,
       slug: ModuleMetaSlugs.tabs,
     ),
+    bindKindOf: (mod) => _bindKindFromModule(mod) ?? 'global',
   );
 }
 
-/// Merges management/data hub tabs from cabinet + project leaves.
-///
-/// Cabinet-owned tabs come from [cabinetRaw]; project-owned from [projectRaw].
-/// Deduplicates by `moduleId`+`viewSlug`, preferring cabinet-owned.
-List<CabinetNavEntry> _mergeHubPlacementEntries({
-  required List<CabinetNavEntry> cabinetRaw,
-  required List<CabinetNavEntry> projectRaw,
-  required CabinetNavPlacement placement,
-}) {
-  final fromCabinet = cabinetRaw.where(
-    (e) =>
-        cabinetNavPlacementOf(e.tab) == placement && isCabinetInstanceOwner(e.tab),
-  );
-  final fromProject = projectRaw.where(
-    (e) =>
-        cabinetNavPlacementOf(e.tab) == placement && !isCabinetInstanceOwner(e.tab),
-  );
-
-  final byKey = <String, CabinetNavEntry>{};
-  for (final e in fromProject) {
-    byKey['${e.moduleId}:${e.viewSlug}'] = e;
-  }
-  for (final e in fromCabinet) {
-    byKey['${e.moduleId}:${e.viewSlug}'] = e;
-  }
-  return byKey.values.toList();
+List<CabinetNavEntry> _filterPlacement(
+  List<CabinetNavEntry> raw,
+  CabinetNavPlacement placement,
+) {
+  return [
+    for (final e in raw)
+      if (cabinetNavPlacementOf(e.tab) == placement) e,
+  ];
 }
 
 /// Loads module tabs for cabinet shell navigation filtered by [placement].
@@ -180,41 +192,55 @@ Future<List<CabinetNavEntry>> loadCabinetNavEntries(
   }
 }
 
-/// Loads rail (cabinet) + management/data (cabinet-owned ∪ project-owned) in one pass.
+/// Loads rail (cabinet) + management/data hubs.
+///
+/// - No project: all cabinet tabs for the placement (cabinet SoT).
+/// - With project: only modules with an MP; SoT from actual `bind_kind`.
 Future<
     ({
       List<CabinetNavEntry> rail,
       List<CabinetNavEntry> management,
       List<CabinetNavEntry> data,
     })> loadCabinetNavBundle(String cabinetId, {String? projectId}) async {
+  final hasProject = projectId != null && projectId.isNotEmpty;
+
+  if (!hasProject) {
+    // Force cabinet SoT for hubs even when tab seed says local.
+    final cabinetRaw = await _loadRawCabinetNavEntries(
+      cabinetId,
+      forceBindKind: 'global',
+    );
+    return (
+      rail: _finalizeCabinetNavEntries(
+        _filterPlacement(cabinetRaw, CabinetNavPlacement.rail),
+      ),
+      management: _finalizeCabinetNavEntries(
+        _filterPlacement(cabinetRaw, CabinetNavPlacement.management),
+      ),
+      data: _finalizeCabinetNavEntries(
+        _filterPlacement(cabinetRaw, CabinetNavPlacement.data),
+      ),
+    );
+  }
+
   final cabinetRaw = await _loadRawCabinetNavEntries(cabinetId);
-  final projectRaw = (projectId == null || projectId.isEmpty)
-      ? <CabinetNavEntry>[]
-      : await _loadRawProjectNavEntries(projectId);
+  final projectRaw = await _loadRawProjectNavEntries(projectId);
   return (
     rail: _finalizeCabinetNavEntries(
-      cabinetRaw.where((e) => cabinetNavPlacementOf(e.tab) == CabinetNavPlacement.rail).toList(),
+      _filterPlacement(cabinetRaw, CabinetNavPlacement.rail),
     ),
     management: _finalizeCabinetNavEntries(
-      _mergeHubPlacementEntries(
-        cabinetRaw: cabinetRaw,
-        projectRaw: projectRaw,
-        placement: CabinetNavPlacement.management,
-      ),
+      _filterPlacement(projectRaw, CabinetNavPlacement.management),
     ),
     data: _finalizeCabinetNavEntries(
-      _mergeHubPlacementEntries(
-        cabinetRaw: cabinetRaw,
-        projectRaw: projectRaw,
-        placement: CabinetNavPlacement.data,
-      ),
+      _filterPlacement(projectRaw, CabinetNavPlacement.data),
     ),
   );
 }
 
 /// First enabled nav tab for a module (management/rail/data/none — any placement).
 Future<CabinetNavEntry?> loadFirstModuleNavEntry(String cabinetId, String moduleId) async {
-  final raw = await _loadRawCabinetNavEntries(cabinetId);
+  final raw = await _loadRawCabinetNavEntries(cabinetId, forceBindKind: 'global');
   final matches = raw.where((e) => e.moduleId == moduleId).toList();
   if (matches.isEmpty) return null;
   final finalized = _finalizeCabinetNavEntries(matches);

@@ -107,7 +107,7 @@ Template (modules + module_meta_documents)
 | **Instance** | Independent copy when bind is **local**: `module_instances` + meta/data JSONB. Owner: `platform` / `company` / `cabinet` / `project` |
 | **Bind** | Edge on `platform→company` (grant), `company/cabinet` (MC), `cabinet→project` (MP). Fields: `bind_kind` (`local`\|`global`), `child_may_edit` (bool). **Local** forks a child instance. **Global** does not fork; child depends on parent SoT; writes allowed only if `child_may_edit` |
 | **SoT resolve** | `resolve_sot_instance(module, owner)`: local instance for owner if present, else follow global bind to parent. Replaces former tab `instance_owner` hack |
-| **Project hubs** | Employee UI edits the **SoT owner** returned by resolve (cabinet for global project binds on prompts/MCP/files; project leaf for local equipment binds) |
+| **Project hubs** | Employee UI edits the **SoT owner** returned by resolve (cabinet for global project binds; project leaf for local binds) |
 | **Materialize** | Module runs for a project **only** with an explicit MP row. Row `project_ids` further filters entities (empty = all **bound** projects for that module). Bind alone does not dump every row into the workspace |
 | **Materialize rules** | From template meta slug `materialize` (MVP) |
 | **Seed upsert (Alembic)** | Meta refresh for all instances; data rows insert-only (`ON CONFLICT DO NOTHING`) |
@@ -123,20 +123,19 @@ Product module seed changes ship only via Alembic calling `upsert_product_module
 | `bind_kind` | Effect | Child edit |
 |-------------|--------|------------|
 | **local** | Child gets own instance (fork) | Child owns and edits its copy |
-| **global** | Child has no instance; uses parent SoT | Locked unless `child_may_edit=true` (lock icon in bind UI) |
+| **global** | Child has no instance; uses parent SoT | Writes only if `child_may_edit=true` |
 
 | Layer | Typical bind |
 |-------|----------------|
 | Admin → company (grant) | **local** copy (fork) |
 | Company → cabinet (MC) | **local** copy (fork) — cabinet UI edits this SoT |
-| Cabinet → project (MP) | **global** for `mod_prompts` / `mod_mcp` / `mod_files`; **local** for `mod_equipment` |
+| Cabinet → project (MP) | **global** by default (share cabinet SoT); opt-in **local** fork |
 
-Product defaults (`default_project_bind` / `default_cabinet_bind_kind`):
+Product defaults (`default_project_bind` / `default_project_bind_kind`):
 
 | Module | Typical cabinet→project bind | Company→cabinet |
 |--------|------------------------------|-----------------|
-| `mod_prompts`, `mod_mcp`, `mod_files` | **global** | **local** |
-| `mod_equipment` | **local** | **local** |
+| All product modules (`mod_prompts`, `mod_mcp`, `mod_files`, `mod_equipment`, …) | **global** | **local** |
 
 ### Row `project_ids`
 
@@ -163,11 +162,11 @@ Storage: `module_instance_data_rows.session_id` (+ mirror in JSON body). UI/MCP 
 
 ### Equipment matching module (`mod_equipment`)
 
-Product module for computer-equipment matching (hub on **Данные**). Project binds stay **local** (per-project instance).
+Product module for computer-equipment matching (hub on **Данные**). Cabinet→project binds default to **global** (shared cabinet SoT); operators may switch a project to **local** for an isolated leaf.
 
 | Layer | SoT | Notes |
 |-------|-----|--------|
-| Catalog cards, request lines, found offers, selection | Project leaf instance rows | Editable UI + agent via rows API |
+| Catalog cards, request lines, found offers, selection | SoT instance rows (cabinet for global MP; project leaf for local) | Editable UI + agent via rows API |
 | Local price tables (csv/xlsx) | MinIO `source_file` → OpenSearch | Action `content.index_opensearch` (+ Celery); `column_map` required (title+price) |
 | Remote PostgreSQL catalogs | External DB → OpenSearch snapshot | DSN in Vault; `content.probe_remote_sql` for headers/`COUNT`; full scan indexed by Celery; beat reindex via `reindex_interval_hours` (default 24) |
 | Search for agent | Pod API → Search Index BC | **No** `catalog.sqlite`, **no** `EQUIPMENT_*` env in Pod |

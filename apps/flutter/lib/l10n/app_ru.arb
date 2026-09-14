@@ -1357,7 +1357,6 @@
   "projectAiProviderNotSelected": "Не выбран",
   "projectAiKeyColumnProvider": "Провайдер",
   "projectAiKeyColumnSubscription": "Подписка",
-  "projectModuleProfileColumn": "Профиль",
   "projectSelectModuleProfile": "Выбор профиля",
   "projectModuleNoProfiles": "У модуля нет профилей",
   "projectLaunchSuccess": "Проект запущен",

@@ -390,7 +390,8 @@ async def patch_project_modules(
 class BindProjectModuleBody(BaseModel):
     model_config = {"extra": "forbid"}
 
-    bind_kind: str = Field(default="local", pattern="^(local|global)$")
+    # None → resolve via default_project_bind_kind(module_id) in the handler.
+    bind_kind: str | None = Field(default=None, pattern="^(local|global)$")
     child_may_edit: bool | None = None
 
 
@@ -409,6 +410,7 @@ async def bind_project_module(
         attach_workspace_sync,
         defer_or_schedule_project_sync,
     )
+    from prodavan.domain.modules import default_project_bind_kind
 
     project = await ProjectAccessPolicy(session).require_access(
         project_id=project_id,
@@ -427,10 +429,11 @@ async def bind_project_module(
             status=422,
             detail="module not bound to cabinet",
         )
+    kind = body.bind_kind or default_project_bind_kind(module_id).value
     result = await bindings.bind_project(
         module_id,
         project_id,
-        bind_kind=body.bind_kind,
+        bind_kind=kind,
         child_may_edit=body.child_may_edit,
     )
     await session.commit()

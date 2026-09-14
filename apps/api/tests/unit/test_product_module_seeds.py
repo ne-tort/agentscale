@@ -142,7 +142,7 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     tab = meta["tabs"][0]
     assert tab["view_slug"] == "equipment_hub"
     assert tab["nav"]["placement"] == "data"
-    assert tab["default_project_bind"] == "local"
+    assert tab["default_project_bind"] == "global"
     assert {t["slug"] for t in meta["tables"]} == {
         "catalogs",
         "request_lines",

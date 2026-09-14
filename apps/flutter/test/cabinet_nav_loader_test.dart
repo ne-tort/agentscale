@@ -197,7 +197,41 @@ void main() {
   });
 
   group('CabinetNavEntry.usesProjectLeaf', () {
-    test('global bind does not use project leaf', () {
+    test('global bindKind does not use project leaf', () {
+      const entry = CabinetNavEntry(
+        moduleId: 'mod_prompts',
+        moduleName: 'Промпты',
+        tab: {
+          'title': 'Промпты',
+          'view_slug': 'prompt_profiles_list',
+          'default_project_bind': 'local',
+          'nav': {'contour': 'employee', 'placement': 'management'},
+        },
+        label: 'Промпты',
+        bindKind: 'global',
+      );
+      expect(entry.instanceOwner, 'cabinet');
+      expect(entry.usesProjectLeaf, isFalse);
+    });
+
+    test('local bindKind uses project leaf even if seed says global', () {
+      const entry = CabinetNavEntry(
+        moduleId: 'mod_equipment',
+        moduleName: 'Подбор техники',
+        tab: {
+          'title': 'Подбор техники',
+          'view_slug': 'equipment_hub',
+          'default_project_bind': 'global',
+          'nav': {'contour': 'employee', 'placement': 'data'},
+        },
+        label: 'Подбор техники',
+        bindKind: 'local',
+      );
+      expect(entry.instanceOwner, 'project');
+      expect(entry.usesProjectLeaf, isTrue);
+    });
+
+    test('falls back to default_project_bind when bindKind null', () {
       const entry = CabinetNavEntry(
         moduleId: 'mod_prompts',
         moduleName: 'Промпты',

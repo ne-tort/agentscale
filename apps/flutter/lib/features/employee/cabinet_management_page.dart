@@ -12,8 +12,8 @@ import 'package:prodavan/l10n/app_localizations.dart';
 /// Hub listing module tabs for a shell placement (`management` or `data`).
 ///
 /// Rows use the same preference-tile chrome as project settings.
-/// Global-bound tabs (`default_project_bind: global`) edit cabinet SoT without a
-/// selected project; local-bound tabs need a project leaf.
+/// Global binds (`bindKind` / cabinet context) edit cabinet SoT; local binds
+/// need a project leaf.
 class CabinetModuleHubPage extends StatelessWidget {
   const CabinetModuleHubPage({
     super.key,
@@ -37,6 +37,7 @@ class CabinetModuleHubPage extends StatelessWidget {
   Future<void> _openModule(BuildContext context, CabinetNavEntry entry) {
     // global bind → cabinet SoT (projectId null); local → project leaf required.
     final pid = entry.usesProjectLeaf ? projectId : null;
+    final sid = sessionId ?? workContext.selectedSessionId;
     return Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => AppScaffold(
@@ -44,7 +45,7 @@ class CabinetModuleHubPage extends StatelessWidget {
           body: CabinetModuleHost(
             cabinetId: cabinetId,
             projectId: pid,
-            sessionId: pid != null ? sessionId : null,
+            sessionId: sid,
             entry: entry,
             embedded: true,
           ),
@@ -54,7 +55,6 @@ class CabinetModuleHubPage extends StatelessWidget {
   }
 
   Widget _listBody(BuildContext context, AppLocalizations l10n) {
-    final pid = projectId;
     final activeSession = sessionId ?? workContext.selectedSessionId;
     final visibleEntries = [
       for (final e in entries)
@@ -62,13 +62,6 @@ class CabinetModuleHubPage extends StatelessWidget {
             (activeSession != null && activeSession.trim().isNotEmpty))
           e,
     ];
-    final hasCabinetOwned = visibleEntries.any((e) => !e.usesProjectLeaf);
-    if ((pid == null || pid.isEmpty) && !hasCabinetOwned) {
-      return EmptyPlaceholder(
-        title: l10n.projectCreateProjectHint,
-        icon: Icons.folder_outlined,
-      );
-    }
     if (visibleEntries.isEmpty) {
       return EmptyPlaceholder(
         title: l10n.companyNoModules,

@@ -8,24 +8,23 @@
 - Rail destinations:
   - **Projects** (system, order 10)
   - Module tabs with `nav.placement: rail` only (cabinet instance APIs)
-  - **Управление** / **Данные** hubs only when the selected project has tabs for that placement
+  - **Управление** / **Данные** hubs when that placement has entries (cabinet modules without a project; bound modules when a project is selected)
 - Trailing: **Settings** → `EmployeeSettingsBody`
 
 ## Narrow (<600px)
 
 - Bottom nav: **Projects**, **Overview**, optional **Управление** / **Данные**, Settings
-- Hub lists: module tabs with `nav.placement: management` / `data` for the selected project
+- Hub lists: same rules as wide — cabinet tabs without project; project-bound tabs when selected
 - Empty placement → hub destination omitted from nav
-- Hub page with null `projectId` still shows CTA to create/select a project
 
 ## Runtime-modules scope
 
-| Surface | Owner | API |
-|---------|-------|-----|
-| Rail tabs | cabinet instance | `/cabinets/{id}/modules…` |
-| Management / Data | project leaf | `/projects/{id}/runtime-modules…` |
+| Surface | No project | Project selected |
+|---------|------------|------------------|
+| Rail tabs | Cabinet modules | Cabinet modules (`placement: rail`) |
+| Management / Data | All cabinet module tabs for that placement | Only modules with MP; SoT = cabinet if `bind_kind=global`, project leaf if `local` |
 
-`CabinetModuleHost(projectId: …)` must receive an explicit project id for hubs; rail omits it. Do not fall back to `workContext.selectedProjectId` inside the host.
+`CabinetModuleHost(projectId: …)` for **local** binds only; **global** opens cabinet APIs (`projectId` null). Do not fall back to `workContext.selectedProjectId` inside the host.
 
 ## Chat
 

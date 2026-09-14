@@ -16,6 +16,7 @@ from prodavan.application.modules.module_instance_service import (
 from prodavan.domain.errors import AppError
 from prodavan.domain.modules import (
     GLOBAL_DEFAULT_PROJECT_MODULES,
+    LOCAL_DEFAULT_PROJECT_MODULES,
     ModuleBindKind,
     default_cabinet_bind_kind,
     default_child_may_edit,
@@ -32,13 +33,15 @@ def test_default_bind_helpers() -> None:
     assert default_project_bind_kind("mod_prompts") == ModuleBindKind.GLOBAL
     assert default_project_bind_kind("mod_mcp") == ModuleBindKind.GLOBAL
     assert default_project_bind_kind("mod_files") == ModuleBindKind.GLOBAL
-    assert default_project_bind_kind("mod_equipment") == ModuleBindKind.LOCAL
+    assert default_project_bind_kind("mod_equipment") == ModuleBindKind.GLOBAL
+    assert default_project_bind_kind("mod_custom") == ModuleBindKind.GLOBAL
     assert default_cabinet_bind_kind("mod_prompts") == ModuleBindKind.LOCAL
     assert default_cabinet_bind_kind("mod_files") == ModuleBindKind.LOCAL
     assert default_cabinet_bind_kind("mod_equipment") == ModuleBindKind.LOCAL
     assert default_child_may_edit(ModuleBindKind.LOCAL) is True
     assert default_child_may_edit(ModuleBindKind.GLOBAL) is False
     assert default_child_may_edit("local") is True
+    assert LOCAL_DEFAULT_PROJECT_MODULES == frozenset()
     assert GLOBAL_DEFAULT_PROJECT_MODULES == frozenset({"mod_prompts", "mod_mcp", "mod_files"})
 
 

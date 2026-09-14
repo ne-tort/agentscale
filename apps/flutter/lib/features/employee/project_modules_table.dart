@@ -5,28 +5,17 @@ import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Product modules that default to a global cabinet→project bind.
-const _globalDefaultModuleIds = {'mod_prompts', 'mod_mcp', 'mod_files'};
-
 /// Resolve effective MP bind kind for a project-modules list row.
+///
+/// Missing `bind_kind` on an enabled row defaults to **global** (product default).
 String projectModuleBindKind(Map<String, dynamic> module) {
   final raw = module['bind_kind'];
   if (raw is String && (raw == 'local' || raw == 'global')) return raw;
   if (module['enabled'] != true) return '';
-  final id = module['module_id'] as String? ?? '';
-  return _globalDefaultModuleIds.contains(id) ? 'global' : 'local';
+  return 'global';
 }
 
-/// Locked (read-only child) when global and `child_may_edit` is not true.
-bool projectModuleBindLocked(Map<String, dynamic> module) {
-  if (module['enabled'] != true) return false;
-  final may = module['child_may_edit'];
-  if (may == true) return false;
-  if (may == false) return true;
-  return projectModuleBindKind(module) == 'global';
-}
-
-/// Project modules table — name, profile, Local/Global bind actions.
+/// Project modules table — name + Local/Global bind actions.
 class ProjectModulesTable extends StatelessWidget {
   const ProjectModulesTable({
     super.key,
@@ -52,21 +41,15 @@ class ProjectModulesTable extends StatelessWidget {
 
     final rows = modules.map((m) {
       final id = m['module_id'] as String;
-      final hasProfiles = m['has_profiles'] == true;
-      final profileName = m['profile_name'] as String?;
       final kind = projectModuleBindKind(m);
-      final locked = projectModuleBindLocked(m);
       return AppEntityRow(
         id: id,
         title: m['name'] as String? ?? id,
-        cells: {
-          'profile': hasProfiles ? (profileName ?? l10n.commonEmDash) : l10n.commonEmDash,
-        },
+        cells: const {},
         cellWidgets: {
           'bind': _BindActions(
             moduleId: id,
             bindKind: kind,
-            locked: locked,
             localLabel: localLabel,
             globalLabel: globalLabel,
             onBindChanged: onBindChanged,
@@ -93,7 +76,6 @@ class ProjectModulesTable extends StatelessWidget {
             rows: rows,
             primaryColumnLabel: l10n.commonName,
             columns: [
-              AppEntityColumn(id: 'profile', label: l10n.projectModuleProfileColumn),
               AppEntityColumn(
                 id: 'bind',
                 label: isRu ? 'Привязка' : 'Bind',
@@ -121,7 +103,6 @@ class _BindActions extends StatelessWidget {
   const _BindActions({
     required this.moduleId,
     required this.bindKind,
-    required this.locked,
     required this.localLabel,
     required this.globalLabel,
     required this.onBindChanged,
@@ -129,26 +110,15 @@ class _BindActions extends StatelessWidget {
 
   final String moduleId;
   final String bindKind;
-  final bool locked;
   final String localLabel;
   final String globalLabel;
   final Future<void> Function(String moduleId, String? bindKind) onBindChanged;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (locked)
-          Padding(
-            padding: const EdgeInsets.only(right: 4),
-            child: Icon(
-              Icons.lock_outline,
-              size: 16,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
         _kindChip(
           context,
           label: localLabel,
