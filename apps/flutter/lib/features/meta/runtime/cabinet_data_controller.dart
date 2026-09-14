@@ -4,7 +4,6 @@ import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/features/meta/module_cell_format.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
-import 'package:prodavan/features/meta/runtime/chat_scope.dart';
 import 'package:prodavan/features/meta/runtime/module_pick_context.dart';
 
 typedef ProjectsRematerializeCallback = void Function(int scheduled, {required bool inline});
@@ -31,16 +30,6 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
 
   bool get _useProjectInstance => projectId != null && projectId!.isNotEmpty;
 
-  /// True when any chat-scoped table cannot load without an active session.
-  bool get needsChatSession {
-    for (final table in _manifest.tables) {
-      if (tableIsChatScoped(table) && (sessionId == null || sessionId!.isEmpty)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   ProjectsRematerializeCallback? onProjectsRematerialize;
   WorkspaceOutdatedCallback? onWorkspaceOutdated;
 
@@ -53,9 +42,6 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
     for (final table in _manifest.tables) {
       final slug = table['slug'] as String?;
       if (slug == null || slug.isEmpty) continue;
-      if (tableIsChatScoped(table) && (sessionId == null || sessionId!.isEmpty)) {
-        continue;
-      }
       final rows = _useProjectInstance
           ? await api.listProjectRuntimeModuleDataRows(
               projectId: projectId!,

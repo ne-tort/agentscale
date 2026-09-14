@@ -44,25 +44,30 @@ Reusable on `TableDefinition`, `ViewDefinition`, `TabDefinition`, `ActionDefinit
 | | `bound` | Only when current project has MP row |
 | | `none` | Cabinet-level only; hidden in project workspace overlay |
 | `chats` | `all` | **Default.** Shared rows for all chats in the SoT instance; `session_id` ignored |
-| | `current` | Per-chat rows: list/create require active agent session; filter/stamp `session_id` |
+| | `current` | Per-chat rows: filter/stamp `session_id`; missing session → synthetic **`main`** |
+| `active_chat` | `optional` | **Default.** Tab / hub tile always shown (UI) |
+| | `required` | **Opt-in.** Hide this tab or hub tile when no live agent chat is open |
 | `requires_assignment` | bool | Employee must have cabinet assignment (default true) |
 | `module_binding` | `required` | Implicit — skip if module not bound |
 
 **`scope.chats` is orthogonal to `bind_kind`.** Local/global chooses which **instance** is SoT; `chats` filters **rows inside** that instance. Do **not** fork a module instance per chat.
 
+**`scope.active_chat` is orthogonal to `scope.chats`.** Row stamping always works (with `main` fallback). Hiding UI without a chat is an explicit product choice on tabs / hub items — not implied by `chats=current`.
+
 ```text
-bind_kind local|global  → cabinet vs project (or higher) instance
-scope.chats all|current → shared rows vs session_id-scoped rows
+bind_kind local|global     → cabinet vs project (or higher) instance
+scope.chats all|current    → shared rows vs session_id-scoped rows
+scope.active_chat optional|required → show vs hide nav/hub without live chat
 ```
 
 | `scope.chats` | List | Create / update |
 |---------------|------|-----------------|
 | `all` | All rows of the table | Do not stamp `session_id` |
-| `current` | Rows where `session_id == activeSession` | Require session; stamp column + `body.session_id`; foreign session → 404/403 |
+| `current` | Rows where `session_id == activeSession` (or `main`) | Stamp column + `body.session_id`; foreign session → 404/403 |
 
-System field **`session_id`** (agent session id): first-class column on `module_instance_data_rows` + mirrored in JSON body on write. Not shown on ordinary forms.
+System field **`session_id`** (agent session id or synthetic `main`): first-class column on `module_instance_data_rows` + mirrored in JSON body on write. Not shown on ordinary forms.
 
-Wire: UI / MCP send `X-Prodavan-Session-Id` (or query). Pod MCP tools pass `session_id` per call (one Pod serves many chats).
+Wire: UI / MCP send `X-Prodavan-Session-Id` (or query). Absent header on `chats=current` → treat as `main` (no 422). Pod MCP tools pass `session_id` per call when a real chat is active.
 
 ## enabled and visibility
 

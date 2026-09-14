@@ -10,12 +10,30 @@ CHAT_SCOPE_ALL = "all"
 CHAT_SCOPE_CURRENT = "current"
 SESSION_HEADER = "X-Prodavan-Session-Id"
 
+# Synthetic session when no agent chat is active — still stamps chats=current rows.
+DEFAULT_CHAT_SESSION_ID = "main"
+
+ACTIVE_CHAT_OPTIONAL = "optional"
+ACTIVE_CHAT_REQUIRED = "required"
+
 
 def normalize_chats_scope(raw: Any) -> str:
     value = str(raw or CHAT_SCOPE_ALL).strip().lower()
     if value == CHAT_SCOPE_CURRENT:
         return CHAT_SCOPE_CURRENT
     return CHAT_SCOPE_ALL
+
+
+def normalize_active_chat(raw: Any) -> str:
+    """UI opt-in: hide nav/hub entry when no live agent chat.
+
+    Default ``optional`` — always show. ``required`` — hide without active session.
+    Orthogonal to ``scope.chats`` row filtering.
+    """
+    value = str(raw or ACTIVE_CHAT_OPTIONAL).strip().lower()
+    if value == ACTIVE_CHAT_REQUIRED:
+        return ACTIVE_CHAT_REQUIRED
+    return ACTIVE_CHAT_OPTIONAL
 
 
 def chats_scope_from_tables_body(tables_body: Any, table_slug: str) -> str:
@@ -46,19 +64,23 @@ def chats_scope_from_tables_body(tables_body: Any, table_slug: str) -> str:
     return CHAT_SCOPE_ALL
 
 
-def require_session_id(session_id: str | None, *, for_write: bool) -> str | None:
-    """For chats=current: write requires session; list may return empty without one."""
+def is_synthetic_chat_session(session_id: str | None) -> bool:
+    return (session_id or "").strip() == DEFAULT_CHAT_SESSION_ID
+
+
+def resolve_session_id(session_id: str | None) -> str:
+    """Active chat id, or synthetic ``main`` when absent."""
     sid = (session_id or "").strip() or None
-    if sid:
-        return sid
-    if for_write:
-        raise AppError(
-            code="SESSION_REQUIRED",
-            title="Validation Error",
-            status=422,
-            detail="session_id required for chat-scoped module table",
-        )
-    return None
+    return sid or DEFAULT_CHAT_SESSION_ID
+
+
+def require_session_id(session_id: str | None, *, for_write: bool) -> str | None:
+    """Resolve session for chats=current.
+
+    Missing session → ``main`` (no 422). ``for_write`` kept for call-site clarity.
+    """
+    _ = for_write
+    return resolve_session_id(session_id)
 
 
 def stamp_session_on_body(body: dict[str, Any], session_id: str) -> dict[str, Any]:

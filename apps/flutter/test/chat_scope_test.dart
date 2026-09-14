@@ -40,8 +40,36 @@ void main() {
     });
   });
 
-  group('CabinetDataController.needsChatSession', () {
-    test('true when chat-scoped table and no session', () {
+  group('scope.active_chat', () {
+    test('required hides without session', () {
+      final item = {
+        'title': 'Позиции',
+        'scope': {'active_chat': 'required'},
+      };
+      expect(scopeRequiresActiveChat(item), isTrue);
+      expect(scopeVisibleForSession(item, null), isFalse);
+      expect(scopeVisibleForSession(item, ''), isFalse);
+      expect(scopeVisibleForSession(item, 'ags_1'), isTrue);
+    });
+
+    test('optional always visible', () {
+      final item = {
+        'title': 'Каталоги',
+        'scope': {'active_chat': 'optional'},
+      };
+      expect(scopeVisibleForSession(item, null), isTrue);
+      expect(scopeVisibleForSession({'title': 'x'}, null), isTrue);
+    });
+
+    test('effectiveChatSessionId falls back to main', () {
+      expect(effectiveChatSessionId(null), kDefaultChatSessionId);
+      expect(effectiveChatSessionId(''), kDefaultChatSessionId);
+      expect(effectiveChatSessionId('ags_1'), 'ags_1');
+    });
+  });
+
+  group('CabinetDataController', () {
+    test('loads without requiring chat session flag', () {
       final ctrl = CabinetDataController(
         api: _FakeApi(),
         cabinetId: 'cab_1',
@@ -55,42 +83,7 @@ void main() {
           ],
         ),
       );
-      expect(ctrl.needsChatSession, isTrue);
-    });
-
-    test('false when session present', () {
-      final ctrl = CabinetDataController(
-        api: _FakeApi(),
-        cabinetId: 'cab_1',
-        moduleId: 'mod_1',
-        sessionId: 'ags_1',
-        manifest: ModuleMetaManifest(
-          tables: [
-            {
-              'slug': 'request_lines',
-              'scope': {'chats': 'current'},
-            },
-          ],
-        ),
-      );
-      expect(ctrl.needsChatSession, isFalse);
-    });
-
-    test('false when only shared tables', () {
-      final ctrl = CabinetDataController(
-        api: _FakeApi(),
-        cabinetId: 'cab_1',
-        moduleId: 'mod_1',
-        manifest: ModuleMetaManifest(
-          tables: [
-            {
-              'slug': 'catalogs',
-              'scope': {'chats': 'all'},
-            },
-          ],
-        ),
-      );
-      expect(ctrl.needsChatSession, isFalse);
+      expect(ctrl.sessionId, isNull);
     });
   });
 }

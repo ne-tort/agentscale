@@ -54,14 +54,20 @@ class CabinetModuleHubPage extends StatelessWidget {
 
   Widget _listBody(BuildContext context, AppLocalizations l10n) {
     final pid = projectId;
-    final hasCabinetOwned = entries.any((e) => !e.usesProjectLeaf);
+    final visibleEntries = [
+      for (final e in entries)
+        if (!e.requiresActiveChat ||
+            (sessionId != null && sessionId!.trim().isNotEmpty))
+          e,
+    ];
+    final hasCabinetOwned = visibleEntries.any((e) => !e.usesProjectLeaf);
     if ((pid == null || pid.isEmpty) && !hasCabinetOwned) {
       return EmptyPlaceholder(
         title: l10n.projectCreateProjectHint,
         icon: Icons.folder_outlined,
       );
     }
-    if (entries.isEmpty) {
+    if (visibleEntries.isEmpty) {
       return EmptyPlaceholder(
         title: l10n.companyNoModules,
         icon: emptyIcon,
@@ -71,7 +77,7 @@ class CabinetModuleHubPage extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.all(AppSpacing.md),
       children: [
-        for (final entry in entries)
+        for (final entry in visibleEntries)
           AppNavPreference(
             title: entry.label,
             icon: entry.icon,

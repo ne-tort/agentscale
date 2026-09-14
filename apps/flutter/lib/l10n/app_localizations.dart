@@ -1856,12 +1856,6 @@ abstract class AppLocalizations {
   /// **'Module changes saved — use Update project on each running project to apply'**
   String get cabinetModuleWorkspaceOutdated;
 
-  /// No description provided for @moduleChatScopeOpenFromChat.
-  ///
-  /// In en, this message translates to:
-  /// **'Per-chat tables are empty here — open this module from an active chat to see and edit that chat’s rows.'**
-  String get moduleChatScopeOpenFromChat;
-
   /// No description provided for @cabinetArchiveTable.
   ///
   /// In en, this message translates to:

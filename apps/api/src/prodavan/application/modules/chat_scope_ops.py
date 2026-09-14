@@ -11,6 +11,7 @@ from prodavan.application.modules.chat_scope import (
     CHAT_SCOPE_CURRENT,
     assert_row_session_access,
     chats_scope_from_tables_body,
+    is_synthetic_chat_session,
     require_session_id,
     stamp_session_on_body,
 )
@@ -38,6 +39,8 @@ async def ensure_session_belongs_to_project(
     project_id: str,
     session_id: str,
 ) -> None:
+    if is_synthetic_chat_session(session_id):
+        return
     q = await session.execute(
         select(AgentSessionRow.id).where(
             AgentSessionRow.id == session_id,
@@ -65,7 +68,7 @@ async def prepare_chat_scoped_list(
 ) -> tuple[str | None, bool]:
     """Return (filter_session_id, skip_empty).
 
-    skip_empty True → caller should return [] without querying.
+    skip_empty is unused for chats=current (synthetic ``main`` fills the gap).
     """
     chats = await resolve_table_chats_scope(
         instances, instance_id=instance_id, module_id=module_id, table_slug=table_slug
@@ -73,8 +76,7 @@ async def prepare_chat_scoped_list(
     if chats != CHAT_SCOPE_CURRENT:
         return None, False
     sid = require_session_id(session_id, for_write=False)
-    if sid is None:
-        return None, True
+    assert sid is not None
     if db is not None and project_id is not None:
         await ensure_session_belongs_to_project(db, project_id=project_id, session_id=sid)
     return sid, False

@@ -9,6 +9,8 @@ import 'package:prodavan/features/meta/interpreters/profile_hub_interpreter.dart
 import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/preview/preview_stub.dart';
+import 'package:prodavan/features/meta/runtime/chat_scope.dart';
+import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 class HubViewInterpreter extends StatelessWidget {
@@ -38,10 +40,22 @@ class HubViewInterpreter extends StatelessWidget {
       );
     }
 
+    final sessionId = ModuleRuntimeScope.maybeOf(context)?.sessionId;
+    final visible = items.whereType<Map>().where((item) {
+      final map = Map<String, dynamic>.from(item);
+      return scopeVisibleForSession(map, sessionId);
+    }).toList();
+    if (visible.isEmpty) {
+      return EmptyPlaceholder(
+        title: l10n.cabinetNoRows,
+        icon: Icons.list_alt_outlined,
+      );
+    }
+
     return ListView(
       padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
       children: [
-        for (final item in items.whereType<Map>())
+        for (final item in visible)
           AppNavPreference(
             title: item['title'] as String? ?? '—',
             icon: metaIconFromName(item['icon'] as String?, fallback: Icons.chevron_right),

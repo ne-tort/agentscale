@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
+import 'package:prodavan/features/meta/runtime/chat_scope.dart';
 
 /// One cabinet module tab merged into [CabinetShell] rail / management / data hub.
 class CabinetNavEntry {
@@ -38,6 +39,9 @@ class CabinetNavEntry {
 
   /// True when the tab needs a project leaf (local bind); false for global→cabinet SoT.
   bool get usesProjectLeaf => instanceOwner != 'cabinet';
+
+  /// Opt-in meta ``scope.active_chat: required`` — hide without a live chat.
+  bool get requiresActiveChat => scopeRequiresActiveChat(tab);
 }
 
 List<CabinetNavEntry> _finalizeCabinetNavEntries(List<CabinetNavEntry> raw) {

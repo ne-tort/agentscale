@@ -1049,10 +1049,6 @@ class AppLocalizationsRu extends AppLocalizations {
       'Изменения модуля сохранены — нажмите «Обновить проект» на каждом запущенном проекте';
 
   @override
-  String get moduleChatScopeOpenFromChat =>
-      'Таблицы чата здесь пустые — откройте модуль из активного чата, чтобы видеть и править строки этого чата.';
-
-  @override
   String get cabinetArchiveTable => 'В архив';
 
   @override
@@ -2475,7 +2471,8 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectReloadInProgress => 'Перезагрузка проекта…';
 
   @override
-  String get projectLifecycleTimedOut => 'Превышено время ожидания запуска контейнера';
+  String get projectLifecycleTimedOut =>
+      'Превышено время ожидания запуска контейнера';
 
   @override
   String get projectResumeInProgress => 'Возобновление проекта…';

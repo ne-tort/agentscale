@@ -1570,11 +1570,13 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "title": "Позиции заказчика",
                             "icon": "list_alt",
                             "target": {"kind": "view", "view": "request_lines_list"},
+                            "scope": {"active_chat": "required"},
                         },
                         {
                             "title": "Найденные товары",
                             "icon": "inventory_2",
                             "target": {"kind": "view", "view": "found_offers_list"},
+                            "scope": {"active_chat": "required"},
                         },
                         {
                             "title": "Характеристики оборудования",
@@ -1583,6 +1585,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                 "kind": "view",
                                 "view": "equipment_items_list",
                             },
+                            "scope": {"active_chat": "required"},
                         },
                         {
                             "title": "Типы комплектующих",
@@ -1599,6 +1602,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                                 "kind": "view",
                                 "view": "equipment_builds_list",
                             },
+                            "scope": {"active_chat": "required"},
                         },
                         {
                             "title": "Проверенные продавцы",
@@ -1620,6 +1624,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                             "title": "S4B",
                             "icon": "storefront",
                             "target": {"kind": "view", "view": "s4b_settings_list"},
+                            "scope": {"active_chat": "required"},
                         },
                     ],
                 },

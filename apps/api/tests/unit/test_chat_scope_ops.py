@@ -6,12 +6,11 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from prodavan.application.modules.chat_scope import CHAT_SCOPE_ALL
+from prodavan.application.modules.chat_scope import CHAT_SCOPE_ALL, DEFAULT_CHAT_SESSION_ID
 from prodavan.application.modules.chat_scope_ops import (
     prepare_chat_scoped_list,
     prepare_chat_scoped_write,
 )
-from prodavan.domain.errors import AppError
 
 
 @pytest.mark.asyncio
@@ -32,7 +31,7 @@ async def test_prepare_list_shared_no_filter() -> None:
 
 
 @pytest.mark.asyncio
-async def test_prepare_list_current_without_session_skips() -> None:
+async def test_prepare_list_current_without_session_uses_main() -> None:
     instances = MagicMock()
     instances.resolve_tables_body = AsyncMock(
         return_value=[{"slug": "request_lines", "scope": {"chats": "current"}}]
@@ -44,29 +43,30 @@ async def test_prepare_list_current_without_session_skips() -> None:
         table_slug="request_lines",
         session_id=None,
     )
-    assert sid is None
-    assert skip is True
+    assert sid == DEFAULT_CHAT_SESSION_ID
+    assert skip is False
 
 
 @pytest.mark.asyncio
-async def test_prepare_write_current_requires_session() -> None:
+async def test_prepare_write_current_defaults_to_main() -> None:
     instances = MagicMock()
     instances.resolve_tables_body = AsyncMock(
         return_value=[{"slug": "request_lines", "scope": {"chats": "current"}}]
     )
     db = AsyncMock()
-    with pytest.raises(AppError) as ei:
-        await prepare_chat_scoped_write(
-            instances,
-            instance_id="minst_1",
-            module_id="mod_equipment",
-            table_slug="request_lines",
-            body={"title": "x"},
-            session_id=None,
-            db=db,
-            project_id="prj_1",
-        )
-    assert ei.value.code == "SESSION_REQUIRED"
+    body, sid = await prepare_chat_scoped_write(
+        instances,
+        instance_id="minst_1",
+        module_id="mod_equipment",
+        table_slug="request_lines",
+        body={"title": "x"},
+        session_id=None,
+        db=db,
+        project_id="prj_1",
+    )
+    assert sid == DEFAULT_CHAT_SESSION_ID
+    assert body["session_id"] == DEFAULT_CHAT_SESSION_ID
+    db.execute.assert_not_called()
 
 
 @pytest.mark.asyncio

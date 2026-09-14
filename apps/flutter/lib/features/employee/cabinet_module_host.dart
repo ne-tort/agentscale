@@ -5,7 +5,6 @@ import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
-import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/employee/cabinet_nav_loader.dart';
 import 'package:prodavan/features/meta/interpreters/hub_interpreter.dart';
@@ -205,7 +204,6 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
     }
     final manifest = _manifest!;
     final adapter = _adapter!;
-    final data = _data!;
     final viewSlug = widget.entry.viewSlug;
     if (viewSlug.isEmpty) {
       return EmptyPlaceholder(title: l10n.adminMetaInvalid);
@@ -215,27 +213,12 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
       return EmptyPlaceholder(title: l10n.adminMetaInvalid);
     }
 
-    Widget content = ViewInterpreterHost(
+    final content = ViewInterpreterHost(
       manifest: manifest,
       view: view,
       seeds: adapter,
       onOpenView: _openView,
     );
-    if (data.needsChatSession) {
-      content = Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-            child: AppStatusBanner(
-              severity: AppStatusSeverity.info,
-              message: l10n.moduleChatScopeOpenFromChat,
-            ),
-          ),
-          Expanded(child: content),
-        ],
-      );
-    }
 
     final body = ModuleRuntimeScope.cabinet(
       cabinetId: widget.cabinetId,

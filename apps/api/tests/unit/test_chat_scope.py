@@ -7,8 +7,11 @@ import pytest
 from prodavan.application.modules.chat_scope import (
     CHAT_SCOPE_ALL,
     CHAT_SCOPE_CURRENT,
+    DEFAULT_CHAT_SESSION_ID,
     assert_row_session_access,
     chats_scope_from_tables_body,
+    is_synthetic_chat_session,
+    normalize_active_chat,
     normalize_chats_scope,
     require_session_id,
     stamp_session_on_body,
@@ -21,6 +24,12 @@ def test_normalize_chats_scope() -> None:
     assert normalize_chats_scope("all") == CHAT_SCOPE_ALL
     assert normalize_chats_scope("CURRENT") == CHAT_SCOPE_CURRENT
     assert normalize_chats_scope("other") == CHAT_SCOPE_ALL
+
+
+def test_normalize_active_chat() -> None:
+    assert normalize_active_chat(None) == "optional"
+    assert normalize_active_chat("required") == "required"
+    assert normalize_active_chat("OPTIONAL") == "optional"
 
 
 def test_chats_scope_from_tables_list() -> None:
@@ -40,16 +49,12 @@ def test_chats_scope_from_tables_map() -> None:
     assert chats_scope_from_tables_body(body, "request_lines") == CHAT_SCOPE_CURRENT
 
 
-def test_require_session_id_list_allows_missing() -> None:
-    assert require_session_id(None, for_write=False) is None
+def test_require_session_id_falls_back_to_main() -> None:
+    assert require_session_id(None, for_write=False) == DEFAULT_CHAT_SESSION_ID
+    assert require_session_id(None, for_write=True) == DEFAULT_CHAT_SESSION_ID
     assert require_session_id("  ags_1  ", for_write=False) == "ags_1"
-
-
-def test_require_session_id_write_raises() -> None:
-    with pytest.raises(AppError) as ei:
-        require_session_id(None, for_write=True)
-    assert ei.value.code == "SESSION_REQUIRED"
-    assert ei.value.status == 422
+    assert is_synthetic_chat_session("main")
+    assert not is_synthetic_chat_session("ags_1")
 
 
 def test_stamp_and_assert_row_session() -> None:
