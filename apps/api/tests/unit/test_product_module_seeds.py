@@ -175,6 +175,13 @@ def test_equipment_meta_hub_on_data_placement() -> None:
     catalog_cols = {c["name"] for c in meta["columns"] if c["table_slug"] == "catalogs"}
     assert {"source_kind", "remote_dsn", "remote_table", "remote_database", "remote_dsn_has_database", "remote_user", "remote_password"} <= catalog_cols
     assert {"last_indexed_at", "reindex_interval_hours", "index_name"} <= catalog_cols
+    reindex_col = next(
+        c
+        for c in meta["columns"]
+        if c["table_slug"] == "catalogs" and c["name"] == "reindex_interval_hours"
+    )
+    assert reindex_col["label"]["ru"] == "Интервал обновления (ч)"
+    assert reindex_col["type"] == "number"
     assert "artifact_ref" not in catalog_cols
     settings = next(v for v in meta["views"] if v["slug"] == "catalogs_settings")
     field_cols = [f["column"] for f in settings["ui_json"]["fields"]]

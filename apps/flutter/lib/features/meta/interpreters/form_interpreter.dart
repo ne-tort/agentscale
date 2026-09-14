@@ -810,6 +810,21 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
                 }
               : null,
           onSave: (v) async {
+            if (type == 'number') {
+              final trimmed = v.trim();
+              if (trimmed.isEmpty) {
+                _persist(name, null);
+                return;
+              }
+              final asInt = int.tryParse(trimmed);
+              if (asInt != null) {
+                _persist(name, asInt);
+                return;
+              }
+              final asDouble = double.tryParse(trimmed);
+              _persist(name, asDouble ?? trimmed);
+              return;
+            }
             _persist(name, v);
           },
         );

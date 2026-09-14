@@ -1142,8 +1142,8 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "table_slug": "catalogs",
                 "name": "reindex_interval_hours",
                 "label": {
-                    "ru": "Интервал реиндекса (ч)",
-                    "en": "Reindex interval (h)",
+                    "ru": "Интервал обновления (ч)",
+                    "en": "Update interval (h)",
                 },
                 "type": "number",
                 "required": False,

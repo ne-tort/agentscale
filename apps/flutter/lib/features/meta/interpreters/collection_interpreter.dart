@@ -928,7 +928,25 @@ class _CollectionListHeaderState extends State<_CollectionListHeader> {
       value: value?.toString() ?? '',
       icon: Icons.badge_outlined,
       enabled: !widget.readOnly,
-      onSave: (v) async => persist(v.trim()),
+      onSave: (v) async {
+        final colType = col?['type']?.toString();
+        if (colType == 'number') {
+          final trimmed = v.trim();
+          if (trimmed.isEmpty) {
+            await persist(null);
+            return;
+          }
+          final asInt = int.tryParse(trimmed);
+          if (asInt != null) {
+            await persist(asInt);
+            return;
+          }
+          final asDouble = double.tryParse(trimmed);
+          await persist(asDouble ?? trimmed);
+          return;
+        }
+        await persist(v.trim());
+      },
     );
   }
 }
@@ -1025,7 +1043,25 @@ class _CollectionContextHeader extends StatelessWidget {
       value: value?.toString() ?? '',
       icon: Icons.badge_outlined,
       enabled: !readOnly,
-      onSave: (v) async => persist(v.trim()),
+      onSave: (v) async {
+        final colType = col?['type']?.toString();
+        if (colType == 'number') {
+          final trimmed = v.trim();
+          if (trimmed.isEmpty) {
+            await persist(null);
+            return;
+          }
+          final asInt = int.tryParse(trimmed);
+          if (asInt != null) {
+            await persist(asInt);
+            return;
+          }
+          final asDouble = double.tryParse(trimmed);
+          await persist(asDouble ?? trimmed);
+          return;
+        }
+        await persist(v.trim());
+      },
     );
   }
 }

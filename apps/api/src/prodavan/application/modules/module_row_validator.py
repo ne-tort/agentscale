@@ -49,7 +49,7 @@ def validate_row_body(
             continue
 
         if name in body:
-            value = body[name]
+            value = _coerce_field_value(name, body[name], col)
             _validate_field(name, value, col, cabinet_id=cabinet_id)
             sanitized[name] = _normalize_field_value(name, value, col)
         elif col.get("required") is True:
@@ -58,6 +58,33 @@ def validate_row_body(
             sanitized[name] = _normalize_field_value(name, col["default"], col)
 
     return sanitized
+
+
+def _coerce_field_value(name: str, value: Any, col: dict[str, Any]) -> Any:
+    """Coerce UI-friendly payloads (e.g. numeric strings) before type checks."""
+    if col.get("type") != "number":
+        return value
+    if value is None:
+        return None
+    # bool is a subclass of int — reject before accepting numbers.
+    if isinstance(value, bool):
+        raise _row_error(f"{name}: expected number")
+    if isinstance(value, (int, float)):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            if any(ch in text for ch in ".eE"):
+                parsed = float(text)
+                if parsed.is_integer():
+                    return int(parsed)
+                return parsed
+            return int(text)
+        except ValueError as exc:
+            raise _row_error(f"{name}: expected number") from exc
+    return value
 
 
 def _normalize_field_value(name: str, value: Any, col: dict[str, Any]) -> Any:

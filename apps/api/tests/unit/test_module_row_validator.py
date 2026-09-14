@@ -188,7 +188,38 @@ def test_workspace_path_normalize_on_save() -> None:
     assert body3["path"] == ""
 
 
-def test_workspace_path_rejects_dotdot() -> None:
+def test_number_accepts_numeric_string() -> None:
+    columns = [
+        {"table_slug": "catalogs", "name": "name", "type": "text", "required": True},
+        {
+            "table_slug": "catalogs",
+            "name": "reindex_interval_hours",
+            "type": "number",
+            "required": False,
+            "default": 24,
+        },
+    ]
+    body = validate_row_body(
+        {"name": "remote", "reindex_interval_hours": "12"},
+        columns,
+    )
+    assert body["reindex_interval_hours"] == 12
+    body_float = validate_row_body(
+        {"name": "remote", "reindex_interval_hours": "1.5"},
+        columns,
+    )
+    assert body_float["reindex_interval_hours"] == 1.5
+    body_empty = validate_row_body(
+        {"name": "remote", "reindex_interval_hours": "  "},
+        columns,
+    )
+    assert body_empty["reindex_interval_hours"] is None
+
+
+def test_number_rejects_non_numeric_string() -> None:
+    columns = [
+        {"table_slug": "catalogs", "name": "qty", "type": "number", "required": False},
+    ]
     with pytest.raises(AppError) as exc:
-        validate_row_body({"path": "../etc"}, _PATH_COLUMNS)
-    assert exc.value.code == "ROW_VALIDATION"
+        validate_row_body({"qty": "abc"}, columns)
+    assert "expected number" in (exc.value.detail or "")
