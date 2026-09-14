@@ -40,7 +40,7 @@ class CabinetNavEntry {
   /// True when the tab needs a project leaf (local bind); false for global→cabinet SoT.
   bool get usesProjectLeaf => instanceOwner != 'cabinet';
 
-  /// Opt-in meta ``scope.active_chat: required`` — hide without a live chat.
+  /// Opt-in meta ``scope.active_chat: required`` — hide without active chat.
   bool get requiresActiveChat => scopeRequiresActiveChat(tab);
 }
 

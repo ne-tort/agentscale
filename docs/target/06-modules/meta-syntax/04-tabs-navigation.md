@@ -37,7 +37,7 @@ Tabs = **то, что видит пользователь** в панели на
 | `table_slug` | Shortcut for tables browser / MCP context |
 | `enabled` | `false` → `visibility=disabled` |
 | `system` | `true` only for platform-owned tabs (modules usually `false`) |
-| `scope` | See [scope-bindings](07-scope-bindings.md) — including optional `active_chat: required` to hide without a live chat |
+| `scope` | See [scope-bindings](07-scope-bindings.md) — including optional `active_chat: required` to hide without an active chat |
 | `visibility` | `visible` \| `hidden` \| `disabled` |
 | `badge` | Optional count dot |
 | `nav` | Optional product-shell injection — see below |

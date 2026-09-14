@@ -33,6 +33,17 @@
 - **Narrow:** root push — bottom nav hidden (full-screen chat).
 - Paused / error / pod-down: transcript stays readable; composer wake (warning text) — tap resumes or reloads without extra banners.
 
+### Active chat (`selectedSessionId`)
+
+Independent of main-rail selection (same idea as `selectedProjectId`):
+
+| Selection | Where | Cleared when |
+|-----------|-------|--------------|
+| Main destination (Projects / Management / Data / …) | `AppLayout.selectedIndex` | Switch destination / overview / settings |
+| Active chat | `WorkContext.selectedSessionId` → chats rail highlight | Project change, cabinet enter, logout, or session gone from sidebar |
+
+Opening a chat sets `selectedSessionId` and **keeps** it after leaving the chat overlay — hubs with `scope.active_chat: required` and `scope.chats=current` data stay bound to that session until another chat is chosen or the selection is cleared.
+
 ## State machine
 
 Копия `_CompanyShellState`: `_contentIndex`, `_railSelected`, `_narrowStackIndex`, `_subpageOpen`, `AppShellBranch` per tab. Reload management/data nav when `selectedProjectId` changes.

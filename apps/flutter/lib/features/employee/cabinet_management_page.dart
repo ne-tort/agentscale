@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/preferences/app_nav_preference.dart';
+import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
@@ -54,10 +55,11 @@ class CabinetModuleHubPage extends StatelessWidget {
 
   Widget _listBody(BuildContext context, AppLocalizations l10n) {
     final pid = projectId;
+    final activeSession = sessionId ?? workContext.selectedSessionId;
     final visibleEntries = [
       for (final e in entries)
         if (!e.requiresActiveChat ||
-            (sessionId != null && sessionId!.trim().isNotEmpty))
+            (activeSession != null && activeSession.trim().isNotEmpty))
           e,
     ];
     final hasCabinetOwned = visibleEntries.any((e) => !e.usesProjectLeaf);

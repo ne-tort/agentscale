@@ -55,7 +55,6 @@ class _CabinetShellState extends State<CabinetShell> {
   bool _newChatEnabled = false;
   List<Map<String, dynamic>> _pinnedChats = const [];
   List<Map<String, dynamic>> _projectChats = const [];
-  String? _activeSessionId;
   Timer? _presenceHeartbeat;
 
   bool get _showManagement => _managementEntries.isNotEmpty;
@@ -183,14 +182,26 @@ class _CabinetShellState extends State<CabinetShell> {
       if (!mounted) return;
       final pinned = body['pinned'];
       final projectChats = body['project_chats'];
+      final pinnedList =
+          pinned is List ? pinned.cast<Map<String, dynamic>>() : const <Map<String, dynamic>>[];
+      final projectList = projectChats is List
+          ? projectChats.cast<Map<String, dynamic>>()
+          : const <Map<String, dynamic>>[];
       setState(() {
         _newChatEnabled = body['new_chat_enabled'] == true;
-        _pinnedChats = pinned is List ? pinned.cast<Map<String, dynamic>>() : const [];
-        _projectChats =
-            projectChats is List ? projectChats.cast<Map<String, dynamic>>() : const [];
+        _pinnedChats = pinnedList;
+        _projectChats = projectList;
         final selected = body['selected_project_id'] as String?;
         if (selected != workContext.selectedProjectId) {
           workContext.setSelectedProjectId(selected);
+        }
+        final active = workContext.selectedSessionId;
+        if (active != null) {
+          final stillThere = [...pinnedList, ...projectList]
+              .any((c) => c['session_id'] == active);
+          if (!stillThere) {
+            workContext.setSelectedSessionId(null);
+          }
         }
       });
     } catch (_) {
@@ -326,10 +337,11 @@ class _CabinetShellState extends State<CabinetShell> {
     final sessionId = chat['session_id'] as String?;
     final projectId = chat['project_id'] as String?;
     if (sessionId == null || projectId == null) return;
-    // Same dialog already open — do not remount workspace from scratch.
-    if (_activeSessionId == sessionId) return;
+    // Already viewing this chat — keep selection, do not remount.
+    if (workContext.selectedSessionId == sessionId && _chatOpen) return;
+
     final projectName = chat['project_name'] as String? ?? projectId;
-    setState(() => _activeSessionId = sessionId);
+    workContext.setSelectedSessionId(sessionId);
     final page = ProjectWorkspacePage(
       cabinetId: widget.cabinetId,
       projectId: projectId,
@@ -340,7 +352,7 @@ class _CabinetShellState extends State<CabinetShell> {
     );
     await _pushChat(page);
     if (!mounted) return;
-    setState(() => _activeSessionId = null);
+    // Keep selectedSessionId — active chat drives chat-scoped module UI.
     await _reloadSidebar();
   }
 
@@ -357,7 +369,7 @@ class _CabinetShellState extends State<CabinetShell> {
         name = p['name'] as String? ?? projectId;
       } catch (_) {}
       if (!mounted) return;
-      setState(() => _activeSessionId = sessionId);
+      workContext.setSelectedSessionId(sessionId);
       final page = ProjectWorkspacePage(
         cabinetId: widget.cabinetId,
         projectId: projectId,
@@ -367,7 +379,6 @@ class _CabinetShellState extends State<CabinetShell> {
       );
       await _pushChat(page);
       if (!mounted) return;
-      setState(() => _activeSessionId = null);
       await _reloadSidebar();
     } catch (e) {
       if (!mounted) return;
@@ -408,7 +419,7 @@ class _CabinetShellState extends State<CabinetShell> {
           newChatEnabled: _newChatEnabled,
           pinned: _pinnedChats,
           projectChats: _projectChats,
-          activeSessionId: _activeSessionId,
+          activeSessionId: workContext.selectedSessionId,
           onNewChat: _newChatEnabled ? _newChat : null,
           onOpenChat: _openChat,
         ),
@@ -422,7 +433,7 @@ class _CabinetShellState extends State<CabinetShell> {
       newChatEnabled: _newChatEnabled,
       pinned: _pinnedChats,
       projectChats: _projectChats,
-      activeSessionId: _activeSessionId,
+      activeSessionId: workContext.selectedSessionId,
       onNewChat: _newChatEnabled ? _newChat : null,
       onOpenChat: _openChat,
       showLeadingDivider: true,
@@ -489,7 +500,7 @@ class _CabinetShellState extends State<CabinetShell> {
                 root: CabinetManagementPage(
                   cabinetId: widget.cabinetId,
                   projectId: workContext.selectedProjectId,
-                  sessionId: _activeSessionId,
+                  sessionId: workContext.selectedSessionId,
                   entries: _managementEntries,
                 ),
               ),
@@ -501,7 +512,7 @@ class _CabinetShellState extends State<CabinetShell> {
                 root: CabinetDataPage(
                   cabinetId: widget.cabinetId,
                   projectId: workContext.selectedProjectId,
-                  sessionId: _activeSessionId,
+                  sessionId: workContext.selectedSessionId,
                   entries: _dataEntries,
                 ),
               ),
@@ -525,6 +536,9 @@ class _CabinetShellState extends State<CabinetShell> {
         AppNavDestination(icon: Icons.table_chart_outlined, label: l10n.navData),
     ];
 
+    // Main dest vs active chat are independent: chat highlight is in
+    // [CabinetChatsRail] via selectedSessionId; main keeps the open page even
+    // while the chat overlay is showing.
     final wideSelected = () {
       if (_contentIndex == _overviewIndex || _contentIndex == _settingsIndex) {
         return null;
@@ -595,7 +609,7 @@ class _CabinetShellState extends State<CabinetShell> {
         CabinetManagementPage(
           cabinetId: widget.cabinetId,
           projectId: workContext.selectedProjectId,
-          sessionId: _activeSessionId,
+          sessionId: workContext.selectedSessionId,
           entries: _managementEntries,
           embedded: true,
         ),
@@ -603,7 +617,7 @@ class _CabinetShellState extends State<CabinetShell> {
         CabinetDataPage(
           cabinetId: widget.cabinetId,
           projectId: workContext.selectedProjectId,
-          sessionId: _activeSessionId,
+          sessionId: workContext.selectedSessionId,
           entries: _dataEntries,
           embedded: true,
         ),

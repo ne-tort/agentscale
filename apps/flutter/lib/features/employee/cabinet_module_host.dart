@@ -46,17 +46,29 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
   ModuleMetaManifest? _manifest;
   RuntimeDataAdapter? _adapter;
   CabinetDataController? _data;
+  String? _boundSessionId;
+
+  String? get _effectiveSessionId =>
+      widget.sessionId ?? workContext.selectedSessionId;
 
   @override
   void initState() {
     super.initState();
+    workContext.addListener(_onWorkContext);
     _load();
   }
 
   @override
   void dispose() {
+    workContext.removeListener(_onWorkContext);
     _data?.dispose();
     super.dispose();
+  }
+
+  void _onWorkContext() {
+    if (!mounted) return;
+    if (_boundSessionId == _effectiveSessionId) return;
+    _load();
   }
 
   @override
@@ -128,7 +140,7 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
         api: api,
         cabinetId: widget.cabinetId,
         projectId: projectId,
-        sessionId: widget.sessionId,
+        sessionId: _effectiveSessionId,
         moduleId: widget.entry.moduleId,
         manifest: manifest,
       );
@@ -147,6 +159,7 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
         _data = data;
         _manifest = manifest;
         _adapter = RuntimeDataAdapter(data);
+        _boundSessionId = _effectiveSessionId;
         _loading = false;
         _error = null;
       });
@@ -177,7 +190,7 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
           wrapBody: (page) => ModuleRuntimeScope.cabinet(
             cabinetId: widget.cabinetId,
             projectId: widget.projectId,
-            sessionId: widget.sessionId,
+            sessionId: _effectiveSessionId,
             moduleId: widget.entry.moduleId,
             api: workContext.api,
             child: page,
@@ -223,7 +236,7 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
     final body = ModuleRuntimeScope.cabinet(
       cabinetId: widget.cabinetId,
       projectId: widget.projectId,
-      sessionId: widget.sessionId,
+      sessionId: _effectiveSessionId,
       moduleId: widget.entry.moduleId,
       api: workContext.api,
       child: content,

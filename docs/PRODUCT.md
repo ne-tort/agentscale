@@ -153,7 +153,7 @@ Orthogonal to bind local/global. Tables declare `scope.chats`:
 | `all` (default) | Shared across chats in the SoT instance |
 | `current` | Rows stamped with agent `session_id`; missing session → synthetic **`main`** |
 
-UI may opt into hiding nav/hub entries without a live chat via **`scope.active_chat: required`** (default `optional` — always show). Not implied by `chats=current`.
+UI may opt into hiding nav/hub entries without an **active chat** (`WorkContext.selectedSessionId`) via **`scope.active_chat: required`** (default `optional` — always show). Active chat persists while browsing hubs (like selected project); not implied by `chats=current`.
 
 Storage: `module_instance_data_rows.session_id` (+ mirror in JSON body). UI/MCP send `X-Prodavan-Session-Id`. Not a per-chat module fork.
 

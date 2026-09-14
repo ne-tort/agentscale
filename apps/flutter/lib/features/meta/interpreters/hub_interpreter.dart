@@ -9,6 +9,7 @@ import 'package:prodavan/features/meta/interpreters/profile_hub_interpreter.dart
 import 'package:prodavan/features/meta/meta_icon.dart';
 import 'package:prodavan/features/meta/module_meta_manifest.dart';
 import 'package:prodavan/features/meta/preview/preview_stub.dart';
+import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/features/meta/runtime/chat_scope.dart';
 import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -40,7 +41,9 @@ class HubViewInterpreter extends StatelessWidget {
       );
     }
 
-    final sessionId = ModuleRuntimeScope.maybeOf(context)?.sessionId;
+    // Active chat is cabinet-wide (like selected project), not only Inherited scope.
+    final sessionId = workContext.selectedSessionId ??
+        ModuleRuntimeScope.maybeOf(context)?.sessionId;
     final visible = items.whereType<Map>().where((item) {
       final map = Map<String, dynamic>.from(item);
       return scopeVisibleForSession(map, sessionId);

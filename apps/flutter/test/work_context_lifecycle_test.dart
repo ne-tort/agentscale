@@ -27,4 +27,25 @@ void main() {
     workContext.clear();
     expect(workContext.projectLifecycleEpoch, 0);
   });
+
+  test('selectedSessionId persists until project/cabinet change', () {
+    workContext.setSelectedSessionId('ags_1');
+    expect(workContext.selectedSessionId, 'ags_1');
+    workContext.setSelectedSessionId('ags_1');
+    expect(workContext.selectedSessionId, 'ags_1');
+
+    workContext.setSelectedProjectId('proj_a');
+    expect(workContext.selectedSessionId, isNull);
+
+    workContext.setSelectedSessionId('ags_2');
+    workContext.enterCabinet('cab_1');
+    expect(workContext.selectedSessionId, isNull);
+  });
+
+  test('setSelectedSessionId trims empty to null', () {
+    workContext.setSelectedSessionId('  ');
+    expect(workContext.selectedSessionId, isNull);
+    workContext.setSelectedSessionId(' ags_x ');
+    expect(workContext.selectedSessionId, 'ags_x');
+  });
 }

@@ -46,7 +46,7 @@ Reusable on `TableDefinition`, `ViewDefinition`, `TabDefinition`, `ActionDefinit
 | `chats` | `all` | **Default.** Shared rows for all chats in the SoT instance; `session_id` ignored |
 | | `current` | Per-chat rows: filter/stamp `session_id`; missing session → synthetic **`main`** |
 | `active_chat` | `optional` | **Default.** Tab / hub tile always shown (UI) |
-| | `required` | **Opt-in.** Hide this tab or hub tile when no live agent chat is open |
+| | `required` | **Opt-in.** Hide this tab or hub tile when no active chat is selected (`selectedSessionId`) |
 | `requires_assignment` | bool | Employee must have cabinet assignment (default true) |
 | `module_binding` | `required` | Implicit — skip if module not bound |
 
@@ -57,7 +57,7 @@ Reusable on `TableDefinition`, `ViewDefinition`, `TabDefinition`, `ActionDefinit
 ```text
 bind_kind local|global     → cabinet vs project (or higher) instance
 scope.chats all|current    → shared rows vs session_id-scoped rows
-scope.active_chat optional|required → show vs hide nav/hub without live chat
+scope.active_chat optional|required → show vs hide nav/hub without active chat (`selectedSessionId`)
 ```
 
 | `scope.chats` | List | Create / update |

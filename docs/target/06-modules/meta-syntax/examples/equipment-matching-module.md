@@ -28,7 +28,7 @@ Product seed: `mod_equipment` — see `product_module_seeds.py`.
 ## Meta primitives
 
 - Hub tiles → collections with `scaffold.title` (AppBar titles, not view slugs)
-- Per-chat hub tiles (`request_lines`, `found_offers`, `equipment_items`, `equipment_builds`, `s4b_settings`) set **`scope.active_chat: required`** — hidden in cabinet Data hub until a chat is open; shared tiles stay visible
+- Per-chat hub tiles (`request_lines`, `found_offers`, `equipment_items`, `equipment_builds`, `s4b_settings`) set **`scope.active_chat: required`** — hidden in cabinet Data hub until an active chat is selected (`selectedSessionId`); shared tiles stay visible
 - Catalogs: collection + `inline_add`; settings with **Тип** (`source_kind`), local `file_upload` / remote DSN + optional login/password + **База** / **Таблица** pickers, `column_map` (autosave), `project_multiselect`, `paused`, reindex interval (remote)
 - Found offers: `inline_add` on title; **Запрос** = `line_id` `type_ref_picker` → `request_lines_pick`
 - Action `content.index_opensearch` after catalog write / toolbar «Переиндексировать» (Celery wipe+bulk; header probe sync for local)

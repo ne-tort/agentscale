@@ -16,6 +16,9 @@ class WorkContext extends ChangeNotifier {
   /// Per-employee selected project in the current cabinet (sidebar context).
   String? selectedProjectId;
 
+  /// Active agent chat for chat-scoped module UI (persists while browsing hubs).
+  String? selectedSessionId;
+
   /// Bumped when project launch/pause/resume/reload changes chat availability
   /// so [CabinetShell] can refresh `new_chat_enabled` without leaving the page.
   int projectLifecycleEpoch = 0;
@@ -42,6 +45,7 @@ class WorkContext extends ChangeNotifier {
     cabinetId = id;
     projectId = null;
     selectedProjectId = null;
+    selectedSessionId = null;
     notifyListeners();
   }
 
@@ -53,6 +57,14 @@ class WorkContext extends ChangeNotifier {
   void setSelectedProjectId(String? id) {
     if (selectedProjectId == id) return;
     selectedProjectId = id;
+    selectedSessionId = null;
+    notifyListeners();
+  }
+
+  void setSelectedSessionId(String? id) {
+    final next = (id == null || id.trim().isEmpty) ? null : id.trim();
+    if (selectedSessionId == next) return;
+    selectedSessionId = next;
     notifyListeners();
   }
 
@@ -81,6 +93,7 @@ class WorkContext extends ChangeNotifier {
     projectId = null;
     companyId = null;
     selectedProjectId = null;
+    selectedSessionId = null;
     projectLifecycleEpoch = 0;
     notifyListeners();
   }
