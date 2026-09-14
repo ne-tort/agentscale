@@ -13,6 +13,7 @@ from prodavan.api.agent_auth import AgentAuthDep
 from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
 from prodavan.application.agent import AgentSessionService, AgentTriggerDispatcher
 from prodavan.domain.errors import AppError
+from prodavan.domain.projects import CHAT_MAX_ATTACHMENTS_PER_MESSAGE, CHAT_MAX_MESSAGE_CHARS
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
 router = APIRouter(tags=["agent"])
@@ -21,8 +22,8 @@ router = APIRouter(tags=["agent"])
 class SendMessageBody(BaseModel):
     model_config = {"extra": "forbid"}
 
-    text: str = Field(default="")
-    attachment_refs: list[str] = Field(default_factory=list)
+    text: str = Field(default="", max_length=CHAT_MAX_MESSAGE_CHARS)
+    attachment_refs: list[str] = Field(default_factory=list, max_length=CHAT_MAX_ATTACHMENTS_PER_MESSAGE)
     model: str | None = Field(default=None, max_length=128)
 
     @model_validator(mode="after")
@@ -42,9 +43,9 @@ class CreateSessionBody(BaseModel):
 class ChatTurnBody(BaseModel):
     model_config = {"extra": "forbid"}
 
-    text: str = Field(default="")
+    text: str = Field(default="", max_length=CHAT_MAX_MESSAGE_CHARS)
     session_id: str | None = Field(default=None, max_length=64)
-    attachment_refs: list[str] = Field(default_factory=list)
+    attachment_refs: list[str] = Field(default_factory=list, max_length=CHAT_MAX_ATTACHMENTS_PER_MESSAGE)
     model: str | None = Field(default=None, max_length=128)
 
     @model_validator(mode="after")
@@ -73,12 +74,9 @@ EmployeeDep = Annotated[EmployeeRow | None, Depends(get_current_employee)]
 
 
 def _chat_text(text: str, attachment_refs: list[str]) -> str:
-    trimmed = text.strip()
-    if trimmed:
-        return trimmed
-    if attachment_refs:
-        return "(attachment)"
-    return ""
+    """Keep user text as-is; empty is fine when attachments are present."""
+    _ = attachment_refs
+    return text.strip()
 
 
 @router.post("/projects/{project_id}/agent/sessions", status_code=201)

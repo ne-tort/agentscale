@@ -38,10 +38,13 @@ def events_to_transcript(events: list[dict]) -> list[dict]:
             flush_assistant()
             text = data.get("text")
             refs = data.get("attachment_refs") or []
-            if text or refs:
+            attachments = data.get("attachments") or []
+            if text or refs or attachments:
                 bubble: dict = {"role": "user", "text": str(text or "")}
                 if isinstance(refs, list) and refs:
                     bubble["attachment_refs"] = [str(r) for r in refs]
+                if isinstance(attachments, list) and attachments:
+                    bubble["attachments"] = attachments
                 messages.append(bubble)
         elif etype == AgentEventType.TOOL_CALL:
             flush_assistant()
@@ -106,10 +109,13 @@ def events_to_chat_blocks(events: list[dict]) -> list[dict]:
             flush_thinking()
             text = data.get("text")
             refs = data.get("attachment_refs") or []
-            if text or refs:
+            attachments = data.get("attachments") or []
+            if text or refs or attachments:
                 block: dict = {"kind": "user", "text": str(text or "")}
                 if isinstance(refs, list) and refs:
                     block["attachment_refs"] = [str(r) for r in refs]
+                if isinstance(attachments, list) and attachments:
+                    block["attachments"] = attachments
                 blocks.append(block)
             continue
 

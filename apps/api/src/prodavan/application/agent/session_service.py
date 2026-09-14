@@ -37,6 +37,7 @@ from prodavan.application.agent.stream_normalizer import TurnStreamNormalizer
 from prodavan.application.ai_keys.service import AiKeysService
 from prodavan.application.ai_models.resolution import AiModelResolutionService
 from prodavan.application.project_service import ProjectAccessPolicy
+from prodavan.application.projects.attachment_delivery import AttachmentDeliveryService
 from prodavan.application.projects.attachment_service import ProjectAttachmentService
 from prodavan.application.projects.workspace_checkpoint import checkpoint_project_workspace
 from prodavan.config.settings import settings
@@ -53,6 +54,7 @@ from prodavan.domain.agent import (
 from prodavan.domain.agent.errors import agent_runtime_unavailable, app_error_from_bridge_event
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
+from prodavan.domain.projects import CHAT_MAX_ATTACHMENTS_PER_MESSAGE, CHAT_MAX_MESSAGE_CHARS
 from prodavan.infrastructure.persistence.models.agent import AgentEventRow, AgentSessionRow, AgentUsageRow
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
@@ -559,13 +561,14 @@ class AgentSessionService:
             project_id=project_id, principal=principal, employee=employee, write=True
         )
         await self._subscription.require_active(project.company_id)
-        await require_running_pod_runtime(
+        runtime = await require_running_pod_runtime(
             self._session,
             project_id=project_id,
             principal=principal,
             employee=employee,
             write=True,
         )
+        runtime_ref = str(runtime.get("k8s_pod_name") or runtime.get("runtime_ref") or "").strip() or None
         row = await self.get_session(session_id=session_id)
         if row.project_id != project_id:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
@@ -585,21 +588,56 @@ class AgentSessionService:
         adapter = None
         if not settings.pod_agent_runtime_enabled:
             adapter = get_agent_adapter(api_kind=row.api_kind)
+
+        user_text = (text or "").strip()
+        if len(user_text) > CHAT_MAX_MESSAGE_CHARS:
+            raise AppError(
+                code="MESSAGE_TOO_LONG",
+                title="Message too long",
+                status=413,
+                detail=f"max {CHAT_MAX_MESSAGE_CHARS} characters",
+            )
+        raw_refs = list(attachment_refs or ())
+        if len(raw_refs) > CHAT_MAX_ATTACHMENTS_PER_MESSAGE:
+            raise AppError(
+                code="TOO_MANY_ATTACHMENTS",
+                title="Too many attachments",
+                status=422,
+                detail=f"max {CHAT_MAX_ATTACHMENTS_PER_MESSAGE} attachments per message",
+            )
         normalized_refs = await ProjectAttachmentService(self._session).normalize_refs(
             project_id=project_id,
-            refs=list(attachment_refs or ()),
+            refs=raw_refs,
         )
         refs = tuple(normalized_refs)
-        message = ChatMessage(text=text, attachment_refs=refs)
+
+        delivery = None
+        if refs:
+            delivery = await AttachmentDeliveryService(self._session).deliver_for_send(
+                project_id=project_id,
+                workspace_key=project.workspace_key,
+                storage_refs=list(refs),
+                user_text=user_text,
+                runtime_ref=runtime_ref,
+                principal=principal,
+                employee=employee,
+            )
+            agent_text = delivery.agent_message
+            display_text = delivery.display_text
+        else:
+            agent_text = user_text
+            display_text = user_text
+
+        message = ChatMessage(text=agent_text, attachment_refs=refs)
 
         hydrate_gen = await self._project_hydrate_generation(project_id)
-        bridge_message = text
+        bridge_message = agent_text
         if settings.pod_agent_runtime_enabled and needs_conversation_rehydrate(
             row.adapter_state if isinstance(row.adapter_state, dict) else None,
             current_generation=hydrate_gen,
         ):
             prior = await self._session_transcript_bubbles(session_id)
-            rebuilt = format_rehydrate_bridge_message(history=prior, new_message=text)
+            rebuilt = format_rehydrate_bridge_message(history=prior, new_message=agent_text)
             if rebuilt:
                 bridge_message = rebuilt
 
@@ -609,9 +647,11 @@ class AgentSessionService:
         seq = int(seq_q.scalar_one() or 0)
 
         seq += 1
-        user_payload: dict = {"text": text}
+        user_payload: dict = {"text": display_text}
         if refs:
             user_payload["attachment_refs"] = list(refs)
+        if delivery is not None:
+            user_payload["attachments"] = delivery.ui_attachments()
         if employee is not None:
             user_payload["employee_id"] = employee.id
         self._session.add(
@@ -623,7 +663,7 @@ class AgentSessionService:
                 at=None,
             )
         )
-        _touch_session_activity(row, text=text)
+        _touch_session_activity(row, text=display_text)
         yield {"type": PLATFORM_EVENT_USER_MESSAGE, "data": user_payload}
 
         from prodavan.application.metrics.publish import schedule_agent_request

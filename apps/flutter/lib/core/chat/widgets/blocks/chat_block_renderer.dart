@@ -27,9 +27,21 @@ class ChatBlockRenderer extends StatelessWidget {
     switch (block.kind) {
       case 'user':
         final refs = block.raw['attachment_refs'];
+        final attachmentsRaw = block.raw['attachments'];
+        final attachments = <Map<String, dynamic>>[];
+        if (attachmentsRaw is List) {
+          for (final item in attachmentsRaw) {
+            if (item is Map<String, dynamic>) {
+              attachments.add(item);
+            } else if (item is Map) {
+              attachments.add(Map<String, dynamic>.from(item));
+            }
+          }
+        }
         return UserMessageBlock(
           text: block.text,
           attachmentRefs: refs is List ? refs.cast<String>() : const [],
+          attachments: attachments,
         );
       case 'assistant_markdown':
         return AssistantStreamBlock(

@@ -43,6 +43,8 @@ def test_attachment_extension_allowlist() -> None:
     assert is_allowed_attachment_filename("note.txt")
     assert is_allowed_attachment_filename("scan.PDF")
     assert is_allowed_attachment_filename("data.json")
+    assert is_allowed_attachment_filename("sheet.xml")
+    assert is_allowed_attachment_filename("rows.tsv")
     assert not is_allowed_attachment_filename("malware.exe")
     assert not is_allowed_attachment_filename("noext")
 

@@ -48,6 +48,7 @@ Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** depe
 - **Selection** — one `SelectionArea` over transcript; plain `Text` / non-selectable markdown → cross-paragraph copy without markdown junk.
 - **Markdown** — GFM after turn done; LLM pipe-tables normalized (`||` rows, missing separators); plain text while streaming.
 - **Chat settings** — model picker + title rename + pin + session Tokens/Requests tiles (preference pages, no modal dialogs); Enter отправляет, Shift+Enter — новая строка; usage collapsed по умолчанию.
+- **Chat attachments** — upload → MinIO `inbox/`; on send API hot-pushes file into running Pod `/workspace/inbox/…` and prefixes the agent prompt with path. Tabular (`csv`/`tsv`/`xlsx`/`xls`/`xml`) → JSON: ≤200 rows inlined into the bridge message (UI spoiler), larger files written as `.json` in the workspace (not raw spreadsheet). UI limits are wide (`500k` chars, `32` attachments) and match API ceilings; company `max_attachment_mb` still caps blob size.
 - **Responsive** — mobile full-width; tablet/desktop center column (768–900px); на узком shell чаты — отдельная страница (не bottom sheet).
 - **Subagents** — `subagent_*` events + sidechain transcript API.
 

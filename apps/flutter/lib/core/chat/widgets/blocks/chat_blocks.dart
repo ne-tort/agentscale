@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:markdown/markdown.dart' as md;
@@ -190,15 +192,44 @@ class AssistantStreamBlock extends StatelessWidget {
   }
 }
 
-class UserMessageBlock extends StatelessWidget {
-  const UserMessageBlock({super.key, required this.text, this.attachmentRefs = const []});
+class UserMessageBlock extends StatefulWidget {
+  const UserMessageBlock({
+    super.key,
+    required this.text,
+    this.attachmentRefs = const [],
+    this.attachments = const [],
+  });
 
   final String text;
   final List<String> attachmentRefs;
+  final List<Map<String, dynamic>> attachments;
+
+  @override
+  State<UserMessageBlock> createState() => _UserMessageBlockState();
+}
+
+class _UserMessageBlockState extends State<UserMessageBlock> {
+  final Set<int> _openSpoilers = {};
+
+  String _attachmentLabel(Map<String, dynamic> att) {
+    final name = att['filename'] as String? ?? 'file';
+    final kind = att['kind'] as String? ?? '';
+    final rows = att['row_count'];
+    if (kind == 'inline_json') {
+      return rows is int ? 'Вложение: $name ($rows строк)' : 'Вложение: $name (JSON)';
+    }
+    final path = att['workspace_path'] as String?;
+    if (path != null && path.isNotEmpty) {
+      return 'Вложение: $name → /workspace/$path';
+    }
+    return 'Вложение: $name';
+  }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final attachments = widget.attachments;
+    final refs = widget.attachmentRefs;
     return Align(
       alignment: Alignment.centerRight,
       child: Container(
@@ -212,15 +243,71 @@ class UserMessageBlock extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text(text),
-            for (final ref in attachmentRefs)
-              Padding(
-                padding: EdgeInsets.only(top: AppSpacing.xs),
-                child: Chip(label: Text(ref.split('/').last, overflow: TextOverflow.ellipsis)),
-              ),
+            if (widget.text.isNotEmpty) Text(widget.text),
+            if (attachments.isNotEmpty)
+              for (var i = 0; i < attachments.length; i++) ...[
+                Padding(
+                  padding: EdgeInsets.only(top: AppSpacing.xs),
+                  child: _AttachmentSpoiler(
+                    label: _attachmentLabel(attachments[i]),
+                    expanded: _openSpoilers.contains(i),
+                    onTap: attachments[i]['kind'] == 'inline_json' && attachments[i]['inline_json'] != null
+                        ? () => setState(() {
+                              if (_openSpoilers.contains(i)) {
+                                _openSpoilers.remove(i);
+                              } else {
+                                _openSpoilers.add(i);
+                              }
+                            })
+                        : null,
+                    body: attachments[i]['kind'] == 'inline_json' && _openSpoilers.contains(i)
+                        ? JsonEncoder.withIndent('  ').convert(attachments[i]['inline_json'])
+                        : null,
+                  ),
+                ),
+              ]
+            else
+              for (final ref in refs)
+                Padding(
+                  padding: EdgeInsets.only(top: AppSpacing.xs),
+                  child: Chip(label: Text(ref.split('/').last, overflow: TextOverflow.ellipsis)),
+                ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _AttachmentSpoiler extends StatelessWidget {
+  const _AttachmentSpoiler({
+    required this.label,
+    required this.expanded,
+    this.onTap,
+    this.body,
+  });
+
+  final String label;
+  final bool expanded;
+  final VoidCallback? onTap;
+  final String? body;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        ChatMutedLine(
+          label: label,
+          expanded: expanded,
+          onTap: onTap,
+        ),
+        if (expanded && body != null && body!.isNotEmpty)
+          Padding(
+            padding: EdgeInsets.only(top: AppSpacing.xs),
+            child: ChatCodePanel(text: body!),
+          ),
+      ],
     );
   }
 }

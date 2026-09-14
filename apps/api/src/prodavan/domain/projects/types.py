@@ -98,12 +98,20 @@ ATTACHMENT_ALLOWED_EXTENSIONS = frozenset(
         ".xlsx",
         ".xls",
         ".csv",
+        ".tsv",
+        ".xml",
         ".txt",
         ".md",
         ".json",
         ".zip",
     }
 )
+
+# Chat turn limits — wide enough for agent context, not unbounded.
+CHAT_MAX_MESSAGE_CHARS = 500_000
+CHAT_MAX_ATTACHMENTS_PER_MESSAGE = 32
+# Tabular attachments with ≤ this many data rows are inlined into the bridge prompt.
+CHAT_INLINE_TABULAR_ROW_LIMIT = 200
 
 # Magic prefixes that must never appear in chat uploads (lightweight content policy / AV-lite).
 # Not a virus scanner — blocks obvious executables and script entrypoints.

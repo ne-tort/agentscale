@@ -4,25 +4,22 @@
 
 ## Типы
 
-| Тип | Примеры | Хранение |
-|-----|---------|----------|
-| Image | png, jpeg, webp | **MinIO** (S3) + object key в inbox; не локальный path API |
-| Document | pdf, xlsx, csv, txt, md | **MinIO** (S3) |
-| Archive | zip (по политике кабинета) | **MinIO** (S3) |
+| Тип | Примеры | Хранение / доставка |
+|-----|---------|---------------------|
+| Image | png, jpeg, webp | MinIO inbox + hot-push в Pod `/workspace/inbox/` |
+| Document | pdf, txt, md, json, zip | MinIO inbox + hot-push; путь в prompt агенту |
+| Tabular | csv, tsv, xlsx, xls, xml | **→ JSON**: ≤200 строк inline в bridge (+ UI spoiler); больше — `inbox/*.json` в Pod |
 
-Канон: [13-platform-infra](../13-platform-infra/). Локальный `storage/.../inbox` как SoT — дефект до закрытия P0.
+Канон object store: [13-platform-infra](../13-platform-infra/).
 
 ## UX
 
-- Composer на chat page: кнопка «Файл» → системный picker (не modal приложения).
-- Превью вложений в ленте сообщений.
-- Лимиты размера/типа — из company policy + cabinet manifest.
+- Composer: «Файл» → системный picker.
+- Превью: имя файла; inline JSON — спойлер, не простыня.
+- Лимиты: company `max_attachment_mb`; чат — до **500k** знаков и **32** вложения на сообщение.
 
 ## Runtime
 
-1. Upload → object store key `…/projects/{project_id}/inbox/…` (MinIO).
-2. Metadata в platform DB (`chat_attachments`) — object ref, не host path.
-3. При `chat.message` trigger объекты попадают в workspace pod (sync/mount из object store).
-4. Агент (Cursor SDK multimodal и т.д.) получает ссылки согласно adapter capabilities.
-
-Кабинет может дополнительно прогонять файл через свой pipeline (например xlsx → rows) по trigger `chat.message` с attachment kind.
+1. Upload → MinIO `projects/{workspace_key}/workspace/inbox/…` + row в `project_attachments`.
+2. На `send` / chat turn: `AttachmentDeliveryService` готовит вложения, пишет в live Pod (k8s exec `workspace_fs write`), обогащает bridge message.
+3. Агент видит либо путь `/workspace/inbox/…`, либо JSON в сообщении.

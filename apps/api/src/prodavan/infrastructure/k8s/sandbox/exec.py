@@ -35,12 +35,13 @@ def _build_exec_url(
     pod_name: str,
     command: list[str],
     container: str,
+    stdin: bool = False,
 ) -> str:
     base = auth.api_base().replace("https://", "wss://").replace("http://", "ws://")
     query = urlencode(
         [
             ("container", container),
-            ("stdin", "false"),
+            ("stdin", "true" if stdin else "false"),
             ("stdout", "true"),
             ("stderr", "true"),
             ("tty", "false"),
@@ -66,8 +67,13 @@ async def exec_in_pod(
     command: list[str],
     container: str = "agent-runtime",
     timeout: float = 60.0,
+    stdin_data: bytes | None = None,
 ) -> ExecResult:
-    """Run command in pod container; collect stdout/stderr."""
+    """Run command in pod container; collect stdout/stderr.
+
+    When ``stdin_data`` is set, stdin is enabled and bytes are streamed on channel 0
+    before EOF (empty channel-0 frame).
+    """
     from websockets.asyncio.client import connect
     from websockets.exceptions import ConnectionClosed
 
@@ -77,6 +83,7 @@ async def exec_in_pod(
         pod_name=pod_name,
         command=command,
         container=container,
+        stdin=stdin_data is not None,
     )
     headers = {"Authorization": auth.headers()["Authorization"]}
     stdout = bytearray()
@@ -98,8 +105,15 @@ async def exec_in_pod(
         open_timeout=timeout,
         subprotocols=_EXEC_SUBPROTOCOLS,
     ) as ws:
-        # Close stdin stream (channel 0) so kubelet does not wait for input.
-        await ws.send(bytes([_CHANNEL_STDIN]))
+        if stdin_data is not None:
+            chunk = 32 * 1024
+            for offset in range(0, len(stdin_data), chunk):
+                await ws.send(bytes([_CHANNEL_STDIN]) + stdin_data[offset : offset + chunk])
+            # EOF on stdin
+            await ws.send(bytes([_CHANNEL_STDIN]))
+        else:
+            # Close stdin stream (channel 0) so kubelet does not wait for input.
+            await ws.send(bytes([_CHANNEL_STDIN]))
 
         while True:
             try:

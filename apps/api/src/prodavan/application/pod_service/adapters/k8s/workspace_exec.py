@@ -179,6 +179,38 @@ class K8sExecWorkspaceAdapter:
             )
         await self._run_bytes(runtime_ref=runtime_ref, args=["cp", s, d])
 
+    async def write_bytes(self, *, runtime_ref: str, path: str, data: bytes) -> None:
+        rel = normalize_workspace_path(path)
+        if not rel:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="path required",
+            )
+        await self._require_running_snap(runtime_ref)
+        try:
+            result = await exec_in_pod(
+                auth=self._client.auth,
+                namespace=self._client.namespace,
+                pod_name=runtime_ref,
+                command=build_workspace_fs_command(["write", rel]),
+                stdin_data=data,
+                timeout=120.0,
+            )
+        except AppError:
+            raise
+        except Exception as exc:
+            raise app_error_from_exec_failure(exc) from exc
+        if result.exit_code not in (0, None):
+            err = result.stderr.decode("utf-8", errors="replace")[:500]
+            raise AppError(
+                code="POD_EXEC_FAILED",
+                title="Bad Gateway",
+                status=502,
+                detail=err or "pod exec failed",
+            )
+
 
 def as_port(adapter: K8sExecWorkspaceAdapter) -> PodWorkspacePort:
     return adapter

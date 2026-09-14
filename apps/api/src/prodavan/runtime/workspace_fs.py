@@ -84,6 +84,17 @@ def cmd_mv(src: str, dst: str) -> None:
     shutil.move(str(s), str(d))
 
 
+def cmd_write(path: str) -> None:
+    target = _resolve(path)
+    if not path or not str(path).strip().replace("\\", "/").lstrip("/"):
+        raise ValueError("path required")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    data = sys.stdin.buffer.read()
+    target.write_bytes(data)
+    rel = target.relative_to(WORKSPACE_ROOT.resolve()).as_posix()
+    print(json.dumps({"ok": True, "path": rel, "size": len(data)}), flush=True)
+
+
 def cmd_cp(src: str, dst: str) -> None:
     s = _resolve(src)
     d = _resolve(dst)
@@ -122,6 +133,9 @@ def main(argv: list[str] | None = None) -> None:
     p_cp.add_argument("src")
     p_cp.add_argument("dst")
 
+    p_write = sub.add_parser("write")
+    p_write.add_argument("path")
+
     args = parser.parse_args(argv)
     if args.cmd == "list":
         cmd_list(args.path)
@@ -135,6 +149,8 @@ def main(argv: list[str] | None = None) -> None:
         cmd_mv(args.src, args.dst)
     elif args.cmd == "cp":
         cmd_cp(args.src, args.dst)
+    elif args.cmd == "write":
+        cmd_write(args.path)
 
 
 if __name__ == "__main__":

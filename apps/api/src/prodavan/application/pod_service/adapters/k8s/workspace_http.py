@@ -200,3 +200,44 @@ class HttpAgentRuntimeWorkspaceAdapter:
             path="/v1/workspace/copy",
             json_body={"src": s, "dst": d},
         )
+
+    async def write_bytes(self, *, runtime_ref: str, path: str, data: bytes) -> None:
+        """Prefer HTTP PUT; fall back to k8s exec write when runtime has no write API."""
+        rel = normalize_workspace_path(path)
+        if not rel:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="path required",
+            )
+        base = await self._runtime_base(runtime_ref)
+        url = f"{base}/v1/workspace/content?path={quote(rel, safe='')}"
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.put(url, content=data, headers=_runtime_headers())
+        except Exception as exc:
+            raise AppError(
+                code="RUNTIME_UNREACHABLE",
+                title="Bad Gateway",
+                status=502,
+                detail=str(exc),
+            ) from exc
+        if response.status_code in {404, 405}:
+            from prodavan.application.pod_service.adapters.k8s.workspace_exec import (
+                K8sExecWorkspaceAdapter,
+            )
+
+            await K8sExecWorkspaceAdapter(client=self._client).write_bytes(
+                runtime_ref=runtime_ref,
+                path=rel,
+                data=data,
+            )
+            return
+        if response.status_code >= 400:
+            raise AppError(
+                code="RUNTIME_FS_FAILED",
+                title="Bad Gateway",
+                status=502,
+                detail=response.text[:500],
+            )

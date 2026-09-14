@@ -71,6 +71,16 @@ List<ChatBlock> applyStreamEvent(List<ChatBlock> blocks, Map<String, dynamic> ev
   final next = List<ChatBlock>.from(blocks);
 
   switch (type) {
+    case 'user_message':
+      final userRaw = Map<String, dynamic>.from(payload);
+      final idx = next.indexWhere((b) => b.kind == 'user');
+      final block = ChatBlock(kind: 'user', raw: userRaw);
+      if (idx >= 0) {
+        next[idx] = block;
+      } else {
+        next.insert(0, block);
+      }
+      break;
     case 'text_delta':
       final chunk = payload['text'] as String? ?? '';
       if (chunk.isEmpty) return next;

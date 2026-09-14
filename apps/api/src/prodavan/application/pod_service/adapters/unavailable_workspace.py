@@ -60,3 +60,12 @@ class UnavailableWorkspaceAdapter:
             status=409,
             detail="pod is not running",
         )
+
+    async def write_bytes(self, *, runtime_ref: str, path: str, data: bytes) -> None:
+        _ = runtime_ref, path, data
+        raise AppError(
+            code="POD_NOT_RUNNING",
+            title="Conflict",
+            status=409,
+            detail="pod is not running",
+        )

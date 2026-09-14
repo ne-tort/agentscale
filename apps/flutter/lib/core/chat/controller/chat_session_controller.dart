@@ -181,7 +181,7 @@ class ChatSessionController {
     final userBlock = ChatBlock(
       kind: 'user',
       raw: {
-        'text': trimmed.isEmpty ? '(attachment)' : trimmed,
+        'text': trimmed,
         if (attachmentRefs.isNotEmpty) 'attachment_refs': attachmentRefs,
       },
     );
@@ -191,7 +191,7 @@ class ChatSessionController {
     _handle?.abort();
     _handle = api.projectChatStream(
       projectId: projectId,
-      text: trimmed.isEmpty ? '(attachment)' : trimmed,
+      text: trimmed,
       sessionId: sessionId,
       model: selectedModel,
       attachmentRefs: attachmentRefs,

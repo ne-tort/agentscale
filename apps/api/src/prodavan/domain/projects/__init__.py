@@ -12,6 +12,9 @@ from prodavan.domain.projects.runtime_ops import (
 from prodavan.domain.projects.types import (
     ATTACHMENT_ALLOWED_EXTENSIONS,
     ATTACHMENT_MAX_BYTES,
+    CHAT_INLINE_TABULAR_ROW_LIMIT,
+    CHAT_MAX_ATTACHMENTS_PER_MESSAGE,
+    CHAT_MAX_MESSAGE_CHARS,
     PAUSE_EXEMPT_TRIGGER_KINDS,
     PLATFORM_EVENT_TYPES,
     PROJECT_TRIGGER_KINDS,
@@ -36,6 +39,9 @@ from prodavan.domain.projects.webhook_hmac import verify_webhook_signature, webh
 __all__ = [
     "ATTACHMENT_ALLOWED_EXTENSIONS",
     "ATTACHMENT_MAX_BYTES",
+    "CHAT_INLINE_TABULAR_ROW_LIMIT",
+    "CHAT_MAX_ATTACHMENTS_PER_MESSAGE",
+    "CHAT_MAX_MESSAGE_CHARS",
     "PAUSE_EXEMPT_TRIGGER_KINDS",
     "PLATFORM_EVENT_TYPES",
     "PROJECT_TRIGGER_KINDS",

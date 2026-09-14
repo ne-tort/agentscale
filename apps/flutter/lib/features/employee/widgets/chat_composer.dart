@@ -8,6 +8,11 @@ import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
+/// Wide limits aligned with API agent constraints (not unbounded).
+const int kChatMaxMessageChars = 500000;
+const int kChatMaxAttachmentsPerMessage = 32;
+const int kChatMaxAttachmentBytesClient = 500 * 1024 * 1024; // platform ceiling; server enforces company policy
+
 typedef ChatComposerSend = void Function(String text, List<String> attachmentRefs);
 
 class _PendingAttachment {
@@ -111,8 +116,21 @@ class _ChatComposerState extends State<ChatComposer> {
 
   void _submit() {
     if (!_canSend) return;
+    final text = _controller.text;
+    if (text.length > kChatMaxMessageChars) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Сообщение слишком длинное (макс. $kChatMaxMessageChars знаков)')),
+      );
+      return;
+    }
+    if (_attachments.length > kChatMaxAttachmentsPerMessage) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Слишком много вложений (макс. $kChatMaxAttachmentsPerMessage)')),
+      );
+      return;
+    }
     widget.onSend(
-      _controller.text,
+      text,
       _attachments.map((a) => a.id).toList(),
     );
     _controller.clear();
@@ -139,6 +157,18 @@ class _ChatComposerState extends State<ChatComposer> {
     final bytes = file.bytes;
     if (bytes == null) return;
     if (!mounted) return;
+    if (_attachments.length >= kChatMaxAttachmentsPerMessage) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Слишком много вложений (макс. $kChatMaxAttachmentsPerMessage)')),
+      );
+      return;
+    }
+    if (bytes.length > kChatMaxAttachmentBytesClient) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Файл слишком большой')),
+      );
+      return;
+    }
 
     setState(() => _uploading = true);
     try {
@@ -279,7 +309,15 @@ class _ChatComposerState extends State<ChatComposer> {
         enabled: !_uploading && widget.enabled,
         readOnly: !widget.enabled,
         minLines: 1,
-        maxLines: 6,
+        maxLines: 40,
+        maxLength: kChatMaxMessageChars,
+        buildCounter: (
+          context, {
+          required currentLength,
+          required isFocused,
+          maxLength,
+        }) =>
+            null,
         decoration: _fieldDecoration(context),
       ),
     );
