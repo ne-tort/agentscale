@@ -296,6 +296,7 @@ async def test_upsert_data_row_clears_module_seed_created_by() -> None:
         row_id="profile_default",
         body={"name": "Default"},
         created_by="module_seed",
+        session_id=None,
     )
     result = MagicMock()
     result.scalar_one_or_none.return_value = row
@@ -326,6 +327,7 @@ async def test_upsert_data_row_preserves_seed_when_explicit() -> None:
         row_id="r1",
         body={},
         created_by="module_seed",
+        session_id=None,
     )
     result = MagicMock()
     result.scalar_one_or_none.return_value = row

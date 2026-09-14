@@ -280,10 +280,15 @@ class ProdavanApi {
     required String projectId,
     required String moduleId,
     required String tableSlug,
+    String? sessionId,
   }) async {
     final res = await AuthHttp.get(
       _uri('/projects/$projectId/runtime-modules/$moduleId/data/$tableSlug'),
-      extraHeaders: _workHeaders,
+      extraHeaders: {
+        ..._workHeaders,
+        if (sessionId != null && sessionId.isNotEmpty)
+          'X-Prodavan-Session-Id': sessionId,
+      },
     );
     _throwIfError(res);
     final body = jsonDecode(res.body) as Map<String, dynamic>;
@@ -299,11 +304,16 @@ class ProdavanApi {
     required String moduleId,
     required String tableSlug,
     required Map<String, dynamic> body,
+    String? sessionId,
   }) async {
     final res = await AuthHttp.post(
       _uri('/projects/$projectId/runtime-modules/$moduleId/data/$tableSlug'),
       body: jsonEncode({'body': body}),
-      extraHeaders: _workHeaders,
+      extraHeaders: {
+        ..._workHeaders,
+        if (sessionId != null && sessionId.isNotEmpty)
+          'X-Prodavan-Session-Id': sessionId,
+      },
     );
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
@@ -315,11 +325,16 @@ class ProdavanApi {
     required String tableSlug,
     required String rowId,
     required Map<String, dynamic> body,
+    String? sessionId,
   }) async {
     final res = await AuthHttp.patch(
       _uri('/projects/$projectId/runtime-modules/$moduleId/data/$tableSlug/$rowId'),
       body: jsonEncode({'body': body}),
-      extraHeaders: _workHeaders,
+      extraHeaders: {
+        ..._workHeaders,
+        if (sessionId != null && sessionId.isNotEmpty)
+          'X-Prodavan-Session-Id': sessionId,
+      },
     );
     _throwIfError(res);
     return jsonDecode(res.body) as Map<String, dynamic>;
@@ -330,10 +345,15 @@ class ProdavanApi {
     required String moduleId,
     required String tableSlug,
     required String rowId,
+    String? sessionId,
   }) async {
     final res = await AuthHttp.delete(
       _uri('/projects/$projectId/runtime-modules/$moduleId/data/$tableSlug/$rowId'),
-      extraHeaders: _workHeaders,
+      extraHeaders: {
+        ..._workHeaders,
+        if (sessionId != null && sessionId.isNotEmpty)
+          'X-Prodavan-Session-Id': sessionId,
+      },
     );
     _throwIfError(res);
     if (res.body.isEmpty) return <String, dynamic>{'deleted': true};

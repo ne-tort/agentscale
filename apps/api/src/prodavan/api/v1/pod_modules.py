@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Header
 from pydantic import BaseModel, Field
 
 from prodavan.api.agent_auth import PodBridgeDep
 from prodavan.api.deps import SessionDep
+from prodavan.application.modules.chat_scope import SESSION_HEADER
 from prodavan.application.tenant_infra.equipment_catalog_search_service import (
     EquipmentCatalogPodSearchService,
 )
@@ -109,12 +110,14 @@ async def list_pod_module_data(
     table_slug: str,
     bridge: PodBridgeDep,
     session: SessionDep,
+    x_prodavan_session_id: str | None = Header(default=None, alias=SESSION_HEADER),
 ) -> dict[str, Any]:
     items = await PodModuleDataService(session).list_data_rows(
         bridge=bridge,
         project_id=project_id,
         module_id=module_id,
         table_slug=table_slug,
+        session_id=x_prodavan_session_id,
     )
     return {"items": items}
 
@@ -127,6 +130,7 @@ async def create_pod_module_data(
     body: PodModuleDataBody,
     bridge: PodBridgeDep,
     session: SessionDep,
+    x_prodavan_session_id: str | None = Header(default=None, alias=SESSION_HEADER),
 ) -> dict[str, Any]:
     return await PodModuleDataService(session).create_data_row(
         bridge=bridge,
@@ -134,6 +138,7 @@ async def create_pod_module_data(
         module_id=module_id,
         table_slug=table_slug,
         body=body.body,
+        session_id=x_prodavan_session_id,
     )
 
 
@@ -146,6 +151,7 @@ async def update_pod_module_data(
     body: PodModuleDataBody,
     bridge: PodBridgeDep,
     session: SessionDep,
+    x_prodavan_session_id: str | None = Header(default=None, alias=SESSION_HEADER),
 ) -> dict[str, Any]:
     return await PodModuleDataService(session).update_data_row(
         bridge=bridge,
@@ -154,6 +160,7 @@ async def update_pod_module_data(
         table_slug=table_slug,
         row_id=row_id,
         body=body.body,
+        session_id=x_prodavan_session_id,
     )
 
 

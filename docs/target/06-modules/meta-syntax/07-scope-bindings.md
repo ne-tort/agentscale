@@ -31,6 +31,7 @@ Reusable on `TableDefinition`, `ViewDefinition`, `TabDefinition`, `ActionDefinit
 {
   "scope": {
     "projects": "all",
+    "chats": "all",
     "requires_assignment": true,
     "module_binding": "required"
   }
@@ -42,8 +43,26 @@ Reusable on `TableDefinition`, `ViewDefinition`, `TabDefinition`, `ActionDefinit
 | `projects` | `all` | Visible in cabinet shell always |
 | | `bound` | Only when current project has MP row |
 | | `none` | Cabinet-level only; hidden in project workspace overlay |
+| `chats` | `all` | **Default.** Shared rows for all chats in the SoT instance; `session_id` ignored |
+| | `current` | Per-chat rows: list/create require active agent session; filter/stamp `session_id` |
 | `requires_assignment` | bool | Employee must have cabinet assignment (default true) |
 | `module_binding` | `required` | Implicit — skip if module not bound |
+
+**`scope.chats` is orthogonal to `bind_kind`.** Local/global chooses which **instance** is SoT; `chats` filters **rows inside** that instance. Do **not** fork a module instance per chat.
+
+```text
+bind_kind local|global  → cabinet vs project (or higher) instance
+scope.chats all|current → shared rows vs session_id-scoped rows
+```
+
+| `scope.chats` | List | Create / update |
+|---------------|------|-----------------|
+| `all` | All rows of the table | Do not stamp `session_id` |
+| `current` | Rows where `session_id == activeSession` | Require session; stamp column + `body.session_id`; foreign session → 404/403 |
+
+System field **`session_id`** (agent session id): first-class column on `module_instance_data_rows` + mirrored in JSON body on write. Not shown on ordinary forms.
+
+Wire: UI / MCP send `X-Prodavan-Session-Id` (or query). Pod MCP tools pass `session_id` per call (one Pod serves many chats).
 
 ## enabled and visibility
 

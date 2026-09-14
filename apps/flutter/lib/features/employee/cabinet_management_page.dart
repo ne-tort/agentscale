@@ -20,12 +20,14 @@ class CabinetModuleHubPage extends StatelessWidget {
     required this.title,
     required this.entries,
     this.projectId,
+    this.sessionId,
     this.embedded = false,
     this.emptyIcon = Icons.apps_outlined,
   });
 
   final String cabinetId;
   final String? projectId;
+  final String? sessionId;
   final String title;
   final List<CabinetNavEntry> entries;
   final bool embedded;
@@ -41,6 +43,7 @@ class CabinetModuleHubPage extends StatelessWidget {
           body: CabinetModuleHost(
             cabinetId: cabinetId,
             projectId: pid,
+            sessionId: pid != null ? sessionId : null,
             entry: entry,
             embedded: true,
           ),
@@ -101,11 +104,13 @@ class CabinetManagementPage extends StatelessWidget {
     required this.cabinetId,
     required this.entries,
     this.projectId,
+    this.sessionId,
     this.embedded = false,
   });
 
   final String cabinetId;
   final String? projectId;
+  final String? sessionId;
   final List<CabinetNavEntry> entries;
   final bool embedded;
 
@@ -115,6 +120,7 @@ class CabinetManagementPage extends StatelessWidget {
     return CabinetModuleHubPage(
       cabinetId: cabinetId,
       projectId: projectId,
+      sessionId: sessionId,
       title: l10n.navManagement,
       entries: entries,
       embedded: embedded,
@@ -130,11 +136,13 @@ class CabinetDataPage extends StatelessWidget {
     required this.cabinetId,
     required this.entries,
     this.projectId,
+    this.sessionId,
     this.embedded = false,
   });
 
   final String cabinetId;
   final String? projectId;
+  final String? sessionId;
   final List<CabinetNavEntry> entries;
   final bool embedded;
 
@@ -144,6 +152,7 @@ class CabinetDataPage extends StatelessWidget {
     return CabinetModuleHubPage(
       cabinetId: cabinetId,
       projectId: projectId,
+      sessionId: sessionId,
       title: l10n.navData,
       entries: entries,
       embedded: embedded,

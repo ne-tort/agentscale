@@ -29,6 +29,7 @@ Schema-слой meta: **что хранится** и **как валидиров
 | `storage_kind` | enum | ✓ | `json_document` \| `physical` |
 | `enabled` | bool | | default `true`; `false` → скрыта из UI, MCP read-only |
 | `scope.projects` | enum | | `all` \| `bound` \| `none` — см. [scope-bindings](07-scope-bindings.md) |
+| `scope.chats` | enum | | `all` (default) \| `current` — shared vs per-chat rows; см. [scope-bindings](07-scope-bindings.md) |
 | `primary_key` | string | | default `id` (implicit row_id in json_document) |
 | `icon` | string | | Material icon name (optional tab leading) |
 

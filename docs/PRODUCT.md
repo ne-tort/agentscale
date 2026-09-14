@@ -144,6 +144,17 @@ Product defaults (`default_project_bind` / `default_cabinet_bind_kind`):
 - Empty/`null` `project_ids` = all projects **bound to the module** (not every cabinet project).
 - Fan-out (e.g. equipment catalogs after merge): empty `project_ids` + local MP → materialize into each bound project workspace.
 
+### Row `session_id` / `scope.chats` (per-chat data)
+
+Orthogonal to bind local/global. Tables declare `scope.chats`:
+
+| Value | Meaning |
+|-------|---------|
+| `all` (default) | Shared across chats in the SoT instance |
+| `current` | Rows stamped with agent `session_id`; list/create require active chat |
+
+Storage: `module_instance_data_rows.session_id` (+ mirror in JSON body). UI/MCP send `X-Prodavan-Session-Id`. Not a per-chat module fork.
+
 **Prompts hub:** `prompt_paths` (name, path, `files_json`); empty `files_json` skips folder creation; workspace writes `AGENTS.md` only. One active profile per project among matching `project_ids`.
 
 **File & env pipeline:** see [12-content-file-pipeline](target/06-modules/meta-syntax/12-content-file-pipeline.md) · [13-container-env-secrets](target/06-modules/meta-syntax/13-container-env-secrets.md).
@@ -163,10 +174,15 @@ Product module for computer-equipment matching (hub on **Данные**). Projec
 
 | Table | Scope intent | Role |
 |-------|--------------|------|
-| `catalogs` | project leaf (+ row `project_ids`) | name, `source_kind` local\|remote, file or remote DSN/table, status, paused, column_map, `last_indexed_at`, `reindex_interval_hours`, `index_name`, project_ids |
-| `request_lines` | project leaf | customer line: title, P/N, qty, found_count, selected_offer_id |
-| `found_offers` | project leaf | candidates linked via `line_id` (**Запрос** picker → request_lines); `catalog_id` provenance only (not on form); exactly one `is_selected` primary |
-| `s4b_settings` | project leaf (+ row `project_ids`) | S4B URL/login/password(secret)/MCP zip; empty `project_ids` = all bound projects; injects `S4B_*` env + materialize `mcp_package` |
+| `catalogs` | project leaf; `chats=all` (+ row `project_ids`) | name, `source_kind` local\|remote, file or remote DSN/table, status, paused, column_map, `last_indexed_at`, `reindex_interval_hours`, `index_name`, project_ids |
+| `request_lines` | project leaf; `chats=current` | customer line per chat: title, P/N, qty, found_count, selected_offer_id |
+| `found_offers` | project leaf; `chats=current` | candidates linked via `line_id` (**Запрос** picker → request_lines); `catalog_id` provenance only (not on form); exactly one `is_selected` primary |
+| `equipment_types` | project leaf; `chats=all` | component type definitions (shared) |
+| `equipment_items` | project leaf; `chats=current` | characteristics / items per chat |
+| `equipment_builds` | project leaf; `chats=current` | PC/server builds per chat |
+| `trusted_sellers` | project leaf; `chats=all` | trusted seller list (shared) |
+| `web_shops` | project leaf; `chats=all` | web shops (shared) |
+| `s4b_settings` | project leaf; `chats=current` | S4B URL/login/password(secret)/MCP zip per chat; injects `S4B_*` env + materialize `mcp_package` |
 
 Agent fills `found_offers` / `found_count` through first-party MCP `prodavan-equipment` (typed tools) or rows APIs. **Unified catalog search** (`equipment_catalog_search`) calls Pod `…/equipment/catalog-search` → OpenSearch with the same canonical hit contract (pagination, match+price sort, default in-stock filter). First-party MCP packages `prodavan-modules` + `prodavan-equipment` are materialized into the workspace; `mcp.json` / OpenClaw `mcp.servers` carry `env: ${PRODAVAN_*}` placeholders (no plaintext tokens in MinIO). Cursor SDK stdio MCP **не** наследует pod env — bridge expands placeholders and injects `PRODAVAN_*` / `S4B_*` into `Agent.create({ mcpServers })`.
 

@@ -1049,6 +1049,10 @@ class AppLocalizationsRu extends AppLocalizations {
       'Изменения модуля сохранены — нажмите «Обновить проект» на каждом запущенном проекте';
 
   @override
+  String get moduleChatScopeOpenFromChat =>
+      'Таблицы чата здесь пустые — откройте модуль из активного чата, чтобы видеть и править строки этого чата.';
+
+  @override
   String get cabinetArchiveTable => 'В архив';
 
   @override

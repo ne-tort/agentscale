@@ -1856,6 +1856,12 @@ abstract class AppLocalizations {
   /// **'Module changes saved — use Update project on each running project to apply'**
   String get cabinetModuleWorkspaceOutdated;
 
+  /// No description provided for @moduleChatScopeOpenFromChat.
+  ///
+  /// In en, this message translates to:
+  /// **'Per-chat tables are empty here — open this module from an active chat to see and edit that chat’s rows.'**
+  String get moduleChatScopeOpenFromChat;
+
   /// No description provided for @cabinetArchiveTable.
   ///
   /// In en, this message translates to:
@@ -3065,7 +3071,7 @@ abstract class AppLocalizations {
   /// No description provided for @errorUnauthorized.
   ///
   /// In en, this message translates to:
-  /// **'Session expired. Please sign in again.'**
+  /// **'Authorization failed. Please sign in again.'**
   String get errorUnauthorized;
 
   /// No description provided for @errorInvalidCredentials.
@@ -4505,7 +4511,7 @@ abstract class AppLocalizations {
   /// No description provided for @sessionRestoreOffline.
   ///
   /// In en, this message translates to:
-  /// **'Server unavailable. Check your connection.'**
+  /// **'Server unavailable. Check your connection'**
   String get sessionRestoreOffline;
 
   /// No description provided for @settingsLanguage.

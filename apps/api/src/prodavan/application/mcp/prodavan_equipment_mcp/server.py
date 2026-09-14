@@ -30,6 +30,15 @@ def _env() -> tuple[str, str, str]:
     return api, token, project_id
 
 
+def _session_id(arguments: dict[str, Any] | None = None) -> str | None:
+    if arguments:
+        raw = arguments.get("session_id")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    env = (os.environ.get("PRODAVAN_SESSION_ID") or "").strip()
+    return env or None
+
+
 TOOLS: list[dict[str, Any]] = [
     {
         "name": "equipment_catalog_sources",
@@ -177,7 +186,13 @@ TOOLS: list[dict[str, Any]] = [
 ]
 
 
-def _http(method: str, path: str, payload: Any | None = None) -> Any:
+def _http(
+    method: str,
+    path: str,
+    payload: Any | None = None,
+    *,
+    session_id: str | None = None,
+) -> Any:
     api_base, token, project_id = _env()
     if not api_base or not token or not project_id:
         raise RuntimeError(
@@ -189,6 +204,9 @@ def _http(method: str, path: str, payload: Any | None = None) -> Any:
         "Authorization": f"Bearer {token}",
         "Accept": "application/json",
     }
+    sid = session_id or _session_id()
+    if sid:
+        headers["X-Prodavan-Session-Id"] = sid
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -215,8 +233,10 @@ def _data_path(module_id: str, table: str, row_id: str | None = None) -> str:
     return base
 
 
-def _list_rows(module_id: str, table: str) -> list[dict[str, Any]]:
-    payload = _http("GET", _data_path(module_id, table))
+def _list_rows(
+    module_id: str, table: str, *, session_id: str | None = None
+) -> list[dict[str, Any]]:
+    payload = _http("GET", _data_path(module_id, table), session_id=session_id)
     if isinstance(payload, list):
         return [r for r in payload if isinstance(r, dict)]
     if isinstance(payload, dict):
@@ -226,13 +246,18 @@ def _list_rows(module_id: str, table: str) -> list[dict[str, Any]]:
     return []
 
 
-def _get_row(module_id: str, table: str, row_id: str) -> dict[str, Any]:
-    for row in _list_rows(module_id, table):
+def _get_row(
+    module_id: str,
+    table: str,
+    row_id: str,
+    *,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    for row in _list_rows(module_id, table, session_id=session_id):
         if str(row.get("row_id") or "") == row_id:
             return row
-    # Try direct GET if API supports it
     try:
-        return _http("GET", _data_path(module_id, table, row_id))
+        return _http("GET", _data_path(module_id, table, row_id), session_id=session_id)
     except RuntimeError:
         raise RuntimeError(f"{table} row not found: {row_id}") from None
 
@@ -262,11 +287,13 @@ def _validate_offer_body(body: dict[str, Any], *, creating: bool) -> None:
             raise RuntimeError(f"match_kind must be one of {sorted(MATCH_KINDS)}")
 
 
-def _bump_found_count(module_id: str, line_id: str) -> None:
+def _bump_found_count(
+    module_id: str, line_id: str, *, session_id: str | None = None
+) -> None:
     if not line_id:
         return
     count = 0
-    for r in _list_rows(module_id, "found_offers"):
+    for r in _list_rows(module_id, "found_offers", session_id=session_id):
         body = r.get("body") if isinstance(r.get("body"), dict) else r
         if str(body.get("line_id") or "") == line_id:
             count += 1
@@ -275,6 +302,7 @@ def _bump_found_count(module_id: str, line_id: str) -> None:
             "PATCH",
             _data_path(module_id, "request_lines", line_id),
             {"body": {"found_count": count}},
+            session_id=session_id,
         )
     except RuntimeError:
         # Best-effort — offer write already succeeded
@@ -323,11 +351,12 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
         return _catalog_search(arguments)
 
     mid = _module_id(arguments)
+    sid = _session_id(arguments)
 
     if name == "request_lines_list":
-        return {"items": _list_rows(mid, "request_lines")}
+        return {"items": _list_rows(mid, "request_lines", session_id=sid)}
     if name == "request_lines_get":
-        return _get_row(mid, "request_lines", str(arguments.get("row_id") or ""))
+        return _get_row(mid, "request_lines", str(arguments.get("row_id") or ""), session_id=sid)
     if name == "request_lines_upsert":
         keys = (
             "title",
@@ -342,13 +371,23 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
         row_id = str(arguments.get("row_id") or "").strip() or None
         _validate_line_body(body, creating=not row_id)
         if row_id:
-            return _http("PATCH", _data_path(mid, "request_lines", row_id), {"body": body})
+            return _http(
+                "PATCH",
+                _data_path(mid, "request_lines", row_id),
+                {"body": body},
+                session_id=sid,
+            )
         if "title" not in body:
             raise RuntimeError("title is required when creating request_lines")
-        return _http("POST", _data_path(mid, "request_lines"), {"body": body})
+        return _http(
+            "POST",
+            _data_path(mid, "request_lines"),
+            {"body": body},
+            session_id=sid,
+        )
 
     if name == "found_offers_list":
-        items = _list_rows(mid, "found_offers")
+        items = _list_rows(mid, "found_offers", session_id=sid)
         line_id = str(arguments.get("line_id") or "").strip()
         if line_id:
             filtered = []
@@ -359,7 +398,7 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
             items = filtered
         return {"items": items}
     if name == "found_offers_get":
-        return _get_row(mid, "found_offers", str(arguments.get("row_id") or ""))
+        return _get_row(mid, "found_offers", str(arguments.get("row_id") or ""), session_id=sid)
     if name == "found_offers_upsert":
         keys = (
             "title",
@@ -378,21 +417,31 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
         row_id = str(arguments.get("row_id") or "").strip() or None
         _validate_offer_body(body, creating=not row_id)
         if row_id:
-            result = _http("PATCH", _data_path(mid, "found_offers", row_id), {"body": body})
+            result = _http(
+                "PATCH",
+                _data_path(mid, "found_offers", row_id),
+                {"body": body},
+                session_id=sid,
+            )
         else:
             if "title" not in body:
                 raise RuntimeError("title is required when creating found_offers")
-            result = _http("POST", _data_path(mid, "found_offers"), {"body": body})
+            result = _http(
+                "POST",
+                _data_path(mid, "found_offers"),
+                {"body": body},
+                session_id=sid,
+            )
         line_id = body.get("line_id")
         if not line_id and row_id:
             try:
-                existing = _get_row(mid, "found_offers", row_id)
+                existing = _get_row(mid, "found_offers", row_id, session_id=sid)
                 eb = existing.get("body") if isinstance(existing.get("body"), dict) else existing
                 line_id = eb.get("line_id")
             except RuntimeError:
                 line_id = None
         if isinstance(line_id, str) and line_id.strip():
-            _bump_found_count(mid, line_id.strip())
+            _bump_found_count(mid, line_id.strip(), session_id=sid)
         return result
 
     raise RuntimeError(f"unknown tool: {name}")

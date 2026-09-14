@@ -453,6 +453,20 @@ class ModuleInstanceService:
             return
         await self.refresh_meta_from_template(instance_id=inst.id, module_id=module_id)
 
+    async def resolve_tables_body(self, *, instance_id: str, module_id: str) -> Any:
+        """Instance tables meta with template fallback."""
+        try:
+            doc = await self.get_meta_document(instance_id=instance_id, slug="tables")
+            return doc.get("body")
+        except AppError:
+            q = await self._session.execute(
+                select(ModuleMetaDocumentRow.body).where(
+                    ModuleMetaDocumentRow.module_id == module_id,
+                    ModuleMetaDocumentRow.slug == "tables",
+                )
+            )
+            return q.scalar_one_or_none()
+
     async def resolve_columns_body(self, *, instance_id: str, module_id: str) -> Any:
         """Instance columns meta with template fallback."""
         try:
@@ -511,8 +525,25 @@ class ModuleInstanceService:
         await self._session.flush()
         return {"slug": row.slug, "body": row.body}
 
-    async def list_data_rows(self, *, instance_id: str, table_slug: str) -> list[dict[str, Any]]:
-        q = await self._session.execute(
+    def _serialize_data_row(self, r: ModuleInstanceDataRow) -> dict[str, Any]:
+        return {
+            "row_id": r.row_id,
+            "table_slug": r.table_slug,
+            "body": r.body,
+            "session_id": r.session_id,
+            "created_by": r.created_by,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+        }
+
+    async def list_data_rows(
+        self,
+        *,
+        instance_id: str,
+        table_slug: str,
+        session_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        stmt = (
             select(ModuleInstanceDataRow)
             .where(
                 ModuleInstanceDataRow.instance_id == instance_id,
@@ -520,17 +551,10 @@ class ModuleInstanceService:
             )
             .order_by(ModuleInstanceDataRow.updated_at.desc())
         )
-        return [
-            {
-                "row_id": r.row_id,
-                "table_slug": r.table_slug,
-                "body": r.body,
-                "created_by": r.created_by,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
-            }
-            for r in q.scalars().all()
-        ]
+        if session_id is not None:
+            stmt = stmt.where(ModuleInstanceDataRow.session_id == session_id)
+        q = await self._session.execute(stmt)
+        return [self._serialize_data_row(r) for r in q.scalars().all()]
 
     async def get_data_row(
         self, *, instance_id: str, table_slug: str, row_id: str
@@ -545,14 +569,7 @@ class ModuleInstanceService:
         r = q.scalar_one_or_none()
         if r is None:
             return None
-        return {
-            "row_id": r.row_id,
-            "table_slug": r.table_slug,
-            "body": r.body,
-            "created_by": r.created_by,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
-        }
+        return self._serialize_data_row(r)
 
     async def upsert_data_row(
         self,
@@ -562,6 +579,7 @@ class ModuleInstanceService:
         row_id: str,
         body: dict[str, Any],
         created_by: str | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         q = await self._session.execute(
             select(ModuleInstanceDataRow).where(
@@ -571,18 +589,37 @@ class ModuleInstanceService:
             )
         )
         row = q.scalar_one_or_none()
+        body_out = dict(body)
+        effective_session = session_id
+        if effective_session is None and isinstance(body_out.get("session_id"), str):
+            effective_session = str(body_out["session_id"]).strip() or None
+        if effective_session:
+            body_out["session_id"] = effective_session
         if row is None:
             row = ModuleInstanceDataRow(
                 id=_new_data_id(),
                 instance_id=instance_id,
                 table_slug=table_slug,
                 row_id=row_id,
-                body=body,
+                body=body_out,
+                session_id=effective_session,
                 created_by=created_by,
             )
             self._session.add(row)
         else:
-            row.body = body
+            if row.session_id and effective_session and row.session_id != effective_session:
+                raise AppError(
+                    code="NOT_FOUND",
+                    title="Not Found",
+                    status=404,
+                    detail="row not found",
+                )
+            if row.session_id and not effective_session:
+                effective_session = row.session_id
+                body_out["session_id"] = row.session_id
+            row.body = body_out
+            if effective_session is not None:
+                row.session_id = effective_session
             # API / user edits clear seed provenance so product upsert never clobbers.
             if created_by is not None:
                 row.created_by = created_by
@@ -593,6 +630,7 @@ class ModuleInstanceService:
             "row_id": row.row_id,
             "table_slug": row.table_slug,
             "body": row.body,
+            "session_id": row.session_id,
             "created_by": row.created_by,
         }
 
@@ -603,6 +641,7 @@ class ModuleInstanceService:
         table_slug: str,
         body: dict[str, Any],
         created_by: str | None = None,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
         row_id = f"row_{uuid.uuid4().hex[:12]}"
         return await self.upsert_data_row(
@@ -611,6 +650,7 @@ class ModuleInstanceService:
             row_id=row_id,
             body=body,
             created_by=created_by,
+            session_id=session_id,
         )
 
     async def delete_data_row(self, *, instance_id: str, table_slug: str, row_id: str) -> bool:

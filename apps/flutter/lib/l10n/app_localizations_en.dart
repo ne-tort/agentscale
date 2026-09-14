@@ -1039,6 +1039,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Module changes saved — use Update project on each running project to apply';
 
   @override
+  String get moduleChatScopeOpenFromChat =>
+      'Per-chat tables are empty here — open this module from an active chat to see and edit that chat’s rows.';
+
+  @override
   String get cabinetArchiveTable => 'Archive table';
 
   @override

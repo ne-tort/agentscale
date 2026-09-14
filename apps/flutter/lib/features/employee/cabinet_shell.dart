@@ -489,6 +489,7 @@ class _CabinetShellState extends State<CabinetShell> {
                 root: CabinetManagementPage(
                   cabinetId: widget.cabinetId,
                   projectId: workContext.selectedProjectId,
+                  sessionId: _activeSessionId,
                   entries: _managementEntries,
                 ),
               ),
@@ -500,6 +501,7 @@ class _CabinetShellState extends State<CabinetShell> {
                 root: CabinetDataPage(
                   cabinetId: widget.cabinetId,
                   projectId: workContext.selectedProjectId,
+                  sessionId: _activeSessionId,
                   entries: _dataEntries,
                 ),
               ),
@@ -593,6 +595,7 @@ class _CabinetShellState extends State<CabinetShell> {
         CabinetManagementPage(
           cabinetId: widget.cabinetId,
           projectId: workContext.selectedProjectId,
+          sessionId: _activeSessionId,
           entries: _managementEntries,
           embedded: true,
         ),
@@ -600,6 +603,7 @@ class _CabinetShellState extends State<CabinetShell> {
         CabinetDataPage(
           cabinetId: widget.cabinetId,
           projectId: workContext.selectedProjectId,
+          sessionId: _activeSessionId,
           entries: _dataEntries,
           embedded: true,
         ),

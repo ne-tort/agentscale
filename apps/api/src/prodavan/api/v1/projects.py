@@ -18,6 +18,7 @@ from prodavan.application.projects import (
     ProjectTriggerService,
 )
 from prodavan.application.projects.signed_ingress import enqueue_signed_trigger
+from prodavan.application.modules.chat_scope import SESSION_HEADER
 from prodavan.domain.errors import AppError
 from prodavan.domain.projects.types import PAUSE_EXEMPT_TRIGGER_KINDS
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
@@ -528,6 +529,7 @@ async def list_project_runtime_module_data(
     principal: PrincipalDep,
     session: SessionDep,
     employee: EmployeeDep,
+    x_prodavan_session_id: str | None = Header(default=None, alias=SESSION_HEADER),
 ) -> dict:
     from prodavan.application.projects.project_runtime_module_service import (
         ProjectRuntimeModuleService,
@@ -539,6 +541,7 @@ async def list_project_runtime_module_data(
         table_slug=table_slug,
         principal=principal,
         employee=employee,
+        session_id=x_prodavan_session_id,
     )
     return {"items": items}
 
@@ -552,6 +555,7 @@ async def create_project_runtime_module_data(
     principal: PrincipalDep,
     session: SessionDep,
     employee: EmployeeDep,
+    x_prodavan_session_id: str | None = Header(default=None, alias=SESSION_HEADER),
 ) -> dict:
     from prodavan.application.projects.project_runtime_module_service import (
         ProjectRuntimeModuleService,
@@ -564,6 +568,7 @@ async def create_project_runtime_module_data(
         body=body.body,
         principal=principal,
         employee=employee,
+        session_id=x_prodavan_session_id,
     )
 
 
@@ -577,6 +582,7 @@ async def update_project_runtime_module_data(
     principal: PrincipalDep,
     session: SessionDep,
     employee: EmployeeDep,
+    x_prodavan_session_id: str | None = Header(default=None, alias=SESSION_HEADER),
 ) -> dict:
     from prodavan.application.projects.project_runtime_module_service import (
         ProjectRuntimeModuleService,
@@ -590,6 +596,7 @@ async def update_project_runtime_module_data(
         body=body.body,
         principal=principal,
         employee=employee,
+        session_id=x_prodavan_session_id,
     )
 
 

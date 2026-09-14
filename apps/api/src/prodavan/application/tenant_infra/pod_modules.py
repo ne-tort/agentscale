@@ -234,14 +234,30 @@ class PodModuleDataService:
         project_id: str,
         module_id: str,
         table_slug: str,
+        session_id: str | None = None,
     ) -> list[dict[str, Any]]:
+        from prodavan.application.modules.chat_scope_ops import prepare_chat_scoped_list
+
         await self._require_project_row(project_id, bridge)
         self._require_module_rows(bridge, module_id)
         table_slug = check_table_slug(table_slug)
         inst = await self._runtime._sot_for_project(
             project_id=project_id, module_id=module_id, write=False
         )
-        rows = await self._instances.list_data_rows(instance_id=inst.id, table_slug=table_slug)
+        filter_sid, empty = await prepare_chat_scoped_list(
+            self._instances,
+            instance_id=inst.id,
+            module_id=module_id,
+            table_slug=table_slug,
+            session_id=session_id,
+            db=self._session,
+            project_id=project_id,
+        )
+        if empty:
+            return []
+        rows = await self._instances.list_data_rows(
+            instance_id=inst.id, table_slug=table_slug, session_id=filter_sid
+        )
         return [
             {"module_id": module_id, "instance_id": inst.id, **row}
             for row in rows
@@ -255,13 +271,26 @@ class PodModuleDataService:
         module_id: str,
         table_slug: str,
         body: Any,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
+        from prodavan.application.modules.chat_scope_ops import prepare_chat_scoped_write
+
         project = await self._require_project_row(project_id, bridge)
         self._require_module_rows(bridge, module_id)
         table_slug = check_table_slug(table_slug)
         body = ensure_row_body(body)
         inst = await self._runtime._sot_for_project(
             project_id=project_id, module_id=module_id, write=True
+        )
+        body, stamp_sid = await prepare_chat_scoped_write(
+            self._instances,
+            instance_id=inst.id,
+            module_id=module_id,
+            table_slug=table_slug,
+            body=body,
+            session_id=session_id,
+            db=self._session,
+            project_id=project_id,
         )
         columns_body = await self._instances.resolve_columns_body(
             instance_id=inst.id, module_id=module_id
@@ -280,6 +309,7 @@ class PodModuleDataService:
             table_slug=table_slug,
             body=body,
             created_by=f"pod:{bridge.pod_id}",
+            session_id=stamp_sid,
         )
         await self._session.commit()
         return {"module_id": module_id, "instance_id": inst.id, **row}
@@ -293,13 +323,32 @@ class PodModuleDataService:
         table_slug: str,
         row_id: str,
         body: Any,
+        session_id: str | None = None,
     ) -> dict[str, Any]:
+        from prodavan.application.modules.chat_scope_ops import prepare_chat_scoped_write
+
         project = await self._require_project_row(project_id, bridge)
         self._require_module_rows(bridge, module_id)
         table_slug = check_table_slug(table_slug)
         body = ensure_row_body(body)
         inst = await self._runtime._sot_for_project(
             project_id=project_id, module_id=module_id, write=True
+        )
+        existing = await self._instances.get_data_row(
+            instance_id=inst.id, table_slug=table_slug, row_id=row_id
+        )
+        if existing is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        body, stamp_sid = await prepare_chat_scoped_write(
+            self._instances,
+            instance_id=inst.id,
+            module_id=module_id,
+            table_slug=table_slug,
+            body=body,
+            session_id=session_id,
+            db=self._session,
+            project_id=project_id,
+            existing_row=existing,
         )
         columns_body = await self._instances.resolve_columns_body(
             instance_id=inst.id, module_id=module_id
@@ -310,16 +359,12 @@ class PodModuleDataService:
             body=body,
             cabinet_id=project.cabinet_id,
         )
-        existing = await self._instances.get_data_row(
-            instance_id=inst.id, table_slug=table_slug, row_id=row_id
-        )
-        if existing is None:
-            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
         row = await self._instances.upsert_data_row(
             instance_id=inst.id,
             table_slug=table_slug,
             row_id=row_id,
             body=body,
+            session_id=stamp_sid,
         )
         await self._session.commit()
         return {"module_id": module_id, "instance_id": inst.id, **row}

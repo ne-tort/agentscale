@@ -5,6 +5,7 @@ import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/employee/cabinet_nav_loader.dart';
 import 'package:prodavan/features/meta/interpreters/hub_interpreter.dart';
@@ -24,12 +25,15 @@ class CabinetModuleHost extends StatefulWidget {
     required this.cabinetId,
     required this.entry,
     this.projectId,
+    this.sessionId,
     this.embedded = false,
   });
 
   final String cabinetId;
   /// When set, meta/data come from the project leaf instance (hubs). Never inferred from selection.
   final String? projectId;
+  /// Active agent chat for ``scope.chats=current`` tables.
+  final String? sessionId;
   final CabinetNavEntry entry;
   final bool embedded;
 
@@ -60,6 +64,7 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
   void didUpdateWidget(covariant CabinetModuleHost oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.projectId != widget.projectId ||
+        oldWidget.sessionId != widget.sessionId ||
         oldWidget.entry.moduleId != widget.entry.moduleId) {
       _load();
     }
@@ -124,6 +129,7 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
         api: api,
         cabinetId: widget.cabinetId,
         projectId: projectId,
+        sessionId: widget.sessionId,
         moduleId: widget.entry.moduleId,
         manifest: manifest,
       );
@@ -172,6 +178,7 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
           wrapBody: (page) => ModuleRuntimeScope.cabinet(
             cabinetId: widget.cabinetId,
             projectId: widget.projectId,
+            sessionId: widget.sessionId,
             moduleId: widget.entry.moduleId,
             api: workContext.api,
             child: page,
@@ -198,6 +205,7 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
     }
     final manifest = _manifest!;
     final adapter = _adapter!;
+    final data = _data!;
     final viewSlug = widget.entry.viewSlug;
     if (viewSlug.isEmpty) {
       return EmptyPlaceholder(title: l10n.adminMetaInvalid);
@@ -207,17 +215,35 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
       return EmptyPlaceholder(title: l10n.adminMetaInvalid);
     }
 
+    Widget content = ViewInterpreterHost(
+      manifest: manifest,
+      view: view,
+      seeds: adapter,
+      onOpenView: _openView,
+    );
+    if (data.needsChatSession) {
+      content = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+            child: AppStatusBanner(
+              severity: AppStatusSeverity.info,
+              message: l10n.moduleChatScopeOpenFromChat,
+            ),
+          ),
+          Expanded(child: content),
+        ],
+      );
+    }
+
     final body = ModuleRuntimeScope.cabinet(
       cabinetId: widget.cabinetId,
       projectId: widget.projectId,
+      sessionId: widget.sessionId,
       moduleId: widget.entry.moduleId,
       api: workContext.api,
-      child: ViewInterpreterHost(
-        manifest: manifest,
-        view: view,
-        seeds: adapter,
-        onOpenView: _openView,
-      ),
+      child: content,
     );
 
     if (widget.embedded) return body;

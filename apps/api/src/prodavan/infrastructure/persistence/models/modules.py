@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -177,6 +177,12 @@ class ModuleInstanceDataRow(Base):
             "row_id",
             name="uq_module_instance_data_row",
         ),
+        Index(
+            "ix_module_instance_data_rows_session",
+            "instance_id",
+            "table_slug",
+            "session_id",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=_midr_id)
@@ -187,6 +193,7 @@ class ModuleInstanceDataRow(Base):
     table_slug: Mapped[str] = mapped_column(String(64), nullable=False)
     row_id: Mapped[str] = mapped_column(String(64), nullable=False)
     body: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict, server_default="{}")
+    session_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_by: Mapped[str | None] = mapped_column(String(80), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

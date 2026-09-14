@@ -15,15 +15,15 @@ Product seed: `mod_equipment` — see `product_module_seeds.py`.
 
 ## Tables (sketch)
 
-- `catalogs` — `name`, `source_kind` (`local`\|`remote`), `source_file`, `remote_dsn` (`secret_ref`), `remote_user` / `remote_password`, `remote_database`, `remote_table`, `status`, `paused`, `row_count`, `columns_json`, `column_map`, `last_indexed_at`, `reindex_interval_hours`, `index_name`, `error`, `project_ids`
-- `request_lines` — `title`, `part_number`, `qty`, `found_count`, `selected_offer_id`, `status`
-- `found_offers` — `line_id` (ref **Запрос** → `request_lines` via `request_lines_pick`), `title`, `part_number`, `brand`, `price`, `catalog_id` (provenance only, not on form), `score`, `match_kind`, `is_selected`, `source_title` (denorm from line title)
-- `equipment_types` — `name`, `sort_order`, `build_scope` (`all`|`pc`|`server`), `fields_json` (`[{key,label}]`); seed 13 PC/server types (incl. case fans; RAID/HBA/backplane/BMC server-only)
-- `equipment_items` — `name`, `offer_id`/`offer_title`, `type_id`/`type_name`, `part_number`, `qty`, `attrs` (string map by field key)
-- `equipment_builds` — `name`, `build_kind` (`pc`|`server`), `slots` (`{etype_id: item_row_id}`), denorm `components_count` / `price_total`
-- `trusted_sellers` — `name`, `aliases` (comma-separated); CRUD only
-- `web_shops` — `name`, `url`, `cookies` (free-form paste via `text_editor` nav page); CRUD only
-- `s4b_settings` — `name`, `base_url`, `login`, `password` (`secret_ref` via core `value` + `secret: true`), `mcp_zip` (`file_ref`), `enabled` (`pause_toggle` invert), `project_ids` (empty = all)
+- `catalogs` — shared (`scope.chats=all`): `name`, `source_kind` (`local`\|`remote`), …, `project_ids`
+- `request_lines` — per-chat (`scope.chats=current`): `title`, `part_number`, `qty`, `found_count`, `selected_offer_id`, `status` (+ system `session_id`)
+- `found_offers` — per-chat: `line_id` (ref → `request_lines`), … (+ `session_id`)
+- `equipment_types` — shared: `name`, `sort_order`, `build_scope`, `fields_json`
+- `equipment_items` — per-chat: characteristics / items
+- `equipment_builds` — per-chat: PC/server builds
+- `trusted_sellers` — shared: `name`, `aliases`
+- `web_shops` — shared: `name`, `url`, `cookies`
+- `s4b_settings` — per-chat: S4B credentials / MCP zip (+ `session_id`)
 
 ## Meta primitives
 

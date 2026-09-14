@@ -20,6 +20,15 @@ def _env() -> tuple[str, str, str]:
     return api, token, project_id
 
 
+def _session_id(arguments: dict[str, Any] | None = None) -> str | None:
+    if arguments:
+        raw = arguments.get("session_id")
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    env = (os.environ.get("PRODAVAN_SESSION_ID") or "").strip()
+    return env or None
+
+
 TOOLS: list[dict[str, Any]] = [
     {
         "name": "modules_list",
@@ -62,32 +71,37 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "module_data_list",
-        "description": "List rows in a module table.",
+        "description": "List rows in a module table. Pass session_id for chat-scoped tables.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "module_id": {"type": "string"},
                 "table_slug": {"type": "string"},
+                "session_id": {
+                    "type": "string",
+                    "description": "Agent session id (required for scope.chats=current tables)",
+                },
             },
             "required": ["module_id", "table_slug"],
         },
     },
     {
         "name": "module_data_create",
-        "description": "Create a row in a module table.",
+        "description": "Create a row in a module table. Pass session_id for chat-scoped tables.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "module_id": {"type": "string"},
                 "table_slug": {"type": "string"},
                 "body": {"type": "object"},
+                "session_id": {"type": "string"},
             },
             "required": ["module_id", "table_slug", "body"],
         },
     },
     {
         "name": "module_data_update",
-        "description": "Update a module data row.",
+        "description": "Update a module data row. Pass session_id for chat-scoped tables.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -95,6 +109,7 @@ TOOLS: list[dict[str, Any]] = [
                 "table_slug": {"type": "string"},
                 "row_id": {"type": "string"},
                 "body": {"type": "object"},
+                "session_id": {"type": "string"},
             },
             "required": ["module_id", "table_slug", "row_id", "body"],
         },
@@ -108,6 +123,7 @@ TOOLS: list[dict[str, Any]] = [
                 "module_id": {"type": "string"},
                 "table_slug": {"type": "string"},
                 "row_id": {"type": "string"},
+                "session_id": {"type": "string"},
             },
             "required": ["module_id", "table_slug", "row_id"],
         },
@@ -128,7 +144,13 @@ TOOLS: list[dict[str, Any]] = [
 ]
 
 
-def _http(method: str, path: str, payload: Any | None = None) -> Any:
+def _http(
+    method: str,
+    path: str,
+    payload: Any | None = None,
+    *,
+    session_id: str | None = None,
+) -> Any:
     api_base, token, _project_id = _env()
     if not api_base or not token or not _project_id:
         raise RuntimeError(
@@ -140,6 +162,9 @@ def _http(method: str, path: str, payload: Any | None = None) -> Any:
         "Authorization": f"Bearer {token}",
         "Accept": "application/json",
     }
+    sid = session_id or _session_id()
+    if sid:
+        headers["X-Prodavan-Session-Id"] = sid
     if payload is not None:
         data = json.dumps(payload).encode("utf-8")
         headers["Content-Type"] = "application/json"
@@ -156,6 +181,7 @@ def _http(method: str, path: str, payload: Any | None = None) -> Any:
 def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
     _api, _tok, project_id = _env()
     mid = str(arguments.get("module_id") or "")
+    sid = _session_id(arguments)
     if name == "modules_list":
         return _http("GET", f"/projects/{project_id}/modules")
     if name == "module_meta_list":
@@ -172,13 +198,18 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
         )
     if name == "module_data_list":
         table = str(arguments.get("table_slug") or "")
-        return _http("GET", f"/projects/{project_id}/modules/{mid}/data/{table}")
+        return _http(
+            "GET",
+            f"/projects/{project_id}/modules/{mid}/data/{table}",
+            session_id=sid,
+        )
     if name == "module_data_create":
         table = str(arguments.get("table_slug") or "")
         return _http(
             "POST",
             f"/projects/{project_id}/modules/{mid}/data/{table}",
             {"body": arguments.get("body") or {}},
+            session_id=sid,
         )
     if name == "module_data_update":
         table = str(arguments.get("table_slug") or "")
@@ -187,11 +218,16 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
             "PATCH",
             f"/projects/{project_id}/modules/{mid}/data/{table}/{row_id}",
             {"body": arguments.get("body") or {}},
+            session_id=sid,
         )
     if name == "module_data_delete":
         table = str(arguments.get("table_slug") or "")
         row_id = str(arguments.get("row_id") or "")
-        return _http("DELETE", f"/projects/{project_id}/modules/{mid}/data/{table}/{row_id}")
+        return _http(
+            "DELETE",
+            f"/projects/{project_id}/modules/{mid}/data/{table}/{row_id}",
+            session_id=sid,
+        )
     if name == "module_action_invoke":
         action_id = str(arguments.get("action_id") or "")
         body: dict[str, Any] = {}
@@ -201,6 +237,7 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
             "POST",
             f"/projects/{project_id}/modules/{mid}/actions/{action_id}/invoke",
             body or None,
+            session_id=sid,
         )
     raise RuntimeError(f"unknown tool: {name}")
 

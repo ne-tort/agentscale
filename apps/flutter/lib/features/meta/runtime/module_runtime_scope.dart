@@ -22,6 +22,7 @@ class ModuleRuntimeScope extends InheritedWidget {
     this.cabinetId,
     this.companyId,
     this.projectId,
+    this.sessionId,
     required super.child,
   }) : assert(
           uploadKind != ModuleContentUploadKind.cabinet ||
@@ -41,6 +42,7 @@ class ModuleRuntimeScope extends InheritedWidget {
     required String moduleId,
     required ProdavanApi api,
     String? projectId,
+    String? sessionId,
     required Widget child,
   }) {
     return ModuleRuntimeScope(
@@ -50,6 +52,7 @@ class ModuleRuntimeScope extends InheritedWidget {
       uploadKind: ModuleContentUploadKind.cabinet,
       cabinetId: cabinetId,
       projectId: projectId,
+      sessionId: sessionId,
       uploadContentFn: ({
         required String filename,
         required List<int> bytes,
@@ -107,6 +110,9 @@ class ModuleRuntimeScope extends InheritedWidget {
 
   /// When set, data/actions use the project leaf instance (hubs).
   final String? projectId;
+
+  /// Active agent chat — filters/stamps ``scope.chats=current`` tables.
+  final String? sessionId;
   final String moduleId;
 
   /// Cabinet work API — only set for [ModuleContentUploadKind.cabinet].
@@ -130,6 +136,7 @@ class ModuleRuntimeScope extends InheritedWidget {
         cabinetId != oldWidget.cabinetId ||
         companyId != oldWidget.companyId ||
         projectId != oldWidget.projectId ||
+        sessionId != oldWidget.sessionId ||
         moduleId != oldWidget.moduleId ||
         api != oldWidget.api;
   }
