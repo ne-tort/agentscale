@@ -41,7 +41,21 @@ Auth / cabinet heartbeat / agent session / storage sampler / relation.*
 
 Named counters: `employees_total`, `projects_total`, `cabinets_total`, `agent_requests`, `agent_tokens`, `storage_bytes`.
 
+Entity types: `project`, `cabinet`, `company`, `employee`, `session`.
+
+Cascade for `agent_requests` / `agent_tokens`: **project → cabinet → company** only.  
+Additional **side incr** (no cascade, avoids double-counting company):
+
+- `session` — per chat (`session_id` on `metrics.usage.turn` / `metrics.counter.delta`)
+- `employee` — per sender (`employee_id`; attribution = who sent the turn, not session owner)
+
+Payload fields on usage/request facts: `project_id`, `cabinet_id`, `company_id`, `session_id`, `employee_id`.
+
+Durable PG: `agent_usage.employee_id` (nullable); `user_message.payload.employee_id` for audit/rebuild.
+
 `agent_requests` = user turns (`user_message` / counter delta), **never** SSE `text_delta` chunks.
+
+Rebuild (`POST /admin/metrics/rebuild`) also sets per-session and per-employee counters from PG.
 
 ## Presence (online)
 
@@ -100,6 +114,9 @@ GET /api/v1/cabinets/{id}/metrics
 GET /api/v1/cabinets/{id}/metrics/series?metric=agent_requests&window=7d
 POST /api/v1/cabinets/{id}/presence/heartbeat
 GET /api/v1/companies/{company_id}/containers/{project_id}/metrics?window=1h
+GET /api/v1/companies/{company_id}/employees/{employee_id}/metrics
+GET /api/v1/projects/{project_id}/agent/sessions  (includes agent_tokens_used / agent_requests)
+GET /api/v1/projects/{project_id}/agent/sessions/{session_id}
 ```
 
 Overview fields prefer Redis counters; SQL/FS used for backfill/rebuild and transitional fallbacks (not `text_delta`, not per-request storage scan).

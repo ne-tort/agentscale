@@ -247,6 +247,23 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
               if (mounted) _clearEdit();
             },
           ),
+        for (final action in widget.rowActions)
+          if (_rowActionVisible(action, row))
+            IconButton(
+              tooltip: action.tooltip,
+              icon: action.iconBuilder?.call(context, row) ??
+                  Icon(action.icon, size: 20, color: onSurface),
+              padding: EdgeInsets.zero,
+              visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints(
+                minWidth: AppInsets.trailingIconExtent,
+                minHeight: AppInsets.trailingIconExtent,
+              ),
+              onPressed: () async {
+                await action.onPressed(row);
+                if (mounted) _clearEdit();
+              },
+            ),
         if (_canDelete(row))
           IconButton(
             tooltip: l10n.commonDelete,
@@ -270,23 +287,6 @@ class _AppEntityCollectionState extends State<AppEntityCollection> {
               if (mounted) _clearEdit();
             },
           ),
-        for (final action in widget.rowActions)
-          if (_rowActionVisible(action, row))
-            IconButton(
-              tooltip: action.tooltip,
-              icon: action.iconBuilder?.call(context, row) ??
-                  Icon(action.icon, size: 20, color: onSurface),
-              padding: EdgeInsets.zero,
-              visualDensity: VisualDensity.compact,
-              constraints: const BoxConstraints(
-                minWidth: AppInsets.trailingIconExtent,
-                minHeight: AppInsets.trailingIconExtent,
-              ),
-              onPressed: () async {
-                await action.onPressed(row);
-                if (mounted) _clearEdit();
-              },
-            ),
       ],
     );
   }

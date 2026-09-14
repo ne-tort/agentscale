@@ -43,7 +43,7 @@ async def test_apply_counter_delta_cascades_to_cabinet_and_company() -> None:
 
 
 @pytest.mark.asyncio
-async def test_usage_turn_tokens_only_without_request_only() -> None:
+async def test_usage_turn_side_incrs_session_and_employee() -> None:
     store = MagicMock()
     store.incr_counter = AsyncMock(return_value=10)
     store.append_counter_series = AsyncMock()
@@ -54,11 +54,43 @@ async def test_usage_turn_tokens_only_without_request_only() -> None:
             "project_id": "prj_1",
             "cabinet_id": "cab_1",
             "company_id": "co_1",
+            "session_id": "ags_1",
+            "employee_id": "emp_1",
             "input_tokens": 3,
             "output_tokens": 7,
         }
     )
+    from prodavan.domain.metrics.types import ENTITY_EMPLOYEE, ENTITY_SESSION
+
     store.incr_counter.assert_any_await(ENTITY_PROJECT, "prj_1", METRIC_AGENT_TOKENS, 10)
+    store.incr_counter.assert_any_await(ENTITY_SESSION, "ags_1", METRIC_AGENT_TOKENS, 10)
+    store.incr_counter.assert_any_await(ENTITY_EMPLOYEE, "emp_1", METRIC_AGENT_TOKENS, 10)
+    # project + cabinet + company + session + employee
+    assert store.incr_counter.await_count == 5
+
+
+@pytest.mark.asyncio
+async def test_counter_delta_side_incrs_session_and_employee() -> None:
+    store = MagicMock()
+    store.incr_counter = AsyncMock(return_value=1)
+    store.append_counter_series = AsyncMock()
+    store.get_parent = AsyncMock(return_value=None)
+    acc = MetricsAccumulator(store)
+    from prodavan.domain.metrics.types import ENTITY_EMPLOYEE, ENTITY_SESSION
+
+    await acc.apply_counter_delta(
+        metric=METRIC_AGENT_REQUESTS,
+        entity_type=ENTITY_PROJECT,
+        entity_id="prj_1",
+        delta=1,
+        company_id="co_1",
+        cabinet_id="cab_1",
+        session_id="ags_1",
+        employee_id="emp_1",
+    )
+    store.incr_counter.assert_any_await(ENTITY_SESSION, "ags_1", METRIC_AGENT_REQUESTS, 1)
+    store.incr_counter.assert_any_await(ENTITY_EMPLOYEE, "emp_1", METRIC_AGENT_REQUESTS, 1)
+    assert store.incr_counter.await_count == 5
 
 
 @pytest.mark.asyncio

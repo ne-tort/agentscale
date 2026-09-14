@@ -357,3 +357,90 @@ class ProjectMetricsAggregator:
         return await overlay_store_counters(
             metrics, entity_type=ENTITY_PROJECT, entity_id=project_id
         )
+
+
+class SessionMetricsAggregator:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def aggregate(self, session_id: str) -> dict:
+        row = await self._session.get(AgentSessionRow, session_id)
+        if row is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+
+        usage_q = await self._session.execute(
+            select(
+                func.coalesce(func.sum(AgentUsageRow.input_tokens), 0),
+                func.coalesce(func.sum(AgentUsageRow.output_tokens), 0),
+            ).where(AgentUsageRow.session_id == session_id)
+        )
+        usage_row = usage_q.one()
+        input_tok = int(usage_row[0] or 0)
+        output_tok = int(usage_row[1] or 0)
+
+        msg_q = await self._session.execute(
+            select(func.count())
+            .select_from(AgentEventRow)
+            .where(
+                AgentEventRow.session_id == session_id,
+                AgentEventRow.event_type == "user_message",
+            )
+        )
+        agent_requests = int(msg_q.scalar_one() or 0)
+        metrics = {
+            "session_id": session_id,
+            "project_id": row.project_id,
+            "agent_tokens_used": input_tok + output_tok,
+            "agent_input_tokens": input_tok,
+            "agent_output_tokens": output_tok,
+            "agent_requests": agent_requests,
+            "agent_messages": agent_requests,
+        }
+        from prodavan.domain.metrics.types import ENTITY_SESSION
+
+        return await overlay_store_counters(
+            metrics, entity_type=ENTITY_SESSION, entity_id=session_id
+        )
+
+
+class EmployeeMetricsAggregator:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def aggregate(self, employee_id: str) -> dict:
+        emp = await self._session.get(EmployeeRow, employee_id)
+        if emp is None or emp.deleted_at is not None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Employee not found")
+
+        usage_q = await self._session.execute(
+            select(
+                func.coalesce(func.sum(AgentUsageRow.input_tokens), 0),
+                func.coalesce(func.sum(AgentUsageRow.output_tokens), 0),
+            ).where(AgentUsageRow.employee_id == employee_id)
+        )
+        usage_row = usage_q.one()
+        input_tok = int(usage_row[0] or 0)
+        output_tok = int(usage_row[1] or 0)
+        msg_q = await self._session.execute(
+            select(func.count())
+            .select_from(AgentEventRow)
+            .where(
+                AgentEventRow.event_type == "user_message",
+                AgentEventRow.payload["employee_id"].as_string() == employee_id,
+            )
+        )
+        agent_requests = int(msg_q.scalar_one() or 0)
+
+        metrics = {
+            "employee_id": employee_id,
+            "agent_tokens_used": input_tok + output_tok,
+            "agent_input_tokens": input_tok,
+            "agent_output_tokens": output_tok,
+            "agent_requests": agent_requests,
+            "agent_messages": agent_requests,
+        }
+        from prodavan.domain.metrics.types import ENTITY_EMPLOYEE
+
+        return await overlay_store_counters(
+            metrics, entity_type=ENTITY_EMPLOYEE, entity_id=employee_id
+        )

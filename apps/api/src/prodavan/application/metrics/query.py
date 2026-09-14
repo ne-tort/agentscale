@@ -12,7 +12,9 @@ from prodavan.application.metrics.adapters.redis_metrics_store import build_metr
 from prodavan.application.metrics.aggregator import (
     CabinetMetricsAggregator,
     CompanyMetricsAggregator,
+    EmployeeMetricsAggregator,
     ProjectMetricsAggregator,
+    SessionMetricsAggregator,
 )
 from prodavan.application.metrics.read_service import MetricsReadService
 from prodavan.config.settings import settings
@@ -38,6 +40,12 @@ class MetricsQuery:
 
     async def project_metrics(self, project_id: str) -> dict[str, Any]:
         return await ProjectMetricsAggregator(self._session).aggregate(project_id)
+
+    async def session_metrics(self, session_id: str) -> dict[str, Any]:
+        return await SessionMetricsAggregator(self._session).aggregate(session_id)
+
+    async def employee_metrics(self, employee_id: str) -> dict[str, Any]:
+        return await EmployeeMetricsAggregator(self._session).aggregate(employee_id)
 
     async def counter_series(
         self,

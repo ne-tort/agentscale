@@ -91,6 +91,11 @@ class AgentUsageRow(Base):
 
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: _id("aus"))
     session_id: Mapped[str] = mapped_column(ForeignKey("agent_sessions.id", ondelete="CASCADE"), nullable=False)
+    employee_id: Mapped[str | None] = mapped_column(
+        ForeignKey("employees.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     turn_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
     model: Mapped[str | None] = mapped_column(String(128), nullable=True)

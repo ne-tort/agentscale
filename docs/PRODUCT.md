@@ -47,14 +47,15 @@ Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** depe
 - **Scroll** — plain chronological `ListView` (no reverse, no auto pin/jump on stream); `loadOlder` only when user scrolls near top.
 - **Selection** — one `SelectionArea` over transcript; plain `Text` / non-selectable markdown → cross-paragraph copy without markdown junk.
 - **Markdown** — GFM after turn done; LLM pipe-tables normalized (`||` rows, missing separators); plain text while streaming.
-- **Chat settings** — model picker + title rename + pin (preference pages, no modal dialogs); Enter отправляет, Shift+Enter — новая строка; usage collapsed по умолчанию.
+- **Chat settings** — model picker + title rename + pin + session Tokens/Requests tiles (preference pages, no modal dialogs); Enter отправляет, Shift+Enter — новая строка; usage collapsed по умолчанию.
 - **Responsive** — mobile full-width; tablet/desktop center column (768–900px); на узком shell чаты — отдельная страница (не bottom sheet).
 - **Subagents** — `subagent_*` events + sidechain transcript API.
 
 ## Observability
 
 - **k8s metrics-server** — cluster addon для CPU/RAM sandbox pod'ов; Prodavan не деплоит отдельный metrics microservice.
-- **Metrics BC** (`application/metrics/`) — Kafka-first read-model внутри `prodavan-api`: facts (`metrics.usage.turn`, `metrics.counter.delta`, `metrics.storage.snapshot`, presence heartbeat) + `relation.*` links → Redis counters/cascade; overview REST читает store (не live SQL/FS scan для requests/tokens/storage). Presence: login/refresh/logout + cabinet heartbeat. Backfill: `POST /admin/metrics/rebuild`. Series: `GET /admin/metrics/series` / `GET /cabinets/{id}/metrics/series`.
+- **Metrics BC** (`application/metrics/`) — Kafka-first read-model внутри `prodavan-api`: facts (`metrics.usage.turn`, `metrics.counter.delta`, `metrics.storage.snapshot`, presence heartbeat) + `relation.*` links → Redis counters. Cascade `project → cabinet → company`; **side-incr без cascade** на `session` и `employee` (кто отправил turn). Overview / dialogs / chat settings читают store overlay + SQL fallback (`agent_usage`, `user_message`). Presence: login/refresh/logout + cabinet heartbeat. Backfill: `POST /admin/metrics/rebuild` (также session/employee). Series: `GET /admin/metrics/series` / `GET /cabinets/{id}/metrics/series`. Employee: `GET /companies/{id}/employees/{eid}/metrics`.
+- **Dialogs metrics UI** — таблица «Диалоги»: колонки Tokens/Requests; pin — иконка в selection рядом с delete (не колонка). Настройки чата — `SessionMetricsWrap` (tokens + requests).
 - **Project lifecycle** — статусы `draft` | `active` | `paused` | `error` | `completed`. `error` = fatal pod failure after grace; **node/WSL flap** (`NotFound` / transient Unknown при `desired=RUNNING`) не залипает в `error` сразу — grace + reconcile **auto-reprovision**; recovery также через `POST /projects/{id}/reload`. Chat readable для `active|paused|error`; send только при `active` + `observed_state=running`; иначе composer wake (tap → resume/reload).
 - **Agent sessions** — pause **suspend** (recoverable); resume/reload reactivate ту же PG-сессию и re-register bridge. История чата в Postgres сохраняется.
 - **Chat durability** — SoT UI-транскрипта = **Postgres** (`agent_sessions` / `agent_events`), не MinIO. `user_message` коммитится сразу; stream events flush mid-turn; финальный commit на DONE. Crash mid-turn не должен съедать уже записанный user turn.

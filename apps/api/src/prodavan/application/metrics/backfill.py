@@ -17,6 +17,7 @@ from prodavan.domain.metrics.types import (
     ENTITY_COMPANY,
     ENTITY_EMPLOYEE,
     ENTITY_PROJECT,
+    ENTITY_SESSION,
     METRIC_AGENT_REQUESTS,
     METRIC_AGENT_TOKENS,
     METRIC_CABINETS_TOTAL,
@@ -46,6 +47,8 @@ class MetricsBackfillService:
         companies = 0
         cabinets = 0
         projects = 0
+        sessions = 0
+        employees = 0
 
         co_rows = (
             await self._session.execute(select(CompanyRow).where(CompanyRow.deleted_at.is_(None)))
@@ -72,6 +75,25 @@ class MetricsBackfillService:
             await self._rebuild_project(proj)
             projects += 1
 
+        sess_ids = (
+            await self._session.execute(select(AgentSessionRow.id))
+        ).scalars().all()
+        for sid in sess_ids:
+            await self._rebuild_session(str(sid))
+            sessions += 1
+
+        emp_ids = (
+            await self._session.execute(
+                select(func.distinct(AgentUsageRow.employee_id)).where(
+                    AgentUsageRow.employee_id.is_not(None)
+                )
+            )
+        ).scalars().all()
+        for eid in emp_ids:
+            if eid:
+                await self._rebuild_employee(str(eid))
+                employees += 1
+
         storage_stats: dict[str, Any] = {}
         if storage:
             storage_stats = await StorageMetricsSampler(self._session).sample_all(apply_local=True)
@@ -80,6 +102,8 @@ class MetricsBackfillService:
             "companies": companies,
             "cabinets": cabinets,
             "projects": projects,
+            "sessions": sessions,
+            "employees": employees,
             "storage": storage_stats,
         }
 
@@ -225,6 +249,48 @@ class MetricsBackfillService:
         req, tokens = await self._usage_for_scope(project_id=row.id)
         await self._store.set_counter(ENTITY_PROJECT, row.id, METRIC_AGENT_REQUESTS, req)
         await self._store.set_counter(ENTITY_PROJECT, row.id, METRIC_AGENT_TOKENS, tokens)
+
+    async def _rebuild_session(self, session_id: str) -> None:
+        msg_q = await self._session.execute(
+            select(func.count())
+            .select_from(AgentEventRow)
+            .where(
+                AgentEventRow.session_id == session_id,
+                AgentEventRow.event_type == "user_message",
+            )
+        )
+        usage_q = await self._session.execute(
+            select(
+                func.coalesce(func.sum(AgentUsageRow.input_tokens), 0),
+                func.coalesce(func.sum(AgentUsageRow.output_tokens), 0),
+            ).where(AgentUsageRow.session_id == session_id)
+        )
+        usage_row = usage_q.one()
+        tokens = int(usage_row[0] or 0) + int(usage_row[1] or 0)
+        req = int(msg_q.scalar_one() or 0)
+        await self._store.set_counter(ENTITY_SESSION, session_id, METRIC_AGENT_REQUESTS, req)
+        await self._store.set_counter(ENTITY_SESSION, session_id, METRIC_AGENT_TOKENS, tokens)
+
+    async def _rebuild_employee(self, employee_id: str) -> None:
+        usage_q = await self._session.execute(
+            select(
+                func.coalesce(func.sum(AgentUsageRow.input_tokens), 0),
+                func.coalesce(func.sum(AgentUsageRow.output_tokens), 0),
+            ).where(AgentUsageRow.employee_id == employee_id)
+        )
+        usage_row = usage_q.one()
+        tokens = int(usage_row[0] or 0) + int(usage_row[1] or 0)
+        msg_q = await self._session.execute(
+            select(func.count())
+            .select_from(AgentEventRow)
+            .where(
+                AgentEventRow.event_type == "user_message",
+                AgentEventRow.payload["employee_id"].as_string() == employee_id,
+            )
+        )
+        req = int(msg_q.scalar_one() or 0)
+        await self._store.set_counter(ENTITY_EMPLOYEE, employee_id, METRIC_AGENT_REQUESTS, req)
+        await self._store.set_counter(ENTITY_EMPLOYEE, employee_id, METRIC_AGENT_TOKENS, tokens)
 
     async def _usage_for_scope(
         self,

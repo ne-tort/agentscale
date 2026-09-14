@@ -8,15 +8,16 @@
 |------|-----|-----|
 | Name | `PATCH /projects/{id}` | `AppValuePreference` на корне |
 | **О проекте** | nav → `ProjectAboutPage` | Описание (`about`), Бюджет, Создатель (RO) |
-| **Диалоги** | nav → `ProjectDialogsPage` (когда проект chat-ready) | таблица сессий, inline create, delete, tap → chat settings |
+| **Диалоги** | nav → `ProjectDialogsPage` (когда проект chat-ready) | таблица: title, Tokens, Requests; selection pin+delete; tap → chat settings |
 | Modules | nav tile → `ProjectModulesListPage` | table on subpage; row → `ProjectModuleEditPage` |
 | Провайдер AI | `PATCH` `resolved_ai_key_id` | табличный picker scoped AI-ключей |
 | Metrics | `GET /projects/{id}/metrics` | `ProjectMetricsWrap` (usage: tokens, storage) |
 
 ## Диалоги
 
-- `GET /projects/{id}/agent/sessions` — список; create с optional `title`.
-- Tap row → `ProjectChatSettingsPage` (без live controller: title/pin/delete).
+- `GET /projects/{id}/agent/sessions` — список с `agent_tokens_used` / `agent_requests`; create с optional `title`; `GET …/sessions/{sid}` — одна сессия + метрики.
+- Pin — иконка в selection (не колонка); switch в chat settings.
+- Tap row → `ProjectChatSettingsPage`: `SessionMetricsWrap` (tokens/requests) + title/pin/delete.
 - Workspace AppBar title — бесшовный rename (`AppBarTitleEditor`, save on blur).
 
 ## Провайдер AI

@@ -62,6 +62,8 @@ class MetricsCommand:
                 company_id=envelope.company_id or p.get("company_id"),
                 cabinet_id=envelope.cabinet_id or p.get("cabinet_id"),
                 project_id=envelope.project_id or p.get("project_id"),
+                session_id=str(p.get("session_id") or "").strip() or None,
+                employee_id=str(p.get("employee_id") or "").strip() or None,
                 at=envelope.occurred_at,
             )
             return

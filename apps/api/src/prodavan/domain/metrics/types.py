@@ -29,6 +29,7 @@ ENTITY_PROJECT = "project"
 ENTITY_CABINET = "cabinet"
 ENTITY_COMPANY = "company"
 ENTITY_EMPLOYEE = "employee"
+ENTITY_SESSION = "session"
 
 METRIC_WINDOWS = frozenset({"1h", "24h", "7d"})
 

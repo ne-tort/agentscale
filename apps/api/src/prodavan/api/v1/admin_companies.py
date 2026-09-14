@@ -367,6 +367,30 @@ async def revoke_cabinet_assignment(
     )
 
 
+@company_router.get("/{company_id}/employees/{employee_id}/metrics")
+async def get_employee_metrics(
+    company_id: str,
+    employee_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    from prodavan.application.metrics.query import MetricsQuery
+    from prodavan.infrastructure.persistence.models.identity import MembershipRow
+    from sqlalchemy import select
+
+    mem = await session.execute(
+        select(MembershipRow.id).where(
+            MembershipRow.company_id == company_id,
+            MembershipRow.employee_id == employee_id,
+        )
+    )
+    if mem.scalar_one_or_none() is None:
+        raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Employee not in company")
+    return await MetricsQuery(session).employee_metrics(employee_id)
+
+
 @company_router.get("/{company_id}/employees")
 async def list_company_employees(
     company_id: str,

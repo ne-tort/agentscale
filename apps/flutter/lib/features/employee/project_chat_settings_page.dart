@@ -10,10 +10,11 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
+import 'package:prodavan/core/widgets/session_metrics_wrap.dart';
 import 'package:prodavan/features/employee/project_chat_model_select_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Chat settings — title, pin, optional model (when [controller] is set), delete.
+/// Chat settings — metrics, title, pin, optional model (when [controller] is set), delete.
 class ProjectChatSettingsPage extends StatefulWidget {
   const ProjectChatSettingsPage({
     super.key,
@@ -22,6 +23,8 @@ class ProjectChatSettingsPage extends StatefulWidget {
     required this.sessionId,
     required this.title,
     required this.pinned,
+    this.agentTokensUsed,
+    this.agentRequests,
     required this.onTitleChanged,
     required this.onPinnedChanged,
   });
@@ -32,6 +35,8 @@ class ProjectChatSettingsPage extends StatefulWidget {
   final String sessionId;
   final String title;
   final bool pinned;
+  final Object? agentTokensUsed;
+  final Object? agentRequests;
   final ValueChanged<String> onTitleChanged;
   final ValueChanged<bool> onPinnedChanged;
 
@@ -43,15 +48,40 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
   late String _title;
   late bool _pinned;
   bool _deleting = false;
+  Map<String, dynamic>? _metrics;
 
   @override
   void initState() {
     super.initState();
     _title = widget.title;
     _pinned = widget.pinned;
+    _metrics = {
+      'agent_tokens_used': widget.agentTokensUsed ?? 0,
+      'agent_requests': widget.agentRequests ?? 0,
+    };
     widget.controller?.changes.listen((_) {
       if (mounted) setState(() {});
     });
+    _loadMetrics();
+  }
+
+  Future<void> _loadMetrics() async {
+    try {
+      final body = await workContext.api.getAgentSession(
+        projectId: widget.projectId,
+        sessionId: widget.sessionId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _metrics = {
+          'agent_tokens_used': body['agent_tokens_used'] ?? 0,
+          'agent_requests':
+              body['agent_requests'] ?? body['agent_messages'] ?? 0,
+        };
+      });
+    } catch (_) {
+      // Keep initial metrics from list row / defaults.
+    }
   }
 
   @override
@@ -137,6 +167,8 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
       body: ListView(
         padding: const EdgeInsets.all(AppSpacing.md),
         children: [
+          SessionMetricsWrap(metrics: _metrics),
+          const SizedBox(height: AppSpacing.md),
           AppValuePreference<String>(
             title: l10n.chatRenameTitle,
             icon: Icons.title_outlined,

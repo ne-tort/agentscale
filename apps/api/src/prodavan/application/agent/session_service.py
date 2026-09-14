@@ -66,7 +66,52 @@ def _session_public(row: AgentSessionRow) -> dict:
         "title": row.title,
         "last_message_at": row.last_message_at.isoformat() if row.last_message_at else None,
         "created_at": row.created_at.isoformat() if row.created_at else None,
+        "agent_tokens_used": 0,
+        "agent_requests": 0,
+        "agent_messages": 0,
     }
+
+
+async def _session_usage_maps(
+    session,
+    session_ids: list[str],
+) -> tuple[dict[str, int], dict[str, int]]:
+    """SQL baseline: tokens from agent_usage, requests from user_message events."""
+    tokens_by: dict[str, int] = {sid: 0 for sid in session_ids}
+    req_by: dict[str, int] = {sid: 0 for sid in session_ids}
+    if not session_ids:
+        return tokens_by, req_by
+    usage_q = await session.execute(
+        select(
+            AgentUsageRow.session_id,
+            func.coalesce(func.sum(AgentUsageRow.input_tokens), 0),
+            func.coalesce(func.sum(AgentUsageRow.output_tokens), 0),
+        )
+        .where(AgentUsageRow.session_id.in_(session_ids))
+        .group_by(AgentUsageRow.session_id)
+    )
+    for sid, inp, out in usage_q.all():
+        tokens_by[str(sid)] = int(inp or 0) + int(out or 0)
+    msg_q = await session.execute(
+        select(AgentEventRow.session_id, func.count())
+        .where(
+            AgentEventRow.session_id.in_(session_ids),
+            AgentEventRow.event_type == "user_message",
+        )
+        .group_by(AgentEventRow.session_id)
+    )
+    for sid, cnt in msg_q.all():
+        req_by[str(sid)] = int(cnt or 0)
+    return tokens_by, req_by
+
+
+async def _overlay_session_metrics(item: dict, *, session_id: str) -> dict:
+    from prodavan.application.metrics.overview_merge import overlay_store_counters
+    from prodavan.domain.metrics.types import ENTITY_SESSION
+
+    return await overlay_store_counters(
+        item, entity_type=ENTITY_SESSION, entity_id=session_id
+    )
 
 
 def _default_chat_title(text: str) -> str:
@@ -349,12 +394,50 @@ class AgentSessionService:
                 )
             )
             pinned_ids = {sid for sid in pin_q.scalars().all()}
+        tokens_by, req_by = await _session_usage_maps(self._session, [r.id for r in rows])
         out: list[dict] = []
         for r in rows:
             item = _session_public(r)
             item["pinned"] = r.id in pinned_ids
+            item["agent_tokens_used"] = tokens_by.get(r.id, 0)
+            item["agent_requests"] = req_by.get(r.id, 0)
+            item["agent_messages"] = item["agent_requests"]
+            item = await _overlay_session_metrics(item, session_id=r.id)
             out.append(item)
         return out
+
+    async def get_session_public(
+        self,
+        *,
+        project_id: str,
+        session_id: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+    ) -> dict:
+        from prodavan.infrastructure.persistence.models.agent import EmployeeChatPinRow
+
+        await self._projects.require_access(
+            project_id=project_id, principal=principal, employee=employee, write=False
+        )
+        row = await self.get_session(session_id=session_id)
+        if row.project_id != project_id:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Agent session not found")
+        tokens_by, req_by = await _session_usage_maps(self._session, [row.id])
+        item = _session_public(row)
+        item["agent_tokens_used"] = tokens_by.get(row.id, 0)
+        item["agent_requests"] = req_by.get(row.id, 0)
+        item["agent_messages"] = item["agent_requests"]
+        if employee is not None:
+            pin_q = await self._session.execute(
+                select(EmployeeChatPinRow.session_id).where(
+                    EmployeeChatPinRow.employee_id == employee.id,
+                    EmployeeChatPinRow.session_id == row.id,
+                )
+            )
+            item["pinned"] = pin_q.scalar_one_or_none() is not None
+        else:
+            item["pinned"] = False
+        return await _overlay_session_metrics(item, session_id=row.id)
 
     async def patch_session(
         self,
@@ -477,6 +560,8 @@ class AgentSessionService:
         user_payload: dict = {"text": text}
         if refs:
             user_payload["attachment_refs"] = list(refs)
+        if employee is not None:
+            user_payload["employee_id"] = employee.id
         self._session.add(
             AgentEventRow(
                 session_id=session_id,
@@ -497,6 +582,7 @@ class AgentSessionService:
             company_id=project.company_id,
             cabinet_id=project.cabinet_id,
             employee_id=employee.id if employee else None,
+            session_id=session_id,
         )
         # Durable user turn before vendor stream (crash mid-turn keeps the prompt).
         await self._flush_events()
@@ -551,6 +637,7 @@ class AgentSessionService:
                     self._session.add(
                         AgentUsageRow(
                             session_id=session_id,
+                            employee_id=employee.id if employee else None,
                             turn_id=f"turn_{seq}",
                             provider=str(normalized.data.get("provider") or row.provider),
                             model=normalized.data.get("model") or row.model,
@@ -569,6 +656,7 @@ class AgentSessionService:
                         company_id=project.company_id,
                         cabinet_id=project.cabinet_id,
                         employee_id=employee.id if employee else None,
+                        session_id=session_id,
                         input_tokens=normalized.data.get("input_tokens"),
                         output_tokens=normalized.data.get("output_tokens"),
                         provider=str(normalized.data.get("provider") or row.provider),
@@ -625,6 +713,7 @@ class AgentSessionService:
                 self._session.add(
                     AgentUsageRow(
                         session_id=session_id,
+                        employee_id=employee.id if employee else None,
                         turn_id=f"turn_{seq}",
                         provider=str(normalized.data.get("provider") or row.provider),
                         model=normalized.data.get("model") or row.model,
@@ -643,6 +732,7 @@ class AgentSessionService:
                     company_id=project.company_id,
                     cabinet_id=project.cabinet_id,
                     employee_id=employee.id if employee else None,
+                    session_id=session_id,
                     input_tokens=normalized.data.get("input_tokens"),
                     output_tokens=normalized.data.get("output_tokens"),
                     provider=str(normalized.data.get("provider") or row.provider),
@@ -983,9 +1073,15 @@ class AgentSessionService:
             _touch_session_activity(row)
 
         if event_type == AgentEventType.USAGE:
+            emp_id = employee.id if employee else None
+            if emp_id is None:
+                raw_emp = data.get("employee_id")
+                if isinstance(raw_emp, str) and raw_emp.strip():
+                    emp_id = raw_emp.strip()
             self._session.add(
                 AgentUsageRow(
                     session_id=session_id,
+                    employee_id=emp_id,
                     turn_id=f"turn_{seq}",
                     provider=str(data.get("provider") or row.provider),
                     model=data.get("model") or row.model,
@@ -1003,6 +1099,8 @@ class AgentSessionService:
                     project_id=project.id,
                     company_id=project.company_id,
                     cabinet_id=project.cabinet_id,
+                    employee_id=emp_id,
+                    session_id=session_id,
                     input_tokens=data.get("input_tokens"),
                     output_tokens=data.get("output_tokens"),
                     provider=str(data.get("provider") or row.provider),

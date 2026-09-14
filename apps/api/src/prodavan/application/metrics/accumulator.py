@@ -12,7 +12,9 @@ from prodavan.application.metrics.adapters.redis_counter_store import (
 from prodavan.domain.metrics.types import (
     ENTITY_CABINET,
     ENTITY_COMPANY,
+    ENTITY_EMPLOYEE,
     ENTITY_PROJECT,
+    ENTITY_SESSION,
     METRIC_AGENT_REQUESTS,
     METRIC_AGENT_TOKENS,
     METRIC_STORAGE_BYTES,
@@ -25,6 +27,27 @@ class MetricsAccumulator:
     def __init__(self, store: RedisCounterStore | None = None) -> None:
         self._store = store or build_counter_store()
 
+    async def _side_incr(
+        self,
+        *,
+        metric: str,
+        delta: int,
+        session_id: str | None,
+        employee_id: str | None,
+        at: str | None,
+    ) -> None:
+        """Incr session/employee without cascading (avoids double-counting company)."""
+        if session_id:
+            val = await self._store.incr_counter(ENTITY_SESSION, session_id, metric, delta)
+            await self._store.append_counter_series(
+                ENTITY_SESSION, session_id, metric, value=val, at=at
+            )
+        if employee_id:
+            val = await self._store.incr_counter(ENTITY_EMPLOYEE, employee_id, metric, delta)
+            await self._store.append_counter_series(
+                ENTITY_EMPLOYEE, employee_id, metric, value=val, at=at
+            )
+
     async def apply_counter_delta(
         self,
         *,
@@ -35,8 +58,11 @@ class MetricsAccumulator:
         company_id: str | None = None,
         cabinet_id: str | None = None,
         project_id: str | None = None,
+        session_id: str | None = None,
+        employee_id: str | None = None,
         at: str | None = None,
     ) -> None:
+        _ = project_id
         if not entity_id or not metric or delta == 0:
             return
         val = await self._store.incr_counter(entity_type, entity_id, metric, delta)
@@ -67,10 +93,20 @@ class MetricsAccumulator:
             pval = await self._store.incr_counter(ptype, pid, metric, delta)
             await self._store.append_counter_series(ptype, pid, metric, value=pval, at=at)
 
+        await self._side_incr(
+            metric=metric,
+            delta=delta,
+            session_id=session_id,
+            employee_id=employee_id,
+            at=at,
+        )
+
     async def apply_usage_turn(self, payload: dict[str, Any], *, at: str | None = None) -> None:
         project_id = str(payload.get("project_id") or "").strip()
         cabinet_id = str(payload.get("cabinet_id") or "").strip() or None
         company_id = str(payload.get("company_id") or "").strip() or None
+        session_id = str(payload.get("session_id") or "").strip() or None
+        employee_id = str(payload.get("employee_id") or "").strip() or None
         if not project_id:
             return
         if payload.get("request_only"):
@@ -81,6 +117,8 @@ class MetricsAccumulator:
                 delta=1,
                 company_id=company_id,
                 cabinet_id=cabinet_id,
+                session_id=session_id,
+                employee_id=employee_id,
                 at=at,
             )
             return
@@ -96,6 +134,8 @@ class MetricsAccumulator:
                 delta=tokens,
                 company_id=company_id,
                 cabinet_id=cabinet_id,
+                session_id=session_id,
+                employee_id=employee_id,
                 at=at,
             )
 

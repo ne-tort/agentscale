@@ -106,6 +106,26 @@ class _ProjectDialogsPageState extends State<ProjectDialogsPage> {
     }
   }
 
+  Future<void> _togglePin(AppEntityRow row) async {
+    final session = _sessions.firstWhere(
+      (s) => (s['id'] as String?) == row.id,
+      orElse: () => <String, dynamic>{},
+    );
+    final pinned = session['pinned'] == true;
+    try {
+      await workContext.api.patchAgentSession(
+        projectId: widget.projectId,
+        sessionId: row.id,
+        pin: !pinned,
+      );
+      if (!mounted) return;
+      workContext.notifyProjectLifecycleChanged();
+      await _reload();
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+    }
+  }
+
   Future<void> _openSettings(AppEntityRow row) async {
     final session = _sessions.firstWhere(
       (s) => (s['id'] as String?) == row.id,
@@ -120,6 +140,8 @@ class _ProjectDialogsPageState extends State<ProjectDialogsPage> {
           sessionId: row.id,
           title: title,
           pinned: pinned,
+          agentTokensUsed: session['agent_tokens_used'],
+          agentRequests: session['agent_requests'] ?? session['agent_messages'],
           onTitleChanged: (_) {},
           onPinnedChanged: (_) {},
         ),
@@ -135,6 +157,7 @@ class _ProjectDialogsPageState extends State<ProjectDialogsPage> {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final onSurface = Theme.of(context).colorScheme.onSurface;
     final rows = [
       for (final s in _sessions)
         AppEntityRow(
@@ -145,7 +168,8 @@ class _ProjectDialogsPageState extends State<ProjectDialogsPage> {
             return t;
           }(),
           cells: {
-            if (s['pinned'] == true) 'pin': l10n.chatPin,
+            'tokens': '${s['agent_tokens_used'] ?? 0}',
+            'requests': '${s['agent_requests'] ?? s['agent_messages'] ?? 0}',
           },
         ),
     ];
@@ -186,13 +210,41 @@ class _ProjectDialogsPageState extends State<ProjectDialogsPage> {
                         primaryColumnLabel: l10n.chatUntitled,
                         columns: [
                           AppEntityColumn(
-                            id: 'pin',
-                            label: l10n.chatPin,
+                            id: 'tokens',
+                            label: l10n.commonAgentTokens,
                             width: 100,
+                            align: AppEntityColumnAlign.center,
+                          ),
+                          AppEntityColumn(
+                            id: 'requests',
+                            label: l10n.adminAgentMessages,
+                            width: 110,
+                            align: AppEntityColumnAlign.center,
                           ),
                         ],
                         onOpen: _openSettings,
                         onDelete: _delete,
+                        rowActions: [
+                          AppEntityRowAction(
+                            tooltip: l10n.chatPin,
+                            icon: Icons.push_pin_outlined,
+                            iconBuilder: (context, row) {
+                              final session = _sessions.firstWhere(
+                                (s) => (s['id'] as String?) == row.id,
+                                orElse: () => <String, dynamic>{},
+                              );
+                              final pinned = session['pinned'] == true;
+                              return Icon(
+                                pinned
+                                    ? Icons.push_pin
+                                    : Icons.push_pin_outlined,
+                                size: 20,
+                                color: onSurface,
+                              );
+                            },
+                            onPressed: _togglePin,
+                          ),
+                        ],
                         empty: EmptyPlaceholder(
                           title: l10n.chatCreateChatHint,
                           icon: Icons.forum_outlined,

@@ -113,6 +113,22 @@ async def list_agent_sessions(
     return {"items": items}
 
 
+@router.get("/projects/{project_id}/agent/sessions/{session_id}")
+async def get_agent_session(
+    project_id: str,
+    session_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    return await AgentSessionService(session).get_session_public(
+        project_id=project_id,
+        session_id=session_id,
+        principal=principal,
+        employee=employee,
+    )
+
+
 class PatchSessionBody(BaseModel):
     model_config = {"extra": "forbid"}
 

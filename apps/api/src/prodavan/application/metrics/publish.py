@@ -18,6 +18,7 @@ def schedule_usage_turn(
     company_id: str | None,
     cabinet_id: str | None,
     employee_id: str | None = None,
+    session_id: str | None = None,
     input_tokens: int | None = None,
     output_tokens: int | None = None,
     provider: str | None = None,
@@ -32,6 +33,7 @@ def schedule_usage_turn(
         "company_id": company_id,
         "cabinet_id": cabinet_id,
         "employee_id": employee_id,
+        "session_id": session_id,
         "request_only": request_only,
     }
     if not request_only:
@@ -57,6 +59,7 @@ def schedule_agent_request(
     company_id: str | None,
     cabinet_id: str | None,
     employee_id: str | None = None,
+    session_id: str | None = None,
 ) -> None:
     """Count one AI request (user message) without waiting for usage tokens."""
     from prodavan.core.events.deferred import schedule_metrics_event_publish
@@ -80,6 +83,7 @@ def schedule_agent_request(
             "company_id": company_id,
             "cabinet_id": cabinet_id,
             "employee_id": employee_id,
+            "session_id": session_id,
         },
     )
 
