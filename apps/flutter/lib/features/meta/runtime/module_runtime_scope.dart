@@ -11,6 +11,11 @@ typedef ModuleContentUploadFn = Future<Map<String, dynamic>> Function({
   String? mime,
 });
 
+typedef ModuleSecretUploadFn = Future<Map<String, dynamic>> Function({
+  required String secret,
+  String? label,
+});
+
 /// Inherited scope for live module interpreters (upload, API, project leaf).
 class ModuleRuntimeScope extends InheritedWidget {
   const ModuleRuntimeScope({
@@ -18,6 +23,7 @@ class ModuleRuntimeScope extends InheritedWidget {
     required this.moduleId,
     required this.uploadKind,
     required this.uploadContentFn,
+    required this.uploadSecretFn,
     this.api,
     this.cabinetId,
     this.companyId,
@@ -65,6 +71,17 @@ class ModuleRuntimeScope extends InheritedWidget {
           mime: mime,
         );
       },
+      uploadSecretFn: ({
+        required String secret,
+        String? label,
+      }) {
+        return api.uploadCabinetModuleSecret(
+          cabinetId: cabinetId,
+          moduleId: moduleId,
+          secret: secret,
+          label: label,
+        );
+      },
       child: child,
     );
   }
@@ -74,6 +91,7 @@ class ModuleRuntimeScope extends InheritedWidget {
     Key? key,
     required String moduleId,
     required ModuleContentUploadFn uploadContentFn,
+    required ModuleSecretUploadFn uploadSecretFn,
     required Widget child,
   }) {
     return ModuleRuntimeScope(
@@ -81,6 +99,7 @@ class ModuleRuntimeScope extends InheritedWidget {
       moduleId: moduleId,
       uploadKind: ModuleContentUploadKind.platform,
       uploadContentFn: uploadContentFn,
+      uploadSecretFn: uploadSecretFn,
       child: child,
     );
   }
@@ -91,6 +110,7 @@ class ModuleRuntimeScope extends InheritedWidget {
     required String companyId,
     required String moduleId,
     required ModuleContentUploadFn uploadContentFn,
+    required ModuleSecretUploadFn uploadSecretFn,
     required Widget child,
   }) {
     return ModuleRuntimeScope(
@@ -99,12 +119,14 @@ class ModuleRuntimeScope extends InheritedWidget {
       uploadKind: ModuleContentUploadKind.company,
       companyId: companyId,
       uploadContentFn: uploadContentFn,
+      uploadSecretFn: uploadSecretFn,
       child: child,
     );
   }
 
   final ModuleContentUploadKind uploadKind;
   final ModuleContentUploadFn uploadContentFn;
+  final ModuleSecretUploadFn uploadSecretFn;
   final String? cabinetId;
   final String? companyId;
 
@@ -128,6 +150,13 @@ class ModuleRuntimeScope extends InheritedWidget {
     String? mime,
   }) {
     return uploadContentFn(filename: filename, bytes: bytes, mime: mime);
+  }
+
+  Future<Map<String, dynamic>> uploadSecret({
+    required String secret,
+    String? label,
+  }) {
+    return uploadSecretFn(secret: secret, label: label);
   }
 
   @override

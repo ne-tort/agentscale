@@ -49,6 +49,13 @@ class DataRowBody(BaseModel):
     body: dict[str, Any]
 
 
+class SecretUploadBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    secret: str = Field(min_length=1, max_length=8192)
+    label: str | None = Field(default=None, max_length=200)
+
+
 @router.get("")
 async def list_company_modules(
     company_id: str,
@@ -231,6 +238,26 @@ async def upload_company_module_content(
         mime=file.content_type,
         principal=principal,
         employee=employee,
+    )
+
+
+@router.post("/{module_id}/secrets/upload")
+async def upload_company_module_secret(
+    company_id: str,
+    module_id: str,
+    body: SecretUploadBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    from prodavan.application.modules.owner_module_secret_service import OwnerModuleSecretService
+
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    return await OwnerModuleSecretService(session).upload_company_secret(
+        company_id=company_id,
+        module_id=module_id,
+        secret=body.secret,
+        label=body.label,
     )
 
 

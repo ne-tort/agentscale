@@ -59,6 +59,13 @@ class DataRowBody(BaseModel):
     body: dict[str, Any]
 
 
+class SecretUploadBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    secret: str = Field(min_length=1, max_length=8192)
+    label: str | None = Field(default=None, max_length=200)
+
+
 @router.get("")
 async def list_modules(_: PlatformAdminDep, session: SessionDep) -> dict:
     items = await ModuleService(session).list_all_admin()
@@ -222,6 +229,22 @@ async def upload_platform_module_content(
         filename=file.filename or "upload.bin",
         mime=file.content_type,
         principal=principal,
+    )
+
+
+@router.post("/{module_id}/secrets/upload")
+async def upload_platform_module_secret(
+    module_id: str,
+    body: SecretUploadBody,
+    _: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    from prodavan.application.modules.owner_module_secret_service import OwnerModuleSecretService
+
+    return await OwnerModuleSecretService(session).upload_platform_secret(
+        module_id=module_id,
+        secret=body.secret,
+        label=body.label,
     )
 
 

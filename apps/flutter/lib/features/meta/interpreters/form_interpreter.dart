@@ -895,17 +895,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
           if (scope == null) {
             throw StateError('secret_ref requires module runtime scope');
           }
-          final cabinetId = scope.cabinetId;
-          final api = scope.api;
-          if (cabinetId == null || cabinetId.isEmpty || api == null) {
-            throw StateError('secret_ref requires cabinet-scoped module runtime');
-          }
-          final ref = await api.uploadCabinetModuleSecret(
-            cabinetId: cabinetId,
-            moduleId: scope.moduleId,
-            secret: secret,
-            label: label,
-          );
+          final ref = await scope.uploadSecret(secret: secret, label: label);
           if (name == 'remote_dsn') {
             final hasDb = _postgresDsnHasDatabase(secret);
             // One upsert: flags + new DSN together → single auto-probe on the new host.

@@ -146,12 +146,15 @@ Like `file_ref`, but stores **reference** after secure upload:
 
 **UI flow (as-built):**
 1. Column type `secret_ref` rendered with core `AppValuePreference` (`widget: value` + `secret: true` / type `secret_ref`) — same tile as URL/login, obscured.
-2. On save, Flutter calls `POST /cabinets/{id}/modules/{id}/secrets/upload` (requires cabinet write ACL).
-3. Platform `CabinetSecretStore.put(cabinet_id, …)` → `vault://cabinet_secrets/{cabinet_id}/…` or file backend.
+2. On save, Flutter uploads via `ModuleRuntimeScope.uploadSecret` by owner:
+   - cabinet → `POST /cabinets/{id}/modules/{mid}/secrets/upload` → `cabinet_secrets/{cabinet_id}/…`
+   - platform (Admin «Предзаполнение») → `POST /admin/modules/{mid}/secrets/upload` → `module_secrets/platform/platform/…`
+   - company → `POST /companies/{cid}/modules/{mid}/secrets/upload` → `module_secrets/company/{company_id}/…`
+3. `CabinetSecretStore` / `OwnerModuleSecretStore` → vault or file backend; `RoutingSecretStore.get` resolves both prefixes.
 4. Row stores only `{secret_ref, secret_ref_prefix?, label?, created_at?}` — **never** plaintext.
 5. Plaintext strings and extra `password`/`secret` keys in the object are rejected by row validator.
-6. `secret_ref` must include this cabinet's id (`assert_cabinet_secret_scope`) — cannot bind another company's vault path.
-7. Pod env resolve (`container_env_secrets`) re-checks cabinet scope before `SecretStore.get`.
+6. Cabinet rows: `secret_ref` must include this cabinet's id (`assert_cabinet_secret_scope`). Owner seed rows use `module_secrets/…` (no cabinet assert).
+7. Pod env resolve (`container_env_secrets`) re-checks cabinet scope for `cabinet_secrets` refs before `SecretStore.get`.
 
 **Forbidden:** dedicated `secret_upload` meta widget (removed). Use core value preference + `secret: true`.
 

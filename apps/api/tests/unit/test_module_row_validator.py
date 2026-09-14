@@ -93,7 +93,34 @@ def test_secret_ref_bad_prefix() -> None:
             },
             _SECRET_COLUMNS,
         )
-    assert "cabinet_secrets prefix" in (exc.value.detail or "")
+    assert "module_secrets" in (exc.value.detail or "") or "cabinet_secrets" in (
+        exc.value.detail or ""
+    )
+
+
+def test_secret_ref_owner_module_prefix() -> None:
+    body = validate_row_body(
+        {
+            "name": "ACME",
+            "api_token": {
+                "secret_ref": "file://module_secrets/platform/platform/sec_abc",
+            },
+        },
+        _SECRET_COLUMNS,
+    )
+    assert body["api_token"]["secret_ref"].startswith("file://module_secrets/")
+    with pytest.raises(AppError) as exc:
+        validate_row_body(
+            {
+                "name": "ACME",
+                "api_token": {
+                    "secret_ref": "file://module_secrets/platform/platform/sec_abc",
+                },
+            },
+            _SECRET_COLUMNS,
+            cabinet_id="cab_1",
+        )
+    assert "cabinet_secrets" in (exc.value.detail or "")
 
 
 def test_secret_ref_cabinet_scope() -> None:

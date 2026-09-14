@@ -8,7 +8,9 @@ from prodavan.domain.errors import AppError
 
 _FILE_REF_REQUIRED = frozenset({"asset_id", "version_id", "storage_key", "filename"})
 _SECRET_REF_REQUIRED = frozenset({"secret_ref"})
-_SECRET_REF_PREFIXES = ("file://cabinet_secrets/", "vault://cabinet_secrets/")
+_CABINET_SECRET_PREFIXES = ("file://cabinet_secrets/", "vault://cabinet_secrets/")
+_OWNER_SECRET_PREFIXES = ("file://module_secrets/", "vault://module_secrets/")
+_SECRET_REF_PREFIXES = _CABINET_SECRET_PREFIXES + _OWNER_SECRET_PREFIXES
 
 
 def _row_error(detail: str) -> AppError:
@@ -145,8 +147,14 @@ def _validate_secret_ref(name: str, value: Any, *, cabinet_id: str | None = None
     if not isinstance(ref, str) or not ref.strip():
         raise _row_error(f"{name}: secret_ref.secret_ref must be a non-empty string")
     if not ref.startswith(_SECRET_REF_PREFIXES):
-        raise _row_error(f"{name}: secret_ref must use cabinet_secrets prefix")
+        raise _row_error(
+            f"{name}: secret_ref must use cabinet_secrets or module_secrets prefix"
+        )
     if cabinet_id is not None:
+        if not ref.startswith(_CABINET_SECRET_PREFIXES):
+            raise _row_error(
+                f"{name}: cabinet rows require cabinet_secrets secret_ref"
+            )
         from prodavan.infrastructure.secrets.cabinet_secret_store import (
             assert_cabinet_secret_scope,
         )

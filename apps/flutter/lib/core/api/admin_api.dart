@@ -840,6 +840,22 @@ class AdminApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> uploadModuleSecret({
+    required String moduleId,
+    required String secret,
+    String? label,
+  }) async {
+    final res = await AuthHttp.post(
+      _uri('/admin/modules/$moduleId/secrets/upload'),
+      body: jsonEncode({
+        'secret': secret,
+        if (label != null && label.isNotEmpty) 'label': label,
+      }),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   void _throwIfError(http.Response res) {
     if (res.statusCode >= 400) {
       throw ProdavanApiException(res.statusCode, res.body);

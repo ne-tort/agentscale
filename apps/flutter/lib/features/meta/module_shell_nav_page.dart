@@ -122,6 +122,17 @@ class _ModuleShellNavPageState extends State<ModuleShellNavPage> {
             mime: mime,
           );
         },
+        uploadSecretFn: ({
+          required String secret,
+          String? label,
+        }) {
+          return api.uploadModuleSecret(
+            companyId: companyId,
+            moduleId: widget.entry.moduleId,
+            secret: secret,
+            label: label,
+          );
+        },
         child: child,
       );
     }
@@ -138,6 +149,16 @@ class _ModuleShellNavPageState extends State<ModuleShellNavPage> {
           filename: filename,
           bytes: bytes,
           mime: mime,
+        );
+      },
+      uploadSecretFn: ({
+        required String secret,
+        String? label,
+      }) {
+        return api.uploadModuleSecret(
+          moduleId: widget.entry.moduleId,
+          secret: secret,
+          label: label,
         );
       },
       child: child,

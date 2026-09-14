@@ -16,6 +16,15 @@ from prodavan.infrastructure.secrets.cabinet_secret_store import (
     get_cabinet_secret_store,
 )
 from prodavan.infrastructure.secrets.file_store import FileSecretStore
+from prodavan.infrastructure.secrets.owner_module_secret_store import (
+    FILE_PREFIX as OWNER_FILE_PREFIX,
+)
+from prodavan.infrastructure.secrets.owner_module_secret_store import (
+    VAULT_PREFIX as OWNER_VAULT_PREFIX,
+)
+from prodavan.infrastructure.secrets.owner_module_secret_store import (
+    get_owner_module_secret_store,
+)
 from prodavan.infrastructure.secrets.vault_store import VaultSecretStore
 
 
@@ -49,6 +58,8 @@ class RoutingSecretStore:
     def get(self, secret_ref: str) -> str:
         if secret_ref.startswith(CABINET_VAULT_PREFIX) or secret_ref.startswith(CABINET_FILE_PREFIX):
             return get_cabinet_secret_store().get(secret_ref)
+        if secret_ref.startswith(OWNER_VAULT_PREFIX) or secret_ref.startswith(OWNER_FILE_PREFIX):
+            return get_owner_module_secret_store().get(secret_ref)
         if secret_ref.startswith("vault://"):
             if self._vault is None:
                 raise AppError(
@@ -63,6 +74,9 @@ class RoutingSecretStore:
     def delete(self, secret_ref: str) -> None:
         if secret_ref.startswith(CABINET_VAULT_PREFIX) or secret_ref.startswith(CABINET_FILE_PREFIX):
             get_cabinet_secret_store().delete(secret_ref)
+            return
+        if secret_ref.startswith(OWNER_VAULT_PREFIX) or secret_ref.startswith(OWNER_FILE_PREFIX):
+            get_owner_module_secret_store().delete(secret_ref)
             return
         if secret_ref.startswith("vault://"):
             if self._vault is not None:
