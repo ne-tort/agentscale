@@ -773,6 +773,22 @@ class CompanyApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> invokeModuleAction({
+    required String companyId,
+    required String moduleId,
+    required String actionId,
+    String? rowId,
+  }) async {
+    final res = await AuthHttp.post(
+      _uri('/companies/$companyId/modules/$moduleId/actions/$actionId/invoke'),
+      body: jsonEncode({
+        if (rowId != null && rowId.isNotEmpty) 'row_id': rowId,
+      }),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   void _throwIfError(http.Response res) {
     if (res.statusCode >= 400) {
       throw ProdavanApiException(res.statusCode, res.body);

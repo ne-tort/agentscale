@@ -56,6 +56,12 @@ class SecretUploadBody(BaseModel):
     label: str | None = Field(default=None, max_length=200)
 
 
+class ActionInvokeBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    row_id: str | None = None
+
+
 @router.get("")
 async def list_company_modules(
     company_id: str,
@@ -258,6 +264,30 @@ async def upload_company_module_secret(
         module_id=module_id,
         secret=body.secret,
         label=body.label,
+    )
+
+
+@router.post("/{module_id}/actions/{action_id}/invoke")
+async def invoke_company_module_action(
+    company_id: str,
+    module_id: str,
+    action_id: str,
+    body: ActionInvokeBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    from prodavan.application.modules.module_action_executor import ModuleActionExecutor
+
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    await CompanyModuleService(session).get_for_company(company_id=company_id, module_id=module_id)
+    return await ModuleActionExecutor(session).invoke_owner(
+        owner_kind=OWNER_COMPANY,
+        owner_id=company_id,
+        module_id=module_id,
+        action_id=action_id,
+        row_id=body.row_id,
+        principal=principal,
     )
 
 

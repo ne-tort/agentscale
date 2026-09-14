@@ -16,6 +16,11 @@ typedef ModuleSecretUploadFn = Future<Map<String, dynamic>> Function({
   String? label,
 });
 
+typedef ModuleActionInvokeFn = Future<Map<String, dynamic>> Function({
+  required String actionId,
+  String? rowId,
+});
+
 /// Inherited scope for live module interpreters (upload, API, project leaf).
 class ModuleRuntimeScope extends InheritedWidget {
   const ModuleRuntimeScope({
@@ -24,6 +29,7 @@ class ModuleRuntimeScope extends InheritedWidget {
     required this.uploadKind,
     required this.uploadContentFn,
     required this.uploadSecretFn,
+    this.invokeActionFn,
     this.api,
     this.cabinetId,
     this.companyId,
@@ -82,6 +88,18 @@ class ModuleRuntimeScope extends InheritedWidget {
           label: label,
         );
       },
+      invokeActionFn: ({
+        required String actionId,
+        String? rowId,
+      }) {
+        return api.invokeModuleAction(
+          cabinetId: cabinetId,
+          moduleId: moduleId,
+          actionId: actionId,
+          rowId: rowId,
+          projectId: projectId,
+        );
+      },
       child: child,
     );
   }
@@ -92,6 +110,7 @@ class ModuleRuntimeScope extends InheritedWidget {
     required String moduleId,
     required ModuleContentUploadFn uploadContentFn,
     required ModuleSecretUploadFn uploadSecretFn,
+    ModuleActionInvokeFn? invokeActionFn,
     required Widget child,
   }) {
     return ModuleRuntimeScope(
@@ -100,6 +119,7 @@ class ModuleRuntimeScope extends InheritedWidget {
       uploadKind: ModuleContentUploadKind.platform,
       uploadContentFn: uploadContentFn,
       uploadSecretFn: uploadSecretFn,
+      invokeActionFn: invokeActionFn,
       child: child,
     );
   }
@@ -111,6 +131,7 @@ class ModuleRuntimeScope extends InheritedWidget {
     required String moduleId,
     required ModuleContentUploadFn uploadContentFn,
     required ModuleSecretUploadFn uploadSecretFn,
+    ModuleActionInvokeFn? invokeActionFn,
     required Widget child,
   }) {
     return ModuleRuntimeScope(
@@ -120,6 +141,7 @@ class ModuleRuntimeScope extends InheritedWidget {
       companyId: companyId,
       uploadContentFn: uploadContentFn,
       uploadSecretFn: uploadSecretFn,
+      invokeActionFn: invokeActionFn,
       child: child,
     );
   }
@@ -127,6 +149,7 @@ class ModuleRuntimeScope extends InheritedWidget {
   final ModuleContentUploadKind uploadKind;
   final ModuleContentUploadFn uploadContentFn;
   final ModuleSecretUploadFn uploadSecretFn;
+  final ModuleActionInvokeFn? invokeActionFn;
   final String? cabinetId;
   final String? companyId;
 
@@ -157,6 +180,17 @@ class ModuleRuntimeScope extends InheritedWidget {
     String? label,
   }) {
     return uploadSecretFn(secret: secret, label: label);
+  }
+
+  Future<Map<String, dynamic>> invokeAction({
+    required String actionId,
+    String? rowId,
+  }) {
+    final fn = invokeActionFn;
+    if (fn == null) {
+      throw StateError('module action invoke requires runtime scope');
+    }
+    return fn(actionId: actionId, rowId: rowId);
   }
 
   @override

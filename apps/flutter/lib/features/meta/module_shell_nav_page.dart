@@ -133,6 +133,17 @@ class _ModuleShellNavPageState extends State<ModuleShellNavPage> {
             label: label,
           );
         },
+        invokeActionFn: ({
+          required String actionId,
+          String? rowId,
+        }) {
+          return api.invokeModuleAction(
+            companyId: companyId,
+            moduleId: widget.entry.moduleId,
+            actionId: actionId,
+            rowId: rowId,
+          );
+        },
         child: child,
       );
     }
@@ -159,6 +170,16 @@ class _ModuleShellNavPageState extends State<ModuleShellNavPage> {
           moduleId: widget.entry.moduleId,
           secret: secret,
           label: label,
+        );
+      },
+      invokeActionFn: ({
+        required String actionId,
+        String? rowId,
+      }) {
+        return api.invokeModuleAction(
+          moduleId: widget.entry.moduleId,
+          actionId: actionId,
+          rowId: rowId,
         );
       },
       child: child,

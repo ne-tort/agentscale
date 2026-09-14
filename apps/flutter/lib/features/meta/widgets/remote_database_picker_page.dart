@@ -1,32 +1,25 @@
 import 'package:flutter/material.dart';
 
-import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_switch.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
-import 'package:prodavan/features/meta/widgets/remote_database_picker_field.dart';
+import 'package:prodavan/features/meta/runtime/module_runtime_scope.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Selector: remote SQL databases; trailing [AppSwitch] single-select.
 class RemoteDatabasePickerPage extends StatefulWidget {
   const RemoteDatabasePickerPage({
     super.key,
-    required this.api,
-    required this.cabinetId,
-    required this.moduleId,
+    required this.scope,
     required this.listActionId,
     required this.rowId,
-    this.projectId,
     this.selectedDatabase,
   });
 
-  final ProdavanApi api;
-  final String cabinetId;
-  final String? projectId;
-  final String moduleId;
+  final ModuleRuntimeScope scope;
   final String listActionId;
   final String rowId;
   final String? selectedDatabase;
@@ -53,12 +46,9 @@ class _RemoteDatabasePickerPageState extends State<RemoteDatabasePickerPage> {
       _error = null;
     });
     try {
-      final result = await widget.api.invokeModuleAction(
-        cabinetId: widget.cabinetId,
-        moduleId: widget.moduleId,
+      final result = await widget.scope.invokeAction(
         actionId: widget.listActionId,
         rowId: widget.rowId,
-        projectId: widget.projectId,
       );
       final raw = result['databases'];
       final names = <String>[];
@@ -78,10 +68,6 @@ class _RemoteDatabasePickerPageState extends State<RemoteDatabasePickerPage> {
     } catch (e) {
       if (!mounted) return;
       AppErrors.showSnack(context, e);
-      if (remotePickerIsAuthFailure(e)) {
-        Navigator.of(context).pop();
-        return;
-      }
       setState(() {
         _error = e;
         _loading = false;

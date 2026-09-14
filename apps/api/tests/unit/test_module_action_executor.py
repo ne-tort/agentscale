@@ -231,3 +231,19 @@ async def test_auto_probe_skips_when_connection_inputs_unchanged(
         },
     )
     assert called == ["probe"]
+
+
+@pytest.mark.asyncio
+async def test_invoke_owner_rejects_non_remote_actions() -> None:
+    executor = ModuleActionExecutor(session=_FakeSession([  # type: ignore[arg-type]
+        {"id": "create", "kind": "data.create_row", "params": {"table_slug": "x"}},
+    ]))
+    with pytest.raises(AppError) as exc:
+        await executor.invoke_owner(
+            owner_kind="platform",
+            owner_id="platform",
+            module_id="mod_equipment",
+            action_id="create",
+            principal=Principal(sub="admin", roles=frozenset({"platform_admin"})),
+        )
+    assert exc.value.code == "FORBIDDEN"

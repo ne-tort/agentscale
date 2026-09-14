@@ -66,3 +66,25 @@ def test_rejects_empty_and_bad_owner(tmp_path: Path, monkeypatch: pytest.MonkeyP
     with pytest.raises(AppError) as exc2:
         store.put(owner_kind="cabinet", owner_id="cab_1", secret="x")
     assert exc2.value.code == "VALIDATION_ERROR"
+
+
+def test_assert_module_secret_ref_scope_owner_and_cabinet(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from prodavan.infrastructure.secrets.owner_module_secret_store import (
+        assert_module_secret_ref_scope,
+    )
+
+    monkeypatch.setattr(settings, "vault_addr", None)
+    store = OwnerModuleSecretStore(tmp_path)
+    owner_ref = store.put(owner_kind="platform", owner_id="platform", secret="x")
+    assert_module_secret_ref_scope(
+        owner_ref, owner_kind="platform", owner_id="platform"
+    )
+    with pytest.raises(AppError) as exc:
+        assert_module_secret_ref_scope(owner_ref, cabinet_id="cab_1")
+    assert exc.value.code == "SECRET_SCOPE_VIOLATION"
+    cab_ref = "file://cabinet_secrets/cab_1/sec_abc"
+    with pytest.raises(AppError) as exc2:
+        assert_module_secret_ref_scope(
+            cab_ref, owner_kind="platform", owner_id="platform"
+        )
+    assert exc2.value.code == "SECRET_SCOPE_VIOLATION"

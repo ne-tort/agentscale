@@ -66,6 +66,12 @@ class SecretUploadBody(BaseModel):
     label: str | None = Field(default=None, max_length=200)
 
 
+class ActionInvokeBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    row_id: str | None = None
+
+
 @router.get("")
 async def list_modules(_: PlatformAdminDep, session: SessionDep) -> dict:
     items = await ModuleService(session).list_all_admin()
@@ -245,6 +251,28 @@ async def upload_platform_module_secret(
         module_id=module_id,
         secret=body.secret,
         label=body.label,
+    )
+
+
+@router.post("/{module_id}/actions/{action_id}/invoke")
+async def invoke_platform_module_action(
+    module_id: str,
+    action_id: str,
+    body: ActionInvokeBody,
+    principal: PrincipalDep,
+    _: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    from prodavan.application.modules.module_action_executor import ModuleActionExecutor
+
+    await ModuleService(session)._get_row(module_id)
+    return await ModuleActionExecutor(session).invoke_owner(
+        owner_kind=OWNER_PLATFORM,
+        owner_id=PLATFORM_OWNER_ID,
+        module_id=module_id,
+        action_id=action_id,
+        row_id=body.row_id,
+        principal=principal,
     )
 
 

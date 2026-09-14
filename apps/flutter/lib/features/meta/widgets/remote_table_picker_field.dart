@@ -52,17 +52,11 @@ class RemoteTablePickerField extends StatelessWidget {
       enabled: !readOnly,
       onTap: () async {
         final scope = ModuleRuntimeScope.maybeOf(context);
-        if (scope == null) return;
-        final cabinetId = scope.cabinetId;
-        final api = scope.api;
-        if (cabinetId == null || cabinetId.isEmpty || api == null) return;
+        if (scope == null || scope.invokeActionFn == null) return;
         final picked = await Navigator.of(context).push<String>(
           MaterialPageRoute(
             builder: (_) => RemoteTablePickerPage(
-              api: api,
-              cabinetId: cabinetId,
-              projectId: scope.projectId,
-              moduleId: scope.moduleId,
+              scope: scope,
               listActionId: listActionId,
               rowId: rowId,
               selectedTable: tableName,

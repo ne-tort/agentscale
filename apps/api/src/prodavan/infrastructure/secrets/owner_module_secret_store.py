@@ -49,6 +49,46 @@ def parse_owner_module_secret_ref(secret_ref: str) -> tuple[str, str, str] | Non
     return None
 
 
+def assert_module_secret_ref_scope(
+    secret_ref: str,
+    *,
+    cabinet_id: str | None = None,
+    owner_kind: str | None = None,
+    owner_id: str | None = None,
+) -> None:
+    """Validate secret_ref belongs to the active runtime scope (cabinet or owner instance)."""
+    if secret_ref.startswith(("file://cabinet_secrets/", "vault://cabinet_secrets/")):
+        if not cabinet_id:
+            raise AppError(
+                code="SECRET_SCOPE_VIOLATION",
+                title="Secret scope violation",
+                status=403,
+                detail="cabinet secret_ref requires cabinet scope",
+            )
+        from prodavan.infrastructure.secrets.cabinet_secret_store import assert_cabinet_secret_scope
+
+        assert_cabinet_secret_scope(secret_ref, cabinet_id)
+        return
+    if secret_ref.startswith((FILE_PREFIX, VAULT_PREFIX)):
+        if not owner_kind or not owner_id:
+            raise AppError(
+                code="SECRET_SCOPE_VIOLATION",
+                title="Secret scope violation",
+                status=403,
+                detail="module secret_ref requires owner scope",
+            )
+        assert_owner_module_secret_scope(
+            secret_ref, owner_kind=owner_kind, owner_id=owner_id
+        )
+        return
+    raise AppError(
+        code="SECRET_SCOPE_VIOLATION",
+        title="Secret scope violation",
+        status=403,
+        detail="unsupported secret_ref prefix for module row",
+    )
+
+
 def assert_owner_module_secret_scope(
     secret_ref: str, *, owner_kind: str, owner_id: str
 ) -> None:

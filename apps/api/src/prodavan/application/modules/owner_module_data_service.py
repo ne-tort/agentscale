@@ -150,6 +150,9 @@ class OwnerModuleDataService:
         )
         if existing is None:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        previous_body = (
+            dict(existing["body"]) if isinstance(existing.get("body"), dict) else {}
+        )
         row = await self._instances.upsert_data_row(
             instance_id=inst.id,
             table_slug=table_slug,
@@ -164,7 +167,53 @@ class OwnerModuleDataService:
             self._session, module_id=module_id, source="owner_module_data"
         )
         await self._session.commit()
+        try:
+            await self._maybe_run_owner_row_actions(
+                owner_kind=owner_kind,
+                owner_id=owner_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                row_id=row_id,
+                previous_body=previous_body,
+            )
+        except AppError:
+            refreshed = await self._instances.get_data_row(
+                instance_id=inst.id, table_slug=table_slug, row_id=row_id
+            )
+            if refreshed is not None:
+                return {"module_id": module_id, "instance_id": inst.id, **refreshed}
+            raise
+        refreshed = await self._instances.get_data_row(
+            instance_id=inst.id, table_slug=table_slug, row_id=row_id
+        )
+        if refreshed is not None:
+            row = refreshed
         return {"module_id": module_id, "instance_id": inst.id, **row}
+
+    async def _maybe_run_owner_row_actions(
+        self,
+        *,
+        owner_kind: str,
+        owner_id: str,
+        module_id: str,
+        table_slug: str,
+        row_id: str,
+        previous_body: dict | None = None,
+    ) -> None:
+        from prodavan.application.modules.module_action_executor import ModuleActionExecutor
+        from prodavan.domain.identity import Principal
+
+        await ModuleActionExecutor(self._session).maybe_auto_probe_remote_sql(
+            cabinet_id="",
+            module_id=module_id,
+            table_slug=table_slug,
+            row_id=row_id,
+            principal=Principal(sub="owner-module", roles=frozenset()),
+            employee=None,
+            previous_body=previous_body,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
+        )
 
     async def delete_data_row(
         self,

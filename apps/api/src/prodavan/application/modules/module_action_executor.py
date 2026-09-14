@@ -20,10 +20,18 @@ from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceR
 from prodavan.infrastructure.persistence.models.content import ContentBlobVersionRow
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.modules import ModuleMetaDocumentRow
-from prodavan.infrastructure.secrets.cabinet_secret_store import assert_cabinet_secret_scope
+from prodavan.infrastructure.secrets.owner_module_secret_store import assert_module_secret_ref_scope
 from prodavan.infrastructure.secrets.store import get_secret_store
 
 logger = logging.getLogger(__name__)
+
+_OWNER_REMOTE_KINDS = frozenset(
+    {
+        "content.probe_remote_sql",
+        "content.list_remote_sql_databases",
+        "content.list_remote_sql_tables",
+    }
+)
 
 
 def remote_probe_connection_key(body: dict[str, Any], params: dict[str, Any]) -> str:
@@ -212,6 +220,58 @@ class ModuleActionExecutor:
                 project_id=project_id,
             )
 
+        raise AppError(
+            code="NOT_IMPLEMENTED",
+            title="Not Implemented",
+            status=501,
+            detail=f"action kind not supported: {kind}",
+        )
+
+    async def invoke_owner(
+        self,
+        *,
+        owner_kind: str,
+        owner_id: str,
+        module_id: str,
+        action_id: str,
+        row_id: str | None = None,
+        principal: Principal,
+    ) -> dict[str, Any]:
+        """Platform/company module instance — remote SQL actions only."""
+        action = await self._load_action(module_id=module_id, action_id=action_id)
+        if action.get("enabled") is False:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="action is disabled",
+            )
+        kind = str(action.get("kind") or "")
+        if kind not in _OWNER_REMOTE_KINDS:
+            raise AppError(
+                code="FORBIDDEN",
+                title="Forbidden",
+                status=403,
+                detail="action not available for owner module scope",
+            )
+        params = action.get("params") if isinstance(action.get("params"), dict) else {}
+        common = dict(
+            module_id=module_id,
+            params=params,
+            row_id=row_id,
+            principal=principal,
+            employee=None,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
+            cabinet_id="",
+            project_id=None,
+        )
+        if kind == "content.probe_remote_sql":
+            return await self._probe_remote_sql(**common)
+        if kind == "content.list_remote_sql_databases":
+            return await self._list_remote_sql_databases(**common)
+        if kind == "content.list_remote_sql_tables":
+            return await self._list_remote_sql_tables(**common)
         raise AppError(
             code="NOT_IMPLEMENTED",
             title="Not Implemented",
@@ -408,6 +468,8 @@ class ModuleActionExecutor:
         employee: EmployeeRow | None,
         project_id: str | None = None,
         previous_body: dict[str, Any] | None = None,
+        owner_kind: str | None = None,
+        owner_id: str | None = None,
     ) -> None:
         """Best-effort: run content.probe_remote_sql after remote catalog row write."""
         for action in await self._list_actions(module_id=module_id):
@@ -422,13 +484,15 @@ class ModuleActionExecutor:
             on = trigger.get("on") if isinstance(trigger.get("on"), list) else ["row.created", "row.updated"]
             if "row.created" not in on and "row.updated" not in on:
                 continue
-            rows = await self._list_module_rows(
+            rows = await self._list_rows_for_scope(
                 cabinet_id=cabinet_id,
                 project_id=project_id,
                 module_id=module_id,
                 table_slug=table_slug,
                 principal=principal,
                 employee=employee,
+                owner_kind=owner_kind,
+                owner_id=owner_id,
             )
             target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
             if target is None:
@@ -471,6 +535,8 @@ class ModuleActionExecutor:
                     row_id=row_id,
                     principal=principal,
                     employee=employee,
+                    owner_kind=owner_kind,
+                    owner_id=owner_id,
                 )
             except AppError:
                 raise
@@ -543,6 +609,38 @@ class ModuleActionExecutor:
             employee=employee,
         )
 
+    async def _list_rows_for_scope(
+        self,
+        *,
+        module_id: str,
+        table_slug: str,
+        principal: Principal,
+        employee: EmployeeRow | None,
+        cabinet_id: str = "",
+        project_id: str | None = None,
+        owner_kind: str | None = None,
+        owner_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        if owner_kind and owner_id:
+            from prodavan.application.modules.owner_module_data_service import (
+                OwnerModuleDataService,
+            )
+
+            return await OwnerModuleDataService(self._session).list_data_rows(
+                owner_kind=owner_kind,
+                owner_id=owner_id,
+                module_id=module_id,
+                table_slug=table_slug,
+            )
+        return await self._list_module_rows(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            principal=principal,
+            employee=employee,
+        )
+
     async def _update_module_row(
         self,
         *,
@@ -573,6 +671,46 @@ class ModuleActionExecutor:
             )
         return await self._modules.update_data_row(
             cabinet_id=cabinet_id,
+            module_id=module_id,
+            table_slug=table_slug,
+            row_id=row_id,
+            body=body,
+            principal=principal,
+            employee=employee,
+            run_actions=run_actions,
+        )
+
+    async def _update_row_for_scope(
+        self,
+        *,
+        module_id: str,
+        table_slug: str,
+        row_id: str,
+        body: dict[str, Any],
+        principal: Principal,
+        employee: EmployeeRow | None,
+        cabinet_id: str = "",
+        project_id: str | None = None,
+        owner_kind: str | None = None,
+        owner_id: str | None = None,
+        run_actions: bool = False,
+    ) -> dict[str, Any]:
+        if owner_kind and owner_id:
+            from prodavan.application.modules.owner_module_data_service import (
+                OwnerModuleDataService,
+            )
+
+            return await OwnerModuleDataService(self._session).update_data_row(
+                owner_kind=owner_kind,
+                owner_id=owner_id,
+                module_id=module_id,
+                table_slug=table_slug,
+                row_id=row_id,
+                body=body,
+            )
+        return await self._update_module_row(
+            cabinet_id=cabinet_id,
+            project_id=project_id,
             module_id=module_id,
             table_slug=table_slug,
             row_id=row_id,
@@ -694,6 +832,8 @@ class ModuleActionExecutor:
         principal: Principal,
         employee: EmployeeRow | None,
         project_id: str | None = None,
+        owner_kind: str | None = None,
+        owner_id: str | None = None,
     ) -> dict[str, Any]:
         table_slug = params.get("table_slug")
         source_column = str(params.get("source_column") or "source_file")
@@ -712,13 +852,15 @@ class ModuleActionExecutor:
                 detail="row_id required for content.index_tabular",
             )
 
-        rows = await self._list_module_rows(
+        rows = await self._list_rows_for_scope(
             cabinet_id=cabinet_id,
             project_id=project_id,
             module_id=module_id,
             table_slug=table_slug,
             principal=principal,
             employee=employee,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
         )
         target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
         if target is None:
@@ -744,7 +886,7 @@ class ModuleActionExecutor:
         if not isinstance(file_ref, dict):
             body[status_col] = "draft"
             body[error_col] = None
-            await self._update_module_row(
+            await self._update_row_for_scope(
                 cabinet_id=cabinet_id,
                 project_id=project_id,
                 module_id=module_id,
@@ -753,13 +895,15 @@ class ModuleActionExecutor:
                 body=body,
                 principal=principal,
                 employee=employee,
+                owner_kind=owner_kind,
+                owner_id=owner_id,
                 run_actions=False,
             )
             return {"kind": "content.index_tabular", "status": "draft", "row_id": row_id}
 
         body[status_col] = "indexing"
         body[error_col] = None
-        await self._update_module_row(
+        await self._update_row_for_scope(
             cabinet_id=cabinet_id,
             project_id=project_id,
             module_id=module_id,
@@ -768,6 +912,8 @@ class ModuleActionExecutor:
             body=body,
             principal=principal,
             employee=employee,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
             run_actions=False,
         )
 
@@ -818,7 +964,7 @@ class ModuleActionExecutor:
         except Exception as exc:
             body[status_col] = "error"
             body[error_col] = str(exc)[:500]
-            await self._update_module_row(
+            await self._update_row_for_scope(
                 cabinet_id=cabinet_id,
                 project_id=project_id,
                 module_id=module_id,
@@ -827,6 +973,8 @@ class ModuleActionExecutor:
                 body=body,
                 principal=principal,
                 employee=employee,
+                owner_kind=owner_kind,
+                owner_id=owner_id,
                 run_actions=False,
             )
             raise AppError(
@@ -836,7 +984,7 @@ class ModuleActionExecutor:
                 detail=f"index_tabular failed: {exc}",
             ) from exc
 
-        await self._update_module_row(
+        await self._update_row_for_scope(
             cabinet_id=cabinet_id,
             project_id=project_id,
             module_id=module_id,
@@ -845,6 +993,8 @@ class ModuleActionExecutor:
             body=body,
             principal=principal,
             employee=employee,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
             run_actions=False,
         )
         return {
@@ -865,6 +1015,8 @@ class ModuleActionExecutor:
         principal: Principal,
         employee: EmployeeRow | None,
         project_id: str | None = None,
+        owner_kind: str | None = None,
+        owner_id: str | None = None,
     ) -> dict[str, Any]:
         from prodavan.application.modules.equipment_catalog_opensearch import (
             column_map_ready,
@@ -890,13 +1042,15 @@ class ModuleActionExecutor:
                 detail="row_id required for content.index_opensearch",
             )
 
-        rows = await self._list_module_rows(
+        rows = await self._list_rows_for_scope(
             cabinet_id=cabinet_id,
             project_id=project_id,
             module_id=module_id,
             table_slug=table_slug,
             principal=principal,
             employee=employee,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
         )
         target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
         if target is None:
@@ -951,7 +1105,7 @@ class ModuleActionExecutor:
             except Exception as exc:
                 body[status_col] = "error"
                 body[error_col] = str(exc)[:500]
-                await self._update_module_row(
+                await self._update_row_for_scope(
                     cabinet_id=cabinet_id,
                     project_id=project_id,
                     module_id=module_id,
@@ -960,6 +1114,8 @@ class ModuleActionExecutor:
                     body=body,
                     principal=principal,
                     employee=employee,
+                    owner_kind=owner_kind,
+                    owner_id=owner_id,
                     run_actions=False,
                 )
                 raise AppError(
@@ -973,7 +1129,7 @@ class ModuleActionExecutor:
             if str(body.get(status_col) or "") != "error":
                 body[status_col] = "draft"
                 body[error_col] = None
-                await self._update_module_row(
+                await self._update_row_for_scope(
                     cabinet_id=cabinet_id,
                     project_id=project_id,
                     module_id=module_id,
@@ -982,6 +1138,8 @@ class ModuleActionExecutor:
                     body=body,
                     principal=principal,
                     employee=employee,
+                    owner_kind=owner_kind,
+                    owner_id=owner_id,
                     run_actions=False,
                 )
             return {
@@ -993,7 +1151,7 @@ class ModuleActionExecutor:
 
         body[status_col] = "indexing"
         body[error_col] = None
-        await self._update_module_row(
+        await self._update_row_for_scope(
             cabinet_id=cabinet_id,
             project_id=project_id,
             module_id=module_id,
@@ -1002,6 +1160,8 @@ class ModuleActionExecutor:
             body=body,
             principal=principal,
             employee=employee,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
             run_actions=False,
         )
 
@@ -1041,8 +1201,10 @@ class ModuleActionExecutor:
         *,
         body: dict[str, Any],
         params: dict[str, Any],
-        cabinet_id: str,
         dsn: str,
+        cabinet_id: str = "",
+        owner_kind: str | None = None,
+        owner_id: str | None = None,
     ) -> tuple[str, str, str, str]:
         """Return (remote_database, remote_table, remote_user, remote_password)."""
         from prodavan.application.content.remote_sql_probe import (
@@ -1069,8 +1231,12 @@ class ModuleActionExecutor:
         if not postgres_dsn_has_password(dsn):
             pwd_ref = field_value_as_secret_ref(body.get(password_col))
             if pwd_ref:
-                if pwd_ref.startswith(("file://cabinet_secrets/", "vault://cabinet_secrets/")):
-                    assert_cabinet_secret_scope(pwd_ref, cabinet_id)
+                assert_module_secret_ref_scope(
+                    pwd_ref,
+                    cabinet_id=cabinet_id or None,
+                    owner_kind=owner_kind,
+                    owner_id=owner_id,
+                )
                 remote_password = get_secret_store().get(pwd_ref)
             else:
                 # Plain text fallback (should not persist; UI uses secret_ref).
@@ -1089,6 +1255,8 @@ class ModuleActionExecutor:
         principal: Principal,
         employee: EmployeeRow | None,
         project_id: str | None = None,
+        owner_kind: str | None = None,
+        owner_id: str | None = None,
     ) -> dict[str, Any]:
         from prodavan.application.content.remote_sql_probe import (
             check_remote_postgres_connect,
@@ -1116,13 +1284,15 @@ class ModuleActionExecutor:
                 detail="row_id required for content.probe_remote_sql",
             )
 
-        rows = await self._list_module_rows(
+        rows = await self._list_rows_for_scope(
             cabinet_id=cabinet_id,
             project_id=project_id,
             module_id=module_id,
             table_slug=table_slug,
             principal=principal,
             employee=employee,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
         )
         target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
         if target is None:
@@ -1152,7 +1322,7 @@ class ModuleActionExecutor:
             body[status_col] = "draft"
             body[error_col] = None
             body["remote_dsn_reachable"] = False
-            await self._update_module_row(
+            await self._update_row_for_scope(
                 cabinet_id=cabinet_id,
                 project_id=project_id,
                 module_id=module_id,
@@ -1161,6 +1331,8 @@ class ModuleActionExecutor:
                 body=body,
                 principal=principal,
                 employee=employee,
+                owner_kind=owner_kind,
+                owner_id=owner_id,
                 run_actions=False,
             )
             return {"kind": "content.probe_remote_sql", "status": "draft", "row_id": row_id}
@@ -1172,14 +1344,20 @@ class ModuleActionExecutor:
 
         remote_database = str(body.get(db_col) or "").strip()
         try:
-            if secret_ref.startswith(("file://cabinet_secrets/", "vault://cabinet_secrets/")):
-                assert_cabinet_secret_scope(secret_ref, cabinet_id)
+            assert_module_secret_ref_scope(
+                secret_ref,
+                cabinet_id=cabinet_id or None,
+                owner_kind=owner_kind,
+                owner_id=owner_id,
+            )
             dsn = get_secret_store().get(secret_ref)
             remote_database, remote_table, remote_user, remote_password = self._remote_sql_row_auth(
                 body=body,
                 params=params,
-                cabinet_id=cabinet_id,
                 dsn=dsn,
+                cabinet_id=cabinet_id,
+                owner_kind=owner_kind,
+                owner_id=owner_id,
             )
             body[db_col] = remote_database or None
             if remote_table:
@@ -1212,7 +1390,7 @@ class ModuleActionExecutor:
                 body[row_count_col] = 0
                 body[columns_col] = None
                 body.pop("probed_remote_key", None)
-                await self._update_module_row(
+                await self._update_row_for_scope(
                     cabinet_id=cabinet_id,
                     project_id=project_id,
                     module_id=module_id,
@@ -1221,6 +1399,8 @@ class ModuleActionExecutor:
                     body=body,
                     principal=principal,
                     employee=employee,
+                    owner_kind=owner_kind,
+                    owner_id=owner_id,
                     run_actions=False,
                 )
                 return {
@@ -1244,7 +1424,7 @@ class ModuleActionExecutor:
                 body[row_count_col] = 0
                 body[columns_col] = None
                 body.pop("probed_remote_key", None)
-                await self._update_module_row(
+                await self._update_row_for_scope(
                     cabinet_id=cabinet_id,
                     project_id=project_id,
                     module_id=module_id,
@@ -1253,6 +1433,8 @@ class ModuleActionExecutor:
                     body=body,
                     principal=principal,
                     employee=employee,
+                    owner_kind=owner_kind,
+                    owner_id=owner_id,
                     run_actions=False,
                 )
                 return {
@@ -1265,7 +1447,7 @@ class ModuleActionExecutor:
             body[status_col] = "draft"
             body[error_col] = None
             body["remote_dsn_reachable"] = True
-            await self._update_module_row(
+            await self._update_row_for_scope(
                 cabinet_id=cabinet_id,
                 project_id=project_id,
                 module_id=module_id,
@@ -1274,6 +1456,8 @@ class ModuleActionExecutor:
                 body=body,
                 principal=principal,
                 employee=employee,
+                owner_kind=owner_kind,
+                owner_id=owner_id,
                 run_actions=False,
             )
 
@@ -1307,7 +1491,7 @@ class ModuleActionExecutor:
                 body[status_col] = "error"
                 body[error_col] = str(exc.detail or exc)[:500]
                 body["remote_dsn_reachable"] = False
-            await self._update_module_row(
+            await self._update_row_for_scope(
                 cabinet_id=cabinet_id,
                 project_id=project_id,
                 module_id=module_id,
@@ -1316,6 +1500,8 @@ class ModuleActionExecutor:
                 body=body,
                 principal=principal,
                 employee=employee,
+                owner_kind=owner_kind,
+                owner_id=owner_id,
                 run_actions=False,
             )
             raise
@@ -1323,7 +1509,7 @@ class ModuleActionExecutor:
             body[status_col] = "error"
             body[error_col] = str(exc)[:500]
             body["remote_dsn_reachable"] = False
-            await self._update_module_row(
+            await self._update_row_for_scope(
                 cabinet_id=cabinet_id,
                 project_id=project_id,
                 module_id=module_id,
@@ -1332,6 +1518,8 @@ class ModuleActionExecutor:
                 body=body,
                 principal=principal,
                 employee=employee,
+                owner_kind=owner_kind,
+                owner_id=owner_id,
                 run_actions=False,
             )
             raise AppError(
@@ -1341,7 +1529,7 @@ class ModuleActionExecutor:
                 detail=f"probe_remote_sql failed: {exc}",
             ) from exc
 
-        await self._update_module_row(
+        await self._update_row_for_scope(
             cabinet_id=cabinet_id,
             project_id=project_id,
             module_id=module_id,
@@ -1350,6 +1538,8 @@ class ModuleActionExecutor:
             body=body,
             principal=principal,
             employee=employee,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
             run_actions=False,
         )
         return {
@@ -1370,6 +1560,8 @@ class ModuleActionExecutor:
         principal: Principal,
         employee: EmployeeRow | None,
         project_id: str | None = None,
+        owner_kind: str | None = None,
+        owner_id: str | None = None,
     ) -> dict[str, Any]:
         from prodavan.application.content.remote_sql_probe import list_remote_databases
 
@@ -1389,13 +1581,15 @@ class ModuleActionExecutor:
                 detail="row_id required for content.list_remote_sql_databases",
             )
 
-        rows = await self._list_module_rows(
+        rows = await self._list_rows_for_scope(
             cabinet_id=cabinet_id,
             project_id=project_id,
             module_id=module_id,
             table_slug=table_slug,
             principal=principal,
             employee=employee,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
         )
         target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
         if target is None:
@@ -1410,14 +1604,20 @@ class ModuleActionExecutor:
                 status=422,
                 detail="remote_dsn is required",
             )
-        if secret_ref.startswith(("file://cabinet_secrets/", "vault://cabinet_secrets/")):
-            assert_cabinet_secret_scope(secret_ref, cabinet_id)
+        assert_module_secret_ref_scope(
+            secret_ref,
+            cabinet_id=cabinet_id or None,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
+        )
         dsn = get_secret_store().get(secret_ref)
         _db, _table, remote_user, remote_password = self._remote_sql_row_auth(
             body=body,
             params=params,
-            cabinet_id=cabinet_id,
             dsn=dsn,
+            cabinet_id=cabinet_id,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
         )
         try:
             databases = await list_remote_databases(
@@ -1430,7 +1630,7 @@ class ModuleActionExecutor:
                 body["remote_auth_failed"] = True
                 body["status"] = "draft"
                 body["error"] = None
-                await self._update_module_row(
+                await self._update_row_for_scope(
                     cabinet_id=cabinet_id,
                     project_id=project_id,
                     module_id=module_id,
@@ -1439,12 +1639,14 @@ class ModuleActionExecutor:
                     body=body,
                     principal=principal,
                     employee=employee,
+                    owner_kind=owner_kind,
+                    owner_id=owner_id,
                     run_actions=False,
                 )
             raise
         if body.get("remote_auth_failed"):
             body["remote_auth_failed"] = False
-            await self._update_module_row(
+            await self._update_row_for_scope(
                 cabinet_id=cabinet_id,
                 project_id=project_id,
                 module_id=module_id,
@@ -1453,6 +1655,8 @@ class ModuleActionExecutor:
                 body=body,
                 principal=principal,
                 employee=employee,
+                owner_kind=owner_kind,
+                owner_id=owner_id,
                 run_actions=False,
             )
         return {
@@ -1471,6 +1675,8 @@ class ModuleActionExecutor:
         principal: Principal,
         employee: EmployeeRow | None,
         project_id: str | None = None,
+        owner_kind: str | None = None,
+        owner_id: str | None = None,
     ) -> dict[str, Any]:
         from prodavan.application.content.remote_sql_probe import list_remote_tables
 
@@ -1490,13 +1696,15 @@ class ModuleActionExecutor:
                 detail="row_id required for content.list_remote_sql_tables",
             )
 
-        rows = await self._list_module_rows(
+        rows = await self._list_rows_for_scope(
             cabinet_id=cabinet_id,
             project_id=project_id,
             module_id=module_id,
             table_slug=table_slug,
             principal=principal,
             employee=employee,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
         )
         target = next((r for r in rows if str(r.get("row_id")) == row_id), None)
         if target is None:
@@ -1513,14 +1721,20 @@ class ModuleActionExecutor:
                 status=422,
                 detail="remote_dsn is required",
             )
-        if secret_ref.startswith(("file://cabinet_secrets/", "vault://cabinet_secrets/")):
-            assert_cabinet_secret_scope(secret_ref, cabinet_id)
+        assert_module_secret_ref_scope(
+            secret_ref,
+            cabinet_id=cabinet_id or None,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
+        )
         dsn = get_secret_store().get(secret_ref)
         remote_database, remote_table, remote_user, remote_password = self._remote_sql_row_auth(
             body=body,
             params=params,
-            cabinet_id=cabinet_id,
             dsn=dsn,
+            cabinet_id=cabinet_id,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
         )
         if body.get(db_col) != (remote_database or None) or (
             remote_table and body.get(table_col) != remote_table
@@ -1529,7 +1743,7 @@ class ModuleActionExecutor:
             if remote_table:
                 body[table_col] = remote_table
             body["remote_dsn_has_database"] = bool(remote_database)
-            await self._update_module_row(
+            await self._update_row_for_scope(
                 cabinet_id=cabinet_id,
                 project_id=project_id,
                 module_id=module_id,
@@ -1538,6 +1752,8 @@ class ModuleActionExecutor:
                 body=body,
                 principal=principal,
                 employee=employee,
+                owner_kind=owner_kind,
+                owner_id=owner_id,
                 run_actions=False,
             )
         if not remote_database:
@@ -1562,7 +1778,7 @@ class ModuleActionExecutor:
                 body["remote_auth_failed"] = True
                 body["status"] = "draft"
                 body["error"] = None
-                await self._update_module_row(
+                await self._update_row_for_scope(
                     cabinet_id=cabinet_id,
                     project_id=project_id,
                     module_id=module_id,
@@ -1571,12 +1787,14 @@ class ModuleActionExecutor:
                     body=body,
                     principal=principal,
                     employee=employee,
+                    owner_kind=owner_kind,
+                    owner_id=owner_id,
                     run_actions=False,
                 )
             raise
         if body.get("remote_auth_failed"):
             body["remote_auth_failed"] = False
-            await self._update_module_row(
+            await self._update_row_for_scope(
                 cabinet_id=cabinet_id,
                 project_id=project_id,
                 module_id=module_id,
@@ -1585,6 +1803,8 @@ class ModuleActionExecutor:
                 body=body,
                 principal=principal,
                 employee=employee,
+                owner_kind=owner_kind,
+                owner_id=owner_id,
                 run_actions=False,
             )
         return {
