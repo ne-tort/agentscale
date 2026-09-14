@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.modules.module_materialize_service import ModuleMaterializeService
+from prodavan.domain.cabinets import CabinetStatus
 from prodavan.domain.cabinets.types import CabinetCompanyGrantScope
 from prodavan.domain.errors import AppError
 from prodavan.domain.modules import ModuleCompanyGrantScope
@@ -85,21 +86,142 @@ class ModuleBindingService:
         )
         return q.scalar_one_or_none()
 
-    async def list_project_bindings_for_module(self, module_id: str) -> list[dict]:
-        q = await self._session.execute(
-            select(ModuleProjectBindingRow, ProjectRow.name)
-            .join(ProjectRow, ProjectRow.id == ModuleProjectBindingRow.project_id)
-            .where(ModuleProjectBindingRow.module_id == module_id)
-            .order_by(ProjectRow.name)
+    async def list_project_bindings_for_module(
+        self, module_id: str, *, company_id: str | None = None
+    ) -> list[dict]:
+        """Project binds for a module, enriched with company + usage metrics.
+
+        When ``company_id`` is set, only projects owned by that company are returned.
+        """
+        from prodavan.application.metrics.overview_merge import overlay_store_counters
+        from prodavan.domain.metrics.types import ENTITY_PROJECT
+        from prodavan.infrastructure.persistence.models.agent import (
+            AgentEventRow,
+            AgentSessionRow,
+            AgentUsageRow,
         )
+
+        stmt = (
+            select(
+                ModuleProjectBindingRow,
+                ProjectRow.name,
+                ProjectRow.company_id,
+                ProjectRow.cabinet_id,
+                CompanyRow.name,
+            )
+            .join(ProjectRow, ProjectRow.id == ModuleProjectBindingRow.project_id)
+            .outerjoin(CompanyRow, CompanyRow.id == ProjectRow.company_id)
+            .where(ModuleProjectBindingRow.module_id == module_id)
+        )
+        if company_id is not None:
+            stmt = stmt.where(ProjectRow.company_id == company_id)
+        stmt = stmt.order_by(ProjectRow.name)
+        rows = (await self._session.execute(stmt)).all()
+        if not rows:
+            return []
+
+        project_ids = [bind.project_id for bind, *_ in rows]
+
+        usage_q = await self._session.execute(
+            select(
+                AgentSessionRow.project_id,
+                func.coalesce(func.sum(AgentUsageRow.input_tokens), 0),
+                func.coalesce(func.sum(AgentUsageRow.output_tokens), 0),
+            )
+            .select_from(AgentUsageRow)
+            .join(AgentSessionRow, AgentSessionRow.id == AgentUsageRow.session_id)
+            .where(AgentSessionRow.project_id.in_(project_ids))
+            .group_by(AgentSessionRow.project_id)
+        )
+        tokens_by: dict[str, int] = {}
+        for pid, inp, out in usage_q.all():
+            tokens_by[str(pid)] = int(inp or 0) + int(out or 0)
+
+        msg_q = await self._session.execute(
+            select(AgentSessionRow.project_id, func.count())
+            .select_from(AgentEventRow)
+            .join(AgentSessionRow, AgentSessionRow.id == AgentEventRow.session_id)
+            .where(
+                AgentSessionRow.project_id.in_(project_ids),
+                AgentEventRow.event_type == "user_message",
+            )
+            .group_by(AgentSessionRow.project_id)
+        )
+        requests_by = {str(pid): int(cnt or 0) for pid, cnt in msg_q.all()}
+
+        out: list[dict] = []
+        for bind, project_name, proj_company_id, cabinet_id, company_name in rows:
+            pid = bind.project_id
+            metrics = {
+                "agent_tokens_used": tokens_by.get(pid, 0),
+                "agent_requests": requests_by.get(pid, 0),
+                "agent_messages": requests_by.get(pid, 0),
+            }
+            metrics = await overlay_store_counters(
+                metrics, entity_type=ENTITY_PROJECT, entity_id=pid
+            )
+            out.append(
+                {
+                    "project_id": pid,
+                    "project_name": project_name,
+                    "company_id": proj_company_id,
+                    "company_name": company_name,
+                    "cabinet_id": cabinet_id,
+                    "bind_kind": bind.bind_kind,
+                    "child_may_edit": bind.child_may_edit,
+                    "agent_tokens_used": int(metrics.get("agent_tokens_used") or 0),
+                    "agent_requests": int(metrics.get("agent_requests") or 0),
+                }
+            )
+        return out
+
+    async def list_cabinets_catalog_for_module(
+        self, module_id: str, *, company_id: str | None = None
+    ) -> list[dict]:
+        """All (or company-owned) cabinets with bound flag + modules_count for UI table."""
+        bound_ids = set(await self.list_cabinet_ids(module_id))
+
+        # Prefer owner_company_id, fall back to legacy company_id for display name.
+        company_id_col = func.coalesce(
+            CabinetInstanceRow.owner_company_id, CabinetInstanceRow.company_id
+        )
+        modules_count_sq = (
+            select(func.count())
+            .select_from(ModuleCabinetBindingRow)
+            .where(ModuleCabinetBindingRow.cabinet_id == CabinetInstanceRow.id)
+            .correlate(CabinetInstanceRow)
+            .scalar_subquery()
+        )
+        stmt = (
+            select(
+                CabinetInstanceRow.id,
+                CabinetInstanceRow.name,
+                company_id_col,
+                CompanyRow.name,
+                modules_count_sq,
+            )
+            .outerjoin(CompanyRow, CompanyRow.id == company_id_col)
+            .where(CabinetInstanceRow.status != CabinetStatus.DELETED)
+            .order_by(CabinetInstanceRow.name)
+        )
+        if company_id is not None:
+            # Match company shell org cabinets (owned copies), not platform templates.
+            stmt = stmt.where(
+                CabinetInstanceRow.owner_company_id == company_id,
+                CabinetInstanceRow.owner_scope == "company",
+            )
+
+        rows = (await self._session.execute(stmt)).all()
         return [
             {
-                "project_id": row.project_id,
-                "project_name": name,
-                "bind_kind": row.bind_kind,
-                "child_may_edit": row.child_may_edit,
+                "cabinet_id": cab_id,
+                "cabinet_name": cab_name,
+                "company_id": cid,
+                "company_name": cname,
+                "modules_count": int(mod_count or 0),
+                "bound": cab_id in bound_ids,
             }
-            for row, name in q.all()
+            for cab_id, cab_name, cid, cname, mod_count in rows
         ]
 
     async def has_cabinet_binding(self, module_id: str, cabinet_id: str) -> bool:

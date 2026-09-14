@@ -607,6 +607,20 @@ class AdminApi {
     return const [];
   }
 
+  /// Cabinets catalog for module bind UI — GET `/admin/modules/{id}/cabinets`.
+  Future<List<Map<String, dynamic>>> listModuleCabinets(String moduleId) async {
+    final res = await AuthHttp.get(_uri('/admin/modules/$moduleId/cabinets'));
+    _throwIfError(res);
+    final decoded = jsonDecode(res.body);
+    if (decoded is Map && decoded['items'] is List) {
+      return [
+        for (final item in decoded['items'] as List)
+          if (item is Map) Map<String, dynamic>.from(item),
+      ];
+    }
+    return const [];
+  }
+
   /// Bound project ids from module detail (`project_ids` on GET `/admin/modules/{id}`).
   Future<List<Map<String, dynamic>>> listModuleBoundProjects(String moduleId) async {
     final items = await listModuleProjectBindings(moduleId);

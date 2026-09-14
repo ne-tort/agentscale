@@ -422,6 +422,42 @@ class CompanyApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<List<Map<String, dynamic>>> listModuleProjects({
+    required String companyId,
+    required String moduleId,
+  }) async {
+    final res = await AuthHttp.get(
+      _uri('/companies/$companyId/modules/$moduleId/projects'),
+    );
+    _throwIfError(res);
+    final decoded = jsonDecode(res.body);
+    if (decoded is Map && decoded['items'] is List) {
+      return [
+        for (final item in decoded['items'] as List)
+          if (item is Map) Map<String, dynamic>.from(item),
+      ];
+    }
+    return const [];
+  }
+
+  Future<List<Map<String, dynamic>>> listModuleCabinets({
+    required String companyId,
+    required String moduleId,
+  }) async {
+    final res = await AuthHttp.get(
+      _uri('/companies/$companyId/modules/$moduleId/cabinets'),
+    );
+    _throwIfError(res);
+    final decoded = jsonDecode(res.body);
+    if (decoded is Map && decoded['items'] is List) {
+      return [
+        for (final item in decoded['items'] as List)
+          if (item is Map) Map<String, dynamic>.from(item),
+      ];
+    }
+    return const [];
+  }
+
   Future<Map<String, dynamic>> createModule({
     required String companyId,
     required String name,

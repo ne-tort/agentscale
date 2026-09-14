@@ -132,6 +132,42 @@ async def copy_company_module(
     )
 
 
+@router.get("/{module_id}/projects")
+async def list_company_module_projects(
+    company_id: str,
+    module_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    from prodavan.application.modules.module_binding_service import ModuleBindingService
+
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    await CompanyModuleService(session).get_for_company(company_id=company_id, module_id=module_id)
+    items = await ModuleBindingService(session).list_project_bindings_for_module(
+        module_id, company_id=company_id
+    )
+    return {"items": items}
+
+
+@router.get("/{module_id}/cabinets")
+async def list_company_module_cabinets(
+    company_id: str,
+    module_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    from prodavan.application.modules.module_binding_service import ModuleBindingService
+
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    await CompanyModuleService(session).get_for_company(company_id=company_id, module_id=module_id)
+    items = await ModuleBindingService(session).list_cabinets_catalog_for_module(
+        module_id, company_id=company_id
+    )
+    return {"items": items}
+
+
 @router.get("/{module_id}/meta/documents")
 async def list_company_module_meta(
     company_id: str,

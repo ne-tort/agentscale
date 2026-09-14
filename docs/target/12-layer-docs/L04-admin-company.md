@@ -31,6 +31,7 @@ Platform Admin — компании, keys (L03), квоты/policy, metrics read
 | Company containers: org-scoped list, pause/resume/delete | P-CO-03 |
 | Company cabinets: local CRUD, employee + module assign | P-CO-04 partial |
 | Company modules: local CRUD + platform-assigned RO + cabinet bind | |
+| Module detail: AppNav → Projects/Cabinets tables (metrics + MC bind checkbox; open → container detail) | |
 | Invite employee full-page form | |
 | `PUT /admin/companies/{id}/subscription` → emits `company.suspended` on expire transition (cancels ACTIVE agent sessions), `company.reactivated` on renew | |
 | `DELETE /admin/companies/{id}` → disable employees → pause+delete projects (wipe) → hard-delete cabinets → delete company | |

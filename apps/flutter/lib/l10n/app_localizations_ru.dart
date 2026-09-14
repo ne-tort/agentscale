@@ -1372,6 +1372,21 @@ class AppLocalizationsRu extends AppLocalizations {
   String get commonAgentTokens => 'Токены';
 
   @override
+  String get commonAgentRequests => 'Запросы';
+
+  @override
+  String get commonId => 'ID';
+
+  @override
+  String get moduleBindKind => 'Связь';
+
+  @override
+  String get moduleBindLocal => 'Локальная';
+
+  @override
+  String get moduleBindGlobal => 'Глобальная';
+
+  @override
   String get commonApiBaseUrl => 'Базовый URL API';
 
   @override

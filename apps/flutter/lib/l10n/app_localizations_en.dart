@@ -1360,6 +1360,21 @@ class AppLocalizationsEn extends AppLocalizations {
   String get commonAgentTokens => 'Tokens';
 
   @override
+  String get commonAgentRequests => 'Requests';
+
+  @override
+  String get commonId => 'ID';
+
+  @override
+  String get moduleBindKind => 'Bind';
+
+  @override
+  String get moduleBindLocal => 'Local';
+
+  @override
+  String get moduleBindGlobal => 'Global';
+
+  @override
   String get commonApiBaseUrl => 'API base URL';
 
   @override

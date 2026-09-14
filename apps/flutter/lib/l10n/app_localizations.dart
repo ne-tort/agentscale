@@ -2426,6 +2426,36 @@ abstract class AppLocalizations {
   /// **'Tokens'**
   String get commonAgentTokens;
 
+  /// No description provided for @commonAgentRequests.
+  ///
+  /// In en, this message translates to:
+  /// **'Requests'**
+  String get commonAgentRequests;
+
+  /// No description provided for @commonId.
+  ///
+  /// In en, this message translates to:
+  /// **'ID'**
+  String get commonId;
+
+  /// No description provided for @moduleBindKind.
+  ///
+  /// In en, this message translates to:
+  /// **'Bind'**
+  String get moduleBindKind;
+
+  /// No description provided for @moduleBindLocal.
+  ///
+  /// In en, this message translates to:
+  /// **'Local'**
+  String get moduleBindLocal;
+
+  /// No description provided for @moduleBindGlobal.
+  ///
+  /// In en, this message translates to:
+  /// **'Global'**
+  String get moduleBindGlobal;
+
   /// No description provided for @commonApiBaseUrl.
   ///
   /// In en, this message translates to:

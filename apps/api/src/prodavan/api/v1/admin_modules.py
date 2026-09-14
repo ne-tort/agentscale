@@ -164,6 +164,19 @@ async def list_module_project_bindings(
     return {"items": items}
 
 
+@router.get("/{module_id}/cabinets")
+async def list_module_cabinets_catalog(
+    module_id: str,
+    _: PlatformAdminDep,
+    session: SessionDep,
+) -> dict:
+    from prodavan.application.modules.module_binding_service import ModuleBindingService
+
+    await ModuleService(session)._get_row(module_id)
+    items = await ModuleBindingService(session).list_cabinets_catalog_for_module(module_id)
+    return {"items": items}
+
+
 @router.post("/{module_id}/projects/{project_id}")
 async def bind_project(
     module_id: str,
