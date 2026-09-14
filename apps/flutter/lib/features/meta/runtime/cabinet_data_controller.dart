@@ -38,7 +38,7 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
   List<Map<String, dynamic>> get items => List.unmodifiable(_items);
 
   Future<void> loadAll() async {
-    _items.clear();
+    final next = <Map<String, dynamic>>[];
     for (final table in _manifest.tables) {
       final slug = table['slug'] as String?;
       if (slug == null || slug.isEmpty) continue;
@@ -55,7 +55,7 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
               tableSlug: slug,
             );
       for (final row in rows) {
-        _items.add({
+        next.add({
           'table_slug': slug,
           'row_id': row['row_id'],
           'body': row['body'] is Map
@@ -64,7 +64,28 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
         });
       }
     }
+    if (_itemsFingerprint(next) == _itemsFingerprint(_items)) {
+      return;
+    }
+    _items
+      ..clear()
+      ..addAll(next);
     notifyListeners();
+  }
+
+  String _itemsFingerprint(List<Map<String, dynamic>> items) {
+    // Cheap structural fingerprint so silent polls skip rebuild when unchanged.
+    final buf = StringBuffer();
+    for (final item in items) {
+      buf
+        ..write(item['table_slug'])
+        ..write('|')
+        ..write(item['row_id'])
+        ..write('|')
+        ..write(item['body'])
+        ..write(';');
+    }
+    return buf.toString();
   }
 
   List<Map<String, dynamic>> itemsForTable(String tableSlug) {
@@ -246,7 +267,26 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
           : <String, dynamic>{};
       final title = body[titleField]?.toString() ?? rowId;
       final subtitle = subtitleFields
-          .map((f) => body[f]?.toString())
+          .map((f) {
+            final metaCol = _manifest.columnsForTable(tableSlug).cast<Map<String, dynamic>?>().firstWhere(
+                  (c) => c?['name'] == f,
+                  orElse: () => null,
+                );
+            if (metaCol != null && metaCol['type']?.toString() == 'ref') {
+              return formatModuleCell(
+                item: item,
+                body: body,
+                col: {
+                  'field': f,
+                  'type': metaCol['type'],
+                  'ref': metaCol['ref'],
+                },
+                tableSlug: tableSlug,
+                itemsForTable: itemsForTable,
+              );
+            }
+            return body[f]?.toString();
+          })
           .whereType<String>()
           .where((s) => s.isNotEmpty)
           .join(' · ');
@@ -259,8 +299,12 @@ class CabinetDataController extends ChangeNotifier with ModulePickContextMixin {
               (c) => c?['name'] == field,
               orElse: () => null,
             );
-        if (metaCol != null && metaCol['enum'] is Map && merged['enum'] == null) {
-          merged['enum'] = metaCol['enum'];
+        if (metaCol != null) {
+          if (metaCol['enum'] is Map && merged['enum'] == null) {
+            merged['enum'] = metaCol['enum'];
+          }
+          merged['type'] ??= metaCol['type'];
+          merged['ref'] ??= metaCol['ref'];
         }
         cells[field] = _cellValue(item, body, merged);
       }

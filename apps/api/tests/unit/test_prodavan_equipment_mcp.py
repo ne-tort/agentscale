@@ -136,3 +136,45 @@ def test_found_offers_upsert_tool_docs_require_line_id() -> None:
     tool = next(t for t in mcp_server.TOOLS if t["name"] == "found_offers_upsert")
     assert "line_id" in tool["description"]
     assert "request_lines.row_id" in tool["description"]
+    assert "s4b" in tool["description"].lower() or "catalog" in tool["description"].lower()
+
+
+def test_found_offers_upsert_autofills_source_title(monkeypatch) -> None:
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
+
+    posted: dict = {}
+
+    def fake_http(method, path, payload=None, *, session_id=None):
+        if method == "POST":
+            posted.update(payload or {})
+            return {"row_id": "o1", "body": (payload or {}).get("body")}
+        return {}
+
+    with patch.object(mcp_server, "_http", side_effect=fake_http):
+        with patch.object(
+            mcp_server,
+            "_get_row",
+            return_value={"row_id": "line-1", "body": {"title": "Контактор LC1"}},
+        ):
+            with patch.object(mcp_server, "_list_rows", return_value=[]):
+                resp = mcp_server._handle(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 6,
+                        "method": "tools/call",
+                        "params": {
+                            "name": "found_offers_upsert",
+                            "arguments": {
+                                "title": "LC1D09 Schneider",
+                                "line_id": "line-1",
+                                "source_title": "s4b",
+                            },
+                        },
+                    }
+                )
+    assert resp is not None
+    assert resp["result"].get("isError") is not True
+    assert posted["body"]["source_title"] == "Контактор LC1"
+    assert posted["body"]["line_id"] == "line-1"

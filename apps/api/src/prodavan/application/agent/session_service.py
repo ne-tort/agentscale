@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from decimal import Decimal
+from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +17,12 @@ from prodavan.application.agent.budget_service import AgentBudgetService
 from prodavan.application.agent.chat_projection import (
     assistant_text_from_events,
     events_to_chat_blocks,
+    events_to_transcript,
+)
+from prodavan.application.agent.conversation_rehydrate import (
+    format_rehydrate_bridge_message,
+    needs_conversation_rehydrate,
+    stamp_hydrate_generation,
 )
 from prodavan.application.agent.credential_broker import AgentCredentialBroker
 from prodavan.application.agent.openclaw_bridge import (
@@ -202,6 +209,40 @@ class AgentSessionService:
 
     async def _checkpoint_workspace_after_turn(self, *, project_id: str) -> None:
         await checkpoint_project_workspace(self._session, project_id=project_id, best_effort=True)
+
+    async def _project_hydrate_generation(self, project_id: str) -> int | None:
+        from prodavan.infrastructure.persistence.models.projects import ProjectPodRow
+
+        q = await self._session.execute(
+            select(ProjectPodRow.hydrate_generation).where(ProjectPodRow.project_id == project_id)
+        )
+        value = None
+        if hasattr(q, "scalar_one_or_none"):
+            value = q.scalar_one_or_none()
+        elif hasattr(q, "scalar_one"):
+            # Unit mocks often stub only scalar_one.
+            value = q.scalar_one()
+        if value is None:
+            return None
+        return int(value)
+
+    async def _session_transcript_bubbles(self, session_id: str) -> list[dict]:
+        q = await self._session.execute(
+            select(AgentEventRow)
+            .where(AgentEventRow.session_id == session_id)
+            .order_by(AgentEventRow.seq.asc())
+        )
+        rows: list[Any] = []
+        if hasattr(q, "scalars"):
+            rows = list(q.scalars().all())
+        events = [
+            {
+                "type": getattr(row, "event_type", None),
+                "data": row.payload if isinstance(getattr(row, "payload", None), dict) else {},
+            }
+            for row in rows
+        ]
+        return events_to_transcript(events)
 
     async def create_session(
         self,
@@ -551,6 +592,17 @@ class AgentSessionService:
         refs = tuple(normalized_refs)
         message = ChatMessage(text=text, attachment_refs=refs)
 
+        hydrate_gen = await self._project_hydrate_generation(project_id)
+        bridge_message = text
+        if settings.pod_agent_runtime_enabled and needs_conversation_rehydrate(
+            row.adapter_state if isinstance(row.adapter_state, dict) else None,
+            current_generation=hydrate_gen,
+        ):
+            prior = await self._session_transcript_bubbles(session_id)
+            rebuilt = format_rehydrate_bridge_message(history=prior, new_message=text)
+            if rebuilt:
+                bridge_message = rebuilt
+
         seq_q = await self._session.execute(
             select(func.coalesce(func.max(AgentEventRow.seq), 0)).where(AgentEventRow.session_id == session_id)
         )
@@ -606,7 +658,7 @@ class AgentSessionService:
             async for event in bridge.iter_send_events(
                 project_id=project_id,
                 session_id=session_id,
-                message=text,
+                message=bridge_message,
                 model=send_model,
                 bootstrap=BridgeSessionBootstrap(
                     session_id=row.id,
@@ -670,6 +722,11 @@ class AgentSessionService:
                         )
                         if isinstance(state, dict):
                             row.adapter_state = state
+                        if hydrate_gen is not None:
+                            row.adapter_state = stamp_hydrate_generation(
+                                row.adapter_state if isinstance(row.adapter_state, dict) else None,
+                                hydrate_gen,
+                            )
                         turn_ok = True
                     await self._flush_events()
                     if turn_ok:
@@ -686,6 +743,11 @@ class AgentSessionService:
                 )
                 if isinstance(state, dict):
                     row.adapter_state = state
+                if hydrate_gen is not None:
+                    row.adapter_state = stamp_hydrate_generation(
+                        row.adapter_state if isinstance(row.adapter_state, dict) else None,
+                        hydrate_gen,
+                    )
                 await self._flush_events()
                 await self._checkpoint_workspace_after_turn(project_id=project_id)
                 return

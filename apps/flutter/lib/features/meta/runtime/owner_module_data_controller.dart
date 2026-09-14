@@ -266,6 +266,15 @@ class OwnerModuleDataController extends ChangeNotifier with ModulePickContextMix
         if (labels.containsKey(key)) return labels[key].toString();
       }
     }
+    if (col != null && col['type'] == 'ref') {
+      return formatModuleCell(
+        item: const {},
+        body: {field: value},
+        col: {'field': field, 'type': 'ref', 'ref': col['ref']},
+        tableSlug: tableSlug,
+        itemsForTable: itemsForTable,
+      );
+    }
     return value.toString();
   }
 }

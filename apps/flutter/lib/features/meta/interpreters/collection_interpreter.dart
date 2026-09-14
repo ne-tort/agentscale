@@ -401,7 +401,13 @@ class CollectionViewInterpreter extends StatelessWidget {
             AppIconButton(
               icon: Icons.refresh,
               tooltip: 'Refresh',
-              onPressed: () => seeds.refresh(),
+              onPressed: () async {
+                try {
+                  await seeds.loadAll();
+                } catch (_) {
+                  seeds.refresh();
+                }
+              },
             ),
           );
         } else if (kind == 'invoke_action') {

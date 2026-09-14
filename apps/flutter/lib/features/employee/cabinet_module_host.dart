@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
+import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
@@ -47,6 +48,7 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
   RuntimeDataAdapter? _adapter;
   CabinetDataController? _data;
   String? _boundSessionId;
+  late final AppAutoRefreshBinder _autoRefresh;
 
   String? get _effectiveSessionId =>
       widget.sessionId ?? workContext.selectedSessionId;
@@ -55,14 +57,25 @@ class _CabinetModuleHostState extends State<CabinetModuleHost> {
   void initState() {
     super.initState();
     workContext.addListener(_onWorkContext);
+    _autoRefresh = AppAutoRefreshBinder(
+      onTick: _silentReloadData,
+      isActive: () => appAutoRefreshIsActive(context),
+    )..attach();
     _load();
   }
 
   @override
   void dispose() {
+    _autoRefresh.dispose();
     workContext.removeListener(_onWorkContext);
     _data?.dispose();
     super.dispose();
+  }
+
+  Future<void> _silentReloadData() async {
+    final data = _data;
+    if (data == null || _loading) return;
+    await data.loadAll();
   }
 
   void _onWorkContext() {

@@ -94,6 +94,11 @@ class SeedDataController extends ChangeNotifier with ModulePickContextMixin {
   /// Re-emit for UI refresh (toolbar).
   void refresh() => notifyListeners();
 
+  /// Preview has no remote SoT — keep API compatible with live controllers.
+  Future<void> loadAll() async {
+    notifyListeners();
+  }
+
   Map<String, dynamic> defaultBodyForTable(String tableSlug) {
     final body = <String, dynamic>{};
     for (final c in _manifest.columnsForTable(tableSlug)) {

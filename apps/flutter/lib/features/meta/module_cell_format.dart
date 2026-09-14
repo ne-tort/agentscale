@@ -71,6 +71,25 @@ String formatModuleCell({
     if (labels.containsKey(key)) return labels[key].toString();
   }
 
+  if (col['type']?.toString() == 'ref' && raw != null && itemsForTable != null) {
+    final ref = col['ref'];
+    final tableSlug = ref is Map ? ref['table_slug']?.toString() : null;
+    if (tableSlug != null && tableSlug.isNotEmpty) {
+      final id = raw.toString();
+      for (final related in itemsForTable(tableSlug)) {
+        if (related['row_id']?.toString() != id) continue;
+        final relatedBody = related['body'];
+        if (relatedBody is Map) {
+          final title = relatedBody['title'] ?? relatedBody['name'];
+          if (title != null && title.toString().trim().isNotEmpty) {
+            return title.toString();
+          }
+        }
+        break;
+      }
+    }
+  }
+
   return raw?.toString() ?? '';
 }
 

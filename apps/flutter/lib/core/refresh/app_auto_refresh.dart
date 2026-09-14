@@ -18,7 +18,7 @@ const kAppAutoRefreshChoicesSeconds = <int>[
   10 * 60,
 ];
 
-const kAppAutoRefreshDefaultSeconds = 30;
+const kAppAutoRefreshDefaultSeconds = 5;
 
 /// Whether [a] and [b] are deeply equal (Lists/Maps use Dart deep `==`).
 bool appRefreshDataEquals(Object? a, Object? b) {

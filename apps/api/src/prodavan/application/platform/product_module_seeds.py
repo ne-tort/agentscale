@@ -29,7 +29,7 @@ def _equipment_mcp_list_header() -> dict[str, Any]:
         "table_slug": "equipment_mcp",
         "ensure_row": {
             "name": "prodavan-equipment",
-            "version": "1.2.0",
+            "version": "1.2.1",
             "enabled": True,
         },
         "fields": [
@@ -1288,7 +1288,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             {
                 "table_slug": "found_offers",
                 "name": "source_title",
-                "label": {"ru": "Запрос", "en": "Request title"},
+                "label": {"ru": "Название запроса", "en": "Request title"},
                 "type": "text",
                 "required": False,
             },
@@ -2099,7 +2099,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         "title": {"ru": "Найденные товары", "en": "Found offers"}
                     },
                     "title_field": "title",
-                    "subtitle_fields": ["source_title", "match_kind"],
+                    "subtitle_fields": ["line_id", "match_kind"],
                     "columns": [
                         {"field": "title", "label": {"ru": "Товар", "en": "Title"}},
                         {"field": "brand", "label": {"ru": "Бренд", "en": "Brand"}},
@@ -2107,7 +2107,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                         {"field": "price", "label": {"ru": "Цена", "en": "Price"}},
                         {"field": "match_kind", "label": {"ru": "Совпадение", "en": "Match"}},
                         {"field": "score", "label": {"ru": "Оценка", "en": "Score"}},
-                        {"field": "source_title", "label": {"ru": "Запрос", "en": "Request"}},
+                        {"field": "line_id", "label": {"ru": "Запрос", "en": "Request"}},
                     ],
                     "row_tap": {"kind": "open_form", "view": "found_offers_form"},
                     "inline_add": {"field": "title", "title": "Добавить товар"},
@@ -3049,6 +3049,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "description": (
                     "Prefer found_offers_upsert MCP: require line_id=request_lines.row_id, "
                     "copy part_number/brand/price/match_kind/score/catalog_id from search; "
+                    "source_title auto from request line (never catalog/DB name); "
                     "bumps request_lines.found_count. Never write offers only into Pod FS."
                 ),
                 "enabled": True,
@@ -3226,7 +3227,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "row_id": "equipment_mcp_default",
                     "body": {
                         "name": "prodavan-equipment",
-                        "version": "1.2.0",
+                        "version": "1.2.1",
                         "enabled": True,
                     },
                 },

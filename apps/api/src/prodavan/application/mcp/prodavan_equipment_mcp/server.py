@@ -184,12 +184,14 @@ TOOLS: list[dict[str, Any]] = [
             "Create or update a found_offers (кандидат) row. "
             "On create: title AND line_id are required. "
             "line_id MUST be request_lines.row_id from request_lines_list/get "
-            "(visible field row_id — not a hidden id). "
+            "(links the offer to Позиции заказчика — NOT a catalog/DB name). "
+            "source_title is auto-filled from that request line's title; "
+            "do NOT put catalog names (s4b, source_catalog) into source_title or line_id. "
             "Copy from catalog search when present: part_number, brand, price, "
             "catalog_id; match_kind=exact if match_rank=exact_pn else analog; "
             "score optional (e.g. match_rank_order). "
             "PATCH merges: omit = leave; null = clear. "
-            "Optional: is_selected, source_title, project_ids. "
+            "Optional: is_selected, project_ids. "
             "After write with line_id, bumps request_lines.found_count."
         ),
         "inputSchema": {
@@ -212,7 +214,13 @@ TOOLS: list[dict[str, Any]] = [
                 },
                 "is_selected": {"type": ["boolean", "null"]},
                 "catalog_id": {"type": ["string", "null"]},
-                "source_title": {"type": ["string", "null"]},
+                "source_title": {
+                    "type": ["string", "null"],
+                    "description": (
+                        "Optional override; server auto-fills from request_lines.title "
+                        "when line_id is set. Never a catalog/DB name."
+                    ),
+                },
                 "project_ids": {"type": ["array", "null"], "items": {"type": "string"}},
             },
             "additionalProperties": False,
@@ -327,6 +335,26 @@ def _validate_offer_body(body: dict[str, Any], *, creating: bool) -> None:
     if "match_kind" in body and body["match_kind"] is not None:
         if str(body["match_kind"]) not in MATCH_KINDS:
             raise RuntimeError(f"match_kind must be one of {sorted(MATCH_KINDS)}")
+
+
+def _fill_source_title_from_line(
+    module_id: str,
+    body: dict[str, Any],
+    *,
+    session_id: str | None,
+) -> None:
+    """source_title = request_lines.title for line_id — never catalog/source name."""
+    line_id = body.get("line_id")
+    if not isinstance(line_id, str) or not line_id.strip():
+        return
+    try:
+        line = _get_row(module_id, "request_lines", line_id.strip(), session_id=session_id)
+    except RuntimeError:
+        return
+    lb = line.get("body") if isinstance(line.get("body"), dict) else line
+    title = str(lb.get("title") or "").strip()
+    if title:
+        body["source_title"] = title
 
 
 def _bump_found_count(
@@ -458,6 +486,8 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
         body = _pick_present(arguments, keys)
         row_id = str(arguments.get("row_id") or "").strip() or None
         _validate_offer_body(body, creating=not row_id)
+        # Always prefer request-line title over agent-supplied catalog nicknames.
+        _fill_source_title_from_line(mid, body, session_id=sid)
         if row_id:
             result = _http(
                 "PATCH",
@@ -503,7 +533,7 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "prodavan-equipment", "version": "1.2.0"},
+                "serverInfo": {"name": "prodavan-equipment", "version": "1.2.1"},
             },
         }
     if method == "notifications/initialized":

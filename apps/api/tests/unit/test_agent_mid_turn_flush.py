@@ -52,7 +52,11 @@ async def test_iter_send_events_commits_user_message_early(monkeypatch: pytest.M
 
     session.commit = AsyncMock(side_effect=_commit)
     session.execute = AsyncMock(
-        return_value=SimpleNamespace(scalar_one=lambda: 0),
+        return_value=SimpleNamespace(
+            scalar_one=lambda: 0,
+            scalar_one_or_none=lambda: 0,
+            scalars=lambda: SimpleNamespace(all=lambda: []),
+        ),
     )
 
     svc = AgentSessionService(session)
