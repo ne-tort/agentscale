@@ -41,6 +41,8 @@ def test_default_bind_helpers() -> None:
     assert default_child_may_edit(ModuleBindKind.LOCAL) is True
     assert default_child_may_edit(ModuleBindKind.GLOBAL) is False
     assert default_child_may_edit("local") is True
+    assert default_child_may_edit(ModuleBindKind.GLOBAL, "mod_equipment") is True
+    assert default_child_may_edit(ModuleBindKind.GLOBAL, "mod_prompts") is False
     assert LOCAL_DEFAULT_PROJECT_MODULES == frozenset()
     assert GLOBAL_DEFAULT_PROJECT_MODULES == frozenset({"mod_prompts", "mod_mcp", "mod_files"})
 

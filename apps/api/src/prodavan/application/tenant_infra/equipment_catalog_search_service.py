@@ -266,12 +266,15 @@ class EquipmentCatalogPodSearchService:
                     query=os_query,
                     from_=0,
                     size=per,
-                    # Match docs by SoT tenancy (platform SoT → company_id="platform").
-                    company_id=str(cat.get("os_company_id") or bridge.company_id or ""),
+                    # Tenancy for metrics/auth only. Document company_id may be
+                    # "platform" (admin seed) while SoT is cabinet/company — ACL is
+                    # already enforced by ready-catalog resolution + bridge scopes.
+                    company_id=str(
+                        cat.get("os_company_id") or bridge.company_id or "platform"
+                    ),
                     cabinet_id=None,
-                    # Project scope is via ready-catalog list + project_ids, not OS term filter
-                    # (cabinet/global indexes omit project_id on docs).
                     project_id=None,
+                    apply_tenant_filter=False,
                     session=self._session,
                 )
             except AppError:

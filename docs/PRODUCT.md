@@ -124,7 +124,7 @@ Product module seed changes ship only via Alembic calling `upsert_product_module
 | `bind_kind` | Effect | Child edit |
 |-------------|--------|------------|
 | **local** | Child gets own instance (fork) | Child owns and edits its copy |
-| **global** | Child has no instance; uses parent SoT | Writes only if `child_may_edit=true` |
+| **global** | Child has no instance; uses parent SoT | Writes only if `child_may_edit=true` (default **false**, except `mod_equipment` → **true** so agent can fill chat-scoped rows) |
 
 | Layer | Typical bind |
 |-------|----------------|

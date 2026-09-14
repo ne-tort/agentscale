@@ -3,6 +3,7 @@
 from prodavan.domain.modules.types import (
     GLOBAL_DEFAULT_PROJECT_MODULES,
     LOCAL_DEFAULT_PROJECT_MODULES,
+    WRITABLE_GLOBAL_PROJECT_MODULES,
     ModuleBindKind,
     ModuleCompanyGrantScope,
     ModuleStatus,
@@ -15,6 +16,7 @@ from prodavan.domain.modules.types import (
 __all__ = [
     "GLOBAL_DEFAULT_PROJECT_MODULES",
     "LOCAL_DEFAULT_PROJECT_MODULES",
+    "WRITABLE_GLOBAL_PROJECT_MODULES",
     "ModuleBindKind",
     "ModuleCompanyGrantScope",
     "ModuleStatus",

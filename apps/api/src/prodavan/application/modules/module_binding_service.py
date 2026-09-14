@@ -280,7 +280,7 @@ class ModuleBindingService:
             module_id=module_id,
             cabinet_id=cabinet_id,
             bind_kind=kind,
-            child_may_edit=default_child_may_edit(kind),
+            child_may_edit=default_child_may_edit(kind, module_id),
         )
 
     async def replace_module_bindings_for_cabinet(
@@ -348,7 +348,7 @@ class ModuleBindingService:
         bind_kind: str = "local",
         child_may_edit: bool | None = None,
     ) -> dict:
-        from prodavan.domain.modules import ModuleBindKind
+        from prodavan.domain.modules import ModuleBindKind, default_child_may_edit
         from prodavan.application.modules.module_instance_service import ModuleInstanceService
 
         if bind_kind not in (ModuleBindKind.LOCAL, ModuleBindKind.GLOBAL):
@@ -369,9 +369,7 @@ class ModuleBindingService:
                 detail="module is not bound to project's cabinet",
             )
         may_edit = (
-            True
-            if child_may_edit is None and bind_kind == ModuleBindKind.LOCAL
-            else False
+            default_child_may_edit(bind_kind, module_id)
             if child_may_edit is None
             else bool(child_may_edit)
         )

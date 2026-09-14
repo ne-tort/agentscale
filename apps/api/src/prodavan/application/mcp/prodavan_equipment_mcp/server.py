@@ -54,7 +54,9 @@ TOOLS: list[dict[str, Any]] = [
             "Unified RO search across OpenSearch equipment catalog indexes. "
             "Results always use canonical fields (part_number, title, brand, price, "
             "supplier, lead_time). Prefer part_number for large catalogs. "
-            "Default in_stock_only=true. Sort: match_rank then price ASC."
+            "Default in_stock_only=true (excludes lead_time «нет»/on-order). "
+            "If an exact P/N returns 0 hits, retry with in_stock_only=false. "
+            "Sort: match_rank then price ASC."
         ),
         "inputSchema": {
             "type": "object",

@@ -22,6 +22,10 @@ LOCAL_DEFAULT_PROJECT_MODULES: frozenset[str] = frozenset()
 # Back-compat alias (was an allowlist of global defaults; now unused for defaults).
 GLOBAL_DEFAULT_PROJECT_MODULES = frozenset({"mod_prompts", "mod_mcp", "mod_files"})
 
+# Global MP binds that still allow writes into parent SoT (agent fills chat-scoped
+# rows like request_lines / found_offers while sharing catalogs).
+WRITABLE_GLOBAL_PROJECT_MODULES: frozenset[str] = frozenset({"mod_equipment"})
+
 
 def default_project_bind_kind(module_id: str) -> ModuleBindKind:
     """UI/API default for new project binds (not a hard constraint).
@@ -46,8 +50,21 @@ def default_company_grant_bind_kind(module_id: str) -> ModuleBindKind:
     return ModuleBindKind.LOCAL
 
 
-def default_child_may_edit(bind_kind: ModuleBindKind | str) -> bool:
-    return bind_kind == ModuleBindKind.LOCAL or bind_kind == "local"
+def default_child_may_edit(
+    bind_kind: ModuleBindKind | str,
+    module_id: str | None = None,
+) -> bool:
+    """Default write flag for a new bind.
+
+    Local binds are always writable. Global binds are read-only unless the
+    module opts into :data:`WRITABLE_GLOBAL_PROJECT_MODULES` (or the caller
+    passes an explicit ``child_may_edit``).
+    """
+    if bind_kind == ModuleBindKind.LOCAL or bind_kind == "local":
+        return True
+    if module_id and module_id in WRITABLE_GLOBAL_PROJECT_MODULES:
+        return True
+    return False
 
 
 class ModuleStatus:

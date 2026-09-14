@@ -458,6 +458,7 @@ class SearchIndexService:
         project_id: str | None = None,
         filter: dict[str, Any] | None = None,
         session: AsyncSession | None = None,
+        apply_tenant_filter: bool = True,
     ) -> SearchResult:
         ns, idx = self._resolve_ns_idx(namespace, index)
         cid = self._require_tenancy(namespace=ns, company_id=company_id)
@@ -466,9 +467,9 @@ class SearchIndexService:
         skip = max(0, int(from_))
         filt = self._tenancy_filter(
             namespace=ns,
-            company_id=cid,
-            cabinet_id=cabinet_id,
-            project_id=project_id,
+            company_id=cid if apply_tenant_filter else None,
+            cabinet_id=cabinet_id if apply_tenant_filter else None,
+            project_id=project_id if apply_tenant_filter else None,
             extra=filter,
         )
         result = await self._store.search(
