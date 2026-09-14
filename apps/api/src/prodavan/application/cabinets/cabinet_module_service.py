@@ -17,6 +17,7 @@ from prodavan.application.modules.module_row_helpers import (
     check_table_slug,
     ensure_row_body,
     merge_column_defaults,
+    merge_row_patch,
     validate_row_with_columns,
 )
 from prodavan.domain.errors import AppError
@@ -227,6 +228,15 @@ class CabinetModuleService:
         )
         await self._require_module_binding(cabinet_id=cabinet_id, module_id=module_id)
         inst = await self._cabinet_sot(cabinet_id=cabinet_id, module_id=module_id, write=True)
+        existing = await self._instances.get_data_row(
+            instance_id=inst.id, table_slug=table_slug, row_id=row_id
+        )
+        if existing is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        existing_body = (
+            dict(existing["body"]) if isinstance(existing.get("body"), dict) else {}
+        )
+        body = merge_row_patch(existing_body, body)
         columns_body = await self._instances.resolve_columns_body(
             instance_id=inst.id, module_id=module_id
         )
@@ -236,11 +246,6 @@ class CabinetModuleService:
             body=body,
             cabinet_id=cabinet_id,
         )
-        existing = await self._instances.get_data_row(
-            instance_id=inst.id, table_slug=table_slug, row_id=row_id
-        )
-        if existing is None:
-            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
         row = await self._instances.upsert_data_row(
             instance_id=inst.id,
             table_slug=table_slug,
@@ -334,6 +339,27 @@ class CabinetModuleService:
             cabinet_id=cabinet_id,
             module_id=module_id,
         )
+
+    async def _schedule_rematerialize(
+        self, *, cabinet_id: str, module_id: str
+    ) -> dict[str, Any]:
+        from prodavan.application.projects.rematerialize_scheduler import (
+            schedule_cabinet_rematerialize,
+        )
+
+        try:
+            return await schedule_cabinet_rematerialize(
+                self._session,
+                cabinet_id=cabinet_id,
+                module_id=module_id,
+            )
+        except Exception:
+            logger.exception(
+                "cabinet rematerialize failed cabinet=%s module=%s",
+                cabinet_id,
+                module_id,
+            )
+            return {"mode": "deferred", "error": "sync_failed", "scheduled": 0}
 
     async def _maybe_run_row_actions(
         self,

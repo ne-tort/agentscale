@@ -223,3 +223,65 @@ def test_number_rejects_non_numeric_string() -> None:
     with pytest.raises(AppError) as exc:
         validate_row_body({"qty": "abc"}, columns)
     assert "expected number" in (exc.value.detail or "")
+
+
+def test_merge_row_patch_keeps_omitted_fields() -> None:
+    from prodavan.application.modules.module_row_helpers import merge_row_patch
+
+    existing = {
+        "title": "Контактор",
+        "qty": 2,
+        "found_count": 3,
+        "part_number": "LC1D09",
+        "status": "open",
+    }
+    merged = merge_row_patch(existing, {"found_count": 5, "status": "matched"})
+    assert merged["title"] == "Контактор"
+    assert merged["qty"] == 2
+    assert merged["part_number"] == "LC1D09"
+    assert merged["found_count"] == 5
+    assert merged["status"] == "matched"
+
+
+def test_merge_row_patch_allows_explicit_null() -> None:
+    from prodavan.application.modules.module_row_helpers import merge_row_patch
+
+    merged = merge_row_patch({"title": "A", "part_number": "X"}, {"part_number": None})
+    assert merged["title"] == "A"
+    assert merged["part_number"] is None
+
+
+def test_validate_after_merge_does_not_require_title_in_patch() -> None:
+    columns = [
+        {"table_slug": "request_lines", "name": "title", "type": "text", "required": True},
+        {
+            "table_slug": "request_lines",
+            "name": "qty",
+            "type": "number",
+            "required": False,
+            "default": 1,
+        },
+        {
+            "table_slug": "request_lines",
+            "name": "found_count",
+            "type": "number",
+            "required": False,
+            "default": 0,
+        },
+        {
+            "table_slug": "request_lines",
+            "name": "status",
+            "type": "enum",
+            "required": True,
+            "default": "open",
+            "enum": {"values": ["open", "matched", "selected"]},
+        },
+    ]
+    from prodavan.application.modules.module_row_helpers import merge_row_patch
+
+    existing = {"title": "Line", "qty": 2, "found_count": 0, "status": "open"}
+    patched = merge_row_patch(existing, {"found_count": 4})
+    body = validate_row_body(patched, columns)
+    assert body["title"] == "Line"
+    assert body["qty"] == 2
+    assert body["found_count"] == 4

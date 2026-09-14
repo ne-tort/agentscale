@@ -109,3 +109,30 @@ def test_found_offers_upsert_validates_and_http(monkeypatch) -> None:
     assert resp is not None
     assert resp["result"].get("isError") is not True
     assert http.called
+
+
+def test_found_offers_create_requires_line_id(monkeypatch) -> None:
+    monkeypatch.setenv("PRODAVAN_API_BASE_URL", "http://api.example/api/v1")
+    monkeypatch.setenv("PRODAVAN_AUTH_TOKEN", "tok")
+    monkeypatch.setenv("PRODAVAN_PROJECT_ID", "proj-1")
+
+    resp = mcp_server._handle(
+        {
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "tools/call",
+            "params": {
+                "name": "found_offers_upsert",
+                "arguments": {"title": "Mouse"},
+            },
+        }
+    )
+    assert resp is not None
+    assert resp["result"].get("isError") is True
+    assert "line_id" in resp["result"]["content"][0]["text"]
+
+
+def test_found_offers_upsert_tool_docs_require_line_id() -> None:
+    tool = next(t for t in mcp_server.TOOLS if t["name"] == "found_offers_upsert")
+    assert "line_id" in tool["description"]
+    assert "request_lines.row_id" in tool["description"]

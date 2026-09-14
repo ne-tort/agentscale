@@ -16,6 +16,7 @@ from prodavan.application.modules.module_row_helpers import (
     check_table_slug,
     ensure_row_body,
     merge_column_defaults,
+    merge_row_patch,
     validate_row_with_columns,
 )
 from prodavan.domain.errors import AppError
@@ -160,6 +161,15 @@ class OwnerModuleDataService:
         inst = await self._ensure_instance(
             owner_kind=owner_kind, owner_id=owner_id, module_id=module_id
         )
+        existing = await self._instances.get_data_row(
+            instance_id=inst.id, table_slug=table_slug, row_id=row_id
+        )
+        if existing is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
+        previous_body = (
+            dict(existing["body"]) if isinstance(existing.get("body"), dict) else {}
+        )
+        body = merge_row_patch(previous_body, body)
         columns_body = await self._instances.resolve_columns_body(
             instance_id=inst.id, module_id=module_id
         )
@@ -168,14 +178,6 @@ class OwnerModuleDataService:
             table_slug=table_slug,
             body=body,
             cabinet_id=None,
-        )
-        existing = await self._instances.get_data_row(
-            instance_id=inst.id, table_slug=table_slug, row_id=row_id
-        )
-        if existing is None:
-            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="row not found")
-        previous_body = (
-            dict(existing["body"]) if isinstance(existing.get("body"), dict) else {}
         )
         row = await self._instances.upsert_data_row(
             instance_id=inst.id,

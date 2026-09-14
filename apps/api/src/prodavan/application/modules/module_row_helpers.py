@@ -75,6 +75,21 @@ def merge_column_defaults(*, columns_body: Any, table_slug: str, body: dict) -> 
     return merged
 
 
+def merge_row_patch(existing: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    """Merge a thin PATCH into the stored row body.
+
+    Keys present in ``patch`` overwrite (including explicit ``null`` to clear).
+    Keys omitted from ``patch`` keep their previous values — so defaults like
+    ``qty`` / ``found_count`` are not re-applied on update.
+    """
+    if not isinstance(existing, dict):
+        existing = {}
+    out = dict(existing)
+    for key, value in patch.items():
+        out[key] = value
+    return out
+
+
 def validate_row_with_columns(
     *,
     columns_body: Any,

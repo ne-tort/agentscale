@@ -91,12 +91,38 @@ def _build_os_query(
         should.append({"term": {"part_number": {"value": pn, "boost": 10}}})
         should.append({"prefix": {"part_number": {"value": pn, "boost": 5}}})
         should.append({"match": {"part_number.text": {"query": pn, "boost": 3}}})
+        # P/N often appears only inside title for sparse catalogs.
+        should.append({"match_phrase": {"title": {"query": pn, "boost": 2}}})
     if q:
         should.append(
             {
                 "multi_match": {
                     "query": q,
-                    "fields": ["title^3", "part_number.text^2", "brand"],
+                    "fields": [
+                        "title^3",
+                        "part_number.text^2",
+                        "brand^2",
+                        "supplier",
+                        "lead_time",
+                        "price",
+                    ],
+                    "type": "best_fields",
+                    "operator": "and",
+                }
+            }
+        )
+        # Soft fallback when operator:and is too strict on long queries.
+        should.append(
+            {
+                "multi_match": {
+                    "query": q,
+                    "fields": [
+                        "title^2",
+                        "part_number.text",
+                        "brand",
+                        "supplier",
+                        "lead_time",
+                    ],
                     "type": "best_fields",
                 }
             }
@@ -106,8 +132,30 @@ def _build_os_query(
     else:
         must.append({"match_all": {}})
 
-    if brand and str(brand).strip():
-        filters.append({"term": {"brand": str(brand).strip()}})
+    brand_q = (brand or "").strip()
+    if brand_q:
+        # Many catalogs leave brand empty and put the manufacturer only in title
+        # (e.g. S4B SE lines). Match keyword brand OR title text.
+        filters.append(
+            {
+                "bool": {
+                    "should": [
+                        {"term": {"brand": brand_q}},
+                        {
+                            "wildcard": {
+                                "brand": {
+                                    "value": f"*{brand_q}*",
+                                    "case_insensitive": True,
+                                }
+                            }
+                        },
+                        {"match_phrase": {"title": brand_q}},
+                        {"match": {"title": {"query": brand_q, "operator": "and"}}},
+                    ],
+                    "minimum_should_match": 1,
+                }
+            }
+        )
     if catalog_ids:
         filters.append({"terms": {"catalog_id": [str(x) for x in catalog_ids]}})
     if in_stock_only:

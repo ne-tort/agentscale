@@ -29,7 +29,7 @@ def _equipment_mcp_list_header() -> dict[str, Any]:
         "table_slug": "equipment_mcp",
         "ensure_row": {
             "name": "prodavan-equipment",
-            "version": "1.0.0",
+            "version": "1.2.0",
             "enabled": True,
         },
         "fields": [
@@ -3020,13 +3020,13 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
             {
                 "id": "equipment_catalog_query",
                 "name": "equipment_catalog_query",
-                "label": "Query catalog SQLite",
+                "label": "Search OpenSearch catalogs",
                 "description": (
-                    "RO search in merged /workspace/catalogs/catalog.sqlite "
-                    "(canonical columns: title, price, part_number, brand, supplier, "
-                    "lead_time, source_catalog). Prefer part_number exact; else title LIKE."
+                    "Prefer first-party MCP tool equipment_catalog_search "
+                    "(OpenSearch: title/P/N/brand/supplier; brand also matches title). "
+                    "Legacy SQLite path is removed."
                 ),
-                "enabled": True,
+                "enabled": False,
                 "kind": "workspace_sqlite_query",
                 "params_schema": {
                     "type": "object",
@@ -3047,8 +3047,9 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                 "name": "equipment_offers_upsert",
                 "label": "Upsert found offers",
                 "description": (
-                    "Agent writes candidates into found_offers (Postgres SoT) "
-                    "and updates request_lines.found_count — never write offers only into Pod FS"
+                    "Prefer found_offers_upsert MCP: require line_id=request_lines.row_id, "
+                    "copy part_number/brand/price/match_kind/score/catalog_id from search; "
+                    "bumps request_lines.found_count. Never write offers only into Pod FS."
                 ),
                 "enabled": True,
                 "kind": "rows_upsert",
@@ -3225,7 +3226,7 @@ def mod_equipment_meta() -> dict[str, list[Any]]:
                     "row_id": "equipment_mcp_default",
                     "body": {
                         "name": "prodavan-equipment",
-                        "version": "1.0.0",
+                        "version": "1.2.0",
                         "enabled": True,
                     },
                 },

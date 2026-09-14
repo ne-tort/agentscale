@@ -4,9 +4,15 @@ Stdio JSON-RPC (MCP tools/list + tools/call).
 
 Env:
   PRODAVAN_API_BASE_URL, PRODAVAN_AUTH_TOKEN, PRODAVAN_PROJECT_ID
+  Optional: PRODAVAN_SESSION_ID (chat scope; header X-Prodavan-Session-Id)
 
 Catalog search goes through Pod Bridge → OpenSearch (no local SQLite / EQUIPMENT_*).
 SoT rows go through Bridge JWT (:8001).
+
+Linking IDs (visible to the agent — no hidden ids):
+  - request_lines.row_id  → pass as found_offers.line_id (Запрос)
+  - found_offers.row_id   → pass as request_lines.selected_offer_id when selecting
+  - catalog hit.catalog_id / source_catalog → provenance on found_offers.catalog_id
 """
 
 from __future__ import annotations
@@ -52,25 +58,37 @@ TOOLS: list[dict[str, Any]] = [
         "name": "equipment_catalog_search",
         "description": (
             "Unified RO search across OpenSearch equipment catalog indexes. "
-            "Results always use canonical fields (part_number, title, brand, price, "
-            "supplier, lead_time). Prefer part_number for large catalogs. "
+            "Default query matches title, part_number, brand, supplier, lead_time, price. "
+            "Prefer part_number for large catalogs. "
+            "brand filter matches keyword brand OR title text (many S4B rows have empty brand). "
             "Default in_stock_only=true (excludes lead_time «нет»/on-order). "
             "If an exact P/N returns 0 hits, retry with in_stock_only=false. "
-            "Sort: match_rank then price ASC."
+            "Hits include: part_number, title, brand, price, price_num, supplier, lead_time, "
+            "catalog_id, source_catalog, match_rank (exact_pn|pn_prefix|title|other), "
+            "match_rank_order, in_stock. "
+            "When writing found_offers, copy present fields: title, part_number, brand, "
+            "price (prefer price_num), catalog_id; set match_kind=exact for exact_pn else analog; "
+            "score from match_rank_order (lower is better) or omit."
         ),
         "inputSchema": {
             "type": "object",
             "properties": {
                 "part_number": {"type": "string"},
-                "query": {"type": "string", "description": "Title / text search"},
-                "brand": {"type": "string"},
+                "query": {
+                    "type": "string",
+                    "description": "Free text across title / P/N / brand / supplier / lead_time",
+                },
+                "brand": {
+                    "type": "string",
+                    "description": "Filter: brand keyword OR phrase in title",
+                },
                 "price_min": {"type": "number"},
                 "price_max": {"type": "number"},
                 "in_stock_only": {"type": "boolean", "default": True},
                 "catalog_ids": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Subset of source ids; default = all",
+                    "description": "Subset of source ids; default = all ready catalogs",
                 },
                 "limit": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100},
                 "offset": {"type": "integer", "default": 0, "minimum": 0},
@@ -80,7 +98,10 @@ TOOLS: list[dict[str, Any]] = [
     },
     {
         "name": "request_lines_list",
-        "description": "List customer request lines (позиции заказчика) for mod_equipment.",
+        "description": (
+            "List customer request lines (позиции заказчика). "
+            "Use each item's row_id as found_offers.line_id when adding candidates."
+        ),
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -106,10 +127,10 @@ TOOLS: list[dict[str, Any]] = [
         "name": "request_lines_upsert",
         "description": (
             "Create or update a request_lines row. title required on create. "
-            "Optional nullable: part_number, qty, status (open|matched|selected), "
-            "found_count, selected_offer_id, project_ids. "
-            "Omit a field to leave it unchanged on update; pass null to clear nullable fields. "
-            "Pass row_id to update."
+            "PATCH merges: omit a field to leave it unchanged; pass null to clear nullable. "
+            "Optional: part_number, qty, status (open|matched|selected), "
+            "found_count, selected_offer_id (= found_offers.row_id), project_ids. "
+            "Pass row_id to update. Do not re-send qty/found_count unless changing them."
         ),
         "inputSchema": {
             "type": "object",
@@ -119,7 +140,10 @@ TOOLS: list[dict[str, Any]] = [
                 "title": {"type": "string"},
                 "part_number": {"type": ["string", "null"]},
                 "qty": {"type": ["number", "integer", "null"]},
-                "status": {"type": ["string", "null"], "enum": ["open", "matched", "selected", None]},
+                "status": {
+                    "type": ["string", "null"],
+                    "enum": ["open", "matched", "selected", None],
+                },
                 "found_count": {"type": ["number", "integer", "null"]},
                 "selected_offer_id": {"type": ["string", "null"]},
                 "project_ids": {"type": ["array", "null"], "items": {"type": "string"}},
@@ -130,7 +154,7 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "found_offers_list",
         "description": (
-            "List found_offers. Optional filter line_id = request_lines row."
+            "List found_offers. Optional filter line_id = request_lines.row_id."
         ),
         "inputSchema": {
             "type": "object",
@@ -157,13 +181,16 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "found_offers_upsert",
         "description": (
-            "Create or update a found_offers row. title required on create. "
-            "Strongly recommend line_id (link to request_lines / Запрос). "
-            "Optional: part_number, brand, price, score, match_kind (exact|analog), "
-            "is_selected, catalog_id (provenance from search.source_catalog / catalog_id), "
-            "source_title, project_ids. "
-            "Omit = leave on update; null = clear nullable. "
-            "On create/update with line_id, bumps request_lines.found_count."
+            "Create or update a found_offers (кандидат) row. "
+            "On create: title AND line_id are required. "
+            "line_id MUST be request_lines.row_id from request_lines_list/get "
+            "(visible field row_id — not a hidden id). "
+            "Copy from catalog search when present: part_number, brand, price, "
+            "catalog_id; match_kind=exact if match_rank=exact_pn else analog; "
+            "score optional (e.g. match_rank_order). "
+            "PATCH merges: omit = leave; null = clear. "
+            "Optional: is_selected, source_title, project_ids. "
+            "After write with line_id, bumps request_lines.found_count."
         ),
         "inputSchema": {
             "type": "object",
@@ -171,12 +198,18 @@ TOOLS: list[dict[str, Any]] = [
                 "module_id": {"type": "string", "default": DEFAULT_MODULE_ID},
                 "row_id": {"type": "string"},
                 "title": {"type": "string"},
-                "line_id": {"type": ["string", "null"]},
+                "line_id": {
+                    "type": ["string", "null"],
+                    "description": "request_lines.row_id (required on create)",
+                },
                 "part_number": {"type": ["string", "null"]},
                 "brand": {"type": ["string", "null"]},
                 "price": {"type": ["number", "integer", "null"]},
                 "score": {"type": ["number", "integer", "null"]},
-                "match_kind": {"type": ["string", "null"], "enum": ["exact", "analog", None]},
+                "match_kind": {
+                    "type": ["string", "null"],
+                    "enum": ["exact", "analog", None],
+                },
                 "is_selected": {"type": ["boolean", "null"]},
                 "catalog_id": {"type": ["string", "null"]},
                 "source_title": {"type": ["string", "null"]},
@@ -284,6 +317,13 @@ def _validate_line_body(body: dict[str, Any], *, creating: bool) -> None:
 def _validate_offer_body(body: dict[str, Any], *, creating: bool) -> None:
     if creating and not str(body.get("title") or "").strip():
         raise RuntimeError("title is required when creating found_offers")
+    if creating:
+        line_id = body.get("line_id")
+        if not isinstance(line_id, str) or not line_id.strip():
+            raise RuntimeError(
+                "line_id is required when creating found_offers "
+                "(use request_lines.row_id from request_lines_list)"
+            )
     if "match_kind" in body and body["match_kind"] is not None:
         if str(body["match_kind"]) not in MATCH_KINDS:
             raise RuntimeError(f"match_kind must be one of {sorted(MATCH_KINDS)}")
@@ -307,7 +347,7 @@ def _bump_found_count(
             session_id=session_id,
         )
     except RuntimeError:
-        # Best-effort — offer write already succeeded
+        # Best-effort — offer write already succeeded; merge PATCH should not 422.
         pass
 
 
@@ -426,8 +466,6 @@ def _call_tool(name: str, arguments: dict[str, Any]) -> Any:
                 session_id=sid,
             )
         else:
-            if "title" not in body:
-                raise RuntimeError("title is required when creating found_offers")
             result = _http(
                 "POST",
                 _data_path(mid, "found_offers"),
@@ -465,7 +503,7 @@ def _handle(msg: dict[str, Any]) -> dict[str, Any] | None:
             "result": {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
-                "serverInfo": {"name": "prodavan-equipment", "version": "1.0.0"},
+                "serverInfo": {"name": "prodavan-equipment", "version": "1.2.0"},
             },
         }
     if method == "notifications/initialized":

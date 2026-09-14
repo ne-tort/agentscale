@@ -20,6 +20,7 @@ from prodavan.application.modules.module_row_helpers import (
     check_table_slug,
     ensure_row_body,
     merge_column_defaults,
+    merge_row_patch,
     validate_row_with_columns,
 )
 from prodavan.application.pod_identity.bridge import (
@@ -350,6 +351,10 @@ class PodModuleDataService:
             project_id=project_id,
             existing_row=existing,
         )
+        existing_body = (
+            dict(existing["body"]) if isinstance(existing.get("body"), dict) else {}
+        )
+        body = merge_row_patch(existing_body, body)
         columns_body = await self._instances.resolve_columns_body(
             instance_id=inst.id, module_id=module_id
         )

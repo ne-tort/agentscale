@@ -18,6 +18,7 @@ from prodavan.application.modules.module_row_helpers import (
     check_table_slug,
     ensure_row_body,
     merge_column_defaults,
+    merge_row_patch,
     validate_row_with_columns,
 )
 from prodavan.domain.errors import AppError
@@ -278,16 +279,25 @@ class ProjectRuntimeModuleService:
             session_id=stamp_sid,
         )
         await self._session.commit()
-        from prodavan.application.projects.workspace_sync_policy import (
-            defer_or_schedule_project_sync,
-        )
+        remat: dict[str, Any] | None = None
+        try:
+            from prodavan.application.projects.workspace_sync_policy import (
+                defer_or_schedule_project_sync,
+            )
 
-        notification = await defer_or_schedule_project_sync(
-            self._session,
-            project_id=project_id,
-            source="project_module_instance",
-        )
-        remat = notification.rematerialize_alias()
+            notification = await defer_or_schedule_project_sync(
+                self._session,
+                project_id=project_id,
+                source="project_module_instance",
+            )
+            remat = notification.rematerialize_alias()
+        except Exception:
+            logger.exception(
+                "workspace sync after module row write failed project=%s module=%s",
+                project_id,
+                module_id,
+            )
+            remat = {"mode": "deferred", "error": "sync_failed"}
         out: dict[str, Any] = {
             "module_id": module_id,
             "instance_id": inst.id,
@@ -362,6 +372,10 @@ class ProjectRuntimeModuleService:
             project_id=project_id,
             existing_row=existing,
         )
+        existing_body = (
+            dict(existing["body"]) if isinstance(existing.get("body"), dict) else {}
+        )
+        body = merge_row_patch(existing_body, body)
         columns_body = await self._instances.resolve_columns_body(
             instance_id=inst.id, module_id=module_id
         )
@@ -379,16 +393,25 @@ class ProjectRuntimeModuleService:
             session_id=stamp_sid,
         )
         await self._session.commit()
-        from prodavan.application.projects.workspace_sync_policy import (
-            defer_or_schedule_project_sync,
-        )
+        remat: dict[str, Any] | None = None
+        try:
+            from prodavan.application.projects.workspace_sync_policy import (
+                defer_or_schedule_project_sync,
+            )
 
-        notification = await defer_or_schedule_project_sync(
-            self._session,
-            project_id=project_id,
-            source="project_module_instance",
-        )
-        remat = notification.rematerialize_alias()
+            notification = await defer_or_schedule_project_sync(
+                self._session,
+                project_id=project_id,
+                source="project_module_instance",
+            )
+            remat = notification.rematerialize_alias()
+        except Exception:
+            logger.exception(
+                "workspace sync after module row write failed project=%s module=%s",
+                project_id,
+                module_id,
+            )
+            remat = {"mode": "deferred", "error": "sync_failed"}
         out: dict[str, Any] = {
             "module_id": module_id,
             "instance_id": inst.id,
@@ -472,16 +495,25 @@ class ProjectRuntimeModuleService:
                     row_id,
                 )
         await self._session.commit()
-        from prodavan.application.projects.workspace_sync_policy import (
-            defer_or_schedule_project_sync,
-        )
+        remat: dict[str, Any] | None = None
+        try:
+            from prodavan.application.projects.workspace_sync_policy import (
+                defer_or_schedule_project_sync,
+            )
 
-        notification = await defer_or_schedule_project_sync(
-            self._session,
-            project_id=project_id,
-            source="project_module_instance",
-        )
-        remat = notification.rematerialize_alias()
+            notification = await defer_or_schedule_project_sync(
+                self._session,
+                project_id=project_id,
+                source="project_module_instance",
+            )
+            remat = notification.rematerialize_alias()
+        except Exception:
+            logger.exception(
+                "workspace sync after module row write failed project=%s module=%s",
+                project_id,
+                module_id,
+            )
+            remat = {"mode": "deferred", "error": "sync_failed"}
         return {"deleted": True, "row_id": row_id, "rematerialize": remat}
 
     async def _maybe_run_row_actions(
