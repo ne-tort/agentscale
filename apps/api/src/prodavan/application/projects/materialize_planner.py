@@ -13,6 +13,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from prodavan.application.modules.module_binding_service import ModuleBindingService
 from prodavan.application.modules.module_meta_service import ModuleMetaDocumentService
 from prodavan.application.pod_service.workspace_paths import normalize_workspace_path
+from prodavan.application.projects.prompt_stitch import (
+    PromptContribution,
+    stitch_prompt_contributions,
+)
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 from prodavan.infrastructure.persistence.models.modules import ModuleMetaDocumentRow
@@ -151,6 +155,7 @@ class MaterializePlanner:
                     )
                     if op:
                         ops.append(op)
+        ops = _stitch_prompt_fragment_ops(ops)
         ops.sort(key=lambda o: (o.priority, o.rule_id))
         return ops, active_profile_id
 
@@ -681,14 +686,29 @@ def _file_entry_body(entry: dict[str, Any]) -> str | None:
     return None
 
 
+def _entry_priority(entry: dict[str, Any]) -> int:
+    raw = entry.get("priority")
+    if raw is None or raw == "":
+        return 100
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return 100
+
+
 def _expand_prompt_path_ops(
     *,
     rows: list[dict[str, Any]],
     rule_id: str,
     module_id: str,
-    priority: int,
+    priority: int,  # unused: per-file priority from entry; kept for call-site compat
 ) -> list[MaterializeOp]:
-    """Expand prompt_paths.files_json into raw write ops; skip empty files_json."""
+    """Expand prompt_paths.files_json into prompt_fragment ops; skip empty files_json.
+
+    Rule-level ``priority`` is ignored — each file entry carries its own priority
+    (default 100). Fragments are stitched later in ``plan_for_project``.
+    """
+    _ = priority
     ops: list[MaterializeOp] = []
     for i, body in enumerate(rows):
         files = body.get("files_json")
@@ -705,16 +725,74 @@ def _expand_prompt_path_ops(
             ws_path = _join_prompt_file_path(path_base, name)
             if not ws_path:
                 continue
+            frag_id = str(entry.get("id") or f"{rule_id}_{i}_{j}")
             ops.append(
                 MaterializeOp(
                     rule_id=f"{rule_id}_{i}_{j}",
                     module_id=module_id,
                     workspace_path=ws_path,
-                    format="raw",
+                    format="prompt_fragment",
                     source_type="rows",
-                    priority=priority,
-                    row_body={"body_md": text},
+                    priority=_entry_priority(entry),
+                    row_body={"body_md": text, "fragment_id": frag_id},
                     field="body_md",
                 )
             )
     return ops
+
+
+def _stitch_prompt_fragment_ops(ops: list[MaterializeOp]) -> list[MaterializeOp]:
+    """Collapse prompt_fragment ops into one raw write per workspace_path."""
+    fragments = [o for o in ops if o.format == "prompt_fragment"]
+    if not fragments:
+        return ops
+    others = [o for o in ops if o.format != "prompt_fragment"]
+
+    def _frag_id(o: MaterializeOp) -> str:
+        body = o.row_body or {}
+        raw = body.get("fragment_id")
+        return str(raw) if raw else o.rule_id
+
+    def _body_text(o: MaterializeOp) -> str:
+        return str((o.row_body or {}).get(o.field or "body_md") or "")
+
+    contribs = [
+        PromptContribution(
+            workspace_path=o.workspace_path,
+            priority=o.priority,
+            body=_body_text(o),
+            module_id=o.module_id,
+            fragment_id=_frag_id(o),
+        )
+        for o in fragments
+    ]
+    stitched = stitch_prompt_contributions(contribs)
+    by_path: dict[str, list[MaterializeOp]] = {}
+    for o in fragments:
+        by_path.setdefault(o.workspace_path, []).append(o)
+    for path, text in stitched.items():
+        path_frags = by_path.get(path) or []
+        if not path_frags:
+            continue
+        primary = min(
+            path_frags,
+            key=lambda o: (
+                o.priority,
+                len(_body_text(o)),
+                _frag_id(o),
+                o.module_id,
+            ),
+        )
+        others.append(
+            MaterializeOp(
+                rule_id=primary.rule_id,
+                module_id=primary.module_id,
+                workspace_path=path,
+                format="raw",
+                source_type=primary.source_type,
+                priority=primary.priority,
+                row_body={"body_md": text},
+                field="body_md",
+            )
+        )
+    return others

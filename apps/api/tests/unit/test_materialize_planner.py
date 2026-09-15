@@ -112,7 +112,7 @@ def test_expand_prompt_path_ops_skips_empty_files() -> None:
                 "row_id": "path_rules",
                 "path": "rules/",
                 "files_json": [
-                    {"name": "style", "body": "# Style\n"},
+                    {"name": "style", "body": "# Style\n", "priority": 100},
                     {"name": "skip-me"},  # no body
                 ],
             },
@@ -123,9 +123,82 @@ def test_expand_prompt_path_ops_skips_empty_files() -> None:
     )
     assert len(ops) == 1
     assert ops[0].workspace_path == "rules/style.md"
-    assert ops[0].format == "raw"
-    assert ops[0].row_body == {"body_md": "# Style\n"}
+    assert ops[0].format == "prompt_fragment"
+    assert ops[0].priority == 100
+    assert ops[0].row_body == {"body_md": "# Style\n", "fragment_id": "prompt_paths_files_1_0"}
     assert ops[0].field == "body_md"
+
+
+def test_expand_prompt_path_ops_reads_per_file_priority() -> None:
+    from prodavan.application.projects.materialize_planner import _stitch_prompt_fragment_ops
+
+    fragments = _expand_prompt_path_ops(
+        rows=[
+            {
+                "row_id": "path_root",
+                "path": "",
+                "files_json": [
+                    {"id": "f2", "name": "AGENTS", "body": "later", "priority": 200},
+                    {"id": "f1", "name": "AGENTS", "body": "earlier", "priority": 100},
+                ],
+            },
+        ],
+        rule_id="prompt_paths_files",
+        module_id="mod_prompts",
+        priority=10,
+    )
+    assert {o.priority for o in fragments} == {100, 200}
+    stitched = _stitch_prompt_fragment_ops(fragments)
+    assert len(stitched) == 1
+    assert stitched[0].format == "raw"
+    assert stitched[0].workspace_path == "AGENTS.md"
+    assert stitched[0].priority == 100
+    assert stitched[0].row_body == {"body_md": "earlier\n\nlater"}
+
+
+def test_stitch_prompt_fragments_cross_module() -> None:
+    from prodavan.application.projects.materialize_planner import (
+        MaterializeOp,
+        _stitch_prompt_fragment_ops,
+    )
+
+    ops = [
+        MaterializeOp(
+            rule_id="a",
+            module_id="mod_a",
+            workspace_path="AGENTS.md",
+            format="prompt_fragment",
+            source_type="rows",
+            priority=100,
+            row_body={"body_md": "from A", "fragment_id": "a"},
+            field="body_md",
+        ),
+        MaterializeOp(
+            rule_id="b",
+            module_id="mod_b",
+            workspace_path="AGENTS.md",
+            format="prompt_fragment",
+            source_type="rows",
+            priority=101,
+            row_body={"body_md": "from B", "fragment_id": "b"},
+            field="body_md",
+        ),
+        MaterializeOp(
+            rule_id="other",
+            module_id="mod_x",
+            workspace_path="other.txt",
+            format="raw",
+            source_type="static",
+            priority=50,
+            static_value="keep",
+        ),
+    ]
+    out = _stitch_prompt_fragment_ops(ops)
+    by_path = {o.workspace_path: o for o in out}
+    assert set(by_path) == {"AGENTS.md", "other.txt"}
+    assert by_path["AGENTS.md"].format == "raw"
+    assert by_path["AGENTS.md"].row_body == {"body_md": "from A\n\nfrom B"}
+    assert by_path["other.txt"].static_value == "keep"
 
 
 def test_pick_active_profile_filters_by_project_ids() -> None:
@@ -225,4 +298,8 @@ def test_active_profile_paths_only_expand_matching_profile() -> None:
     )
     assert len(ops) == 1
     assert ops[0].workspace_path == "rules/a.md"
-    assert ops[0].row_body == {"body_md": "from A"}
+    assert ops[0].format == "prompt_fragment"
+    assert ops[0].row_body == {
+        "body_md": "from A",
+        "fragment_id": "prompt_paths_files_0_0",
+    }

@@ -86,7 +86,7 @@ def test_prompts_meta_has_materialize_and_seed() -> None:
     assert [f["column"] for f in path_fields] == ["name", "path", "files_json"]
     files_field = path_fields[2]
     assert files_field["widget"] == "prompt_files_editor"
-    assert files_field["section_title"]["ru"] == "Промпты"
+    assert "section_title" not in files_field
 
     view_kinds = {v["slug"]: v["kind"] for v in meta["views"]}
     assert "profile_hub" not in view_kinds.values()

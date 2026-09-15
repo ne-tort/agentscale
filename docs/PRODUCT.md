@@ -159,7 +159,7 @@ UI may opt into hiding nav/hub entries without an **active chat** (`WorkContext.
 
 Storage: `module_instance_data_rows.session_id` (+ mirror in JSON body). UI/MCP send `X-Prodavan-Session-Id`. Not a per-chat module fork.
 
-**Prompts hub:** `prompt_paths` (name, path, `files_json`); empty `files_json` skips folder creation; workspace writes `AGENTS.md` only. One active profile per project among matching `project_ids`.
+**Prompts hub:** `prompt_paths` (name, path, `files_json` with per-file `priority`, default `100`); empty `files_json` skips folder creation; workspace writes `AGENTS.md` only. Materialize stitches all `prompt_fragment` contributions across modules by `path`+filename: ascending priority, then shorter body, then stable id; blocks joined with a blank line. UI auto-assigns `100, 101, …` on add. One active profile per project among matching `project_ids`.
 
 **File & env pipeline:** see [12-content-file-pipeline](target/06-modules/meta-syntax/12-content-file-pipeline.md) · [13-container-env-secrets](target/06-modules/meta-syntax/13-container-env-secrets.md).
 

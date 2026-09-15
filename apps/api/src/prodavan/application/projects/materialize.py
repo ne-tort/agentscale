@@ -200,6 +200,7 @@ class ProjectMaterializeService:
 
         agents_md = None
         agents_source = "materialize"
+        # After planner stitch there is at most one raw op per path (incl. AGENTS.md).
         for op in ops:
             if op.workspace_path == "AGENTS.md" and op.row_body is not None:
                 agents_md = op.row_body.get(op.field or "body_md")

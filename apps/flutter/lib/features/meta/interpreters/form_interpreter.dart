@@ -584,10 +584,7 @@ class _FormViewInterpreterState extends State<FormViewInterpreter> {
       );
     }
     if (widgetKind == 'prompt_files_editor') {
-      final sectionRaw = fieldCfg?['section_title'];
-      final section = resolveMetaLabel(sectionRaw, l10n, locale: locale);
       return PromptFilesEditorField(
-        label: section.isNotEmpty ? section : label,
         value: value,
         readOnly: fieldReadOnly,
         onChanged: (files) => _persist(name, files),

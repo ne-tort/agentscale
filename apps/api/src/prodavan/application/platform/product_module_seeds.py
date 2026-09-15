@@ -596,7 +596,6 @@ def mod_prompts_meta() -> dict[str, list[Any]]:
                         {
                             "column": "files_json",
                             "widget": "prompt_files_editor",
-                            "section_title": {"ru": "Промпты", "en": "Prompts"},
                         },
                     ],
                 },
