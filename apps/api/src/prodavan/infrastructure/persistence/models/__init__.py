@@ -12,6 +12,7 @@ from prodavan.infrastructure.persistence.models.agent import (
     EmployeeChatPinRow,
     EmployeeProjectSelectionRow,
 )
+from prodavan.infrastructure.persistence.models.composer_draft import EmployeeComposerDraftRow
 from prodavan.infrastructure.persistence.models.ai_keys import (
     AiKeyAuditEventRow,
     AiProviderKeyRow,
@@ -66,6 +67,7 @@ __all__ = [
     "AgentSessionRow",
     "AgentUsageRow",
     "EmployeeChatPinRow",
+    "EmployeeComposerDraftRow",
     "EmployeeProjectSelectionRow",
     "AiKeyAuditEventRow",
     "AiKeyModelBindingRow",

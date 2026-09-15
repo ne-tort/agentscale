@@ -1064,6 +1064,78 @@ class ProdavanApi {
     }
   }
 
+  Future<Map<String, dynamic>> getSessionComposerDraft({
+    required String projectId,
+    required String sessionId,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.get(
+        _uri('/projects/$projectId/agent/sessions/$sessionId/composer-draft'),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Map<String, dynamic>> putSessionComposerDraft({
+    required String projectId,
+    required String sessionId,
+    required String text,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.put(
+        _uri('/projects/$projectId/agent/sessions/$sessionId/composer-draft'),
+        body: jsonEncode({'text': text}),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Map<String, dynamic>> getProjectComposerDraft({required String projectId}) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.get(
+        _uri('/projects/$projectId/composer-draft'),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
+  Future<Map<String, dynamic>> putProjectComposerDraft({
+    required String projectId,
+    required String text,
+  }) async {
+    final prevProj = this.projectId;
+    this.projectId = projectId;
+    try {
+      final res = await AuthHttp.put(
+        _uri('/projects/$projectId/composer-draft'),
+        body: jsonEncode({'text': text}),
+        extraHeaders: _workHeaders,
+      );
+      _throwIfError(res);
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } finally {
+      this.projectId = prevProj;
+    }
+  }
+
   Future<Uint8List> downloadProjectAttachmentBytes({
     required String projectId,
     required String attachmentId,

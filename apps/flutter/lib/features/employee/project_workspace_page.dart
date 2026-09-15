@@ -17,24 +17,28 @@ import 'package:prodavan/features/employee/cabinet_project_settings_page.dart';
 import 'package:prodavan/features/employee/project_chat_settings_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
-/// Project agent workspace — requires explicit [sessionId] (multi-chat).
+/// Project agent workspace — [sessionId] null = pending «Новый диалог».
 class ProjectWorkspacePage extends StatefulWidget {
   const ProjectWorkspacePage({
     super.key,
     required this.cabinetId,
     required this.projectId,
     required this.projectName,
-    required this.sessionId,
+    this.sessionId,
     this.initialTitle,
     this.initiallyPinned = false,
+    this.onSessionMaterialized,
+    this.onDraftPresenceChanged,
   });
 
   final String cabinetId;
   final String projectId;
   final String projectName;
-  final String sessionId;
+  final String? sessionId;
   final String? initialTitle;
   final bool initiallyPinned;
+  final void Function(String sessionId)? onSessionMaterialized;
+  final VoidCallback? onDraftPresenceChanged;
 
   @override
   State<ProjectWorkspacePage> createState() => _ProjectWorkspacePageState();
@@ -51,6 +55,9 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   Object? _lastSnackError;
   late String _title;
   late bool _pinned;
+  late String? _sessionId;
+
+  bool get _hasSession => _sessionId != null && _sessionId!.isNotEmpty;
 
   @override
   void initState() {
@@ -64,10 +71,12 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     );
     _title = (widget.initialTitle ?? '').trim();
     _pinned = widget.initiallyPinned;
+    _sessionId = widget.sessionId;
     _chat = ChatSessionController(
       api: workContext.api,
       projectId: widget.projectId,
-      sessionId: widget.sessionId,
+      sessionId: _sessionId ?? '',
+      onSessionCreated: _onSessionMaterialized,
     )..changes.listen((_) {
         if (!mounted) return;
         final err = _chat.error;
@@ -79,6 +88,13 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         setState(() {});
       });
     _bootstrap();
+  }
+
+  void _onSessionMaterialized(String sessionId) {
+    if (_sessionId == sessionId) return;
+    setState(() => _sessionId = sessionId);
+    workContext.setSelectedSessionId(sessionId);
+    widget.onSessionMaterialized?.call(sessionId);
   }
 
   Future<void> _refreshProjectFlags() async {
@@ -201,7 +217,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         builder: (_) => ProjectChatSettingsPage(
           controller: _chat,
           projectId: widget.projectId,
-          sessionId: widget.sessionId,
+          sessionId: _sessionId ?? '',
           title: _title,
           pinned: _pinned,
           onTitleChanged: (v) {
@@ -262,45 +278,48 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     final showChat = _chatReadable || _waking || _updating;
     return AppScaffold(
       title: showChat
-          ? AppBarTitleEditor(
-              value: _title,
-              hintText: l10n.chatUntitled,
-              onSave: (v) async {
+          ? (_hasSession
+              ? AppBarTitleEditor(
+                  value: _title,
+                  hintText: l10n.chatUntitled,
+                  onSave: (v) async {
+                    try {
+                      final body = await workContext.api.patchAgentSession(
+                        projectId: widget.projectId,
+                        sessionId: _sessionId!,
+                        title: v,
+                      );
+                      if (!mounted) return;
+                      setState(() {
+                        _title = (body['title'] as String?)?.trim() ?? v;
+                      });
+                    } catch (e) {
+                      if (mounted) showAgentChatSnack(context, e);
+                    }
+                  },
+                )
+              : Text(_displayTitle))
+          : Text(widget.projectName),
+      actions: [
+        if (showChat) ...[
+          if (_hasSession)
+            IconButton(
+              icon: Icon(_pinned ? Icons.push_pin : Icons.push_pin_outlined),
+              tooltip: _pinned ? l10n.chatUnpin : l10n.chatPin,
+              onPressed: () async {
                 try {
                   final body = await workContext.api.patchAgentSession(
                     projectId: widget.projectId,
-                    sessionId: widget.sessionId,
-                    title: v,
+                    sessionId: _sessionId!,
+                    pin: !_pinned,
                   );
                   if (!mounted) return;
-                  setState(() {
-                    _title = (body['title'] as String?)?.trim() ?? v;
-                  });
+                  setState(() => _pinned = body['pinned'] == true);
                 } catch (e) {
                   if (mounted) showAgentChatSnack(context, e);
                 }
               },
-            )
-          : Text(widget.projectName),
-      actions: [
-        if (showChat) ...[
-          IconButton(
-            icon: Icon(_pinned ? Icons.push_pin : Icons.push_pin_outlined),
-            tooltip: _pinned ? l10n.chatUnpin : l10n.chatPin,
-            onPressed: () async {
-              try {
-                final body = await workContext.api.patchAgentSession(
-                  projectId: widget.projectId,
-                  sessionId: widget.sessionId,
-                  pin: !_pinned,
-                );
-                if (!mounted) return;
-                setState(() => _pinned = body['pinned'] == true);
-              } catch (e) {
-                if (mounted) showAgentChatSnack(context, e);
-              }
-            },
-          ),
+            ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             tooltip: l10n.projectProjectSettings,
@@ -326,7 +345,9 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
               onUpdate: needsUpdate && !_updating ? _updateProjectWorkspace : null,
               onDismissUpdate: needsUpdate && !_updating ? _dismissWorkspaceUpdate : null,
               title: Text(_displayTitle),
-              onOpenChatSettings: _openChatSettings,
+              onOpenChatSettings: _hasSession ? _openChatSettings : null,
+              onSessionMaterialized: _onSessionMaterialized,
+              onDraftPresenceChanged: widget.onDraftPresenceChanged,
             ),
     );
   }

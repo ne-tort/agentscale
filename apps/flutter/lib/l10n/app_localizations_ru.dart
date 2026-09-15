@@ -1417,6 +1417,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get commonContinueAction => 'Продолжить';
 
   @override
+  String get commonSendAction => 'Отправить';
+
+  @override
   String get commonCreate => 'Создать';
 
   @override

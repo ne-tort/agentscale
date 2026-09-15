@@ -76,9 +76,19 @@ class CabinetChatsRail extends StatelessWidget {
     final sid = chat['session_id'] as String? ?? '';
     final title = (chat['title'] as String?)?.trim();
     final label = (title == null || title.isEmpty) ? l10n.chatUntitled : title;
+    final hasDraft = chat['has_draft'] == true;
+    final hasMessages = chat['has_messages'] == true || chat['last_message_at'] != null;
+    final IconData icon;
+    if (pinned) {
+      icon = Icons.push_pin;
+    } else if (hasDraft && !hasMessages) {
+      icon = Icons.edit_note_outlined;
+    } else {
+      icon = Icons.chat_bubble_outline;
+    }
     return _row(
       context,
-      icon: pinned ? Icons.push_pin : Icons.chat_bubble_outline,
+      icon: icon,
       label: label,
       selected: sid == activeSessionId,
       enabled: true,

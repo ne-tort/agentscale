@@ -664,6 +664,13 @@ class AgentSessionService:
             )
         )
         _touch_session_activity(row, text=display_text)
+        if employee is not None:
+            from prodavan.application.agent.composer_draft_service import ComposerDraftService
+
+            await ComposerDraftService(self._session).clear_session_draft_silent(
+                employee_id=employee.id,
+                session_id=session_id,
+            )
         yield {"type": PLATFORM_EVENT_USER_MESSAGE, "data": user_payload}
 
         from prodavan.application.metrics.publish import schedule_agent_request

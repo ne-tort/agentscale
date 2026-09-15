@@ -863,6 +863,7 @@
   "commonDescription": "Описание",
   "commonEntity": "Название",
   "commonContinueAction": "Продолжить",
+  "commonSendAction": "Отправить",
   "commonCreate": "Создать",
   "commonCreating": "Создание…",
   "commonDelete": "Удалить",

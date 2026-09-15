@@ -13,6 +13,7 @@ class ChatSessionController {
     required this.api,
     required this.projectId,
     required this.sessionId,
+    this.onSessionCreated,
   }) {
     _restoreFromCache();
   }
@@ -20,6 +21,7 @@ class ChatSessionController {
   final ProdavanApi api;
   final String projectId;
   String sessionId;
+  final void Function(String sessionId)? onSessionCreated;
   String? selectedModel;
   final List<ChatBlock> blocks = [];
   bool streaming = false;
@@ -65,6 +67,7 @@ class ChatSessionController {
   }
 
   void _restoreFromCache() {
+    if (sessionId.isEmpty) return;
     final cached = TranscriptCache.get(projectId, sessionId);
     if (cached == null || cached.blocks.isEmpty) return;
     blocks
@@ -79,6 +82,7 @@ class ChatSessionController {
   }
 
   void _saveToCache() {
+    if (sessionId.isEmpty) return;
     TranscriptCache.put(
       projectId,
       TranscriptCacheEntry(
@@ -114,6 +118,14 @@ class ChatSessionController {
   }
 
   Future<void> loadTranscript({int? beforeSeq, bool background = false}) async {
+    if (sessionId.isEmpty) {
+      blocks.clear();
+      _liveTurnBlocks = const [];
+      hasMoreHistory = false;
+      refreshingTranscript = false;
+      notifyImmediate();
+      return;
+    }
     if (background) {
       refreshingTranscript = true;
       notifyImmediate();
@@ -178,6 +190,29 @@ class ChatSessionController {
     error = null;
     streaming = true;
 
+    if (sessionId.isEmpty) {
+      try {
+        final created = await api.createAgentSession(
+          projectId: projectId,
+          model: selectedModel,
+        );
+        final sid = created['id'] as String?;
+        if (sid == null || sid.isEmpty) {
+          error = StateError('failed to create chat session');
+          streaming = false;
+          notifyImmediate();
+          return;
+        }
+        sessionId = sid;
+        onSessionCreated?.call(sid);
+      } catch (e) {
+        error = e;
+        streaming = false;
+        notifyImmediate();
+        return;
+      }
+    }
+
     final userBlock = ChatBlock(
       kind: 'user',
       raw: {
@@ -203,10 +238,16 @@ class ChatSessionController {
         final data = event['data'];
         if (type == '_session' && data is Map<String, dynamic>) {
           final next = data['session_id'] as String?;
-          if (next != null && next.isNotEmpty) sessionId = next;
+          if (next != null && next.isNotEmpty) {
+            sessionId = next;
+            onSessionCreated?.call(next);
+          }
         } else if (type == '_turn_complete' && data is Map<String, dynamic>) {
           final next = data['session_id'] as String?;
-          if (next != null && next.isNotEmpty) sessionId = next;
+          if (next != null && next.isNotEmpty) {
+            sessionId = next;
+            onSessionCreated?.call(next);
+          }
           final pending = data['pending_approvals'];
           if (pending is List) pendingApprovals = pending.cast<Map<String, dynamic>>();
           _liveTurnBlocks = finalizeTurnBlocks(_liveTurnBlocks);
@@ -264,7 +305,9 @@ class ChatSessionController {
     blocks.addAll(_liveTurnBlocks);
     _liveTurnBlocks = const [];
     streaming = false;
-    await api.cancelAgentSession(projectId: projectId, sessionId: sessionId);
+    if (sessionId.isNotEmpty) {
+      await api.cancelAgentSession(projectId: projectId, sessionId: sessionId);
+    }
     _saveToCache();
     notifyImmediate();
   }

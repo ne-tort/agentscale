@@ -349,6 +349,11 @@ class _CabinetShellState extends State<CabinetShell> {
       sessionId: sessionId,
       initialTitle: chat['title'] as String?,
       initiallyPinned: chat['pinned'] == true,
+      onSessionMaterialized: (sid) async {
+        workContext.setSelectedSessionId(sid);
+        await _reloadSidebar();
+      },
+      onDraftPresenceChanged: _reloadSidebar,
     );
     await _pushChat(page);
     if (!mounted) return;
@@ -360,22 +365,24 @@ class _CabinetShellState extends State<CabinetShell> {
     final projectId = workContext.selectedProjectId;
     if (projectId == null || !_newChatEnabled) return;
     try {
-      final created = await workContext.api.createAgentSession(projectId: projectId);
-      final sessionId = created['id'] as String?;
-      if (sessionId == null) return;
       String name = projectId;
       try {
         final p = await workContext.api.getProject(projectId);
         name = p['name'] as String? ?? projectId;
       } catch (_) {}
       if (!mounted) return;
-      workContext.setSelectedSessionId(sessionId);
+      // Lazy session: do not create DB dialog until draft (≥5) or first send.
+      workContext.setSelectedSessionId(null);
       final page = ProjectWorkspacePage(
         cabinetId: widget.cabinetId,
         projectId: projectId,
         projectName: name,
-        sessionId: sessionId,
-        initialTitle: created['title'] as String?,
+        sessionId: null,
+        onSessionMaterialized: (sid) async {
+          workContext.setSelectedSessionId(sid);
+          await _reloadSidebar();
+        },
+        onDraftPresenceChanged: _reloadSidebar,
       );
       await _pushChat(page);
       if (!mounted) return;

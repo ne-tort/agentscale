@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +14,7 @@ import 'package:prodavan/l10n/app_localizations.dart';
 const int kChatMaxMessageChars = 500000;
 const int kChatMaxAttachmentsPerMessage = 32;
 const int kChatMaxAttachmentBytesClient = 500 * 1024 * 1024; // platform ceiling; server enforces company policy
+const int kComposerDraftMinChars = 5;
 
 typedef ChatComposerSend = void Function(String text, List<String> attachmentRefs);
 
@@ -32,7 +35,10 @@ class ChatComposer extends StatefulWidget {
     this.onCancel,
     this.onOpenSettings,
     this.projectId,
+    this.sessionId,
     this.api,
+    this.onSessionMaterialized,
+    this.onDraftPresenceChanged,
     this.wakeMode = false,
     this.waking = false,
     this.onWake,
@@ -49,7 +55,11 @@ class ChatComposer extends StatefulWidget {
   final VoidCallback? onCancel;
   final VoidCallback? onOpenSettings;
   final String? projectId;
+  /// Null / empty → pending «Новый диалог» (no session yet).
+  final String? sessionId;
   final ProdavanApi? api;
+  final void Function(String sessionId)? onSessionMaterialized;
+  final VoidCallback? onDraftPresenceChanged;
   /// When true, field is not sendable but tappable — [onWake] resumes/reloads.
   final bool wakeMode;
   /// In-progress resume/reload — spinner on wake panel, ignore further taps.
@@ -70,16 +80,30 @@ class _ChatComposerState extends State<ChatComposer> {
   final _focusNode = FocusNode();
   final List<_PendingAttachment> _attachments = [];
   bool _uploading = false;
-  bool _multiline = false;
+  bool _draftHydrated = false;
+  Timer? _draftTimer;
+  String? _lastPersistedDraft;
 
   @override
   void initState() {
     super.initState();
     _controller.addListener(_onTextChanged);
+    unawaited(_hydrateDraft());
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatComposer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.sessionId != widget.sessionId || oldWidget.projectId != widget.projectId) {
+      _draftHydrated = false;
+      _lastPersistedDraft = null;
+      unawaited(_hydrateDraft());
+    }
   }
 
   @override
   void dispose() {
+    _draftTimer?.cancel();
     _controller.removeListener(_onTextChanged);
     _focusNode.dispose();
     _controller.dispose();
@@ -92,26 +116,88 @@ class _ChatComposerState extends State<ChatComposer> {
       !_uploading &&
       (_controller.text.trim().isNotEmpty || _attachments.isNotEmpty);
 
-  bool _computeMultiline(BuildContext context) {
+  bool get _hasSession {
+    final sid = widget.sessionId;
+    return sid != null && sid.isNotEmpty;
+  }
+
+  Future<void> _hydrateDraft() async {
+    final projectId = widget.projectId;
+    final api = widget.api;
+    if (projectId == null || api == null) {
+      _draftHydrated = true;
+      return;
+    }
+    try {
+      final body = _hasSession
+          ? await api.getSessionComposerDraft(projectId: projectId, sessionId: widget.sessionId!)
+          : await api.getProjectComposerDraft(projectId: projectId);
+      final text = (body['text'] as String?) ?? '';
+      if (!mounted) return;
+      if (text.isNotEmpty && _controller.text.isEmpty) {
+        _controller.value = TextEditingValue(
+          text: text,
+          selection: TextSelection.collapsed(offset: text.length),
+        );
+        _lastPersistedDraft = text;
+      }
+      final materialized = body['session_id'] as String?;
+      if (!_hasSession && materialized != null && materialized.isNotEmpty) {
+        widget.onSessionMaterialized?.call(materialized);
+      }
+    } catch (_) {
+      // Draft is best-effort.
+    } finally {
+      _draftHydrated = true;
+    }
+  }
+
+  void _scheduleDraftPersist() {
+    if (!_draftHydrated) return;
+    _draftTimer?.cancel();
+    _draftTimer = Timer(const Duration(milliseconds: 450), () {
+      unawaited(_persistDraft());
+    });
+  }
+
+  Future<void> _persistDraft() async {
+    final projectId = widget.projectId;
+    final api = widget.api;
+    if (projectId == null || api == null) return;
     final text = _controller.text;
-    if (text.contains('\n')) return true;
-    if (text.isEmpty) return false;
-    final style = Theme.of(context).textTheme.bodyMedium ?? const TextStyle(fontSize: 16);
-    final inset = AppSpacing.md * 2 + 120;
-    final maxWidth = MediaQuery.sizeOf(context).width - inset;
-    if (maxWidth <= 0) return false;
-    final painter = TextPainter(
-      text: TextSpan(text: text, style: style),
-      textDirection: Directionality.of(context),
-      maxLines: null,
-    )..layout(maxWidth: maxWidth);
-    final lineHeight = style.fontSize! * (style.height ?? 1.2);
-    return painter.height > lineHeight * 1.4;
+    final trimmed = text.trim();
+    final shouldStore = trimmed.length >= kComposerDraftMinChars;
+    final payload = shouldStore ? text : '';
+    final prev = _lastPersistedDraft ?? '';
+    if (payload == prev) return;
+    if (!shouldStore && prev.isEmpty) return;
+    try {
+      if (_hasSession) {
+        final body = await api.putSessionComposerDraft(
+          projectId: projectId,
+          sessionId: widget.sessionId!,
+          text: payload,
+        );
+        _lastPersistedDraft = (body['text'] as String?) ?? '';
+        widget.onDraftPresenceChanged?.call();
+      } else {
+        final body = await api.putProjectComposerDraft(projectId: projectId, text: payload);
+        _lastPersistedDraft = (body['text'] as String?) ?? '';
+        final sid = body['session_id'] as String?;
+        if (body['materialized'] == true && sid != null && sid.isNotEmpty) {
+          widget.onSessionMaterialized?.call(sid);
+        }
+        widget.onDraftPresenceChanged?.call();
+      }
+    } catch (_) {
+      // Ignore transient draft errors.
+    }
   }
 
   void _onTextChanged() {
     if (!mounted) return;
     setState(() {});
+    _scheduleDraftPersist();
   }
 
   void _submit() {
@@ -129,6 +215,8 @@ class _ChatComposerState extends State<ChatComposer> {
       );
       return;
     }
+    _draftTimer?.cancel();
+    _lastPersistedDraft = '';
     widget.onSend(
       text,
       _attachments.map((a) => a.id).toList(),
@@ -254,7 +342,7 @@ class _ChatComposerState extends State<ChatComposer> {
       visualDensity: VisualDensity.compact,
       padding: EdgeInsets.zero,
       constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-      tooltip: l10n.commonContinueAction,
+      tooltip: l10n.commonSendAction,
       onPressed: _canSend ? _submit : null,
       icon: const Icon(Icons.send),
     );
@@ -327,12 +415,6 @@ class _ChatComposerState extends State<ChatComposer> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final scheme = Theme.of(context).colorScheme;
-    final multiline = !widget.wakeMode && !widget.updateMode && _computeMultiline(context);
-
-    if (multiline != _multiline) {
-      _multiline = multiline;
-    }
-
     final Widget field;
     if (widget.wakeMode) {
       field = _wakePanel(context);
@@ -378,30 +460,20 @@ class _ChatComposerState extends State<ChatComposer> {
               ),
               child: (widget.wakeMode || widget.updateMode)
                   ? field
-                  : multiline
-                      ? Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            field,
-                            Row(
-                              children: [
-                                _plusButton(l10n),
-                                _attachButton(l10n),
-                                const Spacer(),
-                                _sendButton(l10n),
-                              ],
-                            ),
-                          ],
-                        )
-                      : Row(
-                          crossAxisAlignment: CrossAxisAlignment.end,
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        field,
+                        Row(
                           children: [
                             _plusButton(l10n),
                             _attachButton(l10n),
-                            Expanded(child: field),
+                            const Spacer(),
                             _sendButton(l10n),
                           ],
                         ),
+                      ],
+                    ),
             ),
           ],
         ),

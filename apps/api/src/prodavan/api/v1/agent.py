@@ -170,6 +170,121 @@ async def delete_agent_session(
     )
 
 
+class ComposerDraftBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    text: str = Field(default="", max_length=CHAT_MAX_MESSAGE_CHARS)
+
+
+@router.get("/projects/{project_id}/agent/sessions/{session_id}/composer-draft")
+async def get_session_composer_draft(
+    project_id: str,
+    session_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.agent.composer_draft_service import ComposerDraftService
+
+    return await ComposerDraftService(session).get_session_draft(
+        project_id=project_id,
+        session_id=session_id,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.put("/projects/{project_id}/agent/sessions/{session_id}/composer-draft")
+async def put_session_composer_draft(
+    project_id: str,
+    session_id: str,
+    body: ComposerDraftBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.agent.composer_draft_service import ComposerDraftService
+
+    return await ComposerDraftService(session).put_session_draft(
+        project_id=project_id,
+        session_id=session_id,
+        text=body.text,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.delete("/projects/{project_id}/agent/sessions/{session_id}/composer-draft")
+async def delete_session_composer_draft(
+    project_id: str,
+    session_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.agent.composer_draft_service import ComposerDraftService
+
+    return await ComposerDraftService(session).clear_session_draft(
+        project_id=project_id,
+        session_id=session_id,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.get("/projects/{project_id}/composer-draft")
+async def get_project_pending_composer_draft(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.agent.composer_draft_service import ComposerDraftService
+
+    return await ComposerDraftService(session).get_pending_draft(
+        project_id=project_id,
+        principal=principal,
+        employee=employee,
+    )
+
+
+@router.put("/projects/{project_id}/composer-draft")
+async def put_project_pending_composer_draft(
+    project_id: str,
+    body: ComposerDraftBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    """Upsert pending new-chat draft; materializes a session when text is meaningful (≥5)."""
+    from prodavan.application.agent.composer_draft_service import ComposerDraftService
+
+    svc = AgentSessionService(session)
+    return await ComposerDraftService(session).put_pending_draft(
+        project_id=project_id,
+        text=body.text,
+        principal=principal,
+        employee=employee,
+        create_session=svc.create_session,
+    )
+
+
+@router.delete("/projects/{project_id}/composer-draft")
+async def delete_project_pending_composer_draft(
+    project_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: EmployeeDep,
+) -> dict:
+    from prodavan.application.agent.composer_draft_service import ComposerDraftService
+
+    return await ComposerDraftService(session).clear_pending_draft(
+        project_id=project_id,
+        principal=principal,
+        employee=employee,
+    )
+
+
 @router.post("/projects/{project_id}/chat")
 async def project_chat_turn(
     project_id: str,

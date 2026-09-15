@@ -2516,6 +2516,12 @@ abstract class AppLocalizations {
   /// **'Continue'**
   String get commonContinueAction;
 
+  /// No description provided for @commonSendAction.
+  ///
+  /// In en, this message translates to:
+  /// **'Send'**
+  String get commonSendAction;
+
   /// No description provided for @commonCreate.
   ///
   /// In en, this message translates to:

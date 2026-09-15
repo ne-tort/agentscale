@@ -34,6 +34,13 @@ def _project(*, cabinet_id: str = "cab_1", status: str = "active") -> MagicMock:
     return p
 
 
+def _drafts_result(session_ids: list[str] | None = None) -> MagicMock:
+    """Mock for ComposerDraftService.draft_session_ids_for_employee execute."""
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = list(session_ids or [])
+    return result
+
+
 @pytest.mark.asyncio
 async def test_get_selection_empty() -> None:
     session = AsyncMock()
@@ -127,8 +134,15 @@ async def test_sidebar_sorts_pinned_and_project_chats() -> None:
     project_sess = MagicMock()
     project_sess.scalars.return_value.all.return_value = [older, newer]
     session.get = AsyncMock(return_value=sel)
+    # projects → pins → drafts → pinned sessions → project sessions
     session.execute = AsyncMock(
-        side_effect=[projects_result, pins_result, pinned_sess, project_sess]
+        side_effect=[
+            projects_result,
+            pins_result,
+            _drafts_result(),
+            pinned_sess,
+            project_sess,
+        ]
     )
 
     svc = ChatSidebarService(session)
@@ -164,7 +178,9 @@ async def test_sidebar_new_chat_disabled_unless_container_running() -> None:
     project_sess = MagicMock()
     project_sess.scalars.return_value.all.return_value = []
     session.get = AsyncMock(return_value=sel)
-    session.execute = AsyncMock(side_effect=[projects_result, pins_result, project_sess])
+    session.execute = AsyncMock(
+        side_effect=[projects_result, pins_result, _drafts_result(), project_sess]
+    )
 
     svc = ChatSidebarService(session)
     with (
@@ -196,7 +212,9 @@ async def test_sidebar_new_chat_disabled_for_error_project() -> None:
     project_sess = MagicMock()
     project_sess.scalars.return_value.all.return_value = []
     session.get = AsyncMock(return_value=sel)
-    session.execute = AsyncMock(side_effect=[projects_result, pins_result, project_sess])
+    session.execute = AsyncMock(
+        side_effect=[projects_result, pins_result, _drafts_result(), project_sess]
+    )
 
     svc = ChatSidebarService(session)
     with patch.object(svc._cabinets, "require_access", new=AsyncMock()):

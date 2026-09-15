@@ -1405,6 +1405,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get commonContinueAction => 'Continue';
 
   @override
+  String get commonSendAction => 'Send';
+
+  @override
   String get commonCreate => 'Create';
 
   @override

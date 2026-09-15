@@ -861,6 +861,7 @@
   "commonDescription": "Description",
   "commonEntity": "Name",
   "commonContinueAction": "Continue",
+  "commonSendAction": "Send",
   "commonCreate": "Create",
   "commonCreating": "Creating…",
   "commonDelete": "Delete",

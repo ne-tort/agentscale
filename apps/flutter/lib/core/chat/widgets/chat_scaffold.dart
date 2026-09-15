@@ -351,8 +351,10 @@ class ChatScaffold extends StatelessWidget {
     required this.api,
     required this.chatSendable,
     required this.loading,
-    required this.onOpenChatSettings,
     required this.title,
+    this.onOpenChatSettings,
+    this.onSessionMaterialized,
+    this.onDraftPresenceChanged,
     this.disabledHint,
     this.wakeMode = false,
     this.waking = false,
@@ -367,7 +369,9 @@ class ChatScaffold extends StatelessWidget {
   final ProdavanApi api;
   final bool chatSendable;
   final bool loading;
-  final VoidCallback onOpenChatSettings;
+  final VoidCallback? onOpenChatSettings;
+  final void Function(String sessionId)? onSessionMaterialized;
+  final VoidCallback? onDraftPresenceChanged;
   final Widget title;
   final String? disabledHint;
   final bool wakeMode;
@@ -416,6 +420,7 @@ class ChatScaffold extends StatelessWidget {
                 ),
                 ChatComposer(
                   projectId: controller.projectId,
+                  sessionId: controller.sessionId.isEmpty ? null : controller.sessionId,
                   api: api,
                   enabled: chatSendable && !updateMode,
                   streaming: controller.streaming,
@@ -430,6 +435,11 @@ class ChatScaffold extends StatelessWidget {
                   onSend: (text, refs) => controller.send(text, attachmentRefs: refs),
                   onCancel: controller.streaming ? () => controller.cancelStream() : null,
                   onOpenSettings: onOpenChatSettings,
+                  onSessionMaterialized: (sid) {
+                    controller.sessionId = sid;
+                    onSessionMaterialized?.call(sid);
+                  },
+                  onDraftPresenceChanged: onDraftPresenceChanged,
                 ),
               ],
             ),
