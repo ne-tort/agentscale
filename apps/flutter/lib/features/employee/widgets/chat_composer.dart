@@ -81,6 +81,10 @@ class _ChatComposerState extends State<ChatComposer> {
   final List<_PendingAttachment> _attachments = [];
   bool _uploading = false;
   bool _draftHydrated = false;
+  bool _multiline = false;
+  /// After Send, ignore the empty-text persist that would clear the server draft
+  /// before the user message is written (sidebar GC race → 404).
+  bool _suppressDraftPersist = false;
   Timer? _draftTimer;
   String? _lastPersistedDraft;
 
@@ -153,7 +157,7 @@ class _ChatComposerState extends State<ChatComposer> {
   }
 
   void _scheduleDraftPersist() {
-    if (!_draftHydrated) return;
+    if (!_draftHydrated || _suppressDraftPersist) return;
     _draftTimer?.cancel();
     _draftTimer = Timer(const Duration(milliseconds: 450), () {
       unawaited(_persistDraft());
@@ -161,6 +165,7 @@ class _ChatComposerState extends State<ChatComposer> {
   }
 
   Future<void> _persistDraft() async {
+    if (_suppressDraftPersist) return;
     final projectId = widget.projectId;
     final api = widget.api;
     if (projectId == null || api == null) return;
@@ -200,6 +205,23 @@ class _ChatComposerState extends State<ChatComposer> {
     _scheduleDraftPersist();
   }
 
+  bool _computeMultiline(BuildContext context) {
+    final text = _controller.text;
+    if (text.contains('\n')) return true;
+    if (text.isEmpty) return false;
+    final style = Theme.of(context).textTheme.bodyMedium ?? const TextStyle(fontSize: 16);
+    final inset = AppSpacing.md * 2 + 120;
+    final maxWidth = MediaQuery.sizeOf(context).width - inset;
+    if (maxWidth <= 0) return false;
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: Directionality.of(context),
+      maxLines: null,
+    )..layout(maxWidth: maxWidth);
+    final lineHeight = (style.fontSize ?? 16) * (style.height ?? 1.2);
+    return painter.height > lineHeight * 1.4;
+  }
+
   void _submit() {
     if (!_canSend) return;
     final text = _controller.text;
@@ -216,6 +238,7 @@ class _ChatComposerState extends State<ChatComposer> {
       return;
     }
     _draftTimer?.cancel();
+    _suppressDraftPersist = true;
     _lastPersistedDraft = '';
     widget.onSend(
       text,
@@ -223,6 +246,9 @@ class _ChatComposerState extends State<ChatComposer> {
     );
     _controller.clear();
     setState(_attachments.clear);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _suppressDraftPersist = false;
+    });
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
@@ -415,6 +441,10 @@ class _ChatComposerState extends State<ChatComposer> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final scheme = Theme.of(context).colorScheme;
+    final multiline = !widget.wakeMode && !widget.updateMode && _computeMultiline(context);
+    if (multiline != _multiline) {
+      _multiline = multiline;
+    }
     final Widget field;
     if (widget.wakeMode) {
       field = _wakePanel(context);
@@ -460,20 +490,30 @@ class _ChatComposerState extends State<ChatComposer> {
               ),
               child: (widget.wakeMode || widget.updateMode)
                   ? field
-                  : Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        field,
-                        Row(
+                  : multiline
+                      ? Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            field,
+                            Row(
+                              children: [
+                                _plusButton(l10n),
+                                _attachButton(l10n),
+                                const Spacer(),
+                                _sendButton(l10n),
+                              ],
+                            ),
+                          ],
+                        )
+                      : Row(
+                          crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
                             _plusButton(l10n),
                             _attachButton(l10n),
-                            const Spacer(),
+                            Expanded(child: field),
                             _sendButton(l10n),
                           ],
                         ),
-                      ],
-                    ),
             ),
           ],
         ),

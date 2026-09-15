@@ -268,6 +268,82 @@ async def test_get_transcript_requires_session_id() -> None:
     assert "session_id" in (ei.value.detail or "")
 
 
+@pytest.mark.asyncio
+async def test_sidebar_keeps_young_empty_shells_from_gc() -> None:
+    """Empty shells mid-send/settings must not be deleted on sidebar reload."""
+    from prodavan.application.agent.chat_sidebar_service import _EMPTY_SHELL_GC_GRACE
+
+    session = AsyncMock()
+    emp = _employee()
+    sel = MagicMock()
+    sel.project_id = "proj_1"
+    proj = _project()
+    young = AgentSessionRow(
+        id="ags_young",
+        project_id="proj_1",
+        resolved_key_id=None,
+        provider="cursor",
+        api_kind="cursor_sdk",
+        vendor_agent_id="ags_young",
+        model=None,
+        cwd="/workspace",
+        status=AgentSessionStatus.ACTIVE,
+        title="Young",
+        last_message_at=None,
+        created_at=datetime.now(tz=UTC) - (_EMPTY_SHELL_GC_GRACE / 2),
+    )
+    old = AgentSessionRow(
+        id="ags_old_empty",
+        project_id="proj_1",
+        resolved_key_id=None,
+        provider="cursor",
+        api_kind="cursor_sdk",
+        vendor_agent_id="ags_old_empty",
+        model=None,
+        cwd="/workspace",
+        status=AgentSessionStatus.ACTIVE,
+        title="Old empty",
+        last_message_at=None,
+        created_at=datetime.now(tz=UTC) - (_EMPTY_SHELL_GC_GRACE * 2),
+    )
+    projects_result = MagicMock()
+    projects_result.scalars.return_value.all.return_value = [proj]
+    pins_result = MagicMock()
+    pins_result.scalars.return_value.all.return_value = []
+    project_sess = MagicMock()
+    project_sess.scalars.return_value.all.return_value = [young, old]
+    no_events = MagicMock()
+    no_events.scalar_one_or_none.return_value = None
+    session.get = AsyncMock(return_value=sel)
+    session.execute = AsyncMock(
+        side_effect=[
+            projects_result,
+            pins_result,
+            _drafts_result(),
+            project_sess,
+            no_events,  # event check for old empty shell
+        ]
+    )
+    session.commit = AsyncMock()
+
+    svc = ChatSidebarService(session)
+    with (
+        patch.object(svc._cabinets, "require_access", new=AsyncMock()),
+        patch(
+            "prodavan.application.agent.chat_sidebar_service.PodQuery"
+        ) as pod_cls,
+    ):
+        pod_cls.return_value.runtime_view = AsyncMock(
+            return_value={"observed_state": "running"}
+        )
+        out = await svc.sidebar(cabinet_id="cab_1", principal=_principal(), employee=emp)
+
+    assert out["project_chats"] == []
+    deleted_ids = [c.args[0].id for c in session.delete.await_args_list]
+    assert "ags_old_empty" in deleted_ids
+    assert "ags_young" not in deleted_ids
+
+
 def test_default_chat_title_truncates() -> None:
     assert _default_chat_title("hi") == "hi"
     long = "x" * 100

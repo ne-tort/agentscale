@@ -211,7 +211,51 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     return body.contains('not paused') || body.contains('not paused or completed');
   }
 
+  Future<bool> _ensureSession() async {
+    if (_hasSession) return true;
+    try {
+      final created = await workContext.api.createAgentSession(
+        projectId: widget.projectId,
+        model: _chat.selectedModel,
+        title: _title.isEmpty ? null : _title,
+      );
+      final sid = created['id'] as String?;
+      if (sid == null || sid.isEmpty) {
+        if (mounted) {
+          showAgentChatSnack(context, StateError('failed to create chat session'));
+        }
+        return false;
+      }
+      _chat.sessionId = sid;
+      final createdTitle = (created['title'] as String?)?.trim();
+      if (createdTitle != null && createdTitle.isNotEmpty) {
+        _title = createdTitle;
+      }
+      _onSessionMaterialized(sid);
+      if (_pinned) {
+        try {
+          final body = await workContext.api.patchAgentSession(
+            projectId: widget.projectId,
+            sessionId: sid,
+            pin: true,
+          );
+          if (mounted) setState(() => _pinned = body['pinned'] == true);
+        } catch (_) {
+          // Pin is best-effort until settings page.
+        }
+      }
+      return true;
+    } catch (e) {
+      if (mounted) showAgentChatSnack(context, e);
+      return false;
+    }
+  }
+
   Future<void> _openChatSettings() async {
+    if (!_hasSession) {
+      final ok = await _ensureSession();
+      if (!ok || !mounted) return;
+    }
     final deleted = await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(
         builder: (_) => ProjectChatSettingsPage(
@@ -278,48 +322,62 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     final showChat = _chatReadable || _waking || _updating;
     return AppScaffold(
       title: showChat
-          ? (_hasSession
-              ? AppBarTitleEditor(
-                  value: _title,
-                  hintText: l10n.chatUntitled,
-                  onSave: (v) async {
-                    try {
-                      final body = await workContext.api.patchAgentSession(
-                        projectId: widget.projectId,
-                        sessionId: _sessionId!,
-                        title: v,
-                      );
-                      if (!mounted) return;
-                      setState(() {
-                        _title = (body['title'] as String?)?.trim() ?? v;
-                      });
-                    } catch (e) {
-                      if (mounted) showAgentChatSnack(context, e);
-                    }
-                  },
-                )
-              : Text(_displayTitle))
-          : Text(widget.projectName),
-      actions: [
-        if (showChat) ...[
-          if (_hasSession)
-            IconButton(
-              icon: Icon(_pinned ? Icons.push_pin : Icons.push_pin_outlined),
-              tooltip: _pinned ? l10n.chatUnpin : l10n.chatPin,
-              onPressed: () async {
+          ? AppBarTitleEditor(
+              value: _title,
+              hintText: l10n.chatUntitled,
+              onSave: (v) async {
+                if (!_hasSession) {
+                  setState(() => _title = v);
+                  final ok = await _ensureSession();
+                  if (!ok && mounted) {
+                    // Session create failed — keep local title for retry.
+                  }
+                  return;
+                }
                 try {
                   final body = await workContext.api.patchAgentSession(
                     projectId: widget.projectId,
                     sessionId: _sessionId!,
-                    pin: !_pinned,
+                    title: v,
                   );
                   if (!mounted) return;
-                  setState(() => _pinned = body['pinned'] == true);
+                  setState(() {
+                    _title = (body['title'] as String?)?.trim() ?? v;
+                  });
                 } catch (e) {
                   if (mounted) showAgentChatSnack(context, e);
                 }
               },
-            ),
+            )
+          : Text(widget.projectName),
+      actions: [
+        if (showChat) ...[
+          IconButton(
+            icon: Icon(_pinned ? Icons.push_pin : Icons.push_pin_outlined),
+            tooltip: _pinned ? l10n.chatUnpin : l10n.chatPin,
+            onPressed: () async {
+              if (!_hasSession) {
+                final next = !_pinned;
+                setState(() => _pinned = next);
+                if (next) {
+                  final ok = await _ensureSession();
+                  if (!ok && mounted) setState(() => _pinned = false);
+                }
+                return;
+              }
+              try {
+                final body = await workContext.api.patchAgentSession(
+                  projectId: widget.projectId,
+                  sessionId: _sessionId!,
+                  pin: !_pinned,
+                );
+                if (!mounted) return;
+                setState(() => _pinned = body['pinned'] == true);
+              } catch (e) {
+                if (mounted) showAgentChatSnack(context, e);
+              }
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.settings_outlined),
             tooltip: l10n.projectProjectSettings,
@@ -345,7 +403,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
               onUpdate: needsUpdate && !_updating ? _updateProjectWorkspace : null,
               onDismissUpdate: needsUpdate && !_updating ? _dismissWorkspaceUpdate : null,
               title: Text(_displayTitle),
-              onOpenChatSettings: _hasSession ? _openChatSettings : null,
+              onOpenChatSettings: _openChatSettings,
               onSessionMaterialized: _onSessionMaterialized,
               onDraftPresenceChanged: widget.onDraftPresenceChanged,
             ),

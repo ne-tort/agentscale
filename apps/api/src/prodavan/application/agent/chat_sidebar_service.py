@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,6 +20,19 @@ from prodavan.infrastructure.persistence.models.agent import (
 )
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+# Keep brand-new empty shells (settings open / mid-send) so sidebar GC cannot
+# delete them before the first user message lands — that caused 404 on send.
+_EMPTY_SHELL_GC_GRACE = timedelta(minutes=30)
+
+
+def _is_young_empty_shell(row: AgentSessionRow, *, now: datetime) -> bool:
+    created = row.created_at
+    if created is None:
+        return False
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
+    return created >= now - _EMPTY_SHELL_GC_GRACE
 
 
 def _chat_item(row: AgentSessionRow, *, project_name: str, pinned: bool, has_draft: bool = False) -> dict:
@@ -126,6 +139,7 @@ class ChatSidebarService:
             project_ids=project_ids,
         )
 
+        now = datetime.now(tz=UTC)
         pinned: list[dict] = []
         if pinned_ids:
             sess_q = await self._session.execute(
@@ -175,7 +189,9 @@ class ChatSidebarService:
                 has_draft = r.id in draft_ids
                 has_messages = r.last_message_at is not None
                 if not has_messages and not has_draft:
-                    empty_to_gc.append(r)
+                    # Hide empty shells; only GC abandoned ones past the grace window.
+                    if not _is_young_empty_shell(r, now=now):
+                        empty_to_gc.append(r)
                     continue
                 visible.append(
                     _chat_item(r, project_name=pname, pinned=False, has_draft=has_draft)
