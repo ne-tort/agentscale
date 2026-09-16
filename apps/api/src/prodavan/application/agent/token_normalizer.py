@@ -123,6 +123,14 @@ def _extract_cost(data: dict[str, Any]) -> float | None:
         return None
 
 
+def _extract_token_source(data: dict[str, Any]) -> str | None:
+    raw = data.get("token_source") or data.get("usage_source")
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return text or None
+
+
 def extract_usage(data: dict[str, Any]) -> NormalizedUsage:
     """Project a raw vendor USAGE payload into canonical fields (CLAW-P0b).
 
@@ -144,7 +152,7 @@ def extract_usage(data: dict[str, Any]) -> NormalizedUsage:
         provider=str(data["provider"]) if data.get("provider") else None,
         model=str(data["model"]) if data.get("model") else None,
         message_id=_extract_message_id(data),
-        token_source=str(data["token_source"]) if data.get("token_source") else None,
+        token_source=_extract_token_source(data),
     )
 
 

@@ -34,7 +34,11 @@ from prodavan.application.agent.policy_service import AgentPolicyService
 from prodavan.application.agent.runtime_guard import require_running_pod_runtime
 from prodavan.application.agent.runtime_model import sanitize_runtime_model, sdk_fallback_model
 from prodavan.application.agent.stream_normalizer import TurnStreamNormalizer
-from prodavan.application.agent.token_normalizer import TokenNormalizer, normalize_usage_event
+from prodavan.application.agent.token_normalizer import (
+    TokenNormalizer,
+    extract_usage,
+    normalize_usage_event,
+)
 from prodavan.application.ai_keys.service import AiKeysService
 from prodavan.application.ai_models.resolution import AiModelResolutionService
 from prodavan.application.project_service import ProjectAccessPolicy
@@ -312,6 +316,15 @@ class AgentSessionService:
             projected = normalize_usage_event(normalized)
             if projected is not None:
                 normalized = projected
+            else:
+                # Fully-zero usage: normalize_usage_event dropped it, but we
+                # still persist the event to the transcript — canonicalize the
+                # payload so agent_events never carries vendor aliases like
+                # cache_creation_input_tokens (CLAW-P0b consistency).
+                canonical_payload = extract_usage(normalized.data).to_payload()
+                normalized = AgentEvent(
+                    type=normalized.type, data=canonical_payload, at=normalized.at
+                )
         next_seq = seq + 1
         self._session.add(
             AgentEventRow(

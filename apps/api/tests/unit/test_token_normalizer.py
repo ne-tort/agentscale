@@ -6,6 +6,7 @@ import pytest
 
 from prodavan.application.agent.token_normalizer import (
     TokenNormalizer,
+    extract_usage,
     normalize_usage_event,
 )
 from prodavan.domain.agent import AgentEvent, AgentEventType
@@ -135,3 +136,37 @@ def test_stateless_normalize_usage_event_drops_fully_zero() -> None:
 def test_stateless_passes_through_non_usage_events() -> None:
     ev = AgentEvent.now(AgentEventType.TEXT_DELTA, {"text": "hi"})
     assert normalize_usage_event(ev) is ev
+
+
+def test_extract_usage_to_payload_canonicalizes_aliases() -> None:
+    # Fully-zero usage (normalize_usage_event drops it) still needs a
+    # canonical payload when persisted to the transcript — extract_usage +
+    # to_payload projects vendor aliases to canonical fields so agent_events
+    # never carries cache_creation_input_tokens / estimated_cost_usd.
+    payload = extract_usage(
+        {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+            "estimated_cost_usd": 0,
+            "usage_source": "bridge",
+        }
+    ).to_payload()
+    assert "cache_creation_input_tokens" not in payload
+    assert "cache_read_input_tokens" not in payload
+    assert "estimated_cost_usd" not in payload
+    assert "usage_source" not in payload
+    assert payload["cache_creation_tokens"] == 0
+    assert payload["cache_read_tokens"] == 0
+    assert payload["token_source"] == "bridge"
+
+
+def test_extract_usage_to_payload_omits_null_optional_fields() -> None:
+    payload = extract_usage({"input_tokens": 1, "output_tokens": 2}).to_payload()
+    assert payload == {
+        "input_tokens": 1,
+        "output_tokens": 2,
+        "cache_creation_tokens": None,
+        "cache_read_tokens": None,
+    }
