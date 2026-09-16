@@ -8,6 +8,7 @@
 |-----|------|
 | Продукт | [PRODUCT.md](PRODUCT.md) |
 | As-built (код) | [target/12-layer-docs/](target/12-layer-docs/) |
+| Архитектурный аудит | [ARCHITECTURE/](ARCHITECTURE/) — as-is / проблемы / target-design по слоям |
 | Ops (актуально) | [07-infrastructure/](07-infrastructure/) |
 | Legacy | [LEGACY.md](LEGACY.md) |
 
