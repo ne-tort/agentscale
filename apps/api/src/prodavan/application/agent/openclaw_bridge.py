@@ -10,24 +10,17 @@ from dataclasses import dataclass
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from prodavan.application.agent.adapter_kinds import (
+    BRIDGE_ADAPTER_KINDS,
+    api_kind_to_bridge_adapter,
+)
 from prodavan.application.agent.runtime_model import sanitize_runtime_model
 from prodavan.config.settings import settings
 from prodavan.domain.agent import FROZEN_EVENT_TYPES, PLATFORM_STREAM_EVENT_TYPES, AgentEvent, AgentEventType
 from prodavan.domain.agent.errors import POD_NOT_RUNNING
-from prodavan.domain.ai_keys import ApiKind
 from prodavan.infrastructure.k8s.sandbox.client import K8sSandboxClient
 
 logger = logging.getLogger(__name__)
-
-_BRIDGE_ADAPTER_KINDS = frozenset(
-    {
-        "platform_openclaw",
-        "openclaw_sdk",
-        "cursor_sdk",
-        "codex_sdk",
-        "claude_agent_sdk",
-    }
-)
 
 _BRIDGE_SKIP_EVENT_TYPES = frozenset({"ping"})
 _STUB_TEXT_PREFIXES = (
@@ -49,17 +42,6 @@ def _runtime_request_headers() -> dict[str, str]:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     return headers
-
-
-def api_kind_to_bridge_adapter(api_kind: str) -> str:
-    """Map Prodavan api_kind → OpenClaw bridge adapter_kind."""
-    if api_kind == ApiKind.CURSOR_SDK:
-        return "cursor_sdk"
-    if api_kind == ApiKind.CODEX_SDK:
-        return "codex_sdk"
-    if api_kind == ApiKind.CLAUDE_AGENT_SDK:
-        return "claude_agent_sdk"
-    return "platform_openclaw"
 
 
 def bridge_envelope_to_agent_event(envelope: dict) -> AgentEvent | None:
@@ -132,7 +114,7 @@ class OpenClawBridgeBootstrap:
     ) -> bool:
         if not settings.pod_agent_runtime_enabled or not settings.pod_agent_runtime_bootstrap_enabled:
             return False
-        if payload.adapter_kind not in _BRIDGE_ADAPTER_KINDS:
+        if payload.adapter_kind not in BRIDGE_ADAPTER_KINDS:
             return False
 
         pod_ip = await self._resolve_pod_ip_for_project(project_id)

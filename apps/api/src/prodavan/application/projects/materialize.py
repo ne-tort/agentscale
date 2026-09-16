@@ -12,10 +12,12 @@ from prodavan.application.projects.materialize_executor import MaterializeExecut
 from prodavan.application.projects.materialize_planner import MaterializePlanner
 from prodavan.application.projects.openclaw_config_materializer import (
     build_openclaw_config,
+    filter_mcp_packages_by_policy,
     openclaw_config_relative_path,
     provider_to_default_api_kind,
     render_openclaw_config_yaml,
 )
+from prodavan.domain.agent import default_tool_policy
 from prodavan.domain.projects import workspace_key_for
 from prodavan.infrastructure.persistence.models.ai_keys import AiProviderKeyRow
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
@@ -209,13 +211,14 @@ class ProjectMaterializeService:
             agents_source = "default"
 
         writer.write_agents(cabinet_name=cab_name, project_name=proj_name, agents_md=agents_md)
-        writer.write_mcp_config(cabinet_id=cabinet_id, packages=mcp_packages)
+        filtered_packages = await self._filter_mcp_packages(session, project_id, mcp_packages)
+        writer.write_mcp_config(cabinet_id=cabinet_id, packages=filtered_packages)
 
         await self._write_openclaw_config(
             session=session,
             project_id=project_id,
             writer=writer,
-            mcp_packages=mcp_packages,
+            mcp_packages=filtered_packages,
         )
 
         config_rel = openclaw_config_relative_path()
@@ -223,7 +226,7 @@ class ProjectMaterializeService:
         if config_rel not in all_written:
             all_written.append(config_rel)
 
-        pkg_names = tuple(p.get("name", "") for p in mcp_packages if p.get("name"))
+        pkg_names = tuple(p.get("name", "") for p in filtered_packages if p.get("name"))
         root = writer.workspace_root
         frozen_module_paths = {mid: tuple(paths) for mid, paths in module_paths.items()}
         return MaterializeResult(
@@ -233,7 +236,7 @@ class ProjectMaterializeService:
             mcp_config_path=str(writer.mcp_config_path),
             status="materialized",
             package_names=pkg_names,
-            sandbox_packages=tuple(mcp_packages),
+            sandbox_packages=tuple(filtered_packages),
             agents_source=agents_source,
             written_paths=tuple(all_written),
             module_paths=frozen_module_paths,
@@ -270,6 +273,27 @@ class ProjectMaterializeService:
             relative_path=openclaw_config_relative_path(),
             text=render_openclaw_config_yaml(cfg),
         )
+
+    async def _filter_mcp_packages(
+        self,
+        session: AsyncSession,
+        project_id: str,
+        mcp_packages: list[dict],
+    ) -> list[dict]:
+        """Apply company MCP allowlist to mcp.json packages (CLAW-P1b).
+
+        ``mcp.json`` on disk and the OpenClaw ``config.yaml`` servers map
+        must both honor the company tool policy; otherwise a Pod agent
+        runtime reading the file directly bypasses the allowlist. The
+        OpenClaw config is filtered inside ``build_openclaw_config``; this
+        mirrors the filter for the raw ``mcp.json`` file.
+        """
+        project = await session.get(ProjectRow, project_id)
+        if project is None:
+            return mcp_packages
+        company_policy = await AdminCompanyService(session).get_agent_policy(project.company_id)
+        tool_policy = default_tool_policy(company_policy.tool_preset)
+        return filter_mcp_packages_by_policy(mcp_packages, tool_policy)
 
 
 _default: ProjectMaterializeService | None = None

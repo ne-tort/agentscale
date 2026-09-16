@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.ai_models.policy_service import AiModelPolicyService
+from prodavan.application.projects.openclaw_config_materializer import filter_mcp_packages_by_policy
 from prodavan.domain.agent import AgentToolPolicy, CreateOpts, default_tool_policy
 from prodavan.domain.ai_keys import ResolvedCredential
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
@@ -19,16 +20,17 @@ def filter_mcp_servers(
     servers: dict[str, Any],
     policy: AgentToolPolicy,
 ) -> dict[str, Any]:
+    """Apply MCP allowlist to the ``mcp.json`` packages list (CLAW-P1b).
+
+    Delegates to ``filter_mcp_packages_by_policy`` so ``mcp.json`` and the
+    OpenClaw ``config.yaml`` servers map enforce the same allowlist before
+    rendering — no asymmetric policy between the two config formats.
+    """
     if policy.mcp == "deny":
         return {}
-    if policy.mcp == "manifest_only":
-        return servers
-    if policy.mcp == "allowlist":
-        allowed = set(policy.mcp_allowlist)
-        packages = servers.get("packages") if isinstance(servers.get("packages"), list) else []
-        filtered = [p for p in packages if isinstance(p, dict) and p.get("name") in allowed]
-        return {**servers, "packages": filtered}
-    return servers
+    packages = servers.get("packages") if isinstance(servers.get("packages"), list) else []
+    filtered = filter_mcp_packages_by_policy(packages, policy)
+    return {**servers, "packages": filtered}
 
 
 def load_mcp_servers_from_workspace(cwd: str) -> dict[str, Any]:

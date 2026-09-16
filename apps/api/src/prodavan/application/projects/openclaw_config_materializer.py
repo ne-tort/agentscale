@@ -6,6 +6,7 @@ from typing import Any
 
 import yaml
 
+from prodavan.application.agent.adapter_kinds import api_kind_to_bridge_adapter
 from prodavan.domain.admin.types import CompanyAgentRuntimePolicy
 from prodavan.domain.agent import AgentToolPolicy, default_tool_policy
 from prodavan.domain.ai_keys import ApiKind
@@ -22,16 +23,6 @@ _PROVIDER_DEFAULT_API_KIND: dict[str, str] = {
 _READ_TOOLS = ("fs.read", "fs.list", "search.grep", "search.glob")
 _WRITE_TOOLS = ("fs.write", "fs.edit")
 _SHELL_TOOLS = ("shell.exec",)
-
-
-def _api_kind_to_bridge_adapter(api_kind: str | None) -> str:
-    if api_kind == ApiKind.CURSOR_SDK:
-        return "cursor_sdk"
-    if api_kind == ApiKind.CODEX_SDK:
-        return "codex_sdk"
-    if api_kind == ApiKind.CLAUDE_AGENT_SDK:
-        return "claude_agent_sdk"
-    return "platform_openclaw"
 
 
 def mcp_packages_to_openclaw_servers(packages: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -134,6 +125,31 @@ def tool_policy_to_permissions(policy: AgentToolPolicy) -> dict[str, Any]:
     return perms
 
 
+def filter_mcp_packages_by_policy(
+    packages: list[dict[str, Any]],
+    policy: AgentToolPolicy,
+) -> list[dict[str, Any]]:
+    """Apply MCP allowlist to package list before any rendering (CLAW-P1b).
+
+    The same filtered list feeds ``mcp.json`` and the OpenClaw ``servers``
+    map so the two config formats stay consistent. A deny preset returns an
+    empty list; ``manifest_only`` passes everything through; ``allowlist``
+    keeps only packages whose ``name`` is in the allowlist.
+    """
+    if policy.mcp == "deny":
+        return []
+    if policy.mcp == "manifest_only":
+        return list(packages)
+    if policy.mcp == "allowlist":
+        allowed = set(policy.mcp_allowlist)
+        return [
+            p
+            for p in packages
+            if isinstance(p, dict) and str(p.get("name") or "") in allowed
+        ]
+    return list(packages)
+
+
 def build_openclaw_config(
     *,
     company_policy: CompanyAgentRuntimePolicy,
@@ -146,9 +162,14 @@ def build_openclaw_config(
     """Build OpenClaw YAML config dict from platform policy + materialized MCP.
 
     Model selection is API-only — never written into config.yaml.
+
+    MCP packages are filtered by ``tool_policy`` *before* rendering so the
+    OpenClaw ``servers`` map and the ``mcp.json`` file (filtered upstream)
+    agree on which servers exist. ``allow_servers`` is kept as a defensive
+    allowlist for runtimes that also enforce it server-side.
     """
     policy = tool_policy or default_tool_policy(company_policy.tool_preset)
-    adapter = _api_kind_to_bridge_adapter(api_kind)
+    adapter = api_kind_to_bridge_adapter(api_kind)
     runtime_adapter = adapter if adapter != "platform_openclaw" else "platform_openclaw"
 
     cfg: dict[str, Any] = {
@@ -167,7 +188,8 @@ def build_openclaw_config(
     if company_policy.max_tokens_per_run is not None:
         cfg.setdefault("runtime", {}).setdefault("budget", {})["max_tokens"] = company_policy.max_tokens_per_run
 
-    servers = mcp_packages_to_openclaw_servers(mcp_packages or [])
+    filtered_packages = filter_mcp_packages_by_policy(mcp_packages or [], policy)
+    servers = mcp_packages_to_openclaw_servers(filtered_packages)
     if servers or policy.mcp != "deny":
         mcp_block: dict[str, Any] = {}
         if servers:

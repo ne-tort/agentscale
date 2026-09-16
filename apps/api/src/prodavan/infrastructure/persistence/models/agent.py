@@ -101,5 +101,16 @@ class AgentUsageRow(Base):
     model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Prompt-cache attribution (audit CLAW-P0b). Claude reports cache
+    # creation/read tokens separately; without them budget/metrics ignored
+    # cache savings and could double-estimate cost.
+    cache_creation_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cache_read_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Vendor message id for dedupe (retried/re-emitted usage events).
+    message_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Where the usage came from: "bridge" (Pod runtime) / "adapter" /
+    # "estimate" (heuristic). cost_usd is an estimate today; token_source
+    # lets future budget logic distinguish verified vs estimated rows.
+    token_source: Mapped[str | None] = mapped_column(String(32), nullable=True)
     cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 6), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

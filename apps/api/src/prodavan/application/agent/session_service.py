@@ -34,6 +34,7 @@ from prodavan.application.agent.policy_service import AgentPolicyService
 from prodavan.application.agent.runtime_guard import require_running_pod_runtime
 from prodavan.application.agent.runtime_model import sanitize_runtime_model, sdk_fallback_model
 from prodavan.application.agent.stream_normalizer import TurnStreamNormalizer
+from prodavan.application.agent.token_normalizer import TokenNormalizer
 from prodavan.application.ai_keys.service import AiKeysService
 from prodavan.application.ai_models.resolution import AiModelResolutionService
 from prodavan.application.project_service import ProjectAccessPolicy
@@ -208,6 +209,65 @@ class AgentSessionService:
             await self._flush_events()
             return 0
         return since_flush
+
+    def _persist_usage_event(
+        self,
+        *,
+        data: dict,
+        session_id: str,
+        seq: int,
+        employee_id: str | None,
+        fallback_provider: str,
+        fallback_model: str | None,
+        token_normalizer: TokenNormalizer,
+        project_id: str,
+        company_id: str,
+        cabinet_id: str,
+    ) -> None:
+        """Persist a normalized USAGE event to ``agent_usage`` + metrics.
+
+        Single source of truth for the bridge and in-process adapter send
+        paths and the bridge ``append_event`` path (audit CLAW-P1a
+        copy-paste). Applies ``TokenNormalizer`` (CLAW-P0b): dedupe by
+        ``message_id``, drop fully-zero trailing usage, persist cache
+        tokens + ``token_source``.
+        """
+        normalized = token_normalizer.normalize_usage(data)
+        if normalized is None:
+            # Duplicate message_id or fully-zero trailing usage — skip.
+            return
+        self._session.add(
+            AgentUsageRow(
+                session_id=session_id,
+                employee_id=employee_id,
+                turn_id=f"turn_{seq}",
+                provider=normalized.provider or fallback_provider,
+                model=normalized.model or fallback_model,
+                input_tokens=normalized.input_tokens,
+                output_tokens=normalized.output_tokens,
+                cache_creation_tokens=normalized.cache_creation_tokens,
+                cache_read_tokens=normalized.cache_read_tokens,
+                message_id=normalized.message_id,
+                token_source=normalized.token_source,
+                cost_usd=Decimal(str(normalized.cost_usd))
+                if normalized.cost_usd is not None
+                else None,
+            )
+        )
+        from prodavan.application.metrics.publish import schedule_usage_turn
+
+        schedule_usage_turn(
+            self._session,
+            project_id=project_id,
+            company_id=company_id,
+            cabinet_id=cabinet_id,
+            employee_id=employee_id,
+            session_id=session_id,
+            input_tokens=normalized.input_tokens,
+            output_tokens=normalized.output_tokens,
+            provider=normalized.provider or fallback_provider,
+            model=normalized.model or fallback_model,
+        )
 
     async def _checkpoint_workspace_after_turn(self, *, project_id: str) -> None:
         await checkpoint_project_workspace(self._session, project_id=project_id, best_effort=True)
@@ -688,6 +748,7 @@ class AgentSessionService:
         since_flush = 0
 
         stream_normalizer = TurnStreamNormalizer()
+        token_normalizer = TokenNormalizer()
         used_bridge = False
         turn_ok = False
         if settings.pod_agent_runtime_enabled:
@@ -733,33 +794,17 @@ class AgentSessionService:
                 yield normalized.to_dict()
                 since_flush += 1
                 if normalized.type == AgentEventType.USAGE:
-                    self._session.add(
-                        AgentUsageRow(
-                            session_id=session_id,
-                            employee_id=employee.id if employee else None,
-                            turn_id=f"turn_{seq}",
-                            provider=str(normalized.data.get("provider") or row.provider),
-                            model=normalized.data.get("model") or row.model,
-                            input_tokens=normalized.data.get("input_tokens"),
-                            output_tokens=normalized.data.get("output_tokens"),
-                            cost_usd=Decimal(str(normalized.data["cost_usd"]))
-                            if normalized.data.get("cost_usd") is not None
-                            else None,
-                        )
-                    )
-                    from prodavan.application.metrics.publish import schedule_usage_turn
-
-                    schedule_usage_turn(
-                        self._session,
+                    self._persist_usage_event(
+                        data=normalized.data,
+                        session_id=session_id,
+                        seq=seq,
+                        employee_id=employee.id if employee else None,
+                        fallback_provider=row.provider,
+                        fallback_model=row.model,
+                        token_normalizer=token_normalizer,
                         project_id=project_id,
                         company_id=project.company_id,
                         cabinet_id=project.cabinet_id,
-                        employee_id=employee.id if employee else None,
-                        session_id=session_id,
-                        input_tokens=normalized.data.get("input_tokens"),
-                        output_tokens=normalized.data.get("output_tokens"),
-                        provider=str(normalized.data.get("provider") or row.provider),
-                        model=normalized.data.get("model") or row.model,
                     )
                 if normalized.type in {AgentEventType.DONE, AgentEventType.ERROR}:
                     if normalized.type == AgentEventType.DONE:
@@ -819,33 +864,17 @@ class AgentSessionService:
             yield normalized.to_dict()
             since_flush += 1
             if normalized.type == AgentEventType.USAGE:
-                self._session.add(
-                    AgentUsageRow(
-                        session_id=session_id,
-                        employee_id=employee.id if employee else None,
-                        turn_id=f"turn_{seq}",
-                        provider=str(normalized.data.get("provider") or row.provider),
-                        model=normalized.data.get("model") or row.model,
-                        input_tokens=normalized.data.get("input_tokens"),
-                        output_tokens=normalized.data.get("output_tokens"),
-                        cost_usd=Decimal(str(normalized.data["cost_usd"]))
-                        if normalized.data.get("cost_usd") is not None
-                        else None,
-                    )
-                )
-                from prodavan.application.metrics.publish import schedule_usage_turn
-
-                schedule_usage_turn(
-                    self._session,
+                self._persist_usage_event(
+                    data=normalized.data,
+                    session_id=session_id,
+                    seq=seq,
+                    employee_id=employee.id if employee else None,
+                    fallback_provider=row.provider,
+                    fallback_model=row.model,
+                    token_normalizer=token_normalizer,
                     project_id=project_id,
                     company_id=project.company_id,
                     cabinet_id=project.cabinet_id,
-                    employee_id=employee.id if employee else None,
-                    session_id=session_id,
-                    input_tokens=normalized.data.get("input_tokens"),
-                    output_tokens=normalized.data.get("output_tokens"),
-                    provider=str(normalized.data.get("provider") or row.provider),
-                    model=normalized.data.get("model") or row.model,
                 )
             if normalized.type == AgentEventType.DONE:
                 turn_ok = True
@@ -1187,33 +1216,19 @@ class AgentSessionService:
                 raw_emp = data.get("employee_id")
                 if isinstance(raw_emp, str) and raw_emp.strip():
                     emp_id = raw_emp.strip()
-            self._session.add(
-                AgentUsageRow(
-                    session_id=session_id,
-                    employee_id=emp_id,
-                    turn_id=f"turn_{seq}",
-                    provider=str(data.get("provider") or row.provider),
-                    model=data.get("model") or row.model,
-                    input_tokens=data.get("input_tokens"),
-                    output_tokens=data.get("output_tokens"),
-                    cost_usd=Decimal(str(data["cost_usd"])) if data.get("cost_usd") is not None else None,
-                )
-            )
             project = await self._session.get(ProjectRow, row.project_id)
             if project is not None:
-                from prodavan.application.metrics.publish import schedule_usage_turn
-
-                schedule_usage_turn(
-                    self._session,
+                self._persist_usage_event(
+                    data=data,
+                    session_id=session_id,
+                    seq=seq,
+                    employee_id=emp_id,
+                    fallback_provider=row.provider,
+                    fallback_model=row.model,
+                    token_normalizer=TokenNormalizer(),
                     project_id=project.id,
                     company_id=project.company_id,
                     cabinet_id=project.cabinet_id,
-                    employee_id=emp_id,
-                    session_id=session_id,
-                    input_tokens=data.get("input_tokens"),
-                    output_tokens=data.get("output_tokens"),
-                    provider=str(data.get("provider") or row.provider),
-                    model=data.get("model") or row.model,
                 )
 
         await self._session.commit()

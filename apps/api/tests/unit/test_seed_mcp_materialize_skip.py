@@ -7,8 +7,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.application.projects.materialize import ProjectMaterializeService
+from prodavan.domain.admin.types import CompanyAgentRuntimePolicy
 from prodavan.infrastructure.files.manager import FileStoreManager, set_file_store
+
+
+def _stub_company_policy() -> CompanyAgentRuntimePolicy:
+    return CompanyAgentRuntimePolicy(tool_preset="workspace_dev")
 
 
 @pytest.mark.asyncio
@@ -57,6 +63,9 @@ async def test_run_materialize_skips_equipment_code_when_zip_present(tmp_path: P
             "prodavan.application.mcp.platform_equipment_mcp.materialize_platform_equipment_mcp"
         ) as mat_eq,
         patch.object(svc, "_write_openclaw_config", AsyncMock()),
+        patch.object(
+            AdminCompanyService, "get_agent_policy", AsyncMock(return_value=_stub_company_policy())
+        ),
     ):
         result = await svc._run_materialize(
             session=session,
@@ -128,6 +137,9 @@ async def test_run_materialize_falls_back_to_code_equipment(tmp_path: Path, monk
             ],
         ),
         patch.object(svc, "_write_openclaw_config", AsyncMock()),
+        patch.object(
+            AdminCompanyService, "get_agent_policy", AsyncMock(return_value=_stub_company_policy())
+        ),
     ):
         result = await svc._run_materialize(
             session=session,

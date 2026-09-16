@@ -21,7 +21,20 @@ def _month_start_utc() -> datetime:
 
 
 def _token_sum_expr():
-    return func.coalesce(AgentUsageRow.input_tokens, 0) + func.coalesce(AgentUsageRow.output_tokens, 0)
+    """Total token consumption per usage row (audit CLAW-P0b).
+
+    Cache tokens (cache_creation / cache_read) are real billed tokens —
+    Claude reports them separately from input/output, and a prompt-cache
+    read is cheaper per-token but still a token. Omitting them hid cache
+    savings from the budget and could make cache-heavy sessions look
+    under budget.
+    """
+    return (
+        func.coalesce(AgentUsageRow.input_tokens, 0)
+        + func.coalesce(AgentUsageRow.output_tokens, 0)
+        + func.coalesce(AgentUsageRow.cache_creation_tokens, 0)
+        + func.coalesce(AgentUsageRow.cache_read_tokens, 0)
+    )
 
 
 class AgentBudgetService:

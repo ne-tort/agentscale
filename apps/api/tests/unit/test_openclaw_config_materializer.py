@@ -7,6 +7,7 @@ import yaml
 from prodavan.application.projects.openclaw_config_materializer import (
     api_kind_to_provider_dialect,
     build_openclaw_config,
+    filter_mcp_packages_by_policy,
     mcp_packages_to_openclaw_servers,
     openclaw_config_relative_path,
     provider_to_default_api_kind,
@@ -15,6 +16,60 @@ from prodavan.application.projects.openclaw_config_materializer import (
 )
 from prodavan.domain.admin.types import CompanyAgentRuntimePolicy
 from prodavan.domain.agent import AgentToolPolicy, default_tool_policy
+
+
+def test_filter_mcp_packages_by_policy_allowlist() -> None:
+    packages = [
+        {"name": "echo", "command": "node", "args": []},
+        {"name": "github", "command": "node", "args": []},
+        {"name": "secret", "command": "node", "args": []},
+    ]
+    policy = AgentToolPolicy(mcp="allowlist", mcp_allowlist=("echo", "github"))
+    filtered = filter_mcp_packages_by_policy(packages, policy)
+    assert {p["name"] for p in filtered} == {"echo", "github"}
+
+
+def test_filter_mcp_packages_by_policy_deny_returns_empty() -> None:
+    policy = AgentToolPolicy(mcp="deny")
+    filtered = filter_mcp_packages_by_policy(
+        [{"name": "echo", "command": "node", "args": []}],
+        policy,
+    )
+    assert filtered == []
+
+
+def test_filter_mcp_packages_by_policy_manifest_only_passes_through() -> None:
+    policy = AgentToolPolicy(mcp="manifest_only")
+    packages = [{"name": "echo", "command": "node", "args": []}]
+    assert filter_mcp_packages_by_policy(packages, policy) == packages
+
+
+def test_build_openclaw_config_servers_match_allowlist() -> None:
+    # CLAW-P1b: mcp.json packages and OpenClaw servers map must both honor the
+    # company allowlist. A package not in the allowlist must not appear in
+    # either config surface.
+    policy = AgentToolPolicy(mcp="allowlist", mcp_allowlist=("echo",))
+    cfg = build_openclaw_config(
+        company_policy=CompanyAgentRuntimePolicy(tool_preset="workspace_full"),
+        tool_policy=policy,
+        mcp_packages=[
+            {"name": "echo", "command": "node", "args": []},
+            {"name": "secret", "command": "node", "args": []},
+        ],
+    )
+    assert set(cfg["mcp"]["servers"]) == {"echo"}
+    assert "secret" not in cfg["mcp"]["servers"]
+
+
+def test_build_openclaw_config_deny_preset_omits_servers() -> None:
+    policy = AgentToolPolicy(mcp="deny")
+    cfg = build_openclaw_config(
+        company_policy=CompanyAgentRuntimePolicy(tool_preset="workspace_full"),
+        tool_policy=policy,
+        mcp_packages=[{"name": "echo", "command": "node", "args": []}],
+    )
+    assert "servers" not in cfg.get("mcp", {})
+
 
 
 def test_mcp_packages_to_openclaw_servers() -> None:

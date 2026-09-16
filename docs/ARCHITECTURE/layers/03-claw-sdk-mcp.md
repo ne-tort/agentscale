@@ -68,11 +68,10 @@ Triggers: [`trigger_dispatcher.py`](../../../apps/api/src/prodavan/application/a
 ### CLAW-P0b — неоднородный подсчёт токенов
 
 **Приоритет:** P0  
-
-- Нет `cache_creation` / `cache_read`.
-- Claude per-step `output_tokens` placeholder → риск двойного суммирования.
-- Нет dedupe по `message_id`.
-- `cost_usd` как estimate используется в hard budget.
+~~- Нет `cache_creation` / `cache_read`.~~  
+~~- Нет dedupe по `message_id`.~~  
+**Исправлено:** `TokenNormalizer` (`application/agent/token_normalizer.py`) — dedupe по `message_id` за turn, fully-zero trailing usage не затирает last non-zero. `AgentUsageRow` расширен колонками `cache_creation_tokens`, `cache_read_tokens`, `message_id`, `token_source` (миграция `2026091601`). Budget `_token_sum_expr` учитывает cache tokens как billed total. Send path + `append_event` персистят нормализованные поля через единый `_persist_usage_event`.  
+**Остаток:** Claude per-step `output_tokens` placeholder требует нормализации cumulative→delta (как `TurnStreamNormalizer` для text) — отдельная доработка Pod runtime. `cost_usd` как estimate в hard budget — semantics soft/hard требует PRODUCT + UI (занесено в backlog).
 
 ### CLAW-P0c — rehydrate text-prefix
 
@@ -82,12 +81,14 @@ Triggers: [`trigger_dispatcher.py`](../../../apps/api/src/prodavan/application/a
 ### CLAW-P1a — дубли и copy-paste
 
 **Приоритет:** P1  
-Двойной `api_kind_to_bridge_adapter`; двойной send path в `session_service`.
+~~Двойной `api_kind_to_bridge_adapter`; двойной send path в `session_service`.~~  
+**Исправлено:** единый `application/agent/adapter_kinds.py` (`api_kind_to_bridge_adapter` + `BRIDGE_ADAPTER_KINDS`); приватный дубликат `_api_kind_to_bridge_adapter` в `openclaw_config_materializer` удалён; `openclaw_bridge` реэкспортирует из единого модуля (обратная совместимость). Copy-paste send path схлопнут в `session_service._persist_usage_event` (bridge + in-process adapter + append_event — один helper USAGE+metrics+cache).
 
 ### CLAW-P1b — MCP policy асимметрия
 
 **Приоритет:** P1  
-Allowlist/deny применяется к одному формату конфига.
+~~Allowlist/deny применяется к одному формату конфига.~~  
+**Исправлено:** `filter_mcp_packages_by_policy` в `openclaw_config_materializer` — единый фильтр **до** render; применяется к `mcp.json` packages (через `materialize._filter_mcp_packages` при записи файла) и к OpenClaw `servers` map (в `build_openclaw_config`). `policy_service.filter_mcp_servers` делегирует туда же — mcp.json и config.yaml консистентны.
 
 ### CLAW-P1c — bridge гонки и HITL fallback
 
