@@ -9,7 +9,7 @@ from prodavan.api.exception_handlers import register_exception_handlers
 from prodavan.api.v1 import health as health_routes
 from prodavan.api.v1.router import router as v1_router
 from prodavan.config.settings import settings
-from prodavan.core.middleware import register_cors, register_pod_surface_allowlist
+from prodavan.core.middleware import register_cors, register_pod_surface_allowlist, register_trace_id
 from prodavan.core.wiring import build_lifespan_manager
 
 
@@ -21,6 +21,9 @@ def create_app() -> FastAPI:
         lifespan=lifespan_manager.as_fastapi_lifespan(),
     )
     app.state.lifespan_manager = lifespan_manager
+    # Trace id first so request.state.trace_id is set for all later middleware
+    # and exception handlers (audit XCUT-P2a).
+    register_trace_id(app)
     # Allowlist before CORS so pod credential checks always run.
     register_pod_surface_allowlist(app)
     register_cors(app, allow_origins=settings.cors_origin_list)

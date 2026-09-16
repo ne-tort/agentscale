@@ -74,7 +74,9 @@
 ### XCUT-P2a — observability разрознена
 
 **Приоритет:** P2  
-Platform events DB-only / deferred; metrics consumers; pod metrics N+1 — нет единого correlation id project/pod/session across bus.
+Platform events DB-only / deferred; metrics consumers; pod metrics N+1 — нет единого correlation id project/pod/session across bus.  
+**Частично исправлено:** `TraceIdMiddleware` (`core/middleware.py`) генерирует per-request `trace_id` (UUID hex), переиспользует входящий `X-Trace-Id`, сохраняет в `request.state.trace_id` и возвращает в response header. Exception handlers (`api/exception_handlers.py`) через `_trace_id(request)` пробрасывают trace_id в problem responses (RFC 7807 body) — клиент видит correlation id для debug без distributed-tracing backend. `register_trace_id` в `main.py` первым (до allowlist/CORS).  
+**Остаток:** event bus correlation_id (в EventEnvelope + Kafka headers) — backlog (крупная, 100+ producers); pod metrics N+1 — backlog (batch metrics).
 
 ## Target-design
 

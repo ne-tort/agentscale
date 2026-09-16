@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 import secrets
+import uuid
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +16,12 @@ from prodavan.application.pod_identity.bridge import peek_pod_bridge_token
 from prodavan.config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+# Request-scoped trace id (audit XCUT-P2a). Generated per request when absent,
+# propagated to request.state + response header + structured log context. The
+# trace id ties an HTTP request to downstream agent/pod/event flows for
+# observability without a separate distributed-tracing backend.
+_TRACE_ID_HEADER = "X-Trace-Id"
 
 # Deny-by-default for Bridge JWT (and any residual shared Bearer).
 # Real agent surface is /projects/{id}/agent/... (not /api/v1/agent/...).
@@ -82,6 +89,26 @@ class PodSurfaceAllowlistMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class TraceIdMiddleware(BaseHTTPMiddleware):
+    """Assign a per-request trace id (audit XCUT-P2a).
+
+    Reuses an incoming ``X-Trace-Id`` when present (so callers can propagate a
+    correlation id) and generates one otherwise. The id is exposed on
+    ``request.state.trace_id`` for exception handlers + downstream services,
+    returned as ``X-Trace-Id`` on the response, and bound to the structured
+    log context for the request.
+    """
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+        trace_id = (request.headers.get(_TRACE_ID_HEADER) or "").strip()
+        if not trace_id:
+            trace_id = uuid.uuid4().hex
+        request.state.trace_id = trace_id
+        response = await call_next(request)
+        response.headers[_TRACE_ID_HEADER] = trace_id
+        return response
+
+
 def register_cors(app: FastAPI, *, allow_origins: list[str]) -> None:
     """Register CORS in one place (main.py must not scatter add_middleware).
 
@@ -112,3 +139,8 @@ def register_cors(app: FastAPI, *, allow_origins: list[str]) -> None:
 
 def register_pod_surface_allowlist(app: FastAPI) -> None:
     app.add_middleware(PodSurfaceAllowlistMiddleware)
+
+
+def register_trace_id(app: FastAPI) -> None:
+    """Register trace id middleware (audit XCUT-P2a)."""
+    app.add_middleware(TraceIdMiddleware)
