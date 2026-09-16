@@ -45,7 +45,7 @@
 
 ### Identity / bridge / credentials
 
-- [`pod_identity/bridge.py`](../../../apps/api/src/prodavan/application/pod_identity/bridge.py) — scoped JWT (`aud=prodavan-pod-bridge`), scopes `agent:events`, `internal:*`, `infra:*`, `module:<id>:*`; `bump_pod_bridge_generation`; **`_GEN_FALLBACK` in-memory**.
+- [`pod_identity/bridge.py`](../../../apps/api/src/prodavan/application/pod_identity/bridge.py) — scoped JWT (`aud=prodavan-pod-bridge`), scopes `agent:events`, `internal:*`, `infra:*`, `module:<id>:*`; `bump_pod_bridge_generation`; ~~`_GEN_FALLBACK` in-memory~~ → Redis-only SoT в prod (`pod_identity_bridge_strict=True`), in-memory fallback только для dev/test (`strict=False`).
 - [`openclaw_bridge.py`](../../../apps/api/src/prodavan/application/agent/openclaw_bridge.py) — HTTP на **pod IP**.
 - [`credential_broker.py`](../../../apps/api/src/prodavan/application/agent/credential_broker.py) — lease AI keys в память sidecar (не env).
 
@@ -60,7 +60,8 @@ Ops-канон: [`docs/07-infrastructure/runbook.md`](../../07-infrastructure/ru
 ### POD-P0a — gen-revocation race
 
 **Приоритет:** P0  
-`_GEN_FALLBACK: dict[str, int]` process-local. Без Redis / multi-replica API: bump на A не виден на B → отозванные JWT остаются валидны. Секрет подписи имеет fallback до `dev-pod-bridge-secret` (см. [04](04-api-infra-access.md)).
+~~`_GEN_FALLBACK: dict[str, int]` process-local. Без Redis / multi-replica API: bump на A не виден на B → отозванные JWT остаются валидны. Секрет подписки имеет fallback до `dev-pod-bridge-secret` (см. [04](04-api-infra-access.md)).~~  
+**Исправлено:** gen теперь Redis-only SoT в strict mode (`pod_identity_bridge_strict=True`, по умолчанию); `_GEN_FALLBACK` используется только в dev/test (`strict=False`). `bump` fail-closed (503) при Redis-down — отозванные токены не остаются валидны из-за несинхронизированного in-memory dict. Signing secret fail-closed без `dev-pod-bridge-secret` fallback в prod. Остаток: при multi-replica + Redis-down новый minted токен (gen 0) валиден до первого bump — требует `redis_required=True` в prod (шаг рефакторинга 6 из слоя 04).
 
 ### POD-P0b — emptyDir workspace
 

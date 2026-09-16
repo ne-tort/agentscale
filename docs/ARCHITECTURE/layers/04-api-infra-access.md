@@ -22,7 +22,7 @@
 
 - [`api/agent_auth.py`](../../../apps/api/src/prodavan/api/agent_auth.py) — preferred Bridge JWT; **shared Bearer rejected** на pod surface.
 - [`core/middleware.py`](../../../apps/api/src/prodavan/core/middleware.py) — `PodSurfaceAllowlistMiddleware`; regex допускает `internal/pods`, `projects/.../infra|modules|agent`.
-- Bridge claims: [`pod_identity/bridge.py`](../../../apps/api/src/prodavan/application/pod_identity/bridge.py) — scopes, HS256, `_signing_secret` с цепочкой fallback → `dev-pod-bridge-secret`.
+- Bridge claims: [`pod_identity/bridge.py`](../../../apps/api/src/prodavan/application/pod_identity/bridge.py) — scopes, HS256, `_signing_secret` fail-closed в prod (`pod_identity_bridge_strict=True`, по умолчанию). Fallback-цепочка на `pod_agent_bridge_auth_token` / `auth_test_secret` доступна только в dev/test режиме (`strict=False`). Revocation gen — Redis-only SoT; при Redis-down bump падает 503 (fail-closed), без in-memory dict в prod.
 
 ### Internal Pod API
 
@@ -61,7 +61,8 @@ Managers: Redis / Mongo / OpenSearch / Kafka / object store — optional flags �
 ### API-P1a — слабая подпись Bridge JWT
 
 **Приоритет:** P1 (граничит с P0 security)  
-HS256 + fallback secret chain. Компромисс API / утечка `auth_test_secret` → подделка любого pod JWT.
+~~HS256 + fallback secret chain. Компромисс API / утечка `auth_test_secret` → подделка любого pod JWT.~~  
+**Частично исправлено:** signing теперь fail-closed в prod (`pod_identity_bridge_strict=True` по умолчанию); fallback-цепочка доступна только в dev/test. Revocation gen — Redis-only SoT, bump падает 503 при Redis-down (fail-closed). Остаток: RS256/JWKS вместо HS256 (шаг рефакторинга 1+).
 
 ### API-P1b — CORS credentials + wildcards
 
@@ -81,7 +82,8 @@ Regex включает весь `/agent/` проекта для любого р�
 ### API-P1e — literal auth env в Pod
 
 **Приоритет:** P1  
-`PRODAVAN_AUTH_TOKEN` value в pod YAML видим в describe / environ.
+`PRODAVAN_AUTH_TOKEN` value в pod YAML видим в describe / environ.  
+**Follow-up (не сделано):** переход на per-pod k8s Secret (создаётся runtime adapter'ом) + `secretKeyRef` требует lifecycle управления per-pod Secret в k8s client/adapter — отдельная доработка, помечена в коде `NOTE(audit API-P1e)`.
 
 ### API-P2a — lease secret без audit
 

@@ -39,6 +39,11 @@ def _build_agent_runtime_container(
     for name, value in context.extra_env:
         env.append({"name": name, "value": value})
     if context.pod_auth_token:
+        # Per-pod Bridge JWT is currently injected as a literal env value.
+        # NOTE(audit API-P1e): a literal env leaks via `kubectl describe pod` /
+        # `/proc/1/environ`. The ideal fix is a per-pod k8s Secret created by the
+        # runtime adapter and referenced via secretKeyRef — tracked as a follow-up
+        # because it requires per-pod Secret lifecycle in the k8s client + adapter.
         env.append({"name": "PRODAVAN_AUTH_TOKEN", "value": context.pod_auth_token})
         if auth_secret_name:
             env.append(

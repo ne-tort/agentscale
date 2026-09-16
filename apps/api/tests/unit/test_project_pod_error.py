@@ -18,7 +18,12 @@ from prodavan.infrastructure.persistence.models.projects import ProjectPodRow, P
 
 
 @pytest.fixture(autouse=True)
-def _noop_container_env_loader():
+def _noop_container_env_loader(monkeypatch):
+    # Bridge revocation gen lives in Redis; unit tests run without it, so use
+    # the in-process fallback (prod runs strict with Redis as SoT).
+    from prodavan.config.settings import settings
+
+    monkeypatch.setattr(settings, "pod_identity_bridge_strict", False)
     with (
         patch(
             "prodavan.application.pod_service.command.ContainerEnvLoader.load_for_project",

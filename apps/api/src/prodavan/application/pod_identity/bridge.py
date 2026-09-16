@@ -107,17 +107,33 @@ class PodBridgeClaims:
 
 
 def _signing_secret() -> str:
+    """Bridge JWT signing secret.
+
+    Fail-closed in prod: an explicit ``pod_identity_bridge_secret`` is required.
+    ``pod_agent_bridge_auth_token`` / ``auth_test_secret`` fallbacks exist only for
+    the transitional ``pod_identity_bridge_strict=False`` mode (dev/test) and must
+    never be enabled in prod.
+    """
     secret = (settings.pod_identity_bridge_secret or "").strip()
     if secret:
         return secret
-    # Fallback so existing clusters work before GitOps secret lands.
+    if getattr(settings, "pod_identity_bridge_strict", True):
+        return ""
+    # Transitional fallbacks — only when strict mode is explicitly disabled.
     fallback = (settings.pod_agent_bridge_auth_token or "").strip()
     if fallback:
         return fallback
-    return (settings.auth_test_secret or "").strip() or "dev-pod-bridge-secret"
+    return (settings.auth_test_secret or "").strip()
 
 
+# In-process generation cache for dev/test only — mirrors Redis when the manager
+# is unavailable so single-process test suites still revoke tokens. In prod this is
+# never a source of truth: verify fails closed when Redis is down and strict=True.
 _GEN_FALLBACK: dict[str, int] = {}
+
+
+def _strict_mode() -> bool:
+    return bool(getattr(settings, "pod_identity_bridge_strict", True))
 
 
 def _gen_key(pod_id: str) -> str:
@@ -130,12 +146,17 @@ async def get_pod_bridge_generation(pod_id: str) -> int:
     from prodavan.core.infra.cache import cache_get
 
     raw = await cache_get(_gen_key(pod_id))
-    if raw is None:
-        return int(_GEN_FALLBACK.get(pod_id, 0))
-    try:
-        return int(raw)
-    except ValueError:
-        return int(_GEN_FALLBACK.get(pod_id, 0))
+    if raw is not None:
+        try:
+            return int(raw)
+        except ValueError:
+            pass
+    if _strict_mode():
+        # No Redis value and strict mode → treat as not provisioned (gen 0).
+        # A pod with gen 0 has never had a token minted; any token with gen>0
+        # is therefore invalid, which is the safe default for a revoked pod.
+        return 0
+    return int(_GEN_FALLBACK.get(pod_id, 0))
 
 
 async def bump_pod_bridge_generation(pod_id: str) -> int:
@@ -144,9 +165,22 @@ async def bump_pod_bridge_generation(pod_id: str) -> int:
 
     current = await get_pod_bridge_generation(pod_id)
     nxt = current + 1
+    ok = await cache_set(_gen_key(pod_id), str(nxt), ttl_sec=60 * 60 * 24 * 30)
+    if _strict_mode():
+        if not ok:
+            # Redis is the source of truth for revocation; if we cannot persist the
+            # new generation, the bump did not happen — callers must surface failure
+            # rather than silently leaving revoked tokens valid.
+            raise AppError(
+                code="POD_BRIDGE_REVOCATION_FAILED",
+                title="Pod bridge revocation failed",
+                status=503,
+                detail="cannot persist pod bridge generation; revocation unavailable",
+            )
+        return nxt
+    # Non-strict (dev/test): mirror into the in-process fallback so single-process
+    # suites without Redis still observe the bump.
     _GEN_FALLBACK[pod_id] = nxt
-    # Long TTL — generations are monotonic counters, not session data.
-    await cache_set(_gen_key(pod_id), str(nxt), ttl_sec=60 * 60 * 24 * 30)
     return nxt
 
 
@@ -185,7 +219,15 @@ async def mint_pod_bridge_token(
         payload["acting_employee_id"] = acting_employee_id
     if session_id:
         payload["session_id"] = session_id
-    token = jwt.encode(payload, _signing_secret(), algorithm="HS256")
+    secret = _signing_secret()
+    if not secret:
+        raise AppError(
+            code="UNAUTHORIZED",
+            title="Unauthorized",
+            status=401,
+            detail="pod bridge signing secret not configured",
+        )
+    token = jwt.encode(payload, secret, algorithm="HS256")
     claims = PodBridgeClaims(
         project_id=project_id,
         cabinet_id=cabinet_id,

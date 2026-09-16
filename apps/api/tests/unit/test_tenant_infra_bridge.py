@@ -9,8 +9,8 @@ from httpx import ASGITransport, AsyncClient
 
 from prodavan.application.pod_identity.bridge import (
     SCOPE_INFRA_CACHE,
-    bump_pod_bridge_generation,
     build_launch_scopes,
+    bump_pod_bridge_generation,
     mint_pod_bridge_token,
     module_meta_scope,
     module_rows_scope,
@@ -28,6 +28,9 @@ async def test_mint_verify_and_revoke(monkeypatch) -> None:
     from prodavan.config.settings import settings
 
     monkeypatch.setattr(settings, "pod_identity_bridge_secret", "unit-bridge-secret")
+    # Non-strict mode uses the in-process gen fallback so revocation works in
+    # unit tests without a Redis manager (prod runs strict with Redis as SoT).
+    monkeypatch.setattr(settings, "pod_identity_bridge_strict", False)
     token, claims = await mint_pod_bridge_token(
         project_id="proj-1",
         cabinet_id="cab-1",
@@ -150,3 +153,67 @@ async def test_shared_token_rejected_by_agent_auth(monkeypatch) -> None:
     with pytest.raises(AppError) as exc:
         await get_agent_auth(_Req(), session=AsyncMock())  # type: ignore[arg-type]
     assert exc.value.status == 403
+
+
+@pytest.mark.asyncio
+async def test_strict_mode_rejects_mint_when_secret_missing(monkeypatch) -> None:
+    """In prod (strict=True) an unset bridge secret must fail closed at mint."""
+    from prodavan.config.settings import settings
+
+    monkeypatch.setattr(settings, "pod_identity_bridge_secret", "")
+    monkeypatch.setattr(settings, "pod_identity_bridge_strict", True)
+    monkeypatch.setattr(settings, "pod_agent_bridge_auth_token", "")
+    monkeypatch.setattr(settings, "auth_test_secret", "")
+
+    with pytest.raises(AppError) as exc:
+        await mint_pod_bridge_token(
+            project_id="proj-1",
+            cabinet_id="cab-1",
+            company_id="co-1",
+            pod_id="pod-empty-secret",
+            scopes=[SCOPE_INFRA_CACHE],
+        )
+    assert exc.value.status == 401
+
+
+@pytest.mark.asyncio
+async def test_non_strict_mode_uses_fallback_secret(monkeypatch) -> None:
+    """Dev/test (strict=False) may use pod_agent_bridge_auth_token fallback."""
+    from prodavan.config.settings import settings
+
+    monkeypatch.setattr(settings, "pod_identity_bridge_secret", "")
+    monkeypatch.setattr(settings, "pod_identity_bridge_strict", False)
+    monkeypatch.setattr(settings, "pod_agent_bridge_auth_token", "fallback-bridge-secret")
+    monkeypatch.setattr(settings, "auth_test_secret", "")
+
+    token, claims = await mint_pod_bridge_token(
+        project_id="proj-1",
+        cabinet_id="cab-1",
+        company_id="co-1",
+        pod_id="pod-fallback",
+        scopes=[SCOPE_INFRA_CACHE],
+    )
+    verified = await verify_pod_bridge_token(token)
+    assert verified.project_id == "proj-1"
+
+
+@pytest.mark.asyncio
+async def test_strict_mode_revocation_fails_when_redis_unavailable(monkeypatch) -> None:
+    """bump must surface failure (503) when Redis cannot persist the new gen.
+
+    Fail-closed revocation: if the new generation cannot be stored, callers
+    must not treat the pod as revoked — otherwise revoked tokens stay valid.
+    """
+    from prodavan.application.pod_identity import bridge as bridge_mod
+    from prodavan.config.settings import settings
+
+    monkeypatch.setattr(settings, "pod_identity_bridge_secret", "unit-bridge-secret")
+    monkeypatch.setattr(settings, "pod_identity_bridge_strict", True)
+    monkeypatch.setattr(
+        "prodavan.core.infra.cache.cache_set",
+        AsyncMock(return_value=False),
+    )
+
+    with pytest.raises(AppError) as exc:
+        await bridge_mod.bump_pod_bridge_generation("pod-redis-down")
+    assert exc.value.status == 503

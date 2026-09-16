@@ -49,13 +49,22 @@ class Settings(BaseSettings):
     opensearch_username: str | None = None
     opensearch_password: str | None = None
 
-    # Pod Identity Bridge (scoped JWT for Project Pods). Empty secret → fallback to
-    # POD_AGENT_BRIDGE_AUTH_TOKEN then AUTH_TEST_SECRET.
+    # Pod Identity Bridge (scoped JWT for Project Pods). In prod an explicit
+    # secret is required (pod_identity_bridge_strict=True → fail closed).
+    # Fallbacks to POD_AGENT_BRIDGE_AUTH_TOKEN / AUTH_TEST_SECRET only exist for
+    # dev/test and must never be enabled in prod.
     pod_identity_bridge_secret: str = Field(
         default="",
         validation_alias=AliasChoices(
             "POD_IDENTITY_BRIDGE_SECRET",
             "POD_BRIDGE_JWT_SECRET",
+        ),
+    )
+    pod_identity_bridge_strict: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "POD_IDENTITY_BRIDGE_STRICT",
+            "POD_BRIDGE_JWT_STRICT",
         ),
     )
     pod_identity_bridge_ttl_seconds: int = Field(
