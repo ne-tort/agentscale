@@ -168,7 +168,7 @@ class MaterializePlanner:
         if isinstance(body, dict):
             roots = body.get("workspace_roots")
             if isinstance(roots, list):
-                return [str(r) for r in roots if r]
+                return _sanitize_workspace_roots(roots)
         return []
 
     async def plan_paths_for_module(
@@ -607,6 +607,33 @@ def _pick_active_profile(rows: list[dict[str, Any]], project_id: str) -> str | N
     if defaults:
         return defaults[0]
     return matches[0][0]
+
+
+def _sanitize_workspace_roots(roots: list[Any]) -> list[str]:
+    """Filter ``materialize_roots.workspace_roots`` to safe prune prefixes.
+
+    Audit META-P2b: a malicious or buggy meta-slug could list ``..``, ``/``,
+    ``.`` or empty strings as workspace roots — ``wipe_prefix`` would then
+    try to prune outside the project workspace (``..``) or wipe the whole
+    workspace (``/`` / ``.``). Reject everything that is not a relative path
+    with no ``..`` segment, so sync_project cannot delete foreign files.
+    """
+    safe: list[str] = []
+    for raw in roots:
+        if not isinstance(raw, str):
+            continue
+        candidate = raw.strip()
+        if not candidate:
+            continue
+        # Normalize separators and reject absolute / parent-escape / cwd.
+        norm = candidate.replace("\\", "/").lstrip("/")
+        if not norm or norm in {".", "./"}:
+            continue
+        parts = PurePosixPath(norm).parts
+        if ".." in parts:
+            continue
+        safe.append(norm)
+    return safe
 
 
 def _row_applies_to_project(body: dict[str, Any], project_id: str) -> bool:

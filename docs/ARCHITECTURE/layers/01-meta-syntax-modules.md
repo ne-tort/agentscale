@@ -93,7 +93,8 @@ DB meta slug `actions` + `_product_seed_action` из Python seeds, когда DB
 ### META-P2b — legacy merge и опасный prune
 
 **Приоритет:** P2  
-`merge_mapped_sqlite` — legacy merge артефактов. `sync_project` делает `wipe_prefix` по `workspace_roots`; кривой meta-slug может стереть чужие пути в workspace.
+~~`merge_mapped_sqlite` — legacy merge артефактов. `sync_project` делает `wipe_prefix` по `workspace_roots`; кривой meta-slug может стереть чужие пути в workspace.~~  
+**Исправлено:** defense-in-depth на 3 уровнях: (1) `module_meta_validator._validate_materialize_roots` — `materialize_roots` slug теперь в `META_DOCUMENT_SLUGS`, валидирует `workspace_roots` (reject `..`, `/`, `.`, non-string) при save; (2) `materialize_planner._sanitize_workspace_roots` фильтрует roots при read; (3) `WorkspaceLayoutWriter.wipe_prefix` defensive guard — refuse `..`, `/`, `.` prefixes (local FS `shutil.rmtree` не может escape project root). `merge_mapped_sqlite` (legacy) — unchanged, backlog.
 
 ## Target-design
 

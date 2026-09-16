@@ -235,3 +235,44 @@ def test_product_module_seeds_pass_meta_validation() -> None:
         mod_equipment_meta(),
     ):
         validate_merged_slug_map(meta)
+
+
+def test_materialize_roots_rejects_parent_escape() -> None:
+    # META-P2b: workspace_roots must not list '..' — sync_project wipe_prefix
+    # would prune outside the project workspace.
+    with pytest.raises(AppError) as exc:
+        validate_document_body(
+            "materialize_roots", {"workspace_roots": ["packages", "../escape"]}
+        )
+    assert ".." in (exc.value.detail or "")
+
+
+def test_materialize_roots_rejects_workspace_root() -> None:
+    with pytest.raises(AppError) as exc:
+        validate_document_body("materialize_roots", {"workspace_roots": ["."]})
+    assert "workspace root" in (exc.value.detail or "").lower()
+
+
+def test_materialize_roots_rejects_non_string_entry() -> None:
+    with pytest.raises(AppError) as exc:
+        validate_document_body("materialize_roots", {"workspace_roots": [123]})
+    assert "must be a string" in (exc.value.detail or "")
+
+
+def test_materialize_roots_accepts_safe_relative_paths() -> None:
+    # Should not raise.
+    validate_document_body(
+        "materialize_roots", {"workspace_roots": ["packages", "prompts/rules"]}
+    )
+
+
+def test_materialize_roots_accepts_empty() -> None:
+    # Empty roots list / missing is allowed (no prune).
+    validate_document_body("materialize_roots", {"workspace_roots": []})
+    validate_document_body("materialize_roots", {})
+
+
+def test_materialize_roots_rejects_non_object_body() -> None:
+    with pytest.raises(AppError) as exc:
+        validate_document_body("materialize_roots", ["packages"])
+    assert "JSON object" in (exc.value.detail or "")

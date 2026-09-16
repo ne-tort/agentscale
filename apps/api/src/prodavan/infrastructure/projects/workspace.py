@@ -6,7 +6,7 @@ import json
 import shutil
 import zipfile
 from io import BytesIO
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from prodavan.config.settings import settings
@@ -222,8 +222,18 @@ class WorkspaceLayoutWriter:
             shutil.rmtree(local, ignore_errors=True)
 
     def wipe_prefix(self, prefix: str) -> None:
-        rel = prefix.lstrip("/").replace("\\", "/")
-        if rel and not rel.endswith("/"):
+        # Audit META-P2b: defensive guard — even if a meta-slug slips through
+        # with an unsafe prefix (.., /, .), refuse to prune outside the project
+        # workspace. ``workspace_object_key`` raises on ``..`` for the object
+        # store, but the local FS path (self._root / rel) needs its own guard
+        # so ``shutil.rmtree`` cannot escape the project root.
+        rel = prefix.replace("\\", "/").lstrip("/")
+        if not rel or rel in {".", "./"}:
+            # Wiping the whole workspace is never what a module prune wants.
+            return
+        if ".." in PurePosixPath(rel).parts:
+            return
+        if not rel.endswith("/"):
             if "/" not in rel and "." in rel.split("/")[-1]:
                 self.remove_relative_path(rel)
                 return

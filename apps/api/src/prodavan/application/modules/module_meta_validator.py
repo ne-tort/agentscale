@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import PurePosixPath
 from typing import Any
 
 from prodavan.application.projects.template_substitute import (
@@ -52,7 +53,7 @@ ARRAY_DOCUMENT_SLUGS = frozenset(
         "container_env_secrets",
     }
 )
-META_DOCUMENT_SLUGS = ARRAY_DOCUMENT_SLUGS | {"seed_rows"}
+META_DOCUMENT_SLUGS = ARRAY_DOCUMENT_SLUGS | {"seed_rows", "materialize_roots"}
 
 
 def _meta_error(detail: str) -> AppError:
@@ -86,8 +87,44 @@ def validate_document_body(slug: str, body: Any) -> None:
         if items is not None and not isinstance(items, list):
             raise _meta_error("seed_rows.items must be an array")
         return
+    if slug == "materialize_roots":
+        _validate_materialize_roots(body)
+        return
     if not isinstance(body, list):
         raise _meta_error(f"{slug} body must be a JSON array")
+
+
+def _validate_materialize_roots(body: Any) -> None:
+    """Audit META-P2b: ``workspace_roots`` must be relative paths with no ``..``.
+
+    A malicious or buggy meta-slug listing ``..`` / ``/`` / ``.`` would let
+    sync_project ``wipe_prefix`` prune outside the project workspace. Reject
+    at save time so the bad meta never reaches materialize.
+    """
+    if not isinstance(body, dict):
+        raise _meta_error("materialize_roots body must be a JSON object")
+    roots = body.get("workspace_roots")
+    if roots is None:
+        return  # empty is allowed (no roots → no prune)
+    if not isinstance(roots, list):
+        raise _meta_error("materialize_roots.workspace_roots must be an array")
+    for idx, raw in enumerate(roots):
+        if not isinstance(raw, str):
+            raise _meta_error(
+                f"materialize_roots.workspace_roots[{idx}] must be a string"
+            )
+        candidate = raw.strip()
+        if not candidate:
+            continue
+        norm = candidate.replace("\\", "/").lstrip("/")
+        if not norm or norm in {".", "./"}:
+            raise _meta_error(
+                f"materialize_roots.workspace_roots[{idx}] cannot be the workspace root"
+            )
+        if ".." in PurePosixPath(norm).parts:
+            raise _meta_error(
+                f"materialize_roots.workspace_roots[{idx}] must not contain '..': {raw!r}"
+            )
 
 
 def manifest_from_slug_map(slug_map: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
