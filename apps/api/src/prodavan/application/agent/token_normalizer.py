@@ -44,7 +44,13 @@ def _as_int(value: Any) -> int | None:
 
 @dataclass(frozen=True, slots=True)
 class NormalizedUsage:
-    """Normalized USAGE payload ready for ``AgentUsageRow`` + metrics."""
+    """Normalized USAGE payload ready for ``AgentUsageRow`` + metrics.
+
+    ``to_payload`` projects the normalized fields (plus any extra passthrough
+    keys the bridge sent) back into a dict for ``AgentEventRow.payload`` and
+    SSE, so the persisted transcript no longer carries vendor aliases like
+    ``cache_creation_input_tokens`` / ``estimated_cost_usd``.
+    """
 
     input_tokens: int | None
     output_tokens: int | None
@@ -55,6 +61,91 @@ class NormalizedUsage:
     model: str | None
     message_id: str | None
     token_source: str | None
+
+    def to_payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "input_tokens": self.input_tokens,
+            "output_tokens": self.output_tokens,
+            "cache_creation_tokens": self.cache_creation_tokens,
+            "cache_read_tokens": self.cache_read_tokens,
+        }
+        if self.cost_usd is not None:
+            payload["cost_usd"] = self.cost_usd
+        if self.provider:
+            payload["provider"] = self.provider
+        if self.model:
+            payload["model"] = self.model
+        if self.message_id:
+            payload["message_id"] = self.message_id
+        if self.token_source:
+            payload["token_source"] = self.token_source
+        return payload
+
+    def is_fully_zero(self) -> bool:
+        numeric = (
+            self.input_tokens,
+            self.output_tokens,
+            self.cache_creation_tokens,
+            self.cache_read_tokens,
+            self.cost_usd,
+        )
+        return all(value in (None, 0) for value in numeric)
+
+
+# Vendor aliases that ``extract`` collapses into canonical fields. Kept as
+# a module constant so the normalization contract is in one place.
+_USAGE_FIELD_ALIASES = {
+    "cache_creation_tokens": "cache_creation_input_tokens",
+    "cache_read_tokens": "cache_read_input_tokens",
+    "cost_usd": "estimated_cost_usd",
+    "message_id": "request_id",
+    "token_source": "usage_source",
+}
+
+
+def _extract_message_id(data: dict[str, Any]) -> str | None:
+    raw = data.get("message_id") or data.get("request_id")
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    return text or None
+
+
+def _extract_cost(data: dict[str, Any]) -> float | None:
+    raw = data.get("cost_usd")
+    if raw is None:
+        raw = data.get("estimated_cost_usd")
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def extract_usage(data: dict[str, Any]) -> NormalizedUsage:
+    """Project a raw vendor USAGE payload into canonical fields (CLAW-P0b).
+
+    Single source of truth for field extraction + alias collapsing. Both
+    ``TokenNormalizer.normalize_usage`` (dedupe + zero-skip) and callers
+    that only need field projection go through here, so the canonical
+    schema cannot drift between the two paths.
+    """
+    return NormalizedUsage(
+        input_tokens=_as_int(data.get("input_tokens")),
+        output_tokens=_as_int(data.get("output_tokens")),
+        cache_creation_tokens=_as_int(
+            data.get("cache_creation_tokens") or data.get("cache_creation_input_tokens")
+        ),
+        cache_read_tokens=_as_int(
+            data.get("cache_read_tokens") or data.get("cache_read_input_tokens")
+        ),
+        cost_usd=_extract_cost(data),
+        provider=str(data["provider"]) if data.get("provider") else None,
+        model=str(data["model"]) if data.get("model") else None,
+        message_id=_extract_message_id(data),
+        token_source=str(data["token_source"]) if data.get("token_source") else None,
+    )
 
 
 class TokenNormalizer:
@@ -74,116 +165,49 @@ class TokenNormalizer:
         Skip rules (fail-safe: never inflate the budget):
 
         * duplicate ``message_id`` already seen this turn → ``None``;
-        * fully-zero usage (no input/output/cache, no cost, no new
-          ``message_id``) → ``None`` so it cannot overwrite the last real
-          row via a subsequent persist path.
+        * fully-zero usage (no input/output/cache, no cost) → ``None`` so it
+          cannot overwrite the last real row via a subsequent persist path.
         """
-        message_id = self._extract_message_id(data)
+        message_id = _extract_message_id(data)
         if message_id and message_id in self._seen_message_ids:
             return None
         if message_id:
             self._seen_message_ids.add(message_id)
 
-        input_tokens = _as_int(data.get("input_tokens"))
-        output_tokens = _as_int(data.get("output_tokens"))
-        cache_creation = _as_int(
-            data.get("cache_creation_tokens")
-            or data.get("cache_creation_input_tokens")
-        )
-        cache_read = _as_int(data.get("cache_read_tokens") or data.get("cache_read_input_tokens"))
-        cost_usd = self._extract_cost(data)
-        provider = data.get("provider")
-        model = data.get("model")
-        token_source = data.get("token_source") or data.get("usage_source")
-
-        normalized = NormalizedUsage(
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cache_creation_tokens=cache_creation,
-            cache_read_tokens=cache_read,
-            cost_usd=cost_usd,
-            provider=str(provider) if provider else None,
-            model=str(model) if model else None,
-            message_id=message_id,
-            token_source=str(token_source) if token_source else None,
-        )
-
-        if self._is_fully_zero(normalized):
+        normalized = extract_usage(data)
+        if normalized.is_fully_zero():
             # A trailing zero USAGE must not wipe the last real row.
             return None
         self._last_nonzero = normalized
         return normalized
 
-    @staticmethod
-    def _extract_message_id(data: dict[str, Any]) -> str | None:
-        raw = data.get("message_id") or data.get("request_id")
-        if raw is None:
-            return None
-        text = str(raw).strip()
-        return text or None
-
-    @staticmethod
-    def _extract_cost(data: dict[str, Any]) -> float | None:
-        raw = data.get("cost_usd")
-        if raw is None:
-            raw = data.get("estimated_cost_usd")
-        if raw is None:
-            return None
-        try:
-            return float(raw)
-        except (TypeError, ValueError):
-            return None
-
-    @staticmethod
-    def _is_fully_zero(usage: NormalizedUsage) -> bool:
-        numeric_fields = (
-            usage.input_tokens,
-            usage.output_tokens,
-            usage.cache_creation_tokens,
-            usage.cache_read_tokens,
-            usage.cost_usd,
-        )
-        return all(value in (None, 0) for value in numeric_fields)
+    def last_nonzero(self) -> NormalizedUsage | None:
+        """Last non-zero usage seen this turn (for diagnostics / fallback)."""
+        return self._last_nonzero
 
 
 def normalize_usage_event(event: AgentEvent) -> AgentEvent | None:
-    """Stateless helper for tests / one-shot normalization.
+    """Stateless field-projection for a USAGE ``AgentEvent`` (CLAW-P0b).
 
-    Returns a USAGE ``AgentEvent`` with normalized fields (cache_* tokens,
-    ``token_source``), or ``None`` when the event is a duplicate/zero that
-    should be dropped. Per-turn dedupe requires the stateful class above;
-    this helper only does field projection + zero-skip for callers that do
-    not need cross-event dedupe (e.g. append_event from bridge).
+    Returns a USAGE ``AgentEvent`` with canonical fields (cache_* tokens,
+    ``token_source``) and vendor aliases collapsed, or ``None`` when the
+    event is fully-zero and should be dropped. Does **not** dedupe across
+    events — use ``TokenNormalizer`` for per-turn dedupe. Non-USAGE events
+    pass through unchanged.
     """
     if event.type != AgentEventType.USAGE:
         return event
-    data = dict(event.data) if isinstance(event.data, dict) else {}
-    input_tokens = _as_int(data.get("input_tokens"))
-    output_tokens = _as_int(data.get("output_tokens"))
-    cache_creation = _as_int(
-        data.get("cache_creation_tokens") or data.get("cache_creation_input_tokens")
-    )
-    cache_read = _as_int(data.get("cache_read_tokens") or data.get("cache_read_input_tokens"))
-    cost_usd = TokenNormalizer._extract_cost(data)
-    # Skip fully-zero trailing usage (no signal, avoids wiping last row).
-    numeric = (input_tokens, output_tokens, cache_creation, cache_read, cost_usd)
-    if all(value in (None, 0) for value in numeric):
+    if not isinstance(event.data, dict):
+        return event
+    normalized = extract_usage(event.data)
+    if normalized.is_fully_zero():
         return None
-    normalized_data: dict[str, Any] = {
+    # Preserve passthrough keys the bridge may have sent, but drop the
+    # collapsed aliases so the transcript never carries duplicate shapes.
+    passthrough = {
         k: v
-        for k, v in data.items()
-        if k
-        not in {
-            "cache_creation_input_tokens",
-            "cache_read_input_tokens",
-            "estimated_cost_usd",
-        }
+        for k, v in event.data.items()
+        if k not in set(_USAGE_FIELD_ALIASES.values()) | set(_USAGE_FIELD_ALIASES.keys())
     }
-    normalized_data["input_tokens"] = input_tokens
-    normalized_data["output_tokens"] = output_tokens
-    normalized_data["cache_creation_tokens"] = cache_creation
-    normalized_data["cache_read_tokens"] = cache_read
-    normalized_data["cost_usd"] = cost_usd
-    if not normalized_data.get("token_source") and data.get("usage_source"):
-        normalized_data["token_source"] = data["usage_source"]
-    return AgentEvent(type=event.type, data=normalized_data, at=event.at)
+    return AgentEvent(type=event.type, data={**passthrough, **normalized.to_payload()}, at=event.at)
+

@@ -34,7 +34,7 @@ from prodavan.application.agent.policy_service import AgentPolicyService
 from prodavan.application.agent.runtime_guard import require_running_pod_runtime
 from prodavan.application.agent.runtime_model import sanitize_runtime_model, sdk_fallback_model
 from prodavan.application.agent.stream_normalizer import TurnStreamNormalizer
-from prodavan.application.agent.token_normalizer import TokenNormalizer
+from prodavan.application.agent.token_normalizer import TokenNormalizer, normalize_usage_event
 from prodavan.application.ai_keys.service import AiKeysService
 from prodavan.application.ai_models.resolution import AiModelResolutionService
 from prodavan.application.project_service import ProjectAccessPolicy
@@ -47,6 +47,7 @@ from prodavan.domain.agent import (
     PLATFORM_EVENT_TOOL_APPROVAL_DECISION,
     PLATFORM_EVENT_USER_MESSAGE,
     PLATFORM_STREAM_EVENT_TYPES,
+    AgentEvent,
     AgentEventType,
     AgentHandle,
     AgentSessionStatus,
@@ -268,6 +269,73 @@ class AgentSessionService:
             provider=normalized.provider or fallback_provider,
             model=normalized.model or fallback_model,
         )
+
+    def _append_stream_event(
+        self,
+        *,
+        event: AgentEvent,
+        session_id: str,
+        seq: int,
+        employee_id: str | None,
+        fallback_provider: str,
+        fallback_model: str | None,
+        stream_normalizer: TurnStreamNormalizer,
+        token_normalizer: TokenNormalizer,
+        project_id: str,
+        company_id: str,
+        cabinet_id: str,
+    ) -> tuple[AgentEvent, int] | None:
+        """Persist one stream event + (for USAGE) usage row, return wire event.
+
+        Single send-path helper (audit CLAW-P1a copy-paste) shared by the
+        bridge and in-process adapter ``_iter_send_events`` branches:
+
+        * ``TurnStreamNormalizer`` projects cumulative text/thinking deltas
+          to incremental wire chunks;
+        * ``normalize_usage_event`` projects USAGE payload to canonical
+          fields (cache_* tokens, ``token_source``) before the event is
+          persisted to ``agent_events`` and yielded on the wire, so the
+          transcript never carries vendor aliases like
+          ``cache_creation_input_tokens`` (CLAW-P0b);
+        * ``_persist_usage_event`` dedupes by ``message_id`` and persists
+          the canonical usage row + metrics.
+
+        Returns the ``(wire_event, next_seq)`` tuple, or ``None`` when the
+        event produced no wire output (normalized away). ``seq`` is mutated
+        by the caller; the helper receives the current ``seq`` and returns
+        the incremented value to keep both branches identical.
+        """
+        normalized = stream_normalizer.normalize_event(event)
+        if normalized is None:
+            return None
+        if normalized.type == AgentEventType.USAGE:
+            projected = normalize_usage_event(normalized)
+            if projected is not None:
+                normalized = projected
+        next_seq = seq + 1
+        self._session.add(
+            AgentEventRow(
+                session_id=session_id,
+                seq=next_seq,
+                event_type=normalized.type,
+                payload=normalized.data,
+                at=None,
+            )
+        )
+        if normalized.type == AgentEventType.USAGE:
+            self._persist_usage_event(
+                data=normalized.data,
+                session_id=session_id,
+                seq=next_seq,
+                employee_id=employee_id,
+                fallback_provider=fallback_provider,
+                fallback_model=fallback_model,
+                token_normalizer=token_normalizer,
+                project_id=project_id,
+                company_id=company_id,
+                cabinet_id=cabinet_id,
+            )
+        return normalized, next_seq
 
     async def _checkpoint_workspace_after_turn(self, *, project_id: str) -> None:
         await checkpoint_project_workspace(self._session, project_id=project_id, best_effort=True)
@@ -778,34 +846,24 @@ class AgentSessionService:
                 ),
             ):
                 used_bridge = True
-                normalized = stream_normalizer.normalize_event(event)
-                if normalized is None:
-                    continue
-                seq += 1
-                self._session.add(
-                    AgentEventRow(
-                        session_id=session_id,
-                        seq=seq,
-                        event_type=normalized.type,
-                        payload=normalized.data,
-                        at=None,
-                    )
+                appended = self._append_stream_event(
+                    event=event,
+                    session_id=session_id,
+                    seq=seq,
+                    employee_id=employee.id if employee else None,
+                    fallback_provider=row.provider,
+                    fallback_model=row.model,
+                    stream_normalizer=stream_normalizer,
+                    token_normalizer=token_normalizer,
+                    project_id=project_id,
+                    company_id=project.company_id,
+                    cabinet_id=project.cabinet_id,
                 )
+                if appended is None:
+                    continue
+                normalized, seq = appended
                 yield normalized.to_dict()
                 since_flush += 1
-                if normalized.type == AgentEventType.USAGE:
-                    self._persist_usage_event(
-                        data=normalized.data,
-                        session_id=session_id,
-                        seq=seq,
-                        employee_id=employee.id if employee else None,
-                        fallback_provider=row.provider,
-                        fallback_model=row.model,
-                        token_normalizer=token_normalizer,
-                        project_id=project_id,
-                        company_id=project.company_id,
-                        cabinet_id=project.cabinet_id,
-                    )
                 if normalized.type in {AgentEventType.DONE, AgentEventType.ERROR}:
                     if normalized.type == AgentEventType.DONE:
                         state = await bridge.sync_adapter_state_for_session(
@@ -848,34 +906,24 @@ class AgentSessionService:
         if adapter is None:
             raise agent_runtime_unavailable()
         async for event in adapter.send(handle, message):
-            normalized = stream_normalizer.normalize_event(event)
-            if normalized is None:
-                continue
-            seq += 1
-            self._session.add(
-                AgentEventRow(
-                    session_id=session_id,
-                    seq=seq,
-                    event_type=normalized.type,
-                    payload=normalized.data,
-                    at=None,
-                )
+            appended = self._append_stream_event(
+                event=event,
+                session_id=session_id,
+                seq=seq,
+                employee_id=employee.id if employee else None,
+                fallback_provider=row.provider,
+                fallback_model=row.model,
+                stream_normalizer=stream_normalizer,
+                token_normalizer=token_normalizer,
+                project_id=project_id,
+                company_id=project.company_id,
+                cabinet_id=project.cabinet_id,
             )
+            if appended is None:
+                continue
+            normalized, seq = appended
             yield normalized.to_dict()
             since_flush += 1
-            if normalized.type == AgentEventType.USAGE:
-                self._persist_usage_event(
-                    data=normalized.data,
-                    session_id=session_id,
-                    seq=seq,
-                    employee_id=employee.id if employee else None,
-                    fallback_provider=row.provider,
-                    fallback_model=row.model,
-                    token_normalizer=token_normalizer,
-                    project_id=project_id,
-                    company_id=project.company_id,
-                    cabinet_id=project.cabinet_id,
-                )
             if normalized.type == AgentEventType.DONE:
                 turn_ok = True
             if normalized.type in {AgentEventType.DONE, AgentEventType.ERROR}:
