@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -10,6 +11,14 @@ from prodavan.application.project_service import ProjectAccessPolicy
 from prodavan.application.projects.trigger_service import ProjectTriggerService
 from prodavan.domain.errors import AppError
 from prodavan.domain.projects import ProjectStatus, verify_webhook_signature
+
+if TYPE_CHECKING:
+    from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+
+def _ingress_not_found() -> AppError:
+    """Generic 404 for missing project / missing webhook secret (audit API-P2d)."""
+    return AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Project not found")
 
 
 async def enqueue_signed_trigger(
@@ -20,6 +29,7 @@ async def enqueue_signed_trigger(
     raw_body: bytes,
     signature_header: str | None,
     secret: str | None,
+    project: ProjectRow | None = None,
 ) -> dict:
     """Enqueue a signed external trigger.
 
@@ -32,16 +42,17 @@ async def enqueue_signed_trigger(
     pass ``secret=None`` when either the project or the secret is missing so
     both collapse to the generic 404 here.
 
-    The former ``secret_name`` parameter was dropped: it leaked into the 503
-    detail and is no longer needed now that missing-secret collapses to a
-    generic 404 without detail.
+    ``project`` may be passed by the caller (route handler already loaded it
+    for secret resolution) to avoid a duplicate DB round-trip; when ``None``,
+    it is loaded here via ``get_project_or_none``.
     """
-    project = await ProjectAccessPolicy(session).get_project_or_none(project_id)
+    if project is None:
+        project = await ProjectAccessPolicy(session).get_project_or_none(project_id)
     if project is None or project.status == ProjectStatus.DELETED:
-        raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Project not found")
+        raise _ingress_not_found()
     if not secret:
         # Same shape as a missing project — do not reveal existence.
-        raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Project not found")
+        raise _ingress_not_found()
     if not verify_webhook_signature(secret=secret, body=raw_body, header=signature_header):
         raise AppError(
             code="WEBHOOK_SIGNATURE_INVALID",

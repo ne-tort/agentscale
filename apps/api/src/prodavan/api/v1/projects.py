@@ -972,16 +972,9 @@ async def ingress_signed_webhook(
 ) -> dict:
     """External webhook.http ingress — HMAC-SHA256 over raw body (company policy secret)."""
     await _enforce_ingress_rate_limit(project_id, channel="webhook")
-    # API-P2d: load project without raising — a missing project and a missing
-    # webhook secret must collapse to the same generic 404 to avoid enumeration.
-    from prodavan.domain.projects import ProjectStatus
-
-    project = await ProjectAccessPolicy(session).get_project_or_none(project_id)
-    webhook_secret: str | None = None
-    if project is not None and project.status != ProjectStatus.DELETED:
-        webhook_secret, _ = await AdminCompanyService(session).get_ingress_hmac_secrets(
-            project.company_id
-        )
+    project, webhook_secret = await _resolve_ingress_secret(
+        session, project_id=project_id, channel="webhook"
+    )
     return await enqueue_signed_trigger(
         session,
         project_id=project_id,
@@ -989,6 +982,7 @@ async def ingress_signed_webhook(
         raw_body=await request.body(),
         signature_header=x_prodavan_signature,
         secret=webhook_secret,
+        project=project,
     )
 
 
@@ -1001,14 +995,9 @@ async def ingress_signed_telegram(
 ) -> dict:
     """Telegram bot transport ingress — HMAC-SHA256 (company telegram_hmac_secret)."""
     await _enforce_ingress_rate_limit(project_id, channel="telegram")
-    from prodavan.domain.projects import ProjectStatus
-
-    project = await ProjectAccessPolicy(session).get_project_or_none(project_id)
-    telegram_secret: str | None = None
-    if project is not None and project.status != ProjectStatus.DELETED:
-        _, telegram_secret = await AdminCompanyService(session).get_ingress_hmac_secrets(
-            project.company_id
-        )
+    project, telegram_secret = await _resolve_ingress_secret(
+        session, project_id=project_id, channel="telegram"
+    )
     return await enqueue_signed_trigger(
         session,
         project_id=project_id,
@@ -1016,7 +1005,33 @@ async def ingress_signed_telegram(
         raw_body=await request.body(),
         signature_header=x_prodavan_signature,
         secret=telegram_secret,
+        project=project,
     )
+
+
+async def _resolve_ingress_secret(
+    session: SessionDep,
+    *,
+    project_id: str,
+    channel: str,
+) -> tuple:
+    """Load project (without raising) + the channel HMAC secret (audit API-P2d).
+
+    A missing project and a missing secret both collapse to ``secret=None`` +
+    ``project=None`` so ``enqueue_signed_trigger`` answers the same generic
+    404 for either case — no project-id enumeration via 404 vs 503.
+    Shared by both webhook/telegram ingress handlers (DRY).
+    """
+    from prodavan.domain.projects import ProjectStatus
+
+    project = await ProjectAccessPolicy(session).get_project_or_none(project_id)
+    secret: str | None = None
+    if project is not None and project.status != ProjectStatus.DELETED:
+        webhook_secret, telegram_secret = await AdminCompanyService(
+            session
+        ).get_ingress_hmac_secrets(project.company_id)
+        secret = webhook_secret if channel == "webhook" else telegram_secret
+    return project, secret
 
 
 async def _enforce_ingress_rate_limit(project_id: str, *, channel: str) -> None:
