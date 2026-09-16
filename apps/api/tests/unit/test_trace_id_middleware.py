@@ -65,3 +65,62 @@ def test_error_response_carries_trace_id() -> None:
     body = resp.json()
     assert body["trace_id"] == trace_id
     assert body["code"] == "BOOM"
+
+
+def test_malicious_incoming_trace_id_rejected() -> None:
+    # An incoming X-Trace-Id with whitespace / control chars / weird shape is
+    # ignored — a fresh uuid is generated so a hostile caller cannot inject
+    # log noise through the header.
+    client = TestClient(_app())
+    resp = client.get("/trace", headers={_TRACE_ID_HEADER: "bad trace\ninjection"})
+    assert resp.status_code == 200
+    trace_id = resp.headers[_TRACE_ID_HEADER]
+    assert trace_id != "bad trace\ninjection"
+    assert len(trace_id) == 32  # generated uuid hex
+
+
+def test_empty_incoming_trace_id_generated() -> None:
+    client = TestClient(_app())
+    resp = client.get("/trace", headers={_TRACE_ID_HEADER: "   "})
+    assert resp.status_code == 200
+    trace_id = resp.headers[_TRACE_ID_HEADER]
+    assert len(trace_id) == 32
+
+
+def test_trace_context_contextvar_set_during_request() -> None:
+    # The contextvar is set during a request so log records carry trace_id.
+    from prodavan.core import trace_context
+
+    captured: list[str | None] = []
+
+    app = _app()
+
+    @app.get("/ctx")
+    async def _ctx() -> dict:
+        captured.append(trace_context.current_trace_id())
+        return {"trace_id": trace_context.current_trace_id()}
+
+    client = TestClient(app)
+    resp = client.get("/ctx")
+    assert resp.status_code == 200
+    # During the request, the contextvar held the request trace id.
+    assert captured[0] == resp.headers[_TRACE_ID_HEADER]
+
+
+def test_trace_context_resets_after_request() -> None:
+    # After a request, the contextvar resets so it does not leak across requests.
+    from prodavan.core import trace_context
+
+    app = _app()
+
+    @app.get("/ctx")
+    async def _ctx() -> dict:
+        return {"trace_id": trace_context.current_trace_id()}
+
+    client = TestClient(app)
+    resp1 = client.get("/ctx")
+    resp2 = client.get("/ctx")
+    # Two requests, each with a distinct trace id; contextvar held each.
+    assert resp1.headers[_TRACE_ID_HEADER] != resp2.headers[_TRACE_ID_HEADER]
+    assert resp1.json()["trace_id"] == resp1.headers[_TRACE_ID_HEADER]
+    assert resp2.json()["trace_id"] == resp2.headers[_TRACE_ID_HEADER]

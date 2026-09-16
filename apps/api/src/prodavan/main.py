@@ -3,6 +3,8 @@
 Product behavior: docs/target/. Do not restore legacy domain from git history.
 """
 
+import logging
+
 from fastapi import FastAPI
 
 from prodavan.api.exception_handlers import register_exception_handlers
@@ -10,10 +12,16 @@ from prodavan.api.v1 import health as health_routes
 from prodavan.api.v1.router import router as v1_router
 from prodavan.config.settings import settings
 from prodavan.core.middleware import register_cors, register_pod_surface_allowlist, register_trace_id
+from prodavan.core.trace_context import install_trace_id_log_filter
 from prodavan.core.wiring import build_lifespan_manager
+
+logger = logging.getLogger(__name__)
 
 
 def create_app() -> FastAPI:
+    # Bind trace_id to the structured log context (audit XCUT-P2a) before the
+    # first request is served.
+    install_trace_id_log_filter()
     lifespan_manager = build_lifespan_manager()
     app = FastAPI(
         title="Prodavan API",

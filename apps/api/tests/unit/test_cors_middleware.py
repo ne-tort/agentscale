@@ -6,7 +6,12 @@ import pytest
 from fastapi import FastAPI
 
 from prodavan.config.settings import settings as _settings
-from prodavan.core.middleware import _CORS_HEADERS, _CORS_METHODS, register_cors
+from prodavan.core.middleware import (
+    _CORS_EXPOSE_HEADERS,
+    _CORS_HEADERS,
+    _CORS_METHODS,
+    register_cors,
+)
 
 
 def _make_app() -> FastAPI:
@@ -20,6 +25,10 @@ def test_register_cors_explicit_methods_and_headers() -> None:
     assert "X-Cabinet-Id" in _CORS_HEADERS
     assert "X-Project-Id" in _CORS_HEADERS
     assert "X-Prodavan-Session-Id" in _CORS_HEADERS
+    # XCUT-P2a: X-Trace-Id is both a request header (caller propagates) and
+    # an exposed response header (browser SPA can read it for debug).
+    assert "X-Trace-Id" in _CORS_HEADERS
+    assert "X-Trace-Id" in _CORS_EXPOSE_HEADERS
     assert "*" not in _CORS_METHODS
     assert "*" not in _CORS_HEADERS
 

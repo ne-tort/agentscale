@@ -14,6 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from prodavan.application.pod_identity.bridge import peek_pod_bridge_token
 from prodavan.config.settings import settings
+from prodavan.core.trace_context import set_trace_id
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,10 @@ logger = logging.getLogger(__name__)
 # trace id ties an HTTP request to downstream agent/pod/event flows for
 # observability without a separate distributed-tracing backend.
 _TRACE_ID_HEADER = "X-Trace-Id"
+# Accept caller-supplied trace ids that look like a uuid hex, a short token,
+# or a dotted dotted name — reject anything with whitespace / control chars /
+# unreasonable length so a hostile caller cannot inject log noise.
+_TRACE_ID_RE = re.compile(r"^[A-Za-z0-9_.:\-]{1,128}$")
 
 # Deny-by-default for Bridge JWT (and any residual shared Bearer).
 # Real agent surface is /projects/{id}/agent/... (not /api/v1/agent/...).
@@ -42,7 +47,14 @@ _CORS_HEADERS = [
     "X-Prodavan-Session-Id",
     "X-Prodavan-Signature",
     "X-Prodavan-Events-Owner",
+    # X-Trace-Id is both a request header (caller propagates) and a response
+    # header (server returns) — listed in allow_headers and expose_headers.
+    "X-Trace-Id",
 ]
+# Response headers exposed to cross-origin callers (audit XCUT-P2a). Without
+# this, a browser SPA cannot read X-Trace-Id from the response to quote it
+# when debugging a 4xx/5xx.
+_CORS_EXPOSE_HEADERS = ["X-Trace-Id"]
 
 
 def _bearer(request: Request) -> str | None:
@@ -92,19 +104,25 @@ class PodSurfaceAllowlistMiddleware(BaseHTTPMiddleware):
 class TraceIdMiddleware(BaseHTTPMiddleware):
     """Assign a per-request trace id (audit XCUT-P2a).
 
-    Reuses an incoming ``X-Trace-Id`` when present (so callers can propagate a
-    correlation id) and generates one otherwise. The id is exposed on
-    ``request.state.trace_id`` for exception handlers + downstream services,
-    returned as ``X-Trace-Id`` on the response, and bound to the structured
-    log context for the request.
+    Reuses an incoming ``X-Trace-Id`` when present (and well-formed) so
+    callers can propagate a correlation id, and generates one otherwise. The
+    id is exposed on ``request.state.trace_id``, bound to the structured log
+    context via ``core.trace_context`` (so every log record carries
+    ``trace_id``), and returned as ``X-Trace-Id`` on the response.
     """
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
-        trace_id = (request.headers.get(_TRACE_ID_HEADER) or "").strip()
-        if not trace_id:
-            trace_id = uuid.uuid4().hex
+        incoming = (request.headers.get(_TRACE_ID_HEADER) or "").strip()
+        trace_id = incoming if (incoming and _TRACE_ID_RE.match(incoming)) else uuid.uuid4().hex
         request.state.trace_id = trace_id
-        response = await call_next(request)
+        token = set_trace_id(trace_id)
+        try:
+            response = await call_next(request)
+        finally:
+            # Contextvar reset is scoped to this request's async context.
+            from prodavan.core.trace_context import reset_trace_id
+
+            reset_trace_id(token)
         response.headers[_TRACE_ID_HEADER] = trace_id
         return response
 
@@ -134,6 +152,7 @@ def register_cors(app: FastAPI, *, allow_origins: list[str]) -> None:
         allow_credentials=allow_credentials,
         allow_methods=_CORS_METHODS,
         allow_headers=_CORS_HEADERS,
+        expose_headers=_CORS_EXPOSE_HEADERS,
     )
 
 

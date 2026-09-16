@@ -75,7 +75,7 @@
 
 **Приоритет:** P2  
 Platform events DB-only / deferred; metrics consumers; pod metrics N+1 — нет единого correlation id project/pod/session across bus.  
-**Частично исправлено:** `TraceIdMiddleware` (`core/middleware.py`) генерирует per-request `trace_id` (UUID hex), переиспользует входящий `X-Trace-Id`, сохраняет в `request.state.trace_id` и возвращает в response header. Exception handlers (`api/exception_handlers.py`) через `_trace_id(request)` пробрасывают trace_id в problem responses (RFC 7807 body) — клиент видит correlation id для debug без distributed-tracing backend. `register_trace_id` в `main.py` первым (до allowlist/CORS).  
+**Частично исправлено:** `TraceIdMiddleware` (`core/middleware.py`) генерирует per-request `trace_id` (UUID hex), переиспользует входящий `X-Trace-Id` (с валидацией формата — reject whitespace/control/odd shape, чтобы hostile caller не инжектнул log noise), сохраняет в `request.state.trace_id`, bind'ит к structured log context через `core/trace_context.py` (contextvar + `TraceIdLogFilter` → каждое log record carries `trace_id`) и возвращает в response header. Exception handlers (`api/exception_handlers.py`) через `_trace_id(request)` пробрасывают trace_id в problem responses (RFC 7807 body). CORS: `X-Trace-Id` в `allow_headers` + `expose_headers` — browser SPA может читать trace_id из response. `register_trace_id` + `install_trace_id_log_filter` в `main.py` первыми (до allowlist/CORS).  
 **Остаток:** event bus correlation_id (в EventEnvelope + Kafka headers) — backlog (крупная, 100+ producers); pod metrics N+1 — backlog (batch metrics).
 
 ## Target-design
