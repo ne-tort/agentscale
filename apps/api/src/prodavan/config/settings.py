@@ -28,6 +28,13 @@ class Settings(BaseSettings):
         "http://localhost:3000,http://localhost:8080,http://localhost:8088,http://localhost:5173,"
         "http://127.0.0.1:8080,http://127.0.0.1:8088"
     )
+    # When True, CORS allows credentials (cookies). Prod should set this only if a
+    # cookie-based auth flow is used; Prodavan auth is Bearer JWT, so the default is
+    # False. Audit API-P1b: allow_credentials=True + wildcard origins/methods/headers
+    # was a credential-leak risk under misconfigured prod origins.
+    cors_allow_credentials: bool = False
+    # When True, a wildcard "*" origin in CORS_ORIGINS is a hard error (prod guard).
+    cors_forbid_wildcard_origin: bool = True
     api_v1_prefix: str = "/api/v1"
     storage_root: Path = _REPO_ROOT / "data" / "storage"
 

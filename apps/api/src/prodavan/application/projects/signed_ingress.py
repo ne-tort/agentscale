@@ -20,18 +20,28 @@ async def enqueue_signed_trigger(
     raw_body: bytes,
     signature_header: str | None,
     secret: str | None,
-    secret_name: str,
 ) -> dict:
-    project = await ProjectAccessPolicy(session).get_project(project_id)
-    if project.status == ProjectStatus.DELETED:
+    """Enqueue a signed external trigger.
+
+    Audit API-P2d (webhook existence leak): a missing project and a missing
+    webhook secret are both answered with the same generic 404 so an attacker
+    cannot enumerate project ids by distinguishing 404 (no project) from 503
+    (project exists but webhook not configured). Signature failure stays 401
+    (it is the same for existing and non-existing projects once the secret is
+    known). Callers should load the project via ``get_project_or_none`` and
+    pass ``secret=None`` when either the project or the secret is missing so
+    both collapse to the generic 404 here.
+
+    The former ``secret_name`` parameter was dropped: it leaked into the 503
+    detail and is no longer needed now that missing-secret collapses to a
+    generic 404 without detail.
+    """
+    project = await ProjectAccessPolicy(session).get_project_or_none(project_id)
+    if project is None or project.status == ProjectStatus.DELETED:
         raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Project not found")
     if not secret:
-        raise AppError(
-            code="WEBHOOK_NOT_CONFIGURED",
-            title="Ingress not configured",
-            status=503,
-            detail=f"company {secret_name} not set",
-        )
+        # Same shape as a missing project — do not reveal existence.
+        raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Project not found")
     if not verify_webhook_signature(secret=secret, body=raw_body, header=signature_header):
         raise AppError(
             code="WEBHOOK_SIGNATURE_INVALID",

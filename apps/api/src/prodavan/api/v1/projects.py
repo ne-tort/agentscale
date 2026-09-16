@@ -972,9 +972,16 @@ async def ingress_signed_webhook(
 ) -> dict:
     """External webhook.http ingress — HMAC-SHA256 over raw body (company policy secret)."""
     await _enforce_ingress_rate_limit(project_id, channel="webhook")
-    project = await ProjectAccessPolicy(session).get_project(project_id)
-    companies = AdminCompanyService(session)
-    webhook_secret, _ = await companies.get_ingress_hmac_secrets(project.company_id)
+    # API-P2d: load project without raising — a missing project and a missing
+    # webhook secret must collapse to the same generic 404 to avoid enumeration.
+    from prodavan.domain.projects import ProjectStatus
+
+    project = await ProjectAccessPolicy(session).get_project_or_none(project_id)
+    webhook_secret: str | None = None
+    if project is not None and project.status != ProjectStatus.DELETED:
+        webhook_secret, _ = await AdminCompanyService(session).get_ingress_hmac_secrets(
+            project.company_id
+        )
     return await enqueue_signed_trigger(
         session,
         project_id=project_id,
@@ -982,7 +989,6 @@ async def ingress_signed_webhook(
         raw_body=await request.body(),
         signature_header=x_prodavan_signature,
         secret=webhook_secret,
-        secret_name="webhook_hmac_secret",
     )
 
 
@@ -995,9 +1001,14 @@ async def ingress_signed_telegram(
 ) -> dict:
     """Telegram bot transport ingress — HMAC-SHA256 (company telegram_hmac_secret)."""
     await _enforce_ingress_rate_limit(project_id, channel="telegram")
-    project = await ProjectAccessPolicy(session).get_project(project_id)
-    companies = AdminCompanyService(session)
-    _, telegram_secret = await companies.get_ingress_hmac_secrets(project.company_id)
+    from prodavan.domain.projects import ProjectStatus
+
+    project = await ProjectAccessPolicy(session).get_project_or_none(project_id)
+    telegram_secret: str | None = None
+    if project is not None and project.status != ProjectStatus.DELETED:
+        _, telegram_secret = await AdminCompanyService(session).get_ingress_hmac_secrets(
+            project.company_id
+        )
     return await enqueue_signed_trigger(
         session,
         project_id=project_id,
@@ -1005,7 +1016,6 @@ async def ingress_signed_telegram(
         raw_body=await request.body(),
         signature_header=x_prodavan_signature,
         secret=telegram_secret,
-        secret_name="telegram_hmac_secret",
     )
 
 

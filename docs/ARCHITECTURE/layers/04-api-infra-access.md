@@ -67,7 +67,8 @@ Managers: Redis / Mongo / OpenSearch / Kafka / object store — optional flags �
 ### API-P1b — CORS credentials + wildcards
 
 **Приоритет:** P1  
-`allow_credentials=True`, methods/headers `*`. Опасно при неверной prod origins конфигурации.
+~~`allow_credentials=True`, methods/headers `*`. Опасно при неверной prod origins конфигурации.~~  
+**Исправлено:** `register_cors` использует явные methods (GET/POST/PUT/PATCH/DELETE/OPTIONS) и headers (Authorization, Content-Type, X-Cabinet-Id, X-Project-Id, X-Prodavan-*); `allow_credentials` opt-in (default False — auth Bearer JWT, cookie flow не нужен). Guard: wildcard `*` origin forbidden при credentials enabled или `cors_forbid_wildcard_origin` (default True) — fail loudly at startup. Settings `cors_allow_credentials` / `cors_forbid_wildcard_origin`.
 
 ### API-P1c — широкая allowlist-поверхность
 
@@ -103,7 +104,8 @@ Secret в JSON ответа lease; нет обязательного audit trail
 ### API-P2d — webhook existence leak
 
 **Приоритет:** P2  
-404 project до 503 «webhook not configured».
+~~404 project до 503 «webhook not configured».~~  
+**Исправлено:** `enqueue_signed_trigger` грузит project через `get_project_or_none`; missing project и missing webhook secret оба возвращают generic 404 («Project not found») — attacker не может enum project_id по разнице 404 vs 503. Route handlers (`ingress_signed_webhook` / `ingress_signed_telegram`) не раскрывают project existence раньше signature check. Invalid signature → 401 (одинаковый для existing/non-existing).
 
 ### API-P2e — query-time isolation gaps
 
