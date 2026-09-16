@@ -188,3 +188,93 @@ async def test_revoke_lease_for_pod_unknown_pod() -> None:
     session.get = AsyncMock(return_value=None)
     broker = AgentCredentialBroker(session)
     assert await broker.revoke_lease_for_pod(pod_id="missing", lease_id="lease_x") is False
+
+
+@pytest.mark.asyncio
+async def test_push_lease_audit_failure_does_not_mask_push_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    # API-P2a: audit is best-effort. If the audit store raises, the push
+    # result must still reflect the HTTP response (True on 201), not be
+    # masked by the audit exception.
+    monkeypatch.setattr("prodavan.application.agent.credential_broker.settings.pod_agent_runtime_enabled", True)
+    monkeypatch.setattr("prodavan.application.agent.credential_broker.settings.pod_agent_runtime_port", 3921)
+    monkeypatch.setattr("prodavan.application.agent.credential_broker.settings.pod_agent_runtime_token", "rt-token")
+
+    session = MagicMock()
+    project = MagicMock()
+    session.get = AsyncMock(return_value=project)
+
+    keys = MagicMock()
+    keys.require_key_available_for_project = AsyncMock()
+    keys.resolve_secret_for_key = AsyncMock(return_value="sk-test")
+
+    k8s = MagicMock()
+    k8s.available.return_value = True
+    k8s.get_pod = AsyncMock(
+        return_value=PodSnapshot(
+            name="pod-wk-demo",
+            uid="u1",
+            phase="Running",
+            restarts=0,
+            ready=True,
+            labels={},
+            pod_ip="10.42.0.88",
+        ),
+    )
+
+    mock_response = MagicMock()
+    mock_response.status_code = 201
+    mock_response.text = ""
+
+    mock_http = MagicMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.post = AsyncMock(return_value=mock_response)
+
+    broker = AgentCredentialBroker(session, k8s_client=k8s, http_client=lambda **_: mock_http)
+    broker._keys = keys
+    # Audit store raises — push must still return True.
+    failing_audit = MagicMock()
+    failing_audit.record = AsyncMock(side_effect=RuntimeError("audit db down"))
+    broker._audit = failing_audit
+
+    runtime_view = {
+        "observed_state": "running",
+        "k8s_pod_name": "pod-wk-demo",
+        "runtime_ref": "pod-wk-demo",
+    }
+    with (
+        patch("prodavan.application.agent.credential_broker.settings"),
+        patch(
+            "prodavan.application.pod_service.query.PodQuery.runtime_view",
+            new=AsyncMock(return_value=runtime_view),
+        ),
+    ):
+        ok = await broker.push_lease_to_runtime(project_id="prj_1", key_id="key_abc")
+
+    assert ok is True  # push succeeded — audit failure did not mask it
+
+
+@pytest.mark.asyncio
+async def test_revoke_lease_audit_failure_does_not_mask_revoke_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("prodavan.application.agent.credential_broker.settings.pod_agent_runtime_enabled", True)
+    monkeypatch.setattr("prodavan.application.agent.credential_broker.settings.pod_agent_runtime_port", 3921)
+    monkeypatch.setattr("prodavan.application.agent.credential_broker.settings.pod_agent_runtime_token", "rt-token")
+
+    session = MagicMock()
+    mock_response = MagicMock()
+    mock_response.status_code = 204
+
+    mock_http = MagicMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.delete = AsyncMock(return_value=mock_response)
+
+    broker = AgentCredentialBroker(session, http_client=lambda **_kwargs: mock_http)
+    broker._resolve_pod_ip_for_project = AsyncMock(return_value="10.42.0.88")
+    failing_audit = MagicMock()
+    failing_audit.record = AsyncMock(side_effect=RuntimeError("audit db down"))
+    broker._audit = failing_audit
+
+    ok = await broker.revoke_runtime_lease(project_id="prj_1", lease_id="lease_xyz")
+
+    assert ok is True  # revoke succeeded — audit failure did not mask it

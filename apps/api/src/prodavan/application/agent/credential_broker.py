@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import uuid
 from dataclasses import dataclass
+from typing import Any
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,6 +55,34 @@ class AgentCredentialBroker:
         self._audit = AiKeyAuditService(session)
         self._k8s = k8s_client
         self._http_client = http_client
+
+    async def _safe_record(
+        self,
+        *,
+        event_type: str,
+        key_id: str | None,
+        principal: Principal,
+        detail: dict[str, Any] | None,
+    ) -> None:
+        """Best-effort audit write (API-P2a).
+
+        Audit is observability, not a gate: a failure to persist the audit row
+        must not change the lease push/revoke result or mask the original
+        bridge/HTTP error. Errors are logged and swallowed.
+        """
+        try:
+            await self._audit.record(
+                event_type=event_type,
+                key_id=key_id,
+                principal=principal,
+                detail=detail or {},
+            )
+        except Exception:
+            logger.exception(
+                "credential audit record failed event_type=%s key_id=%s",
+                event_type,
+                key_id,
+            )
 
     async def list_handles_for_pod(self, *, pod_id: str) -> list[CredentialHandle]:
         project = await self._require_pod_project(pod_id)
@@ -149,51 +178,51 @@ class AgentCredentialBroker:
         }
         headers = _runtime_request_headers()
         actor = principal or _SYSTEM_PRINCIPAL
+        push_ok = False
+        failure_detail: dict[str, Any] | None = None
         try:
             async with self._http_client(timeout=5.0) as client:
                 response = await client.post(url, json=body, headers=headers)
             if response.status_code in (200, 201):
                 logger.info("credential lease pushed key=%s project=%s", key_id, project_id)
-                await self._audit.record(
-                    event_type=LEASE_PUSHED,
-                    key_id=key_id,
-                    principal=actor,
-                    detail={
-                        "lease_id": lease_id,
-                        "project_id": project_id,
-                        "ttl_sec": body["ttl_sec"],
-                    },
+                push_ok = True
+            else:
+                logger.warning(
+                    "credential push failed status=%s body=%s",
+                    response.status_code,
+                    response.text[:200],
                 )
-                return True
-            logger.warning(
-                "credential push failed status=%s body=%s",
-                response.status_code,
-                response.text[:200],
-            )
-            await self._audit.record(
-                event_type=LEASE_PUSH_FAILED,
-                key_id=key_id,
-                principal=actor,
-                detail={
+                failure_detail = {
                     "lease_id": lease_id,
                     "project_id": project_id,
                     "status": response.status_code,
                     "body": response.text[:200],
-                },
-            )
+                }
         except Exception as exc:
             logger.debug("credential push unreachable project=%s: %s", project_id, exc)
-            await self._audit.record(
-                event_type=LEASE_PUSH_FAILED,
-                key_id=key_id,
-                principal=actor,
-                detail={
+            failure_detail = {
+                "lease_id": lease_id,
+                "project_id": project_id,
+                "error": str(exc)[:256],
+            }
+        # Audit is best-effort: an audit-store failure must not change the push
+        # result or mask the original bridge error (audit is observability, not
+        # a gate). Record after the HTTP result is known.
+        await self._safe_record(
+            event_type=LEASE_PUSHED if push_ok else LEASE_PUSH_FAILED,
+            key_id=key_id,
+            principal=actor,
+            detail=(
+                {
                     "lease_id": lease_id,
                     "project_id": project_id,
-                    "error": str(exc)[:256],
-                },
-            )
-        return False
+                    "ttl_sec": body["ttl_sec"],
+                }
+                if push_ok
+                else failure_detail
+            ),
+        )
+        return push_ok
 
     async def revoke_lease_for_pod(
         self,
@@ -223,36 +252,35 @@ class AgentCredentialBroker:
         if not pod_ip:
             return False
         url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/credentials/leases/{lease_id}"
+        actor = principal or _SYSTEM_PRINCIPAL
+        revoke_ok = False
+        revoke_detail: dict[str, Any]
         try:
             async with self._http_client(timeout=10.0) as client:
                 response = await client.delete(url, headers=_runtime_request_headers())
-            ok = response.status_code in (200, 204, 404)
-            await self._audit.record(
-                event_type=LEASE_REVOKED,
-                key_id=None,
-                principal=principal or _SYSTEM_PRINCIPAL,
-                detail={
-                    "lease_id": lease_id,
-                    "project_id": project_id,
-                    "status": response.status_code,
-                    "ok": ok,
-                },
-            )
-            return ok
+            revoke_ok = response.status_code in (200, 204, 404)
+            revoke_detail = {
+                "lease_id": lease_id,
+                "project_id": project_id,
+                "status": response.status_code,
+                "ok": revoke_ok,
+            }
         except Exception as exc:
             logger.debug("credential revoke unreachable project=%s: %s", project_id, exc)
-            await self._audit.record(
-                event_type=LEASE_REVOKED,
-                key_id=None,
-                principal=principal or _SYSTEM_PRINCIPAL,
-                detail={
-                    "lease_id": lease_id,
-                    "project_id": project_id,
-                    "error": str(exc)[:256],
-                    "ok": False,
-                },
-            )
-            return False
+            revoke_detail = {
+                "lease_id": lease_id,
+                "project_id": project_id,
+                "error": str(exc)[:256],
+                "ok": False,
+            }
+        # Audit is best-effort: must not mask the original revoke result.
+        await self._safe_record(
+            event_type=LEASE_REVOKED,
+            key_id=None,
+            principal=actor,
+            detail=revoke_detail,
+        )
+        return revoke_ok
 
     async def _require_pod_project(self, pod_id: str) -> ProjectRow:
         pod = await self._session.get(ProjectPodRow, pod_id)
