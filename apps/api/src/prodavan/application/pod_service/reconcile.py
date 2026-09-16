@@ -15,6 +15,7 @@ from prodavan.application.pod_service.ports.pod_runtime import PodRuntimePort
 from prodavan.application.pod_service.query import PodQuery
 from prodavan.application.pod_service.runtime_observation import RuntimeObservationService
 from prodavan.config.settings import settings
+from prodavan.core.infra.advisory_lock import advisory_lock
 from prodavan.domain.identity import Principal
 from prodavan.domain.pods import PodDesiredState, PodStatus
 from prodavan.domain.projects import ProjectStatus
@@ -27,6 +28,11 @@ _SYSTEM = Principal(sub="system:pod-reconcile", roles=frozenset({"platform.admin
 _PROVISIONING_GRACE_SEC = float(
     settings.pod_image_pull_timeout_sec + settings.pod_ready_timeout_sec + 40
 )
+
+# Session-level PG advisory lock key so only one API process runs reconcile at a
+# time, even on multi-replica deployments (audit POD-P2a). PG-backed (not Redis)
+# so it stays effective when Redis is down — PG is the system of record.
+_RECONCILE_LOCK_KEY = "prodavan.pod_reconcile"
 
 
 def _managed_pod_age_sec(item: dict) -> float | None:
@@ -52,6 +58,16 @@ class PodReconcileService:
         self._pods = PodCommand(session, runtime=self._runtime, events=PodLifecycleEmitter(session))
 
     async def run(self) -> dict:
+        # POD-P2a: PG advisory lock so multi-replica deployments (or the admin
+        # /reconcile endpoint racing the Celery beat) do not run two reconcile
+        # passes in parallel — the zombie reaper and sync_desired are not safe
+        # under concurrent reconcile. PG-backed so it works when Redis is down.
+        async with advisory_lock(self._session, _RECONCILE_LOCK_KEY) as held:
+            if not held:
+                return {"skipped": True, "reason": "lock_held"}
+            return await self._run_reconcile()
+
+    async def _run_reconcile(self) -> dict:
         fixed = 0
         # Include FAILED pods that still desire RUNNING so WSL/node flaps can heal.
         q = await self._session.execute(

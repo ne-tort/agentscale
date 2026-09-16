@@ -21,16 +21,15 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from sqlalchemy import text
-
 from prodavan.application.agent.trigger_dispatcher import AgentTriggerDispatcher
 from prodavan.application.project_service import ProjectIdlePauseService
 from prodavan.config.settings import settings
+from prodavan.core.infra.advisory_lock import advisory_lock
 from prodavan.infrastructure.persistence.database import get_session_factory
 
 logger = logging.getLogger(__name__)
 
-_LOCK_KEY_SQL = "hashtext('prodavan.trigger_worker')"
+_RECONCILE_LOCK_KEY = "prodavan.trigger_worker"
 
 _stop: asyncio.Event | None = None
 _task: asyncio.Task[None] | None = None
@@ -43,10 +42,9 @@ def _worker_wanted() -> bool:
 async def drain_once() -> dict:
     factory = get_session_factory()
     async with factory() as session:
-        locked = await session.execute(text(f"SELECT pg_try_advisory_lock({_LOCK_KEY_SQL})"))
-        if not locked.scalar():
-            return {"dispatched": False, "reason": "lock_held", "count": 0, "projects": []}
-        try:
+        async with advisory_lock(session, _RECONCILE_LOCK_KEY) as held:
+            if not held:
+                return {"dispatched": False, "reason": "lock_held", "count": 0, "projects": []}
             out: dict = {
                 "dispatched": False,
                 "count": 0,
@@ -61,8 +59,6 @@ async def drain_once() -> dict:
                 idle = await ProjectIdlePauseService(session).sweep_all()
                 out["idle_pause"] = idle
             return out
-        finally:
-            await session.execute(text(f"SELECT pg_advisory_unlock({_LOCK_KEY_SQL})"))
 
 
 async def _loop(stop: asyncio.Event) -> None:

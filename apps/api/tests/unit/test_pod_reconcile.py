@@ -66,3 +66,46 @@ async def test_reap_zombies_deletes_stale_untracked_pod() -> None:
 
     assert deleted == 1
     runtime.terminate.assert_awaited_once_with(runtime_ref="pod-wk-stale")
+
+
+@pytest.mark.asyncio
+async def test_run_skips_when_advisory_lock_held() -> None:
+    # POD-P2a: when another process holds the reconcile lock, run() skips
+    # without touching k8s or DB rows.
+    session = AsyncMock()
+    lock_result = MagicMock()
+    lock_result.scalar.return_value = False  # pg_try_advisory_lock → False
+    session.execute = AsyncMock(return_value=lock_result)
+
+    svc = PodReconcileService(session, runtime=AsyncMock())
+    result = await svc.run()
+
+    assert result == {"skipped": True, "reason": "lock_held"}
+    # No reconcile queries after the lock probe (execute called once for lock).
+    assert session.execute.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_run_reconciles_when_advisory_lock_acquired() -> None:
+    # When the lock is acquired, run() delegates to _run_reconcile. We verify
+    # the lock is acquired+released (2 executes) and _run_reconcile is called.
+    session = AsyncMock()
+    lock_acquired = MagicMock()
+    lock_acquired.scalar.return_value = True  # pg_try_advisory_lock → True
+    session.execute = AsyncMock(return_value=lock_acquired)
+    session.commit = AsyncMock()
+
+    svc = PodReconcileService(session, runtime=AsyncMock())
+    called: dict = {}
+
+    async def _fake_run() -> dict:
+        called["run"] = True
+        return {"fixed": 0, "zombies_deleted": 0, "metrics": {}, "observed": 0}
+
+    svc._run_reconcile = _fake_run  # type: ignore[method-assign]
+    result = await svc.run()
+
+    assert called.get("run") is True
+    assert result["fixed"] == 0
+    # Lock acquired + released.
+    assert session.execute.await_count == 2

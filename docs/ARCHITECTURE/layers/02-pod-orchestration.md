@@ -96,7 +96,9 @@ DB ставит PAUSED/TERMINATED сразу после `delete_pod`; pod мож
 ### POD-P2a — reconcile session / N+1 metrics
 
 **Приоритет:** P2  
-Один `AsyncSession` на reconcile-проход с commit внутри sync без явного rollback на partial failure. `get_pod_metrics` на каждый Running observe.
+~~Один `AsyncSession` на reconcile-проход с commit внутри sync без явного rollback на partial failure.~~  
+**Частично исправлено:** `PodReconcileService.run()` теперь под PG advisory lock (`core/infra/advisory_lock.py`, `pg_try_advisory_lock`/`pg_advisory_unlock`) — multi-replica race (admin `/reconcile` vs Celery beat) устранён: второй проход получает `lock_held` и skip'ает. PG-backed (не Redis) — работает при Redis-down (PG = SoT). Partial failure изоляция уже была через try/except per pod (sync_desired/`_apply_running` commit'ит row до k8s create — осознанный design для zombie reaper). Общий helper `advisory_lock` переиспользуется trigger_worker (DRY).  
+**Остаток:** N+1 metrics (`PodMetricsSampler.sample_managed_pods` каждый проход + `get_pod_metrics` на каждый Running observe) — backlog (batch metrics).
 
 ## Target-design
 
