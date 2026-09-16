@@ -5,12 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-import re
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.projects.materialize_planner import MaterializeOp
+from prodavan.application.projects.template_substitute import substitute_blanking_missing
 from prodavan.infrastructure.files.manager import ensure_file_store
 from prodavan.infrastructure.persistence.models.content import ContentBlobVersionRow
 from prodavan.infrastructure.projects.workspace import WorkspaceLayoutWriter
@@ -228,9 +228,13 @@ def _should_skip_copy_blob(writer: WorkspaceLayoutWriter, workspace_path: str, r
 
 
 def _render_template(template: str, ctx: dict[str, Any]) -> str:
-    def repl(match: re.Match[str]) -> str:
-        key = match.group(1)
-        val = ctx.get(key)
-        return "" if val is None else str(val)
+    """Render ``{{var}}`` placeholders in file-content templates.
 
-    return re.sub(r"\{\{(\w+)\}\}", repl, template)
+    Shares the single substitution dialect with the planner
+    (``template_substitute``) so there is one regex and one placeholder
+    contract (audit META-P1c). For file content, missing values blank to ""
+    instead of leaving the placeholder verbatim (a literal ``{{var}}`` inside
+    a rendered file would be confusing).
+    """
+    blanked = {k: ("" if v is None else str(v)) for k, v in ctx.items()}
+    return substitute_blanking_missing(template, blanked)

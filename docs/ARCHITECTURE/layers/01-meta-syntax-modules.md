@@ -82,7 +82,8 @@ DB meta slug `actions` + `_product_seed_action` из Python seeds, когда DB
 ### META-P1c — хрупкие плейсхолдеры
 
 **Приоритет:** P1  
-`_substitute` поддерживает и `{{var}}` (Mustache), и `{var}` (regex `[a-z_]+`). Порядок важен: `{target_path}` внутри `{{target_path}}` ломается.
+~~`_substitute` поддерживает и `{{var}}` (Mustache), и `{var}` (regex `[a-z_]+`). Порядок важен: `{target_path}` внутри `{{target_path}}` ломается.~~  
+**Исправлено:** единый `application/projects/template_substitute.py` — только `{{var}}` Mustache dialect (`substitute` + `substitute_blanking_missing` для file content). Planner и executor делегируют; отдельный regex в `_render_template` удалён. Seeds мигрированы: `{active_profile_id}` → `{{active_profile_id}}`. Валидатор (`module_meta_validator._validate_template_dialect`) отклоняет single-brace `{var}` в `workspace_path` / `template` / `source.filter.*` с diagnostic. Тесты обновлены под новый dialect.
 
 ### META-P2a — хардкод `mod_prompts`
 

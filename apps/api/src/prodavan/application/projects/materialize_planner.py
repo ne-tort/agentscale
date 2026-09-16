@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import PurePosixPath
 from typing import Any
@@ -17,11 +16,10 @@ from prodavan.application.projects.prompt_stitch import (
     PromptContribution,
     stitch_prompt_contributions,
 )
+from prodavan.application.projects.template_substitute import substitute
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 from prodavan.infrastructure.persistence.models.modules import ModuleMetaDocumentRow
-
-_PLACEHOLDER_RE = re.compile(r"\{([a-z_]+)\}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -379,16 +377,11 @@ class MaterializePlanner:
         return out
 
     def _substitute(self, template: str, ctx: dict[str, str | None]) -> str:
-        # {{var}} row-field templates first — {var} would otherwise match the inner
-        # `{target_path}` inside `{{target_path}}` and leave stray braces.
-        out = re.sub(r"\{\{(\w+)\}\}", lambda m: ctx.get(m.group(1), "") or "", template)
-
-        def repl(match: re.Match[str]) -> str:
-            key = match.group(1)
-            val = ctx.get(key)
-            return val if val is not None else match.group(0)
-
-        return _PLACEHOLDER_RE.sub(repl, out)
+        # Mustache {{var}} is the only supported dialect (audit META-P1c).
+        # The previous single-brace {var} regex matched the inner braces of
+        # {{target_path}} and required a fragile apply-order; both the planner
+        # and the validator now go through template_substitute.substitute.
+        return substitute(template, ctx)
 
     async def _plan_row_op(
         self,

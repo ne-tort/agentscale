@@ -187,6 +187,39 @@ def test_materialize_copy_blob_requires_field() -> None:
     assert "target.field" in (exc.value.detail or "")
 
 
+def test_materialize_rejects_deprecated_single_brace_workspace_path() -> None:
+    # META-P1c: single-brace {var} is deprecated; {{var}} is the only dialect.
+    slug_map = _suppliers_slug_map()
+    slug_map["materialize"] = [
+        {
+            "source": {"type": "rows", "table_slug": "suppliers"},
+            "target": {"workspace_path": "{name}.bin", "format": "raw", "field": "name"},
+        }
+    ]
+    with pytest.raises(AppError) as exc:
+        validate_merged_slug_map(slug_map)
+    assert "deprecated" in (exc.value.detail or "").lower()
+
+
+def test_materialize_rejects_deprecated_single_brace_filter() -> None:
+    slug_map = _suppliers_slug_map()
+    slug_map["materialize"] = [
+        {
+            "source": {
+                "type": "rows",
+                "table_slug": "suppliers",
+                "filter": {"name": "{active_profile_id}"},
+            },
+            "target": {"workspace_path": "out.bin", "format": "raw"},
+        }
+    ]
+    with pytest.raises(AppError) as exc:
+        validate_merged_slug_map(slug_map)
+    detail = exc.value.detail or ""
+    assert "deprecated" in detail.lower()
+    assert "source.filter.name" in detail
+
+
 def test_product_module_seeds_pass_meta_validation() -> None:
     from prodavan.application.platform.product_module_seeds import (
         mod_equipment_meta,

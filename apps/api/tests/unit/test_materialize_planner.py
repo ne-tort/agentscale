@@ -18,8 +18,13 @@ def test_substitute_double_brace_before_single() -> None:
     assert out == "assets/hello.txt"
     out2 = planner._substitute("packages/{{name}}", {"name": "demo"})
     assert out2 == "packages/demo"
-    out3 = planner._substitute("{active_profile_id}/rules", {"active_profile_id": "prof_1"})
+    # META-P1c: single-brace {var} is no longer a placeholder. It is left
+    # verbatim so meta authors cannot rely on the deprecated fragile dialect
+    # that matched the inner braces of {{target_path}}.
+    out3 = planner._substitute("{{active_profile_id}}/rules", {"active_profile_id": "prof_1"})
     assert out3 == "prof_1/rules"
+    out4 = planner._substitute("{active_profile_id}/rules", {"active_profile_id": "prof_1"})
+    assert out4 == "{active_profile_id}/rules"
 
 
 def test_row_matches_filter_equality() -> None:
@@ -74,7 +79,16 @@ def test_substitute_double_brace_row_fields() -> None:
 
 def test_substitute_single_brace_placeholders() -> None:
     planner = MaterializePlanner(session=None)  # type: ignore[arg-type]
-    assert planner._substitute("{active_profile_id}", {"active_profile_id": "profile_default"}) == "profile_default"
+    # META-P1c: single-brace {var} is deprecated and no longer substituted.
+    # Only {{var}} resolves; {var} is left verbatim (use {{active_profile_id}}).
+    assert (
+        planner._substitute("{active_profile_id}", {"active_profile_id": "profile_default"})
+        == "{active_profile_id}"
+    )
+    assert (
+        planner._substitute("{{active_profile_id}}", {"active_profile_id": "profile_default"})
+        == "profile_default"
+    )
 
 
 def test_row_path_context_extracts_filename() -> None:

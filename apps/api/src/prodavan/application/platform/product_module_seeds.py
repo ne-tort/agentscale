@@ -366,7 +366,7 @@ def _prompts_materialize_rules() -> list[dict[str, Any]]:
             "source": {
                 "type": "rows",
                 "table_slug": "prompt_paths",
-                "filter": {"profile_id": "{active_profile_id}"},
+                "filter": {"profile_id": "{{active_profile_id}}"},
             },
             "target": {"workspace_path": ".", "format": "prompt_paths"},
         }

@@ -5,6 +5,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from prodavan.application.projects.template_substitute import (
+    deprecated_placeholder_names,
+    has_deprecated_placeholders,
+)
 from prodavan.domain.errors import AppError
 
 _SLUG_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
@@ -185,6 +189,25 @@ def _validate_workspace_path(path: str, *, rule_label: str) -> None:
         raise _meta_error(f"{rule_label} target.workspace_path must be relative: {path!r}")
 
 
+def _validate_template_dialect(template: str, *, rule_label: str, field: str) -> None:
+    """Reject the deprecated single-brace ``{var}`` dialect (audit META-P1c).
+
+    ``{{var}}`` is the only supported placeholder syntax. A single-brace
+    ``{var}`` used to also work via a fragile second regex pass that matched
+    the inner braces of ``{{target_path}}``; rejecting it at validation time
+    keeps meta authors from introducing mixed-dialect templates that break
+    under substitution ordering changes.
+    """
+    if not template:
+        return
+    if has_deprecated_placeholders(template):
+        names = deprecated_placeholder_names(template)
+        raise _meta_error(
+            f"{rule_label} {field} uses deprecated {{{{ {names[0]} }}}}-style "
+            f"placeholder(s): {names}; use {{{{var}}}} instead"
+        )
+
+
 def _validate_materialize_rules(
     rules: list[dict[str, Any]],
     table_slugs: set[str],
@@ -240,6 +263,7 @@ def _validate_materialize_rules(
         if not isinstance(ws_path, str):
             raise _meta_error(f"{label} target.workspace_path must be a string")
         _validate_workspace_path(ws_path, rule_label=label)
+        _validate_template_dialect(ws_path, rule_label=label, field="target.workspace_path")
 
         fmt = target.get("format") or "raw"
         if not isinstance(fmt, str) or fmt not in _MATERIALIZE_FORMATS:
@@ -247,6 +271,20 @@ def _validate_materialize_rules(
 
         if fmt == "template" and not isinstance(target.get("template"), str):
             raise _meta_error(f"{label} template format requires target.template string")
+        if fmt == "template" and isinstance(target.get("template"), str):
+            _validate_template_dialect(
+                target["template"], rule_label=label, field="target.template"
+            )
+
+        # source.filter values also go through substitute() at plan time — they
+        # must use the same {{var}} dialect, not the deprecated {var}.
+        filt = source.get("filter")
+        if isinstance(filt, dict):
+            for key, val in filt.items():
+                if isinstance(val, str):
+                    _validate_template_dialect(
+                        val, rule_label=label, field=f"source.filter.{key}"
+                    )
 
         if fmt in _BLOB_MATERIALIZE_FORMATS:
             field = target.get("field")
