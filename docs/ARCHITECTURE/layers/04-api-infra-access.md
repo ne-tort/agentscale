@@ -89,7 +89,8 @@ Regex включает весь `/agent/` проекта для любого р�
 ### API-P2a — lease secret без audit
 
 **Приоритет:** P2  
-Secret в JSON ответа lease; нет обязательного audit trail per-lease.
+~~Secret в JSON ответа lease; нет обязательного audit trail per-lease.~~  
+**Исправлено:** `AgentCredentialBroker` пишет lease events в `ai_key_audit_events` через `AiKeyAuditService.record` (reuse существующей audit infrastructure): `lease.created` (pod route `create_lease`), `lease.pushed` / `lease.push_failed` (session_service `push_lease_to_runtime`), `lease.revoked` (pod route `revoke`). Detail: `lease_id`, `pod_id`/`project_id`, `ttl_sec`, `status` — секрет **никогда** не в detail (`_sanitize_detail` redacts + не кладётся). Principal: bridge principal (`pod-bridge:{pod_id}[:emp:{acting_employee_id}]`) для pod routes, employee principal для session_service push.
 
 ### API-P2b — квоты infra завязаны на Redis cache overlay
 
@@ -99,7 +100,8 @@ Secret в JSON ответа lease; нет обязательного audit trail
 ### API-P2c — stub adapters flag
 
 **Приоритет:** P2  
-`agent_inprocess_adapters_enabled` может открыть stub path в неверном env.
+~~`agent_inprocess_adapters_enabled` может открыть stub path в неверном env.~~  
+**Исправлено:** setting `app_environment` (dev|staging|prod, default dev). `model_validator` в `Settings` reject'ит `agent_inprocess_adapters_enabled=True` вне dev — fail loudly at startup (`RuntimeError`) вместо молча открытия stub path в prod. Guard покрывает stray env var misconfiguration.
 
 ### API-P2d — webhook existence leak
 

@@ -11,9 +11,16 @@ from prodavan.infrastructure.k8s.sandbox.client import PodSnapshot
 from prodavan.infrastructure.persistence.models.projects import ProjectPodRow
 
 
+def _stub_audit() -> MagicMock:
+    audit = MagicMock()
+    audit.record = AsyncMock()
+    return audit
+
+
 @pytest.mark.asyncio
 async def test_push_lease_skips_when_runtime_disabled() -> None:
     broker = AgentCredentialBroker(MagicMock())
+    broker._audit = _stub_audit()
     with patch("prodavan.application.agent.credential_broker.settings") as mock_settings:
         mock_settings.pod_agent_runtime_enabled = False
         ok = await broker.push_lease_to_runtime(project_id="prj_1", key_id="key_1")
@@ -55,6 +62,7 @@ async def test_push_lease_posts_to_runtime() -> None:
 
     broker = AgentCredentialBroker(session, k8s_client=k8s, http_client=lambda **_: mock_http)
     broker._keys = keys
+    broker._audit = _stub_audit()
 
     runtime_view = {
         "observed_state": "running",
@@ -80,6 +88,11 @@ async def test_push_lease_posts_to_runtime() -> None:
     assert call.kwargs["json"]["key_id"] == "key_abc"
     assert call.kwargs["json"]["secret"] == "sk-test"
     assert call.kwargs["headers"]["Authorization"] == "Bearer rt-token"
+    # Audit API-P2a: lease push is recorded.
+    broker._audit.record.assert_awaited()
+    recorded = broker._audit.record.await_args
+    assert recorded.kwargs["event_type"] == "lease.pushed"
+    assert recorded.kwargs["key_id"] == "key_abc"
 
 
 @pytest.mark.asyncio
@@ -88,6 +101,7 @@ async def test_create_lease_returns_secret_once() -> None:
     pod = MagicMock()
     pod.project_id = "prj_1"
     project = MagicMock()
+    project.id = "prj_1"
     session.get = AsyncMock(side_effect=lambda model, pk: pod if model is ProjectPodRow else project)
 
     keys = MagicMock()
@@ -97,12 +111,25 @@ async def test_create_lease_returns_secret_once() -> None:
 
     broker = AgentCredentialBroker(session)
     broker._keys = keys
+    broker._audit = _stub_audit()
 
     body = await broker.create_lease(pod_id="pod_1", key_id="key_abc", ttl_sec=300)
     assert body["key_id"] == "key_abc"
     assert body["secret"] == "sk-secret"
     assert body["ttl_sec"] == 300
     assert body["lease_id"].startswith("lease_")
+    # Audit API-P2a: lease creation is recorded with lease_id, pod_id, project_id,
+    # ttl — but never the secret.
+    broker._audit.record.assert_awaited_once()
+    recorded = broker._audit.record.await_args
+    assert recorded.kwargs["event_type"] == "lease.created"
+    assert recorded.kwargs["key_id"] == "key_abc"
+    detail = recorded.kwargs["detail"]
+    assert detail["lease_id"] == body["lease_id"]
+    assert detail["pod_id"] == "pod_1"
+    assert detail["project_id"] == "prj_1"
+    assert detail["ttl_sec"] == 300
+    assert "secret" not in detail
 
 
 @pytest.mark.asyncio
@@ -117,7 +144,9 @@ async def test_revoke_lease_for_pod_delegates_to_runtime() -> None:
 
     ok = await broker.revoke_lease_for_pod(pod_id="pod_1", lease_id="lease_x")
     assert ok is True
-    broker.revoke_runtime_lease.assert_awaited_once_with(project_id="prj_1", lease_id="lease_x")
+    broker.revoke_runtime_lease.assert_awaited_once_with(
+        project_id="prj_1", lease_id="lease_x", principal=None
+    )
 
 
 @pytest.mark.asyncio
@@ -137,6 +166,7 @@ async def test_revoke_runtime_lease_posts_delete(monkeypatch: pytest.MonkeyPatch
     mock_http.delete = AsyncMock(return_value=mock_response)
 
     broker = AgentCredentialBroker(session, http_client=lambda **_kwargs: mock_http)
+    broker._audit = _stub_audit()
     broker._resolve_pod_ip_for_project = AsyncMock(return_value="10.42.0.88")
 
     ok = await broker.revoke_runtime_lease(project_id="prj_1", lease_id="lease_xyz")
@@ -144,6 +174,12 @@ async def test_revoke_runtime_lease_posts_delete(monkeypatch: pytest.MonkeyPatch
     assert ok is True
     call = mock_http.delete.await_args
     assert call.args[0] == "http://10.42.0.88:3921/v1/credentials/leases/lease_xyz"
+    # Audit API-P2a: revoke is recorded.
+    broker._audit.record.assert_awaited_once()
+    recorded = broker._audit.record.await_args
+    assert recorded.kwargs["event_type"] == "lease.revoked"
+    assert recorded.kwargs["detail"]["lease_id"] == "lease_xyz"
+    assert recorded.kwargs["detail"]["ok"] is True
 
 
 @pytest.mark.asyncio

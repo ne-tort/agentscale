@@ -483,6 +483,7 @@ class AgentSessionService:
         await AgentCredentialBroker(self._session).push_lease_to_runtime(
             project_id=project_id,
             key_id=credential.key_id,
+            principal=principal,
         )
         return _session_public(row)
 
@@ -838,6 +839,7 @@ class AgentSessionService:
                 pushed = await AgentCredentialBroker(self._session).push_lease_to_runtime(
                     project_id=project_id,
                     key_id=row.resolved_key_id,
+                    principal=principal,
                 )
                 if not pushed:
                     raise agent_runtime_unavailable(
@@ -1756,6 +1758,7 @@ class AgentSessionService:
             await AgentCredentialBroker(self._session).push_lease_to_runtime(
                 project_id=project_id,
                 key_id=source.resolved_key_id,
+                principal=principal,
             )
         return _session_public(row)
 

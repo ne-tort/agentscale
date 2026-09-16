@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,6 +23,10 @@ _REPO_ROOT = _default_repo_root()
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+    # Deployment environment: "dev" | "staging" | "prod". Used to guard
+    # dev/test-only flags (e.g. agent_inprocess_adapters_enabled is forbidden
+    # outside dev — audit API-P2c).
+    app_environment: str = "dev"
     database_url: str = "postgresql+asyncpg://prodavan_app:prodavan@localhost:5432/prodavan"
     cors_origins: str = (
         "http://localhost:3000,http://localhost:8080,http://localhost:8088,http://localhost:5173,"
@@ -220,6 +224,8 @@ class Settings(BaseSettings):
         ),
     )
     # When True, allow FakeAgentAdapter / FixtureCursorAdapter in-process (pytest only).
+    # Audit API-P2c: forbidden outside dev — a stray prod env var must not open the
+    # stub adapter path. Validated in __init__ via field_validator.
     agent_inprocess_adapters_enabled: bool = False
     projects_auto_rematerialize_on_cabinet_change: bool = Field(
         default=False,
@@ -354,6 +360,26 @@ class Settings(BaseSettings):
     # Admin ops (drain/sweep/gc) and MCP call rate limits; 0 = disabled.
     admin_ops_rate_limit_per_minute: int = 60
     mcp_call_rate_limit_per_minute: int = 180
+
+    @model_validator(mode="after")
+    def _guard_non_dev_flags(self) -> "Settings":
+        """Audit API-P2c: stub adapter flag must not be on outside dev.
+
+        A stray ``AGENT_INPROCESS_ADAPTERS_ENABLED=true`` in staging/prod
+        would open the FakeAgentAdapter / FixtureCursorAdapter path and let
+        chat run against fixtures instead of the real Pod runtime. Fail
+        loudly at startup so the misconfiguration is caught before the API
+        serves a single request.
+        """
+        env = (self.app_environment or "dev").strip().lower()
+        if env not in {"dev", "staging", "prod"}:
+            env = "dev"
+        if env != "dev" and self.agent_inprocess_adapters_enabled:
+            raise RuntimeError(
+                "AGENT_INPROCESS_ADAPTERS_ENABLED is forbidden outside dev "
+                f"(app_environment={env}); stub adapters must not serve prod traffic"
+            )
+        return self
 
     @property
     def cors_origin_list(self) -> list[str]:

@@ -17,6 +17,7 @@ from prodavan.application.pod_identity.bridge import (
 )
 from prodavan.application.pod_service.workspace_tar_download import download_workspace_tar
 from prodavan.domain.errors import AppError
+from prodavan.domain.identity import Principal
 from prodavan.infrastructure.persistence.database import get_db_session
 from prodavan.infrastructure.persistence.models.projects import ProjectPodRow
 
@@ -36,6 +37,18 @@ def _require_pod_bridge(auth: AgentAuth, pod_id: str) -> None:
             detail="pod bridge JWT required",
         )
     require_bridge_pod(auth.bridge, pod_id)
+
+
+def _bridge_principal(bridge) -> Principal:
+    """Build a Principal from a PodBridgeClaims for audit attribution.
+
+    Lease audit (API-P2a) records who/what leased the key: the pod bridge JWT
+    identifies the pod (and optional acting employee) that requested the lease.
+    """
+    sub = f"pod-bridge:{bridge.pod_id}"
+    if bridge.acting_employee_id:
+        sub = f"pod-bridge:{bridge.pod_id}:emp:{bridge.acting_employee_id}"
+    return Principal(sub=sub, roles=frozenset())
 
 
 @router.get("/{pod_id}/workspace-archive")
@@ -121,7 +134,12 @@ async def create_pod_credential_lease(
     assert auth.bridge is not None
     auth.bridge.require_scope(SCOPE_INTERNAL_CREDENTIALS)
     broker = AgentCredentialBroker(session)
-    return await broker.create_lease(pod_id=pod_id, key_id=key_id, ttl_sec=body.ttl_sec)
+    return await broker.create_lease(
+        pod_id=pod_id,
+        key_id=key_id,
+        ttl_sec=body.ttl_sec,
+        principal=_bridge_principal(auth.bridge),
+    )
 
 
 @router.delete("/{pod_id}/credentials/leases/{lease_id}", status_code=204)
@@ -135,7 +153,11 @@ async def revoke_pod_credential_lease(
     assert auth.bridge is not None
     auth.bridge.require_scope(SCOPE_INTERNAL_CREDENTIALS)
     broker = AgentCredentialBroker(session)
-    if not await broker.revoke_lease_for_pod(pod_id=pod_id, lease_id=lease_id):
+    if not await broker.revoke_lease_for_pod(
+        pod_id=pod_id,
+        lease_id=lease_id,
+        principal=_bridge_principal(auth.bridge),
+    ):
         raise AppError(
             code="REVOKE_FAILED",
             title="Bad Gateway",
