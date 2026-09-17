@@ -67,7 +67,6 @@ class MaterializePlanner:
         except Exception:
             pass
         active_profile_id = await self._resolve_active_profile_id(
-            schema_name=inst.schema_name,
             project_id=project_id,
             cabinet_id=cabinet_id,
         )
@@ -96,7 +95,6 @@ class MaterializePlanner:
                 rule_id = str(rule.get("id") or f"{module_id}_{len(ops)}")
                 if source_type == "row":
                     op = await self._plan_row_op(
-                        inst=inst,
                         module_id=module_id,
                         rule_id=rule_id,
                         source=source,
@@ -111,7 +109,6 @@ class MaterializePlanner:
                         ops.append(op)
                 elif source_type == "rows":
                     row_ops = await self._plan_rows_ops(
-                        inst=inst,
                         module_id=module_id,
                         rule_id=rule_id,
                         source=source,
@@ -256,7 +253,6 @@ class MaterializePlanner:
     async def _resolve_active_profile_id(
         self,
         *,
-        schema_name: str,
         project_id: str,
         cabinet_id: str | None = None,
     ) -> str | None:
@@ -265,7 +261,6 @@ class MaterializePlanner:
             ModuleInstanceService,
         )
 
-        del schema_name  # legacy schema fallback removed
         instances = ModuleInstanceService(self._session)
         sot = await instances.resolve_sot_instance(
             module_id="mod_prompts",
@@ -322,7 +317,6 @@ class MaterializePlanner:
     async def _fetch_row(
         self,
         *,
-        schema_name: str,
         module_id: str,
         table_slug: str,
         row_id: str,
@@ -331,7 +325,6 @@ class MaterializePlanner:
     ) -> dict[str, Any] | None:
         from prodavan.application.modules.module_instance_service import ModuleInstanceService
 
-        del schema_name
         instances = ModuleInstanceService(self._session)
         instance_id = await self._sot_instance_id(
             module_id=module_id, project_id=project_id, cabinet_id=cabinet_id
@@ -349,7 +342,6 @@ class MaterializePlanner:
     async def _fetch_rows(
         self,
         *,
-        schema_name: str,
         module_id: str,
         table_slug: str,
         filt: dict[str, Any] | None,
@@ -358,7 +350,6 @@ class MaterializePlanner:
     ) -> list[dict[str, Any]]:
         from prodavan.application.modules.module_instance_service import ModuleInstanceService
 
-        del schema_name
         instances = ModuleInstanceService(self._session)
         instance_id = await self._sot_instance_id(
             module_id=module_id, project_id=project_id, cabinet_id=cabinet_id
@@ -386,7 +377,6 @@ class MaterializePlanner:
     async def _plan_row_op(
         self,
         *,
-        inst: CabinetInstanceRow,
         module_id: str,
         rule_id: str,
         source: dict[str, Any],
@@ -402,7 +392,6 @@ class MaterializePlanner:
         ctx = {"active_profile_id": active_profile_id}
         row_id = self._substitute(row_id_tpl, ctx)
         body = await self._fetch_row(
-            schema_name=inst.schema_name,
             module_id=module_id,
             table_slug=table_slug,
             row_id=row_id,
@@ -435,7 +424,6 @@ class MaterializePlanner:
     async def _plan_rows_ops(
         self,
         *,
-        inst: CabinetInstanceRow,
         module_id: str,
         rule_id: str,
         source: dict[str, Any],
@@ -454,7 +442,6 @@ class MaterializePlanner:
             for k, v in filt_raw.items()
         }
         rows = await self._fetch_rows(
-            schema_name=inst.schema_name,
             module_id=module_id,
             table_slug=table_slug,
             filt=filt,
@@ -518,7 +505,6 @@ class MaterializePlanner:
                 rows=rows,
                 rule_id=rule_id,
                 module_id=module_id,
-                priority=priority,
             )
         ops: list[MaterializeOp] = []
         for i, body in enumerate(rows):
@@ -721,14 +707,12 @@ def _expand_prompt_path_ops(
     rows: list[dict[str, Any]],
     rule_id: str,
     module_id: str,
-    priority: int,  # unused: per-file priority from entry; kept for call-site compat
 ) -> list[MaterializeOp]:
     """Expand prompt_paths.files_json into prompt_fragment ops; skip empty files_json.
 
-    Rule-level ``priority`` is ignored — each file entry carries its own priority
-    (default 100). Fragments are stitched later in ``plan_for_project``.
+    Each file entry carries its own priority (default 100). Fragments are
+    stitched later in ``plan_for_project``.
     """
-    _ = priority
     ops: list[MaterializeOp] = []
     for i, body in enumerate(rows):
         files = body.get("files_json")

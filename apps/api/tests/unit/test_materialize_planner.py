@@ -133,7 +133,6 @@ def test_expand_prompt_path_ops_skips_empty_files() -> None:
         ],
         rule_id="prompt_paths_files",
         module_id="mod_prompts",
-        priority=10,
     )
     assert len(ops) == 1
     assert ops[0].workspace_path == "rules/style.md"
@@ -159,7 +158,6 @@ def test_expand_prompt_path_ops_reads_per_file_priority() -> None:
         ],
         rule_id="prompt_paths_files",
         module_id="mod_prompts",
-        priority=10,
     )
     assert {o.priority for o in fragments} == {100, 200}
     stitched = _stitch_prompt_fragment_ops(fragments)
@@ -252,10 +250,8 @@ def test_merge_mapped_sqlite_skips_remote_source_kind() -> None:
             {"name": "remote", "source_kind": "remote", "status": "ready", "paused": False},
         ]
     )
-    inst = SimpleNamespace(schema_name="cab_x")
     ops = asyncio.run(
         planner._plan_rows_ops(
-            inst=inst,
             module_id="mod_equipment",
             rule_id="catalogs_merge",
             source={"type": "rows", "table_slug": "catalogs", "filter": {"status": "ready"}},
@@ -308,7 +304,6 @@ def test_active_profile_paths_only_expand_matching_profile() -> None:
         rows=filtered,
         rule_id="prompt_paths_files",
         module_id="mod_prompts",
-        priority=10,
     )
     assert len(ops) == 1
     assert ops[0].workspace_path == "rules/a.md"
