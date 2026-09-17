@@ -219,18 +219,17 @@ def test_connect_error_connection_lost_is_actionable() -> None:
     assert "192.168.0.104" in (err.detail or "")
 
 def test_product_seed_action_fallback() -> None:
-    from prodavan.application.modules.module_action_executor import _product_seed_action
-
-    action = _product_seed_action(
-        module_id="mod_equipment",
-        action_id="list_catalog_remote_databases",
+    from prodavan.application.modules.module_action_executor import (
+        _product_seed_actions,
     )
+
+    actions = _product_seed_actions(module_id="mod_equipment")
+    assert actions, "mod_equipment must expose seed actions"
+    by_id = {str(a.get("id")): a for a in actions}
+    action = by_id.get("list_catalog_remote_databases")
     assert action is not None
     assert action["kind"] == "content.list_remote_sql_databases"
-    tables = _product_seed_action(
-        module_id="mod_equipment",
-        action_id="list_catalog_remote_tables",
-    )
+    tables = by_id.get("list_catalog_remote_tables")
     assert tables is not None
     assert tables["kind"] == "content.list_remote_sql_tables"
 

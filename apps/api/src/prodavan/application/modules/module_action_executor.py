@@ -57,21 +57,25 @@ def remote_probe_connection_key(body: dict[str, Any], params: dict[str, Any]) ->
     )
 
 
-def _product_seed_action(*, module_id: str, action_id: str) -> dict[str, Any] | None:
-    """Fallback when DB meta lags behind product seeds (avoids picker 404)."""
+def _product_seed_actions(module_id: str) -> list[dict[str, Any]]:
+    """Return the product seed ``actions`` list for ``module_id`` (META-P1b).
+
+    Single source of truth for the seed fallback: when DB meta is empty (fresh
+    install / unseeded module), the UI picker and the action executor both
+    see the same list — no two contracts. ``upsert_product_modules`` (Alembic)
+    mirrors seeds into DB meta on migration, so this fallback is only hit on
+    un-migrated / partial envs; it is the safety net, not the primary SoT.
+    """
     from prodavan.application.platform.product_module_seeds import PRODUCT_MODULES
 
     for mid, _name, slugs in PRODUCT_MODULES:
         if mid != module_id:
             continue
         actions = slugs.get("actions")
-        if not isinstance(actions, list):
-            return None
-        for item in actions:
-            if isinstance(item, dict) and str(item.get("id")) == action_id:
-                return dict(item)
-        return None
-    return None
+        if isinstance(actions, list):
+            return [dict(item) for item in actions if isinstance(item, dict)]
+        return []
+    return []
 
 
 class ModuleActionExecutor:
@@ -1871,6 +1875,14 @@ class ModuleActionExecutor:
         }
 
     async def _list_actions(self, *, module_id: str) -> list[dict[str, Any]]:
+        """List actions for a module from DB meta, falling back to seeds (META-P1b).
+
+        Single SoT: the UI picker and the executor both go through this method,
+        so a fresh install / unseeded module sees the same actions in both
+        places — no two contracts. ``upsert_product_modules`` mirrors seeds
+        into DB meta on migration; the seed fallback only fires when DB meta
+        is empty or absent.
+        """
         q = await self._session.execute(
             select(ModuleMetaDocumentRow.body).where(
                 ModuleMetaDocumentRow.module_id == module_id,
@@ -1878,15 +1890,14 @@ class ModuleActionExecutor:
             )
         )
         body = q.scalar_one_or_none()
-        if not isinstance(body, list):
-            return []
-        return [item for item in body if isinstance(item, dict)]
+        if isinstance(body, list):
+            return [item for item in body if isinstance(item, dict)]
+        # DB meta empty/absent — fall back to product seeds so UI picker and
+        # executor agree on the action list before the next Alembic mirror.
+        return _product_seed_actions(module_id)
 
     async def _load_action(self, *, module_id: str, action_id: str) -> dict[str, Any]:
         for item in await self._list_actions(module_id=module_id):
             if str(item.get("id")) == action_id:
                 return item
-        seeded = _product_seed_action(module_id=module_id, action_id=action_id)
-        if seeded is not None:
-            return seeded
         raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="action not found")

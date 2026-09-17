@@ -75,6 +75,47 @@ async def test_unknown_action_kind() -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_actions_falls_back_to_product_seeds_when_db_empty() -> None:
+    # META-P1b: when DB meta is empty/unseeded, _list_actions falls back to
+    # product seeds so the UI picker and the executor share one SoT.
+    from prodavan.application.modules.module_action_executor import (
+        _product_seed_actions,
+    )
+
+    executor = ModuleActionExecutor(session=_FakeSession(None))  # type: ignore[arg-type]
+    actions = await executor._list_actions(module_id="mod_equipment")
+    seed_actions = _product_seed_actions("mod_equipment")
+    # DB empty → seed fallback returns the same list the UI would show.
+    assert actions == seed_actions
+    assert len(actions) >= 1
+
+
+@pytest.mark.asyncio
+async def test_load_action_finds_seed_action_when_db_empty() -> None:
+    # META-P1b: _load_action goes through _list_actions (seed fallback), so
+    # an unseeded module can still invoke a seed action — no 404 gap between
+    # UI picker and executor.
+    from prodavan.application.modules.module_action_executor import (
+        _product_seed_actions,
+    )
+
+    seed_actions = _product_seed_actions("mod_equipment")
+    assert seed_actions, "mod_equipment must have seed actions"
+    action_id = str(seed_actions[0].get("id"))
+    executor = ModuleActionExecutor(session=_FakeSession(None))  # type: ignore[arg-type]
+    loaded = await executor._load_action(module_id="mod_equipment", action_id=action_id)
+    assert str(loaded.get("id")) == action_id
+
+
+@pytest.mark.asyncio
+async def test_load_action_404_when_neither_db_nor_seeds_have_it() -> None:
+    executor = ModuleActionExecutor(session=_FakeSession(None))  # type: ignore[arg-type]
+    with pytest.raises(AppError) as exc:
+        await executor._load_action(module_id="mod_equipment", action_id="nope")
+    assert exc.value.status == 404
+
+
+@pytest.mark.asyncio
 async def test_list_remote_databases_uses_project_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

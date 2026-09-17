@@ -75,7 +75,8 @@ Source types: `row` / `rows` / `file_ref` / `meta_document` / `mcp_package` / `s
 ### META-P1b — два источника истины для actions
 
 **Приоритет:** P1  
-DB meta slug `actions` + `_product_seed_action` из Python seeds, когда DB отстаёт. Два контракта UI/агента.
+~~DB meta slug `actions` + `_product_seed_action` из Python seeds, когда DB отстаёт. Два контракта UI/агента.~~  
+**Исправлено:** `_list_actions` — single SoT: берёт из DB meta, fallback к `_product_seed_actions` (seeds) когда DB пуста. UI picker и executor оба через `_list_actions` — один контракт. `_load_action` делегирует к `_list_actions` (без отдельного seed fallback). `_product_seed_action` (single-action lookup) убран (legacy под нож). `upsert_product_modules` (Alembic) зеркалит seeds в DB meta при миграции — fallback только для un-migrated/partial envs.
 
 **Где:** [`module_action_executor.py`](../../../apps/api/src/prodavan/application/modules/module_action_executor.py), [`product_module_seeds.py`](../../../apps/api/src/prodavan/application/platform/product_module_seeds.py).
 
