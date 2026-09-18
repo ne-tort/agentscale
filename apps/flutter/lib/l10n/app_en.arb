@@ -1424,5 +1424,20 @@
   },
   "metaSecretEnter": "Enter secret",
   "metaSecretReplace": "Replace secret",
-  "metaSecretSave": "Save secret"
+  "metaSecretSave": "Save secret",
+  "aiKeyProbeTitle": "Verify key",
+  "aiKeyProbeRun": "Verify key",
+  "aiKeyProbeNoSecret": "Key has no secret stored. Add a secret first.",
+  "aiKeyProbeNeverRun": "Key has not been verified yet.",
+  "aiKeyProbeLatency": "Latency",
+  "aiKeyProbeModelsCount": "Models available",
+  "aiKeyProbeErrorCode": "Error code",
+  "aiKeyProbeErrorMessage": "Error message",
+  "aiKeyProbeCheckedAt": "Checked at",
+  "aiKeyProbeModelSelect": "Select model (informational)",
+  "aiKeyProbeModelLabel": "Model",
+  "aiKeyProbeStatusOk": "Key works",
+  "aiKeyProbeStatusError": "Key error",
+  "aiKeyProbeStatusUnavailable": "Probe unavailable",
+  "aiKeyProbeStatusNone": "Not verified"
 }

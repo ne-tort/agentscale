@@ -60,7 +60,12 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
     final status = probe['status'] as String? ?? 'none';
     final latency = probe['latency_ms'];
     final at = probe['checked_at'] as String? ?? '';
-    final label = l10n.aiKeyProbeStatusLabel(status);
+    final label = switch (status) {
+      'ok' => l10n.aiKeyProbeStatusOk,
+      'error' => l10n.aiKeyProbeStatusError,
+      'unavailable' => l10n.aiKeyProbeStatusUnavailable,
+      _ => l10n.aiKeyProbeStatusNone,
+    };
     if (latency != null && at.isNotEmpty) {
       return '$label · ${latency}ms · $at';
     }

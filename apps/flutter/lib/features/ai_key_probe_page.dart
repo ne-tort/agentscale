@@ -195,7 +195,7 @@ class _AiKeyProbePageState extends State<AiKeyProbePage> {
                 const SizedBox(width: AppSpacing.sm),
                 Expanded(
                   child: Text(
-                    l10n.aiKeyProbeStatusLabel(status),
+                    _statusLabel(l10n, status),
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                 ),
@@ -294,5 +294,19 @@ class _AiKeyProbePageState extends State<AiKeyProbePage> {
       AppStatusSeverity.info => tokens.info,
       AppStatusSeverity.critical => tokens.danger,
     };
+  }
+
+  String _statusLabel(AppLocalizations l10n, String status) {
+    switch (status) {
+      case 'ok':
+        return l10n.aiKeyProbeStatusOk;
+      case 'error':
+        return l10n.aiKeyProbeStatusError;
+      case 'unavailable':
+        return l10n.aiKeyProbeStatusUnavailable;
+      case 'none':
+      default:
+        return l10n.aiKeyProbeStatusNone;
+    }
   }
 }

@@ -1426,5 +1426,20 @@
   },
   "metaSecretEnter": "Введите секрет",
   "metaSecretReplace": "Заменить секрет",
-  "metaSecretSave": "Сохранить секрет"
+  "metaSecretSave": "Сохранить секрет",
+  "aiKeyProbeTitle": "Проверить ключ",
+  "aiKeyProbeRun": "Проверить ключ",
+  "aiKeyProbeNoSecret": "У ключа нет сохранённого секрета. Сначала добавьте секрет.",
+  "aiKeyProbeNeverRun": "Ключ ещё не проверялся.",
+  "aiKeyProbeLatency": "Задержка",
+  "aiKeyProbeModelsCount": "Доступно моделей",
+  "aiKeyProbeErrorCode": "Код ошибки",
+  "aiKeyProbeErrorMessage": "Сообщение ошибки",
+  "aiKeyProbeCheckedAt": "Проверен",
+  "aiKeyProbeModelSelect": "Выбор модели (информационно)",
+  "aiKeyProbeModelLabel": "Модель",
+  "aiKeyProbeStatusOk": "Ключ работает",
+  "aiKeyProbeStatusError": "Ошибка ключа",
+  "aiKeyProbeStatusUnavailable": "Проверка недоступна",
+  "aiKeyProbeStatusNone": "Не проверялся"
 }

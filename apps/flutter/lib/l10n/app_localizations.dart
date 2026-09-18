@@ -4724,8 +4724,29 @@ abstract class AppLocalizations {
   /// **'Model'**
   String get aiKeyProbeModelLabel;
 
-  /// aiKeyProbeStatusLabel — returns a localized label for a probe status.
-  String aiKeyProbeStatusLabel(String status);
+  /// No description provided for @aiKeyProbeStatusOk.
+  ///
+  /// In en, this message translates to:
+  /// **'Key works'**
+  String get aiKeyProbeStatusOk;
+
+  /// No description provided for @aiKeyProbeStatusError.
+  ///
+  /// In en, this message translates to:
+  /// **'Key error'**
+  String get aiKeyProbeStatusError;
+
+  /// No description provided for @aiKeyProbeStatusUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Probe unavailable'**
+  String get aiKeyProbeStatusUnavailable;
+
+  /// No description provided for @aiKeyProbeStatusNone.
+  ///
+  /// In en, this message translates to:
+  /// **'Not verified'**
+  String get aiKeyProbeStatusNone;
 }
 
 class _AppLocalizationsDelegate

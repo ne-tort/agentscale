@@ -2613,7 +2613,8 @@ class AppLocalizationsRu extends AppLocalizations {
   String get aiKeyProbeRun => 'Проверить ключ';
 
   @override
-  String get aiKeyProbeNoSecret => 'У ключа нет сохранённого секрета. Сначала добавьте секрет.';
+  String get aiKeyProbeNoSecret =>
+      'У ключа нет сохранённого секрета. Сначала добавьте секрет.';
 
   @override
   String get aiKeyProbeNeverRun => 'Ключ ещё не проверялся.';
@@ -2640,17 +2641,14 @@ class AppLocalizationsRu extends AppLocalizations {
   String get aiKeyProbeModelLabel => 'Модель';
 
   @override
-  String aiKeyProbeStatusLabel(String status) {
-    switch (status) {
-      case 'ok':
-        return 'Ключ работает';
-      case 'error':
-        return 'Ошибка ключа';
-      case 'unavailable':
-        return 'Проверка недоступна';
-      case 'none':
-      default:
-        return 'Не проверялся';
-    }
-  }
+  String get aiKeyProbeStatusOk => 'Ключ работает';
+
+  @override
+  String get aiKeyProbeStatusError => 'Ошибка ключа';
+
+  @override
+  String get aiKeyProbeStatusUnavailable => 'Проверка недоступна';
+
+  @override
+  String get aiKeyProbeStatusNone => 'Не проверялся';
 }

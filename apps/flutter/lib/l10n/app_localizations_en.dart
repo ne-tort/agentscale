@@ -2598,7 +2598,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get aiKeyProbeRun => 'Verify key';
 
   @override
-  String get aiKeyProbeNoSecret => 'Key has no secret stored. Add a secret first.';
+  String get aiKeyProbeNoSecret =>
+      'Key has no secret stored. Add a secret first.';
 
   @override
   String get aiKeyProbeNeverRun => 'Key has not been verified yet.';
@@ -2625,17 +2626,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get aiKeyProbeModelLabel => 'Model';
 
   @override
-  String aiKeyProbeStatusLabel(String status) {
-    switch (status) {
-      case 'ok':
-        return 'Key works';
-      case 'error':
-        return 'Key error';
-      case 'unavailable':
-        return 'Probe unavailable';
-      case 'none':
-      default:
-        return 'Not verified';
-    }
-  }
+  String get aiKeyProbeStatusOk => 'Key works';
+
+  @override
+  String get aiKeyProbeStatusError => 'Key error';
+
+  @override
+  String get aiKeyProbeStatusUnavailable => 'Probe unavailable';
+
+  @override
+  String get aiKeyProbeStatusNone => 'Not verified';
 }
