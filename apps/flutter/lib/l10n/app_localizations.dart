@@ -4657,6 +4657,96 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Save secret'**
   String get metaSecretSave;
+
+  /// No description provided for @aiKeyProbeTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Verify key'**
+  String get aiKeyProbeTitle;
+
+  /// No description provided for @aiKeyProbeRun.
+  ///
+  /// In en, this message translates to:
+  /// **'Verify key'**
+  String get aiKeyProbeRun;
+
+  /// No description provided for @aiKeyProbeNoSecret.
+  ///
+  /// In en, this message translates to:
+  /// **'Key has no secret stored. Add a secret first.'**
+  String get aiKeyProbeNoSecret;
+
+  /// No description provided for @aiKeyProbeNeverRun.
+  ///
+  /// In en, this message translates to:
+  /// **'Key has not been verified yet.'**
+  String get aiKeyProbeNeverRun;
+
+  /// No description provided for @aiKeyProbeLatency.
+  ///
+  /// In en, this message translates to:
+  /// **'Latency'**
+  String get aiKeyProbeLatency;
+
+  /// No description provided for @aiKeyProbeModelsCount.
+  ///
+  /// In en, this message translates to:
+  /// **'Models available'**
+  String get aiKeyProbeModelsCount;
+
+  /// No description provided for @aiKeyProbeErrorCode.
+  ///
+  /// In en, this message translates to:
+  /// **'Error code'**
+  String get aiKeyProbeErrorCode;
+
+  /// No description provided for @aiKeyProbeErrorMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Error message'**
+  String get aiKeyProbeErrorMessage;
+
+  /// No description provided for @aiKeyProbeCheckedAt.
+  ///
+  /// In en, this message translates to:
+  /// **'Checked at'**
+  String get aiKeyProbeCheckedAt;
+
+  /// No description provided for @aiKeyProbeModelSelect.
+  ///
+  /// In en, this message translates to:
+  /// **'Select model (informational)'**
+  String get aiKeyProbeModelSelect;
+
+  /// No description provided for @aiKeyProbeModelLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Model'**
+  String get aiKeyProbeModelLabel;
+
+  /// No description provided for @aiKeyProbeStatusOk.
+  ///
+  /// In en, this message translates to:
+  /// **'Key works'**
+  String get aiKeyProbeStatusOk;
+
+  /// No description provided for @aiKeyProbeStatusError.
+  ///
+  /// In en, this message translates to:
+  /// **'Key error'**
+  String get aiKeyProbeStatusError;
+
+  /// No description provided for @aiKeyProbeStatusUnavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Probe unavailable'**
+  String get aiKeyProbeStatusUnavailable;
+
+  /// No description provided for @aiKeyProbeStatusNone.
+  ///
+  /// In en, this message translates to:
+  /// **'Not verified'**
+  String get aiKeyProbeStatusNone;
 }
 
 class _AppLocalizationsDelegate

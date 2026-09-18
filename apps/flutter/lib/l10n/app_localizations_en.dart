@@ -2590,4 +2590,50 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get metaSecretSave => 'Save secret';
+
+  @override
+  String get aiKeyProbeTitle => 'Verify key';
+
+  @override
+  String get aiKeyProbeRun => 'Verify key';
+
+  @override
+  String get aiKeyProbeNoSecret =>
+      'Key has no secret stored. Add a secret first.';
+
+  @override
+  String get aiKeyProbeNeverRun => 'Key has not been verified yet.';
+
+  @override
+  String get aiKeyProbeLatency => 'Latency';
+
+  @override
+  String get aiKeyProbeModelsCount => 'Models available';
+
+  @override
+  String get aiKeyProbeErrorCode => 'Error code';
+
+  @override
+  String get aiKeyProbeErrorMessage => 'Error message';
+
+  @override
+  String get aiKeyProbeCheckedAt => 'Checked at';
+
+  @override
+  String get aiKeyProbeModelSelect => 'Select model (informational)';
+
+  @override
+  String get aiKeyProbeModelLabel => 'Model';
+
+  @override
+  String get aiKeyProbeStatusOk => 'Key works';
+
+  @override
+  String get aiKeyProbeStatusError => 'Key error';
+
+  @override
+  String get aiKeyProbeStatusUnavailable => 'Probe unavailable';
+
+  @override
+  String get aiKeyProbeStatusNone => 'Not verified';
 }

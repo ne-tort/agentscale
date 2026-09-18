@@ -15,6 +15,7 @@ from prodavan.infrastructure.persistence.models.agent import (
 from prodavan.infrastructure.persistence.models.composer_draft import EmployeeComposerDraftRow
 from prodavan.infrastructure.persistence.models.ai_keys import (
     AiKeyAuditEventRow,
+    AiKeyCheckResultRow,
     AiProviderKeyRow,
     CompanyAiKeyBindingRow,
 )
@@ -70,6 +71,7 @@ __all__ = [
     "EmployeeComposerDraftRow",
     "EmployeeProjectSelectionRow",
     "AiKeyAuditEventRow",
+    "AiKeyCheckResultRow",
     "AiKeyModelBindingRow",
     "AiModelRow",
     "AiModelSdkBindingRow",

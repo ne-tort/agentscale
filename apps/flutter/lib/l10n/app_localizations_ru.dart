@@ -2605,4 +2605,50 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get metaSecretSave => 'Сохранить секрет';
+
+  @override
+  String get aiKeyProbeTitle => 'Проверить ключ';
+
+  @override
+  String get aiKeyProbeRun => 'Проверить ключ';
+
+  @override
+  String get aiKeyProbeNoSecret =>
+      'У ключа нет сохранённого секрета. Сначала добавьте секрет.';
+
+  @override
+  String get aiKeyProbeNeverRun => 'Ключ ещё не проверялся.';
+
+  @override
+  String get aiKeyProbeLatency => 'Задержка';
+
+  @override
+  String get aiKeyProbeModelsCount => 'Доступно моделей';
+
+  @override
+  String get aiKeyProbeErrorCode => 'Код ошибки';
+
+  @override
+  String get aiKeyProbeErrorMessage => 'Сообщение ошибки';
+
+  @override
+  String get aiKeyProbeCheckedAt => 'Проверен';
+
+  @override
+  String get aiKeyProbeModelSelect => 'Выбор модели (информационно)';
+
+  @override
+  String get aiKeyProbeModelLabel => 'Модель';
+
+  @override
+  String get aiKeyProbeStatusOk => 'Ключ работает';
+
+  @override
+  String get aiKeyProbeStatusError => 'Ошибка ключа';
+
+  @override
+  String get aiKeyProbeStatusUnavailable => 'Проверка недоступна';
+
+  @override
+  String get aiKeyProbeStatusNone => 'Не проверялся';
 }

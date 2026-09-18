@@ -12,6 +12,7 @@ import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/admin/ai_key_integration_type.dart';
 import 'package:prodavan/features/company/ai_key_models_page.dart';
 import 'package:prodavan/features/company/company_entity_source.dart';
+import 'package:prodavan/features/ai_key_probe_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Company AI key detail — full edit for local keys; RO for platform-bound.
@@ -51,6 +52,25 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
   String _bindingCountSubtitle(AppLocalizations l10n, int count) {
     if (count == 0) return l10n.commonNotSet;
     return l10n.adminBindingsSelected('$count');
+  }
+
+  String _probeSubtitle(AppLocalizations l10n) {
+    final probe = _key?['last_probe'];
+    if (probe is! Map) return l10n.aiKeyProbeNeverRun;
+    final status = probe['status'] as String? ?? 'none';
+    final latency = probe['latency_ms'];
+    final at = probe['checked_at'] as String? ?? '';
+    final label = switch (status) {
+      'ok' => l10n.aiKeyProbeStatusOk,
+      'error' => l10n.aiKeyProbeStatusError,
+      'unavailable' => l10n.aiKeyProbeStatusUnavailable,
+      _ => l10n.aiKeyProbeStatusNone,
+    };
+    if (latency != null && at.isNotEmpty) {
+      return '$label · ${latency}ms · $at';
+    }
+    if (at.isNotEmpty) return '$label · $at';
+    return label;
   }
 
   @override
@@ -305,6 +325,27 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
               await _load();
             },
           ),
+          if (hasSecret)
+            AppNavPreference(
+              title: l10n.aiKeyProbeTitle,
+              icon: Icons.network_check_rounded,
+              subtitle: Text(_probeSubtitle(l10n)),
+              onTap: () => AiKeyProbePage.push(
+                context,
+                keyId: widget.keyId,
+                keyName: _displayName,
+                hasSecret: hasSecret,
+                apiKind: _key?['api_kind'] as String? ?? '',
+                onProbe: () => companyContext.api.probeAiKey(
+                  companyId: widget.companyId,
+                  keyId: widget.keyId,
+                ),
+                onLoadLast: () => companyContext.api.getLastProbeAiKey(
+                  companyId: widget.companyId,
+                  keyId: widget.keyId,
+                ),
+              ).then((_) => _load()),
+            ),
           AppSubscriptionPreference(
             title: l10n.adminSubscription,
             enabled: _writable,

@@ -126,3 +126,25 @@ async def set_companies(admin: PlatformAdminDep, session: SessionDep, key_id: st
 @router.delete("/{key_id}", status_code=204)
 async def delete_key(admin: PlatformAdminDep, session: SessionDep, key_id: str) -> None:
     await AiKeysService(session).delete_key(key_id, principal=admin)
+
+
+@router.post("/{key_id}/probe")
+async def probe_key(admin: PlatformAdminDep, session: SessionDep, key_id: str) -> dict:
+    """Verify the key's secret works against the provider API (PROBE-P1).
+
+    Performs a short HTTP request (GET /models, fallback: 1-token chat) and
+    stores the last probe result. Never throws — returns a result dict with
+    status ok/error/unavailable, latency_ms, models, etc.
+    """
+    from prodavan.application.ai_keys.probe.service import AiKeyProbeService
+
+    return await AiKeyProbeService(session).probe_key(key_id, principal=admin)
+
+
+@router.get("/{key_id}/probe")
+async def get_last_probe(_admin: PlatformAdminDep, session: SessionDep, key_id: str) -> dict:
+    """Return the last stored probe result for a key (or {status: 'none'})."""
+    from prodavan.application.ai_keys.probe.service import AiKeyProbeService
+
+    result = await AiKeyProbeService(session).get_last_result(key_id)
+    return result if result is not None else {"status": "none", "models": []}

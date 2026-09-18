@@ -78,7 +78,115 @@ class AiKeysService:
         except Exception:
             pass
 
+    # ---- metrics events (Kafka-first, dual-write post-commit) ----
+
+    def _emit_metrics_created(self, row: AiProviderKeyRow, company_ids: list[str]) -> None:
+        from prodavan.application.ai_keys.metrics import (
+            schedule_key_created_event,
+            schedule_key_provider_meta_event,
+        )
+
+        renewal_iso = row.next_renewal_at.isoformat() if row.next_renewal_at else None
+        price_str = str(row.renewal_price) if row.renewal_price is not None else None
+        # Emit one created event per company bound (or one platform event).
+        owners = company_ids if company_ids else ([row.owner_company_id] if row.owner_company_id else [])
+        for cid in owners:
+            schedule_key_created_event(
+                self._session,
+                key_id=row.id,
+                name=row.name,
+                provider=row.provider,
+                api_kind=row.api_kind,
+                owner_scope=row.owner_scope,
+                owner_company_id=row.owner_company_id,
+                company_ids=company_ids,
+                next_renewal_at=renewal_iso,
+                renewal_price=price_str,
+                currency=row.currency,
+            )
+            schedule_key_provider_meta_event(
+                self._session,
+                key_id=row.id,
+                provider=row.provider,
+                api_kind=row.api_kind,
+                company_id=cid,
+                next_renewal_at=renewal_iso,
+                renewal_price=price_str,
+                currency=row.currency,
+            )
+            # bound event for each company
+            from prodavan.application.ai_keys.metrics import schedule_key_bound_event
+
+            schedule_key_bound_event(self._session, key_id=row.id, company_id=cid)
+        # If no company at all (platform key, unbound), still emit a platform event.
+        if not owners:
+            schedule_key_created_event(
+                self._session,
+                key_id=row.id,
+                name=row.name,
+                provider=row.provider,
+                api_kind=row.api_kind,
+                owner_scope=row.owner_scope,
+                owner_company_id=None,
+                company_ids=[],
+                next_renewal_at=renewal_iso,
+                renewal_price=price_str,
+                currency=row.currency,
+            )
+            schedule_key_provider_meta_event(
+                self._session,
+                key_id=row.id,
+                provider=row.provider,
+                api_kind=row.api_kind,
+                company_id=None,
+                next_renewal_at=renewal_iso,
+                renewal_price=price_str,
+                currency=row.currency,
+            )
+
+    def _emit_metrics_updated(self, row: AiProviderKeyRow, updates: dict[str, Any]) -> None:
+        from prodavan.application.ai_keys.metrics import (
+            schedule_key_disabled_event,
+            schedule_key_provider_meta_event,
+            schedule_key_updated_event,
+        )
+
+        renewal_iso = row.next_renewal_at.isoformat() if row.next_renewal_at else None
+        price_str = str(row.renewal_price) if row.renewal_price is not None else None
+        schedule_key_updated_event(
+            self._session,
+            key_id=row.id,
+            fields=list(updates.keys()),
+            status=row.status,
+            company_id=row.owner_company_id,
+            next_renewal_at=renewal_iso,
+            renewal_price=price_str,
+            currency=row.currency,
+        )
+        # If provider/api_kind/subscription changed, re-emit provider_meta.
+        if {"provider", "api_kind", "next_renewal_at", "renewal_price", "currency"} & set(updates.keys()):
+            schedule_key_provider_meta_event(
+                self._session,
+                key_id=row.id,
+                provider=row.provider,
+                api_kind=row.api_kind,
+                company_id=row.owner_company_id,
+                next_renewal_at=renewal_iso,
+                renewal_price=price_str,
+                currency=row.currency,
+            )
+        # If status flipped to disabled, emit a disabled event.
+        if "status" in updates and row.status == KeyStatus.DISABLED:
+            schedule_key_disabled_event(
+                self._session,
+                key_id=row.id,
+                reason="manual",
+                company_id=row.owner_company_id,
+            )
+
     async def _emit_lazy_expire_audits(self, key_ids: list[str]) -> None:
+        from prodavan.application.ai_keys.metrics import schedule_key_disabled_event
+
         for key_id in key_ids:
             try:
                 await self._audit.record(
@@ -89,6 +197,11 @@ class AiKeysService:
                 )
             except Exception:
                 pass
+            schedule_key_disabled_event(
+                self._session,
+                key_id=key_id,
+                reason="next_renewal_at_past",
+            )
 
     def _apply_lazy_expiry(self, row: AiProviderKeyRow) -> tuple[bool, bool]:
         """Returns (still_active, just_disabled_by_expiry).
@@ -129,9 +242,7 @@ class AiKeysService:
                 runtime = matched
         return runtime, disabled_ids
 
-    async def _finalize_lazy_disabled(
-        self, key_ids: list[str], *, principal: Principal | None = None
-    ) -> None:
+    async def _finalize_lazy_disabled(self, key_ids: list[str], *, principal: Principal | None = None) -> None:
         if not key_ids:
             return
         await self._session.commit()
@@ -139,6 +250,7 @@ class AiKeysService:
         actor = principal or _SYSTEM_PRINCIPAL
         for key_id in key_ids:
             await self.cascade_key_runtime_stop(key_id, principal=actor)
+
     async def _unbound_active_keys(self) -> list[AiProviderKeyRow]:
         bound = select(CompanyAiKeyBindingRow.key_id)
         q = await self._session.execute(
@@ -152,7 +264,13 @@ class AiKeysService:
         )
         return list(q.scalars().all())
 
-    def _to_public(self, row: AiProviderKeyRow, *, company_ids: list[str] | None = None) -> dict:
+    def _to_public(
+        self,
+        row: AiProviderKeyRow,
+        *,
+        company_ids: list[str] | None = None,
+        last_probe: dict | None = None,
+    ) -> dict:
         prefix = row.secret_ref[:24] + "…" if len(row.secret_ref) > 24 else row.secret_ref
         return {
             "id": row.id,
@@ -162,6 +280,7 @@ class AiKeysService:
             "owner_scope": row.owner_scope,
             "owner_company_id": row.owner_company_id,
             "secret_ref_prefix": prefix,
+            "has_secret": bool((row.secret_ref or "").strip()),
             "status": row.status,
             "next_renewal_at": row.next_renewal_at.isoformat() if row.next_renewal_at else None,
             "renewal_price": str(row.renewal_price) if row.renewal_price is not None else None,
@@ -171,6 +290,7 @@ class AiKeysService:
             "updated_at": row.updated_at.isoformat() if row.updated_at else None,
             "company_ids": company_ids,
             "writable": True,
+            "last_probe": last_probe,
         }
 
     async def list_keys(self) -> list[dict]:
@@ -182,9 +302,16 @@ class AiKeysService:
             if just_disabled:
                 disabled_ids.append(row.id)
         await self._finalize_lazy_disabled(disabled_ids)
+        probes = await self._last_probes_batch([r.id for r in rows])
         out: list[dict] = []
         for row in rows:
-            out.append(self._to_public(row, company_ids=await self._company_ids(row.id)))
+            out.append(
+                self._to_public(
+                    row,
+                    company_ids=await self._company_ids(row.id),
+                    last_probe=probes.get(row.id),
+                )
+            )
         return out
 
     async def company_key_metrics(self, company_id: str) -> dict[str, Any]:
@@ -224,7 +351,12 @@ class AiKeysService:
         if just_disabled:
             await self._finalize_lazy_disabled([key_id])
             row = await self._get_row(key_id)
-        return self._to_public(row, company_ids=await self._company_ids(key_id))
+        probes = await self._last_probes_batch([key_id])
+        return self._to_public(
+            row,
+            company_ids=await self._company_ids(key_id),
+            last_probe=probes.get(key_id),
+        )
 
     async def create_key(
         self,
@@ -296,6 +428,7 @@ class AiKeysService:
                 "company_ids": list(company_ids or []),
             },
         )
+        self._emit_metrics_created(row, list(company_ids or []))
         return self._to_public(row, company_ids=list(company_ids or []))
 
     async def list_keys_for_company(self, company_id: str) -> list[dict]:
@@ -314,23 +447,25 @@ class AiKeysService:
             .where(CompanyAiKeyBindingRow.company_id == company_id)
             .order_by(AiProviderKeyRow.created_at)
         )
-        out: list[dict] = []
+        all_rows: list[AiProviderKeyRow] = []
         seen: set[str] = set()
         for row in owned_q.scalars().all():
-            seen.add(row.id)
-            pub = self._to_public(row, company_ids=[company_id])
-            pub.update(
-                company_view_flags(
-                    owner_scope=row.owner_scope,
-                    owner_company_id=row.owner_company_id,
-                    company_id=company_id,
-                )
-            )
-            out.append(pub)
+            if row.id not in seen:
+                seen.add(row.id)
+                all_rows.append(row)
         for row in bound_q.scalars().all():
-            if row.id in seen:
-                continue
-            pub = self._to_public(row, company_ids=await self._company_ids(row.id))
+            if row.id not in seen:
+                seen.add(row.id)
+                all_rows.append(row)
+        probes = await self._last_probes_batch([r.id for r in all_rows])
+        out: list[dict] = []
+        for row in all_rows:
+            is_owned = row.owner_scope == "company" and row.owner_company_id == company_id
+            pub = self._to_public(
+                row,
+                company_ids=[company_id] if is_owned else await self._company_ids(row.id),
+                last_probe=probes.get(row.id),
+            )
             pub.update(
                 company_view_flags(
                     owner_scope=row.owner_scope,
@@ -362,9 +497,7 @@ class AiKeysService:
                 return item
         raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Key not found")
 
-    async def patch_key(
-        self, key_id: str, updates: dict[str, Any], *, principal: Principal | None = None
-    ) -> dict:
+    async def patch_key(self, key_id: str, updates: dict[str, Any], *, principal: Principal | None = None) -> dict:
         row = await self._get_row(key_id)
         old_status = row.status
         if "name" in updates and updates["name"] is not None:
@@ -419,6 +552,7 @@ class AiKeysService:
             principal=principal,
             detail={"fields": sorted(updates.keys()), "status": row.status},
         )
+        self._emit_metrics_updated(row, updates)
         cascade: dict[str, Any] = {}
         if row.status == KeyStatus.DISABLED and old_status != KeyStatus.DISABLED:
             cascade = await self.cascade_key_runtime_stop(key_id, principal=principal)
@@ -444,11 +578,31 @@ class AiKeysService:
             principal=principal,
             detail={"months": months, "next_renewal_at": renewal_iso},
         )
+        from prodavan.application.ai_keys.metrics import (
+            schedule_key_provider_meta_event,
+            schedule_key_renewed_event,
+        )
+
+        schedule_key_renewed_event(
+            self._session,
+            key_id=key_id,
+            months=months,
+            next_renewal_at=renewal_iso,
+            company_id=row.owner_company_id,
+        )
+        schedule_key_provider_meta_event(
+            self._session,
+            key_id=row.id,
+            provider=row.provider,
+            api_kind=row.api_kind,
+            company_id=row.owner_company_id,
+            next_renewal_at=renewal_iso,
+            renewal_price=str(row.renewal_price) if row.renewal_price is not None else None,
+            currency=row.currency,
+        )
         return self._to_public(row, company_ids=await self._company_ids(key_id))
 
-    async def rotate_secret(
-        self, key_id: str, secret: str, *, principal: Principal | None = None
-    ) -> dict:
+    async def rotate_secret(self, key_id: str, secret: str, *, principal: Principal | None = None) -> dict:
         row = await self._get_row(key_id)
         old_ref = row.secret_ref
         row.secret_ref = self._secrets.put(key_id, secret)
@@ -463,11 +617,16 @@ class AiKeysService:
             principal=principal,
             detail={"secret_ref_prefix": row.secret_ref[:24] + "…" if len(row.secret_ref) > 24 else row.secret_ref},
         )
+        from prodavan.application.ai_keys.metrics import schedule_key_rotated_event
+
+        schedule_key_rotated_event(
+            self._session,
+            key_id=key_id,
+            company_id=row.owner_company_id,
+        )
         return self._to_public(row, company_ids=await self._company_ids(key_id))
 
-    async def set_companies(
-        self, key_id: str, company_ids: list[str], *, principal: Principal | None = None
-    ) -> dict:
+    async def set_companies(self, key_id: str, company_ids: list[str], *, principal: Principal | None = None) -> dict:
         await self._get_row(key_id)
         old_ids = set(await self._company_ids(key_id))
         await self._replace_bindings(key_id, company_ids)
@@ -483,6 +642,16 @@ class AiKeysService:
             principal=principal,
             detail={"company_ids": list(company_ids), "removed_company_ids": list(removed)},
         )
+        from prodavan.application.ai_keys.metrics import (
+            schedule_key_bound_event,
+            schedule_key_unbound_event,
+        )
+
+        added = new_ids - old_ids
+        for cid in added:
+            schedule_key_bound_event(self._session, key_id=key_id, company_id=cid)
+        for cid in removed:
+            schedule_key_unbound_event(self._session, key_id=key_id, company_id=cid)
         return await self.get_key(key_id)
 
     async def delete_key(self, key_id: str, *, principal: Principal | None = None) -> None:
@@ -501,10 +670,15 @@ class AiKeysService:
             principal=principal,
             detail={"name": name, "runtime_cascade": cascade},
         )
+        from prodavan.application.ai_keys.metrics import schedule_key_deleted_event
 
-    async def cascade_key_runtime_stop(
-        self, key_id: str, *, principal: Principal | None = None
-    ) -> dict[str, Any]:
+        schedule_key_deleted_event(
+            self._session,
+            key_id=key_id,
+            name=name,
+        )
+
+    async def cascade_key_runtime_stop(self, key_id: str, *, principal: Principal | None = None) -> dict[str, Any]:
         """Cancel sessions resolved to this key; pause projects that lose last runtime binding.
 
         Key does not own Project — effect goes through bindings + session snapshot.
@@ -518,9 +692,7 @@ class AiKeysService:
         await self._clear_scope_bindings_for_key(key_id)
 
         actor = principal or Principal(sub="system:ai-key-cascade")
-        sessions_cancelled = await AgentSessionService(self._session).cancel_active_for_key(
-            key_id=key_id
-        )
+        sessions_cancelled = await AgentSessionService(self._session).cancel_active_for_key(key_id=key_id)
         await self._session.flush()
 
         company_ids = await self._company_ids(key_id)
@@ -530,9 +702,7 @@ class AiKeysService:
         for company_id in company_ids:
             if not await self._company_lost_runtime_key(company_id, exclude_key_id=key_id):
                 continue
-            for project_id in await query.list_ids(
-                company_id=company_id, status=ProjectStatus.ACTIVE
-            ):
+            for project_id in await query.list_ids(company_id=company_id, status=ProjectStatus.ACTIVE):
                 await projects.pause(
                     project_id=project_id,
                     principal=actor,
@@ -616,25 +786,19 @@ class AiKeysService:
         )
         # Prefer company-owned before Admin-bound platform keys.
         candidate_rows = list(owned_q.scalars().all()) + list(bound_q.scalars().all())
-        runtime, disabled_ids = self._pick_runtime_rows(
-            candidate_rows, preferred_provider=preferred_provider
-        )
+        runtime, disabled_ids = self._pick_runtime_rows(candidate_rows, preferred_provider=preferred_provider)
         await self._finalize_lazy_disabled(disabled_ids)
 
         chosen = runtime[0] if runtime else None
 
         if chosen is None and platform_fallback:
             pool_rows = await self._unbound_active_keys()
-            pool_runtime, pool_disabled = self._pick_runtime_rows(
-                pool_rows, preferred_provider=preferred_provider
-            )
+            pool_runtime, pool_disabled = self._pick_runtime_rows(pool_rows, preferred_provider=preferred_provider)
             await self._finalize_lazy_disabled(pool_disabled)
             chosen = pool_runtime[0] if pool_runtime else None
 
         if chosen is None:
-            only_cli = bool(candidate_rows) and all(
-                r.api_kind == ApiKind.CLI_SUBSCRIPTION for r in candidate_rows
-            )
+            only_cli = bool(candidate_rows) and all(r.api_kind == ApiKind.CLI_SUBSCRIPTION for r in candidate_rows)
             detail = (
                 "only cli_subscription bindings; not a runtime credential"
                 if only_cli
@@ -679,6 +843,40 @@ class AiKeysService:
             ids.append(row.owner_company_id)
         return ids
 
+    async def _last_probes_batch(self, key_ids: list[str]) -> dict[str, dict]:
+        """Batch-load last probe results for a list of keys (1 query)."""
+        from prodavan.infrastructure.persistence.models.ai_keys import AiKeyCheckResultRow
+
+        if not key_ids:
+            return {}
+        q = await self._session.execute(select(AiKeyCheckResultRow).where(AiKeyCheckResultRow.key_id.in_(key_ids)))
+        out: dict[str, dict] = {}
+        for row in q.scalars().all():
+            models = row.models
+            if isinstance(models, str):
+                try:
+                    import json
+
+                    models = json.loads(models)
+                except Exception:
+                    models = []
+            models_list = models if isinstance(models, list) else []
+            out[row.key_id] = {
+                "status": row.status,
+                "kind": row.kind,
+                "latency_ms": int(row.latency_ms) if row.latency_ms is not None else None,
+                "models": models_list,
+                "default_model": row.default_model,
+                "http_status": int(row.http_status) if row.http_status is not None else None,
+                "error_code": row.error_code,
+                "error_message": row.error_message,
+                "provider": row.provider,
+                "api_kind": row.api_kind,
+                "checked_at": row.checked_at.isoformat() if row.checked_at else None,
+                "checked_by": row.checked_by,
+            }
+        return out
+
     async def list_audit_events(self, *, key_id: str | None = None, limit: int = 50) -> list[dict]:
         return await self._audit.list_events(key_id=key_id, limit=limit)
 
@@ -706,10 +904,12 @@ class AiKeysService:
         from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
 
         eq = await self._session.execute(
-            select(EmployeeAiKeyBindingRow.id).where(
+            select(EmployeeAiKeyBindingRow.id)
+            .where(
                 EmployeeAiKeyBindingRow.key_id == key_id,
                 EmployeeAiKeyBindingRow.company_id == company_id,
-            ).limit(1)
+            )
+            .limit(1)
         )
         if eq.scalar_one_or_none() is not None:
             return True
@@ -725,10 +925,12 @@ class AiKeysService:
         if cq.scalar_one_or_none() is not None:
             return True
         pq = await self._session.execute(
-            select(ProjectAiKeyBindingRow.id).where(
+            select(ProjectAiKeyBindingRow.id)
+            .where(
                 ProjectAiKeyBindingRow.key_id == key_id,
                 ProjectAiKeyBindingRow.company_id == company_id,
-            ).limit(1)
+            )
+            .limit(1)
         )
         return pq.scalar_one_or_none() is not None
 
@@ -741,11 +943,13 @@ class AiKeysService:
             return True
         if project.owner_employee_id:
             eq = await self._session.execute(
-                select(EmployeeAiKeyBindingRow.id).where(
+                select(EmployeeAiKeyBindingRow.id)
+                .where(
                     EmployeeAiKeyBindingRow.key_id == key_id,
                     EmployeeAiKeyBindingRow.company_id == project.company_id,
                     EmployeeAiKeyBindingRow.employee_id == project.owner_employee_id,
-                ).limit(1)
+                )
+                .limit(1)
             )
             if eq.scalar_one_or_none() is not None:
                 return True
@@ -764,11 +968,13 @@ class AiKeysService:
         if cq.scalar_one_or_none() is not None:
             return True
         pq = await self._session.execute(
-            select(ProjectAiKeyBindingRow.id).where(
+            select(ProjectAiKeyBindingRow.id)
+            .where(
                 ProjectAiKeyBindingRow.key_id == key_id,
                 ProjectAiKeyBindingRow.company_id == project.company_id,
                 ProjectAiKeyBindingRow.project_id == project.id,
-            ).limit(1)
+            )
+            .limit(1)
         )
         return pq.scalar_one_or_none() is not None
 
@@ -781,11 +987,7 @@ class AiKeysService:
                 continue
             row = await self._get_row(kid)
             active, _ = self._apply_lazy_expiry(row)
-            if (
-                active
-                and is_runtime_api_kind(row.api_kind)
-                and (row.secret_ref or "").strip()
-            ):
+            if active and is_runtime_api_kind(row.api_kind) and (row.secret_ref or "").strip():
                 return True
         return False
 
@@ -922,10 +1124,12 @@ class AiKeysService:
 
         for eid in emp_unique:
             mem = await self._session.execute(
-                select(MembershipRow.id).where(
+                select(MembershipRow.id)
+                .where(
                     MembershipRow.company_id == company_id,
                     MembershipRow.employee_id == eid,
-                ).limit(1)
+                )
+                .limit(1)
             )
             if mem.scalar_one_or_none() is None:
                 raise AppError(
@@ -959,8 +1163,10 @@ class AiKeysService:
 
         old_cab = set(await self._scope_cabinet_ids(key_id=key_id, company_id=company_id))
         old_proj = set(await self._scope_project_ids(key_id=key_id, company_id=company_id))
+        old_emp = set(await self._scope_employee_ids(key_id=key_id, company_id=company_id))
         new_cab = set(cab_unique)
         new_proj = set(proj_unique)
+        new_emp = set(emp_unique)
 
         actor = principal or Principal(sub="system:ai-key-cascade")
 
@@ -974,9 +1180,7 @@ class AiKeysService:
             await self._session.delete(b)
         await self._session.flush()
         for eid in emp_unique:
-            self._session.add(
-                EmployeeAiKeyBindingRow(company_id=company_id, employee_id=eid, key_id=key_id)
-            )
+            self._session.add(EmployeeAiKeyBindingRow(company_id=company_id, employee_id=eid, key_id=key_id))
 
         existing_cab = await self._session.execute(
             select(CabinetAiKeyBindingRow)
@@ -1002,15 +1206,68 @@ class AiKeysService:
             await self._session.delete(b)
         await self._session.flush()
         for pid in proj_unique:
-            self._session.add(
-                ProjectAiKeyBindingRow(company_id=company_id, project_id=pid, key_id=key_id)
-            )
+            self._session.add(ProjectAiKeyBindingRow(company_id=company_id, project_id=pid, key_id=key_id))
 
         for cid in old_cab - new_cab:
             await self.cascade_cabinet_key_revoked(cid, key_id, principal=actor)
         for pid in old_proj - new_proj:
             await self.cascade_project_key_revoked(pid, key_id, principal=actor)
         # employee unbind: no pause cascade
+
+        # Metrics: scope bind/unbind events (Kafka-first, post-commit dual-write).
+        from prodavan.application.ai_keys.metrics import (
+            schedule_key_scope_bound_event,
+            schedule_key_scope_unbound_event,
+        )
+
+        for emp_id in new_emp - old_emp:
+            schedule_key_scope_bound_event(
+                self._session,
+                key_id=key_id,
+                scope="employee",
+                scope_id=emp_id,
+                company_id=company_id,
+            )
+        for emp_id in old_emp - new_emp:
+            schedule_key_scope_unbound_event(
+                self._session,
+                key_id=key_id,
+                scope="employee",
+                scope_id=emp_id,
+                company_id=company_id,
+            )
+        for cid in new_cab - old_cab:
+            schedule_key_scope_bound_event(
+                self._session,
+                key_id=key_id,
+                scope="cabinet",
+                scope_id=cid,
+                company_id=company_id,
+            )
+        for cid in old_cab - new_cab:
+            schedule_key_scope_unbound_event(
+                self._session,
+                key_id=key_id,
+                scope="cabinet",
+                scope_id=cid,
+                company_id=company_id,
+            )
+        for pid in new_proj - old_proj:
+            schedule_key_scope_bound_event(
+                self._session,
+                key_id=key_id,
+                scope="project",
+                scope_id=pid,
+                company_id=company_id,
+            )
+        for pid in old_proj - new_proj:
+            schedule_key_scope_unbound_event(
+                self._session,
+                key_id=key_id,
+                scope="project",
+                scope_id=pid,
+                company_id=company_id,
+            )
 
         await self._session.commit()
         return await self.get_key_scope_bindings(key_id=key_id, company_id=company_id)
@@ -1074,9 +1331,7 @@ class AiKeysService:
             project.resolved_ai_key_id = None
         await self._session.flush()
 
-        sessions_cancelled = await AgentSessionService(self._session).cancel_active_for_key(
-            key_id=key_id
-        )
+        sessions_cancelled = await AgentSessionService(self._session).cancel_active_for_key(key_id=key_id)
         await self._session.flush()
 
         actor = principal or Principal(sub="system:ai-key-cascade")
@@ -1122,9 +1377,7 @@ class AiKeysService:
             if await self.project_is_key_allowed(project, key_id):
                 continue
             affected = project.resolved_ai_key_id == key_id
-            if not affected and not await self._project_has_runtime_key_available(
-                project, exclude_key_id=key_id
-            ):
+            if not affected and not await self._project_has_runtime_key_available(project, exclude_key_id=key_id):
                 affected = True
             if not affected:
                 continue
