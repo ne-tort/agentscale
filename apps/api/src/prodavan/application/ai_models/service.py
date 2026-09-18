@@ -1,7 +1,16 @@
-"""AI model catalog CRUD + key bindings."""
+"""AI model catalog CRUD + key bindings.
+
+The model entity is the catalog entry for an AI model. Most fields are
+optional; `name` is the only required field. `key_aliases` is a JSONB array
+of stable provider model ids (e.g. ["ca-opus-4.6", "claude-opus-4-6"]) used
+to auto-match models returned by a key probe (GET /models) to catalog entries.
+
+owner_scope: "platform" (admin-owned, shared) | "company" (company-owned).
+"""
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from decimal import Decimal
 from typing import Any
@@ -18,9 +27,45 @@ from prodavan.infrastructure.persistence.models.ai_models import (
 )
 
 
+def _normalize_aliases(aliases: list[str] | None) -> list[str]:
+    """Dedup + strip + drop empties; preserve order."""
+    out: list[str] = []
+    seen: set[str] = set()
+    for a in aliases or []:
+        s = str(a).strip()
+        if not s or s.lower() in seen:
+            continue
+        seen.add(s.lower())
+        out.append(s)
+    return out
+
+
+def _normalize_api_kinds(kinds: list[str] | None) -> list[str]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for k in kinds or []:
+        s = str(k).strip()
+        if not s or s in seen:
+            continue
+        seen.add(s)
+        out.append(s)
+    return out
+
+
 class AiModelsService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    # ---- read ----
+
+    async def list_models(self) -> list[dict[str, Any]]:
+        """Admin listing: all models (platform + every company)."""
+        q = await self._session.execute(select(AiModelRow).order_by(AiModelRow.name))
+        return [await self._model_public(r) for r in q.scalars().all()]
+
+    async def get_model(self, model_id: str) -> dict[str, Any]:
+        row = await self._get_row(model_id)
+        return await self._model_public(row)
 
     async def list_models_for_company(self, company_id: str) -> list[dict[str, Any]]:
         q = await self._session.execute(
@@ -37,53 +82,86 @@ class AiModelsService:
             out.append(await self._model_public(row))
         return out
 
+    # ---- create ----
+
     async def create_model(
         self,
         *,
-        company_id: str,
         name: str,
+        key_aliases: list[str] | None = None,
+        provider: str | None = None,
+        reasoning_level: str | None = None,
+        description: str | None = None,
         api_kinds: list[str] | None = None,
         input_price_usd_per_mtok: Decimal | None = None,
         output_price_usd_per_mtok: Decimal | None = None,
         max_context_tokens: int | None = None,
         publisher: str | None = None,
         released_at: date | None = None,
+        owner_scope: str = "platform",
+        owner_company_id: str | None = None,
     ) -> dict[str, Any]:
         model_name = name.strip()
         if not model_name:
             raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="model name required")
+        scope = (owner_scope or "platform").strip().lower()
+        if scope not in {"platform", "company"}:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="owner_scope must be platform|company",
+            )
+        if scope == "company" and not owner_company_id:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="owner_company_id required for company scope",
+            )
         row = AiModelRow(
             name=model_name,
-            owner_scope="company",
-            owner_company_id=company_id,
+            key_aliases=_normalize_aliases(key_aliases),
+            provider=(provider or "").strip() or None if provider is not None else None,
+            reasoning_level=(reasoning_level or "").strip() or None if reasoning_level is not None else None,
+            description=(description or "").strip() or None if description is not None else None,
+            owner_scope=scope,
+            owner_company_id=owner_company_id if scope == "company" else None,
             input_price_usd_per_mtok=input_price_usd_per_mtok,
             output_price_usd_per_mtok=output_price_usd_per_mtok,
             max_context_tokens=max_context_tokens,
-            publisher=publisher.strip() if publisher else None,
+            publisher=(publisher or "").strip() or None if publisher is not None else None,
             released_at=released_at,
         )
         self._session.add(row)
         await self._session.flush()
-        for api_kind in api_kinds or []:
-            kind = str(api_kind).strip()
-            if kind:
-                await self._bind_sdk(model_id=row.id, api_kind=kind)
+        for api_kind in _normalize_api_kinds(api_kinds):
+            await self._bind_sdk(model_id=row.id, api_kind=api_kind)
+        await self._session.commit()
+        await self._session.refresh(row)
+        self._emit_model_created_event(row)
         return await self._model_public(row)
+
+    # ---- update ----
 
     async def update_model(
         self,
         *,
-        company_id: str,
         model_id: str,
         name: str | None = None,
+        key_aliases: list[str] | None = None,
+        provider: str | None = None,
+        reasoning_level: str | None = None,
+        description: str | None = None,
         api_kinds: list[str] | None = None,
         input_price_usd_per_mtok: Decimal | None = None,
         output_price_usd_per_mtok: Decimal | None = None,
         max_context_tokens: int | None = None,
         publisher: str | None = None,
         released_at: date | None = None,
+        company_id: str | None = None,
     ) -> dict[str, Any]:
-        row = await self._require_company_model(model_id, company_id)
+        row = await self._require_model(model_id, company_id)
         if name is not None:
             cleaned = name.strip()
             if not cleaned:
@@ -94,6 +172,14 @@ class AiModelsService:
                     detail="model name required",
                 )
             row.name = cleaned
+        if key_aliases is not None:
+            row.key_aliases = _normalize_aliases(key_aliases)
+        if provider is not None:
+            row.provider = (provider or "").strip() or None
+        if reasoning_level is not None:
+            row.reasoning_level = (reasoning_level or "").strip() or None
+        if description is not None:
+            row.description = (description or "").strip() or None
         if input_price_usd_per_mtok is not None:
             row.input_price_usd_per_mtok = input_price_usd_per_mtok
         if output_price_usd_per_mtok is not None:
@@ -101,17 +187,103 @@ class AiModelsService:
         if max_context_tokens is not None:
             row.max_context_tokens = max_context_tokens
         if publisher is not None:
-            row.publisher = publisher.strip() or None
+            row.publisher = (publisher or "").strip() or None
         if released_at is not None:
             row.released_at = released_at
         if api_kinds is not None:
             await self._session.execute(delete(AiModelSdkBindingRow).where(AiModelSdkBindingRow.model_id == model_id))
-            for api_kind in api_kinds:
-                kind = str(api_kind).strip()
-                if kind:
-                    await self._bind_sdk(model_id=model_id, api_kind=kind)
-        await self._session.flush()
+            for api_kind in _normalize_api_kinds(api_kinds):
+                await self._bind_sdk(model_id=model_id, api_kind=api_kind)
+        await self._session.commit()
+        await self._session.refresh(row)
+        self._emit_model_updated_event(row)
         return await self._model_public(row)
+
+    # ---- delete ----
+
+    async def delete_model(self, *, model_id: str, company_id: str | None = None) -> None:
+        row = await self._require_model(model_id, company_id)
+        name = row.name
+        await self._session.delete(row)
+        await self._session.commit()
+        self._emit_model_deleted_event(model_id, name)
+
+    # ---- auto-match on probe (business logic) ----
+
+    async def upsert_by_alias(
+        self,
+        model_key: str,
+        *,
+        provider: str | None = None,
+        api_kind: str | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        """Match a provider model id (from a key probe GET /models) to a catalog entry.
+
+        Exact match strategy:
+        1. Look for a catalog entry whose `key_aliases` (case-insensitive)
+           contains the model_key, OR whose `name` (case-insensitive) equals it.
+        2. If found — return it (no mutation).
+        3. If not found — create a new platform model with name=model_key,
+           key_aliases=[model_key], provider, and an SDK binding to api_kind
+           (so it shows up in list_key_models for that key).
+
+        Returns (model_dict, created).
+        """
+        key = (model_key or "").strip()
+        if not key:
+            raise AppError(code="VALIDATION_ERROR", title="Validation Error", status=422, detail="model_key required")
+        key_lower = key.lower()
+
+        # 1. exact match by alias or name (case-insensitive)
+        rows_q = await self._session.execute(select(AiModelRow))
+        for row in rows_q.scalars().all():
+            aliases = row.key_aliases if isinstance(row.key_aliases, list) else []
+            aliases_lower = {str(a).strip().lower() for a in aliases if a}
+            if key_lower in aliases_lower or row.name.strip().lower() == key_lower:
+                return await self._model_public(row), False
+
+        # 2. create new platform entry from the model_key
+        row = AiModelRow(
+            name=key,
+            key_aliases=[key],
+            provider=(provider or "").strip() or None if provider is not None else None,
+            owner_scope="platform",
+            owner_company_id=None,
+        )
+        self._session.add(row)
+        await self._session.flush()
+        if api_kind:
+            kind = str(api_kind).strip()
+            if kind:
+                await self._bind_sdk(model_id=row.id, api_kind=kind)
+        await self._session.commit()
+        await self._session.refresh(row)
+        self._emit_model_created_event(row)
+        return await self._model_public(row), True
+
+    async def reconcile_probe_models(
+        self,
+        *,
+        model_keys: list[str],
+        provider: str | None = None,
+        api_kind: str | None = None,
+    ) -> dict[str, Any]:
+        """Auto-match a probe's model list against the catalog; create missing ones.
+
+        Returns {matched: int, created: int, total: int}.
+        """
+        matched = 0
+        created = 0
+        for mk in model_keys:
+            s = (mk or "").strip()
+            if not s:
+                continue
+            _, was_created = await self.upsert_by_alias(s, provider=provider, api_kind=api_kind)
+            if was_created:
+                created += 1
+            else:
+                matched += 1
+        return {"matched": matched, "created": created, "total": matched + created}
 
     async def list_key_models(self, *, company_id: str, key_id: str) -> list[dict[str, Any]]:
         key = await self._require_company_key(key_id, company_id)
@@ -137,9 +309,7 @@ class AiModelsService:
         selections: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
         key = await self._require_company_key(key_id, company_id)
-        allowed_ids = {
-            m.id for m in await self._models_for_api_kind(company_id=company_id, api_kind=key.api_kind)
-        }
+        allowed_ids = {m.id for m in await self._models_for_api_kind(company_id=company_id, api_kind=key.api_kind)}
         default_id: str | None = None
         for item in selections:
             model_id = str(item.get("model_id") or "").strip()
@@ -171,9 +341,7 @@ class AiModelsService:
                 existing.is_default = is_default
         if default_id:
             await self._session.execute(
-                update(AiKeyModelBindingRow)
-                .where(AiKeyModelBindingRow.key_id == key_id)
-                .values(is_default=False)
+                update(AiKeyModelBindingRow).where(AiKeyModelBindingRow.key_id == key_id).values(is_default=False)
             )
             await self._session.execute(
                 update(AiKeyModelBindingRow)
@@ -206,9 +374,20 @@ class AiModelsService:
         sdk_q = await self._session.execute(
             select(AiModelSdkBindingRow.api_kind).where(AiModelSdkBindingRow.model_id == row.id)
         )
+        aliases = row.key_aliases
+        if isinstance(aliases, str):
+            try:
+                aliases = json.loads(aliases)
+            except Exception:
+                aliases = []
+        aliases_list = aliases if isinstance(aliases, list) else []
         return {
             "id": row.id,
             "name": row.name,
+            "key_aliases": [str(a) for a in aliases_list if a],
+            "provider": row.provider,
+            "reasoning_level": row.reasoning_level,
+            "description": row.description,
             "owner_scope": row.owner_scope,
             "owner_company_id": row.owner_company_id,
             "api_kinds": list(sdk_q.scalars().all()),
@@ -223,13 +402,53 @@ class AiModelsService:
             "released_at": row.released_at.isoformat() if row.released_at else None,
         }
 
-    async def _require_company_model(self, model_id: str, company_id: str) -> AiModelRow:
+    async def _require_model(self, model_id: str, company_id: str | None) -> AiModelRow:
+        row = await self._get_row(model_id)
+        # company_id=None means platform admin — may touch any model.
+        if company_id is not None and row.owner_scope == "company" and row.owner_company_id != company_id:
+            raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="model not in company scope")
+        return row
+
+    async def _get_row(self, model_id: str) -> AiModelRow:
         row = await self._session.get(AiModelRow, model_id)
         if row is None:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="model not found")
-        if row.owner_scope == "company" and row.owner_company_id != company_id:
-            raise AppError(code="FORBIDDEN", title="Forbidden", status=403, detail="model not in company scope")
         return row
+
+    async def _require_company_model(self, model_id: str, company_id: str) -> AiModelRow:
+        return await self._require_model(model_id, company_id)
+
+    # ---- metrics events (Kafka-first, dual-write post-commit) ----
+
+    def _emit_model_created_event(self, row: AiModelRow) -> None:
+        from prodavan.application.ai_models.metrics import schedule_model_created_event
+
+        schedule_model_created_event(
+            self._session,
+            model_id=row.id,
+            name=row.name,
+            provider=row.provider,
+            key_aliases=row.key_aliases if isinstance(row.key_aliases, list) else [],
+            owner_scope=row.owner_scope,
+            owner_company_id=row.owner_company_id,
+        )
+
+    def _emit_model_updated_event(self, row: AiModelRow) -> None:
+        from prodavan.application.ai_models.metrics import schedule_model_updated_event
+
+        schedule_model_updated_event(
+            self._session,
+            model_id=row.id,
+            name=row.name,
+            provider=row.provider,
+            owner_scope=row.owner_scope,
+            owner_company_id=row.owner_company_id,
+        )
+
+    def _emit_model_deleted_event(self, model_id: str, name: str) -> None:
+        from prodavan.application.ai_models.metrics import schedule_model_deleted_event
+
+        schedule_model_deleted_event(self._session, model_id=model_id, name=name)
 
     async def require_company_key(self, key_id: str, company_id: str) -> AiProviderKeyRow:
         return await self._require_company_key(key_id, company_id)

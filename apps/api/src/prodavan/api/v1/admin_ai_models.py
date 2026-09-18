@@ -1,20 +1,22 @@
-"""Company AI model catalog API."""
+"""Admin AI model catalog CRUD API (MODELS-L1).
+
+Platform-admin surface for the model catalog: list/get/create/patch/delete
+any model (platform or company). The model entity is the catalog entry; most
+fields are optional, `name` is required.
+"""
 
 from __future__ import annotations
 
 from datetime import date
 from decimal import Decimal
-from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from prodavan.api.deps import PrincipalDep, SessionDep, get_current_employee
+from prodavan.api.deps import PlatformAdminDep, SessionDep
 from prodavan.application.ai_models.service import AiModelsService
-from prodavan.application.identity.service import EntitlementService
-from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
-router = APIRouter(prefix="/companies/{company_id}/ai-models", tags=["company-ai-models"])
+router = APIRouter(prefix="/admin/ai-models", tags=["ai-models"])
 
 
 class CreateModelBody(BaseModel):
@@ -31,6 +33,8 @@ class CreateModelBody(BaseModel):
     max_context_tokens: int | None = Field(default=None, ge=1)
     publisher: str | None = Field(default=None, max_length=128)
     released_at: date | None = None
+    owner_scope: str = Field(default="platform", pattern="^(platform|company)$")
+    owner_company_id: str | None = None
 
 
 class PatchModelBody(BaseModel):
@@ -49,33 +53,14 @@ class PatchModelBody(BaseModel):
     released_at: date | None = None
 
 
-class KeyModelSelectionBody(BaseModel):
-    model_config = {"extra": "forbid"}
-
-    selections: list[dict[str, Any]] = Field(default_factory=list)
-
-
 @router.get("")
-async def list_models(
-    company_id: str,
-    principal: PrincipalDep,
-    session: SessionDep,
-    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
-) -> list[dict]:
-    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
-    return await AiModelsService(session).list_models_for_company(company_id)
+async def list_models(_admin: PlatformAdminDep, session: SessionDep) -> list[dict]:
+    return await AiModelsService(session).list_models()
 
 
-@router.post("")
-async def create_model(
-    company_id: str,
-    body: CreateModelBody,
-    principal: PrincipalDep,
-    session: SessionDep,
-    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
-) -> dict:
-    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
-    out = await AiModelsService(session).create_model(
+@router.post("", status_code=201)
+async def create_model(admin: PlatformAdminDep, session: SessionDep, body: CreateModelBody) -> dict:
+    return await AiModelsService(session).create_model(
         name=body.name,
         key_aliases=body.key_aliases,
         provider=body.provider,
@@ -87,22 +72,18 @@ async def create_model(
         max_context_tokens=body.max_context_tokens,
         publisher=body.publisher,
         released_at=body.released_at,
-        owner_scope="company",
-        owner_company_id=company_id,
+        owner_scope=body.owner_scope,
+        owner_company_id=body.owner_company_id,
     )
-    return out
+
+
+@router.get("/{model_id}")
+async def get_model(_admin: PlatformAdminDep, session: SessionDep, model_id: str) -> dict:
+    return await AiModelsService(session).get_model(model_id)
 
 
 @router.patch("/{model_id}")
-async def patch_model(
-    company_id: str,
-    model_id: str,
-    body: PatchModelBody,
-    principal: PrincipalDep,
-    session: SessionDep,
-    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
-) -> dict:
-    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+async def patch_model(admin: PlatformAdminDep, session: SessionDep, model_id: str, body: PatchModelBody) -> dict:
     return await AiModelsService(session).update_model(
         model_id=model_id,
         name=body.name,
@@ -116,17 +97,9 @@ async def patch_model(
         max_context_tokens=body.max_context_tokens,
         publisher=body.publisher,
         released_at=body.released_at,
-        company_id=company_id,
     )
 
 
 @router.delete("/{model_id}", status_code=204)
-async def delete_model(
-    company_id: str,
-    model_id: str,
-    principal: PrincipalDep,
-    session: SessionDep,
-    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
-) -> None:
-    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
-    await AiModelsService(session).delete_model(model_id=model_id, company_id=company_id)
+async def delete_model(admin: PlatformAdminDep, session: SessionDep, model_id: str) -> None:
+    await AiModelsService(session).delete_model(model_id=model_id)

@@ -3830,6 +3830,12 @@ abstract class AppLocalizations {
   /// **'AI Keys'**
   String get navAiKeys;
 
+  /// No description provided for @navAiModels.
+  ///
+  /// In en, this message translates to:
+  /// **'Models'**
+  String get navAiModels;
+
   /// No description provided for @navBundles.
   ///
   /// In en, this message translates to:
@@ -4765,6 +4771,48 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Not verified'**
   String get aiKeyProbeStatusNone;
+
+  /// No description provided for @commonScope.
+  ///
+  /// In en, this message translates to:
+  /// **'Scope'**
+  String get commonScope;
+
+  /// No description provided for @aiModelKeyAliasesLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Key aliases'**
+  String get aiModelKeyAliasesLabel;
+
+  /// No description provided for @aiModelReasoningLevelLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Reasoning level'**
+  String get aiModelReasoningLevelLabel;
+
+  /// No description provided for @adminAddModel.
+  ///
+  /// In en, this message translates to:
+  /// **'Add model'**
+  String get adminAddModel;
+
+  /// No description provided for @adminDeleteModel.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete model'**
+  String get adminDeleteModel;
+
+  /// No description provided for @adminDeleteModelConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Delete model \"{name}\"?'**
+  String adminDeleteModelConfirm(String name);
+
+  /// No description provided for @adminNoModels.
+  ///
+  /// In en, this message translates to:
+  /// **'No models'**
+  String get adminNoModels;
 }
 
 class _AppLocalizationsDelegate

@@ -4,19 +4,20 @@ from fastapi import APIRouter
 
 from prodavan.api.internal import pods as internal_pods
 from prodavan.api.v1 import (
+    admin_ai_models,
     admin_cabinets,
     admin_catalogs,
     admin_companies,
     admin_containers,
+    admin_document_store,
     admin_metrics,
     admin_modules,
     admin_object_store,
-    admin_document_store,
-    admin_search_index,
     admin_platform_events,
     admin_profile,
     admin_projects,
     admin_recycle,
+    admin_search_index,
     admin_triggers,
     agent,
     ai_keys,
@@ -61,6 +62,7 @@ router.include_router(admin_document_store.router)
 router.include_router(admin_search_index.router)
 router.include_router(admin_catalogs.router)
 router.include_router(ai_keys.router)
+router.include_router(admin_ai_models.router)
 router.include_router(cabinets.router)
 router.include_router(projects.cabinet_projects_router)
 router.include_router(projects.router)

@@ -1204,6 +1204,7 @@
   "gallerySubtitle": "subtitle",
   "galleryTwo": "Two",
   "navAiKeys": "AI Keys",
+  "navAiModels": "Models",
   "navBundles": "Bundles",
   "navContainers": "Projects",
   "navCabinets": "Cabinets",
@@ -1447,5 +1448,17 @@
   "aiKeyProbeStatusOk": "Key works",
   "aiKeyProbeStatusError": "Key error",
   "aiKeyProbeStatusUnavailable": "Probe unavailable",
-  "aiKeyProbeStatusNone": "Not verified"
+  "aiKeyProbeStatusNone": "Not verified",
+  "commonScope": "Scope",
+  "aiModelKeyAliasesLabel": "Key aliases",
+  "aiModelReasoningLevelLabel": "Reasoning level",
+  "adminAddModel": "Add model",
+  "adminDeleteModel": "Delete model",
+  "adminDeleteModelConfirm": "Delete model \"{name}\"?",
+  "@adminDeleteModelConfirm": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "adminNoModels": "No models"
 }

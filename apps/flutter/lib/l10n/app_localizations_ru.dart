@@ -2156,6 +2156,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get navAiKeys => 'AI-ключи';
 
   @override
+  String get navAiModels => 'Модели';
+
+  @override
   String get navBundles => 'Бандлы';
 
   @override
@@ -2662,4 +2665,27 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get aiKeyProbeStatusNone => 'Не проверялся';
+
+  @override
+  String get commonScope => 'Область';
+
+  @override
+  String get aiModelKeyAliasesLabel => 'Алиасы ключа';
+
+  @override
+  String get aiModelReasoningLevelLabel => 'Уровень рассуждений';
+
+  @override
+  String get adminAddModel => 'Добавить модель';
+
+  @override
+  String get adminDeleteModel => 'Удалить модель';
+
+  @override
+  String adminDeleteModelConfirm(String name) {
+    return 'Удалить модель «$name»?';
+  }
+
+  @override
+  String get adminNoModels => 'Нет моделей';
 }
