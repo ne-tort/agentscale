@@ -78,7 +78,11 @@ data:
   STORAGE_ROOT: /data/storage
   SECRETS_DIR: /data/storage/secrets
   PACKS_ROOT: /packages/cabinet-packs
-  CORS_ORIGINS: "http://localhost:8088,http://127.0.0.1:8088,http://localhost:8080,http://127.0.0.1:8080"
+  # Dev is reached via arbitrary reverse proxies (punnel / VPN) whose origin
+  # (IP:port) is unpredictable. Allow any origin; auth is Bearer JWT (no cookies),
+  # so wildcard is safe. cors_forbid_wildcard_origin disabled below to permit "*".
+  CORS_ORIGINS: "*"
+  CORS_FORBID_WILDCARD_ORIGIN: "false"
   RUN_MIGRATIONS: "1"
   API_V1_PREFIX: /api/v1
   APP_ENV: dev
