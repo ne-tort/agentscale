@@ -1206,6 +1206,7 @@
   "gallerySubtitle": "подзаголовок",
   "galleryTwo": "Два",
   "navAiKeys": "AI-ключи",
+  "navAiModels": "Модели",
   "navBundles": "Бандлы",
   "navContainers": "Проекты",
   "navCabinets": "Кабинеты",
@@ -1444,5 +1445,17 @@
   "aiKeyProbeStatusOk": "Ключ работает",
   "aiKeyProbeStatusError": "Ошибка ключа",
   "aiKeyProbeStatusUnavailable": "Проверка недоступна",
-  "aiKeyProbeStatusNone": "Не проверялся"
+  "aiKeyProbeStatusNone": "Не проверялся",
+  "commonScope": "Область",
+  "aiModelKeyAliasesLabel": "Алиасы ключа",
+  "aiModelReasoningLevelLabel": "Уровень рассуждений",
+  "adminAddModel": "Добавить модель",
+  "adminDeleteModel": "Удалить модель",
+  "adminDeleteModelConfirm": "Удалить модель «{name}»?",
+  "@adminDeleteModelConfirm": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "adminNoModels": "Нет моделей"
 }

@@ -10,6 +10,7 @@ import 'package:prodavan/features/admin/admin_metrics_overview_page.dart';
 import 'package:prodavan/features/admin/admin_module_list_page.dart';
 import 'package:prodavan/features/admin/admin_project_containers_page.dart';
 import 'package:prodavan/features/admin/admin_settings_body.dart';
+import 'package:prodavan/features/admin/admin_ai_model_list_page.dart';
 import 'package:prodavan/features/admin/ai_key_list_page.dart';
 import 'package:prodavan/features/admin/company_list_page.dart';
 import 'package:prodavan/features/meta/meta_icon.dart';
@@ -27,7 +28,7 @@ class AdminShell extends StatefulWidget {
 
 class _AdminShellState extends State<AdminShell> {
   static const _overviewIndex = 0;
-  static const _platformCount = 5;
+  static const _platformCount = 6;
 
   int _contentIndex = _overviewIndex;
   int? _railSelected;
@@ -154,6 +155,8 @@ class _AdminShellState extends State<AdminShell> {
     final platformDestinations = [
       AppNavDestination(icon: Icons.business_outlined, label: l10n.navCompanies),
       AppNavDestination(icon: Icons.key_outlined, label: l10n.navAiKeys),
+      AppNavDestination(
+          icon: Icons.model_training_outlined, label: l10n.navAiModels),
       AppNavDestination(icon: Icons.dns_outlined, label: l10n.navContainers),
       AppNavDestination(icon: Icons.folder_outlined, label: l10n.navCabinets),
       AppNavDestination(icon: Icons.extension_outlined, label: l10n.navModules),
@@ -188,6 +191,7 @@ class _AdminShellState extends State<AdminShell> {
       AdminMetricsOverviewPage(embedded: true),
       AdminCompanyListPage(embedded: true),
       AdminAiKeyListPage(embedded: true),
+      AdminAiModelListPage(embedded: true),
       AdminProjectContainersPage(embedded: true),
       AdminCabinetListPage(embedded: true),
       AdminModuleListPage(embedded: true),

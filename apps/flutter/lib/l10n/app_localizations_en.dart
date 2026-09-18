@@ -2143,6 +2143,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get navAiKeys => 'AI Keys';
 
   @override
+  String get navAiModels => 'Models';
+
+  @override
   String get navBundles => 'Bundles';
 
   @override
@@ -2647,4 +2650,27 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get aiKeyProbeStatusNone => 'Not verified';
+
+  @override
+  String get commonScope => 'Scope';
+
+  @override
+  String get aiModelKeyAliasesLabel => 'Key aliases';
+
+  @override
+  String get aiModelReasoningLevelLabel => 'Reasoning level';
+
+  @override
+  String get adminAddModel => 'Add model';
+
+  @override
+  String get adminDeleteModel => 'Delete model';
+
+  @override
+  String adminDeleteModelConfirm(String name) {
+    return 'Delete model \"$name\"?';
+  }
+
+  @override
+  String get adminNoModels => 'No models';
 }

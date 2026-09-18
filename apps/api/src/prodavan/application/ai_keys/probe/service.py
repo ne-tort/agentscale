@@ -134,12 +134,39 @@ class AiKeyProbeService:
         *,
         principal: Principal | None = None,
     ) -> dict[str, Any]:
-        """Probe a key and persist the result. Returns the result dict."""
+        """Probe a key and persist the result. Returns the result dict.
+
+        On a successful probe that returned models, also reconciles the
+        provider's model list against the catalog (auto-creates missing entries
+        by exact key-alias match) so the models table stays in sync.
+        """
         row = await self._get_row(key_id)
         result = await self._probe_row(row)
         await self._persist_result(row.id, result, principal=principal)
         await self._emit_metrics(row, result)
+        if result.status == ProbeStatus.OK and result.models:
+            await self._reconcile_models(row, result.models)
         return result.to_dict()
+
+    async def _reconcile_models(self, row: AiProviderKeyRow, model_keys: list[str]) -> None:
+        """Auto-match probe model ids against the ai_models catalog.
+
+        Best-effort: never raises (failures here must not break the probe
+        response). Missing catalog entries are created with name=key,
+        key_aliases=[key], and an SDK binding to the key's api_kind so they
+        show up in list_key_models for this key.
+        """
+        try:
+            from prodavan.application.ai_models.service import AiModelsService
+
+            svc = AiModelsService(self._session)
+            await svc.reconcile_probe_models(
+                model_keys=model_keys,
+                provider=row.provider,
+                api_kind=row.api_kind,
+            )
+        except Exception:
+            logger.exception("probe: reconcile models failed key=%s (best-effort)", row.id)
 
     async def probe_model(
         self,

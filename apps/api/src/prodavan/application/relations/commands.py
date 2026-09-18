@@ -113,9 +113,7 @@ class RelationsCommand:
         *,
         mode: str = "assigned_ro",
     ) -> list[str]:
-        result = await self._grants.replace_company_grants(
-            cabinet_id, company_ids, mode=mode
-        )
+        result = await self._grants.replace_company_grants(cabinet_id, company_ids, mode=mode)
         await self._publish(
             event_type=RELATION_REPLACED,
             payload={
@@ -254,6 +252,210 @@ class RelationsCommand:
             },
             company_id=company_id,
             project_id=project_id,
+        )
+
+    # ---- AI model relations (pure links, no business logic yet) ----
+
+    async def link_model_to_company(
+        self,
+        *,
+        model_id: str,
+        company_id: str,
+    ) -> None:
+        await self._publish(
+            event_type=RELATION_GRANTED,
+            payload={
+                "relation_kind": RelationKind.LINK,
+                "subject_kind": EntityKind.AI_MODEL,
+                "subject_id": model_id,
+                "object_kind": EntityKind.COMPANY,
+                "object_id": company_id,
+                "status": "active",
+            },
+            company_id=company_id,
+        )
+
+    async def unlink_model_from_company(
+        self,
+        *,
+        model_id: str,
+        company_id: str,
+    ) -> None:
+        await self._publish(
+            event_type=RELATION_REVOKED,
+            payload={
+                "relation_kind": RelationKind.LINK,
+                "subject_kind": EntityKind.AI_MODEL,
+                "subject_id": model_id,
+                "object_kind": EntityKind.COMPANY,
+                "object_id": company_id,
+                "status": "revoked",
+            },
+            company_id=company_id,
+        )
+
+    async def link_model_to_project(
+        self,
+        *,
+        model_id: str,
+        project_id: str,
+        company_id: str | None = None,
+    ) -> None:
+        await self._publish(
+            event_type=RELATION_GRANTED,
+            payload={
+                "relation_kind": RelationKind.LINK,
+                "subject_kind": EntityKind.AI_MODEL,
+                "subject_id": model_id,
+                "object_kind": EntityKind.PROJECT,
+                "object_id": project_id,
+                "status": "active",
+            },
+            company_id=company_id,
+            project_id=project_id,
+        )
+
+    async def unlink_model_from_project(
+        self,
+        *,
+        model_id: str,
+        project_id: str,
+        company_id: str | None = None,
+    ) -> None:
+        await self._publish(
+            event_type=RELATION_REVOKED,
+            payload={
+                "relation_kind": RelationKind.LINK,
+                "subject_kind": EntityKind.AI_MODEL,
+                "subject_id": model_id,
+                "object_kind": EntityKind.PROJECT,
+                "object_id": project_id,
+                "status": "revoked",
+            },
+            company_id=company_id,
+            project_id=project_id,
+        )
+
+    async def link_model_to_cabinet(
+        self,
+        *,
+        model_id: str,
+        cabinet_id: str,
+        company_id: str | None = None,
+    ) -> None:
+        await self._publish(
+            event_type=RELATION_GRANTED,
+            payload={
+                "relation_kind": RelationKind.LINK,
+                "subject_kind": EntityKind.AI_MODEL,
+                "subject_id": model_id,
+                "object_kind": EntityKind.CABINET,
+                "object_id": cabinet_id,
+                "status": "active",
+            },
+            company_id=company_id,
+            cabinet_id=cabinet_id,
+        )
+
+    async def unlink_model_from_cabinet(
+        self,
+        *,
+        model_id: str,
+        cabinet_id: str,
+        company_id: str | None = None,
+    ) -> None:
+        await self._publish(
+            event_type=RELATION_REVOKED,
+            payload={
+                "relation_kind": RelationKind.LINK,
+                "subject_kind": EntityKind.AI_MODEL,
+                "subject_id": model_id,
+                "object_kind": EntityKind.CABINET,
+                "object_id": cabinet_id,
+                "status": "revoked",
+            },
+            company_id=company_id,
+            cabinet_id=cabinet_id,
+        )
+
+    async def link_model_to_employee(
+        self,
+        *,
+        model_id: str,
+        employee_id: str,
+        company_id: str | None = None,
+    ) -> None:
+        await self._publish(
+            event_type=RELATION_GRANTED,
+            payload={
+                "relation_kind": RelationKind.LINK,
+                "subject_kind": EntityKind.AI_MODEL,
+                "subject_id": model_id,
+                "object_kind": EntityKind.EMPLOYEE,
+                "object_id": employee_id,
+                "status": "active",
+            },
+            company_id=company_id,
+        )
+
+    async def unlink_model_from_employee(
+        self,
+        *,
+        model_id: str,
+        employee_id: str,
+        company_id: str | None = None,
+    ) -> None:
+        await self._publish(
+            event_type=RELATION_REVOKED,
+            payload={
+                "relation_kind": RelationKind.LINK,
+                "subject_kind": EntityKind.AI_MODEL,
+                "subject_id": model_id,
+                "object_kind": EntityKind.EMPLOYEE,
+                "object_id": employee_id,
+                "status": "revoked",
+            },
+            company_id=company_id,
+        )
+
+    async def link_model_to_key(
+        self,
+        *,
+        model_id: str,
+        key_id: str,
+        company_id: str | None = None,
+    ) -> None:
+        await self._publish(
+            event_type=RELATION_GRANTED,
+            payload={
+                "relation_kind": RelationKind.LINK,
+                "subject_kind": EntityKind.AI_MODEL,
+                "subject_id": model_id,
+                "object_kind": EntityKind.AI_KEY,
+                "object_id": key_id,
+                "status": "active",
+            },
+            company_id=company_id,
+        )
+
+    async def unlink_model_from_key(
+        self,
+        *,
+        model_id: str,
+        key_id: str,
+        company_id: str | None = None,
+    ) -> None:
+        await self._publish(
+            event_type=RELATION_REVOKED,
+            payload={
+                "relation_kind": RelationKind.LINK,
+                "subject_kind": EntityKind.AI_MODEL,
+                "subject_id": model_id,
+                "object_kind": EntityKind.AI_KEY,
+                "object_id": key_id,
+                "status": "revoked",
+            },
+            company_id=company_id,
         )
 
     async def _publish(

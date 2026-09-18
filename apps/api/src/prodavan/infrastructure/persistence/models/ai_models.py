@@ -7,6 +7,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from prodavan.infrastructure.persistence.models.base import Base
@@ -20,7 +21,16 @@ class AiModelRow(Base):
     __tablename__ = "ai_models"
 
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: _id("mdl"))
+    # Human-readable name, e.g. "Claude Opus 4.6" (required).
     name: Mapped[str] = mapped_column(String(128), nullable=False)
+    # Stable model key aliases — provider model ids that map to this catalog
+    # entry, e.g. ["ca-opus-4.6", "claude-opus-4-6", "anthropic/claude-opus-4.6"].
+    # Used to auto-match models returned by a key probe (GET /models) to
+    # catalog entries. JSONB array of strings; [] by default.
+    key_aliases: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
+    provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    reasoning_level: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    description: Mapped[str | None] = mapped_column(String(512), nullable=True)
     owner_scope: Mapped[str] = mapped_column(String(32), nullable=False, default="platform", server_default="platform")
     owner_company_id: Mapped[str | None] = mapped_column(
         ForeignKey("companies.id", ondelete="CASCADE"),

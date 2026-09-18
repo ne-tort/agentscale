@@ -900,4 +900,88 @@ class AdminApi {
       throw ProdavanApiException(res.statusCode, res.body);
     }
   }
+
+  Future<List<Map<String, dynamic>>> listAiModels() async {
+    final res = await AuthHttp.get(_uri('/admin/ai-models'));
+    _throwIfError(res);
+    final body = jsonDecode(res.body);
+    if (body is List) return body.cast<Map<String, dynamic>>();
+    return const [];
+  }
+
+  Future<Map<String, dynamic>> getAiModel(String modelId) async {
+    final res = await AuthHttp.get(_uri('/admin/ai-models/$modelId'));
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> createAiModel({
+    required String name,
+    List<String> keyAliases = const [],
+    String? provider,
+    String? reasoningLevel,
+    String? description,
+    List<String> apiKinds = const [],
+    double? inputPriceUsdPerMtok,
+    double? outputPriceUsdPerMtok,
+    int? maxContextTokens,
+    String? publisher,
+    String? releasedAt,
+    String ownerScope = 'platform',
+    String? ownerCompanyId,
+  }) async {
+    final res = await AuthHttp.post(_uri('/admin/ai-models'), body: jsonEncode({
+      'name': name,
+      'key_aliases': keyAliases,
+      if (provider != null) 'provider': provider,
+      if (reasoningLevel != null) 'reasoning_level': reasoningLevel,
+      if (description != null) 'description': description,
+      'api_kinds': apiKinds,
+      if (inputPriceUsdPerMtok != null) 'input_price_usd_per_mtok': inputPriceUsdPerMtok,
+      if (outputPriceUsdPerMtok != null) 'output_price_usd_per_mtok': outputPriceUsdPerMtok,
+      if (maxContextTokens != null) 'max_context_tokens': maxContextTokens,
+      if (publisher != null) 'publisher': publisher,
+      if (releasedAt != null) 'released_at': releasedAt,
+      'owner_scope': ownerScope,
+      if (ownerCompanyId != null) 'owner_company_id': ownerCompanyId,
+    }));
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> patchAiModel({
+    required String modelId,
+    String? name,
+    List<String>? keyAliases,
+    String? provider,
+    String? reasoningLevel,
+    String? description,
+    List<String>? apiKinds,
+    double? inputPriceUsdPerMtok,
+    double? outputPriceUsdPerMtok,
+    int? maxContextTokens,
+    String? publisher,
+    String? releasedAt,
+  }) async {
+    final res = await AuthHttp.patch(_uri('/admin/ai-models/$modelId'), body: jsonEncode({
+      if (name != null) 'name': name,
+      if (keyAliases != null) 'key_aliases': keyAliases,
+      if (provider != null) 'provider': provider,
+      if (reasoningLevel != null) 'reasoning_level': reasoningLevel,
+      if (description != null) 'description': description,
+      if (apiKinds != null) 'api_kinds': apiKinds,
+      if (inputPriceUsdPerMtok != null) 'input_price_usd_per_mtok': inputPriceUsdPerMtok,
+      if (outputPriceUsdPerMtok != null) 'output_price_usd_per_mtok': outputPriceUsdPerMtok,
+      if (maxContextTokens != null) 'max_context_tokens': maxContextTokens,
+      if (publisher != null) 'publisher': publisher,
+      if (releasedAt != null) 'released_at': releasedAt,
+    }));
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<void> deleteAiModel(String modelId) async {
+    final res = await AuthHttp.delete(_uri('/admin/ai-models/$modelId'));
+    _throwIfError(res);
+  }
 }
