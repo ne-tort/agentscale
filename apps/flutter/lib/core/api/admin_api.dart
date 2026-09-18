@@ -484,6 +484,18 @@ class AdminApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> probeAiKey({required String keyId}) async {
+    final res = await AuthHttp.post(_uri('/admin/ai-keys/$keyId/probe'));
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getLastProbeAiKey({required String keyId}) async {
+    final res = await AuthHttp.get(_uri('/admin/ai-keys/$keyId/probe'));
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<List<Map<String, dynamic>>> listPlatformEvents({
     String? companyId,
     String? eventType,

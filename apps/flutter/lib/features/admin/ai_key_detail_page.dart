@@ -10,6 +10,7 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/admin/ai_http_provider_select_page.dart';import 'package:prodavan/features/admin/ai_key_integration_type.dart';
+import 'package:prodavan/features/ai_key_probe_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// AI key detail — type-first + optional HTTP provider catalog (L03/L04).
@@ -110,6 +111,20 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
     if (count == 0) return l10n.commonNotSet;
     if (count == 1) return _companyLabel(_boundIds.first);
     return l10n.adminBindingsCount(count);
+  }
+
+  String _probeSubtitle(AppLocalizations l10n) {
+    final probe = _key?['last_probe'];
+    if (probe is! Map) return l10n.aiKeyProbeNeverRun;
+    final status = probe['status'] as String? ?? 'none';
+    final latency = probe['latency_ms'];
+    final at = probe['checked_at'] as String? ?? '';
+    final label = l10n.aiKeyProbeStatusLabel(status);
+    if (latency != null && at.isNotEmpty) {
+      return '$label · ${latency}ms · $at';
+    }
+    if (at.isNotEmpty) return '$label · $at';
+    return label;
   }
 
   AiKeyIntegrationType get _type {
@@ -319,6 +334,21 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
               await _load();
             },
           ),
+          if (hasSecret)
+            AppNavPreference(
+              title: l10n.aiKeyProbeTitle,
+              icon: Icons.network_check_rounded,
+              subtitle: Text(_probeSubtitle(l10n)),
+              onTap: () => AiKeyProbePage.push(
+                context,
+                keyId: widget.keyId,
+                keyName: _displayName,
+                hasSecret: hasSecret,
+                apiKind: _key?['api_kind'] as String? ?? '',
+                onProbe: () => adminContext.api.probeAiKey(keyId: widget.keyId),
+                onLoadLast: () => adminContext.api.getLastProbeAiKey(keyId: widget.keyId),
+              ).then((_) => _load()),
+            ),
           if (hasSecret)
             AppMultiChoicePreference<String>(
               title: l10n.adminCompanyBindings,

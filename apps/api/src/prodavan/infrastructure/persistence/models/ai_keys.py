@@ -99,3 +99,31 @@ class AiKeyAuditEventRow(Base):
     actor_sub: Mapped[str | None] = mapped_column(Text, nullable=True)
     detail: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AiKeyCheckResultRow(Base):
+    """Last probe result for an AI key (one row per key, upserted).
+
+    Stores the latest verification data: status, latency, models list, error.
+    Kept separate from ai_provider_keys to avoid mixing mutable probe state
+    with the key record. The probe never mutates the key itself.
+    """
+
+    __tablename__ = "ai_key_check_results"
+    # 1:1 with ai_provider_keys — key_id is the PK so upsert is a single write.
+    key_id: Mapped[str] = mapped_column(
+        ForeignKey("ai_provider_keys.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Numeric(10, 0), nullable=True)
+    models: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default="[]")
+    default_model: Mapped[str | None] = mapped_column(Text, nullable=True)
+    http_status: Mapped[int | None] = mapped_column(Numeric(6, 0), nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    provider: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    api_kind: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    checked_by: Mapped[str | None] = mapped_column(Text, nullable=True)

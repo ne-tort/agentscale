@@ -735,6 +735,24 @@ class CompanyApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> probeAiKey({
+    required String companyId,
+    required String keyId,
+  }) async {
+    final res = await AuthHttp.post(_uri('/companies/$companyId/ai-keys/$keyId/probe'));
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> getLastProbeAiKey({
+    required String companyId,
+    required String keyId,
+  }) async {
+    final res = await AuthHttp.get(_uri('/companies/$companyId/ai-keys/$keyId/probe'));
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> uploadModuleContent({
     required String companyId,
     required String moduleId,

@@ -255,3 +255,44 @@ async def list_key_models_live(
 
     await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
     return await AiModelsLiveService(session).list_live_for_key(company_id=company_id, key_id=key_id)
+
+
+@router.post("/{key_id}/probe")
+async def probe_company_key(
+    company_id: str,
+    key_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    """Verify the key's secret works against the provider API (PROBE-P1).
+
+    Performs a short HTTP request (GET /models, fallback: 1-token chat) and
+    stores the last probe result. Never throws — returns a result dict with
+    status ok/error/unavailable, latency_ms, models, etc.
+    """
+    from prodavan.application.ai_keys.probe.service import AiKeyProbeService
+
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    # Only company-writable keys can be probed (platform-bound RO keys still
+    # probeable — the secret is readable by platform admin path; for company
+    # actor we require visibility only).
+    await AiKeysService(session).require_company_key_visible(key_id, company_id)
+    return await AiKeyProbeService(session).probe_key(key_id, principal=principal)
+
+
+@router.get("/{key_id}/probe")
+async def get_company_last_probe(
+    company_id: str,
+    key_id: str,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    """Return the last stored probe result for a key (or {status: 'none'})."""
+    from prodavan.application.ai_keys.probe.service import AiKeyProbeService
+
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    await AiKeysService(session).require_company_key_visible(key_id, company_id)
+    result = await AiKeyProbeService(session).get_last_result(key_id)
+    return result if result is not None else {"status": "none", "models": []}
