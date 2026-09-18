@@ -13,6 +13,7 @@ import 'package:prodavan/features/admin/ai_key_integration_type.dart';
 import 'package:prodavan/features/company/ai_key_models_page.dart';
 import 'package:prodavan/features/company/company_entity_source.dart';
 import 'package:prodavan/core/preferences/app_probe_preference.dart';
+import 'package:prodavan/features/ai_key_models_probe_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Company AI key detail — full edit for local keys; RO for platform-bound.
@@ -52,6 +53,14 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
   String _bindingCountSubtitle(AppLocalizations l10n, int count) {
     if (count == 0) return l10n.commonNotSet;
     return l10n.adminBindingsSelected('$count');
+  }
+
+  List<String> _modelsFromProbe(Map<String, dynamic>? probe) {
+    if (probe is! Map) return const [];
+    final map = Map<String, dynamic>.from(probe as Map);
+    final models = map['models'];
+    if (models is List) return models.whereType<String>().toList(growable: false);
+    return const [];
   }
 
   @override
@@ -310,10 +319,19 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
             AppProbePreference(
               enabled: hasSecret,
               lastProbe: _key?['last_probe'] as Map<String, dynamic>?,
-              onProbe: () => companyContext.api.probeAiKey(
-                companyId: widget.companyId,
-                keyId: widget.keyId,
-              ),
+              onProbe: () async {
+                final models = _modelsFromProbe(_key?['last_probe']);
+                await AiKeyModelsProbePage.push(
+                  context,
+                  keyName: _displayName,
+                  models: models,
+                  onProbeModel: (model) => companyContext.api.probeAiKeyModel(
+                    companyId: widget.companyId,
+                    keyId: widget.keyId,
+                    model: model,
+                  ),
+                );
+              },
             ),
           AppSubscriptionPreference(
             title: l10n.adminSubscription,

@@ -148,3 +148,22 @@ async def get_last_probe(_admin: PlatformAdminDep, session: SessionDep, key_id: 
 
     result = await AiKeyProbeService(session).get_last_result(key_id)
     return result if result is not None else {"status": "none", "models": []}
+
+
+class ProbeModelBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    model: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/{key_id}/probe/model")
+async def probe_key_model(
+    admin: PlatformAdminDep,
+    session: SessionDep,
+    key_id: str,
+    body: ProbeModelBody,
+) -> dict:
+    """Verify a specific model works with this key (1-token chat completion)."""
+    from prodavan.application.ai_keys.probe.service import AiKeyProbeService
+
+    return await AiKeyProbeService(session).probe_model(key_id, body.model, principal=admin)

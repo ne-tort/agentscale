@@ -753,6 +753,19 @@ class CompanyApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>> probeAiKeyModel({
+    required String companyId,
+    required String keyId,
+    required String model,
+  }) async {
+    final res = await AuthHttp.post(
+      _uri('/companies/$companyId/ai-keys/$keyId/probe/model'),
+      body: jsonEncode({'model': model}),
+    );
+    _throwIfError(res);
+    return jsonDecode(res.body) as Map<String, dynamic>;
+  }
+
   Future<Map<String, dynamic>> uploadModuleContent({
     required String companyId,
     required String moduleId,

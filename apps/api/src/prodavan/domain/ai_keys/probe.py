@@ -39,6 +39,7 @@ class ProbeResult:
     error_message: str | None = None
     provider: str | None = None
     api_kind: str | None = None
+    model: str | None = None  # set when probing a specific model (probe_model)
 
     def to_dict(self) -> dict:
         return {
@@ -52,6 +53,7 @@ class ProbeResult:
             "error_message": self.error_message,
             "provider": self.provider,
             "api_kind": self.api_kind,
+            "model": self.model,
         }
 
 

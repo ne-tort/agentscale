@@ -4661,13 +4661,13 @@ abstract class AppLocalizations {
   /// No description provided for @aiKeyProbeTitle.
   ///
   /// In en, this message translates to:
-  /// **'Verify key'**
+  /// **'Verify'**
   String get aiKeyProbeTitle;
 
   /// No description provided for @aiKeyProbeRun.
   ///
   /// In en, this message translates to:
-  /// **'Verify key'**
+  /// **'Verify'**
   String get aiKeyProbeRun;
 
   /// No description provided for @aiKeyProbeNoSecret.
@@ -4693,6 +4693,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Models available'**
   String get aiKeyProbeModelsCount;
+
+  /// No description provided for @aiKeyProbeModelsCountValue.
+  ///
+  /// In en, this message translates to:
+  /// **'Models: {count}'**
+  String aiKeyProbeModelsCountValue(int count);
+
+  /// No description provided for @aiKeyProbeModelsNotReceived.
+  ///
+  /// In en, this message translates to:
+  /// **'Models not received'**
+  String get aiKeyProbeModelsNotReceived;
 
   /// No description provided for @aiKeyProbeErrorCode.
   ///
@@ -4723,6 +4735,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Model'**
   String get aiKeyProbeModelLabel;
+
+  /// No description provided for @aiKeyProbeStatusCol.
+  ///
+  /// In en, this message translates to:
+  /// **'Status'**
+  String get aiKeyProbeStatusCol;
 
   /// No description provided for @aiKeyProbeStatusOk.
   ///

@@ -63,6 +63,23 @@ def test_probe_result_error_shape() -> None:
     assert d["models"] == []
 
 
+def test_probe_result_model_field() -> None:
+    """ProbeResult carries the model name for per-model probes."""
+    result = ProbeResult(
+        status=ProbeStatus.OK,
+        kind=ProbeKind.CHAT,
+        latency_ms=80,
+        http_status=200,
+        provider="codex",
+        api_kind="openai_api",
+        model="gpt-5.1",
+    )
+    d = result.to_dict()
+    assert d["model"] == "gpt-5.1"
+    assert d["status"] == "ok"
+    assert d["kind"] == "chat"
+
+
 def test_probe_status_enum_values() -> None:
     assert ProbeStatus.OK == "ok"
     assert ProbeStatus.ERROR == "error"

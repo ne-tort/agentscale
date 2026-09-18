@@ -2607,10 +2607,10 @@ class AppLocalizationsRu extends AppLocalizations {
   String get metaSecretSave => 'Сохранить секрет';
 
   @override
-  String get aiKeyProbeTitle => 'Проверить ключ';
+  String get aiKeyProbeTitle => 'Проверить';
 
   @override
-  String get aiKeyProbeRun => 'Проверить ключ';
+  String get aiKeyProbeRun => 'Проверить';
 
   @override
   String get aiKeyProbeNoSecret =>
@@ -2626,6 +2626,14 @@ class AppLocalizationsRu extends AppLocalizations {
   String get aiKeyProbeModelsCount => 'Доступно моделей';
 
   @override
+  String aiKeyProbeModelsCountValue(int count) {
+    return 'Моделей: $count';
+  }
+
+  @override
+  String get aiKeyProbeModelsNotReceived => 'Модели не получены';
+
+  @override
   String get aiKeyProbeErrorCode => 'Код ошибки';
 
   @override
@@ -2639,6 +2647,9 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get aiKeyProbeModelLabel => 'Модель';
+
+  @override
+  String get aiKeyProbeStatusCol => 'Статус';
 
   @override
   String get aiKeyProbeStatusOk => 'Ключ работает';

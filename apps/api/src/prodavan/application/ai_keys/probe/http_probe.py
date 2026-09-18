@@ -187,14 +187,24 @@ def _classify_error(
     )
 
 
-async def _probe_chat(endpoint, client: httpx.AsyncClient, secret: str) -> ProbeResult:
-    """Fallback: minimal chat completion (1 token). Used when /models unavailable."""
+async def _probe_chat(
+    endpoint,
+    client: httpx.AsyncClient,
+    secret: str,
+    *,
+    model: str | None = None,
+) -> ProbeResult:
+    """Minimal chat completion (1 token).
+
+    Used as fallback when /models is not exposed by the provider, or to
+    verify a *specific* model works with this key (probe_model).
+    """
     url = f"{endpoint.base_url}{endpoint.chat_completions_path}"
     headers = _auth_headers(endpoint, secret)
     headers["Content-Type"] = "application/json"
     # Minimal payload — ask for 1 token. Works on OpenAI-compatible + Anthropic.
     payload: dict = {
-        "model": "gpt-5.1",
+        "model": model or "gpt-5.1",
         "messages": [{"role": "user", "content": "ping"}],
         "max_tokens": 1,
         "stream": False,
@@ -202,7 +212,7 @@ async def _probe_chat(endpoint, client: httpx.AsyncClient, secret: str) -> Probe
     # Anthropic Messages API uses a slightly different shape.
     if endpoint.auth_scheme == "x-api-key":
         payload = {
-            "model": "claude-sonnet-4-6",
+            "model": model or "claude-sonnet-4-6",
             "messages": [{"role": "user", "content": "ping"}],
             "max_tokens": 1,
         }
@@ -245,7 +255,7 @@ async def _probe_chat(endpoint, client: httpx.AsyncClient, secret: str) -> Probe
     body_text = _trim(response.text or "")
     if status_code in (400, 404) and any(s in body_text.lower() for s in ("model", "not found", "invalid")):
         return ProbeResult(
-            status=ProbeStatus.OK,
+            status=ProbeStatus.ERROR,
             kind=ProbeKind.CHAT,
             latency_ms=latency,
             http_status=status_code,
@@ -281,7 +291,31 @@ class HttpProbeClient:
                 return await _probe_chat(endpoint, client, secret)
             return result
 
+    async def probe_model(self, endpoint, secret: str, *, model: str) -> ProbeResult:
+        """Verify a specific model works with this key (1-token chat)."""
+        async with httpx.AsyncClient(
+            timeout=self._timeout,
+            follow_redirects=True,
+        ) as client:
+            return await _probe_chat(endpoint, client, secret, model=model)
 
-async def probe_http(endpoint, secret: str, *, timeout: float = _PROBE_TIMEOUT_SEC) -> ProbeResult:
+
+async def probe_http(
+    endpoint,
+    secret: str,
+    *,
+    timeout: float = _PROBE_TIMEOUT_SEC,
+) -> ProbeResult:
     """Convenience function — create a client and probe."""
     return await HttpProbeClient(timeout=timeout).probe(endpoint, secret)
+
+
+async def probe_http_model(
+    endpoint,
+    secret: str,
+    model: str,
+    *,
+    timeout: float = _PROBE_TIMEOUT_SEC,
+) -> ProbeResult:
+    """Convenience function — probe a specific model."""
+    return await HttpProbeClient(timeout=timeout).probe_model(endpoint, secret, model=model)
