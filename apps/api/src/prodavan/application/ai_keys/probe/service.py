@@ -15,6 +15,7 @@ Reliability rules:
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -51,6 +52,82 @@ class AiKeyProbeService:
         self._probe = probe_client or HttpProbeClient()
         self._resolver = ProviderResolver(session)
 
+    async def _resolve_probe_context(self, row: AiProviderKeyRow) -> _ProbeContext:
+        """Preflight: validate kind/secret/endpoint before issuing an HTTP call.
+
+        Returns a context with (endpoint, secret) ready, or a prefilled
+        probe_result describing why the probe cannot run.
+        """
+        if row.api_kind == ApiKind.CLI_SUBSCRIPTION:
+            return _ProbeContext(
+                probe_result=ProbeResult(
+                    status=ProbeStatus.UNAVAILABLE,
+                    error_code="CLI_SUBSCRIPTION_NOT_PROBEABLE",
+                    error_message="CLI subscription keys cannot be probed via HTTP",
+                    provider=row.provider,
+                    api_kind=row.api_kind,
+                )
+            )
+        if not (row.secret_ref or "").strip():
+            return _ProbeContext(
+                probe_result=ProbeResult(
+                    status=ProbeStatus.ERROR,
+                    error_code="NO_SECRET",
+                    error_message="key has no secret stored",
+                    provider=row.provider,
+                    api_kind=row.api_kind,
+                )
+            )
+        if not is_http_probe_kind(row.api_kind):
+            return _ProbeContext(
+                probe_result=ProbeResult(
+                    status=ProbeStatus.UNAVAILABLE,
+                    error_code="PROBE_UNSUPPORTED_KIND",
+                    error_message=f"api_kind '{row.api_kind}' is not HTTP-probeable",
+                    provider=row.provider,
+                    api_kind=row.api_kind,
+                )
+            )
+
+        try:
+            secret = self._secrets.get(row.secret_ref)
+        except Exception as exc:
+            logger.warning("probe: secret fetch failed key=%s: %s", row.id, exc)
+            return _ProbeContext(
+                probe_result=ProbeResult(
+                    status=ProbeStatus.UNAVAILABLE,
+                    error_code="SECRET_STORE_ERROR",
+                    error_message=_trim(str(exc)),
+                    provider=row.provider,
+                    api_kind=row.api_kind,
+                )
+            )
+        if not (secret or "").strip():
+            return _ProbeContext(
+                probe_result=ProbeResult(
+                    status=ProbeStatus.ERROR,
+                    error_code="NO_SECRET",
+                    error_message="stored secret is empty",
+                    provider=row.provider,
+                    api_kind=row.api_kind,
+                )
+            )
+
+        endpoint = await self._resolver.resolve(api_kind=row.api_kind, provider=row.provider)
+        if endpoint is None:
+            return _ProbeContext(
+                probe_result=ProbeResult(
+                    status=ProbeStatus.UNAVAILABLE,
+                    error_code="NO_PROVIDER_ENDPOINT",
+                    error_message=(
+                        f"no HTTP provider endpoint registered for api_kind={row.api_kind} provider={row.provider}"
+                    ),
+                    provider=row.provider,
+                    api_kind=row.api_kind,
+                )
+            )
+        return _ProbeContext(endpoint=endpoint, secret=secret)
+
     async def probe_key(
         self,
         key_id: str,
@@ -64,6 +141,62 @@ class AiKeyProbeService:
         await self._emit_metrics(row, result)
         return result.to_dict()
 
+    async def probe_model(
+        self,
+        key_id: str,
+        model: str,
+        *,
+        principal: Principal | None = None,
+    ) -> dict[str, Any]:
+        """Probe a specific model against the key (1-token chat completion).
+
+        Does NOT persist to ai_key_check_results (that row is for the key-level
+        /models probe). Per-model results are returned only.
+        """
+        model_clean = (model or "").strip()
+        if not model_clean:
+            raise AppError(
+                code="VALIDATION_ERROR",
+                title="Validation Error",
+                status=422,
+                detail="model is required",
+            )
+        row = await self._get_row(key_id)
+        ctx = await self._resolve_probe_context(row)
+        if ctx.probe_result is not None:
+            # Preflight failed (no secret / no endpoint / unsupported kind).
+            return ctx.probe_result.to_dict()
+        try:
+            result = await self._probe.probe_model(ctx.endpoint, ctx.secret, model=model_clean)
+        except Exception as exc:
+            logger.exception("probe_model: unexpected failure key=%s model=%s", row.id, model_clean)
+            result = ProbeResult(
+                status=ProbeStatus.UNAVAILABLE,
+                kind=ProbeKind.CHAT,
+                error_code="PROBE_INTERNAL",
+                error_message=_trim(str(exc)),
+                provider=row.provider,
+                api_kind=row.api_kind,
+                model=model_clean,
+            )
+        else:
+            # Stamp the model on the result for UI display.
+            result = ProbeResult(
+                status=result.status,
+                kind=result.kind,
+                latency_ms=result.latency_ms,
+                models=result.models,
+                default_model=result.default_model,
+                http_status=result.http_status,
+                error_code=result.error_code,
+                error_message=result.error_message,
+                provider=result.provider,
+                api_kind=result.api_kind,
+                model=model_clean,
+            )
+        await self._emit_metrics(row, result)
+        return result.to_dict()
+
     async def get_last_result(self, key_id: str) -> dict[str, Any] | None:
         """Return the last stored probe result for a key (or None)."""
         q = await self._session.execute(select(AiKeyCheckResultRow).where(AiKeyCheckResultRow.key_id == key_id))
@@ -73,66 +206,11 @@ class AiKeyProbeService:
         return self._row_to_public(row)
 
     async def _probe_row(self, row: AiProviderKeyRow) -> ProbeResult:
-        # cli_subscription — no HTTP endpoint to verify (CLI login, not a token).
-        if row.api_kind == ApiKind.CLI_SUBSCRIPTION:
-            return ProbeResult(
-                status=ProbeStatus.UNAVAILABLE,
-                error_code="CLI_SUBSCRIPTION_NOT_PROBEABLE",
-                error_message="CLI subscription keys cannot be probed via HTTP",
-                provider=row.provider,
-                api_kind=row.api_kind,
-            )
-        if not (row.secret_ref or "").strip():
-            return ProbeResult(
-                status=ProbeStatus.ERROR,
-                error_code="NO_SECRET",
-                error_message="key has no secret stored",
-                provider=row.provider,
-                api_kind=row.api_kind,
-            )
-        if not is_http_probe_kind(row.api_kind):
-            return ProbeResult(
-                status=ProbeStatus.UNAVAILABLE,
-                error_code="PROBE_UNSUPPORTED_KIND",
-                error_message=f"api_kind '{row.api_kind}' is not HTTP-probeable",
-                provider=row.provider,
-                api_kind=row.api_kind,
-            )
-
+        ctx = await self._resolve_probe_context(row)
+        if ctx.probe_result is not None:
+            return ctx.probe_result
         try:
-            secret = self._secrets.get(row.secret_ref)
-        except Exception as exc:
-            logger.warning("probe: secret fetch failed key=%s: %s", row.id, exc)
-            return ProbeResult(
-                status=ProbeStatus.UNAVAILABLE,
-                error_code="SECRET_STORE_ERROR",
-                error_message=_trim(str(exc)),
-                provider=row.provider,
-                api_kind=row.api_kind,
-            )
-        if not (secret or "").strip():
-            return ProbeResult(
-                status=ProbeStatus.ERROR,
-                error_code="NO_SECRET",
-                error_message="stored secret is empty",
-                provider=row.provider,
-                api_kind=row.api_kind,
-            )
-
-        endpoint = await self._resolver.resolve(api_kind=row.api_kind, provider=row.provider)
-        if endpoint is None:
-            return ProbeResult(
-                status=ProbeStatus.UNAVAILABLE,
-                error_code="NO_PROVIDER_ENDPOINT",
-                error_message=(
-                    f"no HTTP provider endpoint registered for api_kind={row.api_kind} provider={row.provider}"
-                ),
-                provider=row.provider,
-                api_kind=row.api_kind,
-            )
-
-        try:
-            return await self._probe.probe(endpoint, secret)
+            return await self._probe.probe(ctx.endpoint, ctx.secret)
         except Exception as exc:
             # Should never happen — HttpProbeClient catches all — but guard.
             logger.exception("probe: unexpected failure key=%s", row.id)
@@ -250,3 +328,12 @@ def _trim(msg: str) -> str:
     if len(msg) > 500:
         msg = msg[:500] + "…"
     return msg
+
+
+@dataclass(frozen=True, slots=True)
+class _ProbeContext:
+    """Preflight result: either a ready endpoint+secret, or a probe_result failure."""
+
+    endpoint: Any = None  # ProviderEndpoint
+    secret: str | None = None
+    probe_result: ProbeResult | None = None  # set when preflight failed

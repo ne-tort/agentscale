@@ -1425,17 +1425,25 @@
   "metaSecretEnter": "Enter secret",
   "metaSecretReplace": "Replace secret",
   "metaSecretSave": "Save secret",
-  "aiKeyProbeTitle": "Verify key",
-  "aiKeyProbeRun": "Verify key",
+  "aiKeyProbeTitle": "Verify",
+  "aiKeyProbeRun": "Verify",
   "aiKeyProbeNoSecret": "Key has no secret stored. Add a secret first.",
   "aiKeyProbeNeverRun": "Key has not been verified yet.",
   "aiKeyProbeLatency": "Latency",
   "aiKeyProbeModelsCount": "Models available",
+  "aiKeyProbeModelsCountValue": "Models: {count}",
+  "@aiKeyProbeModelsCountValue": {
+    "placeholders": {
+      "count": { "type": "int" }
+    }
+  },
+  "aiKeyProbeModelsNotReceived": "Models not received",
   "aiKeyProbeErrorCode": "Error code",
   "aiKeyProbeErrorMessage": "Error message",
   "aiKeyProbeCheckedAt": "Checked at",
   "aiKeyProbeModelSelect": "Select model (informational)",
   "aiKeyProbeModelLabel": "Model",
+  "aiKeyProbeStatusCol": "Status",
   "aiKeyProbeStatusOk": "Key works",
   "aiKeyProbeStatusError": "Key error",
   "aiKeyProbeStatusUnavailable": "Probe unavailable",

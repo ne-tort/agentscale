@@ -2592,10 +2592,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get metaSecretSave => 'Save secret';
 
   @override
-  String get aiKeyProbeTitle => 'Verify key';
+  String get aiKeyProbeTitle => 'Verify';
 
   @override
-  String get aiKeyProbeRun => 'Verify key';
+  String get aiKeyProbeRun => 'Verify';
 
   @override
   String get aiKeyProbeNoSecret =>
@@ -2611,6 +2611,14 @@ class AppLocalizationsEn extends AppLocalizations {
   String get aiKeyProbeModelsCount => 'Models available';
 
   @override
+  String aiKeyProbeModelsCountValue(int count) {
+    return 'Models: $count';
+  }
+
+  @override
+  String get aiKeyProbeModelsNotReceived => 'Models not received';
+
+  @override
   String get aiKeyProbeErrorCode => 'Error code';
 
   @override
@@ -2624,6 +2632,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get aiKeyProbeModelLabel => 'Model';
+
+  @override
+  String get aiKeyProbeStatusCol => 'Status';
 
   @override
   String get aiKeyProbeStatusOk => 'Key works';

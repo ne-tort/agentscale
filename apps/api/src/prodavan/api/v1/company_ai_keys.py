@@ -296,3 +296,26 @@ async def get_company_last_probe(
     await AiKeysService(session).require_company_key_visible(key_id, company_id)
     result = await AiKeyProbeService(session).get_last_result(key_id)
     return result if result is not None else {"status": "none", "models": []}
+
+
+class CompanyProbeModelBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    model: str = Field(min_length=1, max_length=200)
+
+
+@router.post("/{key_id}/probe/model")
+async def probe_company_key_model(
+    company_id: str,
+    key_id: str,
+    body: CompanyProbeModelBody,
+    principal: PrincipalDep,
+    session: SessionDep,
+    employee: Annotated[EmployeeRow | None, Depends(get_current_employee)],
+) -> dict:
+    """Verify a specific model works with this key (1-token chat completion)."""
+    from prodavan.application.ai_keys.probe.service import AiKeyProbeService
+
+    await EntitlementService(session).require_company_actor(principal, company_id, employee=employee)
+    await AiKeysService(session).require_company_key_visible(key_id, company_id)
+    return await AiKeyProbeService(session).probe_model(key_id, body.model, principal=principal)
