@@ -151,14 +151,23 @@ class AiKeyProbeService:
         *,
         principal: Principal | None,
     ) -> None:
-        """Upsert the last probe result (1:1 with key)."""
-        import json
+        """Upsert the last probe result (1:1 with key).
 
-        values = {
-            "status": result.status.value if isinstance(result.status, ProbeStatus) else str(result.status),
-            "kind": result.kind.value if isinstance(result.kind, ProbeKind) else result.kind,
+        Uses pg_insert().values(key_id=..., ...) so SQLAlchemy compiles a
+        complete INSERT (all columns bound) — passing params separately to
+        execute() does NOT populate ORM column values and left key_id NULL,
+        causing a NOT NULL violation → IntegrityError → HTTP 409.
+        """
+        status_val = result.status.value if isinstance(result.status, ProbeStatus) else str(result.status)
+        kind_val = result.kind.value if isinstance(result.kind, ProbeKind) else result.kind
+        values: dict[str, Any] = {
+            "key_id": key_id,
+            "status": status_val,
+            "kind": kind_val,
             "latency_ms": result.latency_ms,
-            "models": result.models,
+            # SQLAlchemy adapts a Python list to JSONB for psycopg3; do not
+            # pre-json.dumps it (a str here lands as a JSON string, not array).
+            "models": list(result.models or []),
             "default_model": result.default_model,
             "http_status": result.http_status,
             "error_code": result.error_code,
@@ -168,7 +177,7 @@ class AiKeyProbeService:
             "checked_at": datetime.now(UTC),
             "checked_by": principal.sub if principal else None,
         }
-        stmt = pg_insert(AiKeyCheckResultRow)
+        stmt = pg_insert(AiKeyCheckResultRow).values(**values)
         stmt = stmt.on_conflict_do_update(
             index_elements=["key_id"],
             set_={
@@ -186,11 +195,7 @@ class AiKeyProbeService:
                 "checked_by": stmt.excluded.checked_by,
             },
         )
-        # models JSONB needs explicit cast for psycopg3 when empty list.
-        await self._session.execute(
-            stmt,
-            {**values, "models": json.dumps(values["models"], ensure_ascii=False)},
-        )
+        await self._session.execute(stmt)
         await self._session.commit()
 
     async def _emit_metrics(self, row: AiProviderKeyRow, result: ProbeResult) -> None:
