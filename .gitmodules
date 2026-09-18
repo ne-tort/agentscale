@@ -1,0 +1,3 @@
+[submodule "prodavan-claw"]
+	path = prodavan-claw
+	url = https://github.com/ne-tort/prodavan-claw.git
