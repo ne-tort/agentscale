@@ -46,6 +46,15 @@ Legacy AI-канон: [`docs/target/`](docs/target/) (кроме as-built) — �
 - **Запрещены** `.sh` под `infra/`, docker-compose как кластер, k3d в git, recover/deploy shell.
 - Кластер: **k3s** + Argo (`infra/argocd` → `infra/k3s/overlays/dev`).
 
+### Принципы инфраструктуры (канон)
+
+1. **Декларативно везде, где возможно.** GitOps (Argo CD) + Terraform — источник истины. Никаких императивных `.sh`/`.ps1` скриптов для инфраструктуры: состояние описывается манифестами/HelmChartConfig/Terraform, применяется контроллерами.
+2. **Где GitOps/Terraform не могут декларативно** — **init containers (Python)** внутри Pod/job, которые при старте приводят состояние к нужному. Не shell-скрипты на хосте, а контейнер с Python-логикой в k8s.
+3. **Единственное исключение — WSL→Windows port forwarding.** Проброс портов из WSL на Windows делается вне кластера и вне Terraform (средствами WSL/Windows), не кластерными средствами. Всё остальное — декларативно.
+4. **Dev overlay: wildcard access.** Dev-доступ идёт через произвольные reverse-proxy/VPN (punnel) с непредсказуемым Host/SNI/IP — dev overlays **не пиняют** конкретные SNI/IP, а разрешают любой origin (wildcard). TLS — self-signed default cert Traefik (без cert-manager в dev).
+5. **Prod overlay: cert-manager + Let's Encrypt** на домене **`ai-qwerty.ru`** (ClusterIssuer, автоматический выпуск). Prod overlay пиняет host + TLS cert.
+6. **Не ломать punnel/demux.** Punnel — L4 plaintext reverse relay по дизайну (FEATURE 029: no TLS terminate). HTTPS обеспечивается на ingress-уровне (Traefik websecure), не punnel'ом.
+
 ### Dev-кластер в WSL (kubectl)
 
 Локальный k3s живёт в дистрибутиве **`kali-linux`**, не в Ubuntu / docker-desktop.
