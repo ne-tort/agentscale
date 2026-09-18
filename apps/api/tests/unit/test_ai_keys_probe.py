@@ -78,3 +78,41 @@ def test_probe_result_is_frozen() -> None:
     result = ProbeResult(status=ProbeStatus.OK)
     with pytest.raises(Exception):
         result.status = ProbeStatus.ERROR  # type: ignore[misc]
+
+
+def test_persist_upsert_compiles_with_key_id_bound() -> None:
+    """Regression: pg_insert must bind key_id (NULL → NOT NULL violation → 409).
+
+    Previously _persist_result passed params to execute() without binding
+    them as ORM column values, so SQLAlchemy compiled an INSERT with NULL
+    key_id → IntegrityError → HTTP 409 CONFLICT on every probe.
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    from prodavan.infrastructure.persistence.models.ai_keys import (
+        AiKeyCheckResultRow,
+    )
+
+    stmt = pg_insert(AiKeyCheckResultRow).values(
+        key_id="aik_test",
+        status="ok",
+        kind="models",
+        latency_ms=10,
+        models=["gpt-5.1"],
+        default_model="gpt-5.1",
+        http_status=200,
+        error_code=None,
+        error_message=None,
+        provider="codex",
+        api_kind="openai_api",
+        checked_by=None,
+    )
+    stmt = stmt.on_conflict_do_update(
+        index_elements=["key_id"],
+        set_={"status": stmt.excluded.status},
+    )
+    compiled = str(stmt.compile(dialect=__import__("sqlalchemy").dialects.postgresql.dialect()))
+    # INSERT must list key_id as a bound column (not rely on server default).
+    assert "key_id" in compiled
+    assert "INSERT INTO ai_key_check_results" in compiled
+    assert "ON CONFLICT (key_id)" in compiled
