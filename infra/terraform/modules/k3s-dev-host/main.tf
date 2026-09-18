@@ -80,6 +80,7 @@ resource "null_resource" "k3s_server" {
     # v8: fix remote-exec quoting — bash -lc '… tr -d '\r' …' became tr -d r (stripped all r).
     rev       = "v8-heal-crlf-quote"
     http_port = tostring(var.http_port)
+    https_port = tostring(var.https_port)
     cluster   = var.cluster_name
     traefik_tpl = filesha256("${path.module}/templates/traefik-port.yaml.tpl")
     boot_heal = filesha256("${path.module}/templates/prodavan-boot-heal.conf.tpl")
@@ -95,6 +96,7 @@ resource "null_resource" "k3s_server" {
   provisioner "file" {
     content = templatefile("${path.module}/templates/traefik-port.yaml.tpl", {
       http_port = var.http_port
+      https_port = var.https_port
     })
     destination = "/tmp/prodavan-traefik-port.yaml"
     connection {
@@ -320,6 +322,10 @@ output "api_endpoint" {
 
 output "http_url" {
   value = "http://127.0.0.1:${var.http_port}/"
+}
+
+output "https_url" {
+  value = var.https_port != 0 ? "https://127.0.0.1:${var.https_port}/" : ""
 }
 
 output "cluster_name" {

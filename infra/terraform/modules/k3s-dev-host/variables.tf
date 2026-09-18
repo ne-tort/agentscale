@@ -14,6 +14,12 @@ variable "http_port" {
   description = "Host port for Traefik web entrypoint (smoke/ingress)."
 }
 
+variable "https_port" {
+  type        = number
+  default     = 8443
+  description = "Host port for Traefik websecure entrypoint (HTTPS ingress). 0 disables hostPort."
+}
+
 variable "api_port" {
   type    = number
   default = 6443

@@ -1,4 +1,8 @@
-# Traefik Ingress — no host filter so http://localhost:8088/ works from Windows/WSL.
+# Prodavan ingress — HTTP (web) and HTTPS (websecure) routers.
+#
+# No host filter: dev is reached via arbitrary reverse proxies (punnel/VPN,
+# WSL localhost forwarding) whose Host/SNI is unpredictable; wildcard match
+# keeps it working for any origin. Prod overlays may pin host + cert-manager.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -9,6 +13,48 @@ metadata:
     traefik.ingress.kubernetes.io/router.entrypoints: web
 spec:
   ingressClassName: traefik
+  rules:
+    - http:
+        paths:
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: prodavan-api
+                port:
+                  number: 8000
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: prodavan-api
+                port:
+                  number: 8000
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: prodavan-web
+                port:
+                  number: 80
+---
+# HTTPS router — websecure entrypoint. TLS enabled with the Traefik default
+# certificate (self-signed) when no explicit TLS store cert matches. Prod
+# overlays set host + cert-manager ClusterIssuer (Let's Encrypt, ai-qwerty.ru).
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: prodavan-https
+  namespace: prodavan
+  annotations:
+    argocd.argoproj.io/sync-wave: "25"
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  tls:
+    # No hosts → wildcard SNI; Traefik serves the default cert for any Host.
+    - {}
   rules:
     - http:
         paths:

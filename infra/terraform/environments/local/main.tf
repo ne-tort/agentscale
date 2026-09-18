@@ -22,6 +22,12 @@ variable "http_port" {
   default = 8088
 }
 
+variable "https_port" {
+  type        = number
+  default     = 8443
+  description = "Traefik websecure host port (HTTPS). 0 disables hostPort."
+}
+
 variable "kubeconfig_path" {
   type    = string
   default = ""
@@ -97,6 +103,7 @@ module "k3s_dev" {
 
   cluster_name           = var.cluster_name
   http_port              = var.http_port
+  https_port             = var.https_port
   kubeconfig_path        = var.kubeconfig_path
   ssh_host               = var.ssh_host
   ssh_port               = var.ssh_port
@@ -114,6 +121,10 @@ output "kubeconfig_path" {
 
 output "http_url" {
   value = module.k3s_dev.http_url
+}
+
+output "https_url" {
+  value = module.k3s_dev.https_url
 }
 
 output "api_endpoint" {
