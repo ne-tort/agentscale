@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 
 import pytest
-
 from prodavan_ops.k8s import FIRST_PARTY_DEPLOYMENTS, assert_kubeconfig_docker_ready
 from prodavan_ops.validate import (
     FIRST_PARTY_LATEST,
@@ -201,7 +200,6 @@ def test_export_windows_kubeconfig_script_targets_docker_gateway() -> None:
 
 def test_is_api_unreachable_detects_connection_errors() -> None:
     from kubernetes.client.rest import ApiException
-
     from prodavan_ops.k8s import _is_api_unreachable
 
     assert _is_api_unreachable(ApiException(status=0, reason="Connection refused"))
@@ -212,6 +210,8 @@ def test_is_api_unreachable_detects_connection_errors() -> None:
 def test_first_party_latest_constants() -> None:
     assert "ghcr.io/ne-tort/prodavan-api:latest" in FIRST_PARTY_LATEST
     assert "ghcr.io/ne-tort/prodavan-web:latest" in FIRST_PARTY_LATEST
+    # Platform probe pod ships in the overlay render as :latest (first-party).
+    assert "ghcr.io/ne-tort/prodavan-agent-runtime:latest" in FIRST_PARTY_LATEST
 
 
 def test_pod_stuck_detects_terminating_and_failed() -> None:

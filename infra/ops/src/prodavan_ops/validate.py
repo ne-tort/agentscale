@@ -14,6 +14,11 @@ from prodavan_ops.paths import overlay_dev, overlay_e2e, repo_root
 FIRST_PARTY_LATEST = {
     "ghcr.io/ne-tort/prodavan-api:latest",
     "ghcr.io/ne-tort/prodavan-web:latest",
+    # Platform probe pod (single long-lived agent-runtime, not a project sandbox).
+    # Lives in the overlay render, so it must be a first-party :latest pin like
+    # api/web; the prodavan-ops image-pin check otherwise treats it as third-party
+    # and rejects :latest.
+    "ghcr.io/ne-tort/prodavan-agent-runtime:latest",
 }
 FORBIDDEN_INFRA_LATEST = re.compile(
     r"^(postgres:(16|latest)|redis:(7-alpine|7|latest)|mongo:(7|latest)|minio/minio:latest|minio/mc:latest|"
