@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 from alembic import op
+from sqlalchemy import text
 
 revision = "2026092002"
 down_revision = "2026092001"
@@ -123,7 +124,7 @@ def upgrade() -> None:
     for spec in _SEED:
         payload_json = json.dumps(spec["payload"], ensure_ascii=False)
         conn.execute(
-            op.text(
+            text(
                 """
                 INSERT INTO reference_catalog_entries
                     (pk, catalog_id, id, title, subtitle, icon_name, payload, seeded, sort_order)
@@ -155,7 +156,7 @@ def downgrade() -> None:
     # Best-effort: remove the new cursor_workos entry only.
     conn = op.get_bind()
     conn.execute(
-        op.text(
+        text(
             "DELETE FROM reference_catalog_entries "
             "WHERE catalog_id='ai.http_providers' AND id='cursor_workos'"
         )
