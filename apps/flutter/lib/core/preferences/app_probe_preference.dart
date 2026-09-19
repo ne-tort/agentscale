@@ -100,7 +100,7 @@ class _AppProbePreferenceState extends State<AppProbePreference> {
       trailing: _probing
           ? null
           : Icon(
-              Icons.play_circle_outline_rounded,
+              Icons.chevron_right_rounded,
               color: widget.enabled
                   ? (widget.accentColor ??
                       Theme.of(context).colorScheme.onSurfaceVariant)

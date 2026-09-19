@@ -41,6 +41,32 @@ def _trim(msg: str) -> str:
     return msg
 
 
+def _join_url(base_url: str, path: str) -> str:
+    """Join base_url + path without duplicating a shared `/v1` prefix segment.
+
+    Catalog seeds (e.g. ollama) carry base_url ending in `/v1` and models_path
+    `/v1/models` — concatenating them yields `/v1/v1/models` (404, 0 models).
+    When base_url already ends with the path's leading segment (e.g. `/v1`),
+    drop it from the path before joining.
+    """
+    base = (base_url or "").rstrip("/")
+    p = path or ""
+    if not p.startswith("/"):
+        p = "/" + p
+    # Last path segment of base (e.g. "/v1" for "https://x/v1"); skip the
+    # scheme "//" pseudo-segment so "https://api.openai.com" does not match.
+    seg = ""
+    after_scheme = base.split("://", 1)[-1]
+    slash = after_scheme.rfind("/")
+    if slash >= 1:
+        seg = after_scheme[slash:]
+    if seg and p.startswith(seg + "/"):
+        return base + p[len(seg):]
+    if seg and p == seg:
+        return base
+    return base + p
+
+
 def _auth_headers(endpoint, secret: str) -> dict[str, str]:
     headers = {
         "Accept": "application/json",
@@ -85,7 +111,7 @@ def _normalize_models(body: object) -> list[str]:
 
 
 async def _probe_models(endpoint, client: httpx.AsyncClient, secret: str) -> ProbeResult:
-    url = f"{endpoint.base_url}{endpoint.models_path}"
+    url = _join_url(endpoint.base_url, endpoint.models_path)
     headers = _auth_headers(endpoint, secret)
     start = _now_ms()
     try:
@@ -199,7 +225,7 @@ async def _probe_chat(
     Used as fallback when /models is not exposed by the provider, or to
     verify a *specific* model works with this key (probe_model).
     """
-    url = f"{endpoint.base_url}{endpoint.chat_completions_path}"
+    url = _join_url(endpoint.base_url, endpoint.chat_completions_path)
     headers = _auth_headers(endpoint, secret)
     headers["Content-Type"] = "application/json"
     # Minimal payload — ask for 1 token. Works on OpenAI-compatible + Anthropic.
