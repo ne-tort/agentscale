@@ -143,6 +143,7 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
       keyId: widget.keyId,
       provider: t.provider,
       apiKind: t.apiKind,
+      clearCatalogEntryId: true,
     );
     await _load();
   }

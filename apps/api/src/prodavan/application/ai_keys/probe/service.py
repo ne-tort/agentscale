@@ -24,7 +24,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.ai_keys.probe.http_probe import HttpProbeClient
+from prodavan.application.ai_keys.probe.pod_probe_service import ProbePodService
 from prodavan.application.ai_keys.probe.provider_resolver import ProviderResolver
+from prodavan.config.settings import settings
 from prodavan.domain.ai_keys import ApiKind, ProbeKind, ProbeResult, ProbeStatus, is_http_probe_kind
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
@@ -113,7 +115,12 @@ class AiKeyProbeService:
                 )
             )
 
-        endpoint = await self._resolver.resolve(api_kind=row.api_kind, provider=row.provider, secret=secret)
+        endpoint = await self._resolver.resolve(
+            api_kind=row.api_kind,
+            provider=row.provider,
+            secret=secret,
+            catalog_entry_id=getattr(row, "catalog_entry_id", None),
+        )
         if endpoint is None:
             return _ProbeContext(
                 probe_result=ProbeResult(
@@ -233,6 +240,25 @@ class AiKeyProbeService:
         return self._row_to_public(row)
 
     async def _probe_row(self, row: AiProviderKeyRow) -> ProbeResult:
+        # Pod-probe path (PROBE-P3): when the platform probe pod is enabled,
+        # verify the key via agent-runtime — push a short-lived lease and call
+        # /v1/models through the vendor SDK/HTTP path that only exists inside
+        # the pod. This is the only way to list models for SDK tokens
+        # (cursor_sdk → @cursor/sdk Cursor.models.list()), and it unifies the
+        # probe path for all runtime api_kinds.
+        if settings.pod_probe_enabled:
+            pod_result = await ProbePodService(self._session).probe_key(row)
+            if pod_result.status != ProbeStatus.UNAVAILABLE or pod_result.error_code not in {
+                "POD_PROBE_DISABLED",
+                "PROBE_POD_UNREACHABLE",
+            }:
+                return pod_result
+            # Pod unreachable — fall back to direct http_probe (best-effort).
+            logger.warning(
+                "probe: pod-probe unavailable key=%s code=%s — falling back to http_probe",
+                row.id,
+                pod_result.error_code,
+            )
         ctx = await self._resolve_probe_context(row)
         if ctx.probe_result is not None:
             return ctx.probe_result

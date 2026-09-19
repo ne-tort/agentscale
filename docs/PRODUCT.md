@@ -87,6 +87,12 @@ Upstream [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** depe
 
 GitOps, k3s, CI — не legacy: [`07-infrastructure/runbook.md`](07-infrastructure/runbook.md), [`07-infrastructure/e2e.md`](07-infrastructure/e2e.md).
 
+## AI keys probe (PROBE-P3)
+
+- **Bug fix (catalog_entry_id):** ключи `custom` api_kind (cheapai.lol и пр.) матчатся в `ProviderResolver` на первый `custom+agent_provider` catalog entry → раньше попадали на ollama (localhost) → «Проверка недоступна». Теперь `ai_provider_keys.catalog_entry_id` хранит явную ссылку на catalog entry (`ai.http_providers`); resolver использует её первой. UI передаёт `catalog_entry_id` при выборе HTTP-провайдера; SDK-типы очищают его.
+- **Pod-probe:** для runtime api_kinds (SDK + HTTP) проверка ключа и получение моделей идёт через **platform probe-pod** (`prodavan-probe-pod`, single long-lived agent-runtime pod, не project sandbox). Flow: API push lease (секрет в in-memory store pod'а, TTL 120с) → `GET /v1/models?adapter=…&key_id=…&base_url=…&models_path=…&auth_scheme=…` → revoke lease (секрет дропается из памяти сразу). Секрет никогда не персистится и не переиспользуется. Fallback: если probe-pod недоступен (`PROBE_POD_UNREACHABLE`/`POD_PROBE_DISABLED`) — `http_probe` напрямую. Для cursor_sdk модели доступны только через pod (vendor SDK `@cursor/sdk`); для HTTP kinds pod делает GET `{base_url}{models_path}` изнутри.
+- **Settings:** `POD_PROBE_ENABLED`, `POD_PROBE_BASE_URL` (default `http://prodavan-probe-pod.prodavan-sandboxes.svc:3921`), `POD_PROBE_LEASE_TTL_SEC` (120), `POD_PROBE_TIMEOUT_SEC` (15). Dev overlay включает probe-pod (`infra/k3s/overlays/dev/sandboxes/probe-pod.yaml`).
+
 ## Правила для агентов и PR
 
 1. Новые **продуктовые** требования — дополнять **этот файл** или as-built в `12-layer-docs`, не раздувать `target/01…15`.

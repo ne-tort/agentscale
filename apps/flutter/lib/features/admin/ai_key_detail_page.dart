@@ -161,6 +161,7 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
       keyId: widget.keyId,
       provider: t.provider,
       apiKind: t.apiKind,
+      clearCatalogEntryId: true,
     );
     await _load();
   }
@@ -174,11 +175,13 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
     if (item == null) return;
     final apiKind = item.payload['api_kind'] as String? ?? 'custom';
     final provider = item.payload['agent_provider'] as String? ?? 'codex';
+    final catalogEntryId = item.id;
     try {
       await adminContext.api.patchAiKey(
         keyId: widget.keyId,
         provider: provider,
         apiKind: apiKind,
+        catalogEntryId: catalogEntryId,
       );
       await _load();
     } catch (e) {
@@ -285,10 +288,14 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
             onSave: (v) async {
               if (v.isApiKey) {
                 if (!type.isApiKey) {
+                  // Switching to "API key" type keeps provider/api_kind (openai_api
+                  // defaults) but must clear any prior explicit catalog link so the
+                  // user is prompted to pick a specific HTTP provider next.
                   await adminContext.api.patchAiKey(
                     keyId: widget.keyId,
                     provider: 'codex',
                     apiKind: 'openai_api',
+                    clearCatalogEntryId: true,
                   );
                   await _load();
                 }
