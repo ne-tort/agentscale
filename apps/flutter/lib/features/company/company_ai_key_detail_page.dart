@@ -13,7 +13,6 @@ import 'package:prodavan/features/admin/ai_key_integration_type.dart';
 import 'package:prodavan/features/company/ai_key_models_page.dart';
 import 'package:prodavan/features/company/company_entity_source.dart';
 import 'package:prodavan/core/preferences/app_probe_preference.dart';
-import 'package:prodavan/features/ai_key_models_probe_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Company AI key detail — full edit for local keys; RO for platform-bound.
@@ -53,14 +52,6 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
   String _bindingCountSubtitle(AppLocalizations l10n, int count) {
     if (count == 0) return l10n.commonNotSet;
     return l10n.adminBindingsSelected('$count');
-  }
-
-  List<String> _modelsFromProbe(Map<String, dynamic>? probe) {
-    if (probe is! Map) return const [];
-    final map = Map<String, dynamic>.from(probe as Map);
-    final models = map['models'];
-    if (models is List) return models.whereType<String>().toList(growable: false);
-    return const [];
   }
 
   @override
@@ -230,6 +221,13 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
     return l10n.aiKeyModelsSelected('$enabled');
   }
 
+  bool get _hasModelsFromProbe {
+    final probe = _key?['last_probe'];
+    if (probe is! Map) return false;
+    final models = probe['models'];
+    return models is List && models.isNotEmpty;
+  }
+
   void _openModels() {
     final apiKind = _key?['api_kind'] as String? ?? 'cursor_sdk';
     AiKeyModelsPage.push(
@@ -319,19 +317,10 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
             AppProbePreference(
               enabled: hasSecret,
               lastProbe: _key?['last_probe'] as Map<String, dynamic>?,
-              onProbe: () async {
-                final models = _modelsFromProbe(_key?['last_probe']);
-                await AiKeyModelsProbePage.push(
-                  context,
-                  keyName: _displayName,
-                  models: models,
-                  onProbeModel: (model) => companyContext.api.probeAiKeyModel(
-                    companyId: widget.companyId,
-                    keyId: widget.keyId,
-                    model: model,
-                  ),
-                );
-              },
+              onProbe: () => companyContext.api.probeAiKey(
+                companyId: widget.companyId,
+                keyId: widget.keyId,
+              ),
             ),
           AppSubscriptionPreference(
             title: l10n.adminSubscription,
@@ -377,7 +366,7 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
               icon: Icons.pause_circle_outline_rounded,
               onTap: _pauseKey,
             ),
-          if (AiKeyIntegrationType.sdkApiKinds.contains(_key?['api_kind']))
+          if (hasSecret && _hasModelsFromProbe)
             AppNavPreference(
               title: l10n.aiKeyModelsTitle,
               icon: Icons.model_training_outlined,

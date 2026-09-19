@@ -3,7 +3,13 @@
 Reads the catalog of HTTP providers (`ai.http_providers`) seeded by
 CatalogService. For SDK api_kinds (cursor_sdk / codex_sdk / claude_agent_sdk)
 the catalog entry is matched by `agent_provider`, because those SDK tokens
-are HTTP bearer/x-api-key tokens against the vendor's OpenAI-compatible API.
+are HTTP bearer/x-api-key tokens against the vendor's HTTP API.
+
+Cursor has two token types — dashboard API key (crsr_…, works with
+api.cursor.com /v1/models) and WorkOS access token (eyJ… JWT, works only
+with api2.cursor.sh chat and does NOT expose list-models). The resolver
+picks the dashboard entry when the secret looks like a crsr_ key, otherwise
+the WorkOS entry (no models list — probe falls back to a 1-token chat).
 """
 
 from __future__ import annotations
@@ -34,6 +40,7 @@ class ProviderEndpoint:
     chat_completions_path: str
     models_path: str
     openai_compatible: bool
+    supports_models_list: bool  # False for Cursor WorkOS gateway
 
 
 # Map api_kind → default agent_provider to resolve catalog entry for SDK kinds.
@@ -45,13 +52,24 @@ _SDK_PROVIDER_BY_KIND: dict[str, str] = {
 }
 
 
+def _is_cursor_dashboard_token(secret: str) -> bool:
+    """Cursor dashboard API keys start with 'crsr_'."""
+    return (secret or "").lstrip().lower().startswith("crsr_")
+
+
 class ProviderResolver:
     """Resolve a provider HTTP endpoint from the catalog by api_kind/provider."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def resolve(self, *, api_kind: str, provider: str) -> ProviderEndpoint | None:
+    async def resolve(
+        self,
+        *,
+        api_kind: str,
+        provider: str,
+        secret: str | None = None,
+    ) -> ProviderEndpoint | None:
         entries = await self._entries()
         if not entries:
             return None
@@ -62,6 +80,26 @@ class ProviderResolver:
         # SDK kinds: match by agent_provider (token works against vendor HTTP API)
         sdk_provider = _SDK_PROVIDER_BY_KIND.get(api_kind)
         if sdk_provider:
+            cursor_entries = [e for e in entries if e.agent_provider == "cursor"]
+            if sdk_provider == "cursor" and cursor_entries:
+                # Dashboard API key (crsr_…) works with api.cursor.com and
+                # exposes /v1/models. WorkOS token (eyJ…) does not — pick the
+                # matching entry based on the secret shape.
+                if secret and _is_cursor_dashboard_token(secret):
+                    dashboard = next(
+                        (e for e in cursor_entries if e.supports_models_list),
+                        None,
+                    )
+                    if dashboard:
+                        return dashboard
+                workos = next(
+                    (e for e in cursor_entries if not e.supports_models_list),
+                    None,
+                )
+                if workos:
+                    return workos
+                # Fallback: first cursor entry
+                return cursor_entries[0]
             for e in entries:
                 if e.agent_provider == sdk_provider and (
                     e.api_kind in (api_kind, ApiKind.CUSTOM, "openai_api", "anthropic_api") or sdk_provider == "cursor"
@@ -98,6 +136,7 @@ class ProviderResolver:
                     chat_completions_path=str(payload.get("chat_completions_path") or "/v1/chat/completions"),
                     models_path=str(payload.get("models_path") or "/v1/models"),
                     openai_compatible=bool(payload.get("openai_compatible", True)),
+                    supports_models_list=bool(payload.get("supports_models_list", True)),
                 )
             )
         return out

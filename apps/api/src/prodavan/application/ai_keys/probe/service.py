@@ -113,7 +113,7 @@ class AiKeyProbeService:
                 )
             )
 
-        endpoint = await self._resolver.resolve(api_kind=row.api_kind, provider=row.provider)
+        endpoint = await self._resolver.resolve(api_kind=row.api_kind, provider=row.provider, secret=secret)
         if endpoint is None:
             return _ProbeContext(
                 probe_result=ProbeResult(

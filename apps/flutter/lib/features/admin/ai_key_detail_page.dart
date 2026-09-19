@@ -11,7 +11,6 @@ import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/admin/ai_http_provider_select_page.dart';import 'package:prodavan/features/admin/ai_key_integration_type.dart';
 import 'package:prodavan/core/preferences/app_probe_preference.dart';
-import 'package:prodavan/features/ai_key_models_probe_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// AI key detail — type-first + optional HTTP provider catalog (L03/L04).
@@ -112,14 +111,6 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
     if (count == 0) return l10n.commonNotSet;
     if (count == 1) return _companyLabel(_boundIds.first);
     return l10n.adminBindingsCount(count);
-  }
-
-  List<String> _modelsFromProbe(Map<String, dynamic>? probe) {
-    if (probe is! Map) return const [];
-    final map = Map<String, dynamic>.from(probe as Map);
-    final models = map['models'];
-    if (models is List) return models.whereType<String>().toList(growable: false);
-    return const [];
   }
 
   AiKeyIntegrationType get _type {
@@ -333,18 +324,7 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
             AppProbePreference(
               enabled: hasSecret,
               lastProbe: _key?['last_probe'] as Map<String, dynamic>?,
-              onProbe: () async {
-                final models = _modelsFromProbe(_key?['last_probe']);
-                await AiKeyModelsProbePage.push(
-                  context,
-                  keyName: _displayName,
-                  models: models,
-                  onProbeModel: (model) => adminContext.api.probeAiKeyModel(
-                    keyId: widget.keyId,
-                    model: model,
-                  ),
-                );
-              },
+              onProbe: () => adminContext.api.probeAiKey(keyId: widget.keyId),
             ),
           if (hasSecret)
             AppMultiChoicePreference<String>(

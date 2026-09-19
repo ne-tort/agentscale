@@ -286,8 +286,15 @@ class AiModelsService:
         return {"matched": matched, "created": created, "total": matched + created}
 
     async def list_key_models(self, *, company_id: str, key_id: str) -> list[dict[str, Any]]:
+        """Models visible to a key (platform + company scope) with the
+        key↔model binding state (enabled / is_default).
+
+        Per MODELS-L2: filtering is by the key↔model binding (AiKeyModelBindingRow),
+        NOT by api_kind/SDK. A model enabled on a key shows up here; models with
+        no binding show enabled=false so the user can toggle them on.
+        """
         key = await self._require_company_key(key_id, company_id)
-        models = await self._models_for_api_kind(company_id=company_id, api_kind=key.api_kind)
+        models = await self._models_visible_to_company(company_id=key.owner_company_id or company_id)
         bindings_q = await self._session.execute(
             select(AiKeyModelBindingRow).where(AiKeyModelBindingRow.key_id == key_id)
         )
@@ -308,9 +315,20 @@ class AiModelsService:
         key_id: str,
         selections: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        key = await self._require_company_key(key_id, company_id)
-        allowed_ids = {m.id for m in await self._models_for_api_kind(company_id=company_id, api_kind=key.api_kind)}
+        """Set the key↔model binding state (enabled / is_default toggle).
+
+        Per MODELS-L2: this IS the key↔model link with an on/off property.
+        Toggling enabled=true emits a relation.granted event (model linked to
+        key); enabled=false emits relation.revoked. The AiKeyModelBindingRow
+        itself stays (so the user can re-toggle without re-creating); the
+        relation event reflects the logical on/off state.
+        """
+        from prodavan.application.relations.commands import RelationsCommand
+
+        await self._require_company_key(key_id, company_id)
+        allowed_ids = {m.id for m in await self._models_visible_to_company(company_id=company_id)}
         default_id: str | None = None
+        rel = RelationsCommand(self._session)
         for item in selections:
             model_id = str(item.get("model_id") or "").strip()
             if not model_id or model_id not in allowed_ids:
@@ -336,9 +354,16 @@ class AiModelsService:
                             is_default=is_default,
                         )
                     )
+                    if enabled:
+                        await rel.link_model_to_key(model_id=model_id, key_id=key_id, company_id=company_id)
             else:
+                was_enabled = bool(existing.enabled)
                 existing.enabled = enabled
                 existing.is_default = is_default
+                if enabled and not was_enabled:
+                    await rel.link_model_to_key(model_id=model_id, key_id=key_id, company_id=company_id)
+                elif not enabled and was_enabled:
+                    await rel.unlink_model_from_key(model_id=model_id, key_id=key_id, company_id=company_id)
         if default_id:
             await self._session.execute(
                 update(AiKeyModelBindingRow).where(AiKeyModelBindingRow.key_id == key_id).values(is_default=False)
@@ -352,10 +377,23 @@ class AiModelsService:
                 .values(is_default=True, enabled=True)
             )
         await self._session.flush()
+        await self._session.commit()
         return await self.list_key_models(company_id=company_id, key_id=key_id)
 
     async def _bind_sdk(self, *, model_id: str, api_kind: str) -> None:
         self._session.add(AiModelSdkBindingRow(model_id=model_id, api_kind=api_kind))
+
+    async def _models_visible_to_company(self, *, company_id: str) -> list[AiModelRow]:
+        """All platform models + company-owned models (no api_kind filter)."""
+        q = await self._session.execute(
+            select(AiModelRow)
+            .where(
+                (AiModelRow.owner_scope == "platform")
+                | ((AiModelRow.owner_scope == "company") & (AiModelRow.owner_company_id == company_id))
+            )
+            .order_by(AiModelRow.name)
+        )
+        return list(q.scalars().all())
 
     async def _models_for_api_kind(self, *, company_id: str, api_kind: str) -> list[AiModelRow]:
         q = await self._session.execute(
@@ -371,9 +409,6 @@ class AiModelsService:
         return list(q.scalars().unique().all())
 
     async def _model_public(self, row: AiModelRow) -> dict[str, Any]:
-        sdk_q = await self._session.execute(
-            select(AiModelSdkBindingRow.api_kind).where(AiModelSdkBindingRow.model_id == row.id)
-        )
         aliases = row.key_aliases
         if isinstance(aliases, str):
             try:
@@ -384,13 +419,15 @@ class AiModelsService:
         return {
             "id": row.id,
             "name": row.name,
-            "key_aliases": [str(a) for a in aliases_list if a],
+            # Provider model ids (stable keys like "claude-opus-5"); multiple
+            # equivalent variants allowed. Renamed from "key_aliases" in the
+            # API/UI; the DB column stays "key_aliases" (no rename migration).
+            "model_ids": [str(a) for a in aliases_list if a],
             "provider": row.provider,
             "reasoning_level": row.reasoning_level,
             "description": row.description,
             "owner_scope": row.owner_scope,
             "owner_company_id": row.owner_company_id,
-            "api_kinds": list(sdk_q.scalars().all()),
             "input_price_usd_per_mtok": float(row.input_price_usd_per_mtok)
             if row.input_price_usd_per_mtok is not None
             else None,

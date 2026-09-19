@@ -23,11 +23,12 @@ _AI_HTTP_SEED: list[dict[str, Any]] = [
         "payload": {
             "api_kind": "openai_api",
             "agent_provider": "codex",
-            "base_url": "https://api.openai.com/v1",
+            "base_url": "https://api.openai.com",
             "openai_compatible": True,
             "auth_scheme": "bearer",
             "chat_completions_path": "/v1/chat/completions",
             "models_path": "/v1/models",
+            "supports_models_list": True,
         },
     },
     {
@@ -44,6 +45,7 @@ _AI_HTTP_SEED: list[dict[str, Any]] = [
             "auth_scheme": "x-api-key",
             "chat_completions_path": "/v1/messages",
             "models_path": "/v1/models",
+            "supports_models_list": True,
         },
     },
     {
@@ -60,14 +62,32 @@ _AI_HTTP_SEED: list[dict[str, Any]] = [
             "auth_scheme": "bearer",
             "chat_completions_path": "/chat/completions",
             "models_path": "/models",
+            "supports_models_list": True,
         },
     },
     {
         "id": "cursor",
-        "title": "Cursor",
-        "subtitle": "api2.cursor.sh",
+        "title": "Cursor (Dashboard API)",
+        "subtitle": "api.cursor.com",
         "icon_name": "terminal_outlined",
         "sort_order": 40,
+        "payload": {
+            "api_kind": "custom",
+            "agent_provider": "cursor",
+            "base_url": "https://api.cursor.com",
+            "openai_compatible": True,
+            "auth_scheme": "bearer",
+            "chat_completions_path": "/v1/chat/completions",
+            "models_path": "/v1/models",
+            "supports_models_list": True,
+        },
+    },
+    {
+        "id": "cursor_workos",
+        "title": "Cursor (WorkOS token)",
+        "subtitle": "api2.cursor.sh",
+        "icon_name": "terminal_outlined",
+        "sort_order": 41,
         "payload": {
             "api_kind": "custom",
             "agent_provider": "cursor",
@@ -76,6 +96,10 @@ _AI_HTTP_SEED: list[dict[str, Any]] = [
             "auth_scheme": "bearer",
             "chat_completions_path": "/v1/chat/completions",
             "models_path": "/v1/models",
+            # WorkOS access token (eyJ… JWT) — gateway api2.cursor.sh does NOT
+            # expose a public list-models endpoint. Probe falls back to a
+            # 1-token chat completion to validate the token; no models page.
+            "supports_models_list": False,
         },
     },
     {
@@ -92,6 +116,7 @@ _AI_HTTP_SEED: list[dict[str, Any]] = [
             "auth_scheme": "none",
             "chat_completions_path": "/chat/completions",
             "models_path": "/models",
+            "supports_models_list": True,
         },
     },
 ]

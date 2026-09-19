@@ -8,9 +8,9 @@ from prodavan.application.catalog.service import _AI_HTTP_SEED, CATALOG_AI_HTTP_
 
 def test_ai_http_seed_payloads_are_valid() -> None:
     assert CATALOG_AI_HTTP_PROVIDERS == "ai.http_providers"
-    assert len(_AI_HTTP_SEED) >= 5
+    assert len(_AI_HTTP_SEED) >= 6
     ids = {s["id"] for s in _AI_HTTP_SEED}
-    assert ids == {"openai", "anthropic", "openrouter", "cursor", "ollama"}
+    assert ids == {"openai", "anthropic", "openrouter", "cursor", "cursor_workos", "ollama"}
     for spec in _AI_HTTP_SEED:
         payload = spec["payload"]
         assert payload["agent_provider"] in PROVIDERS

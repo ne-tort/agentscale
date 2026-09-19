@@ -23,11 +23,10 @@ class CreateModelBody(BaseModel):
     model_config = {"extra": "forbid"}
 
     name: str = Field(min_length=1, max_length=128)
-    key_aliases: list[str] = Field(default_factory=list)
+    model_ids: list[str] = Field(default_factory=list)
     provider: str | None = Field(default=None, max_length=64)
     reasoning_level: str | None = Field(default=None, max_length=32)
     description: str | None = Field(default=None, max_length=512)
-    api_kinds: list[str] = Field(default_factory=list)
     input_price_usd_per_mtok: Decimal | None = None
     output_price_usd_per_mtok: Decimal | None = None
     max_context_tokens: int | None = Field(default=None, ge=1)
@@ -41,11 +40,10 @@ class PatchModelBody(BaseModel):
     model_config = {"extra": "forbid"}
 
     name: str | None = Field(default=None, min_length=1, max_length=128)
-    key_aliases: list[str] | None = None
+    model_ids: list[str] | None = None
     provider: str | None = Field(default=None, max_length=64)
     reasoning_level: str | None = Field(default=None, max_length=32)
     description: str | None = Field(default=None, max_length=512)
-    api_kinds: list[str] | None = None
     input_price_usd_per_mtok: Decimal | None = None
     output_price_usd_per_mtok: Decimal | None = None
     max_context_tokens: int | None = Field(default=None, ge=1)
@@ -62,11 +60,10 @@ async def list_models(_admin: PlatformAdminDep, session: SessionDep) -> list[dic
 async def create_model(admin: PlatformAdminDep, session: SessionDep, body: CreateModelBody) -> dict:
     return await AiModelsService(session).create_model(
         name=body.name,
-        key_aliases=body.key_aliases,
+        key_aliases=body.model_ids,
         provider=body.provider,
         reasoning_level=body.reasoning_level,
         description=body.description,
-        api_kinds=body.api_kinds,
         input_price_usd_per_mtok=body.input_price_usd_per_mtok,
         output_price_usd_per_mtok=body.output_price_usd_per_mtok,
         max_context_tokens=body.max_context_tokens,
@@ -87,11 +84,10 @@ async def patch_model(admin: PlatformAdminDep, session: SessionDep, model_id: st
     return await AiModelsService(session).update_model(
         model_id=model_id,
         name=body.name,
-        key_aliases=body.key_aliases,
+        key_aliases=body.model_ids,
         provider=body.provider,
         reasoning_level=body.reasoning_level,
         description=body.description,
-        api_kinds=body.api_kinds,
         input_price_usd_per_mtok=body.input_price_usd_per_mtok,
         output_price_usd_per_mtok=body.output_price_usd_per_mtok,
         max_context_tokens=body.max_context_tokens,

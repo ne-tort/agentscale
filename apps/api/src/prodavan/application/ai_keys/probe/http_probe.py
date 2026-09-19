@@ -274,22 +274,29 @@ class HttpProbeClient:
         self._timeout = timeout
 
     async def probe(self, endpoint, secret: str) -> ProbeResult:
-        """Probe a key: GET /models first, fall back to chat completion."""
+        """Probe a key: GET /models first, fall back to chat completion.
+
+        If the endpoint does not support a models list (Cursor WorkOS gateway),
+        skip /models and validate the token via a 1-token chat completion.
+        """
         async with httpx.AsyncClient(
             timeout=self._timeout,
             follow_redirects=True,
         ) as client:
-            result = await _probe_models(endpoint, client, secret)
-            if result.status == ProbeStatus.OK:
+            if getattr(endpoint, "supports_models_list", True):
+                result = await _probe_models(endpoint, client, secret)
+                if result.status == ProbeStatus.OK:
+                    return result
+                # If /models failed with a hard auth error (401/403), don't retry
+                # with chat — the key is invalid, no point spending tokens.
+                if result.error_code == "AUTH_INVALID":
+                    return result
+                # If /models endpoint simply not implemented (404/405), try chat.
+                if result.http_status in (404, 405) or result.error_code in ("HTTP_404", "HTTP_405"):
+                    return await _probe_chat(endpoint, client, secret)
                 return result
-            # If /models failed with a hard auth error (401/403), don't retry
-            # with chat — the key is invalid, no point spending tokens.
-            if result.error_code == "AUTH_INVALID":
-                return result
-            # If /models endpoint simply not implemented (404/405), try chat.
-            if result.http_status in (404, 405) or result.error_code in ("HTTP_404", "HTTP_405"):
-                return await _probe_chat(endpoint, client, secret)
-            return result
+            # No models-list support — validate the token via a chat probe.
+            return await _probe_chat(endpoint, client, secret)
 
     async def probe_model(self, endpoint, secret: str, *, model: str) -> ProbeResult:
         """Verify a specific model works with this key (1-token chat)."""

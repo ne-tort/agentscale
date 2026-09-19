@@ -27,19 +27,15 @@ class AiModelDetailPage extends StatefulWidget {
 class _AiModelDetailPageState extends State<AiModelDetailPage> {
   bool _loading = true;
   String _name = '';
-  Set<String> _apiKinds = const {};
+  String _modelIds = '';
+  String _provider = '';
+  String _reasoningLevel = '';
+  String _description = '';
   String _inputPrice = '';
   String _outputPrice = '';
   String _maxTokens = '';
   String _publisher = '';
   String _releasedAt = '';
-
-  static const _sdkChoices = [
-    'cursor_sdk',
-    'codex_sdk',
-    'claude_agent_sdk',
-    'openclaw_sdk',
-  ];
 
   @override
   void initState() {
@@ -61,8 +57,11 @@ class _AiModelDetailPageState extends State<AiModelDetailPage> {
       if (!mounted) return;
       setState(() {
         _name = row['name'] as String? ?? widget.modelName;
-        final kinds = row['api_kinds'];
-        _apiKinds = kinds is List ? kinds.map((e) => '$e').toSet() : const {};
+        final ids = row['model_ids'];
+        _modelIds = ids is List ? ids.whereType<String>().join(', ') : '';
+        _provider = row['provider'] as String? ?? '';
+        _reasoningLevel = row['reasoning_level'] as String? ?? '';
+        _description = row['description'] as String? ?? '';
         _inputPrice = _strField(row['input_price_usd_per_mtok']);
         _outputPrice = _strField(row['output_price_usd_per_mtok']);
         _maxTokens = _strField(row['max_context_tokens']);
@@ -88,13 +87,48 @@ class _AiModelDetailPageState extends State<AiModelDetailPage> {
     if (mounted) setState(() => _name = name);
   }
 
-  Future<void> _saveSdks(Set<String> kinds) async {
+  Future<void> _saveModelIds(String v) async {
+    final ids = v
+        .split(',')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
     await companyContext.api.patchAiModel(
       companyId: widget.companyId,
       modelId: widget.modelId,
-      apiKinds: kinds.toList(),
+      modelIds: ids,
     );
-    if (mounted) setState(() => _apiKinds = kinds);
+    if (mounted) setState(() => _modelIds = v);
+  }
+
+  Future<void> _saveProvider(String v) async {
+    final trimmed = v.trim();
+    await companyContext.api.patchAiModel(
+      companyId: widget.companyId,
+      modelId: widget.modelId,
+      provider: trimmed.isEmpty ? '' : trimmed,
+    );
+    if (mounted) setState(() => _provider = trimmed);
+  }
+
+  Future<void> _saveReasoningLevel(String v) async {
+    final trimmed = v.trim();
+    await companyContext.api.patchAiModel(
+      companyId: widget.companyId,
+      modelId: widget.modelId,
+      reasoningLevel: trimmed.isEmpty ? '' : trimmed,
+    );
+    if (mounted) setState(() => _reasoningLevel = trimmed);
+  }
+
+  Future<void> _saveDescription(String v) async {
+    final trimmed = v.trim();
+    await companyContext.api.patchAiModel(
+      companyId: widget.companyId,
+      modelId: widget.modelId,
+      description: trimmed.isEmpty ? '' : trimmed,
+    );
+    if (mounted) setState(() => _description = trimmed);
   }
 
   Future<void> _saveInputPrice(String v) async {
@@ -147,21 +181,6 @@ class _AiModelDetailPageState extends State<AiModelDetailPage> {
     if (mounted) setState(() => _releasedAt = trimmed);
   }
 
-  String _sdkLabel(AppLocalizations l10n, String kind) {
-    switch (kind) {
-      case 'cursor_sdk':
-        return l10n.adminTypeCursorSdk;
-      case 'codex_sdk':
-        return l10n.adminTypeCodexSdk;
-      case 'claude_agent_sdk':
-        return l10n.adminTypeClaudeSdk;
-      case 'openclaw_sdk':
-        return 'OpenClaw SDK';
-      default:
-        return kind;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -183,14 +202,33 @@ class _AiModelDetailPageState extends State<AiModelDetailPage> {
             value: _name,
             onSave: _saveName,
           ),
-          AppMultiChoicePreference<String>(
-            title: l10n.aiModelSdkLabel,
-            icon: Icons.hub_outlined,
-            values: _apiKinds,
-            choices: _sdkChoices,
-            keyFor: (v) => v,
-            labelFor: (v) => _sdkLabel(l10n, v),
-            onSave: _saveSdks,
+          AppValuePreference<String>(
+            title: l10n.aiModelKeyAliasesLabel,
+            icon: Icons.alternate_email_rounded,
+            value: _modelIds,
+            presentValue: (v) => v.isEmpty ? l10n.commonNotSet : v,
+            onSave: _saveModelIds,
+          ),
+          AppValuePreference<String>(
+            title: l10n.commonProvider,
+            icon: Icons.cloud_outlined,
+            value: _provider,
+            presentValue: (v) => v.isEmpty ? l10n.commonNotSet : v,
+            onSave: _saveProvider,
+          ),
+          AppValuePreference<String>(
+            title: l10n.aiModelReasoningLevelLabel,
+            icon: Icons.psychology_outlined,
+            value: _reasoningLevel,
+            presentValue: (v) => v.isEmpty ? l10n.commonNotSet : v,
+            onSave: _saveReasoningLevel,
+          ),
+          AppValuePreference<String>(
+            title: l10n.commonDescription,
+            icon: Icons.notes_rounded,
+            value: _description,
+            presentValue: (v) => v.isEmpty ? l10n.commonNotSet : v,
+            onSave: _saveDescription,
           ),
           AppValuePreference<String>(
             title: l10n.aiModelInputPriceLabel,

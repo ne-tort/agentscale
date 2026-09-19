@@ -2655,7 +2655,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get commonScope => 'Scope';
 
   @override
-  String get aiModelKeyAliasesLabel => 'Key aliases';
+  String get aiModelKeyAliasesLabel => 'Model IDs';
 
   @override
   String get aiModelReasoningLevelLabel => 'Reasoning level';
