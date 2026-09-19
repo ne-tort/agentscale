@@ -147,3 +147,9 @@ data:
   POD_AGENT_RUNTIME_AUTH_SECRET: pod-agent-bridge-auth
   POD_AGENT_RUNTIME_IMAGE: ghcr.io/ne-tort/prodavan-agent-runtime:latest
   POD_AGENT_RUNTIME_BOOTSTRAP_ENABLED: "true"
+  # Platform probe pod — verify AI keys & fetch their model list via agent-runtime.
+  # The probe pod runs in prodavan-sandboxes (see sandboxes/probe-pod.yaml).
+  POD_PROBE_ENABLED: "true"
+  POD_PROBE_BASE_URL: http://prodavan-probe-pod.prodavan-sandboxes.svc:3921
+  POD_PROBE_LEASE_TTL_SEC: "120"
+  POD_PROBE_TIMEOUT_SEC: "15"

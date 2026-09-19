@@ -69,10 +69,19 @@ class ProviderResolver:
         api_kind: str,
         provider: str,
         secret: str | None = None,
+        catalog_entry_id: str | None = None,
     ) -> ProviderEndpoint | None:
         entries = await self._entries()
         if not entries:
             return None
+        # Explicit catalog entry link wins (PROBE-P3): the key was created/edited
+        # against a specific `ai.http_providers` entry, so use it verbatim. This
+        # disambiguates `custom` api_kind keys (ollama vs a user-added cheapai.lol
+        # endpoint — both custom+codex under the legacy api_kind+provider match).
+        if catalog_entry_id:
+            for e in entries:
+                if e.catalog_id == catalog_entry_id:
+                    return e
         # Exact api_kind match first (openai_api / anthropic_api / openrouter / custom)
         for e in entries:
             if e.api_kind == api_kind and e.agent_provider == provider:

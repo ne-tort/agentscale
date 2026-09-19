@@ -1,0 +1,102 @@
+# Platform probe pod — single long-lived agent-runtime pod owned by the platform
+# (not a project sandbox) used to verify AI keys and fetch their model list via
+# the vendor SDK / HTTP /models path that only exists inside agent-runtime.
+#
+# The API pushes a short-lived credential lease (POST /v1/credentials/leases),
+# calls GET /v1/models?adapter=...&key_id=..., then revokes the lease — the
+# secret is never persisted (no env, no disk) and dropped from memory in ≤TTL.
+# See prodavan.application.ai_keys.probe.pod_probe_service.ProbePodService.
+#
+# Why a separate pod (not a project sandbox): probing must not depend on a
+# running project per company, and must not spend project budget. This pod is
+# shared across the whole platform; it has no workspace, no modules, no MCP —
+# only the agent-runtime HTTP surface.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prodavan-probe-pod
+  namespace: prodavan-sandboxes
+  labels:
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: probe-pod
+    prodavan.io/managed-by: pod-service
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: probe-pod
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/component: probe-pod
+        prodavan.io/managed-by: pod-service
+    spec:
+      serviceAccountName: prodavan-project-pod
+      restartPolicy: Always
+      containers:
+        - name: agent-runtime
+          image: ghcr.io/ne-tort/prodavan-agent-runtime:local
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3921
+          env:
+            - name: WORKSPACE_ROOT
+              value: /workspace
+            - name: OPENCLAW_DATA_DIR
+              value: /workspace/.openclaw-data
+            - name: PRODAVAN_EVENTS_WRITE
+              value: "0"
+            - name: PORT
+              value: "3921"
+          envFrom:
+            - secretRef:
+                name: pod-agent-bridge-auth
+                optional: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            failureThreshold: 12
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+      volumes:
+        - name: workspace
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prodavan-probe-pod
+  namespace: prodavan-sandboxes
+  labels:
+    app.kubernetes.io/part-of: prodavan
+    app.kubernetes.io/component: probe-pod
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/component: probe-pod
+  ports:
+    - name: http
+      port: 3921
+      targetPort: http

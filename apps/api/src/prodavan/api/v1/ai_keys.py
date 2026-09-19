@@ -21,6 +21,7 @@ class CreateKeyBody(BaseModel):
     provider: str = "cursor"
     api_kind: str = "cursor_sdk"
     secret: str | None = Field(default=None, min_length=1)
+    catalog_entry_id: str | None = Field(default=None, max_length=64)
     next_renewal_at: datetime | None = None
     renewal_price: str | None = None
     currency: str | None = Field(default=None, max_length=8)
@@ -35,6 +36,7 @@ class PatchKeyBody(BaseModel):
     status: str | None = None
     provider: str | None = None
     api_kind: str | None = None
+    catalog_entry_id: str | None = Field(default=None, max_length=64)
     next_renewal_at: datetime | None = None
     renewal_price: str | None = None
     currency: str | None = None
@@ -89,6 +91,7 @@ async def create_key(admin: PlatformAdminDep, session: SessionDep, body: CreateK
         provider=body.provider,
         api_kind=body.api_kind,
         secret=body.secret,
+        catalog_entry_id=body.catalog_entry_id,
         next_renewal_at=body.next_renewal_at,
         renewal_price=body.renewal_price,
         currency=body.currency,

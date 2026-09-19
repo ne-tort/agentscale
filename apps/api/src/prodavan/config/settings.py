@@ -223,6 +223,28 @@ class Settings(BaseSettings):
             "POD_AGENT_BRIDGE_BOOTSTRAP_ENABLED",
         ),
     )
+    # Platform probe pod — single long-lived agent-runtime pod owned by the platform
+    # (not a project sandbox) used to verify AI keys and fetch their model list via
+    # the vendor SDK/HTTP path that only exists inside agent-runtime. The API pushes
+    # a short-lived credential lease into the probe pod, calls /v1/models, then
+    # revokes the lease — secret is never persisted and never reused after the probe.
+    # Empty base URL = pod-probe disabled (probe falls back to direct http_probe).
+    pod_probe_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("POD_PROBE_ENABLED", "POD_KEY_PROBE_ENABLED"),
+    )
+    pod_probe_base_url: str = Field(
+        default="http://prodavan-probe-pod.prodavan.svc:3921",
+        validation_alias=AliasChoices("POD_PROBE_BASE_URL", "POD_KEY_PROBE_BASE_URL"),
+    )
+    pod_probe_lease_ttl_sec: int = Field(
+        default=120,
+        validation_alias=AliasChoices("POD_PROBE_LEASE_TTL_SEC", "POD_KEY_PROBE_LEASE_TTL_SEC"),
+    )
+    pod_probe_timeout_sec: float = Field(
+        default=15.0,
+        validation_alias=AliasChoices("POD_PROBE_TIMEOUT_SEC", "POD_KEY_PROBE_TIMEOUT_SEC"),
+    )
     # When True, allow FakeAgentAdapter / FixtureCursorAdapter in-process (pytest only).
     # Audit API-P2c: forbidden outside dev — a stray prod env var must not open the
     # stub adapter path. Validated in __init__ via field_validator.

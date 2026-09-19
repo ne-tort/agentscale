@@ -279,6 +279,7 @@ class AiKeysService:
             "api_kind": row.api_kind,
             "owner_scope": row.owner_scope,
             "owner_company_id": row.owner_company_id,
+            "catalog_entry_id": row.catalog_entry_id,
             "secret_ref_prefix": prefix,
             "has_secret": bool((row.secret_ref or "").strip()),
             "status": row.status,
@@ -372,6 +373,7 @@ class AiKeysService:
         company_ids: list[str] | None = None,
         owner_scope: str = "platform",
         owner_company_id: str | None = None,
+        catalog_entry_id: str | None = None,
         principal: Principal | None = None,
     ) -> dict:
         self._validate_provider_kind(provider, api_kind)
@@ -402,6 +404,7 @@ class AiKeysService:
             api_kind=api_kind,
             owner_scope=scope,
             owner_company_id=owner_company_id if scope == "company" else None,
+            catalog_entry_id=(catalog_entry_id or "").strip() or None,
             secret_ref=secret_ref,
             status=KeyStatus.ACTIVE if has_secret else KeyStatus.DISABLED,
             next_renewal_at=next_renewal_at,
@@ -510,6 +513,9 @@ class AiKeysService:
             api_kind = str(updates["api_kind"]).strip()
             self._validate_provider_kind(row.provider, api_kind)
             row.api_kind = api_kind
+        if "catalog_entry_id" in updates:
+            val = updates["catalog_entry_id"]
+            row.catalog_entry_id = (str(val).strip() or None) if val is not None else None
         if "next_renewal_at" in updates:
             row.next_renewal_at = updates["next_renewal_at"]
         if "renewal_price" in updates:

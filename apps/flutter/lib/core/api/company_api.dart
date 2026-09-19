@@ -222,6 +222,7 @@ class CompanyApi {
     String provider = 'cursor',
     String apiKind = 'cursor_sdk',
     String? secret,
+    String? catalogEntryId,
   }) async {
     final res = await AuthHttp.post(
       _uri('/companies/$companyId/ai-keys'),
@@ -230,6 +231,8 @@ class CompanyApi {
         'provider': provider,
         'api_kind': apiKind,
         if (secret != null && secret.isNotEmpty) 'secret': secret,
+        if (catalogEntryId != null && catalogEntryId.isNotEmpty)
+          'catalog_entry_id': catalogEntryId,
       }),
     );
     _throwIfError(res);
@@ -243,6 +246,8 @@ class CompanyApi {
     String? name,
     String? provider,
     String? apiKind,
+    String? catalogEntryId,
+    bool clearCatalogEntryId = false,
     String? nextRenewalAt,
     bool clearNextRenewalAt = false,
   }) async {
@@ -253,6 +258,9 @@ class CompanyApi {
         if (name != null) 'name': name,
         if (provider != null) 'provider': provider,
         if (apiKind != null) 'api_kind': apiKind,
+        if (clearCatalogEntryId) 'catalog_entry_id': null,
+        if (!clearCatalogEntryId && catalogEntryId != null)
+          'catalog_entry_id': catalogEntryId,
         if (clearNextRenewalAt) 'next_renewal_at': null,
         if (!clearNextRenewalAt && nextRenewalAt != null) 'next_renewal_at': nextRenewalAt,
       }),

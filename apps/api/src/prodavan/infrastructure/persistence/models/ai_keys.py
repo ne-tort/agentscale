@@ -30,6 +30,11 @@ class AiProviderKeyRow(Base):
         ForeignKey("companies.id", ondelete="CASCADE"),
         nullable=True,
     )
+    # Explicit link to a `ai.http_providers` catalog entry (reference_catalog_entries.id).
+    # Resolves endpoint ambiguity for `custom` api_kind (multiple custom+codex entries:
+    # ollama + user-added OpenAI-compatible endpoints). NULL = legacy api_kind+agent_provider
+    # match (kept for backward compat with keys created before this column existed).
+    catalog_entry_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     secret_ref: Mapped[str] = mapped_column(String(512), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
     next_renewal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
