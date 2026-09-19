@@ -131,7 +131,7 @@ def upgrade() -> None:
                 VALUES
                     (:pk, 'ai.http_providers', :id, :title, :subtitle, :icon_name,
                      CAST(:payload AS jsonb), true, :sort_order)
-                ON CONFLICT (catalog_id, id) DO UPDATE SET
+                ON CONFLICT (catalog_id, id) WHERE archived_at IS NULL DO UPDATE SET
                     title = EXCLUDED.title,
                     subtitle = EXCLUDED.subtitle,
                     icon_name = EXCLUDED.icon_name,
