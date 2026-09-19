@@ -1,4 +1,4 @@
-"""Unit tests for ProviderResolver catalog_entry_id priority + pod probe normalize (PROBE-P3)."""
+"""Unit tests for ProviderResolver catalog_entry_id priority + pod probe helpers (PROBE-P3)."""
 
 from __future__ import annotations
 
@@ -6,41 +6,47 @@ import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 from prodavan.application.ai_keys.probe.pod_probe_service import _normalize_models
-from prodavan.application.ai_keys.probe.provider_resolver import ProviderEndpoint
+from prodavan.application.ai_keys.probe.provider_resolver import ProviderResolver
+from prodavan.config.settings import settings
 from prodavan.domain.ai_keys import ApiKind, ProbeStatus
 
 
-def _endpoint(
-    catalog_id: str,
+def _catalog_row(
+    rid: str,
     *,
     api_kind: str = "custom",
     agent_provider: str = "codex",
-    supports_models_list: bool = True,
     base_url: str = "http://example/v1",
-) -> ProviderEndpoint:
-    return ProviderEndpoint(
-        catalog_id=catalog_id,
-        title=catalog_id,
-        base_url=base_url,
-        api_kind=api_kind,
-        agent_provider=agent_provider,
-        auth_scheme="bearer",
-        chat_completions_path="/v1/chat/completions",
-        models_path="/v1/models",
-        openai_compatible=True,
-        supports_models_list=supports_models_list,
-    )
+    supports_models_list: bool = True,
+    auth_scheme: str = "bearer",
+):
+    """Build a ReferenceCatalogEntryRow-like mock with a `.payload` dict."""
+    row = MagicMock()
+    row.id = rid
+    row.title = rid
+    row.sort_order = 0
+    row.payload = {
+        "api_kind": api_kind,
+        "agent_provider": agent_provider,
+        "base_url": base_url,
+        "auth_scheme": auth_scheme,
+        "chat_completions_path": "/v1/chat/completions",
+        "models_path": "/v1/models",
+        "openai_compatible": True,
+        "supports_models_list": supports_models_list,
+    }
+    return row
 
 
 class _FakeSession:
-    """Minimal AsyncSession that returns a canned catalog entry list."""
+    """Minimal AsyncSession that returns a canned catalog entry list via .execute()."""
 
-    def __init__(self, entries: list[ProviderEndpoint]) -> None:
+    def __init__(self, rows: list) -> None:
         result = MagicMock()
         scalars = MagicMock()
-        scalars.all = lambda: entries
+        scalars.all = lambda: rows
         result.scalars.return_value = scalars
-        result.all = lambda: entries
+        result.all = lambda: rows
         self._result = result
 
     async def execute(self, *_args, **_kwargs):
@@ -50,12 +56,9 @@ class _FakeSession:
 def test_resolver_prefers_catalog_entry_id_over_legacy_match() -> None:
     """Regression: a custom+codex key must resolve to its explicit catalog entry,
     not the first custom+codex match (ollama vs a user-added cheapai endpoint)."""
-    from prodavan.application.ai_keys.probe.provider_resolver import ProviderResolver
-
-    ollama = _endpoint("ollama", base_url="http://127.0.0.1:11434/v1")
-    cheapai = _endpoint("cheapai", base_url="https://cheapai.lol")
+    ollama = _catalog_row("ollama", base_url="http://127.0.0.1:11434/v1")
+    cheapai = _catalog_row("cheapai", base_url="https://cheapai.lol")
     session = _FakeSession([ollama, cheapai])
-
     resolver = ProviderResolver(session)  # type: ignore[arg-type]
 
     async def run() -> None:
@@ -69,7 +72,7 @@ def test_resolver_prefers_catalog_entry_id_over_legacy_match() -> None:
         assert legacy.catalog_id == "ollama"
 
         # With catalog_entry_id → explicit entry wins even though api_kind+provider
-        # would otherwise match ollama.
+        # would otherwise match ollama first.
         explicit = await resolver.resolve(
             api_kind="custom",
             provider="codex",
@@ -83,10 +86,8 @@ def test_resolver_prefers_catalog_entry_id_over_legacy_match() -> None:
     asyncio.run(run())
 
 
-def test_resolver_returns_none_for_unknown_catalog_entry_id() -> None:
-    from prodavan.application.ai_keys.probe.provider_resolver import ProviderResolver
-
-    ollama = _endpoint("ollama")
+def test_resolver_falls_back_when_catalog_entry_id_unknown() -> None:
+    ollama = _catalog_row("ollama")
     session = _FakeSession([ollama])
     resolver = ProviderResolver(session)  # type: ignore[arg-type]
 
@@ -125,7 +126,6 @@ def test_pod_probe_disabled_returns_unavailable() -> None:
     """When pod_probe_enabled is False, ProbePodService returns UNAVAILABLE with
     POD_PROBE_DISABLED so the caller can fall back to http_probe."""
     from prodavan.application.ai_keys.probe.pod_probe_service import ProbePodService
-    from prodavan.config.settings import settings
 
     row = MagicMock()
     row.api_kind = ApiKind.OPENAI_API
@@ -144,7 +144,6 @@ def test_pod_probe_disabled_returns_unavailable() -> None:
 
 def test_pod_probe_cli_subscription_unavailable() -> None:
     from prodavan.application.ai_keys.probe.pod_probe_service import ProbePodService
-    from prodavan.config.settings import settings
 
     row = MagicMock()
     row.api_kind = ApiKind.CLI_SUBSCRIPTION
@@ -165,7 +164,6 @@ def test_pod_probe_push_unreachable_returns_probe_pod_unreachable() -> None:
     """If the probe pod does not accept the lease, the result is UNAVAILABLE
     with PROBE_POD_UNREACHABLE so the caller falls back to http_probe."""
     from prodavan.application.ai_keys.probe.pod_probe_service import ProbePodService
-    from prodavan.config.settings import settings
 
     row = MagicMock()
     row.id = "aik_x"
@@ -176,16 +174,18 @@ def test_pod_probe_push_unreachable_returns_probe_pod_unreachable() -> None:
     secrets = MagicMock()
     secrets.get = MagicMock(return_value="sk-test")
 
-    # http client whose post returns 503 (pod down)
-    response = MagicMock()
-    response.status_code = 503
+    # http client whose post returns 503 (pod down). Must be async-context-manager.
+    push_response = MagicMock()
+    push_response.status_code = 503
+    push_response.text = "pod down"
 
-    client_cls = MagicMock()
-    fake_client = AsyncMock()
-    fake_client.post = AsyncMock(return_value=response)
-    fake_client.__aenter__ = AsyncMock(return_value=fake_client)
-    fake_client.__aexit__ = AsyncMock(return_value=None)
-    client_cls.return_value = fake_client
+    client_cm = AsyncMock()
+    client_cm.post = AsyncMock(return_value=push_response)
+    client_cm.delete = AsyncMock(return_value=MagicMock(status_code=204))
+    client_cm.__aenter__ = AsyncMock(return_value=client_cm)
+    client_cm.__aexit__ = AsyncMock(return_value=None)
+
+    client_cls = MagicMock(return_value=client_cm)
 
     original = settings.pod_probe_enabled
     settings.pod_probe_enabled = True
