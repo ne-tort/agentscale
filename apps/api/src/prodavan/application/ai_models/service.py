@@ -408,6 +408,41 @@ class AiModelsService:
         )
         return list(q.scalars().unique().all())
 
+    async def _last_probe_model_ids(self, key_id: str) -> list[str]:
+        """Model ids returned by the last successful probe of this key (or [])."""
+        from prodavan.infrastructure.persistence.models.ai_keys import AiKeyCheckResultRow
+
+        q = await self._session.execute(
+            select(AiKeyCheckResultRow).where(AiKeyCheckResultRow.key_id == key_id)
+        )
+        row = q.scalar_one_or_none()
+        if row is None:
+            return []
+        models = row.models
+        if isinstance(models, str):
+            try:
+                import json
+
+                models = json.loads(models)
+            except Exception:
+                return []
+        if not isinstance(models, list):
+            return []
+        return [str(m).strip() for m in models if m]
+
+    @staticmethod
+    def _aliases_list(aliases: object) -> list[str]:
+        if isinstance(aliases, str):
+            try:
+                import json
+
+                aliases = json.loads(aliases)
+            except Exception:
+                return []
+        if not isinstance(aliases, list):
+            return []
+        return [str(a) for a in aliases if a]
+
     async def _model_public(self, row: AiModelRow) -> dict[str, Any]:
         aliases = row.key_aliases
         if isinstance(aliases, str):

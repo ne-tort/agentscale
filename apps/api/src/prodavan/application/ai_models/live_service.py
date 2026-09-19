@@ -37,11 +37,31 @@ def filter_effective_live_ids(
     catalog: list[dict[str, Any]],
     ceiling: list[str],
 ) -> list[str]:
-    enabled_names_lower = {str(m["name"]).lower() for m in catalog if m.get("enabled")}
-    if enabled_names_lower:
-        effective = [mid for mid in live_ids if mid.lower() in enabled_names_lower]
+    """Intersect live probe model ids with the key↔model binding state.
+
+    A live id is kept if it matches (case-insensitive) any alias (model_ids)
+    of a catalog model whose binding on this key is enabled. If the key has no
+    enabled bindings at all, all live ids are kept (the user has not toggled
+    anything off yet). Company policy ceiling is applied last.
+    """
+    enabled_aliases_lower: set[str] = set()
+    has_any_binding = False
+    for m in catalog:
+        if m.get("enabled"):
+            has_any_binding = True
+            ids = m.get("model_ids") if isinstance(m.get("model_ids"), list) else []
+            name = str(m.get("name") or "").strip().lower()
+            if name:
+                enabled_aliases_lower.add(name)
+            for mid in ids:
+                s = str(mid).strip().lower()
+                if s:
+                    enabled_aliases_lower.add(s)
+    if enabled_aliases_lower:
+        effective = [mid for mid in live_ids if mid.lower() in enabled_aliases_lower]
     else:
         effective = list(live_ids)
+    _ = has_any_binding  # kept for future "explicit opt-in" semantics
 
     trimmed_ceiling = [str(m).strip() for m in ceiling if str(m).strip()]
     if trimmed_ceiling:
