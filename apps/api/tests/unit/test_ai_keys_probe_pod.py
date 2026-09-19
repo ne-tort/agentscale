@@ -170,9 +170,15 @@ def test_pod_probe_push_unreachable_returns_probe_pod_unreachable() -> None:
     row.api_kind = ApiKind.OPENAI_API
     row.provider = "codex"
     row.secret_ref = "vault://ai_keys/aik_x"
+    row.catalog_entry_id = None
 
     secrets = MagicMock()
     secrets.get = MagicMock(return_value="sk-test")
+
+    # Session must behave like AsyncSession (await .execute()). Resolver reads
+    # catalog entries from it; return an empty list so resolve() yields None
+    # (probe_key still proceeds to push the lease before fetching models).
+    session = _FakeSession([])
 
     # http client whose post returns 503 (pod down). Must be async-context-manager.
     push_response = MagicMock()
@@ -190,7 +196,7 @@ def test_pod_probe_push_unreachable_returns_probe_pod_unreachable() -> None:
     original = settings.pod_probe_enabled
     settings.pod_probe_enabled = True
     try:
-        svc = ProbePodService(MagicMock(), secrets=secrets, http_client=client_cls)  # type: ignore[arg-type]
+        svc = ProbePodService(session, secrets=secrets, http_client=client_cls)  # type: ignore[arg-type]
         result = asyncio.run(svc.probe_key(row))  # type: ignore[arg-type]
         assert result.status == ProbeStatus.UNAVAILABLE
         assert result.error_code == "PROBE_POD_UNREACHABLE"
