@@ -36,9 +36,11 @@ spec:
     spec:
       serviceAccountName: prodavan-project-pod
       restartPolicy: Always
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
         - name: agent-runtime
-          image: ghcr.io/ne-tort/prodavan-agent-runtime:local
+          image: ghcr.io/ne-tort/prodavan-agent-runtime:latest
           imagePullPolicy: Always
           ports:
             - name: http
