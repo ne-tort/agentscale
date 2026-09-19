@@ -4781,7 +4781,7 @@ abstract class AppLocalizations {
   /// No description provided for @aiModelKeyAliasesLabel.
   ///
   /// In en, this message translates to:
-  /// **'Key aliases'**
+  /// **'Model IDs'**
   String get aiModelKeyAliasesLabel;
 
   /// No description provided for @aiModelReasoningLevelLabel.

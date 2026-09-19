@@ -1447,7 +1447,7 @@
   "aiKeyProbeStatusUnavailable": "Проверка недоступна",
   "aiKeyProbeStatusNone": "Не проверялся",
   "commonScope": "Область",
-  "aiModelKeyAliasesLabel": "Алиасы ключа",
+  "aiModelKeyAliasesLabel": "ID модели",
   "aiModelReasoningLevelLabel": "Уровень рассуждений",
   "adminAddModel": "Добавить модель",
   "adminDeleteModel": "Удалить модель",

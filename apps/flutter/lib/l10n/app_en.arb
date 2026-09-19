@@ -1450,7 +1450,7 @@
   "aiKeyProbeStatusUnavailable": "Probe unavailable",
   "aiKeyProbeStatusNone": "Not verified",
   "commonScope": "Scope",
-  "aiModelKeyAliasesLabel": "Key aliases",
+  "aiModelKeyAliasesLabel": "Model IDs",
   "aiModelReasoningLevelLabel": "Reasoning level",
   "adminAddModel": "Add model",
   "adminDeleteModel": "Delete model",

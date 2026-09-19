@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/theme/app_color_tokens.dart';
+import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/preferences/app_preference_tile.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Inline "Verify" preference tile for an AI key.
 ///
-/// Shown when the key has a secret. The subtitle shows the models count
-/// (or "Models not received" on error), fetched once when the tile appears.
-/// Tapping the row opens the models table page (onProbe) where each model
-/// can be probed individually.
+/// Tapping the row runs a key validity probe inline (no separate page). While
+/// probing, the trailing shows a spinner; after completion the subtitle shows
+/// the probe status (valid / invalid / unavailable) + latency. The "Models"
+/// page link is shown separately by the parent page (only when the probe
+/// returned a models list).
 class AppProbePreference extends StatefulWidget {
   const AppProbePreference({
     super.key,
@@ -25,8 +27,8 @@ class AppProbePreference extends StatefulWidget {
   /// Last stored probe result (map with status/latency_ms/models/etc.) or null.
   final Map<String, dynamic>? lastProbe;
 
-  /// Fires when the user taps "Verify" — opens the models table page.
-  final Future<void> Function() onProbe;
+  /// Fires the probe; resolves with the fresh result map.
+  final Future<Map<String, dynamic>> Function() onProbe;
 
   final Color? accentColor;
 
@@ -35,46 +37,141 @@ class AppProbePreference extends StatefulWidget {
 }
 
 class _AppProbePreferenceState extends State<AppProbePreference> {
+  bool _probing = false;
+  Map<String, dynamic>? _result;
+
+  @override
+  void initState() {
+    super.initState();
+    _result = widget.lastProbe;
+  }
+
+  @override
+  void didUpdateWidget(covariant AppProbePreference oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.lastProbe != widget.lastProbe && !_probing) {
+      _result = widget.lastProbe;
+    }
+  }
+
+  Future<void> _runProbe() async {
+    if (_probing || !widget.enabled) return;
+    setState(() => _probing = true);
+    try {
+      final result = await widget.onProbe();
+      if (!mounted) return;
+      setState(() {
+        _result = result;
+        _probing = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _probing = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     return AppPreferenceTile(
       title: l10n.aiKeyProbeTitle,
       icon: Icons.network_check_rounded,
-      enabled: widget.enabled,
+      enabled: widget.enabled && !_probing,
       accentColor: widget.accentColor,
-      onTap: widget.enabled ? widget.onProbe : null,
+      onTap: widget.enabled && !_probing ? _runProbe : null,
+      leading: _probing
+          ? SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: widget.accentColor ?? Theme.of(context).colorScheme.primary,
+              ),
+            )
+          : Icon(
+              Icons.network_check_rounded,
+              size: 24,
+              color: widget.enabled
+                  ? (widget.accentColor ??
+                      Theme.of(context).colorScheme.onSurfaceVariant)
+                  : Theme.of(context).disabledColor,
+            ),
       subtitle: _buildSubtitle(context, l10n),
-      trailing: Icon(
-        Icons.chevron_right_rounded,
-        color: widget.enabled
-            ? (widget.accentColor ??
-                Theme.of(context).colorScheme.onSurfaceVariant)
-            : Theme.of(context).disabledColor,
-      ),
+      trailing: _probing
+          ? null
+          : Icon(
+              Icons.play_circle_outline_rounded,
+              color: widget.enabled
+                  ? (widget.accentColor ??
+                      Theme.of(context).colorScheme.onSurfaceVariant)
+                  : Theme.of(context).disabledColor,
+            ),
     );
   }
 
   Widget _buildSubtitle(BuildContext context, AppLocalizations l10n) {
-    final probe = widget.lastProbe;
-    if (probe is! Map) {
-      return Text(l10n.aiKeyProbeModelsNotReceived);
+    final result = _result;
+    if (result is! Map) {
+      return Text(l10n.aiKeyProbeNeverRun);
     }
-    final map = Map<String, dynamic>.from(probe as Map);
+    final map = Map<String, dynamic>.from(result as Map);
     final status = map['status'] as String? ?? 'none';
-    if (status == 'none') {
-      return Text(l10n.aiKeyProbeModelsNotReceived);
+    final latency = map['latency_ms'];
+    final modelsCount = _modelsCount(map);
+
+    final severity = _severityFor(status);
+    final color = _statusColor(context, severity);
+    final label = _statusLabel(l10n, status);
+
+    final parts = <String>[label];
+    if (latency != null) parts.add('${latency}ms');
+    if (modelsCount > 0) parts.add(l10n.aiKeyProbeModelsCountValue(modelsCount));
+    return Text(
+      parts.join(' · '),
+      style: Theme.of(context).textTheme.bodySmall?.copyWith(color: color),
+    );
+  }
+
+  int _modelsCount(Map<String, dynamic> result) {
+    final models = result['models'];
+    if (models is List) return models.length;
+    return 0;
+  }
+
+  AppStatusSeverity _severityFor(String status) {
+    switch (status) {
+      case 'ok':
+        return AppStatusSeverity.success;
+      case 'error':
+        return AppStatusSeverity.error;
+      case 'unavailable':
+        return AppStatusSeverity.warning;
+      default:
+        return AppStatusSeverity.info;
     }
-    final models = map['models'];
-    final count = models is List ? models.length : 0;
-    if (status == 'ok' && count > 0) {
-      return Text(l10n.aiKeyProbeModelsCountValue(count));
+  }
+
+  Color _statusColor(BuildContext context, AppStatusSeverity severity) {
+    final tokens = context.appColors;
+    return switch (severity) {
+      AppStatusSeverity.success => tokens.success,
+      AppStatusSeverity.error => tokens.danger,
+      AppStatusSeverity.warning => tokens.warning,
+      AppStatusSeverity.info => tokens.info,
+      AppStatusSeverity.critical => tokens.danger,
+    };
+  }
+
+  String _statusLabel(AppLocalizations l10n, String status) {
+    switch (status) {
+      case 'ok':
+        return l10n.aiKeyProbeStatusOk;
+      case 'error':
+        return l10n.aiKeyProbeStatusError;
+      case 'unavailable':
+        return l10n.aiKeyProbeStatusUnavailable;
+      default:
+        return l10n.aiKeyProbeStatusNone;
     }
-    // Probe ran but no models returned (or failed) — show error/none.
-    if (status == 'error' || status == 'unavailable') {
-      return Text(l10n.aiKeyProbeModelsNotReceived,
-          style: TextStyle(color: context.appColors.warning));
-    }
-    return Text(l10n.aiKeyProbeModelsNotReceived);
   }
 }

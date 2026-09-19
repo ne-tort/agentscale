@@ -112,10 +112,10 @@ class _AdminAiModelListPageState extends State<AdminAiModelListPage> {
         .then((_) => _reload());
   }
 
-  String _aliasesCell(Map<String, dynamic> m) {
-    final aliases = m['key_aliases'];
-    if (aliases is List && aliases.isNotEmpty) {
-      return aliases.take(3).join(', ');
+  String _modelIdsCell(Map<String, dynamic> m) {
+    final ids = m['model_ids'];
+    if (ids is List && ids.isNotEmpty) {
+      return ids.take(3).join(', ');
     }
     return '—';
   }
@@ -130,9 +130,8 @@ class _AdminAiModelListPageState extends State<AdminAiModelListPage> {
         subtitle: m['provider'] as String? ?? '',
         cells: {
           'provider': m['provider'] as String? ?? '—',
-          'aliases': _aliasesCell(m),
+          'model_ids': _modelIdsCell(m),
           'context': m['max_context_tokens']?.toString() ?? '—',
-          'scope': m['owner_scope'] as String? ?? '',
         },
       );
     }).toList();
@@ -154,7 +153,7 @@ class _AdminAiModelListPageState extends State<AdminAiModelListPage> {
             columns: [
               AppEntityColumn(id: 'provider', label: l10n.commonProvider),
               AppEntityColumn(
-                id: 'aliases',
+                id: 'model_ids',
                 label: l10n.aiModelKeyAliasesLabel,
                 flex: 2,
               ),
@@ -162,12 +161,6 @@ class _AdminAiModelListPageState extends State<AdminAiModelListPage> {
                 id: 'context',
                 label: l10n.aiModelMaxTokensLabel,
                 width: 120,
-                align: AppEntityColumnAlign.center,
-              ),
-              AppEntityColumn(
-                id: 'scope',
-                label: l10n.commonScope,
-                width: 100,
                 align: AppEntityColumnAlign.center,
               ),
             ],

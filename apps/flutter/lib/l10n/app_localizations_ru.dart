@@ -2670,7 +2670,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get commonScope => 'Область';
 
   @override
-  String get aiModelKeyAliasesLabel => 'Алиасы ключа';
+  String get aiModelKeyAliasesLabel => 'ID модели';
 
   @override
   String get aiModelReasoningLevelLabel => 'Уровень рассуждений';

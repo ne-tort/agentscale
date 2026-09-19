@@ -137,7 +137,7 @@ class _AiKeyModelsPageState extends State<AiKeyModelsPage> {
       await companyContext.api.createAiModel(
         companyId: widget.companyId,
         name: trimmed,
-        apiKinds: [widget.apiKind],
+        modelIds: [trimmed],
       );
       await _load();
     } catch (e) {

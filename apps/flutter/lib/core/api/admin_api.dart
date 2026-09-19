@@ -917,11 +917,10 @@ class AdminApi {
 
   Future<Map<String, dynamic>> createAiModel({
     required String name,
-    List<String> keyAliases = const [],
+    List<String> modelIds = const [],
     String? provider,
     String? reasoningLevel,
     String? description,
-    List<String> apiKinds = const [],
     double? inputPriceUsdPerMtok,
     double? outputPriceUsdPerMtok,
     int? maxContextTokens,
@@ -932,11 +931,10 @@ class AdminApi {
   }) async {
     final res = await AuthHttp.post(_uri('/admin/ai-models'), body: jsonEncode({
       'name': name,
-      'key_aliases': keyAliases,
+      'model_ids': modelIds,
       if (provider != null) 'provider': provider,
       if (reasoningLevel != null) 'reasoning_level': reasoningLevel,
       if (description != null) 'description': description,
-      'api_kinds': apiKinds,
       if (inputPriceUsdPerMtok != null) 'input_price_usd_per_mtok': inputPriceUsdPerMtok,
       if (outputPriceUsdPerMtok != null) 'output_price_usd_per_mtok': outputPriceUsdPerMtok,
       if (maxContextTokens != null) 'max_context_tokens': maxContextTokens,
@@ -952,11 +950,10 @@ class AdminApi {
   Future<Map<String, dynamic>> patchAiModel({
     required String modelId,
     String? name,
-    List<String>? keyAliases,
+    List<String>? modelIds,
     String? provider,
     String? reasoningLevel,
     String? description,
-    List<String>? apiKinds,
     double? inputPriceUsdPerMtok,
     double? outputPriceUsdPerMtok,
     int? maxContextTokens,
@@ -965,11 +962,10 @@ class AdminApi {
   }) async {
     final res = await AuthHttp.patch(_uri('/admin/ai-models/$modelId'), body: jsonEncode({
       if (name != null) 'name': name,
-      if (keyAliases != null) 'key_aliases': keyAliases,
+      if (modelIds != null) 'model_ids': modelIds,
       if (provider != null) 'provider': provider,
       if (reasoningLevel != null) 'reasoning_level': reasoningLevel,
       if (description != null) 'description': description,
-      if (apiKinds != null) 'api_kinds': apiKinds,
       if (inputPriceUsdPerMtok != null) 'input_price_usd_per_mtok': inputPriceUsdPerMtok,
       if (outputPriceUsdPerMtok != null) 'output_price_usd_per_mtok': outputPriceUsdPerMtok,
       if (maxContextTokens != null) 'max_context_tokens': maxContextTokens,

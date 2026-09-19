@@ -27,13 +27,6 @@ class _AdminAiModelDetailPageState extends State<AdminAiModelDetailPage> {
   String _displayName = '';
   Map<String, dynamic>? _model;
 
-  static const _sdkChoices = [
-    'cursor_sdk',
-    'codex_sdk',
-    'claude_agent_sdk',
-    'openclaw_sdk',
-  ];
-
   @override
   void initState() {
     super.initState();
@@ -60,16 +53,10 @@ class _AdminAiModelDetailPageState extends State<AdminAiModelDetailPage> {
 
   String _strField(Object? value) => value == null ? '' : '$value';
 
-  List<String> _aliasesList() {
-    final aliases = _model?['key_aliases'];
-    if (aliases is List) return aliases.whereType<String>().toList();
+  List<String> _modelIdsList() {
+    final ids = _model?['model_ids'];
+    if (ids is List) return ids.whereType<String>().toList();
     return const [];
-  }
-
-  Set<String> _apiKindsSet() {
-    final kinds = _model?['api_kinds'];
-    if (kinds is List) return kinds.map((e) => '$e').toSet();
-    return const {};
   }
 
   Future<void> _saveName(String v) async {
@@ -83,8 +70,8 @@ class _AdminAiModelDetailPageState extends State<AdminAiModelDetailPage> {
     }
   }
 
-  Future<void> _saveAliases(String v) async {
-    final aliases = v
+  Future<void> _saveModelIds(String v) async {
+    final ids = v
         .split(',')
         .map((s) => s.trim())
         .where((s) => s.isNotEmpty)
@@ -92,7 +79,7 @@ class _AdminAiModelDetailPageState extends State<AdminAiModelDetailPage> {
     try {
       await adminContext.api.patchAiModel(
         modelId: widget.modelId,
-        keyAliases: aliases,
+        modelIds: ids,
       );
       await _load();
     } catch (e) {
@@ -187,18 +174,6 @@ class _AdminAiModelDetailPageState extends State<AdminAiModelDetailPage> {
     }
   }
 
-  Future<void> _saveApiKinds(Set<String> kinds) async {
-    try {
-      await adminContext.api.patchAiModel(
-        modelId: widget.modelId,
-        apiKinds: kinds.toList(),
-      );
-      await _load();
-    } catch (e) {
-      if (mounted) AppErrors.showSnack(context, e);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -209,7 +184,6 @@ class _AdminAiModelDetailPageState extends State<AdminAiModelDetailPage> {
       );
     }
     final model = _model ?? const <String, dynamic>{};
-    final apiKinds = _apiKindsSet();
     return AppScaffold(
       title: Text(_displayName),
       body: ListView(
@@ -224,9 +198,9 @@ class _AdminAiModelDetailPageState extends State<AdminAiModelDetailPage> {
           AppValuePreference<String>(
             title: l10n.aiModelKeyAliasesLabel,
             icon: Icons.alternate_email_rounded,
-            value: _aliasesList().join(', '),
+            value: _modelIdsList().join(', '),
             presentValue: (v) => v.isEmpty ? l10n.commonNotSet : v,
-            onSave: _saveAliases,
+            onSave: _saveModelIds,
           ),
           AppValuePreference<String>(
             title: l10n.commonProvider,
@@ -248,16 +222,6 @@ class _AdminAiModelDetailPageState extends State<AdminAiModelDetailPage> {
             value: model['description'] as String? ?? '',
             presentValue: (v) => v.isEmpty ? l10n.commonNotSet : v,
             onSave: _saveDescription,
-          ),
-          AppMultiChoicePreference<String>(
-            title: l10n.aiModelSdkLabel,
-            icon: Icons.extension_outlined,
-            values: apiKinds,
-            choices: _sdkChoices,
-            keyFor: (v) => v,
-            labelFor: (v) => v,
-            presentValues: (ids) => ids.isEmpty ? l10n.commonNotSet : ids.join(', '),
-            onSave: _saveApiKinds,
           ),
           AppValuePreference<String>(
             title: l10n.aiModelInputPriceLabel,
