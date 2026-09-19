@@ -318,10 +318,16 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
             AppProbePreference(
               enabled: hasSecret,
               lastProbe: _key?['last_probe'] as Map<String, dynamic>?,
-              onProbe: () => companyContext.api.probeAiKey(
-                companyId: widget.companyId,
-                keyId: widget.keyId,
-              ),
+              onProbe: () async {
+                await companyContext.api.probeAiKey(
+                  companyId: widget.companyId,
+                  keyId: widget.keyId,
+                );
+                // Reload the key so last_probe (incl. models list) is fresh —
+                // the "Models" nav is shown only when last_probe.models is non-empty.
+                await _load();
+                return _key?['last_probe'] as Map<String, dynamic>? ?? const {};
+              },
             ),
           AppSubscriptionPreference(
             title: l10n.adminSubscription,

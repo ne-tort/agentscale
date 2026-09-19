@@ -1804,7 +1804,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get aiKeyModelDefault => 'По умолчанию';
 
   @override
-  String get aiModelNameLabel => 'ID модели';
+  String get aiModelNameLabel => 'Название';
 
   @override
   String get aiModelSdkLabel => 'Привязка к SDK';
@@ -1814,6 +1814,9 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get aiModelOutputPriceLabel => 'Цена выход (\$/1M tokens)';
+
+  @override
+  String get aiModelPriceLabel => 'Цена';
 
   @override
   String get aiModelMaxTokensLabel => 'Max tokens';

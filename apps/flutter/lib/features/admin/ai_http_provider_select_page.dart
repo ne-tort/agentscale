@@ -259,10 +259,16 @@ class _AiHttpProviderEditPageState extends State<AiHttpProviderEditPage> {
   late String _authScheme;
   late String _chatPath;
   late String _modelsPath;
+  late bool _seeded;
 
   /// OpenAPI-compatible custom endpoints (incl. seeded Ollama/Cursor) expose
   /// base URL / auth / paths. Known cloud presets only allow renaming.
   bool get _isCustomEndpoint => _apiKind == 'custom';
+
+  /// Seeded entries (catalog presets shipped by migrations) are immutable:
+  /// payload (base_url / auth / paths) can't be edited through the UI — a
+  /// user who wants a different endpoint creates a *custom* entry instead.
+  bool get _isImmutable => _seeded;
 
   @override
   void initState() {
@@ -282,6 +288,7 @@ class _AiHttpProviderEditPageState extends State<AiHttpProviderEditPage> {
         '/v1/chat/completions';
     _modelsPath =
         p[AiHttpProviderPayload.modelsPath]?.toString() ?? '/v1/models';
+    _seeded = p['seeded'] == true;
   }
 
   String get _resolvedAgentProvider {
@@ -349,7 +356,7 @@ class _AiHttpProviderEditPageState extends State<AiHttpProviderEditPage> {
               setState(() {});
             },
           ),
-          if (_isCustomEndpoint) ...[
+          if (_isCustomEndpoint && !_isImmutable) ...[
             AppValuePreference<String>(
               title: l10n.adminHttpBaseUrl,
               icon: Icons.link_rounded,

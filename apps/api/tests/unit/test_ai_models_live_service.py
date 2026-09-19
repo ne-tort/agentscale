@@ -24,6 +24,21 @@ def test_filter_effective_live_ids_all_when_no_enabled() -> None:
     assert effective == ["gpt-5", "default"]
 
 
+def test_filter_effective_live_ids_matches_by_alias() -> None:
+    """A live id matching any model alias (model_ids) of an enabled model is kept."""
+    catalog = [
+        {
+            "name": "Claude Opus 4.8",
+            "model_ids": ["claude-opus-4.8", "ca-opus-4.8"],
+            "enabled": True,
+        },
+        {"name": "GPT-5", "model_ids": ["gpt-5"], "enabled": False},
+    ]
+    live = ["claude-opus-4.8", "ca-opus-4.8", "gpt-5", "default"]
+    effective = filter_effective_live_ids(live, catalog, [])
+    assert effective == ["claude-opus-4.8", "ca-opus-4.8"]
+
+
 def test_enrich_live_model_matches_catalog_case_insensitive() -> None:
     lookup = catalog_by_model_name(
         [

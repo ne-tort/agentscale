@@ -286,7 +286,8 @@ class ProbePodService:
 def _normalize_models(body: object) -> list[str]:
     models: list[str] = []
     if isinstance(body, dict):
-        raw = body.get("models") or body.get("data") or []
+        # OpenAI uses {data:[...]}; Cursor uses {items:[...]}; others use {models:[...]}.
+        raw = body.get("models") or body.get("data") or body.get("items") or []
     elif isinstance(body, list):
         raw = body
     else:

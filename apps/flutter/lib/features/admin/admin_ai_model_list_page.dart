@@ -120,6 +120,17 @@ class _AdminAiModelListPageState extends State<AdminAiModelListPage> {
     return '—';
   }
 
+  String _priceCell(Map<String, dynamic> m) {
+    final inPrice = m['input_price_usd_per_mtok'];
+    final outPrice = m['output_price_usd_per_mtok'];
+    final hasIn = inPrice != null;
+    final hasOut = outPrice != null;
+    if (!hasIn && !hasOut) return '—';
+    final inStr = hasIn ? '$inPrice' : '—';
+    final outStr = hasOut ? '$outPrice' : '—';
+    return '$inStr / $outStr';
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -129,8 +140,8 @@ class _AdminAiModelListPageState extends State<AdminAiModelListPage> {
         title: m['name'] as String? ?? m['id'] as String,
         subtitle: m['provider'] as String? ?? '',
         cells: {
-          'provider': m['provider'] as String? ?? '—',
           'model_ids': _modelIdsCell(m),
+          'price': _priceCell(m),
           'context': m['max_context_tokens']?.toString() ?? '—',
         },
       );
@@ -151,11 +162,16 @@ class _AdminAiModelListPageState extends State<AdminAiModelListPage> {
             rows: rows,
             primaryColumnLabel: l10n.aiModelNameLabel,
             columns: [
-              AppEntityColumn(id: 'provider', label: l10n.commonProvider),
               AppEntityColumn(
                 id: 'model_ids',
                 label: l10n.aiModelKeyAliasesLabel,
                 flex: 2,
+              ),
+              AppEntityColumn(
+                id: 'price',
+                label: l10n.aiModelPriceLabel,
+                width: 140,
+                align: AppEntityColumnAlign.center,
               ),
               AppEntityColumn(
                 id: 'context',

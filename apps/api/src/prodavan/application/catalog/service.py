@@ -225,10 +225,27 @@ class CatalogService:
             row.subtitle = fields["subtitle"]
         if "icon_name" in fields:
             row.icon_name = fields["icon_name"]
-        if "payload" in fields and fields["payload"] is not None:
-            row.payload = dict(fields["payload"])
-        if "sort_order" in fields and fields["sort_order"] is not None:
-            row.sort_order = int(fields["sort_order"])
+        # Seeded preset entries (catalog presets shipped by migrations) are
+        # immutable: their payload (base_url / auth_scheme / paths) is the
+        # platform default and must not be edited through the catalog API —
+        # a user who wants a different endpoint creates a *custom* entry. This
+        # prevents the accidental "edit ollama to point at cheapai" footgun
+        # that a later reseed migration would silently revert anyway.
+        if row.seeded:
+            if "payload" in fields and fields["payload"] is not None:
+                raise AppError(
+                    code="VALIDATION_ERROR",
+                    title="Validation Error",
+                    status=422,
+                    detail="seeded catalog entries are immutable; create a custom entry instead",
+                )
+            if "sort_order" in fields and fields["sort_order"] is not None:
+                row.sort_order = int(fields["sort_order"])
+        else:
+            if "payload" in fields and fields["payload"] is not None:
+                row.payload = dict(fields["payload"])
+            if "sort_order" in fields and fields["sort_order"] is not None:
+                row.sort_order = int(fields["sort_order"])
         await self._session.commit()
         await self._session.refresh(row)
         return _public(row)

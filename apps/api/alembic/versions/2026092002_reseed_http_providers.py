@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 
-from alembic import op
 from sqlalchemy import text
+
+from alembic import op
 
 revision = "2026092002"
 down_revision = "2026092001"

@@ -242,11 +242,15 @@ class AiModelsService:
             if key_lower in aliases_lower or row.name.strip().lower() == key_lower:
                 return await self._model_public(row), False
 
-        # 2. create new platform entry from the model_key
+        # 2. create new platform entry from the model_key.
+        # Provider is NOT mapped from the probing key — a model is a catalog
+        # entity that may be reachable through different keys/providers. The
+        # key↔model binding (AiKeyModelBindingRow) is the link that makes a
+        # model available for a given key, not the model's `provider` field.
         row = AiModelRow(
             name=key,
             key_aliases=[key],
-            provider=(provider or "").strip() or None if provider is not None else None,
+            provider=None,
             owner_scope="platform",
             owner_company_id=None,
         )
@@ -271,6 +275,10 @@ class AiModelsService:
         """Auto-match a probe's model list against the catalog; create missing ones.
 
         Returns {matched: int, created: int, total: int}.
+
+        Provider is intentionally NOT propagated to created models — a model
+        is provider-agnostic in the catalog; the key↔model binding carries the
+        link. `provider` is kept in the signature for callers but ignored.
         """
         matched = 0
         created = 0
@@ -278,7 +286,9 @@ class AiModelsService:
             s = (mk or "").strip()
             if not s:
                 continue
-            _, was_created = await self.upsert_by_alias(s, provider=provider, api_kind=api_kind)
+            # Provider is intentionally not passed — created models are
+            # provider-agnostic in the catalog.
+            _, was_created = await self.upsert_by_alias(s, api_kind=api_kind)
             if was_created:
                 created += 1
             else:
@@ -286,21 +296,29 @@ class AiModelsService:
         return {"matched": matched, "created": created, "total": matched + created}
 
     async def list_key_models(self, *, company_id: str, key_id: str) -> list[dict[str, Any]]:
-        """Models visible to a key (platform + company scope) with the
-        key↔model binding state (enabled / is_default).
+        """Models the probing key actually exposes, with the key↔model binding state.
 
-        Per MODELS-L2: filtering is by the key↔model binding (AiKeyModelBindingRow),
-        NOT by api_kind/SDK. A model enabled on a key shows up here; models with
-        no binding show enabled=false so the user can toggle them on.
+        Per PROBE-P3/№5a: only models whose any key_alias matches a model_id
+        returned by the last probe of this key are shown. This keeps the page
+        scoped to what the key can really serve; toggling enabled/disabled
+        drives the chat model picker filter. The key↔model binding
+        (AiKeyModelBindingRow) carries the enabled/is_default state.
         """
         key = await self._require_company_key(key_id, company_id)
+        probe_ids = await self._last_probe_model_ids(key_id)
         models = await self._models_visible_to_company(company_id=key.owner_company_id or company_id)
         bindings_q = await self._session.execute(
             select(AiKeyModelBindingRow).where(AiKeyModelBindingRow.key_id == key_id)
         )
         bindings = {b.model_id: b for b in bindings_q.scalars().all()}
+        probe_ids_lower = {str(m).strip().lower() for m in probe_ids}
         out: list[dict[str, Any]] = []
         for model in models:
+            aliases = self._aliases_list(model.key_aliases)
+            # Match by any alias (case-insensitive) intersect with probe model ids.
+            aliases_lower = {str(a).strip().lower() for a in aliases}
+            if probe_ids_lower and aliases_lower.isdisjoint(probe_ids_lower):
+                continue
             binding = bindings.get(model.id)
             item = await self._model_public(model)
             item["enabled"] = bool(binding.enabled) if binding else False
@@ -407,6 +425,41 @@ class AiModelsService:
             .order_by(AiModelRow.name)
         )
         return list(q.scalars().unique().all())
+
+    async def _last_probe_model_ids(self, key_id: str) -> list[str]:
+        """Model ids returned by the last successful probe of this key (or [])."""
+        from prodavan.infrastructure.persistence.models.ai_keys import AiKeyCheckResultRow
+
+        q = await self._session.execute(
+            select(AiKeyCheckResultRow).where(AiKeyCheckResultRow.key_id == key_id)
+        )
+        row = q.scalar_one_or_none()
+        if row is None:
+            return []
+        models = row.models
+        if isinstance(models, str):
+            try:
+                import json
+
+                models = json.loads(models)
+            except Exception:
+                return []
+        if not isinstance(models, list):
+            return []
+        return [str(m).strip() for m in models if m]
+
+    @staticmethod
+    def _aliases_list(aliases: object) -> list[str]:
+        if isinstance(aliases, str):
+            try:
+                import json
+
+                aliases = json.loads(aliases)
+            except Exception:
+                return []
+        if not isinstance(aliases, list):
+            return []
+        return [str(a) for a in aliases if a]
 
     async def _model_public(self, row: AiModelRow) -> dict[str, Any]:
         aliases = row.key_aliases
