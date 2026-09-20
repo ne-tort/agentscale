@@ -5,6 +5,7 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/preferences/preferences.dart';
+import 'package:prodavan/features/admin/admin_ai_model_aliases_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Admin AI model detail — edit name, key aliases, provider, metadata.
@@ -70,21 +71,12 @@ class _AdminAiModelDetailPageState extends State<AdminAiModelDetailPage> {
     }
   }
 
-  Future<void> _saveModelIds(String v) async {
-    final ids = v
-        .split(',')
-        .map((s) => s.trim())
-        .where((s) => s.isNotEmpty)
-        .toList();
-    try {
-      await adminContext.api.patchAiModel(
-        modelId: widget.modelId,
-        modelIds: ids,
-      );
-      await _load();
-    } catch (e) {
-      if (mounted) AppErrors.showSnack(context, e);
-    }
+  void _openModelIds() {
+    AdminAiModelAliasesPage.push(
+      context,
+      modelId: widget.modelId,
+      modelName: _displayName,
+    ).then((_) => _load());
   }
 
   Future<void> _saveProvider(String v) async {
@@ -195,12 +187,15 @@ class _AdminAiModelDetailPageState extends State<AdminAiModelDetailPage> {
             value: _displayName,
             onSave: _saveName,
           ),
-          AppValuePreference<String>(
-            title: l10n.aiModelKeyAliasesLabel,
+          AppNavPreference(
+            title: l10n.aiModelModelIdsLabel,
             icon: Icons.alternate_email_rounded,
-            value: _modelIdsList().join(', '),
-            presentValue: (v) => v.isEmpty ? l10n.commonNotSet : v,
-            onSave: _saveModelIds,
+            subtitle: Text(
+              _modelIdsList().isEmpty
+                  ? l10n.commonNotSet
+                  : _modelIdsList().join(', '),
+            ),
+            onTap: _openModelIds,
           ),
           AppValuePreference<String>(
             title: l10n.commonProvider,

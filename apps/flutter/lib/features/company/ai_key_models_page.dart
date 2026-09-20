@@ -4,8 +4,8 @@ import 'package:prodavan/core/session/company_context.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
-import 'package:prodavan/core/widgets/app_inline_add_field.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_switch.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/company/ai_model_detail_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -103,6 +103,7 @@ class _AiKeyModelsPageState extends State<AiKeyModelsPage> {
       if (!mounted) return;
       setState(() => _saving = false);
       AppErrors.showSnack(context, e);
+      await _load();
     }
   }
 
@@ -130,21 +131,6 @@ class _AiKeyModelsPageState extends State<AiKeyModelsPage> {
     await _persist();
   }
 
-  Future<void> _createModel(String name) async {
-    final trimmed = name.trim();
-    if (trimmed.isEmpty) return;
-    try {
-      await companyContext.api.createAiModel(
-        companyId: widget.companyId,
-        name: trimmed,
-        modelIds: [trimmed],
-      );
-      await _load();
-    } catch (e) {
-      if (mounted) AppErrors.showSnack(context, e);
-    }
-  }
-
   void _openModel(AppEntityRow row) {
     Navigator.of(context)
         .push<void>(
@@ -159,6 +145,33 @@ class _AiKeyModelsPageState extends State<AiKeyModelsPage> {
         .then((_) => _load());
   }
 
+  String _modelIdsCell(Map<String, dynamic> m) {
+    final ids = m['model_ids'];
+    if (ids is List && ids.isNotEmpty) {
+      return ids.take(3).join(', ');
+    }
+    return '—';
+  }
+
+  String _costCell(Map<String, dynamic> m) {
+    final input = m['input_price_usd_per_mtok'];
+    final output = m['output_price_usd_per_mtok'];
+    final hasInput = input != null;
+    final hasOutput = output != null;
+    if (!hasInput && !hasOutput) return '—';
+    if (hasInput && hasOutput) {
+      return '${_fmtPrice(input)} / ${_fmtPrice(output)}';
+    }
+    return _fmtPrice(hasInput ? input : output);
+  }
+
+  String _fmtPrice(dynamic v) {
+    final n = v is num ? v : num.tryParse('$v');
+    if (n == null) return '—';
+    if (n == n.roundToDouble()) return n.toStringAsFixed(0);
+    return n.toStringAsFixed(2);
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -167,13 +180,13 @@ class _AiKeyModelsPageState extends State<AiKeyModelsPage> {
           (m) => AppEntityRow(
             id: m['id'] as String? ?? '',
             title: m['name'] as String? ?? '',
+            cells: {
+              'name': m['name'] as String? ?? '',
+              'model_ids': _modelIdsCell(m),
+              'cost': _costCell(m),
+              'max_tokens': m['max_context_tokens']?.toString() ?? '—',
+            },
             cellWidgets: {
-              'enabled': Checkbox(
-                value: m['enabled'] == true,
-                onChanged: _saving
-                    ? null
-                    : (v) => _toggleEnabled(m['id'] as String, v ?? false),
-              ),
               'default': IconButton(
                 tooltip: l10n.aiKeyModelDefault,
                 onPressed: _saving ? null : () => _setDefault(m['id'] as String),
@@ -181,6 +194,11 @@ class _AiKeyModelsPageState extends State<AiKeyModelsPage> {
                   m['is_default'] == true ? Icons.star : Icons.star_border,
                   color: m['is_default'] == true ? Theme.of(context).colorScheme.primary : null,
                 ),
+              ),
+              'enabled': AppSwitch(
+                value: m['enabled'] == true,
+                onChanged: _saving ? null : (v) => _toggleEnabled(m['id'] as String, v),
+                semanticLabel: l10n.aiKeyModelEnabled,
               ),
             },
           ),
@@ -199,20 +217,17 @@ class _AiKeyModelsPageState extends State<AiKeyModelsPage> {
                   style: Theme.of(context).textTheme.titleMedium,
                 ),
                 SizedBox(height: AppSpacing.md),
-                AppInlineAddField(
-                  title: l10n.aiKeyModelsAddHint,
-                  hintText: l10n.aiKeyModelsAddHint,
-                  validator: (raw) => raw.trim().isNotEmpty,
-                  invalidMessage: l10n.errorValidation,
-                  onSave: _createModel,
-                ),
-                SizedBox(height: AppSpacing.sm),
                 AppEntityCollection(
                   rows: rows,
                   loading: _saving,
+                  primaryColumnLabel: l10n.aiModelNameLabel,
                   columns: [
-                    AppEntityColumn(id: 'enabled', label: l10n.aiKeyModelEnabled, width: 56),
-                    AppEntityColumn(id: 'default', label: l10n.aiKeyModelDefault, width: 56),
+                    AppEntityColumn(id: 'default', label: '', width: 48),
+                    AppEntityColumn(id: 'name', label: l10n.aiModelNameLabel, flex: 2),
+                    AppEntityColumn(id: 'model_ids', label: l10n.aiModelModelIdsLabel, flex: 2),
+                    AppEntityColumn(id: 'cost', label: l10n.aiModelCostLabel, width: 120),
+                    AppEntityColumn(id: 'max_tokens', label: l10n.aiModelMaxTokensLabel, width: 100),
+                    AppEntityColumn(id: 'enabled', label: '', width: 64),
                   ],
                   onOpen: _openModel,
                   empty: EmptyPlaceholder(title: l10n.aiKeyModelsEmpty),

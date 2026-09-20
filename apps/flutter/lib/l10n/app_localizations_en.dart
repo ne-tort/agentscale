@@ -1791,7 +1791,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get aiKeyModelDefault => 'Default';
 
   @override
-  String get aiModelNameLabel => 'Model id';
+  String get aiModelNameLabel => 'Name';
+
+  @override
+  String get aiModelModelIdsLabel => 'Model IDs';
 
   @override
   String get aiModelSdkLabel => 'SDK bindings';
@@ -1804,6 +1807,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get aiModelMaxTokensLabel => 'Max tokens';
+
+  @override
+  String get aiModelCostLabel => 'Cost';
 
   @override
   String get aiModelPublisherLabel => 'Publisher';

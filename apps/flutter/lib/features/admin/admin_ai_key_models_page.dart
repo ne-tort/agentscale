@@ -5,6 +5,7 @@ import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_entity_collection.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
+import 'package:prodavan/core/widgets/app_switch.dart';
 import 'package:prodavan/core/widgets/empty_placeholder.dart';
 import 'package:prodavan/features/admin/admin_ai_model_detail_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
@@ -86,6 +87,7 @@ class _AdminAiKeyModelsPageState extends State<AdminAiKeyModelsPage> {
       if (!mounted) return;
       setState(() => _saving = false);
       AppErrors.showSnack(context, e);
+      await _load();
     }
   }
 
@@ -126,6 +128,33 @@ class _AdminAiKeyModelsPageState extends State<AdminAiKeyModelsPage> {
         .then((_) => _load());
   }
 
+  String _modelIdsCell(Map<String, dynamic> m) {
+    final ids = m['model_ids'];
+    if (ids is List && ids.isNotEmpty) {
+      return ids.take(3).join(', ');
+    }
+    return '—';
+  }
+
+  String _costCell(Map<String, dynamic> m) {
+    final input = m['input_price_usd_per_mtok'];
+    final output = m['output_price_usd_per_mtok'];
+    final hasInput = input != null;
+    final hasOutput = output != null;
+    if (!hasInput && !hasOutput) return '—';
+    if (hasInput && hasOutput) {
+      return '${_fmtPrice(input)} / ${_fmtPrice(output)}';
+    }
+    return _fmtPrice(hasInput ? input : output);
+  }
+
+  String _fmtPrice(dynamic v) {
+    final n = v is num ? v : num.tryParse('$v');
+    if (n == null) return '—';
+    if (n == n.roundToDouble()) return n.toStringAsFixed(0);
+    return n.toStringAsFixed(2);
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -134,13 +163,13 @@ class _AdminAiKeyModelsPageState extends State<AdminAiKeyModelsPage> {
           (m) => AppEntityRow(
             id: m['id'] as String? ?? '',
             title: m['name'] as String? ?? '',
+            cells: {
+              'name': m['name'] as String? ?? '',
+              'model_ids': _modelIdsCell(m),
+              'cost': _costCell(m),
+              'max_tokens': m['max_context_tokens']?.toString() ?? '—',
+            },
             cellWidgets: {
-              'enabled': Checkbox(
-                value: m['enabled'] == true,
-                onChanged: _saving
-                    ? null
-                    : (v) => _toggleEnabled(m['id'] as String, v ?? false),
-              ),
               'default': IconButton(
                 tooltip: l10n.aiKeyModelDefault,
                 onPressed: _saving ? null : () => _setDefault(m['id'] as String),
@@ -148,6 +177,11 @@ class _AdminAiKeyModelsPageState extends State<AdminAiKeyModelsPage> {
                   m['is_default'] == true ? Icons.star : Icons.star_border,
                   color: m['is_default'] == true ? Theme.of(context).colorScheme.primary : null,
                 ),
+              ),
+              'enabled': AppSwitch(
+                value: m['enabled'] == true,
+                onChanged: _saving ? null : (v) => _toggleEnabled(m['id'] as String, v),
+                semanticLabel: l10n.aiKeyModelEnabled,
               ),
             },
           ),
@@ -169,9 +203,14 @@ class _AdminAiKeyModelsPageState extends State<AdminAiKeyModelsPage> {
                 AppEntityCollection(
                   rows: rows,
                   loading: _saving,
+                  primaryColumnLabel: l10n.aiModelNameLabel,
                   columns: [
-                    AppEntityColumn(id: 'enabled', label: l10n.aiKeyModelEnabled, width: 56),
-                    AppEntityColumn(id: 'default', label: l10n.aiKeyModelDefault, width: 56),
+                    AppEntityColumn(id: 'default', label: '', width: 48),
+                    AppEntityColumn(id: 'name', label: l10n.aiModelNameLabel, flex: 2),
+                    AppEntityColumn(id: 'model_ids', label: l10n.aiModelModelIdsLabel, flex: 2),
+                    AppEntityColumn(id: 'cost', label: l10n.aiModelCostLabel, width: 120),
+                    AppEntityColumn(id: 'max_tokens', label: l10n.aiModelMaxTokensLabel, width: 100),
+                    AppEntityColumn(id: 'enabled', label: '', width: 64),
                   ],
                   onOpen: _openModel,
                   empty: EmptyPlaceholder(title: l10n.aiKeyModelsEmpty),

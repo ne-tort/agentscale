@@ -3239,8 +3239,14 @@ abstract class AppLocalizations {
   /// No description provided for @aiModelNameLabel.
   ///
   /// In en, this message translates to:
-  /// **'Model id'**
+  /// **'Name'**
   String get aiModelNameLabel;
+
+  /// No description provided for @aiModelModelIdsLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Model IDs'**
+  String get aiModelModelIdsLabel;
 
   /// No description provided for @aiModelSdkLabel.
   ///
@@ -3265,6 +3271,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Max tokens'**
   String get aiModelMaxTokensLabel;
+
+  /// No description provided for @aiModelCostLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Cost'**
+  String get aiModelCostLabel;
 
   /// No description provided for @aiModelPublisherLabel.
   ///

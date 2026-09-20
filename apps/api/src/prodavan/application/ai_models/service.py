@@ -56,6 +56,37 @@ class AiModelsService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def _assert_aliases_unique(
+        self,
+        aliases: list[str],
+        *,
+        exclude_model_id: str | None = None,
+    ) -> None:
+        """Reject duplicate model IDs (aliases) across catalog entries.
+
+        Aliases are matched case-insensitively. Two models must never share the
+        same model id — that would make probe→catalog matching ambiguous.
+        """
+        if not aliases:
+            return
+        lowered = {str(a).strip().lower() for a in aliases if str(a).strip()}
+        if not lowered:
+            return
+        rows_q = await self._session.execute(select(AiModelRow.id, AiModelRow.key_aliases))
+        for row_id, raw in rows_q.all():
+            if exclude_model_id and row_id == exclude_model_id:
+                continue
+            existing = raw if isinstance(raw, list) else []
+            existing_lower = {str(a).strip().lower() for a in existing if a}
+            clash = lowered & existing_lower
+            if clash:
+                raise AppError(
+                    code="DUPLICATE_MODEL_ID",
+                    title="Conflict",
+                    status=409,
+                    detail=f"model id already used by another model: {sorted(clash)[0]}",
+                )
+
     # ---- read ----
 
     async def list_models(self) -> list[dict[str, Any]]:
@@ -119,9 +150,11 @@ class AiModelsService:
                 status=422,
                 detail="owner_company_id required for company scope",
             )
+        normalized_aliases = _normalize_aliases(key_aliases)
+        await self._assert_aliases_unique(normalized_aliases)
         row = AiModelRow(
             name=model_name,
-            key_aliases=_normalize_aliases(key_aliases),
+            key_aliases=normalized_aliases,
             provider=(provider or "").strip() or None if provider is not None else None,
             reasoning_level=(reasoning_level or "").strip() or None if reasoning_level is not None else None,
             description=(description or "").strip() or None if description is not None else None,
@@ -173,7 +206,12 @@ class AiModelsService:
                 )
             row.name = cleaned
         if key_aliases is not None:
-            row.key_aliases = _normalize_aliases(key_aliases)
+            normalized_aliases = _normalize_aliases(key_aliases)
+            await self._assert_aliases_unique(
+                normalized_aliases,
+                exclude_model_id=model_id,
+            )
+            row.key_aliases = normalized_aliases
         if provider is not None:
             row.provider = (provider or "").strip() or None
         if reasoning_level is not None:
@@ -285,6 +323,35 @@ class AiModelsService:
                 matched += 1
         return {"matched": matched, "created": created, "total": matched + created}
 
+    async def _reconcile_from_probe(self, key: AiProviderKeyRow) -> None:
+        """Best-effort register any probe-returned model ids missing from the
+        catalog. Called from list_key_models so the models table stays in sync
+        even if the probe reconcile step failed/skipped. Never raises.
+        """
+        try:
+            from prodavan.infrastructure.persistence.models.ai_keys import AiKeyCheckResultRow
+
+            q = await self._session.execute(
+                select(AiKeyCheckResultRow.models).where(AiKeyCheckResultRow.key_id == key.id)
+            )
+            raw = q.scalar_one_or_none()
+            if raw is None:
+                return
+            models = raw if isinstance(raw, list) else []
+            if not models:
+                return
+            await self.reconcile_probe_models(
+                model_keys=[str(m) for m in models if m],
+                provider=key.provider,
+                api_kind=key.api_kind,
+            )
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).exception(
+                "ai_models: probe reconcile failed key=%s (best-effort)", key.id
+            )
+
     async def list_key_models(self, *, company_id: str, key_id: str) -> list[dict[str, Any]]:
         """Models visible to a key (platform + company scope) with the
         key↔model binding state (enabled / is_default).
@@ -294,6 +361,7 @@ class AiModelsService:
         no binding show enabled=false so the user can toggle them on.
         """
         key = await self._require_company_key(key_id, company_id)
+        await self._reconcile_from_probe(key)
         models = await self._models_visible_to_company(company_id=key.owner_company_id or company_id)
         bindings_q = await self._session.execute(
             select(AiKeyModelBindingRow).where(AiKeyModelBindingRow.key_id == key_id)
@@ -388,6 +456,7 @@ class AiModelsService:
         company key: platform models + that company's models.
         """
         key = await self._require_admin_key(key_id)
+        await self._reconcile_from_probe(key)
         models = await self._models_visible_to_company(
             company_id=key.owner_company_id or ""
         )

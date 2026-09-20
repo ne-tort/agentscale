@@ -154,7 +154,7 @@ class _AdminAiModelListPageState extends State<AdminAiModelListPage> {
               AppEntityColumn(id: 'provider', label: l10n.commonProvider),
               AppEntityColumn(
                 id: 'model_ids',
-                label: l10n.aiModelKeyAliasesLabel,
+                label: l10n.aiModelModelIdsLabel,
                 flex: 2,
               ),
               AppEntityColumn(
