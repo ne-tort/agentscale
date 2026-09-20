@@ -21,6 +21,20 @@ FIRST_PARTY_DEPLOYMENTS = (
     "prodavan-celery-beat",
 )
 
+# Deployment targets for rollout: (name, namespace) pairs. The probe pod
+# (agent-runtime) lives in prodavan-sandboxes (not prodavan), so rollout must
+# cross namespaces. After a fresh prodavan-agent-runtime:latest is pushed by
+# openclaw-images (claw repo), rollout restarts this so the probe pod re-pulls
+# the new digest (imagePullPolicy: Always). Project sandbox pods are dynamic
+# (per-project, created by pod_service) and re-pull on recreate by design.
+DEPLOYMENT_TARGETS: tuple[tuple[str, str], ...] = (
+    ("prodavan-api", "prodavan"),
+    ("prodavan-web", "prodavan"),
+    ("prodavan-celery-worker", "prodavan"),
+    ("prodavan-celery-beat", "prodavan"),
+    ("prodavan-probe-pod", "prodavan-sandboxes"),
+)
+
 _cached_kubeconfig: Path | None = None
 
 
@@ -224,16 +238,26 @@ def _fail_unreachable(exc: BaseException, *, streak: int, limit: int = 3) -> Non
 
 
 def rollout_restart(
-    namespace: str = "prodavan",
-    deployments: tuple[str, ...] = FIRST_PARTY_DEPLOYMENTS,
+    namespace: str | None = None,
+    deployments: tuple[str, ...] | None = None,
     timeout_sec: int = 600,
 ) -> None:
-    """Patch pod-template annotation so kubelet re-pulls :latest (Always)."""
+    """Patch pod-template annotation so kubelet re-pulls :latest (Always).
+
+    By default restarts all DEPLOYMENT_TARGETS (prodavan namespace: api/web/
+    celery-worker/celery-beat; prodavan-sandboxes: prodavan-probe-pod). When
+    `namespace` + `deployments` are passed, overrides the default target set
+    (legacy single-namespace call path).
+    """
     require_k8s_api()
     load_kube()
     apps = client.AppsV1Api()
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    for name in deployments:
+    if namespace is not None and deployments is not None:
+        targets: tuple[tuple[str, str], ...] = tuple((n, namespace) for n in deployments)
+    else:
+        targets = DEPLOYMENT_TARGETS
+    for name, ns in targets:
         body = {
             "spec": {
                 "template": {
@@ -246,20 +270,20 @@ def rollout_restart(
             }
         }
         try:
-            apps.patch_namespaced_deployment(name=name, namespace=namespace, body=body)
+            apps.patch_namespaced_deployment(name=name, namespace=ns, body=body)
         except ApiException as exc:
             _fail_unreachable(exc, streak=1, limit=1)
             raise
         except Exception as exc:
             _fail_unreachable(exc, streak=1, limit=1)
             raise
-        print(f"rollout restart requested: {namespace}/{name}")
+        print(f"rollout restart requested: {ns}/{name}")
     deadline = time.time() + timeout_sec
-    for name in deployments:
+    for name, ns in targets:
         unreachable_streak = 0
         while time.time() < deadline:
             try:
-                dep = apps.read_namespaced_deployment(name=name, namespace=namespace)
+                dep = apps.read_namespaced_deployment(name=name, namespace=ns)
             except ApiException as exc:
                 unreachable_streak += 1
                 _fail_unreachable(exc, streak=unreachable_streak)
@@ -276,12 +300,12 @@ def rollout_restart(
             gen = dep.metadata.generation or 0
             obs = (status.observed_generation or 0) if status else 0
             if obs >= gen and updated >= desired and ready >= desired and desired > 0:
-                print(f"rollout ok: {namespace}/{name} ready={ready}/{desired}")
+                print(f"rollout ok: {ns}/{name} ready={ready}/{desired}")
                 break
-            print(f"rollout wait: {namespace}/{name} ready={ready} updated={updated} desired={desired}")
+            print(f"rollout wait: {ns}/{name} ready={ready} updated={updated} desired={desired}")
             time.sleep(5)
         else:
-            raise TimeoutError(f"rollout timed out: {namespace}/{name}")
+            raise TimeoutError(f"rollout timed out: {ns}/{name}")
 
 
 def wait_argo_app(

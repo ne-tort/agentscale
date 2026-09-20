@@ -19,7 +19,7 @@
 | Sealed Secrets | `infra/argocd/sealed-secrets` + `overlays/dev/SECRETS.md` |
 | Ops CLI | [`infra/ops`](../../infra/ops): `validate` / `wait` / `rollout` / `smoke` |
 
-Образы: `ghcr.io/ne-tort/prodavan-{api,web}:latest`, `imagePullPolicy: Always`, secret `ghcr-pull`.
+Образы: `ghcr.io/ne-tort/prodavan-{api,web}:latest` (основной репо, CI Images), `ghcr.io/ne-tort/prodavan-agent-runtime:latest` (подмодуль prodavan-claw, openclaw-images). `imagePullPolicy: Always`, secret `ghcr-pull`. Probe pod в `prodavan-sandboxes` (см. §1.1).
 
 ---
 
@@ -34,6 +34,26 @@
 Не `git push origin main`.
 
 **Миграции Alembic** — только через initContainer при деплое API; см. [alembic.md](alembic.md). Ручной `alembic upgrade` / `kubectl exec` на shared env запрещён.
+
+### 1.1 Agent-runtime (probe pod) — отдельный поток
+
+Образ `prodavan-agent-runtime` собирается в **подмодуле `prodavan-claw`** (workflow `openclaw-images.yml`), не в основном репо `prodavan`. CI Images основного репо собирает только `prodavan-api` + `prodavan-web` — agent-runtime в нём отсутствует.
+
+```text
+prodavan-claw PR → openclaw-ci → auto-merge
+  → openclaw-images (build prodavan-agent-runtime:latest → GHCR)
+  → trigger-verify (dispatch Verify Dev in ne-tort/prodavan)
+    → Verify Dev: prodavan-ops rollout
+      → restart prodavan-probe-pod (prodavan-sandboxes, imagePullPolicy: Always)
+        → kubelet re-pulls :latest digest
+      → wait Argo → smoke
+```
+
+**Probe pod** (`prodavan-probe-pod` в namespace `prodavan-sandboxes`) — это long-lived agent-runtime pod для проверки AI-ключей. Включён в `DEPLOYMENT_TARGETS` `prodavan-ops` (вместе с api/web/celery-worker/celery-beat), поэтому `prodavan-ops rollout` перезапускает и его. `imagePullPolicy: Always` → при restart тянется свежий digest.
+
+**Project sandbox pods** (динамические, per-project, создаются `pod_service` через `POD_AGENT_RUNTIME_IMAGE` env) — при создании нового sandbox pod подхватит свежий digest (Always + новый pod = новый pull). Уже запущенные sandbox pods обновляются при reload/sync проекта (recreate).
+
+**Для cross-repo trigger** нужен секрет `PRODAVAN_REPO_TOKEN` в `prodavan-claw` репо (PAT с `actions:write` на `ne-tort/prodavan`). Без него trigger-verify выводит warning (образ запушен, но кластер подхватит при следующем Verify Dev из основного репо — теперь probe-pod в `DEPLOYMENT_TARGETS`, так что он тоже перезапустится).
 
 ---
 
