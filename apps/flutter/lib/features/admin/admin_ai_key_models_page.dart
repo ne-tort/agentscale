@@ -194,11 +194,6 @@ class _AdminAiKeyModelsPageState extends State<AdminAiKeyModelsPage> {
           : ListView(
               padding: EdgeInsets.all(AppSpacing.md),
               children: [
-                Text(
-                  widget.keyName,
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                SizedBox(height: AppSpacing.md),
                 AppEntityCollection(
                   rows: rows,
                   loading: _saving,

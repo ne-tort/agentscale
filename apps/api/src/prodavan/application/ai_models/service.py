@@ -365,6 +365,14 @@ class AiModelsService:
         except Exception:
             import logging
 
+            # A failed flush leaves the session in a rollback-pending state;
+            # any further attribute access (even key.id in the log line) raises
+            # PendingRollbackError and escapes the handler as a 500. Roll back
+            # first so this block is truly best-effort and never raises.
+            try:
+                await self._session.rollback()
+            except Exception:
+                pass
             logging.getLogger(__name__).exception(
                 "ai_models: probe reconcile failed key=%s (best-effort)", key.id
             )
@@ -386,16 +394,23 @@ class AiModelsService:
         if not clean_keys:
             return
         # Collect catalog rows matching any probe alias/name (case-insensitive).
+        # Dedup by row.id: a probe list can contain several aliases that all
+        # resolve to the same catalog entry (e.g. "claude-opus-4-6" and
+        # "claude-opus-4.6" after the hyphen/point merge), which would otherwise
+        # produce two AiKeyModelBindingRow inserts for one model_id and trip the
+        # uq_ai_key_model unique constraint (→ 500).
         lower_keys = {m.lower() for m in clean_keys}
         rows_q = await self._session.execute(
             select(AiModelRow).where(AiModelRow.owner_scope == "platform")
         )
         matched_rows: list[AiModelRow] = []
+        seen_ids: set[str] = set()
         for row in rows_q.scalars().all():
             aliases = row.key_aliases if isinstance(row.key_aliases, list) else []
             aliases_lower = {str(a).strip().lower() for a in aliases if a}
-            if aliases_lower & lower_keys or row.name.strip().lower() in lower_keys:
+            if (aliases_lower & lower_keys or row.name.strip().lower() in lower_keys) and row.id not in seen_ids:
                 matched_rows.append(row)
+                seen_ids.add(row.id)
         if not matched_rows:
             return
         existing_q = await self._session.execute(
