@@ -418,17 +418,21 @@ class AiModelsService:
             select(AiKeyModelBindingRow).where(AiKeyModelBindingRow.key_id == key.id)
         )
         existing = {b.model_id: b for b in existing_q.scalars().all()}
+        # Track bindings created in this pass so the default-target step can
+        # mutate the same row instead of inserting a second AiKeyModelBindingRow
+        # with the same model_id (would trip uq_ai_key_model on flush).
+        newly_added: dict[str, AiKeyModelBindingRow] = {}
         for row in matched_rows:
             if row.id in existing:
                 continue
-            self._session.add(
-                AiKeyModelBindingRow(
-                    key_id=key.id,
-                    model_id=row.id,
-                    enabled=True,
-                    is_default=False,
-                )
+            binding = AiKeyModelBindingRow(
+                key_id=key.id,
+                model_id=row.id,
+                enabled=True,
+                is_default=False,
             )
+            self._session.add(binding)
+            newly_added[row.id] = binding
         # Default: existing is_default > Auto (probe key 'auto'/'default') > first.
         has_default = any(b.is_default for b in existing.values())
         if not has_default:
@@ -447,6 +451,9 @@ class AiModelsService:
             if default_target in existing:
                 existing[default_target].is_default = True
                 existing[default_target].enabled = True
+            elif default_target in newly_added:
+                newly_added[default_target].is_default = True
+                newly_added[default_target].enabled = True
             else:
                 self._session.add(
                     AiKeyModelBindingRow(
