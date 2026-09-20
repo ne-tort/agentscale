@@ -222,13 +222,6 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
     return l10n.aiKeyModelsSelected('$enabled');
   }
 
-  bool get _hasModelsFromProbe {
-    final probe = _key?['last_probe'];
-    if (probe is! Map) return false;
-    final models = probe['models'];
-    return models is List && models.isNotEmpty;
-  }
-
   void _openModels() {
     final apiKind = _key?['api_kind'] as String? ?? 'cursor_sdk';
     AiKeyModelsPage.push(
@@ -318,10 +311,16 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
             AppProbePreference(
               enabled: hasSecret,
               lastProbe: _key?['last_probe'] as Map<String, dynamic>?,
-              onProbe: () => companyContext.api.probeAiKey(
-                companyId: widget.companyId,
-                keyId: widget.keyId,
-              ),
+              onProbe: () async {
+                await companyContext.api.probeAiKey(
+                  companyId: widget.companyId,
+                  keyId: widget.keyId,
+                );
+                // Reload the key so last_probe (incl. models list) is fresh —
+                // the "Models" nav is shown only when last_probe.models is non-empty.
+                await _load();
+                return _key?['last_probe'] as Map<String, dynamic>? ?? const {};
+              },
             ),
           AppSubscriptionPreference(
             title: l10n.adminSubscription,
@@ -367,13 +366,12 @@ class _CompanyAiKeyDetailPageState extends State<CompanyAiKeyDetailPage> {
               icon: Icons.pause_circle_outline_rounded,
               onTap: _pauseKey,
             ),
-          if (hasSecret && _hasModelsFromProbe)
-            AppNavPreference(
-              title: l10n.aiKeyModelsTitle,
-              icon: Icons.model_training_outlined,
-              subtitle: Text(_modelsSubtitle(l10n)),
-              onTap: _openModels,
-            ),
+          AppNavPreference(
+            title: l10n.aiKeyModelsTitle,
+            icon: Icons.model_training_outlined,
+            subtitle: Text(_modelsSubtitle(l10n)),
+            onTap: _openModels,
+          ),
           if (hasSecret && _scopeEditable && _employees.isNotEmpty)
             AppMultiChoicePreference<String>(
               title: l10n.navEmployees,

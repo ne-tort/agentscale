@@ -332,7 +332,11 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
             AppProbePreference(
               enabled: hasSecret,
               lastProbe: _key?['last_probe'] as Map<String, dynamic>?,
-              onProbe: () => adminContext.api.probeAiKey(keyId: widget.keyId),
+              onProbe: () async {
+                await adminContext.api.probeAiKey(keyId: widget.keyId);
+                await _load();
+                return _key?['last_probe'] as Map<String, dynamic>? ?? const {};
+              },
             ),
           AppNavPreference(
             title: l10n.aiKeyModelsTitle,
