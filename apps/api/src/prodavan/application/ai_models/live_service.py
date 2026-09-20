@@ -15,9 +15,12 @@ from prodavan.application.agent.openclaw_bridge import (
     _runtime_request_headers,
     api_kind_to_bridge_adapter,
 )
+from prodavan.application.ai_keys.probe.provider_resolver import ProviderResolver
+from prodavan.application.ai_keys.service import AiKeysService
 from prodavan.application.ai_models.resolution import resolve_ui_default
 from prodavan.application.ai_models.service import AiModelsService
 from prodavan.config.settings import settings
+from prodavan.domain.ai_keys import is_http_probe_kind
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.persistence.models.projects import ProjectPodRow, ProjectRow
 
@@ -113,8 +116,7 @@ class AiModelsLiveService:
         catalog = await AiModelsService(self._session).list_key_models(company_id=company_id, key_id=key_id)
         live_ids = await self._fetch_live_model_ids(
             company_id=company_id,
-            key_id=key_id,
-            api_kind=api_kind_to_bridge_adapter(key_row.api_kind),
+            key_row=key_row,
             project_id=project_id,
         )
         if not live_ids:
@@ -164,8 +166,7 @@ class AiModelsLiveService:
         self,
         *,
         company_id: str,
-        key_id: str,
-        api_kind: str,
+        key_row,
         project_id: str | None = None,
     ) -> list[str]:
         if not settings.pod_agent_runtime_enabled:
@@ -179,16 +180,36 @@ class AiModelsLiveService:
             return []
         pushed = await AgentCredentialBroker(self._session).push_lease_to_runtime(
             project_id=resolved_project_id,
-            key_id=key_id,
+            key_id=key_row.id,
         )
         if not pushed:
             return []
+        adapter = api_kind_to_bridge_adapter(key_row.api_kind)
+        params: dict[str, str] = {"adapter": adapter, "key_id": key_row.id}
+        # For HTTP provider api_kinds (openai_api / anthropic_api / openrouter /
+        # custom) the pod agent-runtime /v1/models route needs the resolved
+        # endpoint (base_url / models_path / auth_scheme) from the
+        # ai.http_providers catalog — otherwise listHttpModels gets no baseUrl
+        # and returns [] → 503 MODELS_UNAVAILABLE. SDK kinds (cursor_sdk etc.)
+        # use the vendor SDK and need no endpoint params.
+        if is_http_probe_kind(key_row.api_kind):
+            secret = await self._resolve_key_secret(key_row.id)
+            endpoint = await ProviderResolver(self._session).resolve(
+                api_kind=key_row.api_kind,
+                provider=key_row.provider,
+                secret=secret,
+                catalog_entry_id=getattr(key_row, "catalog_entry_id", None),
+            )
+            if endpoint is not None:
+                params["base_url"] = endpoint.base_url
+                params["models_path"] = endpoint.models_path
+                params["auth_scheme"] = endpoint.auth_scheme
         url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/models"
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 response = await client.get(
                     url,
-                    params={"adapter": api_kind, "key_id": key_id},
+                    params=params,
                     headers=_runtime_request_headers(),
                 )
                 if response.status_code >= 400:
@@ -214,6 +235,13 @@ class AiModelsLiveService:
         except Exception as exc:
             logger.debug("live models fetch failed: %s", exc)
             return []
+
+    async def _resolve_key_secret(self, key_id: str) -> str | None:
+        """Best-effort secret lookup for provider endpoint resolution (cursor token shape)."""
+        try:
+            return await AiKeysService(self._session).resolve_secret_for_key(key_id)
+        except Exception:
+            return None
 
     async def _any_running_project_for_company(self, company_id: str) -> str | None:
         from sqlalchemy import select
