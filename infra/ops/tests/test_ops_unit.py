@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 import pytest
-from prodavan_ops.k8s import FIRST_PARTY_DEPLOYMENTS, assert_kubeconfig_docker_ready
+from prodavan_ops.k8s import DEPLOYMENT_TARGETS, FIRST_PARTY_DEPLOYMENTS, assert_kubeconfig_docker_ready
 from prodavan_ops.validate import (
     FIRST_PARTY_LATEST,
     REQUIRED_SNIPPETS,
@@ -22,6 +22,24 @@ def test_first_party_deployments_cover_api_web_celery() -> None:
     assert "prodavan-web" in names
     assert "prodavan-celery-worker" in names
     assert "prodavan-celery-beat" in names
+
+
+def test_deployment_targets_include_probe_pod_in_sandboxes_namespace() -> None:
+    """Probe pod (agent-runtime) lives in prodavan-sandboxes, not prodavan."""
+    names_by_ns: dict[str, set[str]] = {}
+    for name, ns in DEPLOYMENT_TARGETS:
+        names_by_ns.setdefault(ns, set()).add(name)
+    assert "prodavan-probe-pod" in names_by_ns.get("prodavan-sandboxes", set())
+    # prodavan namespace still has api/web/celery.
+    prodavan = names_by_ns.get("prodavan", set())
+    assert "prodavan-api" in prodavan
+    assert "prodavan-web" in prodavan
+
+
+def test_deployment_targets_names_match_first_party() -> None:
+    """prodavan-namespace targets in DEPLOYMENT_TARGETS == FIRST_PARTY_DEPLOYMENTS."""
+    prodavan_targets = {name for name, ns in DEPLOYMENT_TARGETS if ns == "prodavan"}
+    assert prodavan_targets == set(FIRST_PARTY_DEPLOYMENTS)
 
 
 def test_assert_kubeconfig_docker_ready_noop_without_ci_host(

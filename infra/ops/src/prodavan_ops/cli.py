@@ -40,12 +40,24 @@ def wait_cmd(
 
 @app.command("rollout")
 def rollout_cmd(
-    namespace: str = typer.Option("prodavan", "--namespace"),
+    namespace: str | None = typer.Option(
+        None,
+        "--namespace",
+        help="Override: rollout only this namespace (default: all first-party targets).",
+    ),
     timeout: int = typer.Option(600, "--timeout"),
 ) -> None:
-    """Restart first-party Deployments so :latest+Always re-pulls after CI Images."""
+    """Restart first-party Deployments so :latest+Always re-pulls after CI Images.
+
+    By default restarts all DEPLOYMENT_TARGETS (prodavan: api/web/celery-worker/
+    celery-beat; prodavan-sandboxes: prodavan-probe-pod). Pass --namespace to
+    restrict to a single namespace's first-party deployments.
+    """
     assert_kubeconfig_docker_ready()
-    rollout_restart(namespace=namespace, timeout_sec=timeout)
+    if namespace is not None:
+        rollout_restart(namespace=namespace, deployments=FIRST_PARTY_DEPLOYMENTS, timeout_sec=timeout)
+    else:
+        rollout_restart(timeout_sec=timeout)
 
 
 @app.command("smoke")
