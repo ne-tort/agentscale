@@ -277,7 +277,20 @@ class AiModelsService:
         for row in rows_q.scalars().all():
             aliases = row.key_aliases if isinstance(row.key_aliases, list) else []
             aliases_lower = {str(a).strip().lower() for a in aliases if a}
-            if key_lower in aliases_lower or row.name.strip().lower() == key_lower:
+            matched_by_name = row.name.strip().lower() == key_lower
+            if key_lower in aliases_lower or matched_by_name:
+                # If matched by name but the probe id is missing from aliases,
+                # add it so future alias-based lookups succeed.
+                if matched_by_name and key_lower not in aliases_lower:
+                    updated_aliases = list(aliases) + [key]
+                    await self._assert_aliases_unique(
+                        updated_aliases,
+                        exclude_model_id=row.id,
+                    )
+                    row.key_aliases = updated_aliases
+                    await self._session.flush()
+                    await self._session.commit()
+                    await self._session.refresh(row)
                 return await self._model_public(row), False
 
         # 2. create new platform entry from the model_key
@@ -325,8 +338,10 @@ class AiModelsService:
 
     async def _reconcile_from_probe(self, key: AiProviderKeyRow) -> None:
         """Best-effort register any probe-returned model ids missing from the
-        catalog. Called from list_key_models so the models table stays in sync
-        even if the probe reconcile step failed/skipped. Never raises.
+        catalog, then ensure key↔model bindings exist for every probe model
+        (enabled=True) and a default is set. Called from list_key_models so the
+        models table stays in sync even if the probe reconcile step
+        failed/skipped. Never raises.
         """
         try:
             from prodavan.infrastructure.persistence.models.ai_keys import AiKeyCheckResultRow
@@ -340,17 +355,93 @@ class AiModelsService:
             models = raw if isinstance(raw, list) else []
             if not models:
                 return
+            model_keys = [str(m) for m in models if m]
             await self.reconcile_probe_models(
-                model_keys=[str(m) for m in models if m],
+                model_keys=model_keys,
                 provider=key.provider,
                 api_kind=key.api_kind,
             )
+            await self._ensure_key_bindings(key, model_keys)
         except Exception:
             import logging
 
             logging.getLogger(__name__).exception(
                 "ai_models: probe reconcile failed key=%s (best-effort)", key.id
             )
+
+    async def _ensure_key_bindings(
+        self,
+        key: AiProviderKeyRow,
+        probe_model_keys: list[str],
+    ) -> None:
+        """Ensure a key↔model binding (enabled=True) exists for every probe model.
+
+        On first probe: no bindings → create enabled bindings for all probe
+        models. Default is set per: binding is_default > 'Auto'/'default' (if
+        present in probe) > first probe model. Existing bindings are left
+        untouched (user toggles preserved); only missing ones are added as
+        enabled=True.
+        """
+        clean_keys = [str(m).strip() for m in probe_model_keys if str(m).strip()]
+        if not clean_keys:
+            return
+        # Collect catalog rows matching any probe alias/name (case-insensitive).
+        lower_keys = {m.lower() for m in clean_keys}
+        rows_q = await self._session.execute(
+            select(AiModelRow).where(AiModelRow.owner_scope == "platform")
+        )
+        matched_rows: list[AiModelRow] = []
+        for row in rows_q.scalars().all():
+            aliases = row.key_aliases if isinstance(row.key_aliases, list) else []
+            aliases_lower = {str(a).strip().lower() for a in aliases if a}
+            if aliases_lower & lower_keys or row.name.strip().lower() in lower_keys:
+                matched_rows.append(row)
+        if not matched_rows:
+            return
+        existing_q = await self._session.execute(
+            select(AiKeyModelBindingRow).where(AiKeyModelBindingRow.key_id == key.id)
+        )
+        existing = {b.model_id: b for b in existing_q.scalars().all()}
+        for row in matched_rows:
+            if row.id in existing:
+                continue
+            self._session.add(
+                AiKeyModelBindingRow(
+                    key_id=key.id,
+                    model_id=row.id,
+                    enabled=True,
+                    is_default=False,
+                )
+            )
+        # Default: existing is_default > Auto (probe key 'auto'/'default') > first.
+        has_default = any(b.is_default for b in existing.values())
+        if not has_default:
+            auto_id: str | None = None
+            for mk in clean_keys:
+                if mk.lower() in {"auto", "default"}:
+                    for row in matched_rows:
+                        aliases = row.key_aliases if isinstance(row.key_aliases, list) else []
+                        aliases_lower = {str(a).strip().lower() for a in aliases if a}
+                        if mk.lower() in aliases_lower or row.name.strip().lower() == mk.lower():
+                            auto_id = row.id
+                            break
+                    if auto_id:
+                        break
+            default_target = auto_id or matched_rows[0].id
+            if default_target in existing:
+                existing[default_target].is_default = True
+                existing[default_target].enabled = True
+            else:
+                self._session.add(
+                    AiKeyModelBindingRow(
+                        key_id=key.id,
+                        model_id=default_target,
+                        enabled=True,
+                        is_default=True,
+                    )
+                )
+        await self._session.flush()
+        await self._session.commit()
 
     async def list_key_models(self, *, company_id: str, key_id: str) -> list[dict[str, Any]]:
         """Models visible to a key (platform + company scope) with the
@@ -362,19 +453,21 @@ class AiModelsService:
         """
         key = await self._require_company_key(key_id, company_id)
         await self._reconcile_from_probe(key)
+        probe_keys = await self._probe_model_keys(key.id)
         models = await self._models_visible_to_company(company_id=key.owner_company_id or company_id)
         bindings_q = await self._session.execute(
             select(AiKeyModelBindingRow).where(AiKeyModelBindingRow.key_id == key_id)
         )
         bindings = {b.model_id: b for b in bindings_q.scalars().all()}
-        out: list[dict[str, Any]] = []
-        for model in models:
+        out = self._order_models_by_probe(models, probe_keys)
+        result: list[dict[str, Any]] = []
+        for model in out:
             binding = bindings.get(model.id)
             item = await self._model_public(model)
             item["enabled"] = bool(binding.enabled) if binding else False
             item["is_default"] = bool(binding.is_default) if binding else False
-            out.append(item)
-        return out
+            result.append(item)
+        return result
 
     async def update_key_models(
         self,
@@ -457,6 +550,7 @@ class AiModelsService:
         """
         key = await self._require_admin_key(key_id)
         await self._reconcile_from_probe(key)
+        probe_keys = await self._probe_model_keys(key.id)
         models = await self._models_visible_to_company(
             company_id=key.owner_company_id or ""
         )
@@ -464,14 +558,60 @@ class AiModelsService:
             select(AiKeyModelBindingRow).where(AiKeyModelBindingRow.key_id == key_id)
         )
         bindings = {b.model_id: b for b in bindings_q.scalars().all()}
-        out: list[dict[str, Any]] = []
-        for model in models:
+        out = self._order_models_by_probe(models, probe_keys)
+        result: list[dict[str, Any]] = []
+        for model in out:
             binding = bindings.get(model.id)
             item = await self._model_public(model)
             item["enabled"] = bool(binding.enabled) if binding else False
             item["is_default"] = bool(binding.is_default) if binding else False
-            out.append(item)
-        return out
+            result.append(item)
+        return result
+
+    async def _probe_model_keys(self, key_id: str) -> list[str]:
+        """Return the probe model id list in probe order (empty if no probe)."""
+        from prodavan.infrastructure.persistence.models.ai_keys import AiKeyCheckResultRow
+
+        q = await self._session.execute(
+            select(AiKeyCheckResultRow.models).where(AiKeyCheckResultRow.key_id == key_id)
+        )
+        raw = q.scalar_one_or_none()
+        if raw is None:
+            return []
+        models = raw if isinstance(raw, list) else []
+        return [str(m) for m in models if m]
+
+    def _order_models_by_probe(
+        self,
+        models: list[AiModelRow],
+        probe_keys: list[str],
+    ) -> list[AiModelRow]:
+        """Order models by probe list position; unmatched models appended at the
+        end (sorted by name) for visibility. Probe matching is by alias/name
+        (case-insensitive)."""
+        if not probe_keys:
+            return sorted(models, key=lambda r: r.name)
+        probe_lower = [k.lower() for k in probe_keys]
+        by_position: dict[int, list[AiModelRow]] = {}
+        unmatched: list[AiModelRow] = []
+        for row in models:
+            aliases = row.key_aliases if isinstance(row.key_aliases, list) else []
+            aliases_lower = {str(a).strip().lower() for a in aliases if a}
+            aliases_lower.add(row.name.strip().lower())
+            pos = None
+            for idx, pk in enumerate(probe_lower):
+                if pk in aliases_lower:
+                    pos = idx
+                    break
+            if pos is not None:
+                by_position.setdefault(pos, []).append(row)
+            else:
+                unmatched.append(row)
+        ordered: list[AiModelRow] = []
+        for idx in range(len(probe_lower)):
+            ordered.extend(by_position.get(idx, []))
+        ordered.extend(sorted(unmatched, key=lambda r: r.name))
+        return ordered
 
     async def _require_admin_key(self, key_id: str) -> AiProviderKeyRow:
         row = await self._session.get(AiProviderKeyRow, key_id)

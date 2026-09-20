@@ -181,7 +181,6 @@ class _AiKeyModelsPageState extends State<AiKeyModelsPage> {
             id: m['id'] as String? ?? '',
             title: m['name'] as String? ?? '',
             cells: {
-              'name': m['name'] as String? ?? '',
               'model_ids': _modelIdsCell(m),
               'cost': _costCell(m),
               'max_tokens': m['max_context_tokens']?.toString() ?? '—',
@@ -223,7 +222,6 @@ class _AiKeyModelsPageState extends State<AiKeyModelsPage> {
                   primaryColumnLabel: l10n.aiModelNameLabel,
                   columns: [
                     AppEntityColumn(id: 'default', label: '', width: 48),
-                    AppEntityColumn(id: 'name', label: l10n.aiModelNameLabel, flex: 2),
                     AppEntityColumn(id: 'model_ids', label: l10n.aiModelModelIdsLabel, flex: 2),
                     AppEntityColumn(id: 'cost', label: l10n.aiModelCostLabel, width: 120),
                     AppEntityColumn(id: 'max_tokens', label: l10n.aiModelMaxTokensLabel, width: 100),
