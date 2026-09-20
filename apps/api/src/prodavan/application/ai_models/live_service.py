@@ -37,9 +37,29 @@ def filter_effective_live_ids(
     catalog: list[dict[str, Any]],
     ceiling: list[str],
 ) -> list[str]:
-    enabled_names_lower = {str(m["name"]).lower() for m in catalog if m.get("enabled")}
-    if enabled_names_lower:
-        effective = [mid for mid in live_ids if mid.lower() in enabled_names_lower]
+    """Filter live probe ids down to those enabled on the key.
+
+    A key enables a catalog model via AiKeyModelBindingRow.enabled=true; the
+    catalog model exposes its provider ids as `model_ids` (aliases). A live id
+    is effective iff it matches (case-insensitively) any alias of an enabled
+    catalog model. If no bindings are enabled, all live ids pass (implicit
+    all-on — fresh key before the user toggles anything).
+    """
+    enabled_aliases_lower: set[str] = set()
+    for m in catalog:
+        if not m.get("enabled"):
+            continue
+        for alias in (m.get("model_ids") or []):
+            s = str(alias).strip().lower()
+            if s:
+                enabled_aliases_lower.add(s)
+        # Backward compat: also match by catalog name (seed models with empty
+        # aliases that were not yet backfilled).
+        name = str(m.get("name") or "").strip().lower()
+        if name:
+            enabled_aliases_lower.add(name)
+    if enabled_aliases_lower:
+        effective = [mid for mid in live_ids if mid.lower() in enabled_aliases_lower]
     else:
         effective = list(live_ids)
 
@@ -51,11 +71,16 @@ def filter_effective_live_ids(
 
 
 def catalog_by_model_name(catalog: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """Lookup live id → catalog item by alias (preferred) or name."""
     out: dict[str, dict[str, Any]] = {}
     for item in catalog:
-        name = str(item.get("name") or "").strip()
-        if name:
-            out[name.lower()] = item
+        for alias in (item.get("model_ids") or []):
+            s = str(alias).strip().lower()
+            if s:
+                out[s] = item
+        name = str(item.get("name") or "").strip().lower()
+        if name and name not in out:
+            out[name] = item
     return out
 
 
@@ -112,9 +137,21 @@ class AiModelsLiveService:
             )
 
         lookup = catalog_by_model_name(catalog)
-        ui_default = next((str(m["name"]) for m in catalog if m.get("is_default")), None)
-        if ui_default and ui_default not in effective and ui_default.lower() not in {m.lower() for m in effective}:
-            ui_default = None
+        # Resolve the catalog default model to its live id (any of its aliases
+        # that appears in effective). Falls back to None if no match.
+        ui_default = None
+        default_entry = next((m for m in catalog if m.get("is_default")), None)
+        if default_entry is not None:
+            effective_lower = {m.lower() for m in effective}
+            for alias in (default_entry.get("model_ids") or []):
+                s = str(alias).strip()
+                if s and s.lower() in effective_lower:
+                    ui_default = s
+                    break
+            if ui_default is None:
+                name = str(default_entry.get("name") or "").strip()
+                if name and name.lower() in effective_lower:
+                    ui_default = name
         ui_default = resolve_ui_default(effective, ui_default)
 
         return {
