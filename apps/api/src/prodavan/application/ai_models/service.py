@@ -343,11 +343,16 @@ class AiModelsService:
         models table stays in sync even if the probe reconcile step
         failed/skipped. Never raises.
         """
+        # Snapshot the key id up front: a failed flush leaves the session in a
+        # rollback-pending state and expires ORM attributes, so touching
+        # key.id in the except handler triggers lazy-load -> MissingGreenlet
+        # (sync IO in async context) and escapes as a 500.
+        key_id = key.id
         try:
             from prodavan.infrastructure.persistence.models.ai_keys import AiKeyCheckResultRow
 
             q = await self._session.execute(
-                select(AiKeyCheckResultRow.models).where(AiKeyCheckResultRow.key_id == key.id)
+                select(AiKeyCheckResultRow.models).where(AiKeyCheckResultRow.key_id == key_id)
             )
             raw = q.scalar_one_or_none()
             if raw is None:
@@ -365,16 +370,12 @@ class AiModelsService:
         except Exception:
             import logging
 
-            # A failed flush leaves the session in a rollback-pending state;
-            # any further attribute access (even key.id in the log line) raises
-            # PendingRollbackError and escapes the handler as a 500. Roll back
-            # first so this block is truly best-effort and never raises.
             try:
                 await self._session.rollback()
             except Exception:
                 pass
             logging.getLogger(__name__).exception(
-                "ai_models: probe reconcile failed key=%s (best-effort)", key.id
+                "ai_models: probe reconcile failed key=%s (best-effort)", key_id
             )
 
     async def _ensure_key_bindings(
@@ -601,31 +602,26 @@ class AiModelsService:
         models: list[AiModelRow],
         probe_keys: list[str],
     ) -> list[AiModelRow]:
-        """Order models by probe list position; unmatched models appended at the
-        end (sorted by name) for visibility. Probe matching is by alias/name
-        (case-insensitive)."""
+        """Return only catalog models the key actually returned from its probe,
+        ordered by probe list position. Models not reported by the probe are
+        excluded — the key Models page shows only what the key personally
+        returned (probe match is by alias/name, case-insensitive). If the key
+        was never probed (empty list), nothing is returned."""
         if not probe_keys:
-            return sorted(models, key=lambda r: r.name)
+            return []
         probe_lower = [k.lower() for k in probe_keys]
         by_position: dict[int, list[AiModelRow]] = {}
-        unmatched: list[AiModelRow] = []
         for row in models:
             aliases = row.key_aliases if isinstance(row.key_aliases, list) else []
             aliases_lower = {str(a).strip().lower() for a in aliases if a}
             aliases_lower.add(row.name.strip().lower())
-            pos = None
             for idx, pk in enumerate(probe_lower):
                 if pk in aliases_lower:
-                    pos = idx
+                    by_position.setdefault(idx, []).append(row)
                     break
-            if pos is not None:
-                by_position.setdefault(pos, []).append(row)
-            else:
-                unmatched.append(row)
         ordered: list[AiModelRow] = []
         for idx in range(len(probe_lower)):
             ordered.extend(by_position.get(idx, []))
-        ordered.extend(sorted(unmatched, key=lambda r: r.name))
         return ordered
 
     async def _require_admin_key(self, key_id: str) -> AiProviderKeyRow:
