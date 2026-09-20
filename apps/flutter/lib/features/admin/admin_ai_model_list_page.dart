@@ -127,9 +127,9 @@ class _AdminAiModelListPageState extends State<AdminAiModelListPage> {
       return AppEntityRow(
         id: m['id'] as String,
         title: m['name'] as String? ?? m['id'] as String,
-        subtitle: m['provider'] as String? ?? '',
+        subtitle: m['publisher'] as String? ?? '',
         cells: {
-          'provider': m['provider'] as String? ?? '—',
+          'publisher': m['publisher'] as String? ?? '—',
           'model_ids': _modelIdsCell(m),
           'context': m['max_context_tokens']?.toString() ?? '—',
         },
@@ -151,7 +151,7 @@ class _AdminAiModelListPageState extends State<AdminAiModelListPage> {
             rows: rows,
             primaryColumnLabel: l10n.aiModelNameLabel,
             columns: [
-              AppEntityColumn(id: 'provider', label: l10n.commonProvider),
+              AppEntityColumn(id: 'publisher', label: l10n.aiModelPublisherLabel),
               AppEntityColumn(
                 id: 'model_ids',
                 label: l10n.aiModelModelIdsLabel,
