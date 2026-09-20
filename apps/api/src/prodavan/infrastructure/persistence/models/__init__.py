@@ -21,6 +21,7 @@ from prodavan.infrastructure.persistence.models.ai_keys import (
 )
 from prodavan.infrastructure.persistence.models.ai_models import (
     AiKeyModelBindingRow,
+    AiKeyModelGrantRow,
     AiModelRow,
     AiModelSdkBindingRow,
 )
@@ -73,6 +74,7 @@ __all__ = [
     "AiKeyAuditEventRow",
     "AiKeyCheckResultRow",
     "AiKeyModelBindingRow",
+    "AiKeyModelGrantRow",
     "AiModelRow",
     "AiModelSdkBindingRow",
     "AiProviderKeyRow",
