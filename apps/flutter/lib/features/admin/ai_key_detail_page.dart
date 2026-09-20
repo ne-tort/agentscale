@@ -10,6 +10,7 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_confirm_page.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/features/admin/ai_http_provider_select_page.dart';import 'package:prodavan/features/admin/ai_key_integration_type.dart';
+import 'package:prodavan/features/admin/admin_ai_key_models_page.dart';
 import 'package:prodavan/core/preferences/app_probe_preference.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -333,6 +334,15 @@ class _AdminAiKeyDetailPageState extends State<AdminAiKeyDetailPage> {
               lastProbe: _key?['last_probe'] as Map<String, dynamic>?,
               onProbe: () => adminContext.api.probeAiKey(keyId: widget.keyId),
             ),
+          AppNavPreference(
+            title: l10n.aiKeyModelsTitle,
+            icon: Icons.model_training_outlined,
+            onTap: () => AdminAiKeyModelsPage.push(
+              context,
+              keyId: widget.keyId,
+              keyName: _displayName,
+            ),
+          ),
           if (hasSecret)
             AppMultiChoicePreference<String>(
               title: l10n.adminCompanyBindings,
