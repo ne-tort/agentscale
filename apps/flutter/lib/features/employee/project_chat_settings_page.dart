@@ -178,6 +178,7 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
           ),
           AppSwitchPreference(
             title: l10n.chatPin,
+            icon: Icons.push_pin_outlined,
             value: _pinned,
             enabled: enabled,
             onChanged: _setPinned,
@@ -185,6 +186,7 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
           if (controller != null)
             AppPreferenceTile(
               title: l10n.projectChatModelLabel,
+              icon: Icons.smart_toy_outlined,
               subtitle: Text(controller.selectedModelLabel),
               trailing: const AppTrailingChevron(),
               enabled: enabled,

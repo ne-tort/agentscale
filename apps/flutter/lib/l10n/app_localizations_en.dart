@@ -2381,7 +2381,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get chatUnpin => 'Unpin chat';
 
   @override
-  String get chatRenameTitle => 'Rename chat';
+  String get chatRenameTitle => 'Name';
 
   @override
   String get chatDeleteDialog => 'Delete chat';
