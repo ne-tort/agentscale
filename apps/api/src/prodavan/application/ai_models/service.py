@@ -22,6 +22,7 @@ from prodavan.domain.errors import AppError
 from prodavan.infrastructure.persistence.models.ai_keys import AiProviderKeyRow
 from prodavan.infrastructure.persistence.models.ai_models import (
     AiKeyModelBindingRow,
+    AiKeyModelGrantRow,
     AiModelRow,
     AiModelSdkBindingRow,
 )
@@ -473,11 +474,19 @@ class AiModelsService:
         Per MODELS-L2: filtering is by the key↔model binding (AiKeyModelBindingRow),
         NOT by api_kind/SDK. A model enabled on a key shows up here; models with
         no binding show enabled=false so the user can toggle them on.
+
+        Cascade narrowing (MODELS-L3): models the key owner disabled at the
+        owner level (ai_key_model_grants delegate_kind='key', enabled=false)
+        are NOT shown to the company — the company cannot re-enable what a
+        higher authority revoked.
         """
         key = await self._require_company_key(key_id, company_id)
         await self._reconcile_from_probe(key)
         probe_keys = await self._probe_model_keys(key.id)
         models = await self._models_visible_to_company(company_id=key.owner_company_id or company_id)
+        owner_grants = await self._owner_grants_map(key.id)
+        # Owner-disabled models are hidden from downstream delegates entirely.
+        models = [m for m in models if owner_grants.get(m.id) is None or owner_grants[m.id].enabled]
         bindings_q = await self._session.execute(
             select(AiKeyModelBindingRow).where(AiKeyModelBindingRow.key_id == key_id)
         )
@@ -509,8 +518,12 @@ class AiModelsService:
         """
         from prodavan.application.relations.commands import RelationsCommand
 
-        await self._require_company_key(key_id, company_id)
+        key = await self._require_company_key(key_id, company_id)
         allowed_ids = {m.id for m in await self._models_visible_to_company(company_id=company_id)}
+        # Cascade narrowing (MODELS-L3): a company cannot re-enable a model the
+        # key owner disabled at the owner level. Load the owner ceiling and drop
+        # any selection that tries to enable an owner-disabled model.
+        owner_grants = await self._owner_grants_map(key_id)
         default_id: str | None = None
         rel = RelationsCommand(self._session)
         for item in selections:
@@ -519,6 +532,13 @@ class AiModelsService:
                 continue
             enabled = bool(item.get("enabled"))
             is_default = bool(item.get("is_default"))
+            owner = owner_grants.get(model_id)
+            if owner is not None and not owner.enabled and enabled:
+                # Owner revoked this model; the company may not re-enable it.
+                # Force it off (and drop default) so the effective state honors
+                # the ceiling.
+                enabled = False
+                is_default = False
             if is_default:
                 default_id = model_id
             existing_q = await self._session.execute(
@@ -548,6 +568,17 @@ class AiModelsService:
                     await rel.link_model_to_key(model_id=model_id, key_id=key_id, company_id=company_id)
                 elif not enabled and was_enabled:
                     await rel.unlink_model_from_key(model_id=model_id, key_id=key_id, company_id=company_id)
+            # Mirror the company's choice into a per-delegation grant so the
+            # technology records an individual set per company/employee/... even
+            # when the same key is delegated to several entities.
+            await self._upsert_delegate_grant(
+                key=key,
+                model_id=model_id,
+                delegate_kind="company",
+                delegate_id=company_id,
+                enabled=enabled,
+                is_default=is_default,
+            )
         if default_id:
             await self._session.execute(
                 update(AiKeyModelBindingRow).where(AiKeyModelBindingRow.key_id == key_id).values(is_default=False)
@@ -692,6 +723,15 @@ class AiModelsService:
                     await rel.link_model_to_key(model_id=model_id, key_id=key_id, company_id=company_id)
                 elif not enabled and was_enabled and company_id is not None:
                     await rel.unlink_model_from_key(model_id=model_id, key_id=key_id, company_id=company_id)
+            # Mirror the owner-level ceiling into ai_key_model_grants so that
+            # downstream delegates (company/employee/...) cannot re-enable a
+            # model the admin disabled here.
+            await self._upsert_owner_grant(
+                key=key,
+                model_id=model_id,
+                enabled=enabled,
+                is_default=is_default,
+            )
         if default_id:
             await self._session.execute(
                 update(AiKeyModelBindingRow).where(AiKeyModelBindingRow.key_id == key_id).values(is_default=False)
@@ -710,6 +750,136 @@ class AiModelsService:
 
     async def _bind_sdk(self, *, model_id: str, api_kind: str) -> None:
         self._session.add(AiModelSdkBindingRow(model_id=model_id, api_kind=api_kind))
+
+    # ---- per-delegation model grants (cascade narrowing) ----
+
+    async def _owner_grants_map(self, key_id: str) -> dict[str, AiKeyModelGrantRow]:
+        """Owner-level grants (delegate_kind='key') for a key, keyed by model_id.
+
+        These are the ceiling: a model disabled here cannot be re-enabled by any
+        downstream delegate (company/employee/project/cabinet).
+        """
+        q = await self._session.execute(
+            select(AiKeyModelGrantRow).where(
+                AiKeyModelGrantRow.key_id == key_id,
+                AiKeyModelGrantRow.delegate_kind == "key",
+                AiKeyModelGrantRow.delegate_id.is_(None),
+            )
+        )
+        return {g.model_id: g for g in q.scalars().all()}
+
+    async def _delegate_grants_map(
+        self,
+        *,
+        key_id: str,
+        delegate_kind: str,
+        delegate_id: str,
+    ) -> dict[str, AiKeyModelGrantRow]:
+        q = await self._session.execute(
+            select(AiKeyModelGrantRow).where(
+                AiKeyModelGrantRow.key_id == key_id,
+                AiKeyModelGrantRow.delegate_kind == delegate_kind,
+                AiKeyModelGrantRow.delegate_id == delegate_id,
+            )
+        )
+        return {g.model_id: g for g in q.scalars().all()}
+
+    async def _upsert_owner_grant(
+        self,
+        *,
+        key: AiProviderKeyRow,
+        model_id: str,
+        enabled: bool,
+        is_default: bool,
+    ) -> None:
+        """Insert or update the owner-level grant for a model on a key.
+
+        granted_by_scope mirrors the key owner (platform or company).
+        """
+        scope = key.owner_scope or "platform"
+        company_id = key.owner_company_id if scope == "company" else None
+        company_clause = (
+            AiKeyModelGrantRow.granted_by_company_id.is_(None)
+            if company_id is None
+            else AiKeyModelGrantRow.granted_by_company_id == company_id
+        )
+        q = await self._session.execute(
+            select(AiKeyModelGrantRow).where(
+                AiKeyModelGrantRow.key_id == key.id,
+                AiKeyModelGrantRow.model_id == model_id,
+                AiKeyModelGrantRow.granted_by_scope == scope,
+                company_clause,
+                AiKeyModelGrantRow.delegate_kind == "key",
+                AiKeyModelGrantRow.delegate_id.is_(None),
+            )
+        )
+        grant = q.scalar_one_or_none()
+        if grant is None:
+            self._session.add(
+                AiKeyModelGrantRow(
+                    key_id=key.id,
+                    model_id=model_id,
+                    granted_by_scope=scope,
+                    granted_by_company_id=company_id,
+                    delegate_kind="key",
+                    delegate_id=None,
+                    enabled=enabled,
+                    is_default=is_default,
+                )
+            )
+        else:
+            grant.enabled = enabled
+            grant.is_default = is_default
+
+    async def _upsert_delegate_grant(
+        self,
+        *,
+        key: AiProviderKeyRow,
+        model_id: str,
+        delegate_kind: str,
+        delegate_id: str,
+        enabled: bool,
+        is_default: bool,
+    ) -> None:
+        """Insert or update a downstream delegate's grant for a model.
+
+        Downstream grants narrow the owner ceiling; enabled=False here only
+        disables for this delegate and never overrides an owner disabled model.
+        """
+        scope = key.owner_scope or "platform"
+        company_id = key.owner_company_id if scope == "company" else None
+        company_clause = (
+            AiKeyModelGrantRow.granted_by_company_id.is_(None)
+            if company_id is None
+            else AiKeyModelGrantRow.granted_by_company_id == company_id
+        )
+        q = await self._session.execute(
+            select(AiKeyModelGrantRow).where(
+                AiKeyModelGrantRow.key_id == key.id,
+                AiKeyModelGrantRow.model_id == model_id,
+                AiKeyModelGrantRow.granted_by_scope == scope,
+                company_clause,
+                AiKeyModelGrantRow.delegate_kind == delegate_kind,
+                AiKeyModelGrantRow.delegate_id == delegate_id,
+            )
+        )
+        grant = q.scalar_one_or_none()
+        if grant is None:
+            self._session.add(
+                AiKeyModelGrantRow(
+                    key_id=key.id,
+                    model_id=model_id,
+                    granted_by_scope=scope,
+                    granted_by_company_id=company_id,
+                    delegate_kind=delegate_kind,
+                    delegate_id=delegate_id,
+                    enabled=enabled,
+                    is_default=is_default,
+                )
+            )
+        else:
+            grant.enabled = enabled
+            grant.is_default = is_default
 
     async def _models_visible_to_company(self, *, company_id: str) -> list[AiModelRow]:
         """All platform models + company-owned models (no api_kind filter)."""
