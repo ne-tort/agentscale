@@ -59,7 +59,7 @@ class AiModelPolicyService:
             return EffectiveModelPolicy(allowed_models=[], ui_default_model=None)
 
         q = await self._session.execute(
-            select(AiModelRow.name, AiKeyModelBindingRow.enabled, AiKeyModelBindingRow.is_default)
+            select(AiModelRow, AiKeyModelBindingRow.enabled, AiKeyModelBindingRow.is_default)
             .join(AiKeyModelBindingRow, AiKeyModelBindingRow.model_id == AiModelRow.id)
             .join(AiModelSdkBindingRow, AiModelSdkBindingRow.model_id == AiModelRow.id)
             .where(
@@ -70,15 +70,36 @@ class AiModelPolicyService:
             .order_by(AiModelRow.name)
         )
         rows = list(q.all())
-        allowed = [str(name) for name, _, _ in rows]
+        # Build the allowed id set from the catalog entry's machine ids
+        # (key_aliases / model_ids) plus the human-readable name for backward
+        # compat. Runtime/probe/live paths pass machine ids ("composer-2.5"),
+        # so matching by name alone (now human-readable after the catalog
+        # rename) would reject every valid model with MODEL_NOT_ALLOWED.
+        allowed: list[str] = []
+        allowed_lower: set[str] = set()
+        ui_default_model: str | None = None
+        for row, enabled, is_default in rows:
+            if not enabled:
+                continue
+            ids_for_row: list[str] = []
+            aliases = row.key_aliases if isinstance(row.key_aliases, list) else []
+            for alias in aliases:
+                s = str(alias).strip()
+                if s and s.lower() not in allowed_lower:
+                    ids_for_row.append(s)
+                    allowed_lower.add(s.lower())
+            name = str(row.name or "").strip()
+            if name and name.lower() not in allowed_lower:
+                ids_for_row.append(name)
+                allowed_lower.add(name.lower())
+            if is_default and ui_default_model is None:
+                ui_default_model = ids_for_row[0] if ids_for_row else name
+            allowed.extend(ids_for_row)
         if ceiling:
-            ceiling_set = set(ceiling)
-            allowed = [m for m in allowed if m in ceiling_set]
-        ui_default_model = None
-        for name, _, is_default in rows:
-            if is_default and (not ceiling or name in ceiling):
-                ui_default_model = str(name)
-                break
+            ceiling_lower = {str(m).strip().lower() for m in ceiling if str(m).strip()}
+            allowed = [m for m in allowed if m.lower() in ceiling_lower]
+            if ui_default_model is not None and ui_default_model.lower() not in ceiling_lower:
+                ui_default_model = None
         if not allowed and ceiling:
             if api_kind in _SDK_KINDS:
                 return EffectiveModelPolicy(allowed_models=[], ui_default_model=None)
