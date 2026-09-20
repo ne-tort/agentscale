@@ -516,6 +516,34 @@ class AdminApi {
     return jsonDecode(res.body) as Map<String, dynamic>;
   }
 
+  Future<List<Map<String, dynamic>>> listAiKeyModels({
+    required String keyId,
+  }) async {
+    final res = await AuthHttp.get(_uri('/admin/ai-keys/$keyId/models'));
+    _throwIfError(res);
+    final body = jsonDecode(res.body);
+    if (body is List) {
+      return body.cast<Map<String, dynamic>>();
+    }
+    return const [];
+  }
+
+  Future<List<Map<String, dynamic>>> updateAiKeyModels({
+    required String keyId,
+    required List<Map<String, dynamic>> selections,
+  }) async {
+    final res = await AuthHttp.put(
+      _uri('/admin/ai-keys/$keyId/models'),
+      body: jsonEncode({'selections': selections}),
+    );
+    _throwIfError(res);
+    final body = jsonDecode(res.body);
+    if (body is List) {
+      return body.cast<Map<String, dynamic>>();
+    }
+    return const [];
+  }
+
   Future<List<Map<String, dynamic>>> listPlatformEvents({
     String? companyId,
     String? eventType,
