@@ -4259,7 +4259,7 @@ abstract class AppLocalizations {
   /// No description provided for @chatRenameTitle.
   ///
   /// In en, this message translates to:
-  /// **'Rename chat'**
+  /// **'Name'**
   String get chatRenameTitle;
 
   /// No description provided for @chatDeleteDialog.

@@ -58,6 +58,16 @@ class AiModelPolicyService:
                 return EffectiveModelPolicy(allowed_models=ceiling, ui_default_model=None)
             return EffectiveModelPolicy(allowed_models=[], ui_default_model=None)
 
+        # For SDK api_kinds (cursor_sdk/codex_sdk/claude_agent_sdk) the SDK
+        # binding decides which models the vendor SDK can serve — keep the
+        # api_kind filter. For HTTP api_kinds (openai_api / anthropic_api /
+        # openrouter / custom) any enabled catalog model is reachable through
+        # the HTTP endpoint, so the SDK-binding api_kind filter must NOT drop
+        # models whose only binding is e.g. cursor_sdk (seeded that way) — that
+        # caused MODEL_NOT_ALLOWED for 'gemini-3.7-flash' on an openai_api key.
+        sdk_kind_filter = [] if api_kind not in _SDK_KINDS else [
+            AiModelSdkBindingRow.api_kind == api_kind,
+        ]
         q = await self._session.execute(
             select(AiModelRow, AiKeyModelBindingRow.enabled, AiKeyModelBindingRow.is_default)
             .join(AiKeyModelBindingRow, AiKeyModelBindingRow.model_id == AiModelRow.id)
@@ -65,7 +75,7 @@ class AiModelPolicyService:
             .where(
                 AiKeyModelBindingRow.key_id == key_id,
                 AiKeyModelBindingRow.enabled.is_(True),
-                AiModelSdkBindingRow.api_kind == api_kind,
+                *sdk_kind_filter,
             )
             .order_by(AiModelRow.name)
         )

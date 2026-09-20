@@ -2393,7 +2393,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get chatUnpin => 'Открепить чат';
 
   @override
-  String get chatRenameTitle => 'Переименовать чат';
+  String get chatRenameTitle => 'Название';
 
   @override
   String get chatDeleteDialog => 'Удалить диалог';

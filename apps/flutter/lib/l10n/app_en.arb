@@ -1337,7 +1337,7 @@
   },
   "chatPin": "Pin chat",
   "chatUnpin": "Unpin chat",
-  "chatRenameTitle": "Rename chat",
+  "chatRenameTitle": "Name",
   "chatDeleteDialog": "Delete chat",
   "chatDeleteDialogConfirmMessage": "This chat and its message history will be permanently deleted.",
   "chatOpenFromSidebarHint": "Use New chat or a chat in the sidebar",
