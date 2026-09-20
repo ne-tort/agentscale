@@ -343,11 +343,16 @@ class AiModelsService:
         models table stays in sync even if the probe reconcile step
         failed/skipped. Never raises.
         """
+        # Snapshot the key id up front: a failed flush leaves the session in a
+        # rollback-pending state and expires ORM attributes, so touching
+        # key.id in the except handler can raise again (PendingRollbackError /
+        # MissingGreenlet) and escape as a 500.
+        key_id = key.id
         try:
             from prodavan.infrastructure.persistence.models.ai_keys import AiKeyCheckResultRow
 
             q = await self._session.execute(
-                select(AiKeyCheckResultRow.models).where(AiKeyCheckResultRow.key_id == key.id)
+                select(AiKeyCheckResultRow.models).where(AiKeyCheckResultRow.key_id == key_id)
             )
             raw = q.scalar_one_or_none()
             if raw is None:
@@ -365,16 +370,12 @@ class AiModelsService:
         except Exception:
             import logging
 
-            # A failed flush leaves the session in a rollback-pending state;
-            # any further attribute access (even key.id in the log line) raises
-            # PendingRollbackError and escapes the handler as a 500. Roll back
-            # first so this block is truly best-effort and never raises.
             try:
                 await self._session.rollback()
             except Exception:
                 pass
             logging.getLogger(__name__).exception(
-                "ai_models: probe reconcile failed key=%s (best-effort)", key.id
+                "ai_models: probe reconcile failed key=%s (best-effort)", key_id
             )
 
     async def _ensure_key_bindings(
