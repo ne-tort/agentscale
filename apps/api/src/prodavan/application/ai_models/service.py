@@ -380,6 +380,107 @@ class AiModelsService:
         await self._session.commit()
         return await self.list_key_models(company_id=company_id, key_id=key_id)
 
+    async def list_key_models_admin(self, *, key_id: str) -> list[dict[str, Any]]:
+        """Admin variant of list_key_models — no company scoping.
+
+        Platform-admin can view any key (platform or company-owned). For a
+        platform key: all platform + all company models are visible. For a
+        company key: platform models + that company's models.
+        """
+        key = await self._require_admin_key(key_id)
+        models = await self._models_visible_to_company(
+            company_id=key.owner_company_id or ""
+        )
+        bindings_q = await self._session.execute(
+            select(AiKeyModelBindingRow).where(AiKeyModelBindingRow.key_id == key_id)
+        )
+        bindings = {b.model_id: b for b in bindings_q.scalars().all()}
+        out: list[dict[str, Any]] = []
+        for model in models:
+            binding = bindings.get(model.id)
+            item = await self._model_public(model)
+            item["enabled"] = bool(binding.enabled) if binding else False
+            item["is_default"] = bool(binding.is_default) if binding else False
+            out.append(item)
+        return out
+
+    async def _require_admin_key(self, key_id: str) -> AiProviderKeyRow:
+        row = await self._session.get(AiProviderKeyRow, key_id)
+        if row is None:
+            raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="AI key not found")
+        return row
+
+    async def update_key_models_admin(
+        self,
+        *,
+        key_id: str,
+        selections: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Admin variant of update_key_models — no company scoping.
+
+        Resolves the effective company_id from the key (owner_company_id) so
+        relation events carry the correct company context; for platform keys
+        company_id is None (relation events become platform-scoped).
+        """
+        from prodavan.application.relations.commands import RelationsCommand
+
+        key = await self._require_admin_key(key_id)
+        company_id = key.owner_company_id
+        models = await self._models_visible_to_company(company_id=company_id or "")
+        allowed_ids = {m.id for m in models}
+        default_id: str | None = None
+        rel = RelationsCommand(self._session)
+        for item in selections:
+            model_id = str(item.get("model_id") or "").strip()
+            if not model_id or model_id not in allowed_ids:
+                continue
+            enabled = bool(item.get("enabled"))
+            is_default = bool(item.get("is_default"))
+            if is_default:
+                default_id = model_id
+            existing_q = await self._session.execute(
+                select(AiKeyModelBindingRow).where(
+                    AiKeyModelBindingRow.key_id == key_id,
+                    AiKeyModelBindingRow.model_id == model_id,
+                )
+            )
+            existing = existing_q.scalar_one_or_none()
+            if existing is None:
+                if enabled or is_default:
+                    self._session.add(
+                        AiKeyModelBindingRow(
+                            key_id=key_id,
+                            model_id=model_id,
+                            enabled=enabled,
+                            is_default=is_default,
+                        )
+                    )
+                    if enabled and company_id is not None:
+                        await rel.link_model_to_key(model_id=model_id, key_id=key_id, company_id=company_id)
+            else:
+                was_enabled = bool(existing.enabled)
+                existing.enabled = enabled
+                existing.is_default = is_default
+                if enabled and not was_enabled and company_id is not None:
+                    await rel.link_model_to_key(model_id=model_id, key_id=key_id, company_id=company_id)
+                elif not enabled and was_enabled and company_id is not None:
+                    await rel.unlink_model_from_key(model_id=model_id, key_id=key_id, company_id=company_id)
+        if default_id:
+            await self._session.execute(
+                update(AiKeyModelBindingRow).where(AiKeyModelBindingRow.key_id == key_id).values(is_default=False)
+            )
+            await self._session.execute(
+                update(AiKeyModelBindingRow)
+                .where(
+                    AiKeyModelBindingRow.key_id == key_id,
+                    AiKeyModelBindingRow.model_id == default_id,
+                )
+                .values(is_default=True, enabled=True)
+            )
+        await self._session.flush()
+        await self._session.commit()
+        return await self.list_key_models_admin(key_id=key_id)
+
     async def _bind_sdk(self, *, model_id: str, api_kind: str) -> None:
         self._session.add(AiModelSdkBindingRow(model_id=model_id, api_kind=api_kind))
 

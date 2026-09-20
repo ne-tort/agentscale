@@ -170,3 +170,41 @@ async def probe_key_model(
     from prodavan.application.ai_keys.probe.service import AiKeyProbeService
 
     return await AiKeyProbeService(session).probe_model(key_id, body.model, principal=admin)
+
+
+class AdminKeyModelSelectionBody(BaseModel):
+    model_config = {"extra": "forbid"}
+
+    selections: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@router.get("/{key_id}/models")
+async def admin_list_key_models(
+    _admin: PlatformAdminDep,
+    session: SessionDep,
+    key_id: str,
+) -> list[dict]:
+    """Admin: list models visible to a key (platform + company scope) with
+    the key↔model binding state (enabled / is_default).
+    """
+    from prodavan.application.ai_models.service import AiModelsService
+
+    return await AiModelsService(session).list_key_models_admin(key_id=key_id)
+
+
+@router.put("/{key_id}/models")
+async def admin_update_key_models(
+    admin: PlatformAdminDep,
+    session: SessionDep,
+    key_id: str,
+    body: AdminKeyModelSelectionBody,
+) -> list[dict]:
+    """Admin: set the key↔model binding state (enabled / is_default toggle)."""
+    from prodavan.application.ai_models.service import AiModelsService
+
+    out = await AiModelsService(session).update_key_models_admin(
+        key_id=key_id,
+        selections=body.selections,
+    )
+    await session.commit()
+    return out
