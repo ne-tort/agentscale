@@ -18,6 +18,7 @@ on:
           - integration
           - k8s
           - live
+          - bridge
 
 concurrency:
   group: ci-e2e-${{ github.event.pull_request.number || github.run_id }}
@@ -30,6 +31,7 @@ jobs:
       run_integration: ${{ steps.decide.outputs.run_integration }}
       run_k8s: ${{ steps.decide.outputs.run_k8s }}
       run_live: ${{ steps.decide.outputs.run_live }}
+      run_bridge: ${{ steps.decide.outputs.run_bridge }}
     steps:
       - id: decide
         run: |
@@ -54,6 +56,7 @@ jobs:
             echo "run_integration=false" >> "$GITHUB_OUTPUT"
             echo "run_k8s=false" >> "$GITHUB_OUTPUT"
             echo "run_live=false" >> "$GITHUB_OUTPUT"
+            echo "run_bridge=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           case "$suite" in
@@ -61,21 +64,31 @@ jobs:
               echo "run_integration=true" >> "$GITHUB_OUTPUT"
               echo "run_k8s=false" >> "$GITHUB_OUTPUT"
               echo "run_live=false" >> "$GITHUB_OUTPUT"
+              echo "run_bridge=false" >> "$GITHUB_OUTPUT"
               ;;
             k8s)
               echo "run_integration=false" >> "$GITHUB_OUTPUT"
               echo "run_k8s=true" >> "$GITHUB_OUTPUT"
               echo "run_live=false" >> "$GITHUB_OUTPUT"
+              echo "run_bridge=false" >> "$GITHUB_OUTPUT"
               ;;
             live)
               echo "run_integration=false" >> "$GITHUB_OUTPUT"
               echo "run_k8s=false" >> "$GITHUB_OUTPUT"
               echo "run_live=true" >> "$GITHUB_OUTPUT"
+              echo "run_bridge=false" >> "$GITHUB_OUTPUT"
+              ;;
+            bridge)
+              echo "run_integration=false" >> "$GITHUB_OUTPUT"
+              echo "run_k8s=false" >> "$GITHUB_OUTPUT"
+              echo "run_live=false" >> "$GITHUB_OUTPUT"
+              echo "run_bridge=true" >> "$GITHUB_OUTPUT"
               ;;
             all)
               echo "run_integration=true" >> "$GITHUB_OUTPUT"
               echo "run_k8s=true" >> "$GITHUB_OUTPUT"
               echo "run_live=true" >> "$GITHUB_OUTPUT"
+              echo "run_bridge=true" >> "$GITHUB_OUTPUT"
               ;;
             *)
               echo "unknown suite: $suite" >&2
@@ -381,8 +394,69 @@ jobs:
           PRODAVAN_E2E_LIVE_WAIT_SEC: "15"
         run: pytest tests/e2e/live -m live -q
 
+  bridge:
+    needs: [gate]
+    if: needs.gate.outputs.run_bridge == 'true'
+    runs-on: [self-hosted, linux, docker]
+    timeout-minutes: 25
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Docker diagnostics
+        run: |
+          echo "DOCKER_HOST=${DOCKER_HOST:-unset}"
+          docker info --format '{{.OperatingSystem}} / {{.ServerVersion}} / {{.Driver}}'
+          docker network ls
+          echo "--- runner can reach 127.0.0.1:3921? ---"
+          docker run --rm --network=host alpine sh -c 'wget -qO- http://127.0.0.1:3921/health || echo "no bridge yet (expected)"'
+
+      - name: Clone prodavan-claw submodule
+        env:
+          # PAT with read access to the private ne-tort/prodavan-claw repo
+          # (GITHUB_TOKEN cannot clone cross-repo private repos).
+          GH_TOKEN: ${{ secrets.PRODAVAN_CLAW_TOKEN }}
+        run: |
+          set -euo pipefail
+          # actions/checkout creates an empty prodavan-claw/ dir for the
+          # submodule entry; remove it so git clone can populate it.
+          rm -rf prodavan-claw
+          git clone https://x-access-token:${GH_TOKEN}@github.com/ne-tort/prodavan-claw.git prodavan-claw
+          # checkout the PR branch if it exists, else default
+          cd prodavan-claw
+          branch="${PRODAVAN_CLAW_BRANCH:-refactor/unified-mcp-surface}"
+          git fetch origin "${branch}" && git checkout "${branch}" || true
+
+      - name: Build agent-runtime image
+        working-directory: prodavan-claw
+        run: |
+          set -euo pipefail
+          docker build -t prodavan-agent-runtime:e2e -f platform-openclaw/Dockerfile .
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: apps/api
+        run: pip install -e ".[dev]"
+
+      - name: Pytest bridge e2e (cheapai.lol openclaw provider)
+        working-directory: apps/api
+        env:
+          OPENAI_API_KEY: ${{ secrets.CHEAPAI_API_KEY }}
+          OPENAI_BASE_URL: https://cheapai.lol/v1
+          OPENAI_MODEL: claude-fable-5.1
+          PRODAVAN_AGENT_RUNTIME_IMAGE: prodavan-agent-runtime:e2e
+          PRODAVAN_CLAW_BRANCH: ${{ github.head_ref || 'refactor/unified-mcp-surface' }}
+          # Attach bridge container to the runner's docker network so the
+          # runner host can reach it by IP (Docker Desktop on Linux VMs
+          # doesn't expose -p mappings to 127.0.0.1 on the host).
+          PRODAVAN_E2E_DOCKER_NETWORK: prodavan-runners
+        run: pytest tests/e2e/bridge -m bridge_e2e -q -s
+
   done:
-    needs: [gate, integration, k8s, live]
+    needs: [gate, integration, k8s, live, bridge]
     if: >-
       always() && (
       needs.gate.outputs.run_integration == 'true'
