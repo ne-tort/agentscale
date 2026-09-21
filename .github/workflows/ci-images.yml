@@ -371,8 +371,11 @@ jobs:
         if: steps.meta.outputs.push == 'true'
         with:
           registry: ${{ env.REGISTRY }}
+          # PRODAVAN_CLAW_TOKEN (PAT with write:packages) — the
+          # prodavan-agent-runtime package is owned by the prodavan-claw
+          # repo, so the prodavan repo GITHUB_TOKEN lacks push permission.
           username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          password: ${{ secrets.PRODAVAN_CLAW_TOKEN }}
 
       - name: Build agent-runtime image
         uses: docker/build-push-action@v6
