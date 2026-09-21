@@ -449,6 +449,10 @@ jobs:
           OPENAI_MODEL: claude-fable-5.1
           PRODAVAN_AGENT_RUNTIME_IMAGE: prodavan-agent-runtime:e2e
           PRODAVAN_CLAW_BRANCH: ${{ github.head_ref || 'refactor/unified-mcp-surface' }}
+          # Attach bridge container to the runner's docker network so the
+          # runner host can reach it by IP (Docker Desktop on Linux VMs
+          # doesn't expose -p mappings to 127.0.0.1 on the host).
+          PRODAVAN_E2E_DOCKER_NETWORK: prodavan-runners
         run: pytest tests/e2e/bridge -m bridge_e2e -q -s
 
   done:

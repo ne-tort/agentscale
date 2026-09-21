@@ -43,10 +43,12 @@ def _wait_health(base: str, timeout: float = 90.0):
 def _resolve_host(port: int, container_name: str = "") -> str:
     """Find a host that reaches the docker-mapped bridge port.
 
-    On Linux self-hosted runners the pytest process may run inside a
-    container where 127.0.0.1 does not reach docker port mappings. Try
-    127.0.0.1, host.docker.internal, the docker0 gateway, and finally the
-    container's own IP (for --network=host or bridged containers).
+    Docker Desktop on Linux runs containers in a VM, so 127.0.0.1 on the
+    runner host does not reach container ports. Try 127.0.0.1,
+    host.docker.internal (Docker Desktop resolves to the VM host), the
+    docker0 gateway, the container's own IP, and finally resolve the
+    container name via DNS (works if the runner is on the same docker
+    network as the bridge container, e.g. `prodavan-runners`).
     """
     candidates = ["127.0.0.1", "host.docker.internal"]
     for host in candidates:
@@ -56,7 +58,7 @@ def _resolve_host(port: int, container_name: str = "") -> str:
                 return host
         except Exception:
             pass
-    # docker0 bridge gateway (usually 172.17.0.1 on Linux)
+    # docker0 bridge gateway
     try:
         import json as _json
         net = subprocess.run(
@@ -75,8 +77,7 @@ def _resolve_host(port: int, container_name: str = "") -> str:
                     pass
     except Exception:
         pass
-    # container IP (for --network=host it's the host IP; for bridged it's
-    # the container's eth0). Works when pytest shares the docker network.
+    # container IP
     if container_name:
         try:
             ip = subprocess.run(
@@ -90,6 +91,13 @@ def _resolve_host(port: int, container_name: str = "") -> str:
                         return ip
                 except Exception:
                     pass
+        except Exception:
+            pass
+        # container name DNS (same docker network)
+        try:
+            r = httpx.get(f"http://{container_name}:{port}/health", timeout=3.0)
+            if r.status_code == 200:
+                return container_name
         except Exception:
             pass
     return "127.0.0.1"
@@ -137,13 +145,31 @@ def bridge_url():
     run_id = os.environ.get("GITHUB_RUN_ID", "local")
     name = f"prodavan-agent-runtime-e2e-{run_id}"
     subprocess.run(["docker", "rm", "-f", name], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    # --network=host: container shares host network, bridge reachable at
-    # 127.0.0.1:3921 directly (no port mapping). Works on Linux runners
-    # where docker port mapping may be blocked by iptables/firewall. Set
-    # PRODAVAN_E2E_HOST_NET=0 to use -p mapping (needed for Docker Desktop).
-    use_host_net = os.environ.get("PRODAVAN_E2E_HOST_NET", "1") == "1"
+    # Network strategy:
+    # - PRODAVAN_E2E_DOCKER_NETWORK set + exists: attach container to that
+    #   network (CI runner is on `prodavan-runners`, reaches container by IP/name).
+    # - PRODAVAN_E2E_HOST_NET=1: --network=host (Linux native, no Docker Desktop).
+    # - else: -p port mapping (Docker Desktop on Windows/Mac/Linux VM).
+    runner_net = os.environ.get("PRODAVAN_E2E_DOCKER_NETWORK", "")
+    # Skip default networks (none/host/bridge) — they never help reach the
+    # container from the runner host on Docker Desktop.
+    skip_nets = {"", "none", "host", "bridge"}
+    has_net = False
+    if runner_net and runner_net not in skip_nets:
+        try:
+            r = subprocess.run(
+                ["docker", "network", "inspect", runner_net],
+                capture_output=True, text=True, timeout=10,
+            )
+            has_net = r.returncode == 0
+        except Exception:
+            has_net = False
+    use_host_net = os.environ.get("PRODAVAN_E2E_HOST_NET", "0") == "1"
     if use_host_net:
         port_flags = ["--network=host"]
+        health_port = 3921
+    elif has_net:
+        port_flags = ["--network", runner_net]
         health_port = 3921
     else:
         port_flags = ["-p", f"{port}:3921"]
