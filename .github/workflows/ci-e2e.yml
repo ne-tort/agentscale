@@ -409,6 +409,9 @@ jobs:
           GH_TOKEN: ${{ secrets.PRODAVAN_CLAW_TOKEN }}
         run: |
           set -euo pipefail
+          # actions/checkout creates an empty prodavan-claw/ dir for the
+          # submodule entry; remove it so git clone can populate it.
+          rm -rf prodavan-claw
           git clone https://x-access-token:${GH_TOKEN}@github.com/ne-tort/prodavan-claw.git prodavan-claw
           # checkout the PR branch if it exists, else default
           cd prodavan-claw
