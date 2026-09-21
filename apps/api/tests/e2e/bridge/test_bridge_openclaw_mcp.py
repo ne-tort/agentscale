@@ -40,6 +40,43 @@ def _wait_health(base: str, timeout: float = 90.0):
     raise RuntimeError(f"bridge health timeout: {last_err}")
 
 
+def _resolve_host(port: int) -> str:
+    """Find a host that reaches the docker-mapped port.
+
+    On Linux self-hosted runners the pytest process may run inside a
+    container where 127.0.0.1 does not reach docker port mappings. Try
+    127.0.0.1 first, then host.docker.internal, then the docker bridge IP.
+    """
+    candidates = ["127.0.0.1", "host.docker.internal"]
+    for host in candidates:
+        try:
+            r = httpx.get(f"http://{host}:{port}/health", timeout=3.0)
+            if r.status_code == 200:
+                return host
+        except Exception:
+            pass
+    # docker0 bridge gateway (usually 172.17.0.1 on Linux)
+    try:
+        import json as _json
+        net = subprocess.run(
+            ["docker", "network", "inspect", "bridge", "--format", "{{json .IPAM.Config}}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        cfg = _json.loads(net.stdout) if net.stdout.strip() else []
+        for entry in cfg:
+            subnet = entry.get("Gateway")
+            if subnet:
+                try:
+                    r = httpx.get(f"http://{subnet}:{port}/health", timeout=3.0)
+                    if r.status_code == 200:
+                        return subnet
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return "127.0.0.1"
+
+
 def _read_sse(url, body, timeout=200.0):
     events = []
     with httpx.stream("POST", url, json=body, timeout=timeout) as resp:
@@ -90,7 +127,8 @@ def bridge_url():
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"docker run failed: {result.stderr}")
-    base = f"http://127.0.0.1:{port}"
+    base_host = _resolve_host(port)
+    base = f"http://{base_host}:{port}"
     try:
         health = _wait_health(base)
         if not health.get("provider"):
