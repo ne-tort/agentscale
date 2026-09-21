@@ -40,12 +40,13 @@ def _wait_health(base: str, timeout: float = 90.0):
     raise RuntimeError(f"bridge health timeout: {last_err}")
 
 
-def _resolve_host(port: int) -> str:
-    """Find a host that reaches the docker-mapped port.
+def _resolve_host(port: int, container_name: str = "") -> str:
+    """Find a host that reaches the docker-mapped bridge port.
 
     On Linux self-hosted runners the pytest process may run inside a
     container where 127.0.0.1 does not reach docker port mappings. Try
-    127.0.0.1 first, then host.docker.internal, then the docker bridge IP.
+    127.0.0.1, host.docker.internal, the docker0 gateway, and finally the
+    container's own IP (for --network=host or bridged containers).
     """
     candidates = ["127.0.0.1", "host.docker.internal"]
     for host in candidates:
@@ -74,6 +75,23 @@ def _resolve_host(port: int) -> str:
                     pass
     except Exception:
         pass
+    # container IP (for --network=host it's the host IP; for bridged it's
+    # the container's eth0). Works when pytest shares the docker network.
+    if container_name:
+        try:
+            ip = subprocess.run(
+                ["docker", "inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}", container_name],
+                capture_output=True, text=True, timeout=10,
+            ).stdout.strip()
+            if ip:
+                try:
+                    r = httpx.get(f"http://{ip}:{port}/health", timeout=3.0)
+                    if r.status_code == 200:
+                        return ip
+                except Exception:
+                    pass
+        except Exception:
+            pass
     return "127.0.0.1"
 
 
@@ -119,12 +137,11 @@ def bridge_url():
     run_id = os.environ.get("GITHUB_RUN_ID", "local")
     name = f"prodavan-agent-runtime-e2e-{run_id}"
     subprocess.run(["docker", "rm", "-f", name], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    # On CI self-hosted runners pytest runs in a container where docker port
-    # mappings (-p) may not be reachable via 127.0.0.1. Use host network mode
-    # on Linux so the container shares the host network stack and the bridge
-    # is reachable at 127.0.0.1:PORT directly. Fall back to -p mapping on
-    # platforms without host network (Windows/Mac Docker Desktop).
-    use_host_net = os.environ.get("PRODAVAN_E2E_HOST_NET", "1") == "1"
+    # Use default bridge network + port mapping. _resolve_host tries
+    # 127.0.0.1, host.docker.internal, docker0 gateway, and the container's
+    # own IP — so the test works on both Linux CI runners (pytest in a
+    # container) and local Docker Desktop.
+    use_host_net = os.environ.get("PRODAVAN_E2E_HOST_NET", "0") == "1"
     port_flags = ["--network=host"] if use_host_net else ["-p", f"{port}:3921"]
     cmd = ["docker", "run", "-d", "--name", name, *port_flags,
            "-e", f"OPENAI_API_KEY={api_key}", "-e", f"OPENAI_BASE_URL={CHEAPAI_BASE_URL}",
@@ -135,7 +152,7 @@ def bridge_url():
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"docker run failed: {result.stderr}")
-    base_host = _resolve_host(port)
+    base_host = _resolve_host(port, name)
     base = f"http://{base_host}:{port}"
     try:
         health = _wait_health(base)
