@@ -137,23 +137,27 @@ def bridge_url():
     run_id = os.environ.get("GITHUB_RUN_ID", "local")
     name = f"prodavan-agent-runtime-e2e-{run_id}"
     subprocess.run(["docker", "rm", "-f", name], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    # Use default bridge network + port mapping. _resolve_host tries
-    # 127.0.0.1, host.docker.internal, docker0 gateway, and the container's
-    # own IP — so the test works on both Linux CI runners (pytest in a
-    # container) and local Docker Desktop.
-    use_host_net = os.environ.get("PRODAVAN_E2E_HOST_NET", "0") == "1"
-    port_flags = ["--network=host"] if use_host_net else ["-p", f"{port}:3921"]
+    # --network=host: container shares host network, bridge reachable at
+    # 127.0.0.1:3921 directly (no port mapping). Works on Linux runners
+    # where docker port mapping may be blocked by iptables/firewall. Set
+    # PRODAVAN_E2E_HOST_NET=0 to use -p mapping (needed for Docker Desktop).
+    use_host_net = os.environ.get("PRODAVAN_E2E_HOST_NET", "1") == "1"
+    if use_host_net:
+        port_flags = ["--network=host"]
+        health_port = 3921
+    else:
+        port_flags = ["-p", f"{port}:3921"]
+        health_port = port
     cmd = ["docker", "run", "-d", "--name", name, *port_flags,
            "-e", f"OPENAI_API_KEY={api_key}", "-e", f"OPENAI_BASE_URL={CHEAPAI_BASE_URL}",
            "-e", f"OPENAI_MODEL={MODEL}",
            "-e", f"WORKSPACE_ROOT={workspace}", "-e", "OPENCLAW_DATA_DIR=/workspace/.openclaw-data",
-           "-e", "PORT=3921",
            "-v", f"{claw_dir}:/workspace", IMAGE]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"docker run failed: {result.stderr}")
-    base_host = _resolve_host(port, name)
-    base = f"http://{base_host}:{port}"
+    base_host = _resolve_host(health_port, name)
+    base = f"http://{base_host}:{health_port}"
     try:
         health = _wait_health(base)
         if not health.get("provider"):
