@@ -1,10 +1,21 @@
-﻿"""E2E - agent-runtime bridge with real openclaw API provider (cheapai.lol)."""
+"""E2E - agent-runtime bridge with real openclaw API provider (cheapai.lol).
+
+Builds the prodavan-agent-runtime image, runs it in Docker with OPENAI_API_KEY +
+OPENAI_BASE_URL pointing at cheapai.lol/v1 (openclaw HTTP provider, not a
+proprietary SDK), then sends a tool-mode request that must flow:
+model (cheapai) -> tool_call (mcp.openclaw.fs.read) -> tool_result -> done.
+Exercises the unified MCP surface (real stdio MCP server for built-ins) on the
+OpenClaw loop path, with a live HTTP provider.
+"""
 from __future__ import annotations
 import os, socket, subprocess, time
 from typing import Any
 import httpx, pytest
 
-CHEAPAI_BASE_URL = "https://api.cheapai.lol/v1"
+pytestmark = [pytest.mark.bridge_e2e]
+
+CHEAPAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "https://cheapai.lol/v1")
+MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.4-mini")
 IMAGE = os.environ.get("PRODAVAN_AGENT_RUNTIME_IMAGE", "prodavan-agent-runtime:e2e")
 
 
@@ -58,6 +69,7 @@ def bridge_url():
     subprocess.run(["docker","rm","-f",name], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     cmd = ["docker","run","-d","--name",name,"-p",f"{port}:3921",
            "-e",f"OPENAI_API_KEY={api_key}","-e",f"OPENAI_BASE_URL={CHEAPAI_BASE_URL}",
+           "-e",f"OPENAI_MODEL={MODEL}",
            "-e",f"WORKSPACE_ROOT={workspace}","-e","OPENCLAW_DATA_DIR=/workspace/.openclaw-data",
            "-v",f"{os.getcwd()}:/workspace", IMAGE]
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -68,21 +80,28 @@ def bridge_url():
         health = _wait_health(base)
         if not health.get("provider"):
             raise RuntimeError(f"no provider: {health}")
+        if "openclaw" not in (health.get("mcpServerStatus") or {}):
+            raise RuntimeError(f"builtin MCP server not connected: {health.get('mcpServerStatus')}")
         yield base
     finally:
         subprocess.run(["docker","rm","-f",name], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def test_bridge_mcp_tool_call_roundtrip(bridge_url):
+    """Model (cheapai) -> tool_call (mcp.openclaw.fs.read) -> tool_result -> done."""
     create = httpx.post(f"{bridge_url}/v1/sessions", json={})
-    assert create.status_code == 200, create.text
+    assert create.status_code in (200, 201), create.text
     sid = create.json()["sessionId"]
     events = _read_sse(f"{bridge_url}/v1/sessions/{sid}/send", {
-        "message": "Use the fs.read tool to read package.json and reply with the name field value.",
-        "use_tools": True, "live": True})
+        "message": "Read README.md with the fs.read tool, then reply with the first line of the file.",
+        "use_tools": True, "live": True, "model": MODEL})
     types = [e.get("type") for e in events]
     assert "tool_call" in types, f"missing tool_call; {types}"
     assert "tool_result" in types, f"missing tool_result; {types}"
+    tr = next((e for e in events if e.get("type") == "tool_result"), None)
+    assert tr is not None and not tr.get("data", {}).get("is_error"), f"tool_result error: {tr}"
     done = next((e for e in reversed(events) if e.get("type") == "done"), None)
     assert done is not None, "missing done"
     assert done.get("data", {}).get("reason") == "completed", f"bad done: {done}"
+    assert "tool_approval_request" not in types, "HITL approval should not fire (no HITL for built-ins)"
+    assert "permission_denial" not in types, "permission_denial should not fire (no HITL for built-ins)"

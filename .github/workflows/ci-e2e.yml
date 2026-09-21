@@ -401,8 +401,19 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
+
+      - name: Clone prodavan-claw submodule
+        env:
+          # PAT with read access to the private ne-tort/prodavan-claw repo
+          # (GITHUB_TOKEN cannot clone cross-repo private repos).
+          GH_TOKEN: ${{ secrets.PRODAVAN_CLAW_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone https://x-access-token:${GH_TOKEN}@github.com/ne-tort/prodavan-claw.git prodavan-claw
+          # checkout the PR branch if it exists, else default
+          cd prodavan-claw
+          branch="${PRODAVAN_CLAW_BRANCH:-refactor/unified-mcp-surface}"
+          git fetch origin "${branch}" && git checkout "${branch}" || true
 
       - name: Build agent-runtime image
         working-directory: prodavan-claw
