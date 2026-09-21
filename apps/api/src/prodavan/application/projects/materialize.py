@@ -8,6 +8,8 @@ from typing import Any, Protocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from prodavan.application.admin.company_service import AdminCompanyService
+from prodavan.application.ai_keys.probe.provider_resolver import ProviderResolver
+from prodavan.application.ai_keys.service import AiKeysService
 from prodavan.application.projects.materialize_executor import MaterializeExecutor
 from prodavan.application.projects.materialize_planner import MaterializePlanner
 from prodavan.application.projects.openclaw_config_materializer import (
@@ -18,6 +20,7 @@ from prodavan.application.projects.openclaw_config_materializer import (
     render_openclaw_config_yaml,
 )
 from prodavan.domain.agent import default_tool_policy
+from prodavan.domain.ai_keys import is_http_probe_kind
 from prodavan.domain.projects import workspace_key_for
 from prodavan.infrastructure.persistence.models.ai_keys import AiProviderKeyRow
 from prodavan.infrastructure.persistence.models.cabinets import CabinetInstanceRow
@@ -255,17 +258,41 @@ class ProjectMaterializeService:
             return
         company_policy = await AdminCompanyService(session).get_agent_policy(project.company_id)
         api_kind: str | None = None
+        provider_endpoint: dict[str, Any] | None = None
         provider_key_id = getattr(project, "resolved_ai_key_id", None)
         if provider_key_id:
             key_row = await session.get(AiProviderKeyRow, provider_key_id)
             if key_row is not None and (key_row.api_kind or "").strip():
                 api_kind = str(key_row.api_kind).strip()
+            # Resolve the HTTP provider endpoint (base_url / auth_scheme /
+            # chat_completions_path / models_path) from the ai.http_providers
+            # catalog so the bridge reaches the actual provider (cheapai.lol /
+            # ollama / ...) instead of the env default (api.openai.com).
+            if api_kind and is_http_probe_kind(api_kind):
+                try:
+                    secret = await AiKeysService(session).resolve_secret_for_key(provider_key_id)
+                except Exception:
+                    secret = None
+                endpoint = await ProviderResolver(session).resolve(
+                    api_kind=api_kind,
+                    provider=str(key_row.provider) if key_row is not None else "",
+                    secret=secret,
+                    catalog_entry_id=getattr(key_row, "catalog_entry_id", None) if key_row is not None else None,
+                )
+                if endpoint is not None:
+                    provider_endpoint = {
+                        "base_url": endpoint.base_url,
+                        "auth_scheme": endpoint.auth_scheme,
+                        "chat_completions_path": endpoint.chat_completions_path,
+                        "models_path": endpoint.models_path,
+                    }
         if not api_kind:
             api_kind = provider_to_default_api_kind(project.agent_provider)
         cfg = build_openclaw_config(
             company_policy=company_policy,
             api_kind=api_kind,
             provider_key_id=provider_key_id,
+            provider_endpoint=provider_endpoint,
             mcp_packages=mcp_packages,
             max_turns=12,
         )
