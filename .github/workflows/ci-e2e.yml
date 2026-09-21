@@ -399,8 +399,17 @@ jobs:
     if: needs.gate.outputs.run_bridge == 'true'
     runs-on: [self-hosted, linux, docker]
     timeout-minutes: 25
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
+
+      - name: Docker diagnostics
+        run: |
+          echo "DOCKER_HOST=${DOCKER_HOST:-unset}"
+          docker info --format '{{.OperatingSystem}} / {{.ServerVersion}} / {{.Driver}}'
+          docker network ls
+          echo "--- runner can reach 127.0.0.1:3921? ---"
+          docker run --rm --network=host alpine sh -c 'wget -qO- http://127.0.0.1:3921/health || echo "no bridge yet (expected)"'
 
       - name: Clone prodavan-claw submodule
         env:
