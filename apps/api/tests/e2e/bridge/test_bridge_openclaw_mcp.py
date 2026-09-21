@@ -60,7 +60,7 @@ def _text(events):
 
 
 def _tool_calls(events):
-    return [(e["data"]["name"], e["data"].get("input")) for e in events if e.get("type") == "tool_call")
+    return [(e["data"]["name"], e["data"].get("input")) for e in events if e.get("type") == "tool_call"]
 
 
 @pytest.fixture(scope="module")
