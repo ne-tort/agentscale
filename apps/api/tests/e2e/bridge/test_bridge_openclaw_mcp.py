@@ -69,6 +69,15 @@ def bridge_url():
     if not api_key:
         pytest.skip("OPENAI_API_KEY not set")
     port = _free_port()
+    # Mount the prodavan-claw repo (has README + openclaw-sdk echo server).
+    # In CI: GITHUB_WORKSPACE/prodavan-claw (cloned submodule). Locally: the
+    # prodavan-claw dir relative to apps/api (../../prodavan-claw).
+    repo_root = os.environ.get("GITHUB_WORKSPACE") or os.path.abspath(
+        os.path.join(os.getcwd(), "..", "..")
+    )
+    claw_dir = os.path.join(repo_root, "prodavan-claw")
+    if not os.path.isdir(claw_dir):
+        claw_dir = repo_root  # fallback: tests run inside prodavan-claw already
     workspace = os.environ.get("PRODAVAN_AGENT_RUNTIME_WORKSPACE", "/workspace")
     run_id = os.environ.get("GITHUB_RUN_ID", "local")
     name = f"prodavan-agent-runtime-e2e-{run_id}"
@@ -77,7 +86,7 @@ def bridge_url():
            "-e", f"OPENAI_API_KEY={api_key}", "-e", f"OPENAI_BASE_URL={CHEAPAI_BASE_URL}",
            "-e", f"OPENAI_MODEL={MODEL}",
            "-e", f"WORKSPACE_ROOT={workspace}", "-e", "OPENCLAW_DATA_DIR=/workspace/.openclaw-data",
-           "-v", f"{os.getcwd()}:/workspace", IMAGE]
+           "-v", f"{claw_dir}:/workspace", IMAGE]
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"docker run failed: {result.stderr}")
