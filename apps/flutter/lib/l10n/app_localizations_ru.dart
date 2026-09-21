@@ -1804,7 +1804,10 @@ class AppLocalizationsRu extends AppLocalizations {
   String get aiKeyModelDefault => 'По умолчанию';
 
   @override
-  String get aiModelNameLabel => 'ID модели';
+  String get aiModelNameLabel => 'Название';
+
+  @override
+  String get aiModelModelIdsLabel => 'ID модели';
 
   @override
   String get aiModelSdkLabel => 'Привязка к SDK';
@@ -1817,6 +1820,9 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get aiModelMaxTokensLabel => 'Max tokens';
+
+  @override
+  String get aiModelCostLabel => 'Стоимость';
 
   @override
   String get aiModelPublisherLabel => 'Издатель';
@@ -2387,7 +2393,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get chatUnpin => 'Открепить чат';
 
   @override
-  String get chatRenameTitle => 'Переименовать чат';
+  String get chatRenameTitle => 'Название';
 
   @override
   String get chatDeleteDialog => 'Удалить диалог';

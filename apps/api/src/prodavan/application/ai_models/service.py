@@ -22,6 +22,7 @@ from prodavan.domain.errors import AppError
 from prodavan.infrastructure.persistence.models.ai_keys import AiProviderKeyRow
 from prodavan.infrastructure.persistence.models.ai_models import (
     AiKeyModelBindingRow,
+    AiKeyModelGrantRow,
     AiModelRow,
     AiModelSdkBindingRow,
 )
@@ -55,6 +56,37 @@ def _normalize_api_kinds(kinds: list[str] | None) -> list[str]:
 class AiModelsService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+
+    async def _assert_aliases_unique(
+        self,
+        aliases: list[str],
+        *,
+        exclude_model_id: str | None = None,
+    ) -> None:
+        """Reject duplicate model IDs (aliases) across catalog entries.
+
+        Aliases are matched case-insensitively. Two models must never share the
+        same model id — that would make probe→catalog matching ambiguous.
+        """
+        if not aliases:
+            return
+        lowered = {str(a).strip().lower() for a in aliases if str(a).strip()}
+        if not lowered:
+            return
+        rows_q = await self._session.execute(select(AiModelRow.id, AiModelRow.key_aliases))
+        for row_id, raw in rows_q.all():
+            if exclude_model_id and row_id == exclude_model_id:
+                continue
+            existing = raw if isinstance(raw, list) else []
+            existing_lower = {str(a).strip().lower() for a in existing if a}
+            clash = lowered & existing_lower
+            if clash:
+                raise AppError(
+                    code="DUPLICATE_MODEL_ID",
+                    title="Conflict",
+                    status=409,
+                    detail=f"model id already used by another model: {sorted(clash)[0]}",
+                )
 
     # ---- read ----
 
@@ -119,9 +151,11 @@ class AiModelsService:
                 status=422,
                 detail="owner_company_id required for company scope",
             )
+        normalized_aliases = _normalize_aliases(key_aliases)
+        await self._assert_aliases_unique(normalized_aliases)
         row = AiModelRow(
             name=model_name,
-            key_aliases=_normalize_aliases(key_aliases),
+            key_aliases=normalized_aliases,
             provider=(provider or "").strip() or None if provider is not None else None,
             reasoning_level=(reasoning_level or "").strip() or None if reasoning_level is not None else None,
             description=(description or "").strip() or None if description is not None else None,
@@ -173,7 +207,12 @@ class AiModelsService:
                 )
             row.name = cleaned
         if key_aliases is not None:
-            row.key_aliases = _normalize_aliases(key_aliases)
+            normalized_aliases = _normalize_aliases(key_aliases)
+            await self._assert_aliases_unique(
+                normalized_aliases,
+                exclude_model_id=model_id,
+            )
+            row.key_aliases = normalized_aliases
         if provider is not None:
             row.provider = (provider or "").strip() or None
         if reasoning_level is not None:
@@ -239,7 +278,20 @@ class AiModelsService:
         for row in rows_q.scalars().all():
             aliases = row.key_aliases if isinstance(row.key_aliases, list) else []
             aliases_lower = {str(a).strip().lower() for a in aliases if a}
-            if key_lower in aliases_lower or row.name.strip().lower() == key_lower:
+            matched_by_name = row.name.strip().lower() == key_lower
+            if key_lower in aliases_lower or matched_by_name:
+                # If matched by name but the probe id is missing from aliases,
+                # add it so future alias-based lookups succeed.
+                if matched_by_name and key_lower not in aliases_lower:
+                    updated_aliases = list(aliases) + [key]
+                    await self._assert_aliases_unique(
+                        updated_aliases,
+                        exclude_model_id=row.id,
+                    )
+                    row.key_aliases = updated_aliases
+                    await self._session.flush()
+                    await self._session.commit()
+                    await self._session.refresh(row)
                 return await self._model_public(row), False
 
         # 2. create new platform entry from the model_key
@@ -285,6 +337,136 @@ class AiModelsService:
                 matched += 1
         return {"matched": matched, "created": created, "total": matched + created}
 
+    async def _reconcile_from_probe(self, key: AiProviderKeyRow) -> None:
+        """Best-effort register any probe-returned model ids missing from the
+        catalog, then ensure key↔model bindings exist for every probe model
+        (enabled=True) and a default is set. Called from list_key_models so the
+        models table stays in sync even if the probe reconcile step
+        failed/skipped. Never raises.
+        """
+        # Snapshot the key id up front: a failed flush leaves the session in a
+        # rollback-pending state and expires ORM attributes, so touching
+        # key.id in the except handler triggers lazy-load -> MissingGreenlet
+        # (sync IO in async context) and escapes as a 500.
+        key_id = key.id
+        try:
+            from prodavan.infrastructure.persistence.models.ai_keys import AiKeyCheckResultRow
+
+            q = await self._session.execute(
+                select(AiKeyCheckResultRow.models).where(AiKeyCheckResultRow.key_id == key_id)
+            )
+            raw = q.scalar_one_or_none()
+            if raw is None:
+                return
+            models = raw if isinstance(raw, list) else []
+            if not models:
+                return
+            model_keys = [str(m) for m in models if m]
+            await self.reconcile_probe_models(
+                model_keys=model_keys,
+                provider=key.provider,
+                api_kind=key.api_kind,
+            )
+            await self._ensure_key_bindings(key, model_keys)
+        except Exception:
+            import logging
+
+            try:
+                await self._session.rollback()
+            except Exception:
+                pass
+            logging.getLogger(__name__).exception(
+                "ai_models: probe reconcile failed key=%s (best-effort)", key_id
+            )
+
+    async def _ensure_key_bindings(
+        self,
+        key: AiProviderKeyRow,
+        probe_model_keys: list[str],
+    ) -> None:
+        """Ensure a key↔model binding (enabled=True) exists for every probe model.
+
+        On first probe: no bindings → create enabled bindings for all probe
+        models. Default is set per: binding is_default > 'Auto'/'default' (if
+        present in probe) > first probe model. Existing bindings are left
+        untouched (user toggles preserved); only missing ones are added as
+        enabled=True.
+        """
+        clean_keys = [str(m).strip() for m in probe_model_keys if str(m).strip()]
+        if not clean_keys:
+            return
+        # Collect catalog rows matching any probe alias/name (case-insensitive).
+        # Dedup by row.id: a probe list can contain several aliases that all
+        # resolve to the same catalog entry (e.g. "claude-opus-4-6" and
+        # "claude-opus-4.6" after the hyphen/point merge), which would otherwise
+        # produce two AiKeyModelBindingRow inserts for one model_id and trip the
+        # uq_ai_key_model unique constraint (→ 500).
+        lower_keys = {m.lower() for m in clean_keys}
+        rows_q = await self._session.execute(
+            select(AiModelRow).where(AiModelRow.owner_scope == "platform")
+        )
+        matched_rows: list[AiModelRow] = []
+        seen_ids: set[str] = set()
+        for row in rows_q.scalars().all():
+            aliases = row.key_aliases if isinstance(row.key_aliases, list) else []
+            aliases_lower = {str(a).strip().lower() for a in aliases if a}
+            if (aliases_lower & lower_keys or row.name.strip().lower() in lower_keys) and row.id not in seen_ids:
+                matched_rows.append(row)
+                seen_ids.add(row.id)
+        if not matched_rows:
+            return
+        existing_q = await self._session.execute(
+            select(AiKeyModelBindingRow).where(AiKeyModelBindingRow.key_id == key.id)
+        )
+        existing = {b.model_id: b for b in existing_q.scalars().all()}
+        # Track bindings created in this pass so the default-target step can
+        # mutate the same row instead of inserting a second AiKeyModelBindingRow
+        # with the same model_id (would trip uq_ai_key_model on flush).
+        newly_added: dict[str, AiKeyModelBindingRow] = {}
+        for row in matched_rows:
+            if row.id in existing:
+                continue
+            binding = AiKeyModelBindingRow(
+                key_id=key.id,
+                model_id=row.id,
+                enabled=True,
+                is_default=False,
+            )
+            self._session.add(binding)
+            newly_added[row.id] = binding
+        # Default: existing is_default > Auto (probe key 'auto'/'default') > first.
+        has_default = any(b.is_default for b in existing.values())
+        if not has_default:
+            auto_id: str | None = None
+            for mk in clean_keys:
+                if mk.lower() in {"auto", "default"}:
+                    for row in matched_rows:
+                        aliases = row.key_aliases if isinstance(row.key_aliases, list) else []
+                        aliases_lower = {str(a).strip().lower() for a in aliases if a}
+                        if mk.lower() in aliases_lower or row.name.strip().lower() == mk.lower():
+                            auto_id = row.id
+                            break
+                    if auto_id:
+                        break
+            default_target = auto_id or matched_rows[0].id
+            if default_target in existing:
+                existing[default_target].is_default = True
+                existing[default_target].enabled = True
+            elif default_target in newly_added:
+                newly_added[default_target].is_default = True
+                newly_added[default_target].enabled = True
+            else:
+                self._session.add(
+                    AiKeyModelBindingRow(
+                        key_id=key.id,
+                        model_id=default_target,
+                        enabled=True,
+                        is_default=True,
+                    )
+                )
+        await self._session.flush()
+        await self._session.commit()
+
     async def list_key_models(self, *, company_id: str, key_id: str) -> list[dict[str, Any]]:
         """Models visible to a key (platform + company scope) with the
         key↔model binding state (enabled / is_default).
@@ -292,21 +474,32 @@ class AiModelsService:
         Per MODELS-L2: filtering is by the key↔model binding (AiKeyModelBindingRow),
         NOT by api_kind/SDK. A model enabled on a key shows up here; models with
         no binding show enabled=false so the user can toggle them on.
+
+        Cascade narrowing (MODELS-L3): models the key owner disabled at the
+        owner level (ai_key_model_grants delegate_kind='key', enabled=false)
+        are NOT shown to the company — the company cannot re-enable what a
+        higher authority revoked.
         """
         key = await self._require_company_key(key_id, company_id)
+        await self._reconcile_from_probe(key)
+        probe_keys = await self._probe_model_keys(key.id)
         models = await self._models_visible_to_company(company_id=key.owner_company_id or company_id)
+        owner_grants = await self._owner_grants_map(key.id)
+        # Owner-disabled models are hidden from downstream delegates entirely.
+        models = [m for m in models if owner_grants.get(m.id) is None or owner_grants[m.id].enabled]
         bindings_q = await self._session.execute(
             select(AiKeyModelBindingRow).where(AiKeyModelBindingRow.key_id == key_id)
         )
         bindings = {b.model_id: b for b in bindings_q.scalars().all()}
-        out: list[dict[str, Any]] = []
-        for model in models:
+        out = self._order_models_by_probe(models, probe_keys)
+        result: list[dict[str, Any]] = []
+        for model in out:
             binding = bindings.get(model.id)
             item = await self._model_public(model)
             item["enabled"] = bool(binding.enabled) if binding else False
             item["is_default"] = bool(binding.is_default) if binding else False
-            out.append(item)
-        return out
+            result.append(item)
+        return result
 
     async def update_key_models(
         self,
@@ -325,8 +518,12 @@ class AiModelsService:
         """
         from prodavan.application.relations.commands import RelationsCommand
 
-        await self._require_company_key(key_id, company_id)
+        key = await self._require_company_key(key_id, company_id)
         allowed_ids = {m.id for m in await self._models_visible_to_company(company_id=company_id)}
+        # Cascade narrowing (MODELS-L3): a company cannot re-enable a model the
+        # key owner disabled at the owner level. Load the owner ceiling and drop
+        # any selection that tries to enable an owner-disabled model.
+        owner_grants = await self._owner_grants_map(key_id)
         default_id: str | None = None
         rel = RelationsCommand(self._session)
         for item in selections:
@@ -335,6 +532,13 @@ class AiModelsService:
                 continue
             enabled = bool(item.get("enabled"))
             is_default = bool(item.get("is_default"))
+            owner = owner_grants.get(model_id)
+            if owner is not None and not owner.enabled and enabled:
+                # Owner revoked this model; the company may not re-enable it.
+                # Force it off (and drop default) so the effective state honors
+                # the ceiling.
+                enabled = False
+                is_default = False
             if is_default:
                 default_id = model_id
             existing_q = await self._session.execute(
@@ -364,6 +568,17 @@ class AiModelsService:
                     await rel.link_model_to_key(model_id=model_id, key_id=key_id, company_id=company_id)
                 elif not enabled and was_enabled:
                     await rel.unlink_model_from_key(model_id=model_id, key_id=key_id, company_id=company_id)
+            # Mirror the company's choice into a per-delegation grant so the
+            # technology records an individual set per company/employee/... even
+            # when the same key is delegated to several entities.
+            await self._upsert_delegate_grant(
+                key=key,
+                model_id=model_id,
+                delegate_kind="company",
+                delegate_id=company_id,
+                enabled=enabled,
+                is_default=is_default,
+            )
         if default_id:
             await self._session.execute(
                 update(AiKeyModelBindingRow).where(AiKeyModelBindingRow.key_id == key_id).values(is_default=False)
@@ -388,6 +603,8 @@ class AiModelsService:
         company key: platform models + that company's models.
         """
         key = await self._require_admin_key(key_id)
+        await self._reconcile_from_probe(key)
+        probe_keys = await self._probe_model_keys(key.id)
         models = await self._models_visible_to_company(
             company_id=key.owner_company_id or ""
         )
@@ -395,14 +612,55 @@ class AiModelsService:
             select(AiKeyModelBindingRow).where(AiKeyModelBindingRow.key_id == key_id)
         )
         bindings = {b.model_id: b for b in bindings_q.scalars().all()}
-        out: list[dict[str, Any]] = []
-        for model in models:
+        out = self._order_models_by_probe(models, probe_keys)
+        result: list[dict[str, Any]] = []
+        for model in out:
             binding = bindings.get(model.id)
             item = await self._model_public(model)
             item["enabled"] = bool(binding.enabled) if binding else False
             item["is_default"] = bool(binding.is_default) if binding else False
-            out.append(item)
-        return out
+            result.append(item)
+        return result
+
+    async def _probe_model_keys(self, key_id: str) -> list[str]:
+        """Return the probe model id list in probe order (empty if no probe)."""
+        from prodavan.infrastructure.persistence.models.ai_keys import AiKeyCheckResultRow
+
+        q = await self._session.execute(
+            select(AiKeyCheckResultRow.models).where(AiKeyCheckResultRow.key_id == key_id)
+        )
+        raw = q.scalar_one_or_none()
+        if raw is None:
+            return []
+        models = raw if isinstance(raw, list) else []
+        return [str(m) for m in models if m]
+
+    def _order_models_by_probe(
+        self,
+        models: list[AiModelRow],
+        probe_keys: list[str],
+    ) -> list[AiModelRow]:
+        """Return only catalog models the key actually returned from its probe,
+        ordered by probe list position. Models not reported by the probe are
+        excluded — the key Models page shows only what the key personally
+        returned (probe match is by alias/name, case-insensitive). If the key
+        was never probed (empty list), nothing is returned."""
+        if not probe_keys:
+            return []
+        probe_lower = [k.lower() for k in probe_keys]
+        by_position: dict[int, list[AiModelRow]] = {}
+        for row in models:
+            aliases = row.key_aliases if isinstance(row.key_aliases, list) else []
+            aliases_lower = {str(a).strip().lower() for a in aliases if a}
+            aliases_lower.add(row.name.strip().lower())
+            for idx, pk in enumerate(probe_lower):
+                if pk in aliases_lower:
+                    by_position.setdefault(idx, []).append(row)
+                    break
+        ordered: list[AiModelRow] = []
+        for idx in range(len(probe_lower)):
+            ordered.extend(by_position.get(idx, []))
+        return ordered
 
     async def _require_admin_key(self, key_id: str) -> AiProviderKeyRow:
         row = await self._session.get(AiProviderKeyRow, key_id)
@@ -465,6 +723,15 @@ class AiModelsService:
                     await rel.link_model_to_key(model_id=model_id, key_id=key_id, company_id=company_id)
                 elif not enabled and was_enabled and company_id is not None:
                     await rel.unlink_model_from_key(model_id=model_id, key_id=key_id, company_id=company_id)
+            # Mirror the owner-level ceiling into ai_key_model_grants so that
+            # downstream delegates (company/employee/...) cannot re-enable a
+            # model the admin disabled here.
+            await self._upsert_owner_grant(
+                key=key,
+                model_id=model_id,
+                enabled=enabled,
+                is_default=is_default,
+            )
         if default_id:
             await self._session.execute(
                 update(AiKeyModelBindingRow).where(AiKeyModelBindingRow.key_id == key_id).values(is_default=False)
@@ -483,6 +750,136 @@ class AiModelsService:
 
     async def _bind_sdk(self, *, model_id: str, api_kind: str) -> None:
         self._session.add(AiModelSdkBindingRow(model_id=model_id, api_kind=api_kind))
+
+    # ---- per-delegation model grants (cascade narrowing) ----
+
+    async def _owner_grants_map(self, key_id: str) -> dict[str, AiKeyModelGrantRow]:
+        """Owner-level grants (delegate_kind='key') for a key, keyed by model_id.
+
+        These are the ceiling: a model disabled here cannot be re-enabled by any
+        downstream delegate (company/employee/project/cabinet).
+        """
+        q = await self._session.execute(
+            select(AiKeyModelGrantRow).where(
+                AiKeyModelGrantRow.key_id == key_id,
+                AiKeyModelGrantRow.delegate_kind == "key",
+                AiKeyModelGrantRow.delegate_id.is_(None),
+            )
+        )
+        return {g.model_id: g for g in q.scalars().all()}
+
+    async def _delegate_grants_map(
+        self,
+        *,
+        key_id: str,
+        delegate_kind: str,
+        delegate_id: str,
+    ) -> dict[str, AiKeyModelGrantRow]:
+        q = await self._session.execute(
+            select(AiKeyModelGrantRow).where(
+                AiKeyModelGrantRow.key_id == key_id,
+                AiKeyModelGrantRow.delegate_kind == delegate_kind,
+                AiKeyModelGrantRow.delegate_id == delegate_id,
+            )
+        )
+        return {g.model_id: g for g in q.scalars().all()}
+
+    async def _upsert_owner_grant(
+        self,
+        *,
+        key: AiProviderKeyRow,
+        model_id: str,
+        enabled: bool,
+        is_default: bool,
+    ) -> None:
+        """Insert or update the owner-level grant for a model on a key.
+
+        granted_by_scope mirrors the key owner (platform or company).
+        """
+        scope = key.owner_scope or "platform"
+        company_id = key.owner_company_id if scope == "company" else None
+        company_clause = (
+            AiKeyModelGrantRow.granted_by_company_id.is_(None)
+            if company_id is None
+            else AiKeyModelGrantRow.granted_by_company_id == company_id
+        )
+        q = await self._session.execute(
+            select(AiKeyModelGrantRow).where(
+                AiKeyModelGrantRow.key_id == key.id,
+                AiKeyModelGrantRow.model_id == model_id,
+                AiKeyModelGrantRow.granted_by_scope == scope,
+                company_clause,
+                AiKeyModelGrantRow.delegate_kind == "key",
+                AiKeyModelGrantRow.delegate_id.is_(None),
+            )
+        )
+        grant = q.scalar_one_or_none()
+        if grant is None:
+            self._session.add(
+                AiKeyModelGrantRow(
+                    key_id=key.id,
+                    model_id=model_id,
+                    granted_by_scope=scope,
+                    granted_by_company_id=company_id,
+                    delegate_kind="key",
+                    delegate_id=None,
+                    enabled=enabled,
+                    is_default=is_default,
+                )
+            )
+        else:
+            grant.enabled = enabled
+            grant.is_default = is_default
+
+    async def _upsert_delegate_grant(
+        self,
+        *,
+        key: AiProviderKeyRow,
+        model_id: str,
+        delegate_kind: str,
+        delegate_id: str,
+        enabled: bool,
+        is_default: bool,
+    ) -> None:
+        """Insert or update a downstream delegate's grant for a model.
+
+        Downstream grants narrow the owner ceiling; enabled=False here only
+        disables for this delegate and never overrides an owner disabled model.
+        """
+        scope = key.owner_scope or "platform"
+        company_id = key.owner_company_id if scope == "company" else None
+        company_clause = (
+            AiKeyModelGrantRow.granted_by_company_id.is_(None)
+            if company_id is None
+            else AiKeyModelGrantRow.granted_by_company_id == company_id
+        )
+        q = await self._session.execute(
+            select(AiKeyModelGrantRow).where(
+                AiKeyModelGrantRow.key_id == key.id,
+                AiKeyModelGrantRow.model_id == model_id,
+                AiKeyModelGrantRow.granted_by_scope == scope,
+                company_clause,
+                AiKeyModelGrantRow.delegate_kind == delegate_kind,
+                AiKeyModelGrantRow.delegate_id == delegate_id,
+            )
+        )
+        grant = q.scalar_one_or_none()
+        if grant is None:
+            self._session.add(
+                AiKeyModelGrantRow(
+                    key_id=key.id,
+                    model_id=model_id,
+                    granted_by_scope=scope,
+                    granted_by_company_id=company_id,
+                    delegate_kind=delegate_kind,
+                    delegate_id=delegate_id,
+                    enabled=enabled,
+                    is_default=is_default,
+                )
+            )
+        else:
+            grant.enabled = enabled
+            grant.is_default = is_default
 
     async def _models_visible_to_company(self, *, company_id: str) -> list[AiModelRow]:
         """All platform models + company-owned models (no api_kind filter)."""

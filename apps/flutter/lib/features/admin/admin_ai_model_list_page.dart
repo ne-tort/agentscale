@@ -120,6 +120,25 @@ class _AdminAiModelListPageState extends State<AdminAiModelListPage> {
     return '—';
   }
 
+  String _costCell(Map<String, dynamic> m) {
+    final input = m['input_price_usd_per_mtok'];
+    final output = m['output_price_usd_per_mtok'];
+    final hasInput = input != null;
+    final hasOutput = output != null;
+    if (!hasInput && !hasOutput) return '—';
+    if (hasInput && hasOutput) {
+      return '${_fmtPrice(input)} / ${_fmtPrice(output)}';
+    }
+    return _fmtPrice(hasInput ? input : output);
+  }
+
+  String _fmtPrice(dynamic v) {
+    final n = v is num ? v : num.tryParse('$v');
+    if (n == null) return '—';
+    if (n == n.roundToDouble()) return n.toStringAsFixed(0);
+    return n.toStringAsFixed(2);
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
@@ -127,10 +146,11 @@ class _AdminAiModelListPageState extends State<AdminAiModelListPage> {
       return AppEntityRow(
         id: m['id'] as String,
         title: m['name'] as String? ?? m['id'] as String,
-        subtitle: m['provider'] as String? ?? '',
+        subtitle: m['publisher'] as String? ?? '',
         cells: {
-          'provider': m['provider'] as String? ?? '—',
+          'publisher': m['publisher'] as String? ?? '—',
           'model_ids': _modelIdsCell(m),
+          'cost': _costCell(m),
           'context': m['max_context_tokens']?.toString() ?? '—',
         },
       );
@@ -151,11 +171,16 @@ class _AdminAiModelListPageState extends State<AdminAiModelListPage> {
             rows: rows,
             primaryColumnLabel: l10n.aiModelNameLabel,
             columns: [
-              AppEntityColumn(id: 'provider', label: l10n.commonProvider),
+              AppEntityColumn(id: 'publisher', label: l10n.aiModelPublisherLabel),
               AppEntityColumn(
                 id: 'model_ids',
-                label: l10n.aiModelKeyAliasesLabel,
+                label: l10n.aiModelModelIdsLabel,
                 flex: 2,
+              ),
+              AppEntityColumn(
+                id: 'cost',
+                label: l10n.aiModelCostLabel,
+                width: 120,
               ),
               AppEntityColumn(
                 id: 'context',

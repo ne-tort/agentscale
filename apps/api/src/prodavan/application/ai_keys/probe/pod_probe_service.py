@@ -148,7 +148,7 @@ class ProbePodService:
             async with self._http_client(timeout=settings.pod_probe_timeout_sec) as client:
                 response = await client.get(
                     url,
-                    params={"adapter": adapter, "key_id": key_id},
+                    params=params,
                     headers=_runtime_request_headers(),
                 )
         except httpx.TimeoutException as exc:

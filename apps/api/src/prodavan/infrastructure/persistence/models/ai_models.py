@@ -67,3 +67,52 @@ class AiKeyModelBindingRow(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class AiKeyModelGrantRow(Base):
+    """Per-delegation model grants with cascade narrowing.
+
+    A grant records "who (scope) allowed this model (model_id) for key key_id
+    to which delegate". The effective model set for a delegate is the
+    intersection of every grant along the ownership→delegate chain, all of
+    which must be enabled=true.
+
+    - granted_by_scope: "platform" (admin) or "company" (a company owner of the
+      key). Identifies the authority level that issued this grant.
+    - granted_by_company_id: when granted_by_scope="company", the company id;
+      NULL when scope="platform".
+    - delegate_kind: "key" (owner-level grant on the key itself, the ceiling),
+      "company", "employee", "project", "cabinet" — who the grant targets.
+    - delegate_id: id of the delegate (company_id/employee_id/project_id/
+      cabinet_id). NULL when delegate_kind="key".
+
+    One key can be delegated to several companies, each with an individual
+    model set. Downstream delegates (employee/project/cabinet) narrow further.
+    """
+
+    __tablename__ = "ai_key_model_grants"
+    __table_args__ = (
+        UniqueConstraint(
+            "key_id",
+            "model_id",
+            "granted_by_scope",
+            "granted_by_company_id",
+            "delegate_kind",
+            "delegate_id",
+            name="uq_ai_key_model_grant",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: _id("kmg"))
+    key_id: Mapped[str] = mapped_column(ForeignKey("ai_provider_keys.id", ondelete="CASCADE"), nullable=False)
+    model_id: Mapped[str] = mapped_column(ForeignKey("ai_models.id", ondelete="CASCADE"), nullable=False)
+    granted_by_scope: Mapped[str] = mapped_column(String(32), nullable=False, default="platform", server_default="platform")
+    granted_by_company_id: Mapped[str | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    delegate_kind: Mapped[str] = mapped_column(String(32), nullable=False, default="key", server_default="key")
+    delegate_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
