@@ -98,6 +98,15 @@ def bridge_url():
         if "openclaw" not in (health.get("mcpServerStatus") or {}):
             raise RuntimeError(f"builtin MCP not connected: {health.get('mcpServerStatus')}")
         yield base
+    except Exception:
+        # dump container logs for debugging before teardown
+        try:
+            logs = subprocess.run(["docker", "logs", name], capture_output=True, text=True, timeout=10)
+            print(f"--- docker logs {name} (stdout) ---\n{logs.stdout[-2000:]}")
+            print(f"--- docker logs {name} (stderr) ---\n{logs.stderr[-2000:]}")
+        except Exception:
+            pass
+        raise
     finally:
         subprocess.run(["docker", "rm", "-f", name], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
