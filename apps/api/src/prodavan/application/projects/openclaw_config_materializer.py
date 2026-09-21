@@ -156,6 +156,7 @@ def build_openclaw_config(
     tool_policy: AgentToolPolicy | None = None,
     api_kind: str | None = None,
     provider_key_id: str | None = None,
+    provider_endpoint: dict[str, Any] | None = None,
     mcp_packages: list[dict[str, Any]] | None = None,
     max_turns: int | None = None,
 ) -> dict[str, Any]:
@@ -203,6 +204,23 @@ def build_openclaw_config(
         dialect = api_kind_to_provider_dialect(api_kind)
         if dialect and runtime_adapter == "platform_openclaw":
             provider_block["dialect"] = dialect
+        # Write the resolved HTTP endpoint (from the ai.http_providers catalog)
+        # into config.yaml so the bridge reaches the actual provider endpoint
+        # (cheapai.lol / ollama / ...) instead of the env default (api.openai.com).
+        # Only meaningful for the platform_openclaw (HTTP) adapter.
+        if provider_endpoint and runtime_adapter == "platform_openclaw":
+            base_url = provider_endpoint.get("base_url")
+            if base_url:
+                provider_block["base_url"] = str(base_url).rstrip("/")
+                auth_scheme = provider_endpoint.get("auth_scheme")
+                if auth_scheme:
+                    provider_block["auth_scheme"] = str(auth_scheme)
+                chat_path = provider_endpoint.get("chat_completions_path")
+                if chat_path:
+                    provider_block["chat_completions_path"] = str(chat_path)
+                models_path = provider_endpoint.get("models_path")
+                if models_path:
+                    provider_block["models_path"] = str(models_path)
         cfg["provider"] = provider_block
 
     return cfg
