@@ -44,6 +44,7 @@ markers = [
   "integration: off-cluster API tests (Docker Postgres, stub runtime)",
   "k8s: real Pod lifecycle in prodavan-sandboxes (in-cluster Job or kubeconfig)",
   "live: HTTP tests against deployed dev API",
+  "bridge_e2e: agent-runtime bridge e2e (Docker image + live HTTP provider)",
 ]
 
 [tool.ruff]
