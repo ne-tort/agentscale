@@ -433,7 +433,10 @@ jobs:
         working-directory: apps/api
         env:
           OPENAI_API_KEY: ${{ secrets.CHEAPAI_API_KEY }}
+          OPENAI_BASE_URL: https://cheapai.lol/v1
+          OPENAI_MODEL: claude-fable-5.1
           PRODAVAN_AGENT_RUNTIME_IMAGE: prodavan-agent-runtime:e2e
+          PRODAVAN_CLAW_BRANCH: ${{ github.head_ref || 'refactor/unified-mcp-surface' }}
         run: pytest tests/e2e/bridge -m bridge_e2e -q -s
 
   done:
