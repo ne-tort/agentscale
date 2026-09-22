@@ -223,6 +223,29 @@ class Settings(BaseSettings):
             "POD_AGENT_BRIDGE_BOOTSTRAP_ENABLED",
         ),
     )
+    # CLAW-WEB — web.search provider config (injected into agent-runtime env).
+    # SearxNG is the default self-hosted meta-search engine (search ns).
+    pod_agent_runtime_web_search_provider: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "POD_AGENT_RUNTIME_WEB_SEARCH_PROVIDER",
+            "OPENCLAW_WEB_SEARCH_PROVIDER",
+        ),
+    )
+    pod_agent_runtime_web_search_url: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "POD_AGENT_RUNTIME_WEB_SEARCH_URL",
+            "OPENCLAW_WEB_SEARCH_URL",
+        ),
+    )
+    pod_agent_runtime_web_search_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "POD_AGENT_RUNTIME_WEB_SEARCH_API_KEY",
+            "OPENCLAW_WEB_SEARCH_API_KEY",
+        ),
+    )
     # Platform probe pod — single long-lived agent-runtime pod owned by the platform
     # (not a project sandbox) used to verify AI keys and fetch their model list via
     # the vendor SDK/HTTP path that only exists inside agent-runtime. The API pushes

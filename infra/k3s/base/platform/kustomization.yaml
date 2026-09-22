@@ -8,6 +8,7 @@ resources:
   - kafka.yaml
   - celery.yaml
   - keycloak.yaml
+  - searxng.yaml
   - pdb.yaml
 generatorOptions:
   disableNameSuffixHash: true
