@@ -14,6 +14,7 @@ from prodavan.application.tenant_infra.equipment_catalog_search_service import (
     EquipmentCatalogPodSearchService,
 )
 from prodavan.application.tenant_infra.pod_modules import PodModuleDataService
+from prodavan.application.websearch import WebSearchService
 
 router = APIRouter(tags=["pod-modules"])
 
@@ -230,4 +231,31 @@ async def equipment_catalog_search(
         catalog_ids=body.catalog_ids,
         limit=body.limit,
         offset=body.offset,
+    )
+
+
+class WebSearchBody(BaseModel):
+    query: str
+    limit: int = Field(default=5, ge=1, le=20)
+
+
+@router.post("/projects/{project_id}/web-search")
+async def web_search(
+    project_id: str,
+    body: WebSearchBody,
+    bridge: PodBridgeDep,
+) -> dict[str, Any]:
+    """CLAW-WEB — web.search proxy for the sandbox agent-runtime.
+
+    The pod's built-in `web.search` tool is configured (via env) to call this
+    endpoint as its search provider. The pod never reaches SearxNG directly:
+    the API proxies the query, enforces a per-pod rate limit, and emits
+    metrics. Returns SearxNG-shaped JSON (`{"results": [...]}`) so the SDK
+    tool consumes it without knowing it is a proxy.
+    """
+    bridge.require_project(project_id)
+    return await WebSearchService().search(
+        bridge=bridge,
+        query=body.query,
+        limit=body.limit,
     )

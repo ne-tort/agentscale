@@ -15,7 +15,8 @@ spec:
     - Egress
   egress:
     # Pod API surface only (:8001). No MinIO :9000, Mongo :27017, OpenSearch :9200,
-    # or full API :8000.
+    # or full API :8000. SearxNG :8080 is reachable only via the bridge proxy on
+    # :8001 — sandbox must never connect to SearxNG directly.
     - to:
         - namespaceSelector:
             matchLabels:
