@@ -174,13 +174,13 @@ class ProjectMaterializeService:
             writer=writer, cabinet_id=cabinet_id, ops=ops
         )
 
-        from prodavan.application.mcp.platform_modules_mcp import (
-            materialize_platform_modules_mcp,
-            merge_platform_modules_mcp,
-        )
         from prodavan.application.mcp.platform_equipment_mcp import (
             materialize_platform_equipment_mcp,
             merge_platform_equipment_mcp,
+        )
+        from prodavan.application.mcp.platform_modules_mcp import (
+            materialize_platform_modules_mcp,
+            merge_platform_modules_mcp,
         )
 
         platform_pkg = materialize_platform_modules_mcp(writer)
@@ -204,14 +204,13 @@ class ProjectMaterializeService:
                     module_paths[op.module_id].append(op.workspace_path)
 
         agents_md = None
-        agents_source = "materialize"
+        agents_source = "none"
         # After planner stitch there is at most one raw op per path (incl. AGENTS.md).
         for op in ops:
             if op.workspace_path == "AGENTS.md" and op.row_body is not None:
                 agents_md = op.row_body.get(op.field or "body_md")
+                agents_source = "module"
                 break
-        if agents_md is None:
-            agents_source = "default"
 
         writer.write_agents(cabinet_name=cab_name, project_name=proj_name, agents_md=agents_md)
         filtered_packages = await self._filter_mcp_packages(session, project_id, mcp_packages)

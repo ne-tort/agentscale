@@ -19,10 +19,13 @@ _PROVIDER_DEFAULT_API_KIND: dict[str, str] = {
     "claude_code": ApiKind.CLAUDE_AGENT_SDK,
 }
 
-# OpenClaw builtin tool ids (L07 v1 set subset used by policy presets).
-_READ_TOOLS = ("fs.read", "fs.list", "search.grep", "search.glob")
-_WRITE_TOOLS = ("fs.write", "fs.edit")
-_SHELL_TOOLS = ("shell.exec",)
+# OpenClaw builtin tool ids — canonical MCP names (unified surface: built-ins
+# are exposed exclusively as `mcp.openclaw.<bare>` via the stdio MCP server).
+# Wildcards so policy presets map to the canonical loop-pool tool names.
+_READ_TOOLS = ("mcp.openclaw.fs.read", "mcp.openclaw.fs.list",
+               "mcp.openclaw.search.grep", "mcp.openclaw.search.glob")
+_WRITE_TOOLS = ("mcp.openclaw.fs.write", "mcp.openclaw.fs.edit")
+_SHELL_TOOLS = ("mcp.openclaw.shell.exec",)
 
 
 def mcp_packages_to_openclaw_servers(packages: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
@@ -69,27 +72,17 @@ def api_kind_to_provider_dialect(api_kind: str | None) -> str | None:
 
 
 def tool_policy_to_permissions(policy: AgentToolPolicy) -> dict[str, Any]:
-    """Map AgentToolPolicy preset fields → OpenClaw permissions block."""
-    allow: list[str] = []
-    ask: list[str] = []
+    """Map AgentToolPolicy preset fields → OpenClaw permissions block.
+
+    Unified MCP surface: built-in tools reach the model as canonical
+    `mcp.openclaw.*` names via the stdio MCP server. The bridge
+    permission engine auto-allows all `mcp.*` tools (built-in + external
+    first-party) in default/acceptEdits modes — no per-name allow-list
+    needed. Writing an allow-list would filter out external MCP tools
+    (mcp.prodavan-*.*) not enumerated by the policy preset. Only mode +
+    deny (plan-mode readonly) are written.
+    """
     deny: list[str] = list(policy.extra_deny_tools)
-
-    if policy.fs_read:
-        allow.extend(_READ_TOOLS)
-    if policy.fs_write:
-        allow.extend(_WRITE_TOOLS)
-        if policy.approval in {"dangerous_only", "all_tools"}:
-            ask.extend(_WRITE_TOOLS)
-    elif policy.fs_read:
-        deny.extend(_WRITE_TOOLS)
-
-    if policy.shell_exec:
-        if policy.approval in {"dangerous_only", "all_tools"}:
-            ask.extend(_SHELL_TOOLS)
-        else:
-            allow.extend(_SHELL_TOOLS)
-    else:
-        deny.extend(_SHELL_TOOLS)
 
     if policy.sandbox == "strict" and policy.fs_write:
         mode = "plan"
@@ -99,6 +92,15 @@ def tool_policy_to_permissions(policy: AgentToolPolicy) -> dict[str, Any]:
         mode = "default"
     else:
         mode = "plan" if not policy.fs_write else "default"
+
+    # Plan mode denies mutating built-ins (permission engine enforces).
+    if mode == "plan":
+        deny.extend(_WRITE_TOOLS)
+        deny.extend(_SHELL_TOOLS)
+    elif not policy.fs_write:
+        deny.extend(_WRITE_TOOLS)
+    if not policy.shell_exec and mode != "plan":
+        deny.extend(_SHELL_TOOLS)
 
     # Dedupe preserving order
     def _dedupe(items: list[str]) -> list[str]:
@@ -111,15 +113,9 @@ def tool_policy_to_permissions(policy: AgentToolPolicy) -> dict[str, Any]:
             out.append(item)
         return out
 
-    allow = _dedupe(allow)
-    ask = _dedupe([a for a in ask if a not in allow])
-    deny = _dedupe([d for d in deny if d not in allow])
+    deny = _dedupe(deny)
 
     perms: dict[str, Any] = {"mode": mode}
-    if allow:
-        perms["allow"] = allow
-    if ask:
-        perms["ask"] = ask
     if deny:
         perms["deny"] = deny
     return perms

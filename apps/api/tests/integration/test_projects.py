@@ -125,7 +125,8 @@ def test_project_create_materialize_lifecycle(client: TestClient) -> None:
     launched = _configure_and_launch(client, owner_h, project_id)
     ws_root = Path(launched["materialize"]["workspace_root"])
     assert ws_root.is_dir()
-    assert (ws_root / "AGENTS.md").is_file()
+    # AGENTS.md is only written when a module provides one — no default stub.
+    assert not (ws_root / "AGENTS.md").exists()
     assert not (ws_root / "CLAUDE.md").exists()
     assert (ws_root / "mcp.json").is_file()
     assert (ws_root / ".prodavan" / "config.yaml").is_file()

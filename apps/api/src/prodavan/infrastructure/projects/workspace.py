@@ -84,12 +84,13 @@ class WorkspaceLayoutWriter:
             return None
 
     def write_agents(self, *, cabinet_name: str, project_name: str, agents_md: str | None) -> None:
-        text = agents_md or (
-            f"# {project_name}\n\n"
-            f"Project workspace for cabinet **{cabinet_name}**.\n\n"
-            "Edit context in the cabinet UI; re-materialize to refresh.\n"
-        )
-        raw = text.encode("utf-8")
+        # Only write AGENTS.md if a module provided one — no default stub.
+        # The workspace must contain only what came from modules (incl.
+        # AGENTS.md if a module author created one); a synthetic placeholder
+        # would leak into the agent context as a fake project brief.
+        if agents_md is None:
+            return
+        raw = agents_md.encode("utf-8")
         self._put_workspace_bytes("AGENTS.md", raw, content_type="text/markdown; charset=utf-8")
         # Do not write CLAUDE.md alias — only AGENTS.md.
 
