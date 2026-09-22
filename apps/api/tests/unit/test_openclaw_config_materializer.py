@@ -91,14 +91,20 @@ def test_mcp_packages_to_openclaw_servers() -> None:
 def test_chat_readonly_preset_permissions() -> None:
     perms = tool_policy_to_permissions(default_tool_policy("chat_readonly"))
     assert perms["mode"] == "plan"
-    assert "fs.read" in perms["allow"]
-    assert "shell.exec" in perms.get("deny", [])
+    # Unified MCP surface: no allow-list (auto-allow for mcp.*). Plan mode
+    # denies mutating built-ins via canonical mcp.openclaw.* names.
+    assert "allow" not in perms
+    assert "mcp.openclaw.shell.exec" in perms.get("deny", [])
+    assert "mcp.openclaw.fs.write" in perms.get("deny", [])
 
 
 def test_workspace_dev_preset_permissions() -> None:
     perms = tool_policy_to_permissions(default_tool_policy("workspace_dev"))
-    assert "fs.edit" in perms["allow"]
-    assert "shell.exec" in perms.get("ask", [])
+    # default mode: all mcp.* tools auto-allowed (built-in + external).
+    # No allow/ask/deny lists written — permission engine handles it.
+    assert perms["mode"] == "default"
+    assert "allow" not in perms
+    assert "ask" not in perms
 
 
 def test_build_openclaw_config_never_writes_model_block() -> None:
