@@ -176,6 +176,22 @@ def build_openclaw_config(
         },
         "permissions": tool_policy_to_permissions(policy),
         "tools": {"built_in": True, "mcp": policy.mcp != "deny"},
+        # Context compaction — tool-heavy agent work (15+ MCP calls/run)
+        # generates many assistant+tool messages. Default pipeline limits
+        # (max_messages=32, keep_recent=6, auto_compact=96k chars) drop
+        # the conversation thread mid-dialog, so the model re-introduces
+        # itself and forgets earlier turns. Raise limits so proactive tail
+        # trim + autocompact do not fire until the context is genuinely
+        # large; tool results are trimmed per-result (max_tool_result_chars)
+        # so individual large outputs do not blow the budget.
+        "context": {
+            "compaction": {
+                "max_messages": 200,
+                "keep_recent": 50,
+                "max_tool_result_chars": 12_000,
+                "auto_compact_char_threshold": 500_000,
+            },
+        },
     }
 
     turns = max_turns
