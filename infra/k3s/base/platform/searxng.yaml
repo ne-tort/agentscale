@@ -99,7 +99,7 @@ spec:
     spec:
       containers:
         - name: searxng
-          image: searxng/searxng:latest
+          image: searxng/searxng:2024.9.1.1-2d0f7f0c
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
