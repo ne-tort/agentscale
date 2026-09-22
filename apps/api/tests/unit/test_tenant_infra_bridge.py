@@ -135,6 +135,7 @@ def test_allowlist_allows_project_agent_and_archive_paths() -> None:
     assert _POD_SURFACE_RE.match("/api/v1/internal/pods")
     assert _POD_SURFACE_RE.match("/api/v1/internal/pods/pod_x/workspace-archive")
     assert _POD_SURFACE_RE.match("/api/v1/projects/prj_x/infra/cache/k")
+    assert _POD_SURFACE_RE.match("/api/v1/projects/prj_x/web-search")
     assert not _POD_SURFACE_RE.match("/api/v1/agent/sessions/s1/events")
     assert not _POD_SURFACE_RE.match("/api/v1/admin/modules")
     assert not _POD_SURFACE_RE.match("/api/v1/projects/prj_x/launch")
