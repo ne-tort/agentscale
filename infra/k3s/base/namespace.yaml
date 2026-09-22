@@ -4,3 +4,10 @@ metadata:
   name: prodavan
   labels:
     app.kubernetes.io/part-of: prodavan
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: search
+  labels:
+    app.kubernetes.io/part-of: prodavan

@@ -3,13 +3,8 @@
 # Consumed by the openclaw built-in web.search tool when
 # OPENCLAW_WEB_SEARCH_PROVIDER=searxng + OPENCLAW_WEB_SEARCH_URL set on
 # the agent-runtime pod (via prodavan-sandbox configmap).
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: search
-  labels:
-    app.kubernetes.io/part-of: prodavan
----
+# The `search` namespace is declared in namespace.yaml (base), not inline,
+# to avoid conflicts with the dev overlay namespace-transformer.
 apiVersion: v1
 kind: ConfigMap
 metadata:
