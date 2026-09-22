@@ -98,6 +98,9 @@ class K8sPodRuntimeAdapter:
             agent_runtime_port=settings.pod_agent_runtime_port,
             agent_runtime_api_base_url=settings.pod_agent_runtime_api_base_url,
             agent_runtime_auth_secret=settings.pod_agent_runtime_auth_secret or None,
+            agent_runtime_web_search_provider=settings.pod_agent_runtime_web_search_provider,
+            agent_runtime_web_search_url=settings.pod_agent_runtime_web_search_url,
+            agent_runtime_web_search_api_key=settings.pod_agent_runtime_web_search_api_key,
             image_pull_secret=settings.pod_sandbox_image_pull_secret or None,
         )
         await self._client.create_pod(body)

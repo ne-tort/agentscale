@@ -23,6 +23,9 @@ def _build_agent_runtime_container(
     memory_request: str,
     memory_limit: str,
     stub_holder: bool = False,
+    web_search_provider: str = "",
+    web_search_url: str = "",
+    web_search_api_key: str = "",
 ) -> dict[str, Any]:
     env: list[dict[str, Any]] = [
         {"name": "WORKSPACE_ROOT", "value": _WORKSPACE_MOUNT},
@@ -83,6 +86,15 @@ def _build_agent_runtime_container(
                 },
             },
         )
+    # CLAW-WEB — web.search provider config (passed to the built-in web.search
+    # tool in the agent-runtime container). SearxNG is the default self-hosted
+    # provider; empty values leave the tool disabled (stub error).
+    if web_search_provider:
+        env.append({"name": "OPENCLAW_WEB_SEARCH_PROVIDER", "value": web_search_provider})
+    if web_search_url:
+        env.append({"name": "OPENCLAW_WEB_SEARCH_URL", "value": web_search_url})
+    if web_search_api_key:
+        env.append({"name": "OPENCLAW_WEB_SEARCH_API_KEY", "value": web_search_api_key})
     container: dict[str, Any] = {
         "name": _AGENT_RUNTIME_CONTAINER,
         "image": image,
@@ -137,6 +149,9 @@ def build_pod_body(
     agent_runtime_port: int = 3921,
     agent_runtime_api_base_url: str = "http://prodavan-api.prodavan.svc:8001/api/v1",
     agent_runtime_auth_secret: str | None = None,
+    agent_runtime_web_search_provider: str = "",
+    agent_runtime_web_search_url: str = "",
+    agent_runtime_web_search_api_key: str = "",
     # Legacy aliases (deprecated)
     agent_bridge_image: str | None = None,
     agent_bridge_port: int = 3921,
@@ -213,6 +228,9 @@ def build_pod_body(
             memory_request=memory_request,
             memory_limit=memory_limit,
             stub_holder=runtime_image is None,
+            web_search_provider=agent_runtime_web_search_provider,
+            web_search_url=agent_runtime_web_search_url,
+            web_search_api_key=agent_runtime_web_search_api_key,
         ),
     ]
     spec: dict[str, Any] = {

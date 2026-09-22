@@ -147,6 +147,11 @@ data:
   POD_AGENT_RUNTIME_AUTH_SECRET: pod-agent-bridge-auth
   POD_AGENT_RUNTIME_IMAGE: ghcr.io/ne-tort/prodavan-agent-runtime:latest
   POD_AGENT_RUNTIME_BOOTSTRAP_ENABLED: "true"
+  # CLAW-WEB — web.search provider config (SearxNG self-hosted in search ns).
+  # Passed to the agent-runtime container env; the built-in web.search tool
+  # reads OPENCLAW_WEB_SEARCH_PROVIDER + OPENCLAW_WEB_SEARCH_URL.
+  POD_AGENT_RUNTIME_WEB_SEARCH_PROVIDER: "searxng"
+  POD_AGENT_RUNTIME_WEB_SEARCH_URL: "http://searxng.search.svc:8080/search"
   # Platform probe pod — verify AI keys & fetch their model list via agent-runtime.
   # The probe pod runs in prodavan-sandboxes (see sandboxes/probe-pod.yaml).
   POD_PROBE_ENABLED: "true"
