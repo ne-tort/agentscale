@@ -23,6 +23,9 @@ data:
       port: 8080
       limiter: false
       image_proxy: false
+      # Secret key for SearXNG session/cookies. Must be set; the default
+      # "ultrasecretkey" causes SearXNG to refuse to start.
+      secret_key: "prodavan-searxng-dev-key-change-me"
     search:
       formats:
         - html
