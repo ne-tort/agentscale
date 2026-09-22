@@ -151,7 +151,7 @@ data:
   # Passed to the agent-runtime container env; the built-in web.search tool
   # reads OPENCLAW_WEB_SEARCH_PROVIDER + OPENCLAW_WEB_SEARCH_URL.
   POD_AGENT_RUNTIME_WEB_SEARCH_PROVIDER: "searxng"
-  POD_AGENT_RUNTIME_WEB_SEARCH_URL: "http://searxng.search.svc:8080/search"
+  POD_AGENT_RUNTIME_WEB_SEARCH_URL: "http://searxng.prodavan.svc:8080/search"
   # Platform probe pod — verify AI keys & fetch their model list via agent-runtime.
   # The probe pod runs in prodavan-sandboxes (see sandboxes/probe-pod.yaml).
   POD_PROBE_ENABLED: "true"

@@ -9,7 +9,6 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: searxng-config
-  namespace: search
   labels:
     app.kubernetes.io/name: searxng
     app.kubernetes.io/part-of: prodavan
@@ -64,7 +63,6 @@ apiVersion: v1
 kind: Service
 metadata:
   name: searxng
-  namespace: search
   labels:
     app.kubernetes.io/name: searxng
     app.kubernetes.io/part-of: prodavan
@@ -81,7 +79,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: searxng
-  namespace: search
   labels:
     app.kubernetes.io/name: searxng
     app.kubernetes.io/part-of: prodavan
@@ -147,7 +144,6 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: searxng-env
-  namespace: search
   labels:
     app.kubernetes.io/name: searxng
     app.kubernetes.io/part-of: prodavan
