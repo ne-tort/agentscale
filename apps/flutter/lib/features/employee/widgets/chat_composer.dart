@@ -8,6 +8,8 @@ import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/preferences/app_value_preference.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
+import 'package:prodavan/core/widgets/app_error_presenter.dart';
+import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Wide limits aligned with API agent constraints (not unbounded).
@@ -226,14 +228,16 @@ class _ChatComposerState extends State<ChatComposer> {
     if (!_canSend) return;
     final text = _controller.text;
     if (text.length > kChatMaxMessageChars) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Сообщение слишком длинное (макс. $kChatMaxMessageChars знаков)')),
+      AppSnackBar.warning(
+        context,
+        'Сообщение слишком длинное (макс. $kChatMaxMessageChars знаков)',
       );
       return;
     }
     if (_attachments.length > kChatMaxAttachmentsPerMessage) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Слишком много вложений (макс. $kChatMaxAttachmentsPerMessage)')),
+      AppSnackBar.warning(
+        context,
+        'Слишком много вложений (макс. $kChatMaxAttachmentsPerMessage)',
       );
       return;
     }
@@ -265,22 +269,32 @@ class _ChatComposerState extends State<ChatComposer> {
     final api = widget.api;
     if (!widget.enabled || projectId == null || api == null || _uploading) return;
 
-    final result = await FilePicker.platform.pickFiles(withData: true);
+    // No client-side type filter: the backend whitelists extensions and
+    // rejects forbidden content (executables/scripts) with a domain error,
+    // which AppErrors maps to a themed snackbar. Picking any file here keeps
+    // the UX consistent — unsupported types show a domain error, not a silent
+    // no-op or a generic white snackbar.
+    FilePickerResult? result;
+    try {
+      result = await FilePicker.platform.pickFiles(withData: true);
+    } catch (e) {
+      if (mounted) AppErrors.showSnack(context, e);
+      return;
+    }
     if (result == null || result.files.isEmpty) return;
     final file = result.files.first;
     final bytes = file.bytes;
     if (bytes == null) return;
     if (!mounted) return;
     if (_attachments.length >= kChatMaxAttachmentsPerMessage) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Слишком много вложений (макс. $kChatMaxAttachmentsPerMessage)')),
+      AppSnackBar.warning(
+        context,
+        'Слишком много вложений (макс. $kChatMaxAttachmentsPerMessage)',
       );
       return;
     }
     if (bytes.length > kChatMaxAttachmentBytesClient) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Файл слишком большой')),
-      );
+      AppSnackBar.warning(context, 'Файл слишком большой');
       return;
     }
 
@@ -292,16 +306,17 @@ class _ChatComposerState extends State<ChatComposer> {
         bytes: bytes,
       );
       final id = body['id'] as String? ?? body['storage_ref'] as String? ?? '';
-      if (id.isEmpty) return;
+      if (id.isEmpty) {
+        if (mounted) {
+          AppSnackBar.warning(context, 'Не удалось загрузить вложение');
+        }
+        return;
+      }
       setState(() {
         _attachments.add(_PendingAttachment(id: id, filename: file.name));
       });
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$e')),
-        );
-      }
+      if (mounted) AppErrors.showSnack(context, e);
     } finally {
       if (mounted) setState(() => _uploading = false);
     }
@@ -443,7 +458,19 @@ class _ChatComposerState extends State<ChatComposer> {
     final scheme = Theme.of(context).colorScheme;
     final multiline = !widget.wakeMode && !widget.updateMode && _computeMultiline(context);
     if (multiline != _multiline) {
+      // Layout switches Row↔Column; remember focus so we can restore it in a
+      // post-frame callback after the new tree mounts (otherwise the field
+      // loses primary focus and the user must click back into it).
+      final hadFocus = _focusNode.hasFocus;
       _multiline = multiline;
+      if (hadFocus) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          if (!_focusNode.hasFocus) {
+            _focusNode.requestFocus();
+          }
+        });
+      }
     }
     final Widget field;
     if (widget.wakeMode) {

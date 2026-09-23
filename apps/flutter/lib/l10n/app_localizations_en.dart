@@ -1725,6 +1725,19 @@ class AppLocalizationsEn extends AppLocalizations {
   String get errorValidation => 'Please check the entered data.';
 
   @override
+  String get errorAttachmentTooLarge => 'Attachment is too large.';
+
+  @override
+  String get errorAttachmentTypeForbidden => 'This file type is not allowed.';
+
+  @override
+  String get errorAttachmentContentForbidden =>
+      'This file content is not allowed.';
+
+  @override
+  String get errorTooManyAttachments => 'Too many attachments in one message.';
+
+  @override
   String get errorProjectPaused => 'Project is paused. Resume to continue.';
 
   @override

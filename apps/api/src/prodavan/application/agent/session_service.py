@@ -1137,7 +1137,7 @@ class AgentSessionService:
         project_id: str,
         principal: Principal | None,
         employee: EmployeeRow | None,
-        limit: int = 200,
+        limit: int = 500,
         before_seq: int | None = None,
         tail: bool = False,
         pod_agent: bool = False,
@@ -1304,7 +1304,7 @@ class AgentSessionService:
         principal: Principal,
         employee: EmployeeRow | None,
         session_id: str,
-        limit: int = 100,
+        limit: int = 500,
         before_seq: int | None = None,
     ) -> dict:
         """Chat bubbles for an explicit session — UI must pass session_id (multi-chat)."""

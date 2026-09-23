@@ -1737,6 +1737,20 @@ class AppLocalizationsRu extends AppLocalizations {
   String get errorValidation => 'Проверьте введённые данные.';
 
   @override
+  String get errorAttachmentTooLarge => 'Вложение слишком большое.';
+
+  @override
+  String get errorAttachmentTypeForbidden => 'Этот тип файла не разрешён.';
+
+  @override
+  String get errorAttachmentContentForbidden =>
+      'Содержимое файла не разрешено.';
+
+  @override
+  String get errorTooManyAttachments =>
+      'Слишком много вложений в одном сообщении.';
+
+  @override
   String get errorProjectPaused =>
       'Проект на паузе. Возобновите, чтобы продолжить.';
 

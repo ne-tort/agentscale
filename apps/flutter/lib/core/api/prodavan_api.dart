@@ -1339,14 +1339,14 @@ class ProdavanApi {
   Future<Map<String, dynamic>> projectChatTranscript({
     required String projectId,
     required String sessionId,
-    int limit = 100,
+    int limit = 500,
     int? beforeSeq,
   }) async {
     final prevProj = this.projectId;
     this.projectId = projectId;
     try {
       final params = <String, String>{'session_id': sessionId};
-      if (limit != 100) params['limit'] = '$limit';
+      if (limit != 500) params['limit'] = '$limit';
       if (beforeSeq != null) params['before_seq'] = '$beforeSeq';
       final query =
           '?${params.entries.map((e) => '${e.key}=${Uri.encodeComponent(e.value)}').join('&')}';

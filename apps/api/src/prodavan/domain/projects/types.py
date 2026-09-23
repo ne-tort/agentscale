@@ -89,20 +89,58 @@ ATTACHMENT_MAX_BYTES = 20 * 1024 * 1024
 
 ATTACHMENT_ALLOWED_EXTENSIONS = frozenset(
     {
+        # Images
         ".png",
         ".jpg",
         ".jpeg",
         ".webp",
         ".gif",
+        # Documents
         ".pdf",
+        ".docx",
+        ".odt",
+        ".pptx",
+        # Tabular
         ".xlsx",
         ".xls",
         ".csv",
         ".tsv",
         ".xml",
+        # Text / code (parsed to inline text when small)
         ".txt",
         ".md",
+        ".markdown",
         ".json",
+        ".yaml",
+        ".yml",
+        ".log",
+        ".sql",
+        ".py",
+        ".js",
+        ".jsx",
+        ".ts",
+        ".tsx",
+        ".sh",
+        ".bash",
+        ".go",
+        ".rs",
+        ".java",
+        ".c",
+        ".cpp",
+        ".cc",
+        ".h",
+        ".hpp",
+        ".rb",
+        ".php",
+        ".css",
+        ".html",
+        ".htm",
+        ".toml",
+        ".ini",
+        ".cfg",
+        ".conf",
+        ".env",
+        # Archives
         ".zip",
     }
 )

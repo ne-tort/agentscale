@@ -197,10 +197,12 @@ abstract final class AppErrors {
       'CASCADE_INCOMPLETE' => l10n.errorCascadeIncomplete,
       'SCHEMA_DROP_FAILED' => l10n.errorServer,
       'AUTH_MISCONFIGURED' => l10n.errorIdentityProvider,
-      'ATTACHMENT_TOO_LARGE' ||
-      'ATTACHMENT_FORBIDDEN' ||
-      'ATTACHMENT_TYPE' =>
-        l10n.errorValidation,
+      'ATTACHMENT_TOO_LARGE' => l10n.errorAttachmentTooLarge,
+      'ATTACHMENT_TYPE_FORBIDDEN' || 'ATTACHMENT_TYPE' => l10n.errorAttachmentTypeForbidden,
+      'ATTACHMENT_CONTENT_FORBIDDEN' => l10n.errorAttachmentContentForbidden,
+      'ATTACHMENT_NOT_FOUND' => l10n.errorNotFound,
+      'TOO_MANY_ATTACHMENTS' => l10n.errorTooManyAttachments,
+      'ATTACHMENT_FORBIDDEN' => l10n.errorAttachmentTypeForbidden,
       _ => null,
     };
   }
