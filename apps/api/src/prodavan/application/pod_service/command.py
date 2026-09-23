@@ -433,9 +433,9 @@ class PodCommand:
         extra_env = await ContainerEnvLoader(self._session).load_for_project(
             project, lifecycle=lifecycle
         )
-        pod_auth_token = await self._mint_pod_bridge_token(project, pod, principal=principal)
+        pod_auth_token, pod_bridge_gen = await self._mint_pod_bridge_token(project, pod, principal=principal)
         ctx = self._runtime_context(
-            project, pod, extra_env=extra_env, pod_auth_token=pod_auth_token
+            project, pod, extra_env=extra_env, pod_auth_token=pod_auth_token, pod_bridge_gen=pod_bridge_gen
         )
         # Commit before k8s create/wait so pod_reconcile zombie reaper sees the PG row.
         await self._session.commit()
@@ -460,7 +460,7 @@ class PodCommand:
         pod: ProjectPodRow,
         *,
         principal: Principal,
-    ) -> str | None:
+    ) -> tuple[str | None, int | None]:
         from prodavan.application.modules.module_binding_service import ModuleBindingService
         from prodavan.application.pod_identity.bridge import (
             build_launch_scopes,
@@ -471,7 +471,7 @@ class PodCommand:
             project.id
         )
         scopes = build_launch_scopes(module_ids)
-        token, _claims = await mint_pod_bridge_token(
+        token, claims = await mint_pod_bridge_token(
             project_id=project.id,
             cabinet_id=project.cabinet_id,
             company_id=project.company_id,
@@ -479,7 +479,7 @@ class PodCommand:
             scopes=scopes,
             acting_employee_id=principal.sub or None,
         )
-        return token
+        return token, claims.gen
 
     async def _apply_absent(self, project: ProjectRow, pod: ProjectPodRow) -> None:
         from prodavan.application.pod_identity.bridge import bump_pod_bridge_generation
@@ -516,6 +516,7 @@ class PodCommand:
         *,
         extra_env: tuple[tuple[str, str], ...] = (),
         pod_auth_token: str | None = None,
+        pod_bridge_gen: int | None = None,
     ) -> PodRuntimeContext:
         return PodRuntimeContext(
             pod_id=pod.id,
@@ -525,6 +526,7 @@ class PodCommand:
             hydrate_generation=pod.hydrate_generation,
             extra_env=extra_env,
             pod_auth_token=pod_auth_token,
+            pod_bridge_gen=pod_bridge_gen,
         )
 
     @staticmethod

@@ -177,6 +177,8 @@ def build_pod_body(
         "prodavan.io/workspace-key": context.workspace_key,
         "prodavan.io/hydrate-generation": str(context.hydrate_generation),
     }
+    if context.pod_bridge_gen is not None:
+        labels["prodavan.io/bridge-generation"] = str(context.pod_bridge_gen)
     init_env: list[dict[str, Any]] = [
         {"name": "WORKSPACE_KEY", "value": context.workspace_key},
         {"name": "HYDRATE_TARGET", "value": _WORKSPACE_MOUNT},
