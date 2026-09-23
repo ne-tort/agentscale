@@ -80,6 +80,12 @@ class ChatComposer extends StatefulWidget {
 class _ChatComposerState extends State<ChatComposer> {
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
+  // Stable key for the Focus widget so that when the layout switches between
+  // the single-line Row and the multi-line Column (buttons moving under the
+  // field), Flutter reparents the Focus subtree instead of rebuilding it.
+  // Without it, the Focus widget is recreated under a new parent and the
+  // TextField loses primary focus on the first newline.
+  final _focusKey = GlobalKey();
   final List<_PendingAttachment> _attachments = [];
   bool _uploading = false;
   bool _draftHydrated = false;
@@ -431,6 +437,7 @@ class _ChatComposerState extends State<ChatComposer> {
 
   Widget _textField(BuildContext context) {
     return Focus(
+      key: _focusKey,
       onKeyEvent: _handleKeyEvent,
       child: TextField(
         controller: _controller,

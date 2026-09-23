@@ -154,4 +154,15 @@ class K8sPodRuntimeAdapter:
             return False
         if existing.hydrate_generation is None:
             return False
-        return existing.hydrate_generation != context.hydrate_generation
+        if existing.hydrate_generation != context.hydrate_generation:
+            return True
+        # Bridge token generation: pause/reload/terminate bump the pod bridge
+        # generation after the pod was created. A pod carrying a stale bridge
+        # token (gen < current) cannot hydrate and crashes Init with HTTP 401.
+        # Recreate it so the freshly minted token (gen=current) is baked in.
+        if context.pod_bridge_gen is not None:
+            if existing.bridge_generation is None:
+                return True
+            if existing.bridge_generation != context.pod_bridge_gen:
+                return True
+        return False

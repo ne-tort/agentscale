@@ -56,6 +56,7 @@ class PodSnapshot:
     ready: bool
     labels: dict[str, str]
     hydrate_generation: int | None = None
+    bridge_generation: int | None = None
     hydrating: bool = False
     hydrate_failed: bool = False
     fatal_failure: str | None = None
@@ -250,6 +251,8 @@ def _parse_snapshot(body: dict[str, Any]) -> PodSnapshot:
             ready = True
     gen_raw = labels.get("prodavan.io/hydrate-generation")
     hydrate_gen = int(gen_raw) if gen_raw is not None and str(gen_raw).isdigit() else None
+    bridge_raw = labels.get("prodavan.io/bridge-generation")
+    bridge_gen = int(bridge_raw) if bridge_raw is not None and str(bridge_raw).isdigit() else None
     hydrating, hydrate_failed = _init_hydrate_state(status)
     fatal_failure = _pod_fatal_failure(status)
     waiting_reason = _pod_waiting_reason(status)
@@ -262,6 +265,7 @@ def _parse_snapshot(body: dict[str, Any]) -> PodSnapshot:
         ready=ready,
         labels=labels,
         hydrate_generation=hydrate_gen,
+        bridge_generation=bridge_gen,
         hydrating=hydrating,
         hydrate_failed=hydrate_failed,
         fatal_failure=fatal_failure,
