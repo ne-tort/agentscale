@@ -391,18 +391,18 @@ jobs:
           cache-from: type=local,src=/tmp/.buildx-cache-agent
           cache-to: type=local,dest=/tmp/.buildx-cache-agent-new,mode=max
 
-      - name: Agent-runtime smoke (artifacts present + node require + health)
+      - name: Agent-runtime smoke (artifacts present + health)
         if: steps.meta.outputs.push == 'true'
         run: |
           set -euo pipefail
           IMAGE="${{ steps.meta.outputs.agent }}:${{ steps.meta.outputs.tag }}"
-          # 1) Non-zero artifacts must exist in the image.
+          # 1) Non-zero artifacts must exist in the image (catches a stale
+          #    buildx cache that ships an empty dist/ tree).
           docker run --rm --entrypoint sh "$IMAGE" -c \
             'test -s /app/package.json && test -s /app/package-lock.json && test -s /app/packages/bridge/dist/server.js && test -d /app/node_modules'
-          # 2) Bridge module graph must load (catches empty/truncated dist from a stale buildx cache).
-          docker run --rm --entrypoint sh "$IMAGE" -c \
-            'cd /app/packages/bridge && node -e "import(\"./dist/server.js\").then(()=>console.log(\"bridge module ok\")).catch(e=>{console.error(e);process.exit(1)})"'
-          # 3) Health endpoint must respond 200 within start-period.
+          # 2) Health endpoint must respond 200 within start-period. This also
+          #    proves server.js actually loads and boots Hono — a 0-byte or
+          #    truncated dist will crash the container and never answer.
           docker run -d --name agent-runtime-smoke-${{ github.run_id }} --network host \
             -e PORT=3921 -e WORKSPACE_ROOT=/tmp/ws \
             "$IMAGE"
@@ -415,7 +415,7 @@ jobs:
             fi
             sleep 2
           done
-          [ "$ok" = "1" ] || { echo "agent-runtime /health did not return 200"; exit 1; }
+          [ "$ok" = "1" ] || { echo "agent-runtime /health did not return 200"; docker logs agent-runtime-smoke-${{ github.run_id }} 2>&1 | tail -40; exit 1; }
 
       - name: Rotate cache
         run: |
