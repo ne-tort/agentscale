@@ -345,10 +345,14 @@ async def project_chat_transcript(
     session: SessionDep,
     employee: EmployeeDep,
     session_id: str,
-    limit: int = 100,
+    limit: int = 500,
     before_seq: int | None = None,
 ) -> dict:
     """Reload typed chat blocks for an explicit session (multi-chat)."""
+    # Clamp to a sane upper bound — the default page is large so a typical
+    # session shows its full history without the user scrolling up to trigger
+    # pagination, but remains bounded for very long sessions.
+    limit = max(1, min(limit, 500))
     return await AgentSessionService(session).get_transcript(
         project_id=project_id,
         principal=principal,

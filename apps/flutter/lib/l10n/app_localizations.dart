@@ -3122,6 +3122,30 @@ abstract class AppLocalizations {
   /// **'Please check the entered data.'**
   String get errorValidation;
 
+  /// No description provided for @errorAttachmentTooLarge.
+  ///
+  /// In en, this message translates to:
+  /// **'Attachment is too large.'**
+  String get errorAttachmentTooLarge;
+
+  /// No description provided for @errorAttachmentTypeForbidden.
+  ///
+  /// In en, this message translates to:
+  /// **'This file type is not allowed.'**
+  String get errorAttachmentTypeForbidden;
+
+  /// No description provided for @errorAttachmentContentForbidden.
+  ///
+  /// In en, this message translates to:
+  /// **'This file content is not allowed.'**
+  String get errorAttachmentContentForbidden;
+
+  /// No description provided for @errorTooManyAttachments.
+  ///
+  /// In en, this message translates to:
+  /// **'Too many attachments in one message.'**
+  String get errorTooManyAttachments;
+
   /// No description provided for @errorProjectPaused.
   ///
   /// In en, this message translates to:

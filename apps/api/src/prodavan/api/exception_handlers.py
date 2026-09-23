@@ -71,11 +71,21 @@ async def http_exception_handler(request: Request, exc: StarletteHTTPException) 
 async def validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
+    # Surface the first Pydantic error as the problem detail so a client snackbar
+    # can show a meaningful, domain-scoped message instead of a generic
+    # "Invalid request". The full error list stays in server logs.
+    first = exc.errors()[0] if exc.errors() else None
+    if first is not None:
+        loc = ".".join(str(p) for p in first.get("loc", []) if p != "body")
+        msg = str(first.get("msg") or "invalid value")
+        detail = f"{loc}: {msg}" if loc else msg
+    else:
+        detail = "Invalid request"
     return problem_response(
         status=422,
         code="VALIDATION_ERROR",
         title="Validation Error",
-        detail="Invalid request",
+        detail=detail,
         trace_id=_trace_id(request),
     )
 

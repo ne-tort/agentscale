@@ -1,4 +1,16 @@
-"""Deliver chat attachments into the agent prompt and/or live Pod workspace."""
+"""Deliver chat attachments into the agent prompt and/or live Pod workspace.
+
+Delivery strategy per attachment (size permitting):
+- Inlineable text (txt/md/json/code/html/docx/odt/pptx) → parsed to plain text
+  and embedded as a "Вложенные данные" fenced block in the agent prompt.
+- Inlineable tabular (csv/tsv/xlsx/xml) → converted to JSON records and
+  embedded as a "Вложенные данные" fenced block in the agent prompt.
+- Anything else (binary, oversized, unparseable) → written to the Pod
+  workspace under /workspace/inbox/ and referenced by path in the prompt.
+
+Every attachment triggers the agent: the composed message ends with
+"Поступи с ним, согласно инструкциям." so the agent always acts on the file.
+"""
 
 from __future__ import annotations
 
@@ -14,6 +26,11 @@ from prodavan.application.content.tabular_json import (
     is_tabular_filename,
     records_to_json_bytes,
     tabular_bytes_to_json,
+)
+from prodavan.application.content.text_extract import (
+    MAX_INLINE_TEXT_BYTES,
+    extract_text,
+    is_text_extractable_filename,
 )
 from prodavan.application.pod_service.adapters.k8s.workspace_exec_cmd import build_workspace_fs_command
 from prodavan.application.pod_service.workspace_paths import normalize_workspace_path
@@ -31,7 +48,9 @@ from prodavan.infrastructure.persistence.models.projects import ProjectAttachmen
 
 logger = logging.getLogger(__name__)
 
-DeliveryKind = Literal["inline_json", "workspace_file"]
+DeliveryKind = Literal["inline_text", "inline_json", "workspace_file"]
+
+_INSTRUCTION_SUFFIX = "Поступи с ним, согласно инструкциям."
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,7 +61,8 @@ class DeliveredAttachment:
     workspace_path: str | None
     row_count: int | None
     records: list[dict[str, str]] | None
-    note: str
+    text: str | None = None
+    note: str = ""
 
     def ui_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -57,6 +77,8 @@ class DeliveredAttachment:
             out["row_count"] = self.row_count
         if self.kind == "inline_json" and self.records is not None:
             out["inline_json"] = self.records
+        if self.kind == "inline_text" and self.text is not None:
+            out["inline_text"] = self.text
         return out
 
 
@@ -71,7 +93,14 @@ class AttachmentDeliveryResult:
 
 
 def compose_agent_message(*, user_text: str, items: list[DeliveredAttachment]) -> str:
-    """Build the bridge/adapter prompt: attachment notices + optional inline JSON."""
+    """Build the bridge/adapter prompt: attachment notices + inline data + user text.
+
+    Each inlineable attachment is rendered as a fenced "Вложенные данные" block
+    clearly labelled with the source filename and parse note, so the agent can
+    treat the block as parsed file content. Non-inlineable attachments are
+    announced with their workspace path. The message always closes with the
+    instruction suffix so the agent acts on the file.
+    """
     trimmed = (user_text or "").strip()
     if not items:
         return trimmed
@@ -80,34 +109,31 @@ def compose_agent_message(*, user_text: str, items: list[DeliveredAttachment]) -
     for item in items:
         if item.kind == "inline_json" and item.records is not None:
             payload = records_to_json_bytes(item.records, indent=2).decode("utf-8")
-            sections.append(
-                "[Attachment: {name} — converted to JSON, {n} row(s) inlined below]\n"
-                "```json\n{payload}\n```".format(
-                    name=item.filename,
-                    n=item.row_count or len(item.records),
-                    payload=payload,
-                )
+            header = (
+                f"Вложенные данные: {item.filename} "
+                f"({item.note})"
             )
+            sections.append(f"{header}\n```json\n{payload}\n```")
+        elif item.kind == "inline_text" and item.text is not None:
+            header = f"Вложенные данные: {item.filename} ({item.note})"
+            # Fenced code block with a neutral info string; the label is in the header line.
+            sections.append(f"{header}\n```\n{item.text}\n```")
         elif item.workspace_path:
             sections.append(
-                "[Attachment added: {name} → /workspace/{path}]".format(
-                    name=item.filename,
-                    path=item.workspace_path,
-                )
+                f"Вложение добавлено: {item.filename} → /workspace/{item.workspace_path}"
             )
-            if item.note and "converted" in item.note.lower():
-                sections.append(f"({item.note})")
         else:
-            sections.append(f"[Attachment: {item.filename}] {item.note}".strip())
+            sections.append(f"Вложение: {item.filename} ({item.note})".strip())
 
     prefix = "\n\n".join(sections)
+    instruction = _INSTRUCTION_SUFFIX
     if trimmed:
-        return f"{prefix}\n\n{trimmed}"
-    return prefix
+        return f"{prefix}\n\n{trimmed}\n\n{instruction}"
+    return f"{prefix}\n\n{instruction}"
 
 
 def compose_display_text(*, user_text: str, items: list[DeliveredAttachment]) -> str:
-    """User-visible bubble text — never dump inline JSON here."""
+    """User-visible bubble text — never dump inline text/JSON here."""
     trimmed = (user_text or "").strip()
     if trimmed:
         return trimmed
@@ -256,65 +282,136 @@ class AttachmentDeliveryService:
         workspace_key: str,
         runtime_ref: str | None,
     ) -> DeliveredAttachment:
+        # 1) Tabular (csv/tsv/xlsx/xml) → JSON records inline or as workspace file.
         if is_tabular_filename(filename):
-            try:
-                parsed = tabular_bytes_to_json(raw, filename=filename)
-            except ValueError as exc:
-                rel = f"inbox/{Path(filename).name}"
-                await self._put_inbox_bytes(
-                    workspace_key=workspace_key,
-                    filename=Path(filename).name,
-                    data=raw,
-                    content_type="application/octet-stream",
-                )
-                try:
-                    await self._write_pod_file(runtime_ref=runtime_ref, relative_path=rel, data=raw)
-                except Exception:
-                    logger.exception("pod write failed for %s", rel)
-                return DeliveredAttachment(
-                    filename=filename,
-                    storage_ref=storage_ref,
-                    kind="workspace_file",
-                    workspace_path=rel,
-                    row_count=None,
-                    records=None,
-                    note=f"could not convert tabular file ({exc}); raw file at /workspace/{rel}",
-                )
-
-            if parsed.row_count <= CHAT_INLINE_TABULAR_ROW_LIMIT:
-                return DeliveredAttachment(
-                    filename=filename,
-                    storage_ref=storage_ref,
-                    kind="inline_json",
-                    workspace_path=None,
-                    row_count=parsed.row_count,
-                    records=parsed.records,
-                    note=f"converted {parsed.source_format} → JSON, inlined ({parsed.row_count} rows)",
-                )
-
-            json_name = f"{Path(filename).stem}.json"
-            rel = f"inbox/{json_name}"
-            json_bytes = records_to_json_bytes(parsed.records, indent=2)
-            await self._put_inbox_bytes(
+            return await self._prepare_tabular(
+                filename=filename,
+                storage_ref=storage_ref,
+                raw=raw,
                 workspace_key=workspace_key,
-                filename=json_name,
-                data=json_bytes,
-                content_type="application/json",
+                runtime_ref=runtime_ref,
             )
-            try:
-                await self._write_pod_file(runtime_ref=runtime_ref, relative_path=rel, data=json_bytes)
-            except Exception:
-                logger.exception("pod write failed for %s", rel)
+
+        # 2) Text-like (txt/md/json/code/html/docx/odt/pptx) → inline text or workspace file.
+        if is_text_extractable_filename(filename):
+            return await self._prepare_text(
+                filename=filename,
+                storage_ref=storage_ref,
+                raw=raw,
+                workspace_key=workspace_key,
+                runtime_ref=runtime_ref,
+            )
+
+        # 3) Everything else (binary/unknown) → workspace file.
+        return await self._prepare_workspace_file(
+            filename=filename,
+            storage_ref=storage_ref,
+            raw=raw,
+            workspace_key=workspace_key,
+            runtime_ref=runtime_ref,
+            note="файл помещён в контейнер",
+        )
+
+    async def _prepare_tabular(
+        self,
+        *,
+        filename: str,
+        storage_ref: str,
+        raw: bytes,
+        workspace_key: str,
+        runtime_ref: str | None,
+    ) -> DeliveredAttachment:
+        try:
+            parsed = tabular_bytes_to_json(raw, filename=filename)
+        except ValueError as exc:
+            return await self._prepare_workspace_file(
+                filename=filename,
+                storage_ref=storage_ref,
+                raw=raw,
+                workspace_key=workspace_key,
+                runtime_ref=runtime_ref,
+                note=f"не удалось распарсить таблицу ({exc}); файл помещён в контейнер",
+            )
+
+        if parsed.row_count <= CHAT_INLINE_TABULAR_ROW_LIMIT:
             return DeliveredAttachment(
                 filename=filename,
                 storage_ref=storage_ref,
-                kind="workspace_file",
-                workspace_path=rel,
+                kind="inline_json",
+                workspace_path=None,
                 row_count=parsed.row_count,
-                records=None,
-                note=f"converted {parsed.source_format} → JSON ({parsed.row_count} rows) at /workspace/{rel}",
+                records=parsed.records,
+                text=None,
+                note=f"парсинг {parsed.source_format} → JSON, {parsed.row_count} строк",
             )
 
+        # Large tabular: convert to JSON file in workspace, reference by path.
+        json_name = f"{Path(filename).stem}.json"
+        rel = f"inbox/{json_name}"
+        json_bytes = records_to_json_bytes(parsed.records, indent=2)
+        await self._put_inbox_bytes(
+            workspace_key=workspace_key,
+            filename=json_name,
+            data=json_bytes,
+            content_type="application/json",
+        )
+        try:
+            await self._write_pod_file(runtime_ref=runtime_ref, relative_path=rel, data=json_bytes)
+        except Exception:
+            logger.exception("pod write failed for %s", rel)
+        return DeliveredAttachment(
+            filename=filename,
+            storage_ref=storage_ref,
+            kind="workspace_file",
+            workspace_path=rel,
+            row_count=parsed.row_count,
+            records=None,
+            text=None,
+            note=f"парсинг {parsed.source_format} → JSON ({parsed.row_count} строк), файл /workspace/{rel}",
+        )
+
+    async def _prepare_text(
+        self,
+        *,
+        filename: str,
+        storage_ref: str,
+        raw: bytes,
+        workspace_key: str,
+        runtime_ref: str | None,
+    ) -> DeliveredAttachment:
+        text = extract_text(raw, filename=filename)
+        if text and len(raw) <= MAX_INLINE_TEXT_BYTES:
+            return DeliveredAttachment(
+                filename=filename,
+                storage_ref=storage_ref,
+                kind="inline_text",
+                workspace_path=None,
+                row_count=None,
+                records=None,
+                text=text,
+                note="парсинг в текст, встроено в сообщение",
+            )
+        # Oversized or unparseable text-like file → workspace file.
+        note = "файл помещён в контейнер" if not text else "файл превышает размер инлайна, помещён в контейнер"
+        return await self._prepare_workspace_file(
+            filename=filename,
+            storage_ref=storage_ref,
+            raw=raw,
+            workspace_key=workspace_key,
+            runtime_ref=runtime_ref,
+            note=note,
+        )
+
+    async def _prepare_workspace_file(
+        self,
+        *,
+        filename: str,
+        storage_ref: str,
+        raw: bytes,
+        workspace_key: str,
+        runtime_ref: str | None,
+        note: str,
+    ) -> DeliveredAttachment:
         safe_name = Path(filename).name
         rel = f"inbox/{safe_name}"
         await self._put_inbox_bytes(
@@ -334,7 +431,8 @@ class AttachmentDeliveryService:
             workspace_path=rel,
             row_count=None,
             records=None,
-            note=f"file available at /workspace/{rel}",
+            text=None,
+            note=f"{note}; путь /workspace/{rel}",
         )
 
 
@@ -351,4 +449,13 @@ def row_content_type_guess(filename: str) -> str:
         ".webp": "image/webp",
         ".gif": "image/gif",
         ".zip": "application/zip",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".odt": "application/vnd.oasis.opendocument.text",
+        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        ".csv": "text/csv",
+        ".tsv": "text/tab-separated-values",
+        ".html": "text/html",
+        ".htm": "text/html",
+        ".xml": "application/xml",
     }.get(ext, "application/octet-stream")
