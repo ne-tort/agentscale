@@ -147,6 +147,8 @@ class ChatSessionController {
         final pending = body['pending_approvals'];
         pendingApprovals = pending is List ? pending.cast<Map<String, dynamic>>() : const [];
       } else {
+        // Pagination may legitimately return zero new blocks near the head —
+        // only short-circuit when there is nothing more to load.
         blocks.insertAll(0, newBlocks);
       }
       hasMoreHistory = body['has_more'] == true;
@@ -156,9 +158,20 @@ class ChatSessionController {
       if (total is int) {
         totalEvents = total;
       }
+      // A page that returned blocks but reports has_more=false means we reached
+      // the head — clear the stale oldestSeq so loadOlderTranscript gates out.
+      if (!hasMoreHistory) {
+        oldestSeq = null;
+      }
       if (beforeSeq == null) {
         _saveToCache();
       }
+      notifyImmediate();
+    } catch (e) {
+      // Best-effort transcript load: do not crash the chat. Keep the cached /
+      // existing blocks visible; surface the error so the UI can show a
+      // themed snackbar without leaving the composer in a dead state.
+      error = e;
       notifyImmediate();
     } finally {
       if (background) {
@@ -174,6 +187,10 @@ class ChatSessionController {
     notifyImmediate();
     try {
       await loadTranscript(beforeSeq: oldestSeq);
+    } catch (e) {
+      // loadTranscript already recorded the error; keep loadingHistory gating sane.
+      error = e;
+      notifyImmediate();
     } finally {
       loadingHistory = false;
       notifyImmediate();

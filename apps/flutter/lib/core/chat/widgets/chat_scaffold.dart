@@ -189,8 +189,15 @@ class ChatMessageListState extends State<ChatMessageList> {
     if (!widget.hasMoreHistory || widget.loadingHistory || widget.onLoadOlder == null) {
       return;
     }
-    // Only when content cannot fill the viewport — user has no way to scroll to top.
-    if (_scroll.position.maxScrollExtent < _kStickThreshold) {
+    // Reverse list: maxScrollExtent is the visual top (older messages). When
+    // the content does not fill the viewport the user has no scroll affordance
+    // to reach older history, so we eagerly fetch the next page until the
+    // viewport fills or there is nothing more to load. Using the viewport
+    // extent (not a fixed 48px threshold) is what keeps a short cached tail
+    // from rendering as a single truncated slice with no way up.
+    final pos = _scroll.position;
+    final contentFillsViewport = pos.maxScrollExtent > pos.viewportDimension;
+    if (!contentFillsViewport) {
       widget.onLoadOlder!();
     }
   }
@@ -279,6 +286,12 @@ class ChatMessageListState extends State<ChatMessageList> {
       if (wasPinned) {
         _ensureBottom(animate: _didInitialBottom);
       }
+      // After a background transcript refresh the block set may have grown; if
+      // the viewport still is not filled, keep fetching older pages so a short
+      // cached tail does not render as a single truncated slice.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _maybeAutoloadOlder();
+      });
       return;
     }
 
