@@ -31,7 +31,7 @@ def _noop_container_env_loader(monkeypatch):
         ),
         patch(
             "prodavan.application.pod_service.command.PodCommand._mint_pod_bridge_token",
-            new=AsyncMock(return_value="test-pod-bridge-jwt"),
+            new=AsyncMock(return_value=("test-pod-bridge-jwt", 0)),
         ),
     ):
         yield
