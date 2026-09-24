@@ -5,6 +5,8 @@
 
 > **Не путать с upstream:** репозиторий [openclaw/openclaw](https://github.com/openclaw/openclaw) **не** является зависимостью и **не** деплоится as-is. Берём проверенные идеи (gateway, session manager, tool loop), переписываем под SaaS Pod и `AgentProviderPort`.
 
+> **Поставка образа** `prodavan-agent-runtime` (сборка → GHCR → pull в Pod, кэш CI, карта дыр): [docs/07-infrastructure/agent-runtime-delivery.md](../07-infrastructure/agent-runtime-delivery.md).
+
 ## Два класса runtime
 
 | Класс | Адаптеры | LLM backend | Когда выбирать |
