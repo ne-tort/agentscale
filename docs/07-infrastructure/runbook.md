@@ -19,7 +19,7 @@
 | Sealed Secrets | `infra/argocd/sealed-secrets` + `overlays/dev/SECRETS.md` |
 | Ops CLI | [`infra/ops`](../../infra/ops): `validate` / `wait` / `rollout` / `smoke` |
 
-Образы: `ghcr.io/ne-tort/prodavan-{api,web}:latest` (основной репо, CI Images), `ghcr.io/ne-tort/prodavan-agent-runtime:latest` (агент-runtime — его собирают **два** пайплайна: openclaw-images в подмодуле prodavan-claw **и** build-agent-runtime в CI Images основного репо; см. [agent-runtime-delivery.md](agent-runtime-delivery.md)). `imagePullPolicy: Always`, secret `ghcr-pull`. Probe pod в `prodavan-sandboxes` (см. §1.1).
+Образы: `ghcr.io/ne-tort/prodavan-{api,web}:latest` (основной репо, CI Images), `ghcr.io/ne-tort/prodavan-agent-runtime:latest` (агент-runtime — собирает **только** openclaw-images в подмодуле prodavan-claw; дубль-job в CI Images удалён 2026-09-24; см. [agent-runtime-delivery.md](agent-runtime-delivery.md)). `imagePullPolicy: Always`, secret `ghcr-pull`. Probe pod в `prodavan-sandboxes` (см. §1.1).
 
 ---
 
@@ -37,7 +37,7 @@
 
 ### 1.1 Agent-runtime (probe pod) — отдельный поток
 
-Образ `prodavan-agent-runtime` исторически собирается в **подмодуле `prodavan-claw`** (workflow `openclaw-images.yml`, после auto-merge PR в claw). С 2026-09 его **также** собирает CI Images основного репо — job `build-agent-runtime` в `ci-images.yml` (paths: `prodavan-claw/**`, `.gitmodules`, …): клонирует claw по указателю сабмодуля, buildx local-cache, smoke (артефакты + `/health`). Оба пайплайна пушат один тег `:latest` — это задокументированная дыра №1 в [agent-runtime-delivery.md](agent-runtime-delivery.md) (карта дыр и бэклог фиксов — там же).
+Образ `prodavan-agent-runtime` собирается **только** в **подмодуле `prodavan-claw`** (workflow `openclaw-images.yml`, после auto-merge PR в claw): buildx кэш `type=registry` (общий для dd-claw-раннеров), smoke (артефакты + `/health`) гейтит trigger-verify. Дубль-job `build-agent-runtime` в CI Images основного репо удалён (2026-09-24, дыра №1 закрыта) — карта дыр и статус фиксов в [agent-runtime-delivery.md](agent-runtime-delivery.md).
 
 ```text
 prodavan-claw PR → openclaw-ci → auto-merge
