@@ -83,7 +83,7 @@ Pod проекта: pod_service создаёт Pod c POD_AGENT_RUNTIME_IMAGE (:l
 | 6 | ~~Нет cache-mounts~~ **закрыта**: npm (`/root/.npm`) + apt (`/var/cache/apt`, `/var/lib/apt`) | — | — | — |
 | 7 | ~~--no-save + \|\| true~~ **закрыта**: pinned версии из bridge devDeps, ошибки loud | — | — | — |
 | 8 | ~~chown -R~~ **закрыта**: `COPY --chown=node:node` (−778 МБ) | — | — | — |
-| 9 | ~~devDeps в runtime~~ **закрыта 2026-09-25**: `npm prune --omit=dev` в build-стейджах; vendor SDK вырезаны (адаптеры падают в stub — дефолт `openclaw_sdk` их не требует) | — | — | — |
+| 9 | ~~devDeps в runtime~~ **закрыта**: `npm prune --omit=dev` выкидывает typescript/tsx; vendor SDK **остаются** (образ всегда full, все адаптеры live-способны); для тонких/кастомных образов — lazy-install (`importOrInstall` в `@openclaw/runtime`) + stub-фолбэк | — | — | — |
 | 10 | ~~.dockerignore~~ **закрыта**: `.dockerignore` в корне claw (excludes references/, docs/, .git, node_modules) | — | — | — |
 | 11 | `:latest` + Always, дайджест нигде не пинится; откат = re-push | configmap, `pod_spec.py`, I18-заметка | невозможен точечный rollback; «какой digest в кластере» — только гадание | pod_service резолвит digest при создании Pod'а (P3) |
 | 12 | ~~Optional live smokes фейлят pipeline~~ **закрыта**: `continue-on-error: true` на всех live-шагах `openclaw-ci.yml` (внешний API-флейк больше не красит push) | — | — | — |
@@ -91,7 +91,7 @@ Pod проекта: pod_service создаёт Pod c POD_AGENT_RUNTIME_IMAGE (:l
 
 ## 7. Бэклог: статус (P1+P2 реализованы 2026-09-24)
 
-**Сделано** (claw `46090c7` + PR #445 в prodavan):
+**Сделано** (claw `46090c7`→`09b9aa8` + PR #445/#446 в prodavan):
 
 - ✅ **P1 кэш:** `openclaw-images.yml` — buildx кэш `type=registry` (`<image>-buildcache`, mode=max): общий для dd-claw-раннеров, переживает пересоздание контейнеров; `concurrency`-группа на ref. ✅ **P1 smoke:** новый smoke-job (артефакты + `/health`) гейтит trigger-verify. ✅ **P1 fail-fast**: отпало вместе с удалением дубль-джобы (нет клона сабмодуля в image-CI). ✅ **P1 один пайплайн:** `build-agent-runtime` удалён из `ci-images.yml`; claw — единственный владелец.
 - ✅ **P2 Dockerfile:** стейдж `toolchain` (apt/nvm/rustup в 3 RUN с cache-mounts; пересборка только при правке списка пакетов), manifests-first COPY (правка `.ts` не перезапускает `npm ci` — верифицировано), pinned vendor SDK (без `|| true`), `COPY --chown` вместо `chown -R` (−778 МБ), `.dockerignore` в корне claw. Образ **6,27 ГБ → 4,37 ГБ**, health OK. ✅ **P2 live-smokes:** `continue-on-error` в `openclaw-ci.yml`.
