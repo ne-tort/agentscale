@@ -19,7 +19,7 @@
 | Sealed Secrets | `infra/argocd/sealed-secrets` + `overlays/dev/SECRETS.md` |
 | Ops CLI | [`infra/ops`](../../infra/ops): `validate` / `wait` / `rollout` / `smoke` |
 
-Образы: `ghcr.io/ne-tort/prodavan-{api,web}:latest` (основной репо, CI Images), `ghcr.io/ne-tort/prodavan-agent-runtime:latest` (подмодуль prodavan-claw, openclaw-images). `imagePullPolicy: Always`, secret `ghcr-pull`. Probe pod в `prodavan-sandboxes` (см. §1.1).
+Образы: `ghcr.io/ne-tort/prodavan-{api,web}:latest` (основной репо, CI Images), `ghcr.io/ne-tort/prodavan-agent-runtime:latest` (агент-runtime — его собирают **два** пайплайна: openclaw-images в подмодуле prodavan-claw **и** build-agent-runtime в CI Images основного репо; см. [agent-runtime-delivery.md](agent-runtime-delivery.md)). `imagePullPolicy: Always`, secret `ghcr-pull`. Probe pod в `prodavan-sandboxes` (см. §1.1).
 
 ---
 
@@ -37,7 +37,7 @@
 
 ### 1.1 Agent-runtime (probe pod) — отдельный поток
 
-Образ `prodavan-agent-runtime` собирается в **подмодуле `prodavan-claw`** (workflow `openclaw-images.yml`), не в основном репо `prodavan`. CI Images основного репо собирает только `prodavan-api` + `prodavan-web` — agent-runtime в нём отсутствует.
+Образ `prodavan-agent-runtime` исторически собирается в **подмодуле `prodavan-claw`** (workflow `openclaw-images.yml`, после auto-merge PR в claw). С 2026-09 его **также** собирает CI Images основного репо — job `build-agent-runtime` в `ci-images.yml` (paths: `prodavan-claw/**`, `.gitmodules`, …): клонирует claw по указателю сабмодуля, buildx local-cache, smoke (артефакты + `/health`). Оба пайплайна пушат один тег `:latest` — это задокументированная дыра №1 в [agent-runtime-delivery.md](agent-runtime-delivery.md) (карта дыр и бэклог фиксов — там же).
 
 ```text
 prodavan-claw PR → openclaw-ci → auto-merge
