@@ -60,3 +60,7 @@ infra/.kube/*
 *.sqlite
 *.db
 .openclaw-data/
+
+# Local agent tooling (never commit)
+.kilo/
+.opencode/

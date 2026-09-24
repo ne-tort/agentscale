@@ -17,6 +17,7 @@ Legacy AI-канон: [`docs/target/`](docs/target/) (кроме as-built) — �
 | ~~Канон BC~~ legacy | [`docs/target/01…15`](docs/target/) | Справка, не блокер |
 
 **Правило:** PRODUCT.md + код > gap map. E2E — backend API, не Flutter.
+
 ## Git / CI / кластер (GitOps)
 
 **Ранбук:** [`docs/07-infrastructure/runbook.md`](docs/07-infrastructure/runbook.md).
@@ -94,71 +95,29 @@ ORM-модель → autogenerate в PR → CI (upgrade + alembic check) → mer
 ## Суть продукта
 
 **UI → API → k8s Pod → agent (файлы, tools, SDK).** Подробно: [`docs/PRODUCT.md`](docs/PRODUCT.md).
-## Субагенты (Task tool)
 
-Канон: [skills/task-subagent/SKILL.md](.opencode/skills/task-subagent/SKILL.md)
+## Окружение: Windows
 
-subagent_type в вызове Task — это имя агента, не модель. Валидные значения (проверено эмпирически в этой сборке opencode):
-
-- general — да, subagent; многошаговые задачи, правки файлов, параллелизм.
-- explore — да, subagent read-only; поиск файлов/кода по кодбейзу.
-- build — да, primary; полный доступ к tools.
-- plan — да, primary; анализ без правок.
-- scout — НЕТ: Unknown agent type в этой сборке, не использовать.
-
-НЕ путать с model: inherit — это поле КОНФИГА агента (opencode.json / markdown frontmatter), а не параметр Task tool. Значения inherit, auto, Auto, General (с заглавной), пустая строка — НЕВАЛИДНЫ как subagent_type и дают Unknown agent type.
-
-Правила вызова:
-- subagent_type — обязательно, ровно одно из значений выше, lowercase.
-- description — короткое (1–5 слов); prompt — конкретная задача с критерием готовности.
-- Параллельно: несколько task в одном сообщении, когда задания независимы.
-- task_id — только для resume существующей сессии.
-
-## Окружение: Windows + PowerShell
-
-**ОС: Windows.** Конфиг: `opencode.json` (проектный) задаёт `"shell": "powershell"`. Версия PS — **5.1** (проверено: `$PSVersionTable.PSVersion` = 5.1).
-
-Подробный канон с подводными камнями: [skills/file-tools/SKILL.md](.opencode/skills/file-tools/SKILL.md).
+**ОС: Windows.** Shell для системных команд — Git Bash: `git`, `npm`/`pnpm`, тесты, сборки, `gh`, `wsl`, скрипты.
 
 ### Файловые операции — через native-инструменты, НЕ через bash
 
-**Запрет:** не использовать `cat`, `Get-Content`, `head`, `tail`, `sed`, `Set-Content`, heredoc (`cat <<EOF`), `echo >` для чтения/записи/правки файлов. Это ломает кодировку (кириллица → mojibake) и нестабильно.
+Не читать/писать/искать файлы через `cat`, `head`, `tail`, `sed`, `echo >`, heredoc (`cat <<EOF`): на Windows это ломает кодировку (кириллица → mojibake) и нестабильно. Используй native-инструменты агента (названия отличаются между harness'ами, смысл один — файловый I/O вне shell):
 
-| Задача | Инструмент | НЕ через bash |
-|--------|-----------|---------------|
-| Прочитать файл | `read` | `cat`, `Get-Content` |
-| Создать файл | `write` | `echo >`, `Set-Content`, heredoc |
-| Править файл | `edit` | `sed`, `-replace` |
-| Найти файл | `glob` | `find`, `Get-ChildItem -Recurse` |
-| Поиск по содержимому | `grep` | `rg`, `Select-String` |
+| Задача | Инструмент |
+|--------|------------|
+| Прочитать файл | Read |
+| Создать файл | Write |
+| Править файл | Edit |
+| Найти файл | Glob |
+| Поиск по содержимому | Grep |
 
-`bash` — только для **системных команд**: `git`, `npm`/`bun`/`pnpm`, тесты, сборки, `gh`, `wsl`, скрипты. Не для файлового I/O.
+Подводные камни:
 
-Подводные камни (проверено эмпирически):
-- bash `Get-Content`/`cat` кириллицы → mojibake; native `read` → корректный UTF-8.
-- `glob` исключает dot-папки (`.opencode`, `.github`) по умолчанию — передавай `path` к такой папке явно.
-- `write`/`edit` принимают реальный multiline-контент; НЕ передавай контент как JSON-escaped `\n` внутри одного строкового значения с backticks + двойными кавычками одновременно — JSON-парсинг ломается (`Unterminated string in JSON`). Решение: пишешь реальными переводами строк (multiline), а не escape-последовательностями.
-- `read` возвращает строку с префиксом `N: ` (номер строки). В `edit` `oldString` копируй **без** префикса `N: `.
-- Перед `write` на существующий файл — обязательно `read` (требование инструмента).
-
-### Синтаксис — PowerShell 5.1, не bash
-
-**Запрещено** (не работает в PS 5.1, ломает команды «через раз»):
-
-- `cmd1 && cmd2` → используй `cmd1; if ($?) { cmd2 }`. `&&` поддерживается только в PS 7+, в 5.1 — молча ломается.
-- `cmd1 || cmd2` → `cmd1; if (-not $?) { cmd2 }`.
-- `export VAR=val` → `$env:VAR = "val"`.
-- `VAR=val cmd` → `$env:VAR="val"; cmd` (без inline-префикса).
-- `~` в путях → `$env:USERPROFILE` (надёжнее).
-- heredoc `cat <<EOF` → используй `write` tool.
-
-**Слэши:** native-инструменты (read/write/edit/glob) принимают оба стиля на Windows, но для абсолютных путей — **backslashes** (`C:\Users\...`). В PowerShell-строках предпочтительны **одинарные кавычки** `'...'` для литералов (без интерполяции). Backtick `` ` `` — escape-символ в PS double-quoted строках, избегай его в строках.
-
-**Цепочки команд:**
-- зависимые: `cmd1; if ($?) { cmd2 }`
-- независимые: `cmd1; cmd2`
-- подавить stderr: `cmd 2>$null`
-- слить stderr в stdout: `cmd 2>&1 | Out-Null`
+- bash-вывод кириллицы → mojibake; native Read → корректный UTF-8.
+- Glob по умолчанию не заглядывает в dot-папки (`.github`, `.git`) — передавай `path` к такой папке явно.
+- Read возвращает строки с префиксом `N: ` (номер строки); в Edit `old_string` копируй без этого префикса.
+- Перед Write в существующий файл — сначала Read.
 
 ## Язык и границы
 
