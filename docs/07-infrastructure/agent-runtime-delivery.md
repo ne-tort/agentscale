@@ -55,7 +55,7 @@ Pod проекта: pod_service создаёт Pod c POD_AGENT_RUNTIME_IMAGE (:l
 | `COPY /openclaw-sdk` | 55 МБ | дерево SDK (с node_modules от `npm ci`) |
 | base `node:22-bookworm-slim` | ~370 МБ | |
 
-~85% образа — тулчейн агента (осознанное решение: агент — coding-agent); ~1,2 ГБ — потери (chown-дубль + shipping devDeps); продукт — ~100–200 МБ. tsc по всем 9 пакетам (23 тыс. LOC TS) — секунды: **время сборки и вес образа к TypeScript отношения не имеют.**
+Исторический замер (до оптимизации): ~85% образа — тулчейн. С 2026-09-25 тулчейн полностью удалён из финального образа (multi-stage: build внутри docker, GHCR — artifact-only): **итог 320 МБ** (node:22-slim + ripgrep + pruned node_modules + dist). tsc по всем 9 пакетам (23 тыс. LOC TS) — секунды: время сборки и вес образа к TypeScript отношения не имеют.
 
 ## 4. Кэширование сборки: реальность
 
@@ -83,7 +83,7 @@ Pod проекта: pod_service создаёт Pod c POD_AGENT_RUNTIME_IMAGE (:l
 | 6 | ~~Нет cache-mounts~~ **закрыта**: npm (`/root/.npm`) + apt (`/var/cache/apt`, `/var/lib/apt`) | — | — | — |
 | 7 | ~~--no-save + \|\| true~~ **закрыта**: pinned версии из bridge devDeps, ошибки loud | — | — | — |
 | 8 | ~~chown -R~~ **закрыта**: `COPY --chown=node:node` (−778 МБ) | — | — | — |
-| 9 | devDeps летят в runtime (typescript, tsx, vendor SDK) | `COPY /app/node_modules` из build-стейджа | +~100 МБ и поверхность атаки; vendor SDK в проде не нужны (дефолт — свой tool-loop) | `npm ci --omit=dev` для final; vendor SDK лениво/отдельным тегом |
+| 9 | ~~devDeps в runtime~~ **закрыта 2026-09-25**: `npm prune --omit=dev` в build-стейджах; vendor SDK вырезаны (адаптеры падают в stub — дефолт `openclaw_sdk` их не требует) | — | — | — |
 | 10 | ~~.dockerignore~~ **закрыта**: `.dockerignore` в корне claw (excludes references/, docs/, .git, node_modules) | — | — | — |
 | 11 | `:latest` + Always, дайджест нигде не пинится; откат = re-push | configmap, `pod_spec.py`, I18-заметка | невозможен точечный rollback; «какой digest в кластере» — только гадание | pod_service резолвит digest при создании Pod'а (P3) |
 | 12 | ~~Optional live smokes фейлят pipeline~~ **закрыта**: `continue-on-error: true` на всех live-шагах `openclaw-ci.yml` (внешний API-флейк больше не красит push) | — | — | — |
@@ -99,7 +99,7 @@ Pod проекта: pod_service создаёт Pod c POD_AGENT_RUNTIME_IMAGE (:l
 
 **Осталось (P3):**
 
-- **P3 — политика поставки:** digest-пиннинг в pod_service (точечный rollback); ревизия тулчейна: нужны ли Rust + Go + JDK + clang одновременно (~3,7 ГБ; slim-вариант ~600–800 МБ); devDeps `--omit=dev`.
+- **P3 — политика поставки:** ~~ревизия тулчейна~~ **решено 2026-09-25**: тулчейн полностью убран из финального образа (классический multi-stage: сборка в docker-стейджах, в GHCR — artifact-only `node:22-slim` + ripgrep; **4,37 ГБ → 320 МБ**; vendor SDK вырезаны, адаптеры — stub). Осталось: digest-пиннинг в pod_service (точечный rollback). ~~devDeps `--omit=dev`~~ — сделано в том же изменении.
 
 ## 8. Кто владеет сборкой: prodavan ↔ claw
 
