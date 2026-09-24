@@ -94,9 +94,25 @@ ORM-модель → autogenerate в PR → CI (upgrade + alembic check) → mer
 ## Суть продукта
 
 **UI → API → k8s Pod → agent (файлы, tools, SDK).** Подробно: [`docs/PRODUCT.md`](docs/PRODUCT.md).
-## Субагенты
+## Субагенты (Task tool)
 
-Всегда **Auto**: `model: "inherit"`.
+Канон: [skills/task-subagent/SKILL.md](.opencode/skills/task-subagent/SKILL.md)
+
+subagent_type в вызове Task — это имя агента, не модель. Валидные значения (проверено эмпирически в этой сборке opencode):
+
+- general — да, subagent; многошаговые задачи, правки файлов, параллелизм.
+- explore — да, subagent read-only; поиск файлов/кода по кодбейзу.
+- build — да, primary; полный доступ к tools.
+- plan — да, primary; анализ без правок.
+- scout — НЕТ: Unknown agent type в этой сборке, не использовать.
+
+НЕ путать с model: inherit — это поле КОНФИГА агента (opencode.json / markdown frontmatter), а не параметр Task tool. Значения inherit, auto, Auto, General (с заглавной), пустая строка — НЕВАЛИДНЫ как subagent_type и дают Unknown agent type.
+
+Правила вызова:
+- subagent_type — обязательно, ровно одно из значений выше, lowercase.
+- description — короткое (1–5 слов); prompt — конкретная задача с критерием готовности.
+- Параллельно: несколько task в одном сообщении, когда задания независимы.
+- task_id — только для resume существующей сессии.
 
 ## Язык и границы
 
