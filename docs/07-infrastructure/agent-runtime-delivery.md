@@ -37,6 +37,8 @@ Pod проекта: pod_service создаёт Pod c POD_AGENT_RUNTIME_IMAGE (:l
 
 `pull_request`-ветка в meta-step `build-agent-runtime` (`tag=pr-local`, `push=false`) — мёртвый код: ни один workflow не вызывает `ci-images.yml` как reusable.
 
+**Замеры 2026-09-24:** `openclaw-images` — failure после **28м47с** (uncached, без smoke), следующий запуск — in_progress >27 мин; `ci-images` на main — **34м41с** и **45м41с**, оба failure (сетевой флак скачивания action'ов, `codeload.github.com`). Плюс `openclaw-ci` в claw **красный на docs-only push**: optional live smoke (`smoke-live-cursor`, `api_error` от реального Cursor API) валит job — см. дыру №12.
+
 ## 2. GHCR и секреты
 
 - Образ: `ghcr.io/ne-tort/prodavan-agent-runtime` (`{sha12,latest}`). GHCR-**package принадлежит репо `prodavan-claw`** → пуш из workflows prodavan возможен только через PAT `PRODAVAN_CLAW_TOKEN` (`write:packages`); `GITHUB_TOKEN` prodavan прав не имеет. Тот же PAT используется для клона приватного claw (GITHUB_TOKEN не умеет cross-repo).
@@ -88,6 +90,8 @@ Pod проекта: pod_service создаёт Pod c POD_AGENT_RUNTIME_IMAGE (:l
 | 9 | devDeps летят в runtime (typescript, tsx, vendor SDK) | `COPY /app/node_modules` из build-стейджа | +~100 МБ и поверхность атаки; vendor SDK в проде не нужны (дефолт — свой tool-loop) | `npm ci --omit=dev` для final; vendor SDK лениво/отдельным тегом |
 | 10 | `.dockerignore` не в корне build-контекста | claw repo root (нет) / `platform-openclaw/.dockerignore` (игнорируется) | весь claw-репо в контексте каждой сборки | `.dockerignore` в корне claw-репо |
 | 11 | `:latest` + Always, дайджест нигде не пинится; откат = re-push | configmap, `pod_spec.py`, I18-заметка | невозможен точечный rollback; «какой digest в кластере» — только гадание | pod_service резолвит digest при создании Pod'а (P3) |
+| 12 | Optional live smokes фейлят pipeline: `smoke-live-cursor` (реальный Cursor API, `api_error`) валит `openclaw-ci` **на docs-only push** | `prodavan-claw/.github/workflows/openclaw-ci.yml` | main claw регулярно красный без реальной причины; красный CI приучает игнорировать | `continue-on-error` для live-смоуков или вынести в отдельный scheduled job |
+| 13 | Все 6 раннеров (dd-pv-1..4 + dd-claw-1/2) — контейнеры на **одном Docker Desktop хосте** с общим docker.sock | `infra/github-runner/docker-compose.yml` | 28-минутная uncached сборка образа делит CPU/IO/диск с CI Gate приложения — тяжёлые сборки душат остальные джобы | тот же P1-кэш (сократить длительность сборки); `concurrency:` group в image-workflow; в перспективе — отдельный демон для image-сборок |
 
 ## 7. Бэклог (приоритеты)
 
@@ -95,7 +99,51 @@ Pod проекта: pod_service создаёт Pod c POD_AGENT_RUNTIME_IMAGE (:l
 - **P2 — Dockerfile:** re-порядок слоёв (манифесты → npm ci → исходники), `--mount=type=cache`, `COPY --chown=node:node`, `--omit=dev` для final, `.dockerignore` в корень claw, pinned vendor SDK. Эффект: образ ~1,2–1,8 ГБ (с сохранением тулчейна), slim-вариант ~600–800 МБ.
 - **P3 — политика поставки:** один пайплайн-владелец сборки; digest-пиннинг в pod_service; ревизия тулчейна в образе (нужны ли Rust + Go + JDK + clang одновременно).
 
-## 8. Связанные документы
+## 8. Кто владеет сборкой: prodavan ↔ claw
+
+### 8.1 Инвентарь связей
+
+| Связь | Механизм | Назначение |
+|-------|----------|-----------|
+| prodavan → claw | submodule pointer в git tree | пин «какой claw known-good на момент релиза приложения» |
+| prodavan → claw | PAT-клон в CI (`ci-images.yml` build-agent-runtime, `ci-e2e.yml`) | сборка образа из исходников (дубль!) и **e2e-фикстура**: `tests/e2e/bridge/test_bridge_openclaw_mcp.py:135–143` монтирует исходники claw (README + openclaw-sdk echo server) в тестовый контейнер |
+| prodavan → claw | GHCR pull (secret `ghcr-pull`) | pod_service тянет образ в Pod'ы |
+| claw → prodavan | `trigger-verify` → dispatch `verify-dev.yml` (секрет `PRODAVAN_REPO_TOKEN`) | перезапуск probe-pod после нового `:latest` |
+| claw → GHCR | `openclaw-images.yml` push | **владелец GHCR-пакета** `prodavan-agent-runtime` |
+| runtime | HTTP-контракт бриджа (OpenAPI) + `POD_AGENT_RUNTIME_IMAGE` | единственная рантайм-зависимость; **исходников claw приложение в рантайме не использует** |
+
+### 8.2 Ответы на ключевые вопросы
+
+**Подхватит ли кластер образ, если claw собирается и пушится сам?** Да. `pod_service` создаёт Pod проекта с `:latest` + `imagePullPolicy: Always` — любой **новый** Pod (создание проекта, recreate по generation bump) тянет свежий digest c GHCR без всякого участия CI приложения. Два исключения: уже запущенные Pod'ы обновляются только при recreate (reload/sync проекта), а статический probe-pod — только через `kubectl rollout restart`, что и делает `trigger-verify` → Verify Dev. То есть prodavan-CI **не нужен для доставки** образа; без trigger-verify обновятся только новые/пересозданные поды.
+
+**Должен ли claw собираться и пушиться изолированно?** Да — и почти уже так: claw владеет GHCR-пакетом, итерации идут в claw main, delivery — main-push. Вторая сборка (`build-agent-runtime` в ci-images) — чистый дубль: те же исходники, тот же `:latest`, гонка тегов (дыра №1), лишние 30–45 мин CI на каждый push в main. Рекомендация: **claw — единственный владелец build+push**; из `ci-images.yml` job удалить (или свести к smoke уже опубликованного образа).
+
+**Должен ли claw быть сабмодулем вообще?** Рантайм-зависимости от исходников нет — контракт это HTTP API + digest образа. Функциональные роли сабмодуля сегодня: (1) e2e-фикстура prodavan монтирует исходники claw; (2) метадата-пин для трассируемости. Рекомендация: **сабмодуль оставить** (клон нужен e2e, пин почти бесплатен), но убрать из него сборку образа. В перспективе (P3) digest-пиннинг в pod_service сделает сабмодуль чистой метадатой.
+
+### 8.3 Раннеры: топология
+
+- prodavan: `dd-pv-1..4` (repo-scoped `ne-tort/prodavan`); claw: `dd-claw-1/2` (repo-scoped `ne-tort/prodavan-claw`, compose-профиль `claw`; в compose: «private repo cannot use ubuntu-latest»). Labels идентичны (`self-hosted,linux,docker,docker-desktop`) — джоба уходит в пул своего репо (repo scope).
+- Но все шесть — контейнеры **одного Docker Desktop хоста** с общим `docker.sock`: 28-минутная uncached сборка на `dd-claw-2` делит CPU/IO/диск с CI Gate приложения → наблюдение «заняты раннеры основного проекта» на уровне хоста справедливо (дыра №13).
+- `prodavan-ci-cache:/cache` смонтирован во **все** шесть раннеров — общий кэш-том уже есть, не используется ни одним пайплайном.
+
+### 8.4 Целевая схема (рекомендация)
+
+```text
+claw (владелец образа):
+  PR/main: openclaw-ci — unit + doctor; live-smokes → continue-on-error / отдельный scheduled job
+  main push: openclaw-images (на dd-claw-1/2)
+    кэш: type=registry (GHCR cache-manifest) или type=local на /cache; --mount=type=cache npm/apt
+    Dockerfile: манифесты → npm ci → исходники; npm ci --omit=dev; COPY --chown; .dockerignore; pinned vendor SDK
+    → smoke (артефакты + /health) → push {sha, latest} в GHCR
+  → trigger-verify: rollout probe-pod (единственный кластерный шаг; project pods подхватят сами)
+
+prodavan (потребитель):
+  pod_service: POD_AGENT_RUNTIME_IMAGE (:latest → в перспективе digest) + ghcr-pull
+  ci-e2e: клон сабмодуля для фикстуры (как сейчас)
+  ci-images::build-agent-runtime — удалить
+```
+
+## 9. Связанные документы
 
 - [runbook.md §1.1](runbook.md) — поток поставки (probe pod)
 - [github-runner-local.md](github-runner-local.md) — раннеры и buildx cache
