@@ -17,6 +17,7 @@ Legacy AI-канон: [`docs/target/`](docs/target/) (кроме as-built) — �
 | ~~Канон BC~~ legacy | [`docs/target/01…15`](docs/target/) | Справка, не блокер |
 
 **Правило:** PRODUCT.md + код > gap map. E2E — backend API, не Flutter.
+
 ## Git / CI / кластер (GitOps)
 
 **Ранбук:** [`docs/07-infrastructure/runbook.md`](docs/07-infrastructure/runbook.md).
@@ -94,25 +95,29 @@ ORM-модель → autogenerate в PR → CI (upgrade + alembic check) → mer
 ## Суть продукта
 
 **UI → API → k8s Pod → agent (файлы, tools, SDK).** Подробно: [`docs/PRODUCT.md`](docs/PRODUCT.md).
-## Субагенты (Task tool)
 
-Канон: [skills/task-subagent/SKILL.md](.opencode/skills/task-subagent/SKILL.md)
+## Окружение: Windows
 
-subagent_type в вызове Task — это имя агента, не модель. Валидные значения (проверено эмпирически в этой сборке opencode):
+**ОС: Windows.** Shell для системных команд — Git Bash: `git`, `npm`/`pnpm`, тесты, сборки, `gh`, `wsl`, скрипты.
 
-- general — да, subagent; многошаговые задачи, правки файлов, параллелизм.
-- explore — да, subagent read-only; поиск файлов/кода по кодбейзу.
-- build — да, primary; полный доступ к tools.
-- plan — да, primary; анализ без правок.
-- scout — НЕТ: Unknown agent type в этой сборке, не использовать.
+### Файловые операции — через native-инструменты, НЕ через bash
 
-НЕ путать с model: inherit — это поле КОНФИГА агента (opencode.json / markdown frontmatter), а не параметр Task tool. Значения inherit, auto, Auto, General (с заглавной), пустая строка — НЕВАЛИДНЫ как subagent_type и дают Unknown agent type.
+Не читать/писать/искать файлы через `cat`, `head`, `tail`, `sed`, `echo >`, heredoc (`cat <<EOF`): на Windows это ломает кодировку (кириллица → mojibake) и нестабильно. Используй native-инструменты агента (названия отличаются между harness'ами, смысл один — файловый I/O вне shell):
 
-Правила вызова:
-- subagent_type — обязательно, ровно одно из значений выше, lowercase.
-- description — короткое (1–5 слов); prompt — конкретная задача с критерием готовности.
-- Параллельно: несколько task в одном сообщении, когда задания независимы.
-- task_id — только для resume существующей сессии.
+| Задача | Инструмент |
+|--------|------------|
+| Прочитать файл | Read |
+| Создать файл | Write |
+| Править файл | Edit |
+| Найти файл | Glob |
+| Поиск по содержимому | Grep |
+
+Подводные камни:
+
+- bash-вывод кириллицы → mojibake; native Read → корректный UTF-8.
+- Glob по умолчанию не заглядывает в dot-папки (`.github`, `.git`) — передавай `path` к такой папке явно.
+- Read возвращает строки с префиксом `N: ` (номер строки); в Edit `old_string` копируй без этого префикса.
+- Перед Write в существующий файл — сначала Read.
 
 ## Язык и границы
 
