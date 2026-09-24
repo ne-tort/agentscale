@@ -152,6 +152,24 @@ jobs:
 
 Alternative: GitHub-hosted for API image, self-hosted only for deploy.
 
+### Buildx cache: реальность (as-built)
+
+CI-джобы (`ci-images.yml`) кэшируют docker-слои через `cache-from/to: type=local` в
+`/tmp/.buildx-cache-{api,web,agent}` + ручную ротацию (rmtree + rename). Проблемы:
+
+- Раннеры `runner-1..4` — **контейнеры** (`infra/github-runner/`), их `/tmp` —
+  container-ephemeral: кэш теряется при пересоздании раннера (compose down -v,
+  restart Docker Desktop/WSL).
+- Кэш **не разделяется между runner-1..4**: джоба на другом раннере = холодная
+  сборка (agent-runtime ~10–15 мин).
+- Персистентный volume `prodavan-ci-cache` → `/cache` в compose раннеров заведён
+  именно под кэш, но CI **не использует** его.
+- Ротация rmtree/rename не защищена от конкурирующих сборок одного образа.
+
+Рекомендация: `cache-from/to: type=registry` (кэш-манифесты в GHCR, shared
+между раннерами) либо `type=local` на `/cache` volume. Детали и карта дыр:
+[agent-runtime-delivery.md](agent-runtime-delivery.md).
+
 ---
 
 ## Maintenance
