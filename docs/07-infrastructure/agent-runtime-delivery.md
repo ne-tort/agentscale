@@ -1,18 +1,16 @@
 # Agent-runtime image: сборка → GHCR → Pod (as-built)
 
-**Обновлено:** 2026-09-24 · **Статус:** as-built + gap map  
+**Обновлено:** 2026-09-24 · **Статус:** as-built; P1+P2 реализованы (см. §7)  
 Поставка образа `prodavan-agent-runtime` (ядро агента, репо-подмодуль [`prodavan-claw`](https://github.com/ne-tort/prodavan-claw)) — от CI-сборки до Pod'а проекта. Как **должно** быть: (1) кэшированная сборка через CI-раннер, (2) образ с бинарником → GHCR, (3) pod_service тянет образ из GHCR в Pod проекта. Ниже — как устроено сейчас и где дыры.
 
 ## 0. Поток (TL;DR)
 
 ```text
-prodavan-claw PR → openclaw-ci → auto-merge → openclaw-images ─┐
-   (клон в SF + пуш :latest без кэша и smoke)                  │
-                                                                ├→ GHCR ghcr.io/ne-tort/prodavan-agent-runtime:{sha,latest}
-prodavan main push (paths: prodavan-claw/**, …)                │
-   → ci-images.yml::build-agent-runtime ────────────────────────┘
-      (клон submodule pointer, buildx local-cache, smoke, :latest)
-   → trigger-verify → Verify Dev (ne-tort/prodavan)
+prodavan-claw PR → openclaw-ci (live-smokes: continue-on-error) → auto-merge
+  → push в claw main → openclaw-images
+     (registry-кэш type=registry, Dockerfile: toolchain stage + manifests-first)
+     build-bridge → push {sha,latest} → smoke (артефакты + /health, green only)
+  → trigger-verify → Verify Dev (ne-tort/prodavan)
       → prodavan-ops rollout → restart prodavan-probe-pod (re-pull :latest)
 
 Pod проекта: pod_service создаёт Pod c POD_AGENT_RUNTIME_IMAGE (:latest)
@@ -20,24 +18,22 @@ Pod проекта: pod_service создаёт Pod c POD_AGENT_RUNTIME_IMAGE (:l
   запущенный Pod обновляется только recreate (generation bump).
 ```
 
-**Два независимых пайплайна собирают и пушат один и тот же образ `:latest`** — см. дыру №1.
+Единственный владелец сборки — **prodavan-claw** (дубль-job `build-agent-runtime` в prodavan ci-images удалён — дыра №1 закрыта).
 
-## 1. Сборка: два пайплайна
+## 1. Сборка: единственный пайплайн — `openclaw-images.yml` в prodavan-claw
 
-| | `prodavan-claw` `openclaw-images.yml` | `prodavan` `ci-images.yml::build-agent-runtime` |
-|---|---|---|
-| Триггер | push в claw main (после `openclaw-ci` + auto-merge из PR) | push в prodavan main, paths `prodavan-claw/**`, `.gitmodules`, … |
-| Контекст / Dockerfile | claw repo root / `platform-openclaw/Dockerfile` | клон claw (PAT) / тот же Dockerfile |
-| Ревизия | HEAD claw main | **указатель сабмодуля**, при недоступности — молчаливый `git checkout main` |
-| Кэш Docker | **нет вообще** | `type=local` `/tmp/.buildx-cache-agent` + ручная ротация (rmtree+rename) |
-| Smoke | нет | артефакты (`dist/server.js`, `node_modules`) + `/health` 200 |
-| Auth пуша | `GITHUB_TOKEN` claw | PAT `PRODAVAN_CLAW_TOKEN` (package принадлежит claw-репо) |
-| Теги | `openclaw-bridge:{sha,latest}` **и** `prodavan-agent-runtime:{sha,latest}` | `prodavan-agent-runtime:{sha12,latest}` |
-| После пуша | `trigger-verify` → dispatch `verify-dev.yml` в prodavan | `trigger-verify` → Verify Dev |
+| | Как устроено (после 2026-09-24) |
+|---|---|
+| Триггер | push в claw main (после `openclaw-ci` + auto-merge из PR); path-фильтр `platform-openclaw/**`, `openclaw-sdk/**` |
+| Контекст / Dockerfile | claw repo root / `platform-openclaw/Dockerfile` (toolchain-стейдж, manifests-first, `COPY --chown`, `.dockerignore` в корне) |
+| Ревизия | HEAD claw main (указатель сабмодуля в prodavan — только метадата-пин и e2e-фикстура, в сборке не участвует) |
+| Кэш Docker | buildx `type=registry` (`<image>-buildcache`, mode=max) — общий для dd-claw-раннеров, переживает пересоздание контейнеров; `concurrency`-группа на ref |
+| Smoke | job `smoke`: артефакты (`dist/server.js`, `node_modules`) + `/health` 200 (в scratch docker network — host networking давал EADDRINUSE между раннерами) |
+| Auth пуша | `GITHUB_TOKEN` claw (владелец GHCR-пакета — claw) |
+| Теги | `openclaw-bridge:{sha,latest}` **и** `prodavan-agent-runtime:{sha,latest}` |
+| После пуша | `trigger-verify` → dispatch `verify-dev.yml` в prodavan (только при green smoke) |
 
-`pull_request`-ветка в meta-step `build-agent-runtime` (`tag=pr-local`, `push=false`) — мёртвый код: ни один workflow не вызывает `ci-images.yml` как reusable.
-
-**Замеры 2026-09-24:** `openclaw-images` — failure после **28м47с** (uncached, без smoke), следующий запуск — in_progress >27 мин; `ci-images` на main — **34м41с** и **45м41с**, оба failure (сетевой флак скачивания action'ов, `codeload.github.com`). Плюс `openclaw-ci` в claw **красный на docs-only push**: optional live smoke (`smoke-live-cursor`, `api_error` от реального Cursor API) валит job — см. дыру №12.
+Историческая схема «два пайплайна на один `:latest`» (job `build-agent-runtime` в prodavan `ci-images.yml` с клоном по указателю сабмодуля, silent fallback `git checkout main`, local-cache в эфемерном `/tmp`) **удалена** — дыры №1–№5 закрыты. Замеры до фикса: `openclaw-images` failure 28м47с (uncached); `ci-images` 34м41с/45м41с, оба failure (codeload flake); `openclaw-ci` красный на docs-only push (дыра №12, исправлено `continue-on-error`).
 
 ## 2. GHCR и секреты
 
@@ -79,25 +75,31 @@ Pod проекта: pod_service создаёт Pod c POD_AGENT_RUNTIME_IMAGE (:l
 
 | # | Дыра | Где | Влияние | Направление фикса |
 |---|------|-----|---------|-------------------|
-| 1 | **Двойной пайплайн** пушит один `:latest` | `openclaw-images.yml` + `ci-images.yml::build-agent-runtime` | гонки тегов, недетерминированный digest, разный набор проверок, два кэш-состояния | один владелец сборки; второй пайплайн — только указатель/smoke |
-| 2 | Сборка claw **без кэша и без smoke** | `openclaw-images.yml` (build job) | каждая сборка claw — с нуля, ~ГБ скачиваний; битый образ ловится только в кластере | тот же cache backend + smoke из пайплайна prodavan |
-| 3 | Local-cache в эфемерном `/tmp` контейнера раннера; volume `prodavan-ci-cache:/cache` не используется; нет shared между runner-1..4; race при ротации | `ci-images.yml` cache-from/to; `infra/github-runner/README.md` | холодная сборка 10–15 мин после любого пересоздания раннера / попадания на другой раннер | `type=registry` (кэш-манифест в GHCR) или `type=local` на `/cache` |
-| 4 | Молчаливый fallback `git checkout main` при клоне сабмодуля | `ci-images.yml` (Clone prodavan-claw submodule) | образ может не соответствовать записанному указателю сабмодуля | fail fast вместо fallback |
-| 5 | `COPY packages` до `npm ci` в обоих стейджах | `platform-openclaw/Dockerfile` (sdk-build, build) | любая правка исходников = полный `npm ci` (~2–3 мин ×2) | COPY манифестов → `npm ci` → COPY исходников |
-| 6 | Ни одного `--mount=type=cache` (npm/apt/rustup) | `platform-openclaw/Dockerfile` | слои нельзя ускорить кэшем пакетных менеджеров | cache-mounts в RUN-слоях |
-| 7 | `npm install --no-save @cursor/sdk … \|\| true` | `platform-openclaw/Dockerfile` (build stage) | незафиксированные версии vendor SDK, ошибки глотаются | pinned версии в lockfile; vendor SDK — опционально |
-| 8 | `chown -R` отдельным слоем | `platform-openclaw/Dockerfile` (final) | +778 МБ мёртвого веса в образе | `COPY --chown=node:node` |
+| 1 | ~~Двойной пайплайн~~ **закрыта 2026-09-24**: claw — единственный владелец, `build-agent-runtime` удалён из `ci-images.yml` (PR #445) | — | — | — |
+| 2 | ~~Сборка без кэша и smoke~~ **закрыта**: `type=registry` кэш + job `smoke` (артефакты + `/health`) гейтит trigger-verify | — | — | — |
+| 3 | ~~Local-cache в эфемерном `/tmp`~~ **закрыта**: buildx `type=registry` (`<image>-buildcache`) — общий для раннеров, переживает их пересоздание; гонки ротации сняты `concurrency`-группой | — | — | — |
+| 4 | ~~Молчаливый fallback~~ **закрыта**: клона сабмодуля в image-CI больше нет (job удалён) | — | — | — |
+| 5 | ~~COPY-до-npm-ci~~ **закрыта**: manifests-first в обоих стейджах (верифицировано локально) | — | — | — |
+| 6 | ~~Нет cache-mounts~~ **закрыта**: npm (`/root/.npm`) + apt (`/var/cache/apt`, `/var/lib/apt`) | — | — | — |
+| 7 | ~~--no-save + \|\| true~~ **закрыта**: pinned версии из bridge devDeps, ошибки loud | — | — | — |
+| 8 | ~~chown -R~~ **закрыта**: `COPY --chown=node:node` (−778 МБ) | — | — | — |
 | 9 | devDeps летят в runtime (typescript, tsx, vendor SDK) | `COPY /app/node_modules` из build-стейджа | +~100 МБ и поверхность атаки; vendor SDK в проде не нужны (дефолт — свой tool-loop) | `npm ci --omit=dev` для final; vendor SDK лениво/отдельным тегом |
-| 10 | `.dockerignore` не в корне build-контекста | claw repo root (нет) / `platform-openclaw/.dockerignore` (игнорируется) | весь claw-репо в контексте каждой сборки | `.dockerignore` в корне claw-репо |
+| 10 | ~~.dockerignore~~ **закрыта**: `.dockerignore` в корне claw (excludes references/, docs/, .git, node_modules) | — | — | — |
 | 11 | `:latest` + Always, дайджест нигде не пинится; откат = re-push | configmap, `pod_spec.py`, I18-заметка | невозможен точечный rollback; «какой digest в кластере» — только гадание | pod_service резолвит digest при создании Pod'а (P3) |
-| 12 | Optional live smokes фейлят pipeline: `smoke-live-cursor` (реальный Cursor API, `api_error`) валит `openclaw-ci` **на docs-only push** | `prodavan-claw/.github/workflows/openclaw-ci.yml` | main claw регулярно красный без реальной причины; красный CI приучает игнорировать | `continue-on-error` для live-смоуков или вынести в отдельный scheduled job |
-| 13 | Все 6 раннеров (dd-pv-1..4 + dd-claw-1/2) — контейнеры на **одном Docker Desktop хосте** с общим docker.sock | `infra/github-runner/docker-compose.yml` | 28-минутная uncached сборка образа делит CPU/IO/диск с CI Gate приложения — тяжёлые сборки душат остальные джобы | тот же P1-кэш (сократить длительность сборки); `concurrency:` group в image-workflow; в перспективе — отдельный демон для image-сборок |
+| 12 | ~~Optional live smokes фейлят pipeline~~ **закрыта**: `continue-on-error: true` на всех live-шагах `openclaw-ci.yml` (внешний API-флейк больше не красит push) | — | — | — |
+| 13 | Все 6 раннеров (dd-pv-1..4 + dd-claw-1/2) — контейнеры на **одном Docker Desktop хосте** с общим docker.sock | `infra/github-runner/docker-compose.yml` | тяжёлые сборки делят CPU/IO/диск с CI Gate приложения | **частично смягчено**: registry-кэш + manifests-first резко сократили длительность сборок; `concurrency` убрал гонки. Полностью — отдельный docker daemon для image-сборок |
 
-## 7. Бэклог (приоритеты)
+## 7. Бэклог: статус (P1+P2 реализованы 2026-09-24)
 
-- **P1 — кэш и достоверность:** единый cache backend для обеих сборок (`type=registry` в GHCR или `/cache` volume), smoke в claw-пайплайне, fail-fast на SHA сабмодуля. Эффект: тёплая сборка ~1–2 мин вместо 10–15 холодной.
-- **P2 — Dockerfile:** re-порядок слоёв (манифесты → npm ci → исходники), `--mount=type=cache`, `COPY --chown=node:node`, `--omit=dev` для final, `.dockerignore` в корень claw, pinned vendor SDK. Эффект: образ ~1,2–1,8 ГБ (с сохранением тулчейна), slim-вариант ~600–800 МБ.
-- **P3 — политика поставки:** один пайплайн-владелец сборки; digest-пиннинг в pod_service; ревизия тулчейна в образе (нужны ли Rust + Go + JDK + clang одновременно).
+**Сделано** (claw `46090c7` + PR #445 в prodavan):
+
+- ✅ **P1 кэш:** `openclaw-images.yml` — buildx кэш `type=registry` (`<image>-buildcache`, mode=max): общий для dd-claw-раннеров, переживает пересоздание контейнеров; `concurrency`-группа на ref. ✅ **P1 smoke:** новый smoke-job (артефакты + `/health`) гейтит trigger-verify. ✅ **P1 fail-fast**: отпало вместе с удалением дубль-джобы (нет клона сабмодуля в image-CI). ✅ **P1 один пайплайн:** `build-agent-runtime` удалён из `ci-images.yml`; claw — единственный владелец.
+- ✅ **P2 Dockerfile:** стейдж `toolchain` (apt/nvm/rustup в 3 RUN с cache-mounts; пересборка только при правке списка пакетов), manifests-first COPY (правка `.ts` не перезапускает `npm ci` — верифицировано), pinned vendor SDK (без `|| true`), `COPY --chown` вместо `chown -R` (−778 МБ), `.dockerignore` в корне claw. Образ **6,27 ГБ → 4,37 ГБ**, health OK. ✅ **P2 live-smokes:** `continue-on-error` в `openclaw-ci.yml`.
+- ⚠️ **P2 `--omit=dev`:** отложено (~50 МБ, devDeps остаются в runtime node_modules) — мик-оптимизация, отдельным PR при желании.
+
+**Осталось (P3):**
+
+- **P3 — политика поставки:** digest-пиннинг в pod_service (точечный rollback); ревизия тулчейна: нужны ли Rust + Go + JDK + clang одновременно (~3,7 ГБ; slim-вариант ~600–800 МБ); devDeps `--omit=dev`.
 
 ## 8. Кто владеет сборкой: prodavan ↔ claw
 
