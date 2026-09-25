@@ -5,7 +5,7 @@
 ## Wave 0 — Инфраструктура (devops)
 
 **PR-1: vendored agent-sandbox + App**
-- `infra/agent-sandbox/install/sandbox-with-extensions-v1.0.2.yaml` (vendored upstream) + router deploy (patches: cache-enabled, replicas, resources)
+- `infra/agent-sandbox/install/sandbox-with-extensions-v1.0.4.yaml` (vendored upstream) + router deploy (patches: cache-enabled, replicas, resources)
 - `infra/argocd/apps/agent-sandbox.yaml` (App, wave 0), AppProject destinations
 - Terraform gitops-bootstrap: ожидание Healthy agent-sandbox
 - Verify: `kubectl get pods -n agent-sandbox-system` через ops validate; CRD applied

@@ -28,7 +28,7 @@
 | ID | Gap | Решение к фазе |
 |---|---|---|
 | G1 | Router `--proxy-timeout 180s` (default) не применяется к upgraded-соединениям, но к обычным HTTP-стримам — применяется: длинные агент-ходы > 3 мин могут рваться | Router config: `--proxy-timeout 600`; или SSE через WS-upgrade. **PR-2 включить** |
-| G2 | Router стрипает `Authorization` перед форвардом: API→runtime токен нужно в `X-Prodavan-Runtime-Token` (X-* не стрипается) — проверить фактический стрип-лист роутера v1.0.2 | PR-5: прочитать код `sandbox-router/proxy/headers.go` (уже в отчёте: стрипает Host/Authorization) — X-* проходит ✅ |
+| G2 | Router стрипает `Authorization` перед форвардом: API→runtime токен нужно в `X-Prodavan-Runtime-Token` (X-* не стрипается) — проверить фактический стрип-лист роутера v1.0.4 | PR-5: прочитать код `sandbox-router/proxy/headers.go` (уже в отчёте: стрипает Host/Authorization) — X-* проходит ✅ |
 | G3 | prodavan-claw (nested submodule) — endpoint identity: отдельный PR в claw-репо, версия образа должна совпасть с SandboxTemplate tag | PR-5: coordinate, submodule bump |
 | G4 | RWO PVC: suspend-под с PVC на ноде A, resume-scheduling на ноду B — multi-attach violation. Single-node k3s — ок; multinode dev (если появится) — режим `Retain`+recreate или RWX | Не блокер; задокументировано в 03.8 |
 | G5 | `degrade` статуса: контроллер не даёт «degraded»-сигнала; наш promote/demote flap-grace остаётся источником | 04.6 — сохранить promote_or_demote |

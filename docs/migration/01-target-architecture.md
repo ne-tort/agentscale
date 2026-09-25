@@ -5,7 +5,7 @@
 | Компонент | Чем становится | Namespace |
 |---|---|---|
 | Под агента проекта | `Sandbox` CR (adopt из `SandboxWarmPool`), Pod из `SandboxTemplate`, PVC `workspace` | `prodavan-sandboxes` |
-| Оркестратор подов | **agent-sandbox-controller** (вендор, v1.0.2) + extensions (Claim/Template/WarmPool) | `agent-sandbox-system` |
+| Оркестратор подов | **agent-sandbox-controller** (вендор, v1.0.4) + extensions (Claim/Template/WarmPool) | `agent-sandbox-system` |
 | Канал к поду | **sandbox-router** (`sandbox-router-svc:8080`, header-based `X-Sandbox-*`) | `agent-sandbox-system` |
 | API (:8000/:8001) | FastAPI; :8000 — полный, :8001 — pod-only surface (остаётся) | `prodavan` |
 | SDK | `k8s-agent-sandbox[async]` (AsyncSandboxClient, DirectConnectionConfig на router) | — |

@@ -5,7 +5,7 @@
 Вендорные компоненты ставим через **Argo** (не kubectl apply), чтобы не нарушать GitOps-канон.
 
 - `infra/argocd/apps/agent-sandbox.yaml` — новое Application `agent-sandbox` → source: `https://github.com/ne-tort/agentscale.git`? **Нет** — controller не форкаем, ставим из upstream-манифестов. Вариант: helm-chart из OCI или vendored-манифесты.
-- **Решение: vendored-манифесты** (как уже сделано с Argo install v2.13.3): `infra/agent-sandbox/install/sandbox-with-extensions-v1.0.2.yaml` — коммитим upstream release-манифест, Argo применяет. Обновление = новый PR со свежим манифестом (visible diff, откат = revert).
+- **Решение: vendored-манифесты** (как уже сделано с Argo install v2.13.3): `infra/agent-sandbox/install/sandbox-with-extensions-v1.0.4.yaml` — коммитим upstream release-манифест (источник: `https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v1.0.4/sandbox-with-extensions.yaml`), Argo применяет. Обновление = новый PR со свежим манифестом (visible diff, откат = revert).
 - `infra/agent-sandbox/router/` — deployment+service+rbac из `sandbox-router/deploy/` (порты 8080/8081/9090), 2 реплики, PDB. `--cache-enabled=true` (обязателен для X-Sandbox-ID к warm-подам), `--authz-mode=allow-all` (роутер не в публичной зоне; авторизация — наша, платформенным токеном, см. ниже).
 - AppProject `prodavan`: добавить destination `agent-sandbox-system` + clusterResourceWhitelist уже покрывает CRD-установку (Namespace). Отдельный AppProject `agent-sandbox` с sourceRepos `https://github.com/kubernetes-sigs/agent-sandbox` — **не** используем (vendored); AppProject prodavan расширяем destination'ом.
 
@@ -92,5 +92,5 @@ rules:
 
 1. **RWO PVC + single-node k3s**: warm-pool поды резервируют PVC; suspend'нутые тоже. На single-node ок; при multinode — local-path provisioning не переезд. Не блокер dev.
 2. **PVC объём**: 5Gi × (replicas пула + активные проекты). Dev-квота диска WSL — контролировать; storageClassName local-path, volumeMode Filesystem.
-3. **Vendored v1.0.2 + v1beta1**: слежение за KEP 539.2 (runtime standardization), api-migration-guide при апгрейдах.
+3. **Vendored v1.0.4 + v1beta1**: слежение за KEP 539.2 (runtime standardization), api-migration-guide при апгрейдах. Апстрим活跃: v1.0.3 (17.09.2026), v1.0.4 (24.09.2026) — пиннить свежие release-манифесты PR'ом при обновлениях, ориентироваться на релизы вендора (требование задачи).
 4. **Argo orphanedResources**: Pod/Sandbox от контроллера в ns prodavan-sandboxes → добавить ignore Sandbox/SandboxClaim (они «незаявленные» с т.з. kustomize, создаёт API рантаймом).

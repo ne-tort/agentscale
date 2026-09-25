@@ -18,7 +18,7 @@
 
 ## Цель
 
-Полная миграция backend+devops+frontend на **kubernetes-sigs/agent-sandbox v1.0.2** (v1beta1 API) с сохранением продуктовых возможностей:
+Полная миграция backend+devops+frontend на **kubernetes-sigs/agent-sandbox v1.0.4** (v1beta1 API) с сохранением продуктовых возможностей:
 
 - UI-управление жизненным циклом проекта → Sandbox (launch/pause/resume/reload/complete/delete)
 - Чат с агентом (SSE через API-прокси) — без изменений протокола для фронтенда

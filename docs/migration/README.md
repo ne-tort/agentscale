@@ -1,7 +1,7 @@
 # Migration → kubernetes-sigs/agent-sandbox
 
 Каноническая документация миграции **agentscale** (fork prodavan) с самописного
-k8s-под-рантайма на стек **kubernetes-sigs/agent-sandbox** (v1.0.2).
+k8s-под-рантайма на стек **kubernetes-sigs/agent-sandbox** (v1.0.4).
 
 > Заменяет `INTEGRATION.md` (поверхностный анализ) и частично `docs/target/14-project-containers/k3s-runtime/` (as-built старого рантайма). Прежние доки — исторический контекст, план — здесь.
 
