@@ -1,0 +1,44 @@
+# Router layer — vendored from upstream sandbox-router/deploy/ (v1.0.4) with
+# prodavan-specific patches (see docs/migration/03-devops.md §3.1):
+#   - 2 replicas, dev-sized resources (single-node k3s)
+#   - --cache-enabled=true (REQUIRED for X-Sandbox-ID routing to warm-pool
+#     sandboxes: unclaimed warm pods are not name-indexed by DNS)
+#   - --authz-mode=allow-all (router is not publicly exposed; authorization
+#     is ours — platform token API->runtime, Bridge JWT runtime->API)
+#   - --proxy-timeout=600s (G1: long agent SSE turns > 3min must not break)
+#
+# registry.k8s.io/agent-sandbox/sandbox-router-go:latest is what upstream
+# deploy ships; TODO: pin to v1.0.4 tag when upstream publishes it for router.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: agent-sandbox-system
+resources:
+  - deployment.yaml
+  - service.yaml
+  - serviceaccount.yaml
+  - rbac.yaml # ClusterRole+Binding for Pod-IP cache (cache-enabled=true)
+  - networkpolicy.yaml
+  - pdb.yaml
+patches:
+  - target:
+      kind: Deployment
+      name: sandbox-router
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 2
+      - op: add
+        path: /spec/template/spec/containers/0/resources
+        value:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+      - op: add
+        path: /spec/template/spec/containers/0/args/-
+        value: --proxy-timeout=600s
+      - op: replace
+        path: /spec/template/spec/topologySpreadConstraints
+        value: []

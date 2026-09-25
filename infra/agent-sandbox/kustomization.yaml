@@ -1,0 +1,17 @@
+# agent-sandbox install (Wave 0, PR-1) — see docs/migration/03-devops.md §3.1.
+#
+# Vendored upstream manifests, applied via Argo (not kubectl apply) to keep
+# the GitOps canon. Upgrade = new PR with a fresh release manifest
+# (visible diff, rollback = revert).
+#
+#   install/sandbox-with-extensions-v1.0.4.yaml — verbatim from
+#   https://github.com/kubernetes-sigs/agent-sandbox/releases/download/v1.0.4/sandbox-with-extensions.yaml
+#   (Namespace, 4 CRDs, controller Deployment+Service+SA+RBAC; --extensions
+#   flag enabled = Claim/Template/WarmPool controllers active)
+#
+#   router/ — vendored sandbox-router deploy with prodavan patches.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - install/sandbox-with-extensions-v1.0.4.yaml
+  - router

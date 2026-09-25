@@ -1,0 +1,39 @@
+# agent-sandbox install (Wave 0, PR-1) — see docs/migration/03-devops.md.
+# Must sync BEFORE prodavan-dev: prodavan-sandboxes layer (PR-2) creates
+# SandboxTemplate/SandboxWarmPool that require the CRDs from this app.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: agent-sandbox
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "-5"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: prodavan
+  source:
+    repoURL: https://github.com/ne-tort/agentscale.git
+    targetRevision: main
+    path: infra/agent-sandbox
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: agent-sandbox-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false # Namespace comes from the vendored manifest
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  ignoreDifferences:
+    - group: apiextensions.k8s.io
+      kind: CustomResourceDefinition
+      jsonPointers:
+        - /status

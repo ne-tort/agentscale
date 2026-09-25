@@ -46,6 +46,17 @@ if [ -s /tmp/prodavan-ghcr.token ]; then
   unset GHCR_PASS
 fi
 "$${KCTL[@]}" apply -f "$REPO/infra/argocd/root-app.yaml"
+# agent-sandbox app (sync-wave -5) must be Healthy before prodavan-dev:
+# the prodavan-sandboxes layer needs agent-sandbox CRDs to exist.
+for _ in $(seq 1 36); do
+  asb_sync="$("$${KCTL[@]}" -n argocd get application agent-sandbox -o jsonpath='{.status.sync.status}' 2>/dev/null || echo Pending)"
+  asb_health="$("$${KCTL[@]}" -n argocd get application agent-sandbox -o jsonpath='{.status.health.status}' 2>/dev/null || echo Unknown)"
+  echo "agent-sandbox sync=$asb_sync health=$asb_health"
+  if [ "$asb_sync" = Synced ] && [ "$asb_health" = Healthy ]; then
+    break
+  fi
+  sleep 10
+done
 for _ in $(seq 1 72); do
   sync="$("$${KCTL[@]}" -n argocd get application prodavan-dev -o jsonpath='{.status.sync.status}' 2>/dev/null || echo Pending)"
   health="$("$${KCTL[@]}" -n argocd get application prodavan-dev -o jsonpath='{.status.health.status}' 2>/dev/null || echo Unknown)"
