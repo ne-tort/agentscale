@@ -5,6 +5,7 @@ from __future__ import annotations
 from prodavan.config.settings import settings
 from prodavan.core.infra.database_resource import DatabaseEngineResource
 from prodavan.core.infra.k8s_manager import k8s_manager_from_settings
+from prodavan.core.infra.sandbox_client import sandbox_client_resource_from_settings
 from prodavan.core.infra.kafka_manager import KafkaManager
 from prodavan.core.infra.metrics_consumer_resource import MetricsConsumerResource
 from prodavan.core.infra.mongo_manager import MongoManager
@@ -35,6 +36,9 @@ def build_lifespan_manager() -> LifespanManager:
     manager = LifespanManager()
     manager.register(DatabaseEngineResource())
     manager.register(k8s_manager_from_settings())
+    # agent-sandbox SDK client (inert unless pod_runtime_mode=sandbox; Wave 1 PR-3,
+    # docs/migration/04-backend). Main app only — pod surface (:8001) never talks to k8s.
+    manager.register(sandbox_client_resource_from_settings())
     manager.register(
         RedisManager(
             url=settings.redis_url,
