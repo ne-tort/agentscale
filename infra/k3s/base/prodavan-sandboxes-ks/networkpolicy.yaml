@@ -1,0 +1,70 @@
+# NetworkPolicy for ALL pods in prodavan-sandboxes (agent-sandbox era).
+# Canon: docs/migration/03-devops.md 3.4. Old podSelector by
+# prodavan.io/managed-by label is gone — the controller does not stamp our labels,
+# so the whole namespace is under policy (warm pods included, coverage wider).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: prodavan-sandboxes-egress
+  namespace: prodavan-sandboxes
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: agent-sandbox-system
+    ports:
+    - protocol: TCP
+      port: 3921
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: prodavan
+    ports:
+    - protocol: TCP
+      port: 3921
+  egress:
+  # Pod-only API surface (:8001) — the ONLY platform access for agent pods.
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: prodavan
+    ports:
+    - protocol: TCP
+      port: 8001
+  # DNS
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Public internet (AI providers, web search)
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.42.0.0/16 # pods
+        - 10.43.0.0/16 # services
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 80
+  # External Postgres (AI tooling)
+  - to:
+    - ipBlock:
+        cidr: 0.0.0.0/0
+        except:
+        - 10.42.0.0/16
+        - 10.43.0.0/16
+    ports:
+    - protocol: TCP
+      port: 5432
+    - protocol: TCP
+      port: 5433

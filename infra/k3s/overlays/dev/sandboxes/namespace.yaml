@@ -6,4 +6,4 @@ metadata:
     app.kubernetes.io/name: prodavan-sandboxes
     app.kubernetes.io/part-of: prodavan
     app.kubernetes.io/component: sandbox
-    prodavan.io/managed-by: pod-service
+    prodavan.io/managed-by: agent-sandbox  # legacy selector label; new ns-wide policy does not use it
