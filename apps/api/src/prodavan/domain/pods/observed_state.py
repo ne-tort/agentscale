@@ -17,3 +17,5 @@ class ObservedState(StrEnum):
     FAILED = "failed"
     UNKNOWN = "unknown"
     PAUSED = "paused"
+    SUSPENDED = "suspended"
+    PAUSING = "pausing"

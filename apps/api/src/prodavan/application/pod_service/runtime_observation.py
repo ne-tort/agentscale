@@ -542,7 +542,7 @@ class RuntimeObservationService:
         state = str(status.get("observed_state") or "absent")
         _SANDBOX_STATE_TO_OBSERVED = {
             "running": ObservedState.RUNNING,
-            "suspended": ObservedState.PAUSED,
+            "suspended": ObservedState.SUSPENDED,
             "pausing": ObservedState.PAUSING,
             "provisioning": ObservedState.PROVISIONING,
             "absent": ObservedState.ABSENT,
@@ -561,6 +561,8 @@ class RuntimeObservationService:
             kw["ready"] = status.get("ready")
         if status.get("waiting_reason"):
             kw["waiting_reason"] = status.get("waiting_reason")
+        if status.get("claim_name") or runtime_ref:
+            kw["claim_name"] = status.get("claim_name") or runtime_ref
         if status.get("sandbox_name"):
             kw["sandbox_name"] = status.get("sandbox_name")
         if status.get("service_fqdn"):
@@ -697,6 +699,11 @@ class RuntimeObservationService:
         started_at: str | None = None,
         k8s_created_at: str | None = None,
         waiting_reason: str | None = None,
+        sandbox: bool = False,
+        sandbox_name: str | None = None,
+        claim_name: str | None = None,
+        service_fqdn: str | None = None,
+        launch_type: str | None = None,
     ) -> dict[str, Any]:
         out: dict[str, Any] = {
             "observed_state": observed_state.value,
@@ -710,6 +717,16 @@ class RuntimeObservationService:
             out["phase"] = phase
         if ready is not None:
             out["ready"] = ready
+        if sandbox:
+            out["sandbox"] = True
+        if sandbox_name:
+            out["sandbox_name"] = sandbox_name
+        if claim_name:
+            out["claim_name"] = claim_name
+        if service_fqdn:
+            out["service_fqdn"] = service_fqdn
+        if launch_type:
+            out["launch_type"] = launch_type
         if waiting_reason:
             out["waiting_reason"] = waiting_reason
         if metrics:
