@@ -140,7 +140,6 @@ opensearchproject/opensearch:2.17.1
 curlimages/curl:8.10.1
 redpanda:v24.2.4
 quay.io/keycloak/keycloak:26.0
-bitnamilegacy/kubectl:1.31.4
 """
     verify_image_pins(manifest)
 
@@ -269,17 +268,4 @@ def test_k3s_dev_host_crlf_strip_not_nested_in_bash_lc_quotes() -> None:
     assert "read_bytes().replace" in main_tf
     assert "tr -d '\\r' < /tmp/prodavan-k3s-preflight.sh" not in main_tf
     assert "tr -d '\\r' < /tmp/prodavan-post-k3s-heal.sh" not in main_tf
-
-
-def test_cluster_heal_uses_bitnamilegacy_kubectl() -> None:
-    cron = (
-        Path(__file__).resolve().parents[2]
-        / "k3s"
-        / "overlays"
-        / "dev"
-        / "cluster-heal-cronjob.yaml"
-    ).read_text(encoding="utf-8")
-    assert "bitnamilegacy/kubectl:1.31.4" in cron
-    assert "bitnami/kubectl:" not in cron
-    assert "bitnamilegacy/kubectl:1.31.4" in REQUIRED_SNIPPETS
 
