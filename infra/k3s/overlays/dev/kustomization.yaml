@@ -5,7 +5,6 @@ resources:
   - postgres.yaml
   - userdb-init.yaml
   - sandboxes
-  - cluster-heal-cronjob.yaml
 transformers:
   - namespace-transformer.yaml
 patches:

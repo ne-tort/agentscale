@@ -12,6 +12,7 @@ from prodavan.core.infra.opensearch_manager import OpenSearchManager
 from prodavan.core.infra.platform_bootstrap_resource import PlatformBootstrapResource
 from prodavan.core.infra.pod_metrics_sampler_resource import PodMetricsSamplerResource
 from prodavan.core.infra.redis_manager import RedisManager
+from prodavan.core.infra.sandbox_client import sandbox_client_resource_from_settings
 from prodavan.core.infra.storage_metrics_sampler_resource import StorageMetricsSamplerResource
 from prodavan.core.infra.trigger_worker_resource import TriggerWorkerResource
 from prodavan.core.lifespan.manager import LifespanManager
@@ -35,6 +36,9 @@ def build_lifespan_manager() -> LifespanManager:
     manager = LifespanManager()
     manager.register(DatabaseEngineResource())
     manager.register(k8s_manager_from_settings())
+    # agent-sandbox SDK client (inert unless pod_runtime_mode=sandbox; Wave 2
+    # runtime adapter resolves it lazily via get_sandbox_client_manager).
+    manager.register(sandbox_client_resource_from_settings())
     manager.register(
         RedisManager(
             url=settings.redis_url,

@@ -1,0 +1,77 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Vendored agent-sandbox v1.0.4 (core + extensions, all-in-one).
+# Resource set mirrors agent-sandbox/k8s/kustomization.yaml with one omission:
+# extensions.controller.yaml (a second copy of the controller Deployment — the
+# core controller.yaml is patched to enable extensions instead, as upstream does).
+resources:
+  # core
+  - controller.yaml
+  - rbac.generated.yaml
+  - crds/agents.x-k8s.io_sandboxes.yaml
+  # extensions
+  - extensions.yaml
+  - extensions-rbac.generated.yaml
+  - crds/extensions.agents.x-k8s.io_sandboxclaims.yaml
+  - crds/extensions.agents.x-k8s.io_sandboxtemplates.yaml
+  - crds/extensions.agents.x-k8s.io_sandboxwarmpools.yaml
+
+namespace: agent-sandbox-system
+
+patches:
+  # Same intent as the upstream all-in-one patch: enable the extensions
+  # controllers on the single controller Deployment and mount the
+  # agent-sandbox-config ConfigMap. Kept in lockstep with upstream
+  # agent-sandbox/k8s/kustomization.yaml.
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: agent-sandbox-controller
+        namespace: agent-sandbox-system
+      spec:
+        template:
+          spec:
+            containers:
+              - name: agent-sandbox-controller
+                args:
+                  - --leader-elect=true
+                  - --extensions
+                volumeMounts:
+                  - name: config-volume
+                    mountPath: /etc/sandbox-config
+                    readOnly: true
+            volumes:
+              - name: config-volume
+                configMap:
+                  name: agent-sandbox-config
+                  optional: true
+
+  # Controller image: ko:// placeholder is replaced with the published release
+  # image so Argo/kustomize can resolve it without the ko toolchain.
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: agent-sandbox-controller
+        namespace: agent-sandbox-system
+      spec:
+        template:
+          spec:
+            containers:
+              - name: agent-sandbox-controller
+                image: registry.k8s.io/agent-sandbox/controller:v1.0.4
+                imagePullPolicy: IfNotPresent
+
+# Label-domain allowlist: claims may propagate pod labels/annotations under
+# prodavan.io/* (e.g. prodavan.io/project-id) via additionalPodMetadata.
+# Default (without this ConfigMap) is sandbox.users.io only — claims with
+# prodavan.io/* metadata would be rejected with "label domain not in allowlist".
+configMapGenerator:
+  - name: agent-sandbox-config
+    namespace: agent-sandbox-system
+    options:
+      disableNameSuffixHash: true
+    literals:
+      - allowed-label-domains=prodavan.io

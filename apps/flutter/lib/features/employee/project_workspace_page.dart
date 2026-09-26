@@ -136,10 +136,9 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   Future<void> _wakeProject() async {
     if (_waking || _chatSendable) return;
     final l10n = AppLocalizations.of(context);
-    final paused = (_project?['status'] as String?) == 'paused';
     setState(() => _waking = true);
     try {
-      if (paused) {
+      if (projectChatSuspended(_project)) {
         AppSnackBar.info(context, l10n.projectResumeStartingSnack);
         try {
           await workContext.api.resumeProject(widget.projectId);
@@ -305,8 +304,12 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
 
   String? _wakeHint(AppLocalizations l10n) {
     if (_chatSendable) return null;
-    final paused = (_project?['status'] as String?) == 'paused';
-    return paused ? l10n.projectChatWakePaused : l10n.projectChatWakeUnresponsive;
+    // Agent-sandbox: paused/suspended/pausing = fast resume (seconds),
+    // not a destructive reload. Only unresponsive agents get "reload".
+    if (projectChatSuspended(_project)) {
+      return l10n.projectChatWakePaused;
+    }
+    return l10n.projectChatWakeUnresponsive;
   }
 
   bool get _needsWorkspaceUpdate {

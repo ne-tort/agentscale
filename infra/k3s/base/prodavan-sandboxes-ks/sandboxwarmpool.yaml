@@ -1,0 +1,17 @@
+# SandboxWarmPool — pre-provisioned agent sandboxes for ~2s launches.
+# Canon: docs/migration/01, 06. Recreate: stale unclaimed sandboxes are replaced
+# immediately when the template image changes (update cadence via vendor releases).
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxWarmPool
+metadata:
+  name: prodavan-agent-pool
+  namespace: prodavan-sandboxes
+  labels:
+    app.kubernetes.io/part-of: prodavan
+    prodavan.io/managed-by: agent-sandbox
+spec:
+  replicas: 2
+  updateStrategy:
+    type: Recreate
+  sandboxTemplateRef:
+    name: prodavan-agent

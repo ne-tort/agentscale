@@ -749,6 +749,18 @@ class AppLocalizationsEn extends AppLocalizations {
   String get containerObservedUnknown => 'Unknown';
 
   @override
+  String get containerObservedResuming => 'Waking up';
+
+  @override
+  String get containerObservedSuspended => 'Suspended (data preserved)';
+
+  @override
+  String get containerObservedPausing => 'Pausing';
+
+  @override
+  String get containerPollTimeout => 'Failed to wait for the agent to become ready';
+
+  @override
   String get containerMetricsAwaiting =>
       'CPU/RAM: awaiting first metrics sample';
 

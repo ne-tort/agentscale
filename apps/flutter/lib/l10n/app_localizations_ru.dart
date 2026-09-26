@@ -755,6 +755,18 @@ class AppLocalizationsRu extends AppLocalizations {
   String get containerObservedUnknown => 'Неизвестно';
 
   @override
+  String get containerObservedResuming => 'Пробуждение…';
+
+  @override
+  String get containerObservedSuspended => 'Приостановлен (данные сохранены)';
+
+  @override
+  String get containerObservedPausing => 'Приостанавливается';
+
+  @override
+  String get containerPollTimeout => 'Не удалось дождаться готовности агента';
+
+  @override
   String get containerMetricsAwaiting =>
       'CPU/RAM: ожидание первого sample метрик';
 

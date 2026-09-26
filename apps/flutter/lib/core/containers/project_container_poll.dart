@@ -1,7 +1,15 @@
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/containers/container_runtime_presenter.dart';
 
-const _terminalObservedStates = {'running', 'failed', 'paused'};
+/// Terminal observed states: the poll stops once the sandbox settles into
+/// one of these (agent-sandbox conditions reach a stable value).
+const _terminalObservedStates = {
+  'running',
+  'failed',
+  'suspended',
+  'paused',
+  'absent',
+};
 
 bool containerObservedSettled(Map<String, dynamic>? item) {
   final runtime = item?['runtime'];
@@ -15,12 +23,16 @@ bool containerObservedSettled(Map<String, dynamic>? item) {
   return _terminalObservedStates.contains(state.trim());
 }
 
+/// agent-sandbox suspend/resume is seconds-scale — 5 min is plenty
+/// (warm claim ~2s, cold start with pull is the long tail).
+const containerPollDefaultTimeout = Duration(minutes: 5);
+
 /// Poll project container until observed_state settles or [timeout] elapses.
 Future<Map<String, dynamic>?> pollProjectContainerUntilSettled({
   required ProdavanApi api,
   required String projectId,
   Duration interval = const Duration(seconds: 1),
-  Duration timeout = const Duration(minutes: 12),
+  Duration timeout = containerPollDefaultTimeout,
   void Function(Map<String, dynamic>? item)? onTick,
 }) async {
   final deadline = DateTime.now().add(timeout);

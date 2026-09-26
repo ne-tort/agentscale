@@ -163,10 +163,15 @@ class Settings(BaseSettings):
     # I8: API may POST Jobs via in-cluster SA. Off by default — create path stays object-ws.
     sandbox_k8s_jobs: bool = False
     sandbox_k8s_namespace: str = "prodavan"
-    # pod_service runtime: stub (object-ws) | k8s (real Pod adapter).
+    # pod_service runtime: stub (object-ws) | k8s (real Pod adapter)
+    # | sandbox (agent-sandbox SDK, Wave 2 runtime adapter).
     pod_runtime_mode: str = "k8s"
     pod_reconcile_worker_enabled: bool = False
     pod_sandbox_namespace: str = "prodavan-sandboxes"
+    # agent-sandbox mode wiring (Wave 1 / feat/sandbox-sdk-client parity):
+    pod_sandbox_router_url: str = "http://sandbox-router-svc.agent-sandbox-system.svc:8080"
+    pod_sandbox_warmpool: str = "prodavan-agent-pool"
+    pod_sandbox_shutdown_ttl_sec: int = 604800
     pod_sandbox_image: str = "ghcr.io/ne-tort/prodavan-api:local"
     pod_sandbox_hydrate_image: str = "ghcr.io/ne-tort/prodavan-api:local"
     pod_sandbox_sa: str = "prodavan-project-pod"
