@@ -79,11 +79,17 @@ async def readiness(request: Request) -> dict[str, Any]:
         extras["resources"] = {
             k: ("ok" if v is True else "fail" if v is False else "n/a") for k, v in report.items()
         }
+        runtime_mode = (settings.pod_runtime_mode or 'stub').strip().lower()
         required_resources: list[tuple[str, bool]] = [
             ("kafka", settings.kafka_required),
             ("file_store", settings.object_store_required),
             ("worker", settings.celery_required),
-            ("k8s", settings.pod_k8s_required),
+            # K8sManager is enabled only in k8s runtime mode (see
+            # k8s_manager_from_settings); in sandbox mode it is disabled and
+            # reports None, so requiring it would 503 forever. Sandbox mode
+            # requires the agent-sandbox SDK client resource instead.
+            ("k8s", settings.pod_k8s_required and runtime_mode == "k8s"),
+            ("sandbox", runtime_mode == "sandbox"),
             ("mongodb", settings.mongodb_required),
             ("opensearch", settings.opensearch_required),
         ]
@@ -103,7 +109,7 @@ async def readiness(request: Request) -> dict[str, Any]:
                 )
             checks[name] = "ok"
 
-    if settings.pod_k8s_required:
+    if settings.pod_k8s_required and runtime_mode == "k8s":
         from prodavan.core.infra.k8s_manager import get_k8s_manager
 
         k8s_mgr = get_k8s_manager()

@@ -80,3 +80,51 @@ def test_ready_ok_when_kafka_required_and_healthy(
     body = resp.json()
     assert body["checks"]["kafka"] == "ok"
     assert body["checks"]["file_store"] == "ok"
+
+def test_ready_sandbox_mode_requires_sandbox_client_not_k8s(
+    monkeypatch: pytest.MonkeyPatch, ready_client: TestClient
+) -> None:
+    """pod_runtime_mode=sandbox: k8s gate is mode-gated off; sandbox resource gates."""
+    monkeypatch.setattr(health_mod.settings, "pod_runtime_mode", "sandbox")
+    monkeypatch.setattr(health_mod.settings, "pod_k8s_required", True)
+
+    class _Life:
+        async def health_report(self) -> dict:
+            return {"k8s": None, "sandbox": None, "file_store": True}
+
+    ready_client.app.state.lifespan_manager = _Life()
+    resp = ready_client.get("/api/v1/health/ready")
+    assert resp.status_code == 503
+    assert "sandbox" in resp.json()["detail"]["message"]
+
+
+def test_ready_sandbox_mode_ok_when_sandbox_client_healthy(
+    monkeypatch: pytest.MonkeyPatch, ready_client: TestClient
+) -> None:
+    monkeypatch.setattr(health_mod.settings, "pod_runtime_mode", "sandbox")
+    monkeypatch.setattr(health_mod.settings, "pod_k8s_required", True)
+
+    class _Life:
+        async def health_report(self) -> dict:
+            return {"k8s": None, "sandbox": True, "file_store": True}
+
+    ready_client.app.state.lifespan_manager = _Life()
+    resp = ready_client.get("/api/v1/health/ready")
+    assert resp.status_code == 200
+    assert resp.json()["checks"]["sandbox"] == "ok"
+
+
+def test_ready_k8s_mode_still_requires_k8s(
+    monkeypatch: pytest.MonkeyPatch, ready_client: TestClient
+) -> None:
+    monkeypatch.setattr(health_mod.settings, "pod_runtime_mode", "k8s")
+    monkeypatch.setattr(health_mod.settings, "pod_k8s_required", True)
+
+    class _Life:
+        async def health_report(self) -> dict:
+            return {"k8s": False, "sandbox": None, "file_store": True}
+
+    ready_client.app.state.lifespan_manager = _Life()
+    resp = ready_client.get("/api/v1/health/ready")
+    assert resp.status_code == 503
+    assert "k8s" in resp.json()["detail"]["message"]
