@@ -61,7 +61,7 @@ patches:
           spec:
             containers:
               - name: agent-sandbox-controller
-                image: registry.k8s.io/agent-sandbox/controller:v1.0.4
+                image: registry.k8s.io/agent-sandbox/agent-sandbox-controller:v1.0.4
                 imagePullPolicy: IfNotPresent
 
 # Label-domain allowlist: claims may propagate pod labels/annotations under
