@@ -1,4 +1,6 @@
-# API + Celery worker SA (namespace prodavan). Cross-ns pod lifecycle via rbac-sandboxes.
+# API + Celery worker SA (namespace prodavan). Sandbox lifecycle RBAC lives in
+# base/prodavan-sandboxes-ks/rbac-sandboxes.yaml (claims/sandboxes via agent-sandbox).
+# Legacy batch/Jobs Role removed (Wave 4): the Job isolator path is gone.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -7,35 +9,3 @@ metadata:
     app.kubernetes.io/name: prodavan-api
     app.kubernetes.io/part-of: prodavan
     app.kubernetes.io/component: api
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: prodavan-api-jobs
-  labels:
-    app.kubernetes.io/name: prodavan-api
-    app.kubernetes.io/part-of: prodavan
-    app.kubernetes.io/component: api
-rules:
-  - apiGroups: ["batch"]
-    resources: ["jobs"]
-    verbs: ["create", "get", "list", "watch", "delete"]
-  - apiGroups: ["batch"]
-    resources: ["jobs/status"]
-    verbs: ["get"]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: prodavan-api-jobs
-  labels:
-    app.kubernetes.io/name: prodavan-api
-    app.kubernetes.io/part-of: prodavan
-    app.kubernetes.io/component: api
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: Role
-  name: prodavan-api-jobs
-subjects:
-  - kind: ServiceAccount
-    name: prodavan-api
