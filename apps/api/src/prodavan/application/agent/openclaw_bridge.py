@@ -1,11 +1,19 @@
-"""Best-effort OpenClaw agent-bridge session bootstrap + send proxy (L03/L15)."""
+"""Best-effort OpenClaw agent-bridge session bootstrap + send proxy (L03/L15).
+
+Transport: all agent-runtime traffic is addressed via RuntimeEndpoint
+(application/agent/runtime_transport.py) — direct pod-IP in ``k8s`` mode, the
+agent-sandbox sandbox-router (``X-Sandbox-*`` headers) in ``sandbox`` mode,
+where ``runtime_ref`` is a SandboxClaim name and the backing Sandbox (pod) can
+be re-adopted at any time, so pod IPs are never addressed directly.
+"""
 
 from __future__ import annotations
 
 import json
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,11 +22,19 @@ from prodavan.application.agent.adapter_kinds import (
     BRIDGE_ADAPTER_KINDS,
     api_kind_to_bridge_adapter,
 )
+from prodavan.application.agent.project_bind import bind_project_runtime
 from prodavan.application.agent.runtime_model import sanitize_runtime_model
+from prodavan.application.agent.runtime_transport import (
+    RuntimeEndpoint,
+    resolve_runtime_endpoint,
+    runtime_mode,
+)
 from prodavan.config.settings import settings
 from prodavan.domain.agent import FROZEN_EVENT_TYPES, PLATFORM_STREAM_EVENT_TYPES, AgentEvent, AgentEventType
 from prodavan.domain.agent.errors import POD_NOT_RUNNING
-from prodavan.infrastructure.k8s.sandbox.client import K8sSandboxClient
+
+if TYPE_CHECKING:
+    from prodavan.infrastructure.k8s.sandbox.client import K8sSandboxClient
 
 logger = logging.getLogger(__name__)
 
@@ -31,16 +47,25 @@ _STUB_TEXT_PREFIXES = (
 PRODAVAN_EVENTS_OWNER_HEADER = "X-Prodavan-Events-Owner"
 PRODAVAN_EVENTS_OWNER_API = "api"
 
+# Send-side errors after which one re-resolve + re-register + retry is allowed.
+# In sandbox mode a router 404/410 usually means the Sandbox was re-adopted
+# under a new name; the retry loop re-resolves the endpoint from scratch.
+_RECOVERABLE_SEND_ERROR_CODES = frozenset(
+    {"BRIDGE_SESSION_NOT_FOUND", "BRIDGE_UNREACHABLE", "BRIDGE_EMPTY_STREAM"}
+)
+
 
 def _explicit_bridge_model(model: str | None) -> str | None:
     return sanitize_runtime_model(model)
 
 
-def _runtime_request_headers() -> dict[str, str]:
+def _runtime_request_headers(extra: Mapping[str, str] | None = None) -> dict[str, str]:
     headers = {PRODAVAN_EVENTS_OWNER_HEADER: PRODAVAN_EVENTS_OWNER_API}
     token = settings.pod_agent_runtime_token.strip()
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    if extra:
+        headers.update(extra)
     return headers
 
 
@@ -117,12 +142,22 @@ class OpenClawBridgeBootstrap:
         if payload.adapter_kind not in BRIDGE_ADAPTER_KINDS:
             return False
 
-        pod_ip = await self._resolve_pod_ip_for_project(project_id)
-        if not pod_ip:
-            logger.debug("openclaw bootstrap: no pod ip for project %s", project_id)
+        endpoint = await self._resolve_endpoint_for_project(project_id)
+        if endpoint is None:
+            logger.debug("openclaw bootstrap: no runtime endpoint for project %s", project_id)
             return False
 
-        url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/sessions"
+        # Post-Ready identity bind BEFORE session registration: in sandbox mode
+        # the runtime may be a freshly adopted warm pod that has never seen this
+        # project. Idempotent + 404-tolerant; never blocks registration.
+        await bind_project_runtime(
+            self._session,
+            project_id,
+            endpoint=endpoint,
+            http_client=self._http_client,
+        )
+
+        url = f"{endpoint.base_url}/v1/sessions"
         body = {
             "session_id": payload.session_id,
             "prodavan_session_id": payload.prodavan_session_id,
@@ -136,11 +171,11 @@ class OpenClawBridgeBootstrap:
 
         try:
             async with self._http_client(timeout=5.0) as client:
-                response = await client.post(url, json=body, headers=_runtime_request_headers())
+                response = await client.post(url, json=body, headers=_runtime_request_headers(endpoint.headers))
             if response.status_code in (200, 201):
                 if payload.adapter_state:
                     await self._patch_adapter_state(
-                        pod_ip=pod_ip,
+                        endpoint=endpoint,
                         session_id=payload.session_id,
                         adapter_state=payload.adapter_state,
                         provider_key_id=payload.provider_key_id,
@@ -165,7 +200,7 @@ class OpenClawBridgeBootstrap:
     async def _patch_adapter_state(
         self,
         *,
-        pod_ip: str,
+        endpoint: RuntimeEndpoint,
         session_id: str,
         adapter_state: dict,
         provider_key_id: str | None = None,
@@ -176,7 +211,7 @@ class OpenClawBridgeBootstrap:
         Older agent-runtime builds spread undefined patch fields and wipe
         ``providerKeyId`` / ``model`` if only ``adapter_state`` is sent.
         """
-        url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/sessions/{session_id}"
+        url = f"{endpoint.base_url}/v1/sessions/{session_id}"
         body: dict[str, object] = {"adapter_state": adapter_state}
         if provider_key_id:
             body["provider_key_id"] = provider_key_id
@@ -187,7 +222,7 @@ class OpenClawBridgeBootstrap:
                 response = await client.patch(
                     url,
                     json=body,
-                    headers=_runtime_request_headers(),
+                    headers=_runtime_request_headers(endpoint.headers),
                 )
             return response.status_code in (200, 204)
         except Exception as exc:
@@ -203,13 +238,13 @@ class OpenClawBridgeBootstrap:
         """Best-effort pull adapterState from bridge list after send."""
         if not settings.pod_agent_runtime_enabled:
             return None
-        pod_ip = await self._resolve_pod_ip_for_project(project_id)
-        if not pod_ip:
+        endpoint = await self._resolve_endpoint_for_project(project_id)
+        if endpoint is None:
             return None
-        url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/sessions"
+        url = f"{endpoint.base_url}/v1/sessions"
         try:
             async with self._http_client(timeout=5.0) as client:
-                response = await client.get(url, headers=_runtime_request_headers())
+                response = await client.get(url, headers=_runtime_request_headers(endpoint.headers))
             if response.status_code >= 400:
                 return None
             payload = response.json()
@@ -244,9 +279,9 @@ class OpenClawBridgeBootstrap:
         retried = False
         while True:
             recoverable = False
-            pod_ip = await self._resolve_pod_ip_for_project(project_id)
-            if not pod_ip:
-                logger.debug("openclaw send: no pod ip for project %s", project_id)
+            endpoint = await self._resolve_endpoint_for_project(project_id)
+            if endpoint is None:
+                logger.debug("openclaw send: no runtime endpoint for project %s", project_id)
                 yield AgentEvent.now(
                     AgentEventType.ERROR,
                     {
@@ -260,7 +295,7 @@ class OpenClawBridgeBootstrap:
             if bootstrap is not None and bootstrap.provider_key_id:
                 # Heal sessions wiped by older bridge PATCH (undefined fields cleared key/model).
                 await self._patch_adapter_state(
-                    pod_ip=pod_ip,
+                    endpoint=endpoint,
                     session_id=session_id,
                     adapter_state=bootstrap.adapter_state
                     if isinstance(bootstrap.adapter_state, dict)
@@ -271,47 +306,55 @@ class OpenClawBridgeBootstrap:
                 )
 
             async for event in self._stream_send(
-                pod_ip=pod_ip,
+                endpoint=endpoint,
                 session_id=session_id,
                 message=message,
                 model=model,
             ):
                 if (
                     not retried
-                    and bootstrap is not None
                     and event.type == AgentEventType.ERROR
                     and isinstance(event.data, dict)
-                    and event.data.get("code")
-                    in {"BRIDGE_SESSION_NOT_FOUND", "BRIDGE_UNREACHABLE", "BRIDGE_EMPTY_STREAM"}
+                    and event.data.get("code") in _RECOVERABLE_SEND_ERROR_CODES
+                    and (bootstrap is not None or runtime_mode() == "sandbox")
                 ):
                     recoverable = True
                     break
                 yield event
                 if event.type in {AgentEventType.ERROR, AgentEventType.DONE}:
                     return
-            if recoverable and not retried and bootstrap is not None:
+            if recoverable and not retried:
                 retried = True
-                if await self.register_session(project_id=project_id, payload=bootstrap):
-                    continue
-                yield AgentEvent.now(
-                    AgentEventType.ERROR,
-                    {
-                        "code": "BRIDGE_SESSION_NOT_FOUND",
-                        "message": "agent session missing in pod after restart",
-                        "retryable": False,
-                    },
-                )
+                if bootstrap is not None:
+                    # Re-register against a FRESH endpoint (register_session
+                    # re-resolves internally): in sandbox mode the claim may
+                    # have been re-adopted under a new sandbox name.
+                    if await self.register_session(project_id=project_id, payload=bootstrap):
+                        continue
+                    yield AgentEvent.now(
+                        AgentEventType.ERROR,
+                        {
+                            "code": "BRIDGE_SESSION_NOT_FOUND",
+                            "message": "agent session missing in pod after restart",
+                            "retryable": False,
+                        },
+                    )
+                    return
+                # Sandbox mode without a bootstrap payload: one re-resolve +
+                # retry — the router 404/410 above means the sandbox was likely
+                # re-adopted; the next loop iteration resolves the new name.
+                continue
             return
 
     async def _stream_send(
         self,
         *,
-        pod_ip: str,
+        endpoint: RuntimeEndpoint,
         session_id: str,
         message: str,
         model: str | None,
     ) -> AsyncIterator[AgentEvent]:
-        url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/sessions/{session_id}/send"
+        url = f"{endpoint.base_url}/v1/sessions/{session_id}/send"
         body: dict[str, str] = {"message": message}
         bridge_model = sanitize_runtime_model(model)
         if bridge_model:
@@ -324,13 +367,19 @@ class OpenClawBridgeBootstrap:
                     "POST",
                     url,
                     json=body,
-                    headers=_runtime_request_headers(),
+                    headers=_runtime_request_headers(endpoint.headers),
                 ) as response:
                     if response.status_code >= 400:
                         text = await response.aread()
                         body_text = text.decode("utf-8", errors="replace")
+                        lowered = body_text.lower()
                         code = "BRIDGE_SEND_FAILED"
-                        if response.status_code == 404 and "session not found" in body_text.lower():
+                        if response.status_code == 410:
+                            # Router: sandbox gone / re-adopted under a new name.
+                            code = "BRIDGE_SESSION_NOT_FOUND"
+                        elif response.status_code == 404 and (
+                            "session not found" in lowered or "sandbox" in lowered
+                        ):
                             code = "BRIDGE_SESSION_NOT_FOUND"
                         yield AgentEvent.now(
                             AgentEventType.ERROR,
@@ -376,33 +425,12 @@ class OpenClawBridgeBootstrap:
                 {"code": "BRIDGE_UNREACHABLE", "message": str(exc), "retryable": True},
             )
 
-    async def _resolve_pod_ip_for_project(self, project_id: str) -> str | None:
-        runtime_ref = await self._resolve_runtime_ref(project_id)
-        if not runtime_ref:
-            return None
-        return await self._resolve_pod_ip(runtime_ref)
-
-    async def _resolve_runtime_ref(self, project_id: str) -> str | None:
-        from prodavan.application.pod_service.query import PodQuery
-
-        view = await PodQuery(self._session).runtime_view(project_id)
-        if view is None:
-            return None
-        if str(view.get("observed_state") or "") != "running":
-            return None
-        ref = str(view.get("k8s_pod_name") or view.get("runtime_ref") or "").strip()
-        if not ref or ref.startswith("object-ws:"):
-            return None
-        return ref
-
-    async def _resolve_pod_ip(self, runtime_ref: str) -> str | None:
-        client = self._k8s or K8sSandboxClient(namespace=settings.pod_sandbox_namespace)
-        if not client.available():
-            return None
-        snap = await client.get_pod(runtime_ref)
-        if snap is None or not snap.ready or snap.phase != "Running":
-            return None
-        return snap.pod_ip
+    async def _resolve_endpoint_for_project(self, project_id: str) -> RuntimeEndpoint | None:
+        return await resolve_runtime_endpoint(
+            self._session,
+            project_id,
+            k8s_client=self._k8s,
+        )
 
     async def resolve_approval(
         self,
@@ -414,17 +442,17 @@ class OpenClawBridgeBootstrap:
         """Forward HITL decision to agent-runtime."""
         if not settings.pod_agent_runtime_enabled:
             return False
-        pod_ip = await self._resolve_pod_ip_for_project(project_id)
-        if not pod_ip:
+        endpoint = await self._resolve_endpoint_for_project(project_id)
+        if endpoint is None:
             return False
         bridge_decision = "allow" if decision == "approve" else "deny"
-        url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/approvals/{approval_id}"
+        url = f"{endpoint.base_url}/v1/approvals/{approval_id}"
         try:
             async with self._http_client(timeout=10.0) as client:
                 response = await client.post(
                     url,
                     json={"decision": bridge_decision},
-                    headers=_runtime_request_headers(),
+                    headers=_runtime_request_headers(endpoint.headers),
                 )
             return response.status_code in (200, 201)
         except Exception as exc:
@@ -440,16 +468,13 @@ class OpenClawBridgeBootstrap:
     ) -> dict | None:
         if not settings.pod_agent_runtime_enabled:
             return None
-        pod_ip = await self._resolve_pod_ip_for_project(project_id)
-        if not pod_ip:
+        endpoint = await self._resolve_endpoint_for_project(project_id)
+        if endpoint is None:
             return None
-        url = (
-            f"http://{pod_ip}:{settings.pod_agent_runtime_port}"
-            f"/v1/sessions/{session_id}/sidechains/{tool_use_id}/transcript"
-        )
+        url = f"{endpoint.base_url}/v1/sessions/{session_id}/sidechains/{tool_use_id}/transcript"
         try:
             async with self._http_client(timeout=10.0) as client:
-                response = await client.get(url, headers=_runtime_request_headers())
+                response = await client.get(url, headers=_runtime_request_headers(endpoint.headers))
             if response.status_code >= 400:
                 return None
             body = response.json()
@@ -467,16 +492,16 @@ class OpenClawBridgeBootstrap:
     ) -> dict | None:
         if not settings.pod_agent_runtime_enabled:
             return None
-        pod_ip = await self._resolve_pod_ip_for_project(project_id)
-        if not pod_ip:
+        endpoint = await self._resolve_endpoint_for_project(project_id)
+        if endpoint is None:
             return None
-        url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/sessions/{source_session_id}/fork"
+        url = f"{endpoint.base_url}/v1/sessions/{source_session_id}/fork"
         try:
             async with self._http_client(timeout=10.0) as client:
                 response = await client.post(
                     url,
                     json={"session_id": new_session_id},
-                    headers=_runtime_request_headers(),
+                    headers=_runtime_request_headers(endpoint.headers),
                 )
             if response.status_code >= 400:
                 return None

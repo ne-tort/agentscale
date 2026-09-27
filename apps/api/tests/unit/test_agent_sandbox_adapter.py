@@ -408,9 +408,13 @@ def test_factory_hydrate_is_noop_in_sandbox_mode() -> None:
     assert isinstance(adapter, StubHydrateAdapter)
 
 
-def test_factory_dehydrate_is_noop_in_sandbox_mode() -> None:
+def test_factory_dehydrate_streams_via_router_in_sandbox_mode() -> None:
+    """Wave 3: sandbox dehydrate streams GET /v1/workspace/archive from the
+    agent-runtime through the sandbox-router into the object store."""
     import prodavan.application.pod_service.factory as factory_module
-    from prodavan.application.pod_service.adapters.stub_dehydrate import StubDehydrateAdapter
+    from prodavan.application.pod_service.adapters.agent_sandbox.dehydrate import (
+        SandboxHttpDehydrateAdapter,
+    )
 
     adapter = factory_module.build_dehydrate()
-    assert isinstance(adapter, StubDehydrateAdapter)
+    assert isinstance(adapter, SandboxHttpDehydrateAdapter)

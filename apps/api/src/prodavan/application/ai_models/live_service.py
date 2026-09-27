@@ -15,6 +15,7 @@ from prodavan.application.agent.openclaw_bridge import (
     _runtime_request_headers,
     api_kind_to_bridge_adapter,
 )
+from prodavan.application.agent.runtime_transport import resolve_runtime_endpoint
 from prodavan.application.ai_keys.probe.provider_resolver import ProviderResolver
 from prodavan.application.ai_keys.service import AiKeysService
 from prodavan.application.ai_models.resolution import resolve_ui_default
@@ -174,9 +175,8 @@ class AiModelsLiveService:
         resolved_project_id = project_id or await self._any_running_project_for_company(company_id)
         if not resolved_project_id:
             return []
-        bridge = OpenClawBridgeBootstrap(self._session)
-        pod_ip = await bridge._resolve_pod_ip_for_project(resolved_project_id)  # noqa: SLF001
-        if not pod_ip:
+        runtime_endpoint = await resolve_runtime_endpoint(self._session, resolved_project_id)
+        if runtime_endpoint is None:
             return []
         pushed = await AgentCredentialBroker(self._session).push_lease_to_runtime(
             project_id=resolved_project_id,
@@ -194,23 +194,23 @@ class AiModelsLiveService:
         # use the vendor SDK and need no endpoint params.
         if is_http_probe_kind(key_row.api_kind):
             secret = await self._resolve_key_secret(key_row.id)
-            endpoint = await ProviderResolver(self._session).resolve(
+            provider_endpoint = await ProviderResolver(self._session).resolve(
                 api_kind=key_row.api_kind,
                 provider=key_row.provider,
                 secret=secret,
                 catalog_entry_id=getattr(key_row, "catalog_entry_id", None),
             )
-            if endpoint is not None:
-                params["base_url"] = endpoint.base_url
-                params["models_path"] = endpoint.models_path
-                params["auth_scheme"] = endpoint.auth_scheme
-        url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/models"
+            if provider_endpoint is not None:
+                params["base_url"] = provider_endpoint.base_url
+                params["models_path"] = provider_endpoint.models_path
+                params["auth_scheme"] = provider_endpoint.auth_scheme
+        url = f"{runtime_endpoint.base_url}/v1/models"
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 response = await client.get(
                     url,
                     params=params,
-                    headers=_runtime_request_headers(),
+                    headers=_runtime_request_headers(runtime_endpoint.headers),
                 )
                 if response.status_code >= 400:
                     logger.warning(

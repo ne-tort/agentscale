@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from prodavan.application.agent.credential_broker import AgentCredentialBroker
+from prodavan.application.agent.runtime_transport import RuntimeEndpoint
 from prodavan.infrastructure.k8s.sandbox.client import PodSnapshot
 from prodavan.infrastructure.persistence.models.projects import ProjectPodRow
 
@@ -167,7 +168,7 @@ async def test_revoke_runtime_lease_posts_delete(monkeypatch: pytest.MonkeyPatch
 
     broker = AgentCredentialBroker(session, http_client=lambda **_kwargs: mock_http)
     broker._audit = _stub_audit()
-    broker._resolve_pod_ip_for_project = AsyncMock(return_value="10.42.0.88")
+    broker._resolve_endpoint_for_project = AsyncMock(return_value=RuntimeEndpoint(base_url="http://10.42.0.88:3921", headers={}))
 
     ok = await broker.revoke_runtime_lease(project_id="prj_1", lease_id="lease_xyz")
 
@@ -270,7 +271,7 @@ async def test_revoke_lease_audit_failure_does_not_mask_revoke_result(monkeypatc
     mock_http.delete = AsyncMock(return_value=mock_response)
 
     broker = AgentCredentialBroker(session, http_client=lambda **_kwargs: mock_http)
-    broker._resolve_pod_ip_for_project = AsyncMock(return_value="10.42.0.88")
+    broker._resolve_endpoint_for_project = AsyncMock(return_value=RuntimeEndpoint(base_url="http://10.42.0.88:3921", headers={}))
     failing_audit = MagicMock()
     failing_audit.record = AsyncMock(side_effect=RuntimeError("audit db down"))
     broker._audit = failing_audit
