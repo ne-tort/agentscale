@@ -21,6 +21,9 @@ spec:
     spec:
       serviceAccountName: prodavan-project-pod
       automountServiceAccountToken: false
+      # Runtime image is private on ghcr — pull via the dev overlay ghcr-pull secret.
+      imagePullSecrets:
+        - name: ghcr-pull
       containers:
       - name: agent-runtime
         # Versioned tag — bumped by PR when prodavan-claw image is rebuilt.
