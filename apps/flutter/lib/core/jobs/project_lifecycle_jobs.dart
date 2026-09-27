@@ -23,8 +23,14 @@ String phaseSubtitle(Map<String, dynamic>? container, AppLocalizations l10n) {
     'hydrating' => l10n.containerObservedHydrating,
     'provisioning' => l10n.containerObservedProvisioning,
     'starting' => l10n.containerObservedStarting,
+    'resuming' => l10n.containerObservedResuming,
+    'suspended' => l10n.containerObservedSuspended,
+    'pausing' => l10n.containerObservedPausing,
     'running' => l10n.containerObservedRunning,
+    'degraded' => l10n.containerObservedDegraded,
     'failed' => l10n.containerObservedFailed,
+    'paused' => l10n.containerObservedSuspended,
+    'absent' => l10n.containerObservedAbsent,
     _ => l10n.projectLaunchStartingSnack,
   };
 }
@@ -44,7 +50,7 @@ Future<void> _pollUntilSettledOrThrow({
   );
   if (!containerObservedSettled(container)) {
     throw TimeoutException(
-      l10n.projectLifecycleTimedOut,
+      l10n.containerPollTimeout,
       timeout,
     );
   }
@@ -80,7 +86,7 @@ Future<Map<String, dynamic>?> runProjectLaunchJob({
       subjectId: projectId,
       title: l10n.projectLaunchInProgress,
       subtitle: l10n.projectLaunchStartingSnack,
-      timeout: appJobDefaultTimeout,
+      timeout: containerPollDefaultTimeout,
       run: (ctrl) async {
         if (invokeApi) {
           try {
@@ -117,7 +123,7 @@ Future<Map<String, dynamic>?> runProjectReloadJob({
       subjectId: projectId,
       title: l10n.projectReloadInProgress,
       subtitle: l10n.projectLaunchStartingSnack,
-      timeout: appJobDefaultTimeout,
+      timeout: containerPollDefaultTimeout,
       run: (ctrl) async {
         if (invokeApi) {
           await api.reloadProject(projectId);
@@ -150,7 +156,7 @@ Future<Map<String, dynamic>?> runProjectResumeJob({
       subjectId: projectId,
       title: l10n.projectResumeInProgress,
       subtitle: l10n.projectResumeStartingSnack,
-      timeout: appJobDefaultTimeout,
+      timeout: containerPollDefaultTimeout,
       run: (ctrl) async {
         if (invokeApi) {
           try {

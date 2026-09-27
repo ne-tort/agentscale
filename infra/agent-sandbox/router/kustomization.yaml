@@ -1,0 +1,50 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# sandbox-router (Go) — proxy to sandbox Pods via X-Sandbox-* headers.
+# Vendored from agent-sandbox/sandbox-router/deploy/, patched for Prodavan:
+#   - NetworkPolicy egress to sandboxes: 3921 (agent-runtime port), not 8888
+#   - NetworkPolicy ingress on 8080: only from namespace prodavan
+#   - replicas: 2 (upstream default, kept explicit)
+#   - --cache-enabled=true (Pod-IP fast path; requires rbac.yaml ClusterRole)
+# authz-mode stays upstream default (allow-all) — router is internal-only,
+# no Ingress route; tokenreview/scoped-token is a later iteration.
+resources:
+  - rbac.yaml
+  - serviceaccount.yaml
+  - deployment.yaml
+  - service.yaml
+  - pdb.yaml
+  - networkpolicy.yaml
+
+namespace: agent-sandbox-system
+
+patches:
+  # Explicit HA: 2 replicas (upstream example already sets this; pinned here
+  # so drift is visible in review).
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: sandbox-router
+        namespace: agent-sandbox-system
+      spec:
+        replicas: 2
+  # Enable the Pod-IP cache: requests carrying X-Sandbox-UID dial the live
+  # PodIP and bypass per-sandbox DNS. Required by the k8s-agent-sandbox SDK
+  # flow (MIGRATION-DECISIONS §1.7) and needs the ClusterRole in rbac.yaml.
+  # Upstream example ships with this arg present but commented rationale —
+  # we ensure it is set.
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: sandbox-router
+        namespace: agent-sandbox-system
+      spec:
+        template:
+          spec:
+            containers:
+              - name: sandbox-router
+                args:
+                  - --cache-enabled=true

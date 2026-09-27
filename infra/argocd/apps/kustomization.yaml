@@ -3,5 +3,7 @@ kind: Kustomization
 namespace: argocd
 resources:
   - 00-project.yaml
+  - 00-agent-sandbox-project.yaml
+  - agent-sandbox.yaml
   - prodavan-dev.yaml
   - prodavan-e2e.yaml

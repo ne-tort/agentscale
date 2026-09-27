@@ -1,0 +1,42 @@
+# RBAC for agent-sandbox era (replaces base/prodavan-sandbox/rbac-sandboxes.yaml).
+# Canon: docs/migration/03-devops.md 3.3. The API no longer CRUDs pods directly —
+# it writes SandboxClaims and reads/patches Sandboxes (CRs reconciled by the
+# agent-sandbox controller). pods/exec is GONE: file/command channel is the router.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prodavan-project-pod
+  namespace: prodavan-sandboxes
+  labels:
+    app.kubernetes.io/part-of: prodavan
+---
+# API service account permissions in prodavan-sandboxes.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: prodavan-sandbox-claims
+  namespace: prodavan-sandboxes
+rules:
+- apiGroups: ["extensions.agents.x-k8s.io"]
+  resources: ["sandboxclaims", "sandboxclaims/status"]
+  verbs: ["get", "list", "watch", "create", "delete"]
+- apiGroups: ["agents.x-k8s.io"]
+  resources: ["sandboxes", "sandboxes/status"]
+  verbs: ["get", "list", "watch", "patch"]
+- apiGroups: ["metrics.k8s.io"]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: prodavan-sandbox-claims
+  namespace: prodavan-sandboxes
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: prodavan-sandbox-claims
+subjects:
+- kind: ServiceAccount
+  name: prodavan-api
+  namespace: prodavan

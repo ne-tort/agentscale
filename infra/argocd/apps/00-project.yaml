@@ -13,12 +13,25 @@ spec:
       server: https://kubernetes.default.svc
     - namespace: prodavan-sandboxes
       server: https://kubernetes.default.svc
+    # agent-sandbox-system: platform ns for the sandbox controller/router
+    # (App agent-sandbox.yaml, project `agent-sandbox`). Listed here so the
+    # prodavan project may also target it if platform glue ever lands there.
+    - namespace: agent-sandbox-system
+      server: https://kubernetes.default.svc
   # Overlay includes Namespace; CreateNamespace=true also needs this.
   clusterResourceWhitelist:
     - group: ""
       kind: Namespace
   # Empty whitelist = allow all namespaced kinds. Pin to what overlays/dev actually ships.
   namespaceResourceWhitelist:
+    - group: extensions.agents.x-k8s.io
+      kind: SandboxTemplate
+    - group: extensions.agents.x-k8s.io
+      kind: SandboxWarmPool
+    - group: extensions.agents.x-k8s.io
+      kind: SandboxClaim
+    - group: agents.x-k8s.io
+      kind: Sandbox
     - group: ""
       kind: ConfigMap
     - group: ""

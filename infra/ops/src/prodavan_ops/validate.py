@@ -33,7 +33,6 @@ REQUIRED_SNIPPETS = (
     "curlimages/curl:8.10.1",
     "redpanda:v24.2.4",
     "quay.io/keycloak/keycloak:26.0",
-    "bitnamilegacy/kubectl:1.31.4",
 )
 FORBIDDEN_BITNAMI_PUBLIC = re.compile(r"^bitnami/")
 

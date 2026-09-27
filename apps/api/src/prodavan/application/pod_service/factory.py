@@ -32,6 +32,19 @@ def build_pod_runtime(*, force_new: bool = False) -> PodRuntimePort:
             raise RuntimeError("pod_runtime_mode=k8s but K8sManager client is unavailable")
         logger.info("pod_runtime: k8s adapter namespace=%s", mgr.client.namespace)
         adapter: PodRuntimePort = K8sPodRuntimeAdapter(client=mgr.client)
+    elif mode == "sandbox":
+        from prodavan.application.pod_service.adapters.agent_sandbox import (
+            AgentSandboxPodRuntimeAdapter,
+        )
+
+        # SDK client is resolved lazily from the SandboxClientResource so the
+        # singleton survives resource restarts; mode errors surface on first use.
+        adapter = AgentSandboxPodRuntimeAdapter()
+        logger.info(
+            "pod_runtime: agent-sandbox adapter namespace=%s warmpool=%s",
+            settings.pod_sandbox_namespace,
+            settings.pod_sandbox_warmpool,
+        )
     else:
         adapter = StubPodRuntimeAdapter()
     if not force_new:
@@ -45,6 +58,7 @@ def build_hydrate() -> HydratePort:
         from prodavan.application.pod_service.adapters.k8s.hydrate_init import K8sInitHydrateAdapter
 
         return K8sInitHydrateAdapter()
+    # sandbox mode: workspace lives on the claim PVC — no hydrate step.
     return StubHydrateAdapter()
 
 
@@ -78,6 +92,8 @@ def build_dehydrate():
         return K8sDehydrateAdapter(client=mgr.client)
     from prodavan.application.pod_service.adapters.stub_dehydrate import StubDehydrateAdapter
 
+    # sandbox mode falls through too: PVC is the source of truth, no
+    # Pod-FS -> object-store sync is needed (Wave 2 gap: intentional).
     return StubDehydrateAdapter()
 
 

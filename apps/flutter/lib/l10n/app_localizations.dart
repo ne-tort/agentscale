@@ -1370,6 +1370,18 @@ abstract class AppLocalizations {
   /// **'Unknown'**
   String get containerObservedUnknown;
 
+  /// No description provided for @containerObservedResuming.
+  String get containerObservedResuming;
+
+  /// No description provided for @containerObservedSuspended.
+  String get containerObservedSuspended;
+
+  /// No description provided for @containerObservedPausing.
+  String get containerObservedPausing;
+
+  /// No description provided for @containerPollTimeout.
+  String get containerPollTimeout;
+
   /// No description provided for @containerMetricsAwaiting.
   ///
   /// In en, this message translates to:

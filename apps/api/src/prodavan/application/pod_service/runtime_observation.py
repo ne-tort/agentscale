@@ -105,6 +105,8 @@ class RuntimeObservationService:
                 )
 
         mode = (settings.pod_runtime_mode or "stub").strip().lower()
+        if mode == "sandbox":
+            return await self._observe_sandbox(project, pod)
         if mode != "k8s":
             return await self._observe_stub(project, pod)
 
@@ -514,6 +516,68 @@ class RuntimeObservationService:
             restarts=k8s_status.get("restarts"),
         )
 
+    async def _observe_sandbox(self, project: ProjectRow, pod: ProjectPodRow) -> dict[str, Any]:
+        """agent-sandbox mode — observed_state from the sandbox adapter contract.
+
+        Adapter get_status returns ``observed_state`` in
+        {running, suspended, pausing, provisioning, absent, failed}; map to
+        ObservedState and keep the runtime detail fields for the UI.
+        """
+        runtime_ref = pod.runtime_ref or ""
+        status: dict[str, Any] = {}
+        if runtime_ref:
+            try:
+                runtime = build_pod_runtime()
+                status = await runtime.get_status(runtime_ref=runtime_ref) or {}
+            except Exception as exc:
+                logger.exception("observe sandbox status failed runtime_ref=%s", runtime_ref)
+                return self._summary(
+                    ObservedState.UNKNOWN,
+                    orchestrator_status=pod.status,
+                    desired_state=pod.desired_state,
+                    last_error=str(exc)[:500],
+                    sandbox=True,
+                )
+
+        state = str(status.get("observed_state") or "absent")
+        _SANDBOX_STATE_TO_OBSERVED = {
+            "running": ObservedState.RUNNING,
+            "suspended": ObservedState.SUSPENDED,
+            "pausing": ObservedState.PAUSING,
+            "provisioning": ObservedState.PROVISIONING,
+            "absent": ObservedState.ABSENT,
+            "failed": ObservedState.FAILED,
+        }
+        observed = _SANDBOX_STATE_TO_OBSERVED.get(state, ObservedState.UNKNOWN)
+
+        kw: dict[str, Any] = {
+            "orchestrator_status": pod.status,
+            "desired_state": pod.desired_state,
+            "sandbox": True,
+        }
+        if status.get("phase") is not None:
+            kw["phase"] = status.get("phase")
+        if status.get("ready") is not None:
+            kw["ready"] = status.get("ready")
+        if status.get("waiting_reason"):
+            kw["waiting_reason"] = status.get("waiting_reason")
+        if status.get("claim_name") or runtime_ref:
+            kw["claim_name"] = status.get("claim_name") or runtime_ref
+        if status.get("sandbox_name"):
+            kw["sandbox_name"] = status.get("sandbox_name")
+        if status.get("service_fqdn"):
+            kw["service_fqdn"] = status.get("service_fqdn")
+        if status.get("launch_type"):
+            kw["launch_type"] = status.get("launch_type")
+        if status.get("restarts") is not None:
+            kw["restarts"] = status.get("restarts")
+        if state == "failed":
+            kw["last_error"] = status.get("waiting_reason") or "sandbox claim failed"
+        if observed == ObservedState.ABSENT and pod.desired_state == PodDesiredState.RUNNING.value:
+            # Flap tolerance mirrors k8s: absent is reconcile-recoverable.
+            kw["last_error"] = pod.last_error or "sandbox claim not found"
+        return self._summary(observed, **kw)
+
     async def _observe_stub(self, project: ProjectRow, pod: ProjectPodRow) -> dict[str, Any]:
         """Stub mode — no k8s pod; promote DB RUNNING for in-process agent tests."""
         if (
@@ -635,6 +699,11 @@ class RuntimeObservationService:
         started_at: str | None = None,
         k8s_created_at: str | None = None,
         waiting_reason: str | None = None,
+        sandbox: bool = False,
+        sandbox_name: str | None = None,
+        claim_name: str | None = None,
+        service_fqdn: str | None = None,
+        launch_type: str | None = None,
     ) -> dict[str, Any]:
         out: dict[str, Any] = {
             "observed_state": observed_state.value,
@@ -648,6 +717,16 @@ class RuntimeObservationService:
             out["phase"] = phase
         if ready is not None:
             out["ready"] = ready
+        if sandbox:
+            out["sandbox"] = True
+        if sandbox_name:
+            out["sandbox_name"] = sandbox_name
+        if claim_name:
+            out["claim_name"] = claim_name
+        if service_fqdn:
+            out["service_fqdn"] = service_fqdn
+        if launch_type:
+            out["launch_type"] = launch_type
         if waiting_reason:
             out["waiting_reason"] = waiting_reason
         if metrics:

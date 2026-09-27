@@ -1,0 +1,38 @@
+# agent-sandbox platform (controller + extensions CRDs + sandbox-router).
+# Source is vendored manifests under infra/agent-sandbox/ — no runtime fetch
+# from upstream (MIGRATION-DECISIONS §1.1).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: agent-sandbox
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: agent-sandbox
+  source:
+    repoURL: https://github.com/ne-tort/prodavan.git
+    targetRevision: main
+    path: infra/agent-sandbox
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: agent-sandbox-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  # Controller status fields churn under selfHeal without this.
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /status

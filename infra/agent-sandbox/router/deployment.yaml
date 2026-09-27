@@ -1,0 +1,112 @@
+# Deployment for the Go sandbox-router. Vendored from
+# agent-sandbox/sandbox-router/deploy/deployment.yaml.
+# Prodavan deltas vs upstream example:
+#   - --cache-enabled=true is kept (Pod-IP fast path for the SDK flow);
+#     it requires the ClusterRole in rbac.yaml.
+#   - authz-mode stays default (allow-all): router is internal-only (no
+#     Ingress route); tokenreview/scoped-token is a later iteration.
+# Plain HTTP only (no TLS) — TLS terminates elsewhere and the router is
+# reachable only from the prodavan namespace (see networkpolicy.yaml).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-router
+  namespace: agent-sandbox-system
+  labels:
+    app: sandbox-router
+    app.kubernetes.io/name: sandbox-router
+    app.kubernetes.io/component: sandbox-router
+spec:
+  # 2 replicas for HA (also pinned via kustomization patch).
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: sandbox-router
+      app.kubernetes.io/component: sandbox-router
+  template:
+    metadata:
+      labels:
+        app: sandbox-router
+        app.kubernetes.io/name: sandbox-router
+        app.kubernetes.io/component: sandbox-router
+      annotations:
+        # Tell Prometheus to scrape the metrics port if you don't use a
+        # ServiceMonitor. Adjust or remove for your environment.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: sandbox-router
+      # Spread replicas across nodes/zones so a single failure doesn't take
+      # the router fleet offline.
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: sandbox-router
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: sandbox-router
+      containers:
+      - name: sandbox-router
+        image: registry.k8s.io/agent-sandbox/sandbox-router-go:latest
+        imagePullPolicy: IfNotPresent
+        args:
+        - --http-bind-address=:8080
+        - --metrics-bind-address=:9090
+        - --health-probe-bind-address=:8081
+        - --cluster-domain=cluster.local
+        - --proxy-timeout=180s
+        # Retry budget for upstream dial failures.
+        - --upstream-max-retries=3
+        # Pod-IP cache: requests carrying X-Sandbox-UID dial the live PodIP
+        # and bypass DNS. Required by the k8s-agent-sandbox SDK flow; needs
+        # the ClusterRole granted in rbac.yaml.
+        - --cache-enabled=true
+        ports:
+        - name: proxy
+          containerPort: 8080
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        - name: healthz
+          containerPort: 8081
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: healthz
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: healthz
+          initialDelaySeconds: 1
+          periodSeconds: 5
+          failureThreshold: 2
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            cpu: "2"
+            memory: 1Gi
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          capabilities:
+            drop: ["ALL"]
+          seccompProfile:
+            type: RuntimeDefault
+      # Give in-flight requests a chance to finish before the kubelet
+      # delivers SIGKILL.
+      terminationGracePeriodSeconds: 45

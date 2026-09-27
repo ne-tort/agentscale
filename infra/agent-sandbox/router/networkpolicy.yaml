@@ -1,0 +1,82 @@
+# NetworkPolicy for the Go sandbox-router. Vendored from
+# agent-sandbox/sandbox-router/deploy/networkpolicy.yaml.
+# Prodavan deltas vs upstream example:
+#   - Ingress :8080 only from namespace `prodavan` (upstream: any namespace) —
+#     only the prodavan API dials the router.
+#   - Egress to sandbox pods: TCP 3921 (agent-runtime HTTP port) instead of the
+#     upstream example's 8888 — without this every dial to a sandbox 502s.
+#   - Egress OTel rule kept broad (tracing not enabled yet — tighten when it is).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: sandbox-router
+  namespace: agent-sandbox-system
+  labels:
+    app.kubernetes.io/name: sandbox-router
+    app.kubernetes.io/component: sandbox-router
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: sandbox-router
+      app.kubernetes.io/component: sandbox-router
+  policyTypes: ["Ingress", "Egress"]
+  ingress:
+  # Proxy traffic — only the prodavan API (namespace prodavan) dials the router.
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: prodavan
+    ports:
+    - protocol: TCP
+      port: 8080
+  # Metrics scrape — restrict to your monitoring namespace.
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: monitoring
+    ports:
+    - protocol: TCP
+      port: 9090
+  # Kubelet probes hit the pod IP directly; allow all.
+  - ports:
+    - protocol: TCP
+      port: 8081
+  egress:
+  # DNS for resolving sandbox FQDNs.
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: kube-system
+    ports:
+    - protocol: UDP
+      port: 53
+    - protocol: TCP
+      port: 53
+  # Forwarding to sandbox pods (agent-runtime) on the Prodavan sandbox port.
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: prodavan-sandboxes
+    ports:
+    - protocol: TCP
+      port: 3921
+  # OTel collector (if --enable-tracing or --enable-otel-metrics). Tighten
+  # to the collector's namespace/pod selector when tracing is enabled.
+  - to:
+    - namespaceSelector: {}
+    ports:
+    - protocol: TCP
+      port: 4317
+  # Kubernetes API server — required with --cache-enabled (the cache informer
+  # LIST/WATCHes sandbox-owned Pods). The apiserver lives at the cluster-wide
+  # kubernetes service; NetworkPolicy can't name it directly, so we allow
+  # egress to the default namespace on the standard API ports.
+  - to:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: default
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 6443

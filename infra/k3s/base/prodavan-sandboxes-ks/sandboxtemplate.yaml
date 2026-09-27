@@ -1,0 +1,69 @@
+# SandboxTemplate — canonical pod blueprint for prodavan agent sandboxes.
+# Canon: docs/migration/01-target-architecture.md ("SandboxTemplate (канон)").
+# Per-project customization goes through claim LABELS only (post-Ready inject);
+# env/VCT in claims are loudly rejected (Disallowed) to keep warm-pool adoption
+# sub-second (see docs/migration/01, "Ключевые решения шаблона").
+apiVersion: extensions.agents.x-k8s.io/v1beta1
+kind: SandboxTemplate
+metadata:
+  name: prodavan-agent
+  namespace: prodavan-sandboxes
+  labels:
+    app.kubernetes.io/part-of: prodavan
+    prodavan.io/managed-by: agent-sandbox
+spec:
+  podTemplate:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: prodavan
+        app.kubernetes.io/component: project-pod
+        prodavan.io/managed-by: agent-sandbox
+    spec:
+      serviceAccountName: prodavan-project-pod
+      automountServiceAccountToken: false
+      containers:
+      - name: agent-runtime
+        # Versioned tag — bumped by PR when prodavan-claw image is rebuilt.
+        # TODO: keep in sync with ghcr.io/ne-tort/prodavan-agent-runtime releases.
+        image: ghcr.io/ne-tort/prodavan-agent-runtime:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - name: http
+          containerPort: 3921
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 3
+          periodSeconds: 5
+          failureThreshold: 12
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: http
+          initialDelaySeconds: 10
+          periodSeconds: 20
+          failureThreshold: 6
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
+        volumeMounts:
+        - name: workspace
+          mountPath: /workspace
+      volumes: [] # workspace — via volumeClaimTemplates
+  volumeClaimTemplates:
+  - name: workspace
+    spec:
+      accessModes: [ReadWriteOnce]
+      resources:
+        requests:
+          storage: 5Gi
+  service: true
+  envVarsInjectionPolicy: Disallowed
+  volumeClaimTemplatesPolicy: Disallowed
+  networkPolicyManagement: Unmanaged
