@@ -74,8 +74,7 @@ spec:
               if ! redis-check-aof "$manifest" >/dev/null 2>&1; then
                 echo "AOF corrupt - repairing (truncates to last valid prefix)"
                 cp -a /data/appendonlydir /data/appendonlydir.bak.$(date +%s) || true
-                printf 'y
-' | redis-check-aof --fix "$manifest" || true
+                printf 'y\n' | redis-check-aof --fix "$manifest" || true
               fi
           volumeMounts:
             - name: data
