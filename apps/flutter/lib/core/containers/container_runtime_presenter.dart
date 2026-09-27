@@ -123,6 +123,10 @@ class ContainerRuntime {
 
     final restartsRaw = runtime?['restarts'] ?? item?['restarts'];
     final metricsAvailableRaw = runtime?['metrics_available'];
+    // Hoist null-aware reads into locals: `x?['k'] is bool ? x?['k'] as bool : …`
+    // trips the Dart parser's `is T?` vs ternary disambiguation (CI analyze).
+    final readyRaw = runtime?['ready'];
+    final suspendedRaw = runtime?['suspended'];
 
     return ContainerRuntime(
       observedState: observed,
@@ -130,8 +134,8 @@ class ContainerRuntime {
       claimName: rtString('claim_name'),
       serviceFqdn: rtString('service_fqdn'),
       launchType: launch,
-      ready: (runtime?['ready'] is bool ? runtime?['ready'] as bool : null),
-      suspended: (runtime?['suspended'] is bool ? runtime?['suspended'] as bool : null),
+      ready: readyRaw is bool ? readyRaw : null,
+      suspended: suspendedRaw is bool ? suspendedRaw : null,
       restarts: restartsRaw is num ? restartsRaw : null,
       lastError: rtString('last_error') ?? rootString('last_error'),
       stub: runtime?['stub'] == true || item?['stub'] == true,

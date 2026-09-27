@@ -20,7 +20,10 @@ _sdk = types.ModuleType("k8s_agent_sandbox")
 
 
 class _FakeSandboxNotFoundError(RuntimeError):
-    pass
+    # ``status = 404`` mirrors kubernetes_asyncio.ApiException: the adapter's
+    # _is_not_found recognizes it even when the REAL SDK is installed (CI) and
+    # its SandboxNotFoundError class — not this fake — is bound in the adapter.
+    status = 404
 
 
 _sdk_exc = types.ModuleType("k8s_agent_sandbox.exceptions")
