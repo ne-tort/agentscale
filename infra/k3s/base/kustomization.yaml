@@ -11,7 +11,8 @@ resources:
   - prodavan-api/service.yaml
   - prodavan-web/deployment.yaml
   - prodavan-web/service.yaml
-  - prodavan-sandbox/rbac.yaml
+  # prodavan-sandbox/rbac.yaml removed (Wave 4): legacy SA + batch/Jobs Role — dead path.
+  # Only the prodavan-api ServiceAccount remains (see prodavan-sandbox/rbac-api.yaml).
   - prodavan-sandbox/rbac-api.yaml
   - ingress.yaml
 # Deferred: mcp-gateway, per-project isolator spawn, agent-worker

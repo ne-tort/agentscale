@@ -64,6 +64,30 @@ patches:
                 image: registry.k8s.io/agent-sandbox/agent-sandbox-controller:v1.0.4
                 imagePullPolicy: IfNotPresent
 
+  # Platform-critical, but the vendored upstream manifest ships no probes and
+  # no resources. healthz/readyz are served by controller-runtime on the
+  # declared healthz port :8081 (AddHealthzCheck/AddReadyzCheck Ping).
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: agent-sandbox-controller
+        namespace: agent-sandbox-system
+      spec:
+        template:
+          spec:
+            containers:
+              - name: agent-sandbox-controller
+                readinessProbe:
+                  httpGet: { path: /readyz, port: healthz }
+                  periodSeconds: 10
+                livenessProbe:
+                  httpGet: { path: /healthz, port: healthz }
+                  periodSeconds: 20
+                resources:
+                  requests: { cpu: 50m, memory: 128Mi }
+                  limits: { cpu: 500m, memory: 512Mi }
+
 # Label-domain allowlist: claims may propagate pod labels/annotations under
 # prodavan.io/* (e.g. prodavan.io/project-id) via additionalPodMetadata.
 # Default (without this ConfigMap) is sandbox.users.io only — claims with
