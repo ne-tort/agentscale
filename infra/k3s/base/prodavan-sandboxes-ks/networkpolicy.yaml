@@ -1,5 +1,5 @@
 # NetworkPolicy for ALL pods in prodavan-sandboxes (agent-sandbox era).
-# Canon: docs/migration/03-devops.md 3.4. Old podSelector by
+# Canon: docs/08-migration/agent-sandbox-adr.md (ADR §2.3). Old podSelector by
 # prodavan.io/managed-by label is gone — the controller does not stamp our labels,
 # so the whole namespace is under policy (warm pods included, coverage wider).
 apiVersion: networking.k8s.io/v1
@@ -18,6 +18,8 @@ spec:
     ports:
     - protocol: TCP
       port: 3921
+  # TODO(wave3): direct API→pod access deprecated; drop this rule after
+  # sandbox router transport soak (трафик идёт через agent-sandbox-system).
   - from:
     - namespaceSelector:
         matchLabels:

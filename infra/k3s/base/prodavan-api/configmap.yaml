@@ -70,7 +70,7 @@ data:
   # Empty: API-mediated hydrate via Bridge JWT (no MinIO IAM in sandbox).
   POD_SANDBOX_MINIO_SECRET: ""
   POD_RECONCILE_WORKER_ENABLED: "true"
-  # agent-sandbox migration (docs/migration/03 §3.6): router + warmpool wiring.
+  # agent-sandbox migration (ADR docs/08-migration/agent-sandbox-adr.md §1.5-1.7): router + warmpool wiring.
   # POD_RUNTIME_MODE enum: stub | k8s | sandbox (k8s stays default until Wave 1 flip).
   POD_SANDBOX_ROUTER_URL: http://sandbox-router-svc.agent-sandbox-system.svc:8080
   POD_SANDBOX_WARMPOOL: prodavan-agent-pool

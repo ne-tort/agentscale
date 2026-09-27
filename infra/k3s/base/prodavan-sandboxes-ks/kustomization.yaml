@@ -6,3 +6,7 @@ resources:
   - sandboxwarmpool.yaml
   - rbac-sandboxes.yaml
   - networkpolicy.yaml
+  # Bridge auth secret referenced by the SandboxTemplate (BRIDGE_AUTH_TOKEN
+  # env, optional). Dev-grade placeholder values — prod overlays must
+  # override with real ones (SealedSecret).
+  - pod-agent-bridge-auth-secret.yaml

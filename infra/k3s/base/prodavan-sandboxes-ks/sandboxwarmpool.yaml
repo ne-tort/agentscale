@@ -1,5 +1,5 @@
 # SandboxWarmPool — pre-provisioned agent sandboxes for ~2s launches.
-# Canon: docs/migration/01, 06. Recreate: stale unclaimed sandboxes are replaced
+# Canon: docs/08-migration/agent-sandbox-adr.md (ADR §1.5). Recreate: stale unclaimed sandboxes are replaced
 # immediately when the template image changes (update cadence via vendor releases).
 apiVersion: extensions.agents.x-k8s.io/v1beta1
 kind: SandboxWarmPool
