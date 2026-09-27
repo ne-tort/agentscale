@@ -35,6 +35,25 @@ def _register_worker_k8s_bootstrap(app) -> None:
                     "worker: K8sManager started namespace=%s", settings.pod_sandbox_namespace
                 )
 
+            if mode == "sandbox":
+                # pod_reconcile / idle_pause / rematerialize run in this
+                # worker and drive the agent-sandbox adapter — without the
+                # SandboxClientResource every reconcile pass fails with
+                # SandboxRuntimeUnavailableError.
+                from prodavan.core.infra.sandbox_client import (
+                    get_sandbox_client_manager,
+                    sandbox_client_resource_from_settings,
+                )
+
+                if get_sandbox_client_manager() is None:
+                    sbx = sandbox_client_resource_from_settings()
+                    await sbx.startup()
+                    logger.info(
+                        "worker: SandboxClientResource started router=%s namespace=%s",
+                        settings.pod_sandbox_router_url,
+                        settings.pod_sandbox_namespace,
+                    )
+
             if get_opensearch_manager() is None:
                 os_mgr = OpenSearchManager(
                     url=settings.opensearch_url,

@@ -82,10 +82,14 @@ class SandboxRuntimeUnavailableError(RuntimeError):
 
 
 def sandbox_claim_ref(workspace_key: str) -> str:
-    """Deterministic runtime_ref (SandboxClaim name) for sandbox mode."""
-    from prodavan.domain.pods.types import sanitize_dns
+    """Deterministic runtime_ref (SandboxClaim name) for sandbox mode.
 
-    return f"{CLAIM_PREFIX}{sanitize_dns(workspace_key)}"
+    Delegates to ``domain.pods.types.runtime_ref_for`` so the claim name has
+    a single source of truth (PodCommand persists the same value).
+    """
+    from prodavan.domain.pods.types import runtime_ref_for
+
+    return runtime_ref_for(workspace_key, mode="sandbox")
 
 
 def _condition(conditions: Any, ctype: str) -> dict[str, Any] | None:

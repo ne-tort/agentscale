@@ -47,4 +47,8 @@ def sanitize_dns(value: str) -> str:
 def runtime_ref_for(workspace_key: str, *, mode: str = "stub") -> str:
     if mode == "k8s":
         return f"pod-{sanitize_dns(workspace_key)}"
+    if mode == "sandbox":
+        # The runtime_ref *is* the SandboxClaim name (deterministic get-or-create).
+        # K8s rejects ``object-ws:``-style refs used as claim names with 422.
+        return f"sandbox-claim-{sanitize_dns(workspace_key)}"
     return f"object-ws:{workspace_key}"
