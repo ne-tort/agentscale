@@ -18,6 +18,8 @@ spec:
     ports:
     - protocol: TCP
       port: 3921
+  # TODO(wave3): direct API→pod access deprecated; drop this rule after
+  # sandbox router transport soak (трафик идёт через agent-sandbox-system).
   - from:
     - namespaceSelector:
         matchLabels:

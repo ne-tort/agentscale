@@ -30,21 +30,10 @@ patches:
         namespace: agent-sandbox-system
       spec:
         replicas: 2
-  # Enable the Pod-IP cache: requests carrying X-Sandbox-UID dial the live
-  # PodIP and bypass per-sandbox DNS. Required by the k8s-agent-sandbox SDK
-  # flow (MIGRATION-DECISIONS §1.7) and needs the ClusterRole in rbac.yaml.
-  # Upstream example ships with this arg present but commented rationale —
-  # we ensure it is set.
-  - patch: |-
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: sandbox-router
-        namespace: agent-sandbox-system
-      spec:
-        template:
-          spec:
-            containers:
-              - name: sandbox-router
-                args:
-                  - --cache-enabled=true
+  # NOTE: no args patch here — a strategic-merge patch REPLACES the whole
+  # container args list (scalar lists are not merged), which silently dropped
+  # --http-bind-address / --proxy-timeout / --upstream-max-retries from the
+  # rendered Deployment. All flags — including --cache-enabled=true (Pod-IP
+  # fast path for the k8s-agent-sandbox SDK flow, MIGRATION-DECISIONS §1.7;
+  # needs the ClusterRole in rbac.yaml) — live in deployment.yaml as the
+  # single source of truth.

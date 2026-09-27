@@ -27,6 +27,34 @@ spec:
         # TODO: keep in sync with ghcr.io/ne-tort/prodavan-agent-runtime releases.
         image: ghcr.io/ne-tort/prodavan-agent-runtime:latest
         imagePullPolicy: IfNotPresent
+        # Static platform env — claims cannot carry env
+        # (envVarsInjectionPolicy: Disallowed), so all boot-time config lives
+        # here. Per-project values (PRODAVAN_PROJECT_ID, PRODAVAN_POD_ID,
+        # WORKSPACE_KEY, PROJECT_ID, PRODAVAN_AUTH_TOKEN) are delivered
+        # post-Ready over HTTP (bind step) — MIGRATION-DECISIONS §1.8.
+        env:
+        - name: WORKSPACE_ROOT
+          value: /workspace
+        - name: OPENCLAW_DATA_DIR
+          value: /workspace/.openclaw-data
+        - name: OPENCLAW_SESSION_MAP_PATH
+          value: /workspace/.openclaw-data/session-map.json
+        - name: PRODAVAN_API_BASE_URL
+          value: http://prodavan-api.prodavan.svc:8001/api/v1
+        - name: PRODAVAN_EVENTS_WRITE
+          value: "1"
+        - name: PORT
+          value: "3921"
+        # Web search is proxied through the Prodavan API (dev default).
+        - name: OPENCLAW_WEB_SEARCH_PROVIDER
+          value: prodavan_api
+        # Optional bridge token for API → agent calls (secret in this namespace).
+        - name: BRIDGE_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: pod-agent-bridge-auth
+              key: bridge-token
+              optional: true
         ports:
         - name: http
           containerPort: 3921

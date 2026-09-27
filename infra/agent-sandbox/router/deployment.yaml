@@ -61,7 +61,14 @@ spec:
         - --metrics-bind-address=:9090
         - --health-probe-bind-address=:8081
         - --cluster-domain=cluster.local
-        - --proxy-timeout=180s
+        # Agent SSE streams (POST /v1/sessions/{id}/send) are long-lived HTTP
+        # responses (minutes). proxy-timeout applies to ALL non-upgrade
+        # requests (verified in router sources, proxy/proxy.go); upgrade
+        # (WebSocket) requests are exempt.
+        - --proxy-timeout=3600s
+        # Cold model start can delay the first SSE event well past the
+        # upstream 30s default.
+        - --response-header-timeout=120s
         # Retry budget for upstream dial failures.
         - --upstream-max-retries=3
         # Pod-IP cache: requests carrying X-Sandbox-UID dial the live PodIP
