@@ -7,7 +7,7 @@ metadata:
 spec:
   description: Prodavan k3s (repo + namespace scoped)
   sourceRepos:
-    - https://github.com/ne-tort/prodavan.git
+    - https://github.com/ne-tort/agentscale.git
   destinations:
     - namespace: prodavan
       server: https://kubernetes.default.svc

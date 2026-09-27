@@ -11,7 +11,7 @@ metadata:
 spec:
   project: agent-sandbox
   source:
-    repoURL: https://github.com/ne-tort/prodavan.git
+    repoURL: https://github.com/ne-tort/agentscale.git
     targetRevision: main
     path: infra/agent-sandbox
   destination:
