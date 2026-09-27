@@ -9,8 +9,10 @@ be re-adopted at any time, so pod IPs are never addressed directly.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -51,8 +53,75 @@ PRODAVAN_EVENTS_OWNER_API = "api"
 # In sandbox mode a router 404/410 usually means the Sandbox was re-adopted
 # under a new name; the retry loop re-resolves the endpoint from scratch.
 _RECOVERABLE_SEND_ERROR_CODES = frozenset(
-    {"BRIDGE_SESSION_NOT_FOUND", "BRIDGE_UNREACHABLE", "BRIDGE_EMPTY_STREAM"}
+    {
+        "BRIDGE_SESSION_NOT_FOUND",
+        "BRIDGE_UNREACHABLE",
+        "BRIDGE_EMPTY_STREAM",
+        "BRIDGE_HYDRATING",
+    }
 )
+
+# register_session 409-hydrating: the runtime is restoring its workspace
+# from the bind payload; one retry after this delay, then normal semantics.
+_HYDRATING_RETRY_DELAY_SEC = 5.0
+# ensure_recent_bind: Redis mark TTL — half of the default bridge-JWT TTL
+# (24h) so the runtime receives a fresh token well before expiry.
+_BIND_MARK_TTL_SEC = 12 * 60 * 60
+# Redis-unavailable degradation: in-memory throttle so binds run at most
+# this often per project per process instead of on every send.
+_BIND_FALLBACK_INTERVAL_SEC = 300.0
+_last_bind_attempt: dict[str, float] = {}
+
+
+def _is_hydrating_conflict(response: httpx.Response | None) -> bool:
+    """409 whose body says the runtime is hydrating (workspace restore)."""
+    if response is None or response.status_code != 409:
+        return False
+    try:
+        return "hydrating" in (response.text or "").lower()
+    except Exception:  # noqa: BLE001 - body may be unreadable
+        return False
+
+
+async def ensure_recent_bind(
+    session: AsyncSession,
+    project_id: str,
+    *,
+    endpoint: RuntimeEndpoint | None = None,
+    http_client: type[httpx.AsyncClient] = httpx.AsyncClient,
+) -> None:
+    """Re-bind the agent-runtime when the pod bridge JWT may be stale.
+
+    The bridge JWT lives ~24h while a sandbox lives for days; once it
+    expires, runtime→API callbacks start failing 401. A Redis mark
+    (``prodavan:bind:<project_id>``, TTL 12h) records the last bind; when
+    it is absent the idempotent ``POST /v1/project/bind`` is re-run (it
+    mints a fresh token and the runtime swaps it in). Redis-unavailable
+    degradation: an in-memory throttle keeps binds at most once per
+    ``_BIND_FALLBACK_INTERVAL_SEC`` per process instead of every send.
+    """
+    from prodavan.core.infra.cache import cache_get, cache_key, cache_set
+
+    key = cache_key("bind", project_id)
+    try:
+        if await cache_get(key) is not None:
+            return
+    except Exception:  # noqa: BLE001 - cache helpers degrade, never raise
+        pass
+    now = time.monotonic()
+    if now - _last_bind_attempt.get(project_id, 0.0) < _BIND_FALLBACK_INTERVAL_SEC:
+        return
+    _last_bind_attempt[project_id] = now
+    try:
+        await bind_project_runtime(
+            session,
+            project_id,
+            endpoint=endpoint,
+            http_client=http_client,
+        )
+        await cache_set(key, "1", ttl_sec=_BIND_MARK_TTL_SEC)
+    except Exception as exc:  # noqa: BLE001 - best-effort by contract
+        logger.debug("ensure_recent_bind failed project_id=%s: %s", project_id, exc)
 
 
 def _explicit_bridge_model(model: str | None) -> str | None:
@@ -150,7 +219,9 @@ class OpenClawBridgeBootstrap:
         # Post-Ready identity bind BEFORE session registration: in sandbox mode
         # the runtime may be a freshly adopted warm pod that has never seen this
         # project. Idempotent + 404-tolerant; never blocks registration.
-        await bind_project_runtime(
+        # ensure_recent_bind re-pushes identity (with a fresh bridge JWT)
+        # when the last bind is older than half the JWT TTL.
+        await ensure_recent_bind(
             self._session,
             project_id,
             endpoint=endpoint,
@@ -170,8 +241,17 @@ class OpenClawBridgeBootstrap:
             body["provider_key_id"] = payload.provider_key_id
 
         try:
-            async with self._http_client(timeout=5.0) as client:
-                response = await client.post(url, json=body, headers=_runtime_request_headers(endpoint.headers))
+            response = await self._post_session_registration(endpoint, url, body)
+            if _is_hydrating_conflict(response):
+                # 409 while the runtime self-hydrates from the bind payload:
+                # one retry after a short delay, then normal semantics.
+                logger.info(
+                    "openclaw bootstrap: bridge hydrating, retry in %.0fs session=%s",
+                    _HYDRATING_RETRY_DELAY_SEC,
+                    payload.session_id,
+                )
+                await asyncio.sleep(_HYDRATING_RETRY_DELAY_SEC)
+                response = await self._post_session_registration(endpoint, url, body)
             if response.status_code in (200, 201):
                 if payload.adapter_state:
                     await self._patch_adapter_state(
@@ -196,6 +276,18 @@ class OpenClawBridgeBootstrap:
         except Exception as exc:
             logger.debug("openclaw bootstrap failed for %s: %s", payload.session_id, exc)
         return False
+
+    async def _post_session_registration(
+        self,
+        endpoint: RuntimeEndpoint,
+        url: str,
+        body: dict,
+    ) -> httpx.Response:
+        """Single POST /v1/sessions attempt (no hydrating-retry logic)."""
+        async with self._http_client(timeout=5.0) as client:
+            return await client.post(
+                url, json=body, headers=_runtime_request_headers(endpoint.headers)
+            )
 
     async def _patch_adapter_state(
         self,
@@ -307,6 +399,7 @@ class OpenClawBridgeBootstrap:
 
             async for event in self._stream_send(
                 endpoint=endpoint,
+                project_id=project_id,
                 session_id=session_id,
                 message=message,
                 model=model,
@@ -350,10 +443,15 @@ class OpenClawBridgeBootstrap:
         self,
         *,
         endpoint: RuntimeEndpoint,
+        project_id: str,
         session_id: str,
         message: str,
         model: str | None,
     ) -> AsyncIterator[AgentEvent]:
+        # Fresh bridge JWT before every send: the token TTL (24h) is shorter
+        # than a sandbox lifetime; a stale token makes runtime→API
+        # callbacks 401. Re-bind is idempotent and throttled by mark/TTL.
+        await ensure_recent_bind(self._session, project_id, endpoint=endpoint)
         url = f"{endpoint.base_url}/v1/sessions/{session_id}/send"
         body: dict[str, str] = {"message": message}
         bridge_model = sanitize_runtime_model(model)
@@ -374,9 +472,15 @@ class OpenClawBridgeBootstrap:
                         body_text = text.decode("utf-8", errors="replace")
                         lowered = body_text.lower()
                         code = "BRIDGE_SEND_FAILED"
+                        retryable = response.status_code >= 500
                         if response.status_code == 410:
                             # Router: sandbox gone / re-adopted under a new name.
                             code = "BRIDGE_SESSION_NOT_FOUND"
+                        elif response.status_code == 409 and "hydrating" in lowered:
+                            # Runtime is self-hydrating from the bind payload;
+                            # recoverable — iter_send_events re-registers.
+                            code = "BRIDGE_HYDRATING"
+                            retryable = True
                         elif response.status_code == 404 and (
                             "session not found" in lowered or "sandbox" in lowered
                         ):
@@ -386,7 +490,7 @@ class OpenClawBridgeBootstrap:
                             {
                                 "code": code,
                                 "message": body_text[:500],
-                                "retryable": response.status_code >= 500,
+                                "retryable": retryable,
                             },
                         )
                         return

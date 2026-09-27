@@ -46,6 +46,10 @@ except ImportError as exc:  # pragma: no cover - k8s/stub modes must not break
 SANDBOX_API_GROUP = "agents.x-k8s.io"
 SANDBOX_API_VERSION = "v1beta1"
 SANDBOX_PLURAL = "sandboxes"
+# SandboxClaim CRD lives in the extensions group (k8s_agent_sandbox.constants).
+CLAIM_API_GROUP = "extensions.agents.x-k8s.io"
+CLAIM_API_VERSION = "v1beta1"
+CLAIM_PLURAL = "sandboxclaims"
 LAUNCH_TYPE_LABEL = "agents.x-k8s.io/launch-type"
 LAUNCH_TYPE_WARM = "warm"
 LAUNCH_TYPE_COLD = "cold"
@@ -140,6 +144,13 @@ class AgentSandboxPodRuntimeAdapter:
             return True
         return getattr(exc, "status", None) == 404
 
+    @staticmethod
+    def _is_already_exists(exc: BaseException) -> bool:
+        """True for 409/AlreadyExists conflicts (deterministic claim names)."""
+        if getattr(exc, "status", None) == 409:
+            return True
+        return "alreadyexists" in str(exc).lower()
+
     def _namespace(self) -> str:
         return settings.pod_sandbox_namespace
 
@@ -184,6 +195,62 @@ class AgentSandboxPodRuntimeAdapter:
     @staticmethod
     def _sandbox_name_of(claim: dict[str, Any]) -> str | None:
         return ((claim.get("status") or {}).get("sandbox") or {}).get("name") or None
+
+    @staticmethod
+    def _parse_shutdown_time(value: Any) -> datetime | None:
+        raw = str(value or "").strip()
+        if not raw:
+            return None
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        return dt
+
+    async def _ensure_claim_ttl(
+        self, client: Any, claim: dict[str, Any], claim_name: str, namespace: str
+    ) -> None:
+        """Re-arm spec.lifecycle.shutdownTime when under half the TTL is left.
+
+        The claim controller deletes claim+sandbox+PVC unconditionally once
+        shutdownTime passes with ShutdownPolicy=Delete — an active project
+        would silently lose its workspace after the TTL. Extending on every
+        ensure/pause touch keeps live claims alive; the ttl/2 threshold
+        bounds the patch rate at ~2 per TTL window.
+        """
+        ttl = int(settings.pod_sandbox_shutdown_ttl_sec)
+        if ttl <= 0:
+            return
+        lifecycle = ((claim.get("spec") or {}).get("lifecycle")) or {}
+        shutdown_dt = self._parse_shutdown_time(lifecycle.get("shutdownTime"))
+        if shutdown_dt is None:
+            return
+        remaining = (shutdown_dt - datetime.now(UTC)).total_seconds()
+        if remaining > ttl / 2.0:
+            return
+        new_shutdown = datetime.now(UTC) + timedelta(seconds=ttl)
+        await client.k8s_helper.custom_objects_api.patch_namespaced_custom_object(
+            group=CLAIM_API_GROUP,
+            version=CLAIM_API_VERSION,
+            namespace=namespace,
+            plural=CLAIM_PLURAL,
+            name=claim_name,
+            body={
+                "spec": {
+                    "lifecycle": {
+                        "shutdownTime": new_shutdown.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    }
+                }
+            },
+        )
+        logger.info(
+            "sandbox claim ttl extended claim=%s remaining=%.0fs ttl=%ss",
+            claim_name,
+            remaining,
+            ttl,
+        )
 
     async def _create_claim(
         self,
@@ -235,10 +302,23 @@ class AgentSandboxPodRuntimeAdapter:
 
         claim = await self._get_claim(client, runtime_ref, namespace)
         if claim is None:
-            await self._create_claim(
-                client, claim_name=runtime_ref, namespace=namespace, context=context
-            )
-            return
+            try:
+                await self._create_claim(
+                    client, claim_name=runtime_ref, namespace=namespace, context=context
+                )
+                return
+            except Exception as exc:
+                if not self._is_already_exists(exc):
+                    raise
+                # Deterministic claim name: a concurrent create (two launch
+                # paths racing) already made it — adopt the existing claim.
+                claim = await self._get_claim(client, runtime_ref, namespace)
+                if claim is None:
+                    raise
+
+        # TTL re-arm before anything else: an expired claim means the
+        # controller deletes claim+sandbox+PVC while the project is live.
+        await self._ensure_claim_ttl(client, claim, runtime_ref, namespace)
 
         # Idempotent resume: suspended sandbox → patch operatingMode back.
         sandbox_name = self._sandbox_name_of(claim)
@@ -260,15 +340,22 @@ class AgentSandboxPodRuntimeAdapter:
         claim = await self._get_claim(client, runtime_ref, namespace)
         if claim is None:
             return
+        # Pausing keeps the claim (and its PVC workspace) for resume — re-arm
+        # the TTL timer so the controller does not delete the workspace from
+        # under a paused-but-alive project.
+        await self._ensure_claim_ttl(client, claim, runtime_ref, namespace)
         sandbox_name = self._sandbox_name_of(claim)
         if not sandbox_name:
             # No sandbox bound yet (still provisioning) — nothing to suspend.
             return
         sandbox = await self._get_sandbox(client, sandbox_name, namespace)
-        if sandbox is not None:
-            mode = (sandbox.get("spec") or {}).get("operatingMode") or OPERATING_MODE_RUNNING
-            if mode == OPERATING_MODE_SUSPENDED:
-                return
+        if sandbox is None:
+            # Claim alive but the backing Sandbox is gone (expired/re-adopted):
+            # nothing to suspend — ensure_running/reconcile recreate it.
+            return
+        mode = (sandbox.get("spec") or {}).get("operatingMode") or OPERATING_MODE_RUNNING
+        if mode == OPERATING_MODE_SUSPENDED:
+            return
         await self._patch_sandbox_operating_mode(
             client, sandbox_name, namespace, OPERATING_MODE_SUSPENDED
         )
@@ -276,8 +363,12 @@ class AgentSandboxPodRuntimeAdapter:
     async def terminate(self, *, runtime_ref: str) -> None:
         client = self._require_client()
         namespace = self._namespace()
+        # Delete the SandboxClaim directly: the SDK delete_sandbox swallows
+        # every exception (logs only), which hides real failures from
+        # reconcile/force_kill and leaves zombie claims behind. 404 → the
+        # claim is already gone (idempotent success); anything else raises.
         try:
-            await client.delete_sandbox(runtime_ref, namespace=namespace)
+            await client.k8s_helper.delete_sandbox_claim(runtime_ref, namespace)
         except Exception as exc:
             if not self._is_not_found(exc):
                 raise
@@ -303,7 +394,12 @@ class AgentSandboxPodRuntimeAdapter:
             return out
 
         out["claim_name"] = runtime_ref
-        labels = (claim.get("metadata") or {}).get("labels") or {}
+        metadata = claim.get("metadata") or {}
+        labels = metadata.get("labels") or {}
+        created_at = str(metadata.get("creationTimestamp") or "").strip()
+        if created_at:
+            # Zombie-reaper grace and UI age need the claim birth time.
+            out["created_at"] = created_at
         out["pod_id"] = labels.get(POD_ID_LABEL)
         out["project_id"] = labels.get(PROJECT_ID_LABEL)
         out["company_id"] = labels.get(COMPANY_ID_LABEL)

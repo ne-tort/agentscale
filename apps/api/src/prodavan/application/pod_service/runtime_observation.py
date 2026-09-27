@@ -120,7 +120,8 @@ class RuntimeObservationService:
         poll_sec: float = 2.0,
     ) -> dict[str, Any]:
         mode = (settings.pod_runtime_mode or "stub").strip().lower()
-        if mode != "k8s":
+        if mode != "k8s" and mode != "sandbox":
+            # Stub only: no cluster to wait for — promote instantly.
             project = await self._session.get(ProjectRow, project_id)
             pod = await self._get_live_pod(project_id)
             if project is None or pod is None:
@@ -136,12 +137,22 @@ class RuntimeObservationService:
                 await self._session.flush()
             return obs
 
-        deadline = datetime.now(UTC).timestamp() + float(
-            timeout_sec
-            or (
+        # k8s AND sandbox poll the real runtime: in sandbox mode an
+        # instant PROVISIONING→RUNNING promotion would register sessions
+        # against a sandbox that is not Ready yet (bind/register race).
+        if timeout_sec is not None:
+            budget = float(timeout_sec)
+        elif mode == "sandbox":
+            # No image pull in sandbox mode (warm-pool adoption) — the
+            # budget is provisioning + readiness of the adopted pod.
+            budget = float(
+                settings.pod_provisioning_timeout_sec + settings.pod_ready_timeout_sec
+            )
+        else:
+            budget = float(
                 settings.pod_image_pull_timeout_sec + settings.pod_ready_timeout_sec
             )
-        )
+        deadline = datetime.now(UTC).timestamp() + budget
         last: dict[str, Any] | None = None
         while datetime.now(UTC).timestamp() < deadline:
             project = await self._session.get(ProjectRow, project_id)
@@ -161,9 +172,7 @@ class RuntimeObservationService:
                 )
             await asyncio.sleep(poll_sec)
         raise RuntimeError(
-            f"pod not verified running within "
-            f"{timeout_sec or (settings.pod_image_pull_timeout_sec + settings.pod_ready_timeout_sec)}s; "
-            f"last={last}"
+            f"pod not verified running within {budget}s; last={last}"
         )
 
     async def sync_runtime_health(self, *, project: ProjectRow, pod: ProjectPodRow) -> str:
@@ -199,10 +208,23 @@ class RuntimeObservationService:
 
         mode = (settings.pod_runtime_mode or "stub").strip().lower()
         if mode != "k8s":
+            # When a PROVISIONING pod may be promoted to RUNNING. Stub mode
+            # has no cluster: transitional observations are the best signal
+            # (L2 semantics). Sandbox mode has a real claim behind the ref —
+            # "provisioning"/"hydrating" observations must NOT promote
+            # (the sandbox is not Ready yet; bind/register would race), and
+            # the observed `running` state must (it is the only path that
+            # promotes a healthy sandbox — without it the pod stays
+            # PROVISIONING forever while the claim is Ready).
+            promote_states = (
+                {ObservedState.RUNNING.value}
+                if mode == "sandbox"
+                else _TRANSITIONAL_OBSERVED
+            )
             if (
                 pod.status == PodStatus.PROVISIONING
                 and pod.desired_state == PodDesiredState.RUNNING.value
-                and state in _TRANSITIONAL_OBSERVED
+                and state in promote_states
             ):
                 pod.status = PodStatus.RUNNING
                 pod.last_error = None

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import sys
 import types
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -62,6 +63,8 @@ def _claim(
     ready: tuple[str, str] | None = None,
     sandbox_name: str | None = SANDBOX_NAME,
     service_fqdn: str | None = "sbx-abc123.prodavan-sandboxes.svc.cluster.local",
+    lifecycle: dict[str, str] | None = None,
+    created: str | None = None,
 ) -> dict[str, Any]:
     conditions = []
     if ready is not None:
@@ -72,17 +75,23 @@ def _claim(
         sandbox_status["name"] = sandbox_name
     if service_fqdn:
         sandbox_status["serviceFQDN"] = service_fqdn
-    return {
-        "metadata": {
-            "name": REF,
-            "labels": labels
-            or {
-                "prodavan.io/pod-id": "pod_123",
-                "prodavan.io/project-id": "prj_1",
-                "prodavan.io/company-id": "cmp_1",
-            },
+    metadata: dict[str, Any] = {
+        "name": REF,
+        "labels": labels
+        or {
+            "prodavan.io/pod-id": "pod_123",
+            "prodavan.io/project-id": "prj_1",
+            "prodavan.io/company-id": "cmp_1",
         },
-        "spec": {"warmPoolRef": {"name": "prodavan-agent-pool"}},
+    }
+    if created:
+        metadata["creationTimestamp"] = created
+    spec: dict[str, Any] = {"warmPoolRef": {"name": "prodavan-agent-pool"}}
+    if lifecycle:
+        spec["lifecycle"] = lifecycle
+    return {
+        "metadata": metadata,
+        "spec": spec,
         "status": {"conditions": conditions, "sandbox": sandbox_status},
     }
 
@@ -125,6 +134,7 @@ def _client(
     helper.get_sandbox_claim = AsyncMock(return_value=claim)
     helper.get_sandbox = AsyncMock(return_value=sandbox)
     helper.create_sandbox_claim = AsyncMock(return_value={"metadata": {"name": REF}})
+    helper.delete_sandbox_claim = AsyncMock(return_value=None)
     helper.custom_objects_api = MagicMock()
     helper.custom_objects_api.patch_namespaced_custom_object = AsyncMock(
         return_value=None
@@ -262,25 +272,41 @@ async def test_pause_noop_when_claim_absent() -> None:
 # ------------------------------------------------------------------ terminate
 
 
-async def test_terminate_deletes_claim() -> None:
+async def test_terminate_deletes_claim_directly() -> None:
+    # H5: terminate must go through k8s_helper.delete_sandbox_claim so
+    # real API errors propagate (SDK delete_sandbox swallows them).
     client = _client(claim=_claim(), sandbox=_sandbox())
     adapter = AgentSandboxPodRuntimeAdapter(client=client)
     await adapter.terminate(runtime_ref=REF)
-    client.delete_sandbox.assert_awaited_once_with(REF, namespace=NAMESPACE)
+    client.k8s_helper.delete_sandbox_claim.assert_awaited_once_with(REF, NAMESPACE)
+    client.delete_sandbox.assert_not_awaited()
 
 
 async def test_terminate_not_found_is_ok() -> None:
     client = _client(claim=None, sandbox=None)
-    client.delete_sandbox = AsyncMock(side_effect=_FakeSandboxNotFoundError("gone"))
+    client.k8s_helper.delete_sandbox_claim = AsyncMock(
+        side_effect=_FakeSandboxNotFoundError("gone")
+    )
     adapter = AgentSandboxPodRuntimeAdapter(client=client)
     await adapter.terminate(runtime_ref=REF)  # must not raise
+
+
+async def test_terminate_propagates_non_404_errors() -> None:
+    class _Api500(RuntimeError):
+        status = 500
+
+    client = _client(claim=None, sandbox=None)
+    client.k8s_helper.delete_sandbox_claim = AsyncMock(side_effect=_Api500("api down"))
+    adapter = AgentSandboxPodRuntimeAdapter(client=client)
+    with pytest.raises(RuntimeError):
+        await adapter.terminate(runtime_ref=REF)
 
 
 async def test_force_kill_deletes_claim() -> None:
     client = _client(claim=None, sandbox=None)
     adapter = AgentSandboxPodRuntimeAdapter(client=client)
     await adapter.force_kill(runtime_ref=REF)
-    client.delete_sandbox.assert_awaited_once_with(REF, namespace=NAMESPACE)
+    client.k8s_helper.delete_sandbox_claim.assert_awaited_once_with(REF, NAMESPACE)
 
 
 # ------------------------------------------------------------------ get_status
@@ -436,3 +462,104 @@ def test_factory_dehydrate_streams_via_router_in_sandbox_mode() -> None:
 
     adapter = factory_module.build_dehydrate()
     assert isinstance(adapter, SandboxHttpDehydrateAdapter)
+
+
+# ------------------------------------------------- claim TTL re-arm (B1/H3/M1/M2)
+
+
+def _shutdown_time_iso(seconds_from_now: float) -> str:
+    return (datetime.now(UTC) + timedelta(seconds=seconds_from_now)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+
+
+async def test_ensure_running_extends_claim_ttl_when_expiry_near() -> None:
+    ttl = 604800
+    claim = _claim(
+        ready=("True", "DependenciesReady"),
+        lifecycle={
+            "shutdownTime": _shutdown_time_iso(ttl / 4),
+            "shutdownPolicy": "Delete",
+        },
+    )
+    sandbox = _sandbox(mode="Running", ready=("True", "DependenciesReady"))
+    client = _client(claim=claim, sandbox=sandbox)
+    adapter = AgentSandboxPodRuntimeAdapter(client=client)
+    await adapter.ensure_running(runtime_ref=REF, context=_context())
+    patch = client.k8s_helper.custom_objects_api.patch_namespaced_custom_object
+    patch.assert_awaited_once()
+    kwargs = patch.await_args.kwargs
+    assert kwargs["group"] == "extensions.agents.x-k8s.io"
+    assert kwargs["version"] == "v1beta1"
+    assert kwargs["plural"] == "sandboxclaims"
+    assert kwargs["name"] == REF
+    assert kwargs["namespace"] == NAMESPACE
+    new_time = kwargs["body"]["spec"]["lifecycle"]["shutdownTime"]
+    new_dt = datetime.fromisoformat(new_time.replace("Z", "+00:00"))
+    assert new_dt > datetime.now(UTC) + timedelta(seconds=ttl - 3600)
+
+
+async def test_ensure_running_keeps_claim_ttl_when_expiry_far() -> None:
+    ttl = 604800
+    claim = _claim(
+        ready=("True", "DependenciesReady"),
+        lifecycle={"shutdownTime": _shutdown_time_iso(ttl - 60)},
+    )
+    sandbox = _sandbox(mode="Running", ready=("True", "DependenciesReady"))
+    client = _client(claim=claim, sandbox=sandbox)
+    adapter = AgentSandboxPodRuntimeAdapter(client=client)
+    await adapter.ensure_running(runtime_ref=REF, context=_context())
+    client.k8s_helper.custom_objects_api.patch_namespaced_custom_object.assert_not_awaited()
+
+
+async def test_ensure_running_adopts_claim_on_409_already_exists() -> None:
+    claim = _claim(ready=("True", "DependenciesReady"))
+    sandbox = _sandbox(mode="Running", ready=("True", "DependenciesReady"))
+    client = _client(claim=claim, sandbox=sandbox)
+    client.k8s_helper.get_sandbox_claim = AsyncMock(side_effect=[None, claim])
+
+    class _Conflict409(RuntimeError):
+        status = 409
+
+    client.k8s_helper.create_sandbox_claim = AsyncMock(
+        side_effect=_Conflict409("object already exists")
+    )
+    adapter = AgentSandboxPodRuntimeAdapter(client=client)
+    await adapter.ensure_running(runtime_ref=REF, context=_context())  # must not raise
+    client.k8s_helper.create_sandbox_claim.assert_awaited_once()
+    assert client.k8s_helper.get_sandbox_claim.await_count == 2
+
+
+async def test_pause_extends_claim_ttl_before_suspend() -> None:
+    ttl = 604800
+    claim = _claim(
+        ready=("True", "DependenciesReady"),
+        lifecycle={"shutdownTime": _shutdown_time_iso(ttl / 4)},
+    )
+    sandbox = _sandbox(mode="Running", ready=("True", "DependenciesReady"))
+    client = _client(claim=claim, sandbox=sandbox)
+    adapter = AgentSandboxPodRuntimeAdapter(client=client)
+    await adapter.pause(runtime_ref=REF)
+    patch = client.k8s_helper.custom_objects_api.patch_namespaced_custom_object
+    assert patch.await_count == 2
+    plurals = {c.kwargs["plural"] for c in patch.await_args_list}
+    assert plurals == {"sandboxclaims", "sandboxes"}
+
+
+async def test_pause_noop_when_sandbox_deleted_but_claim_alive() -> None:
+    claim = _claim(ready=("False", "SandboxMissing"))
+    client = _client(claim=claim, sandbox=None)
+    adapter = AgentSandboxPodRuntimeAdapter(client=client)
+    await adapter.pause(runtime_ref=REF)
+    client.k8s_helper.custom_objects_api.patch_namespaced_custom_object.assert_not_awaited()
+
+
+async def test_get_status_includes_claim_created_at() -> None:
+    created = "2026-09-20T10:00:00Z"
+    claim = _claim(ready=("True", "DependenciesReady"), created=created)
+    sandbox = _sandbox(mode="Running", ready=("True", "DependenciesReady"))
+    client = _client(claim=claim, sandbox=sandbox)
+    adapter = AgentSandboxPodRuntimeAdapter(client=client)
+    status = await adapter.get_status(runtime_ref=REF)
+    assert status["created_at"] == created
+    assert datetime.fromisoformat(status["created_at"].replace("Z", "+00:00"))

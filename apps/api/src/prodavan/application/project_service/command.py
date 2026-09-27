@@ -252,6 +252,7 @@ class ProjectCommand:
         row.launch_phase = None
         await self._session.flush()
         await self._pods.provision_for_project(row.id, principal=principal, start=False)
+        launch_exc: Exception | None = None
         try:
             await self._pods.sync_desired(
                 row.id,
@@ -268,11 +269,27 @@ class ProjectCommand:
                 principal=principal,
                 payload={"source": "launch"},
             )
-        except Exception:
+        except Exception as exc:
+            launch_exc = exc
+            logger.exception("project launch failed project_id=%s", row.id)
             row.status = ProjectStatus.ERROR
             row.launch_phase = None
         await self._session.commit()
+        # PG state (pod FAILED + project ERROR) is durable before the
+        # client sees the failure — surface it as 502 problem+json,
+        # not a silent 200 with an ERROR project.
+        if launch_exc is not None:
+            raise AppError(
+                code="POD_LAUNCH_FAILED",
+                title="Pod Launch Failed",
+                status=502,
+                detail=str(launch_exc)[:300],
+            ) from launch_exc
         await self._session.refresh(row)
+        if row.status == ProjectStatus.ACTIVE:
+            # Same post-running hook as resume/reload: background session
+            # bootstrap once the pod verifies running.
+            schedule_bootstrap_background(project_id=row.id, op=op_from_reason("launch"))
         out = await self._project_public(row, include_runtime=True)
         out["materialize"] = {
             "workspace_root": mat.workspace_root,
@@ -633,6 +650,13 @@ class ProjectCommand:
         if row.status == ProjectStatus.PAUSED:
             return await self._project_public(row)
         if await self._get_live_pod(row.id) is None:
+            if (principal.sub or "").startswith("system:"):
+                # System sweeps (idle pause / cascade jobs) must not break
+                # on podless projects — silent no-op, keep the sweep moving.
+                logger.debug(
+                    "pause: system principal, project has no pod project_id=%s", row.id
+                )
+                return await self._project_public(row)
             raise AppError(
                 code="VALIDATION_ERROR",
                 title="Validation Error",

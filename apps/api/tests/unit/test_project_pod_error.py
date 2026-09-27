@@ -10,6 +10,7 @@ import pytest
 from prodavan.application.pod_service.command import PodCommand
 from prodavan.application.pod_service.lifecycle_emitter import PodLifecycleEmitter
 from prodavan.application.project_service.command import ProjectCommand
+from prodavan.application.admin.company_service import AdminCompanyService
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
 from prodavan.domain.pods import PodDesiredState, PodStatus
@@ -268,3 +269,186 @@ async def test_rate_limit_enforce_allows_without_redis_in_test_mode() -> None:
         patch.object(settings, "auth_mode", "test"),
     ):
         await rate_limit_enforce("test:key", limit=1, window_sec=60)
+
+
+# ---------------------------------------------------- launch 502 (H6) + M12
+
+
+def _launch_command(
+    session: AsyncMock,
+    row: ProjectRow,
+    sync_desired: AsyncMock,
+    request: pytest.FixtureRequest | None = None,
+) -> ProjectCommand:
+    # launch() resolves the policy via AdminCompanyService directly (not
+    # cmd._companies); the patch must stay alive for the whole test, so it is
+    # started here and stopped via a finalizer when a request fixture is given.
+    policy = MagicMock(preferred_provider="openrouter", platform_fallback=True)
+    policy_patcher = patch.object(
+        AdminCompanyService, "get_agent_policy", AsyncMock(return_value=policy)
+    )
+    policy_patcher.start()
+    if request is not None:
+        request.addfinalizer(policy_patcher.stop)
+    with patch(
+        "prodavan.application.pod_service.command.build_pod_runtime",
+        return_value=MagicMock(),
+    ):
+        cmd = ProjectCommand(session)
+    cmd._access.require_access = AsyncMock(return_value=row)
+    cmd._get_live_pod = AsyncMock(return_value=None)
+    cmd._cabinets = MagicMock()
+    cmd._cabinets.get_instance = AsyncMock(return_value=MagicMock(name="inst"))
+    cmd._companies = MagicMock()
+    mat = MagicMock(
+        module_paths={},
+        workspace_root="/ws/root",
+        mcp_config_path="/ws/mcp.json",
+        status="ok",
+        package_names=[],
+        sandbox_packages=[],
+        agents_source="default",
+    )
+    cmd._materialize.materialize_project = AsyncMock(return_value=mat)
+    cmd._resolve_enabled_module_ids = AsyncMock(return_value=[])
+    cmd._pods.provision_for_project = AsyncMock(return_value={})
+    cmd._pods.sync_desired = sync_desired
+    cmd._events.emit = AsyncMock()
+    cmd._project_public = AsyncMock(return_value={"id": row.id, "status": row.status})
+    session.commit = AsyncMock()
+    session.refresh = AsyncMock()
+    return cmd
+
+
+@pytest.mark.asyncio
+async def test_launch_failure_raises_502_and_persists_error(request: pytest.FixtureRequest) -> None:
+    session = AsyncMock()
+    row = _project()
+    row.agent_provider = "openrouter"
+    row.resolved_ai_key_id = "key_1"
+    cmd = _launch_command(
+        session,
+        row,
+        AsyncMock(side_effect=RuntimeError("sandbox create boom")),
+        request=request,
+    )
+
+    with patch("prodavan.application.ai_keys.service.AiKeysService") as keys_cls:
+        keys_cls.return_value.resolve_credentials_for_project = AsyncMock()
+        with pytest.raises(AppError) as exc:
+            await cmd.launch(project_id=row.id, principal=_principal(), employee=None)
+
+    assert exc.value.code == "POD_LAUNCH_FAILED"
+    assert exc.value.status == 502
+    assert "sandbox create boom" in (exc.value.detail or "")
+    assert exc.value.detail is not None and len(exc.value.detail) <= 300
+    # PG state is committed BEFORE the client sees the 502.
+    assert row.status == ProjectStatus.ERROR
+    assert row.launch_phase is None
+    session.commit.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_launch_success_schedules_session_bootstrap(request: pytest.FixtureRequest) -> None:
+    from prodavan.domain.projects.runtime_ops import ProjectRuntimeOp
+
+    session = AsyncMock()
+    row = _project()
+    row.agent_provider = "openrouter"
+    row.resolved_ai_key_id = "key_1"
+    cmd = _launch_command(session, row, AsyncMock(return_value=None), request=request)
+
+    with patch("prodavan.application.ai_keys.service.AiKeysService") as keys_cls:
+        keys_cls.return_value.resolve_credentials_for_project = AsyncMock()
+        with patch(
+            "prodavan.application.project_service.command.schedule_bootstrap_background"
+        ) as sched:
+            await cmd.launch(project_id=row.id, principal=_principal(), employee=None)
+
+    assert row.status == ProjectStatus.ACTIVE
+    sched.assert_called_once_with(
+        project_id=row.id, op=ProjectRuntimeOp.LAUNCH
+    )
+
+
+# ---------------------------------------------- system pause + idle sweep (H4)
+
+
+@pytest.mark.asyncio
+async def test_pause_system_principal_without_pod_is_silent() -> None:
+    session = AsyncMock()
+    row = _project()
+    with patch(
+        "prodavan.application.pod_service.command.build_pod_runtime",
+        return_value=MagicMock(),
+    ):
+        cmd = ProjectCommand(session)
+    cmd._access.get_project = AsyncMock(return_value=row)
+    cmd._get_live_pod = AsyncMock(return_value=None)
+    cmd._stop_and_pause_runtime = AsyncMock()
+    cmd._project_public = AsyncMock(return_value={"id": row.id, "status": row.status})
+
+    out = await cmd.pause(
+        project_id=row.id,
+        principal=Principal(sub="system:jobs", roles=frozenset({"platform.admin"})),
+        employee=None,
+        skip_access=True,
+    )
+
+    cmd._stop_and_pause_runtime.assert_not_awaited()
+    assert out["id"] == row.id
+
+
+@pytest.mark.asyncio
+async def test_pause_user_principal_without_pod_raises_422() -> None:
+    session = AsyncMock()
+    row = _project()
+    with patch(
+        "prodavan.application.pod_service.command.build_pod_runtime",
+        return_value=MagicMock(),
+    ):
+        cmd = ProjectCommand(session)
+    cmd._access.require_access = AsyncMock(return_value=row)
+    cmd._get_live_pod = AsyncMock(return_value=None)
+
+    with pytest.raises(AppError) as exc:
+        await cmd.pause(project_id=row.id, principal=_principal(), employee=None)
+
+    assert exc.value.code == "VALIDATION_ERROR"
+    assert exc.value.status == 422
+
+
+@pytest.mark.asyncio
+async def test_idle_pause_sweep_continues_when_one_project_fails() -> None:
+    from datetime import timedelta
+
+    from prodavan.application.project_service.idle_pause import ProjectIdlePauseService
+
+    session = AsyncMock()
+    with patch(
+        "prodavan.application.pod_service.command.build_pod_runtime",
+        return_value=MagicMock(),
+    ):
+        svc = ProjectIdlePauseService(session)
+
+    svc._companies = MagicMock()
+    svc._companies.get_agent_policy = AsyncMock(
+        return_value=MagicMock(idle_pause_enabled=lambda: True, idle_pause_after_hours=1)
+    )
+    projects = [_project(), _project()]
+    proj_q = MagicMock()
+    proj_q.scalars.return_value.all.return_value = projects
+    session.execute = AsyncMock(return_value=proj_q)
+    svc._last_activity_at = AsyncMock(
+        return_value=datetime.now(UTC) - timedelta(hours=48)
+    )
+    svc._commands = MagicMock()
+    svc._commands.pause = AsyncMock(
+        side_effect=[RuntimeError("pause boom"), {"id": projects[1].id}]
+    )
+
+    result = await svc.sweep_company("cmp_test1234567890")
+
+    assert result["count"] == 1
+    assert result["paused"][0]["project_id"] == projects[1].id
+    assert svc._commands.pause.await_count == 2

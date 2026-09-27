@@ -407,3 +407,108 @@ async def test_promote_provisioning_to_running() -> None:
         action = await svc.promote_or_demote(project=project, pod=pod)
     assert action == "promoted"
     assert pod.status == PodStatus.RUNNING
+
+
+# ---------------------------------------------------- wait_for_running (H1)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_running_sandbox_polls_until_running(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "pod_runtime_mode", "sandbox")
+    session = AsyncMock()
+    project = _project()
+    pod = _pod()
+    svc = RuntimeObservationService(session)
+    svc._get_live_pod = AsyncMock(return_value=pod)
+    session.get = AsyncMock(return_value=project)
+    svc.observe = AsyncMock(
+        side_effect=[
+            {"observed_state": ObservedState.PROVISIONING.value},
+            {"observed_state": ObservedState.RUNNING.value},
+        ]
+    )
+
+    out = await svc.wait_for_running(project_id="proj_test", poll_sec=0.01)
+
+    assert out["observed_state"] == ObservedState.RUNNING.value
+    assert svc.observe.await_count == 2
+    assert pod.status == PodStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_wait_for_running_sandbox_times_out_not_running(monkeypatch) -> None:
+    # Sandbox mode must NOT promote PROVISIONING→RUNNING instantly: until the
+    # runtime reports running, the pod row stays PROVISIONING and the wait fails.
+    monkeypatch.setattr(settings, "pod_runtime_mode", "sandbox")
+    session = AsyncMock()
+    project = _project()
+    pod = _pod()
+    svc = RuntimeObservationService(session)
+    svc._get_live_pod = AsyncMock(return_value=pod)
+    session.get = AsyncMock(return_value=project)
+    svc.observe = AsyncMock(
+        return_value={"observed_state": ObservedState.PROVISIONING.value}
+    )
+
+    with pytest.raises(RuntimeError):
+        await svc.wait_for_running(
+            project_id="proj_test", timeout_sec=0.05, poll_sec=0.02
+        )
+    assert pod.status == PodStatus.PROVISIONING
+
+
+@pytest.mark.asyncio
+async def test_wait_for_running_stub_still_promotes_instantly(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "pod_runtime_mode", "stub")
+    session = AsyncMock()
+    project = _project()
+    pod = _pod()
+    svc = RuntimeObservationService(session)
+    svc._get_live_pod = AsyncMock(return_value=pod)
+    session.get = AsyncMock(return_value=project)
+    svc.observe = AsyncMock(
+        return_value={"observed_state": ObservedState.PROVISIONING.value}
+    )
+
+    out = await svc.wait_for_running(project_id="proj_test")
+
+    assert svc.observe.await_count == 1
+    assert pod.status == PodStatus.RUNNING
+
+
+@pytest.mark.asyncio
+async def test_promote_or_demote_sandbox_promotes_on_observed_running() -> None:
+    session = MagicMock()
+    svc = RuntimeObservationService(session)
+    project = _project()
+    pod = _pod(status=PodStatus.PROVISIONING)
+    svc.observe = AsyncMock(  # type: ignore[method-assign]
+        return_value={"observed_state": ObservedState.RUNNING.value},
+    )
+    with patch("prodavan.application.pod_service.runtime_observation.settings") as mock_settings:
+        mock_settings.pod_runtime_mode = "sandbox"
+        mock_settings.pod_provisioning_timeout_sec = 300
+        action = await svc.promote_or_demote(project=project, pod=pod)
+    assert action == "promoted"
+    assert pod.status == PodStatus.RUNNING
+    assert pod.last_error is None
+
+
+@pytest.mark.asyncio
+async def test_promote_or_demote_sandbox_does_not_promote_on_transitional() -> None:
+    # The claim is not Ready yet: transitional observations must not promote
+    # (bind/register would race an un-adopted sandbox) — the pod stays
+    # PROVISIONING until the observed state is `running`.
+    session = MagicMock()
+    svc = RuntimeObservationService(session)
+    project = _project()
+    pod = _pod(status=PodStatus.PROVISIONING)
+    svc.observe = AsyncMock(  # type: ignore[method-assign]
+        return_value={"observed_state": ObservedState.PROVISIONING.value},
+    )
+    with patch("prodavan.application.pod_service.runtime_observation.settings") as mock_settings:
+        mock_settings.pod_runtime_mode = "sandbox"
+        mock_settings.pod_provisioning_timeout_sec = 300
+        action = await svc.promote_or_demote(project=project, pod=pod)
+    assert action == "noop"
+    assert pod.status == PodStatus.PROVISIONING

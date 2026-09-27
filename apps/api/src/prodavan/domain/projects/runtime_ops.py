@@ -40,6 +40,9 @@ RUNTIME_OP_EFFECTS: dict[ProjectRuntimeOp, ProjectRuntimeEffect] = {
         pod_desired=PodDesiredState.RUNNING,
         materialize=True,
         session_action=SessionRuntimeAction.NONE,
+        # Launch (re)creates the pod runtime: existing ACTIVE sessions
+        # must be re-registered on it, same as resume/reload.
+        bootstrap_sessions=True,
     ),
     ProjectRuntimeOp.PAUSE: ProjectRuntimeEffect(
         pod_desired=PodDesiredState.ABSENT,

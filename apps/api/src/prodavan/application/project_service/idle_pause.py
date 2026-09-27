@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select
@@ -14,6 +15,8 @@ from prodavan.domain.projects import ProjectStatus, project_is_idle
 from prodavan.infrastructure.persistence.models.agent import AgentEventRow, AgentSessionRow
 from prodavan.infrastructure.persistence.models.identity import CompanyRow
 from prodavan.infrastructure.persistence.models.projects import ProjectRow
+
+logger = logging.getLogger(__name__)
 
 
 class ProjectIdlePauseService:
@@ -71,17 +74,22 @@ class ProjectIdlePauseService:
                 idle_pause_after_hours=hours,
             ):
                 continue
-            await self._commands.pause(
-                project_id=project.id,
-                principal=actor,
-                employee=None,
-                skip_access=True,
-                payload={
-                    "reason": "idle_pause",
-                    "idle_pause_after_hours": hours,
-                    "last_activity_at": last.isoformat() if last else None,
-                },
-            )
+            try:
+                await self._commands.pause(
+                    project_id=project.id,
+                    principal=actor,
+                    employee=None,
+                    skip_access=True,
+                    payload={
+                        "reason": "idle_pause",
+                        "idle_pause_after_hours": hours,
+                        "last_activity_at": last.isoformat() if last else None,
+                    },
+                )
+            except Exception:
+                # One failing project must not abort the whole sweep.
+                logger.exception("idle pause: pause failed project_id=%s", project.id)
+                continue
             paused.append(
                 {
                     "project_id": project.id,

@@ -273,3 +273,235 @@ async def test_iter_send_events_empty_stream_yields_error() -> None:
     assert len(events) == 1
     assert events[0].type == AgentEventType.ERROR
     assert events[0].data.get("code") == "BRIDGE_EMPTY_STREAM"
+
+
+# ------------------------------------------- 409-hydrating (B2) + ensure_recent_bind (H2/H4)
+
+
+def test_hydrating_code_is_recoverable() -> None:
+    import prodavan.application.agent.openclaw_bridge as bridge_mod
+
+    assert "BRIDGE_HYDRATING" in bridge_mod._RECOVERABLE_SEND_ERROR_CODES
+
+
+@pytest.mark.asyncio
+async def test_stream_send_hydrating_409_yields_retryable_event() -> None:
+    session = MagicMock()
+    k8s = MagicMock()
+    _mock_running_pod(k8s)
+
+    class _StreamResponse:
+        status_code = 409
+
+        async def aread(self) -> bytes:
+            return b'{"error":"hydrating","retryable":true}'
+
+        def aiter_lines(self):
+            async def _gen():
+                return
+                yield ""
+
+            return _gen()
+
+    class _StreamCtx:
+        async def __aenter__(self):
+            return _StreamResponse()
+
+        async def __aexit__(self, *args):
+            return None
+
+    mock_http = MagicMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.stream = MagicMock(return_value=_StreamCtx())
+
+    bootstrap = OpenClawBridgeBootstrap(session, k8s_client=k8s, http_client=lambda **_: mock_http)
+
+    with (
+        patch("prodavan.application.agent.openclaw_bridge.settings") as mock_settings,
+        patch(
+            "prodavan.application.pod_service.query.PodQuery.runtime_view",
+            new=AsyncMock(return_value=_running_runtime_view()),
+        ),
+        patch(
+            "prodavan.application.agent.openclaw_bridge.ensure_recent_bind",
+            new=AsyncMock(),
+        ),
+    ):
+        mock_settings.pod_agent_runtime_enabled = True
+        mock_settings.pod_agent_runtime_port = 3921
+        events = [
+            event
+            async for event in bootstrap.iter_send_events(
+                project_id="prj_1",
+                session_id="ags_abc",
+                message="hello",
+            )
+        ]
+
+    assert len(events) == 1
+    assert events[0].type == AgentEventType.ERROR
+    assert events[0].data.get("code") == "BRIDGE_HYDRATING"
+    assert events[0].data.get("retryable") is True
+
+
+@pytest.mark.asyncio
+async def test_register_session_retries_once_on_hydrating_409() -> None:
+    import prodavan.application.agent.openclaw_bridge as bridge_mod
+
+    session = MagicMock()
+    k8s = MagicMock()
+    _mock_running_pod(k8s)
+
+    resp_409 = MagicMock()
+    resp_409.status_code = 409
+    resp_409.text = '{"error":"hydrating","retryable":true}'
+    resp_201 = MagicMock()
+    resp_201.status_code = 201
+    resp_201.text = ""
+
+    mock_http = MagicMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.post = AsyncMock(side_effect=[resp_409, resp_201])
+
+    bootstrap = OpenClawBridgeBootstrap(session, k8s_client=k8s, http_client=lambda **_: mock_http)
+
+    with (
+        patch("prodavan.application.agent.openclaw_bridge.settings") as mock_settings,
+        patch(
+            "prodavan.application.pod_service.query.PodQuery.runtime_view",
+            new=AsyncMock(return_value=_running_runtime_view()),
+        ),
+        patch.object(bridge_mod, "_HYDRATING_RETRY_DELAY_SEC", 0.01),
+        patch(
+            "prodavan.application.agent.openclaw_bridge.ensure_recent_bind",
+            new=AsyncMock(),
+        ),
+    ):
+        mock_settings.pod_agent_runtime_enabled = True
+        mock_settings.pod_agent_runtime_bootstrap_enabled = True
+        mock_settings.pod_agent_runtime_port = 3921
+        ok = await bootstrap.register_session(
+            project_id="prj_1",
+            payload=BridgeSessionBootstrap(
+                session_id="ags_abc",
+                prodavan_session_id="ags_abc",
+                adapter_kind="platform_openclaw",
+            ),
+        )
+
+    assert ok is True
+    assert mock_http.post.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_register_session_hydrating_409_twice_returns_false() -> None:
+    import prodavan.application.agent.openclaw_bridge as bridge_mod
+
+    session = MagicMock()
+    k8s = MagicMock()
+    _mock_running_pod(k8s)
+
+    resp_409 = MagicMock()
+    resp_409.status_code = 409
+    resp_409.text = '{"error":"hydrating","retryable":true}'
+
+    mock_http = MagicMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.post = AsyncMock(side_effect=[resp_409, resp_409])
+
+    bootstrap = OpenClawBridgeBootstrap(session, k8s_client=k8s, http_client=lambda **_: mock_http)
+
+    with (
+        patch("prodavan.application.agent.openclaw_bridge.settings") as mock_settings,
+        patch(
+            "prodavan.application.pod_service.query.PodQuery.runtime_view",
+            new=AsyncMock(return_value=_running_runtime_view()),
+        ),
+        patch.object(bridge_mod, "_HYDRATING_RETRY_DELAY_SEC", 0.01),
+        patch(
+            "prodavan.application.agent.openclaw_bridge.ensure_recent_bind",
+            new=AsyncMock(),
+        ),
+    ):
+        mock_settings.pod_agent_runtime_enabled = True
+        mock_settings.pod_agent_runtime_bootstrap_enabled = True
+        mock_settings.pod_agent_runtime_port = 3921
+        ok = await bootstrap.register_session(
+            project_id="prj_1",
+            payload=BridgeSessionBootstrap(
+                session_id="ags_abc",
+                prodavan_session_id="ags_abc",
+                adapter_kind="platform_openclaw",
+            ),
+        )
+
+    assert ok is False
+    assert mock_http.post.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_ensure_recent_bind_skips_when_marked() -> None:
+    import prodavan.application.agent.openclaw_bridge as bridge_mod
+
+    session = MagicMock()
+    with (
+        patch("prodavan.core.infra.cache.cache_get", new=AsyncMock(return_value="1")),
+        patch("prodavan.core.infra.cache.cache_set", new=AsyncMock(return_value=True)),
+        patch(
+            "prodavan.application.agent.openclaw_bridge.bind_project_runtime",
+            new=AsyncMock(return_value=True),
+        ) as bind,
+    ):
+        await bridge_mod.ensure_recent_bind(session, "prj_marked")
+    bind.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_ensure_recent_bind_binds_when_unmarked() -> None:
+    import prodavan.application.agent.openclaw_bridge as bridge_mod
+
+    session = MagicMock()
+    bridge_mod._last_bind_attempt.pop("prj_unmarked", None)
+    try:
+        with (
+            patch("prodavan.core.infra.cache.cache_get", new=AsyncMock(return_value=None)),
+            patch(
+                "prodavan.core.infra.cache.cache_set", new=AsyncMock(return_value=True)
+            ) as cache_set,
+            patch(
+                "prodavan.application.agent.openclaw_bridge.bind_project_runtime",
+                new=AsyncMock(return_value=True),
+            ) as bind,
+        ):
+            await bridge_mod.ensure_recent_bind(session, "prj_unmarked")
+        bind.assert_awaited_once()
+        cache_set.assert_awaited_once()
+        assert cache_set.await_args.args[0] == "prodavan:bind:prj_unmarked"
+        assert cache_set.await_args.kwargs["ttl_sec"] == 12 * 60 * 60
+    finally:
+        bridge_mod._last_bind_attempt.pop("prj_unmarked", None)
+
+
+@pytest.mark.asyncio
+async def test_ensure_recent_bind_throttles_without_redis() -> None:
+    import prodavan.application.agent.openclaw_bridge as bridge_mod
+
+    session = MagicMock()
+    bridge_mod._last_bind_attempt.pop("prj_no_redis", None)
+    try:
+        with (
+            patch("prodavan.core.infra.cache.cache_get", new=AsyncMock(return_value=None)),
+            patch("prodavan.core.infra.cache.cache_set", new=AsyncMock(return_value=False)),
+            patch(
+                "prodavan.application.agent.openclaw_bridge.bind_project_runtime",
+                new=AsyncMock(return_value=True),
+            ) as bind,
+        ):
+            await bridge_mod.ensure_recent_bind(session, "prj_no_redis")
+            await bridge_mod.ensure_recent_bind(session, "prj_no_redis")
+        assert bind.await_count == 1
+    finally:
+        bridge_mod._last_bind_attempt.pop("prj_no_redis", None)
