@@ -80,3 +80,28 @@ spec:
       port: 443
     - protocol: TCP
       port: 6443
+  # Kubernetes API server — actual datapath (F1). kube-router DNATs the
+  # `kubernetes` Service (10.43.0.1:443) to the node IP :6443, and on the WSL
+  # k3s dev cluster the node IP lives in the host subnet 172.16.0.0/12 and
+  # drifts whenever the distro is recreated, so:
+  #   - namespaceSelector/podSelector cannot match it: the apiserver is a host
+  #     process, not a pod. The `default`-namespace rule above selects zero
+  #     pods and kube-router never materializes a rule whose ipsets are empty
+  #     (silent no-op, kept as-is for upstream parity) — this is what starved
+  #     the router's pod cache informer.
+  #   - pinning the node IP as /32 would break on every IP drift.
+  # A subnet-wide ipBlock with the cluster pod/service CIDRs excepted is the
+  # only selector that covers the apiserver and survives IP drift — same style
+  # as the public-internet rule in
+  # infra/k3s/base/prodavan-sandboxes-ks/networkpolicy.yaml.
+  - to:
+    - ipBlock:
+        cidr: 172.16.0.0/12
+        except:
+        - 10.42.0.0/16 # pods
+        - 10.43.0.0/16 # services
+    ports:
+    - protocol: TCP
+      port: 443
+    - protocol: TCP
+      port: 6443
