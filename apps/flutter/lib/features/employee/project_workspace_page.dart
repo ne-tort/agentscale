@@ -155,9 +155,15 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
         projectId: widget.projectId,
       );
       if (!mounted) return;
-      final failure = containerObservedFailureMessage(container);
-      if (failure != null) {
-        AppErrors.showSnack(context, failure);
+      if (!containerObservedSettled(container)) {
+        // Poll hit the timeout without settling - honest error instead of
+        // silently dropping back to the wake CTA.
+        AppSnackBar.error(context, l10n.containerPollTimeout);
+      } else {
+        final failure = containerObservedFailureMessage(container);
+        if (failure != null) {
+          AppErrors.showSnack(context, failure);
+        }
       }
       await _refreshProjectFlags();
       if (!mounted) return;
