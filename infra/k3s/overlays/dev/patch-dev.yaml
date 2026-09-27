@@ -126,7 +126,8 @@ data:
   SANDBOX_K8S_NAMESPACE: prodavan
   SANDBOX_K8S_PVC: prodavan-api-storage
   SANDBOX_K8S_JOB_IMAGE: ghcr.io/ne-tort/prodavan-api:latest
-  POD_RUNTIME_MODE: "k8s"
+  # agent-sandbox cutover (Wave 3): claims from warm pool, router transport, post-Ready bind.
+  POD_RUNTIME_MODE: "sandbox"
   POD_K8S_REQUIRED: "true"
   POD_READY_TIMEOUT_SEC: "20"
   POD_IMAGE_PULL_TIMEOUT_SEC: "600"
