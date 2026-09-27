@@ -15,6 +15,7 @@ from urllib.parse import quote
 
 import httpx
 
+from prodavan.application.agent.runtime_auth import runtime_auth_headers
 from prodavan.application.agent.runtime_transport import RuntimeEndpoint
 from prodavan.application.pod_service.ports.workspace import WorkspaceEntry
 from prodavan.application.pod_service.workspace_paths import normalize_workspace_path
@@ -28,11 +29,7 @@ _DEFAULT_READ_MAX = 10_485_760
 
 
 def _runtime_headers() -> dict[str, str]:
-    headers: dict[str, str] = {}
-    token = settings.pod_agent_runtime_token.strip()
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    return headers
+    return runtime_auth_headers()
 
 
 def _endpoint_headers(endpoint: RuntimeEndpoint) -> dict[str, str]:

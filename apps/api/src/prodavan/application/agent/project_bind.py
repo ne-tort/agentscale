@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 from sqlalchemy import select
 
+from prodavan.application.agent.runtime_auth import runtime_auth_headers
 from prodavan.application.agent.runtime_transport import (
     RuntimeEndpoint,
     resolve_runtime_endpoint,
@@ -40,10 +41,7 @@ _BIND_TIMEOUT_S = 150.0
 
 
 def _bind_request_headers(endpoint: RuntimeEndpoint) -> dict[str, str]:
-    headers: dict[str, str] = {}
-    token = settings.pod_agent_runtime_token.strip()
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    headers: dict[str, str] = dict(runtime_auth_headers())
     headers.update(endpoint.headers)
     return headers
 

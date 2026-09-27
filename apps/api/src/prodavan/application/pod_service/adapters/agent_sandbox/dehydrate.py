@@ -14,10 +14,10 @@ from typing import Any
 
 import httpx
 
+from prodavan.application.agent.runtime_auth import runtime_auth_headers
 from prodavan.application.agent.runtime_transport import resolve_runtime_endpoint_for_ref
 from prodavan.application.pod_service.ports.dehydrate import DehydrateResult
 from prodavan.application.pod_service.workspace_tar_upload import upload_workspace_tar
-from prodavan.config.settings import settings
 from prodavan.domain.errors import AppError
 
 logger = logging.getLogger(__name__)
@@ -26,10 +26,7 @@ _DEHYDRATE_TIMEOUT_S = 120.0
 
 
 def _runtime_headers(extra: dict[str, str]) -> dict[str, str]:
-    headers: dict[str, str] = {}
-    token = settings.pod_agent_runtime_token.strip()
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    headers: dict[str, str] = dict(runtime_auth_headers())
     headers.update(extra)
     return headers
 

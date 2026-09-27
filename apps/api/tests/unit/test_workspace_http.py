@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from prodavan.application.pod_service.adapters.k8s.workspace_http import HttpAgentRuntimeWorkspaceAdapter
+from prodavan.config.settings import settings as _real_settings
 from prodavan.domain.errors import AppError
 from prodavan.infrastructure.k8s.sandbox.client import PodSnapshot
 
@@ -46,6 +47,12 @@ def adapter(k8s_client: MagicMock) -> HttpAgentRuntimeWorkspaceAdapter:
     return HttpAgentRuntimeWorkspaceAdapter(client=k8s_client)
 
 
+@pytest.fixture(autouse=True)
+def _pin_runtime_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    # runtime_auth_headers() reads prodavan.config.settings directly.
+    monkeypatch.setattr(_real_settings, "pod_agent_runtime_token", "")
+
+
 @pytest.mark.asyncio
 async def test_list_entries_parses_runtime_response(adapter: HttpAgentRuntimeWorkspaceAdapter) -> None:
     mock_response = MagicMock()
@@ -66,7 +73,6 @@ async def test_list_entries_parses_runtime_response(adapter: HttpAgentRuntimeWor
         ),
     ):
         mock_settings.pod_agent_runtime_port = 3921
-        mock_settings.pod_agent_runtime_token = ""
         entries = await adapter.list_entries(runtime_ref="pod-wk-demo", path=".")
 
     assert len(entries) == 2
@@ -78,7 +84,9 @@ async def test_list_entries_parses_runtime_response(adapter: HttpAgentRuntimeWor
 
 
 @pytest.mark.asyncio
-async def test_read_bytes_returns_content(adapter: HttpAgentRuntimeWorkspaceAdapter) -> None:
+async def test_read_bytes_returns_content(
+    adapter: HttpAgentRuntimeWorkspaceAdapter, monkeypatch: pytest.MonkeyPatch
+) -> None:
     mock_response = MagicMock()
     mock_response.status_code = 200
     mock_response.content = b"hello workspace"
@@ -92,7 +100,7 @@ async def test_read_bytes_returns_content(adapter: HttpAgentRuntimeWorkspaceAdap
         ),
     ):
         mock_settings.pod_agent_runtime_port = 3921
-        mock_settings.pod_agent_runtime_token = "rt"
+        monkeypatch.setattr(_real_settings, "pod_agent_runtime_token", "rt")
         data = await adapter.read_bytes(runtime_ref="pod-wk-demo", path="README.md", max_bytes=4096)
 
     assert data == b"hello workspace"
@@ -129,7 +137,6 @@ async def test_stat_parses_entry(adapter: HttpAgentRuntimeWorkspaceAdapter) -> N
         ),
     ):
         mock_settings.pod_agent_runtime_port = 3921
-        mock_settings.pod_agent_runtime_token = ""
         entry = await adapter.stat(runtime_ref="pod-wk-demo", path="AGENTS.md")
 
     assert entry.name == "AGENTS.md"
@@ -151,7 +158,6 @@ async def test_delete_sends_delete_request(adapter: HttpAgentRuntimeWorkspaceAda
         ),
     ):
         mock_settings.pod_agent_runtime_port = 3921
-        mock_settings.pod_agent_runtime_token = ""
         await adapter.delete(runtime_ref="pod-wk-demo", path="tmp/old.txt")
 
     call = mock_http.request.await_args
@@ -174,7 +180,6 @@ async def test_move_posts_src_dst(adapter: HttpAgentRuntimeWorkspaceAdapter) -> 
         ),
     ):
         mock_settings.pod_agent_runtime_port = 3921
-        mock_settings.pod_agent_runtime_token = ""
         await adapter.move(runtime_ref="pod-wk-demo", src="a.txt", dst="b.txt")
 
     call = mock_http.request.await_args
@@ -226,7 +231,6 @@ async def test_runtime_http_error_maps_to_bad_gateway(adapter: HttpAgentRuntimeW
         ),
     ):
         mock_settings.pod_agent_runtime_port = 3921
-        mock_settings.pod_agent_runtime_token = ""
         with pytest.raises(AppError) as exc_info:
             await adapter.stat(runtime_ref="pod-wk-demo", path="missing.txt")
 

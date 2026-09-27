@@ -16,6 +16,7 @@ from prodavan.application.agent.openclaw_bridge import (
     bridge_envelope_to_agent_event,
     bridge_stub_error_event,
 )
+from prodavan.config.settings import settings as _real_settings
 from prodavan.domain.agent import AgentEventType
 from prodavan.infrastructure.k8s.sandbox.client import PodSnapshot
 
@@ -197,10 +198,10 @@ async def test_iter_send_events_parses_sse() -> None:
             "prodavan.application.pod_service.query.PodQuery.runtime_view",
             new=AsyncMock(return_value=_running_runtime_view()),
         ),
+        patch.object(_real_settings, "pod_agent_runtime_token", "bridge-token"),
     ):
         mock_settings.pod_agent_runtime_enabled = True
         mock_settings.pod_agent_runtime_port = 3921
-        mock_settings.pod_agent_runtime_token = "bridge-token"
         events = [
             event
             async for event in bootstrap.iter_send_events(

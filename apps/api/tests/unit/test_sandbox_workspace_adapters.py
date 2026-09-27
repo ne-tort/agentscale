@@ -22,6 +22,7 @@ from prodavan.application.pod_service.adapters.agent_sandbox.workspace_http impo
     SandboxHttpWorkspaceAdapter,
 )
 from prodavan.application.pod_service.ports.dehydrate import DehydrateResult
+from prodavan.config.settings import settings as _settings
 from prodavan.domain.errors import AppError
 
 REF = "sandbox-claim-ws-demo-01"
@@ -83,7 +84,8 @@ class _FakeHTTP:
 
 def _patch_endpoint(monkeypatch: pytest.MonkeyPatch, endpoint: RuntimeEndpoint | None) -> None:
     monkeypatch.setattr(dh, "resolve_runtime_endpoint_for_ref", AsyncMock(return_value=endpoint))
-    monkeypatch.setattr(dh.settings, "pod_agent_runtime_token", "rt-token")
+    # runtime_auth_headers reads the canonical settings object directly.
+    monkeypatch.setattr(_settings, "pod_agent_runtime_token", "rt-token")
 
 
 # ---------------------------------------------------------------- dehydrate
