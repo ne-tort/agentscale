@@ -204,7 +204,17 @@ class PodReconcileService:
             if pod_id and pod_id in live_ids:
                 continue
             age = _managed_pod_age_sec(item)
-            if age is not None and age < _PROVISIONING_GRACE_SEC:
+            if age is None:
+                # Without created_at the provisioning grace cannot be
+                # applied — deleting could kill a just-created sandbox.
+                logger.warning(
+                    "pod reconcile: managed pod without created_at, skip "
+                    "(grace unavailable) runtime_ref=%s pod_id=%s",
+                    ref,
+                    pod_id,
+                )
+                continue
+            if age < _PROVISIONING_GRACE_SEC:
                 logger.debug(
                     "pod reconcile: skip young managed pod runtime_ref=%s pod_id=%s age=%.0fs",
                     ref,

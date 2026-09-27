@@ -109,3 +109,27 @@ async def test_run_reconciles_when_advisory_lock_acquired() -> None:
     assert result["fixed"] == 0
     # Lock acquired + released.
     assert session.execute.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_reap_zombies_skips_pod_without_created_at(caplog) -> None:
+    # H3: without created_at the provisioning grace cannot be applied — the
+    # reaper must NOT delete (it could kill a just-created sandbox).
+    session = AsyncMock()
+    runtime = AsyncMock()
+    runtime.list_managed_pods = AsyncMock(
+        return_value=[{"runtime_ref": "pod-wk-orphan", "pod_id": "pod_orphan"}]
+    )
+    runtime.terminate = AsyncMock()
+
+    live_q = MagicMock()
+    live_q.all.return_value = []
+    session.execute = AsyncMock(return_value=live_q)
+
+    svc = PodReconcileService(session, runtime=runtime)
+    with caplog.at_level("WARNING"):
+        deleted = await svc._reap_zombies()
+
+    assert deleted == 0
+    runtime.terminate.assert_not_awaited()
+    assert any("created_at" in str(r.getMessage()) for r in caplog.records)
