@@ -90,16 +90,15 @@ spec:
   #     (silent no-op, kept as-is for upstream parity) — this is what starved
   #     the router's pod cache informer.
   #   - pinning the node IP as /32 would break on every IP drift.
-  # A subnet-wide ipBlock with the cluster pod/service CIDRs excepted is the
-  # only selector that covers the apiserver and survives IP drift — same style
-  # as the public-internet rule in
-  # infra/k3s/base/prodavan-sandboxes-ks/networkpolicy.yaml.
+  # A subnet-wide ipBlock is the only selector that covers the apiserver and
+  # survives IP drift. No `except` entries: the pod/service CIDRs
+  # (10.42.0.0/16, 10.43.0.0/16) are disjoint from 172.16.0.0/12, and the
+  # apiserver rejects `except` values that are not strict subsets of `cidr`
+  # (NetworkPolicy "sandbox-router" is invalid otherwise — the first version
+  # of this rule failed exactly that validation and blocked the sync).
   - to:
     - ipBlock:
         cidr: 172.16.0.0/12
-        except:
-        - 10.42.0.0/16 # pods
-        - 10.43.0.0/16 # services
     ports:
     - protocol: TCP
       port: 443
