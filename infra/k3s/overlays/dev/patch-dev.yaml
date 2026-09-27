@@ -23,6 +23,9 @@ spec:
         - name: api
           # Dev uses :latest — Always so Verify/rollout actually pull new digests.
           imagePullPolicy: Always
+        - name: api-pod
+          # Same image as api - must not stay stale (IfNotPresent + cached :latest).
+          imagePullPolicy: Always
 ---
 apiVersion: apps/v1
 kind: Deployment
