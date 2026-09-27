@@ -123,7 +123,7 @@ class ContainerRuntime {
 
     final restartsRaw = runtime?['restarts'] ?? item?['restarts'];
     final metricsAvailableRaw = runtime?['metrics_available'];
-    // Hoist null-aware reads into locals: `x?['k'] is bool ? x?['k'] as bool : …`
+    // Hoist null-aware reads into locals: x?['k'] is bool ? x?['k'] as bool : ...
     // trips the Dart parser's `is T?` vs ternary disambiguation (CI analyze).
     final readyRaw = runtime?['ready'];
     final suspendedRaw = runtime?['suspended'];
