@@ -34,6 +34,9 @@ enum ObservedState {
   static ObservedState parse(String? raw) {
     final s = raw?.trim().toLowerCase();
     if (s == null || s.isEmpty) return ObservedState.unknown;
+    // Legacy wire value: pre agent-sandbox payloads used `paused`; normalize
+    // to suspended (same semantics: data safe on PVC, wake in seconds).
+    if (s == 'paused') return ObservedState.suspended;
     for (final v in values) {
       if (v.name == s) return v;
     }
@@ -435,6 +438,7 @@ bool projectShowsContainerError(Map<String, dynamic>? project) {
     'provisioning',
     'hydrating',
     'starting',
+    'pulling',
     'degraded',
   };
   return !ok.contains(observed);
