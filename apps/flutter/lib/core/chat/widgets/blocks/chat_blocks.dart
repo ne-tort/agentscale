@@ -165,16 +165,25 @@ class ChatMarkdownBody extends StatelessWidget {
 }
 
 class AssistantStreamBlock extends StatelessWidget {
-  const AssistantStreamBlock({super.key, required this.text, this.streaming = false, this.cancelled = false});
+  const AssistantStreamBlock({
+    super.key,
+    required this.text,
+    this.streaming = false,
+    this.cancelled = false,
+    this.interrupted = false,
+  });
 
   final String text;
   final bool streaming;
   final bool cancelled;
 
+  /// SSE connection dropped mid-turn: show an interrupted marker.
+  final bool interrupted;
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    if (text.isEmpty && !cancelled) return const SizedBox.shrink();
+    if (text.isEmpty && !cancelled && !interrupted) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -186,6 +195,11 @@ class AssistantStreamBlock extends StatelessWidget {
           Padding(
             padding: EdgeInsets.only(top: AppSpacing.xs),
             child: Text(l10n.projectChatCancelled, style: Theme.of(context).textTheme.labelSmall),
+          ),
+        if (interrupted)
+          Padding(
+            padding: EdgeInsets.only(top: AppSpacing.xs),
+            child: Text(l10n.projectChatInterrupted, style: Theme.of(context).textTheme.labelSmall),
           ),
       ],
     );

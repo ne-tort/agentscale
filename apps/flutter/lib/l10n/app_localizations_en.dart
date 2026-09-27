@@ -758,7 +758,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get containerObservedPausing => 'Pausing';
 
   @override
-  String get containerPollTimeout => 'Failed to wait for the agent to become ready';
+  String get containerPollTimeout =>
+      'Failed to wait for the agent to become ready';
 
   @override
   String get containerMetricsAwaiting =>
@@ -1903,6 +1904,15 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get projectChatCancelled => 'Cancelled';
+
+  @override
+  String get projectChatInterrupted =>
+      'Interrupted — your message was restored to the input field';
+
+  @override
+  String projectAgentFailedToStart(String reason) {
+    return 'Agent failed to start: $reason';
+  }
 
   @override
   String get projectChatSidechainOffline =>

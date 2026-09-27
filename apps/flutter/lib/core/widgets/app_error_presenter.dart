@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -5,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import 'package:prodavan/core/api/agent_stream_error.dart';
 import 'package:prodavan/core/api/prodavan_api.dart';
+import 'package:prodavan/core/containers/project_container_poll.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -30,6 +32,25 @@ abstract final class AppErrors {
     }
     if (error is AgentStreamError) {
       return _fromAgentStreamError(error, l10n);
+    }
+    if (error is ContainerObservedFailureException) {
+      // Honest launch/reload/resume failure: prefix + the container's
+      // last_error as the reason (raw reason only goes to the clipboard).
+      return AppErrorPresentation(
+        display: l10n.projectAgentFailedToStart(error.reason),
+        diagnostic: error.reason,
+      );
+    }
+    if (error is TimeoutException) {
+      // Lifecycle polls throw with an already-localized message
+      // (containerPollTimeout); keep it instead of a generic fallback.
+      final message = error.message?.trim();
+      return AppErrorPresentation(
+        display: message != null && message.isNotEmpty
+            ? message
+            : l10n.containerPollTimeout,
+        diagnostic: 'TimeoutException',
+      );
     }
     if (error is http.ClientException) {
       return AppErrorPresentation(

@@ -1371,15 +1371,27 @@ abstract class AppLocalizations {
   String get containerObservedUnknown;
 
   /// No description provided for @containerObservedResuming.
+  ///
+  /// In en, this message translates to:
+  /// **'Waking up'**
   String get containerObservedResuming;
 
   /// No description provided for @containerObservedSuspended.
+  ///
+  /// In en, this message translates to:
+  /// **'Suspended (data preserved)'**
   String get containerObservedSuspended;
 
   /// No description provided for @containerObservedPausing.
+  ///
+  /// In en, this message translates to:
+  /// **'Pausing'**
   String get containerObservedPausing;
 
   /// No description provided for @containerPollTimeout.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to wait for the agent to become ready'**
   String get containerPollTimeout;
 
   /// No description provided for @containerMetricsAwaiting.
@@ -3445,6 +3457,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Cancelled'**
   String get projectChatCancelled;
+
+  /// No description provided for @projectChatInterrupted.
+  ///
+  /// In en, this message translates to:
+  /// **'Interrupted — your message was restored to the input field'**
+  String get projectChatInterrupted;
+
+  /// No description provided for @projectAgentFailedToStart.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent failed to start: {reason}'**
+  String projectAgentFailedToStart(String reason);
 
   /// No description provided for @projectChatSidechainOffline.
   ///

@@ -48,6 +48,7 @@ class ChatBlockRenderer extends StatelessWidget {
           text: block.text,
           streaming: block.isStreaming,
           cancelled: block.raw['_cancelled'] == true,
+          interrupted: block.raw['_interrupted'] == true,
         );
       case 'thinking':
         return ThinkingBlock(

@@ -1063,6 +1063,13 @@
   "projectChatWakeUnresponsive": "Project not responding. Reload?",
   "projectChatNeedsUpdate": "Project needs an update. Update?",
   "projectChatCancelled": "Cancelled",
+  "projectChatInterrupted": "Interrupted — your message was restored to the input field",
+  "projectAgentFailedToStart": "Agent failed to start: {reason}",
+  "@projectAgentFailedToStart": {
+    "placeholders": {
+      "reason": { "type": "String" }
+    }
+  },
   "projectChatSidechainOffline": "Sidechain unavailable — container is not running",
   "projectChatGroupThinking": "Reasoning ({count})",
   "@projectChatGroupThinking": {
