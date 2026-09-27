@@ -23,7 +23,6 @@ String phaseSubtitle(Map<String, dynamic>? container, AppLocalizations l10n) {
     'hydrating' => l10n.containerObservedHydrating,
     'provisioning' => l10n.containerObservedProvisioning,
     'starting' => l10n.containerObservedStarting,
-    'resuming' => l10n.containerObservedResuming,
     'suspended' => l10n.containerObservedSuspended,
     'pausing' => l10n.containerObservedPausing,
     'running' => l10n.containerObservedRunning,
@@ -41,14 +40,16 @@ Future<void> _pollUntilSettledOrThrow({
   required AppJobController ctrl,
   required AppLocalizations l10n,
   required Duration timeout,
+  required Set<String> waitFor,
 }) async {
   final container = await pollProjectContainerUntilSettled(
     api: api,
     projectId: projectId,
     timeout: timeout,
+    waitFor: waitFor,
     onTick: (item) => ctrl.setSubtitle(phaseSubtitle(item, l10n)),
   );
-  if (!containerObservedSettled(container)) {
+  if (!containerObservedSettled(container, waitFor: waitFor)) {
     throw TimeoutException(
       l10n.containerPollTimeout,
       timeout,
@@ -56,7 +57,7 @@ Future<void> _pollUntilSettledOrThrow({
   }
   final failure = containerObservedFailureMessage(container);
   if (failure != null) {
-    throw StateError(failure);
+    throw ContainerObservedFailureException(failure);
   }
 }
 
@@ -86,7 +87,7 @@ Future<Map<String, dynamic>?> runProjectLaunchJob({
       subjectId: projectId,
       title: l10n.projectLaunchInProgress,
       subtitle: l10n.projectLaunchStartingSnack,
-      timeout: containerPollDefaultTimeout,
+      timeout: appJobDefaultTimeout,
       run: (ctrl) async {
         if (invokeApi) {
           try {
@@ -101,6 +102,7 @@ Future<Map<String, dynamic>?> runProjectLaunchJob({
           ctrl: ctrl,
           l10n: l10n,
           timeout: ctrl.remaining,
+          waitFor: containerPollWaitForRunning,
         );
         workContext.notifyProjectLifecycleChanged();
       },
@@ -134,6 +136,7 @@ Future<Map<String, dynamic>?> runProjectReloadJob({
           ctrl: ctrl,
           l10n: l10n,
           timeout: ctrl.remaining,
+          waitFor: containerPollWaitForRunning,
         );
         workContext.notifyProjectLifecycleChanged();
       },
@@ -174,6 +177,7 @@ Future<Map<String, dynamic>?> runProjectResumeJob({
           ctrl: ctrl,
           l10n: l10n,
           timeout: ctrl.remaining,
+          waitFor: containerPollWaitForRunning,
         );
         workContext.notifyProjectLifecycleChanged();
       },

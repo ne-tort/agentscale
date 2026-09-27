@@ -1920,6 +1920,15 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectChatCancelled => 'Отменено';
 
   @override
+  String get projectChatInterrupted =>
+      'Прервано — сообщение восстановлено в поле ввода';
+
+  @override
+  String projectAgentFailedToStart(String reason) {
+    return 'Агент не запустился: $reason';
+  }
+
+  @override
   String get projectChatSidechainOffline =>
       'Sidechain недоступен — контейнер не запущен';
 

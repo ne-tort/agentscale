@@ -21,7 +21,6 @@ enum ObservedState {
   pulling,
   hydrating,
   starting,
-  resuming,
   pausing,
   suspended,
   running,
@@ -52,7 +51,6 @@ enum ObservedState {
         pulling ||
         hydrating ||
         starting ||
-        resuming ||
         pausing =>
           true,
         _ => false,
@@ -220,7 +218,6 @@ const _inFlightObservedStates = {
   'pulling',
   'hydrating',
   'starting',
-  'resuming',
   'pausing',
 };
 
@@ -251,7 +248,6 @@ String _formatObservedState(String state, AppLocalizations l10n) {
     'pulling' => l10n.containerObservedPulling,
     'hydrating' => l10n.containerObservedHydrating,
     'starting' => l10n.containerObservedStarting,
-    'resuming' => l10n.containerObservedResuming,
     'suspended' => l10n.containerObservedSuspended,
     'pausing' => l10n.containerObservedPausing,
     'running' => l10n.containerObservedRunning,
@@ -415,9 +411,14 @@ String formatContainerRuntimeDetail(Map<String, dynamic>? item, AppLocalizations
 
 bool containerRuntimeNeedsAttention(Map<String, dynamic>? item) {
   if (item?['status'] != 'active') return false;
+  final rt = ContainerRuntime.fromJson(item);
+  // Sleeping sandbox: data is safe on PVC, resume is the dedicated action.
+  if (rt.observedState.isSleeping) return false;
+  // Provisioning / pulling / … is progress, not an attention state.
+  if (rt.observedState.isInFlight) return false;
   final observed = _observedState(item);
   if (observed != null) {
-    return observed != 'running';
+    return observed != 'running' && observed != 'degraded';
   }
   return runtimeMap(item) == null;
 }
@@ -433,7 +434,6 @@ bool projectShowsContainerError(Map<String, dynamic>? project) {
     'paused',
     'suspended',
     'pausing',
-    'resuming',
     'preparing',
     'provisioning',
     'hydrating',
@@ -471,21 +471,16 @@ bool projectChatSuspended(Map<String, dynamic>? project) {
   return rt.observedState.isSleeping;
 }
 
-/// How the composer should wake the agent:
-/// - [resume] for paused/suspended (fast suspend→resume cycle);
-/// - [reload] for failed/unhealthy pods.
-enum ChatWakeMode { resume, reload }
-
-ChatWakeMode chatWakeMode(Map<String, dynamic>? project) {
-  return projectChatSuspended(project) ? ChatWakeMode.resume : ChatWakeMode.reload;
-}
-
 @Deprecated('Use projectChatSendable')
 bool projectChatAvailable(Map<String, dynamic>? project) => projectChatSendable(project);
 
+/// Live pod the agent chat can talk to. `degraded` is a metrics-only
+/// condition — the agent itself still answers, so the composer stays
+/// sendable (degraded only feeds the metrics banner).
 bool containerRuntimeHealthy(Map<String, dynamic>? item) {
   if (item?['runtime']?['stub'] == true) return false;
-  return _observedState(item) == 'running';
+  final state = _observedState(item);
+  return state == 'running' || state == 'degraded';
 }
 
 String? containerPodServiceId(Map<String, dynamic>? item) {
@@ -504,4 +499,18 @@ String? containerK8sPodName(Map<String, dynamic>? item) {
   final s = '$name'.trim();
   if (s.isEmpty || s.startsWith('object-ws:')) return null;
   return s;
+}
+
+/// agent-sandbox runtime view (sandbox_name/claim_name present) — there is
+/// no k8s pod behind the container, metrics are not collected by design.
+bool containerIsSandboxRuntime(Map<String, dynamic>? item) {
+  final rt = ContainerRuntime.fromJson(item);
+  return rt.sandboxName != null || rt.claimName != null;
+}
+
+/// Runtime identifier for the Runtime row: agent-sandbox name (claim
+/// fallback) in sandbox mode, legacy k8s pod name otherwise.
+String? containerRuntimeRefName(Map<String, dynamic>? item) {
+  final rt = ContainerRuntime.fromJson(item);
+  return rt.sandboxName ?? rt.claimName ?? containerK8sPodName(item);
 }

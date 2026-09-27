@@ -41,6 +41,7 @@ class ChatComposer extends StatefulWidget {
     this.api,
     this.onSessionMaterialized,
     this.onDraftPresenceChanged,
+    this.draftRestore,
     this.wakeMode = false,
     this.waking = false,
     this.onWake,
@@ -62,6 +63,9 @@ class ChatComposer extends StatefulWidget {
   final ProdavanApi? api;
   final void Function(String sessionId)? onSessionMaterialized;
   final VoidCallback? onDraftPresenceChanged;
+  /// Interrupted-turn draft restore (SSE drop): refill the field when set
+  /// by the chat controller so the user message is not lost.
+  final ValueNotifier<String?>? draftRestore;
   /// When true, field is not sendable but tappable — [onWake] resumes/reloads.
   final bool wakeMode;
   /// In-progress resume/reload — spinner on wake panel, ignore further taps.
@@ -100,12 +104,17 @@ class _ChatComposerState extends State<ChatComposer> {
   void initState() {
     super.initState();
     _controller.addListener(_onTextChanged);
+    widget.draftRestore?.addListener(_onDraftRestore);
     unawaited(_hydrateDraft());
   }
 
   @override
   void didUpdateWidget(covariant ChatComposer oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.draftRestore != widget.draftRestore) {
+      oldWidget.draftRestore?.removeListener(_onDraftRestore);
+      widget.draftRestore?.addListener(_onDraftRestore);
+    }
     if (oldWidget.sessionId != widget.sessionId || oldWidget.projectId != widget.projectId) {
       _draftHydrated = false;
       _lastPersistedDraft = null;
@@ -117,9 +126,20 @@ class _ChatComposerState extends State<ChatComposer> {
   void dispose() {
     _draftTimer?.cancel();
     _controller.removeListener(_onTextChanged);
+    widget.draftRestore?.removeListener(_onDraftRestore);
     _focusNode.dispose();
     _controller.dispose();
     super.dispose();
+  }
+
+  /// Interrupted-turn draft restore (SSE drop): refill the input field with
+  /// the user's text unless they already started typing something new.
+  void _onDraftRestore() {
+    final draft = widget.draftRestore?.value;
+    if (draft == null || draft.trim().isEmpty) return;
+    if (_controller.text.trim().isNotEmpty) return;
+    _controller.value = TextEditingValue(text: draft, selection: TextSelection.collapsed(offset: draft.length));
+    _onTextChanged();
   }
 
   bool get _canSend =>

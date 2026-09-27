@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:prodavan/core/api/agent_stream_error.dart';
 import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/chat/models/chat_block.dart';
@@ -51,6 +53,11 @@ class ChatSessionController {
   List<ChatBlock> _liveTurnBlocks = const [];
   final _tick = StreamController<void>.broadcast();
   Timer? _notifyTimer;
+
+  /// Set when a live turn is interrupted by a connection drop (SSE break):
+  /// the composer listens and restores the user text as an editable draft
+  /// instead of losing the message.
+  final ValueNotifier<String?> interruptedDraft = ValueNotifier<String?>(null);
 
   Stream<void> get changes => _tick.stream;
 
@@ -217,6 +224,7 @@ class ChatSessionController {
         if (sid == null || sid.isEmpty) {
           error = StateError('failed to create chat session');
           streaming = false;
+          if (trimmed.isNotEmpty) interruptedDraft.value = trimmed;
           notifyImmediate();
           return;
         }
@@ -225,6 +233,7 @@ class ChatSessionController {
       } catch (e) {
         error = e;
         streaming = false;
+        if (trimmed.isNotEmpty) interruptedDraft.value = trimmed;
         notifyImmediate();
         return;
       }
@@ -304,13 +313,31 @@ class ChatSessionController {
       _saveToCache();
     } on ProdavanApiException catch (e) {
       error = e;
+      _finalizeInterruptedTurn(trimmed);
       notifyImmediate();
     } catch (e) {
       error = e;
+      _finalizeInterruptedTurn(trimmed);
       notifyImmediate();
     } finally {
       streaming = false;
       notifyImmediate();
+    }
+  }
+
+  /// Connection dropped mid-turn: keep the partial transcript (marked
+  /// interrupted, the way [cancelStream] marks cancelled) so the optimistic
+  /// user message is not lost, and hand the user text back to the composer
+  /// as an editable draft.
+  void _finalizeInterruptedTurn(String userText) {
+    if (_liveTurnBlocks.isNotEmpty) {
+      _liveTurnBlocks = finalizeTurnBlocks(_liveTurnBlocks, interrupted: true);
+      blocks.addAll(_liveTurnBlocks);
+      _liveTurnBlocks = const [];
+      _saveToCache();
+    }
+    if (userText.trim().isNotEmpty) {
+      interruptedDraft.value = userText;
     }
   }
 
@@ -343,5 +370,6 @@ class ChatSessionController {
     _handle?.abort();
     _notifyTimer?.cancel();
     _tick.close();
+    interruptedDraft.dispose();
   }
 }

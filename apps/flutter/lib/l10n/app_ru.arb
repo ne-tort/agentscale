@@ -1065,6 +1065,13 @@
   "projectChatWakeUnresponsive": "Проект не отвечает. Перезагрузить?",
   "projectChatNeedsUpdate": "Проект требует обновления. Обновить?",
   "projectChatCancelled": "Отменено",
+  "projectChatInterrupted": "Прервано — сообщение восстановлено в поле ввода",
+  "projectAgentFailedToStart": "Агент не запустился: {reason}",
+  "@projectAgentFailedToStart": {
+    "placeholders": {
+      "reason": { "type": "String" }
+    }
+  },
   "projectChatSidechainOffline": "Sidechain недоступен — контейнер не запущен",
   "projectChatGroupThinking": "Размышление ({count})",
   "@projectChatGroupThinking": {

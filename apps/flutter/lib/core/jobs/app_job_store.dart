@@ -17,9 +17,22 @@ class AppJobStore extends ChangeNotifier {
   Future<void>? _hydrateFuture;
   bool _hydrated = false;
 
+  /// Persist debounce: poll subtitles tick every 1-2s and must not hammer
+  /// SharedPreferences on every notify. Phase changes flush immediately.
+  static const _persistMinGap = Duration(seconds: 2);
+  Timer? _persistTimer;
+  DateTime _lastPersistAt = DateTime.fromMillisecondsSinceEpoch(0);
+
   List<AppJob> get jobs => List<AppJob>.unmodifiable(_jobs.values);
 
   bool get isHydrated => _hydrated;
+
+  @override
+  void dispose() {
+    _persistTimer?.cancel();
+    _persistTimer = null;
+    super.dispose();
+  }
 
   AppJob? byId(String id) => _jobs[id];
 
@@ -130,7 +143,7 @@ class AppJobStore extends ChangeNotifier {
     final completer = Completer<AppJob>();
     _completers[id] = completer;
     notifyListeners();
-    unawaited(_persist());
+    _schedulePersist();
     return _attachRunner(job, run);
   }
 
@@ -171,7 +184,7 @@ class AppJobStore extends ChangeNotifier {
     if (job.subtitle == subtitle) return;
     _jobs[id] = job.copyWith(subtitle: subtitle, updatedAt: DateTime.now());
     notifyListeners();
-    unawaited(_persist());
+    _schedulePersist();
   }
 
   void clear(String id) {
@@ -181,7 +194,7 @@ class AppJobStore extends ChangeNotifier {
       c.completeError(StateError('job cleared'));
     }
     notifyListeners();
-    unawaited(_persist());
+    _schedulePersist(immediate: true);
   }
 
   void clearSubject({required String kind, required String subjectId}) {
@@ -203,10 +216,27 @@ class AppJobStore extends ChangeNotifier {
       completer.complete(next);
     }
     notifyListeners();
-    unawaited(_persist());
+    _schedulePersist(immediate: true);
+  }
+
+  /// Debounced persist: at most one write per [_persistMinGap] unless
+  /// [immediate] (phase change: start / finish / clear).
+  void _schedulePersist({bool immediate = false}) {
+    _persistTimer?.cancel();
+    _persistTimer = null;
+    if (immediate ||
+        DateTime.now().difference(_lastPersistAt) >= _persistMinGap) {
+      unawaited(_persist());
+      return;
+    }
+    _persistTimer = Timer(_persistMinGap, () {
+      _persistTimer = null;
+      unawaited(_persist());
+    });
   }
 
   Future<void> _persist() async {
+    _lastPersistAt = DateTime.now();
     try {
       final prefs = _prefsOverride ?? await SharedPreferences.getInstance();
       final running = _jobs.values

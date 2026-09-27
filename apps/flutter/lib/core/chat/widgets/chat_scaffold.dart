@@ -435,6 +435,7 @@ class ChatScaffold extends StatelessWidget {
                   projectId: controller.projectId,
                   sessionId: controller.sessionId.isEmpty ? null : controller.sessionId,
                   api: api,
+                  draftRestore: controller.interruptedDraft,
                   enabled: chatSendable && !updateMode,
                   streaming: controller.streaming,
                   disabledHint: disabledHint,

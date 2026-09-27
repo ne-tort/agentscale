@@ -209,13 +209,28 @@ List<ChatBlock> applyStreamEvent(List<ChatBlock> blocks, Map<String, dynamic> ev
   return next;
 }
 
-List<ChatBlock> finalizeTurnBlocks(List<ChatBlock> blocks, {bool cancelled = false}) {
+/// Finalize a turn: close streaming flags and optionally mark the partial
+/// assistant reply — [cancelled] for user cancels, [interrupted] for
+/// connection drops (SSE break) — so the transcript keeps an honest tail.
+List<ChatBlock> finalizeTurnBlocks(
+  List<ChatBlock> blocks, {
+  bool cancelled = false,
+  bool interrupted = false,
+}) {
+  final marker = cancelled
+      ? '_cancelled'
+      : interrupted
+          ? '_interrupted'
+          : null;
   return blocks.map((b) {
     if (b.isStreaming) {
-      return b.copyWithRaw({'_streaming': false, if (cancelled) '_cancelled': true});
+      return b.copyWithRaw({
+        '_streaming': false,
+        if (marker != null) marker: true,
+      });
     }
-    if (cancelled && b.kind == 'assistant_markdown') {
-      return b.copyWithRaw({'_cancelled': true});
+    if (marker != null && b.kind == 'assistant_markdown') {
+      return b.copyWithRaw({marker: true});
     }
     return b;
   }).toList();
