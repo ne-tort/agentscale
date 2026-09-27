@@ -56,6 +56,30 @@ spec:
         app.kubernetes.io/component: redis
     spec:
       terminationGracePeriodSeconds: 30
+      initContainers:
+        # Self-heal AOF after unclean shutdown (node reboot / hard kill): a
+        # truncated appendonly manifest otherwise keeps redis in
+        # CrashLoopBackOff forever and cascades into prodavan-api startup
+        # failure (redis ConnectionError at lifespan startup). Declarative
+        # repair in-pod (canon: state fixed by init containers, not hosts).
+        - name: aof-repair
+          image: redis:7.4.11-alpine
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              manifest=/data/appendonlydir/appendonly.aof.manifest
+              [ -f "$manifest" ] || exit 0
+              if ! redis-check-aof "$manifest" >/dev/null 2>&1; then
+                echo "AOF corrupt - repairing (truncates to last valid prefix)"
+                cp -a /data/appendonlydir /data/appendonlydir.bak.$(date +%s) || true
+                printf 'y
+' | redis-check-aof --fix "$manifest" || true
+              fi
+          volumeMounts:
+            - name: data
+              mountPath: /data
       containers:
         - name: redis
           image: redis:7.4.11-alpine
