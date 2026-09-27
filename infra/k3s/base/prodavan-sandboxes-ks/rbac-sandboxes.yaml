@@ -1,5 +1,5 @@
 # RBAC for agent-sandbox era (replaces base/prodavan-sandbox/rbac-sandboxes.yaml).
-# Canon: docs/migration/03-devops.md 3.3. The API no longer CRUDs pods directly —
+# Canon: docs/08-migration/agent-sandbox-adr.md (ADR §1.6). The API no longer CRUDs pods directly —
 # it writes SandboxClaims and reads/patches Sandboxes (CRs reconciled by the
 # agent-sandbox controller). pods/exec is GONE: file/command channel is the router.
 apiVersion: v1

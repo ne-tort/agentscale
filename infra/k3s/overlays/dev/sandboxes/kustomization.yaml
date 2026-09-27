@@ -1,5 +1,5 @@
 # Dev overlay for prodavan-sandboxes (agent-sandbox era).
-# Canon: docs/migration/03-devops.md 3.2. SandboxTemplate/WarmPool/RBAC/NetworkPolicy
+# Canon: docs/08-migration/agent-sandbox-adr.md. SandboxTemplate/WarmPool/RBAC/NetworkPolicy
 # come from the base prodavan-sandboxes-ks layer; this overlay keeps dev-only
 # extras (probe-pod, ghcr pull secret). The bridge auth secret lives in base —
 # the SandboxTemplate BRIDGE_AUTH_TOKEN env references it.

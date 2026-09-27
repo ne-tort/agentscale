@@ -1,8 +1,8 @@
 # SandboxTemplate — canonical pod blueprint for prodavan agent sandboxes.
-# Canon: docs/migration/01-target-architecture.md ("SandboxTemplate (канон)").
+# Canon: docs/08-migration/agent-sandbox-adr.md (ADR §1.4, SandboxTemplate).
 # Per-project customization goes through claim LABELS only (post-Ready inject);
 # env/VCT in claims are loudly rejected (Disallowed) to keep warm-pool adoption
-# sub-second (see docs/migration/01, "Ключевые решения шаблона").
+# sub-second (ADR §1.4: envVarsInjectionPolicy/volumeClaimTemplatesPolicy Disallowed).
 apiVersion: extensions.agents.x-k8s.io/v1beta1
 kind: SandboxTemplate
 metadata:
