@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from prodavan.application.agent.openclaw_bridge import OpenClawBridgeBootstrap
+from prodavan.application.agent.runtime_transport import (
+    RuntimeEndpoint,
+    resolve_runtime_endpoint,
+)
 from prodavan.application.ai_keys.audit_service import AiKeyAuditService
 from prodavan.application.ai_keys.service import AiKeysService
 from prodavan.config.settings import settings
@@ -164,19 +168,19 @@ class AgentCredentialBroker:
             logger.debug("credential push skipped key=%s: %s", key_id, exc)
             return False
 
-        pod_ip = await self._resolve_pod_ip_for_project(project_id)
-        if not pod_ip:
+        endpoint = await self._resolve_endpoint_for_project(project_id)
+        if endpoint is None:
             return False
 
         lease_id = f"lease_{uuid.uuid4().hex[:16]}"
-        url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/credentials/leases"
+        url = f"{endpoint.base_url}/v1/credentials/leases"
         body = {
             "lease_id": lease_id,
             "key_id": key_id,
             "secret": secret,
             "ttl_sec": max(60, min(int(ttl_sec), 86_400)),
         }
-        headers = _runtime_request_headers()
+        headers = _runtime_request_headers(endpoint.headers)
         actor = principal or _SYSTEM_PRINCIPAL
         push_ok = False
         failure_detail: dict[str, Any] | None = None
@@ -248,16 +252,16 @@ class AgentCredentialBroker:
     ) -> bool:
         if not settings.pod_agent_runtime_enabled:
             return False
-        pod_ip = await self._resolve_pod_ip_for_project(project_id)
-        if not pod_ip:
+        endpoint = await self._resolve_endpoint_for_project(project_id)
+        if endpoint is None:
             return False
-        url = f"http://{pod_ip}:{settings.pod_agent_runtime_port}/v1/credentials/leases/{lease_id}"
+        url = f"{endpoint.base_url}/v1/credentials/leases/{lease_id}"
         actor = principal or _SYSTEM_PRINCIPAL
         revoke_ok = False
         revoke_detail: dict[str, Any]
         try:
             async with self._http_client(timeout=10.0) as client:
-                response = await client.delete(url, headers=_runtime_request_headers())
+                response = await client.delete(url, headers=_runtime_request_headers(endpoint.headers))
             revoke_ok = response.status_code in (200, 204, 404)
             revoke_detail = {
                 "lease_id": lease_id,
@@ -291,14 +295,19 @@ class AgentCredentialBroker:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="project not found")
         return project
 
-    async def _resolve_pod_ip_for_project(self, project_id: str) -> str | None:
-        bridge = OpenClawBridgeBootstrap(self._session, k8s_client=self._k8s)
-        return await bridge._resolve_pod_ip_for_project(project_id)
+    async def _resolve_endpoint_for_project(self, project_id: str) -> RuntimeEndpoint | None:
+        return await resolve_runtime_endpoint(
+            self._session,
+            project_id,
+            k8s_client=self._k8s,
+        )
 
 
-def _runtime_request_headers() -> dict[str, str]:
+def _runtime_request_headers(extra: Mapping[str, str] | None = None) -> dict[str, str]:
     headers: dict[str, str] = {}
     token = settings.pod_agent_runtime_token.strip()
     if token:
         headers["Authorization"] = f"Bearer {token}"
+    if extra:
+        headers.update(extra)
     return headers

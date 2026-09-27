@@ -13,6 +13,7 @@ from prodavan.application.agent.openclaw_bridge import (
     OpenClawBridgeBootstrap,
     api_kind_to_bridge_adapter,
 )
+from prodavan.application.agent.project_bind import bind_project_runtime
 from prodavan.application.agent.session_service import AgentSessionService
 from prodavan.application.pod_service.runtime_observation import RuntimeObservationService
 from prodavan.config.settings import settings
@@ -94,6 +95,15 @@ class PodSessionBootstrap:
             .order_by(AgentSessionRow.created_at.asc())
         )
         rows = list(result.scalars().all())
+        # Post-Ready identity bind before re-registering sessions: a freshly
+        # adopted sandbox runtime has no project identity yet (idempotent,
+        # 404-tolerant, best-effort — never aborts the bootstrap).
+        await bind_project_runtime(
+            self._session,
+            project_id,
+            pod_id=pod_row.id if pod_row is not None else None,
+            workspace_key=str(pod_row.workspace_key or "") if pod_row is not None else None,
+        )
         registered = 0
         keys_pushed: set[str] = set()
         broker = AgentCredentialBroker(self._session)

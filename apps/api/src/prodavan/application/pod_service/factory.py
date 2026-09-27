@@ -58,7 +58,8 @@ def build_hydrate() -> HydratePort:
         from prodavan.application.pod_service.adapters.k8s.hydrate_init import K8sInitHydrateAdapter
 
         return K8sInitHydrateAdapter()
-    # sandbox mode: workspace lives on the claim PVC — no hydrate step.
+    # sandbox mode: the runtime self-hydrates from the claim PVC / project bind —
+    # no API-side hydrate step.
     return StubHydrateAdapter()
 
 
@@ -90,10 +91,17 @@ def build_dehydrate():
         if mgr is None or mgr.client is None:
             raise RuntimeError("pod_runtime_mode=k8s but K8sManager client is unavailable")
         return K8sDehydrateAdapter(client=mgr.client)
+    if mode == "sandbox":
+        from prodavan.application.pod_service.adapters.agent_sandbox.dehydrate import (
+            SandboxHttpDehydrateAdapter,
+        )
+
+        # Workspace archive is streamed from the agent-runtime through the
+        # sandbox-router (GET /v1/workspace/archive) into the MinIO last-good
+        # tree — reload/rematerialize keep the dehydrated workspace.
+        return SandboxHttpDehydrateAdapter()
     from prodavan.application.pod_service.adapters.stub_dehydrate import StubDehydrateAdapter
 
-    # sandbox mode falls through too: PVC is the source of truth, no
-    # Pod-FS -> object-store sync is needed (Wave 2 gap: intentional).
     return StubDehydrateAdapter()
 
 
@@ -114,6 +122,14 @@ def build_pod_workspace():
         from prodavan.application.pod_service.adapters.k8s.workspace_exec import K8sExecWorkspaceAdapter
 
         return K8sExecWorkspaceAdapter(client=mgr.client)
+    if mode == "sandbox":
+        from prodavan.application.pod_service.adapters.agent_sandbox.workspace_http import (
+            SandboxHttpWorkspaceAdapter,
+        )
+
+        # Same /v1/workspace/* HTTP API, addressed via the sandbox-router
+        # (X-Sandbox-* headers) instead of a direct pod IP.
+        return SandboxHttpWorkspaceAdapter()
     from prodavan.application.pod_service.adapters.unavailable_workspace import UnavailableWorkspaceAdapter
 
     return UnavailableWorkspaceAdapter()
