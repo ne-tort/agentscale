@@ -10,7 +10,7 @@ metadata:
 spec:
   description: agent-sandbox controller + sandbox-router (namespace scoped)
   sourceRepos:
-    - https://github.com/ne-tort/prodavan.git
+    - https://github.com/ne-tort/agentscale.git
   destinations:
     - namespace: agent-sandbox-system
       server: https://kubernetes.default.svc

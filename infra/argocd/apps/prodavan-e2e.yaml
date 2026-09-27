@@ -10,7 +10,7 @@ metadata:
 spec:
   project: prodavan
   source:
-    repoURL: https://github.com/ne-tort/prodavan.git
+    repoURL: https://github.com/ne-tort/agentscale.git
     targetRevision: main
     path: infra/k3s/overlays/e2e
   destination:
