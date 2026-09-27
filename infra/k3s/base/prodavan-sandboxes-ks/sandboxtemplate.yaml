@@ -21,6 +21,15 @@ spec:
     spec:
       serviceAccountName: prodavan-project-pod
       automountServiceAccountToken: false
+      # agent-runtime is non-root by design (Dockerfile.bun in prodavan-claw:
+      # `USER node`, uid 1000, /workspace and /app chown'ed node:node) —
+      # enforce at pod level. fsGroup makes kubelet chown the root-owned
+      # local-path PVC dir to the node group so /workspace stays writable;
+      # warm-pool pods render this same template, so they inherit the context.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       # Runtime image is private on ghcr — pull via the dev overlay ghcr-pull secret.
       imagePullSecrets:
         - name: ghcr-pull

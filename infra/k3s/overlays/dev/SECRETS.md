@@ -24,3 +24,15 @@ Project sandbox Pods run in **`prodavan-sandboxes`** and need their own `ghcr-pu
 Terraform bootstrap (`TF_VAR_ghcr_token`) also creates `ghcr-pull` in both namespaces on fresh cluster setup.
 
 Argo + Sealed Secrets controller unseal into the cluster. Kubelet pulls from GHCR.
+
+## `pod-agent-bridge-auth` (bridge token — ns `prodavan-sandboxes` only)
+
+- Managed in base:
+  [`base/prodavan-sandboxes-ks/pod-agent-bridge-auth-secret.yaml`](../../base/prodavan-sandboxes-ks/pod-agent-bridge-auth-secret.yaml).
+  Dev values are placeholders (`k3s-dev-bridge-change-me`) — prod overlays must
+  override with a SealedSecret (same flow as `ghcr-pull` above), never commit real values.
+- Exists **only** in namespace `prodavan-sandboxes`: it is consumed by agent-runtime
+  pods via the SandboxTemplate `BRIDGE_AUTH_TOKEN` env (optional `secretKeyRef`).
+- The `prodavan` API **never reads the token value**: `POD_AGENT_RUNTIME_AUTH_SECRET`
+  in the API configmap carries the secret *name* only (the `secretKeyRef` target) —
+  no API-side mount of the value exists.
