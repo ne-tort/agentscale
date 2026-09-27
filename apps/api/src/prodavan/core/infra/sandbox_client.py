@@ -22,7 +22,8 @@ from prodavan.core.lifespan.resource import LifespanResource
 logger = logging.getLogger(__name__)
 
 try:  # pragma: no cover - dependency guard (unit tests mock it)
-    from k8s_agent_sandbox import AsyncSandboxClient, SandboxDirectConnectionConfig
+    from k8s_agent_sandbox import AsyncSandboxClient
+    from k8s_agent_sandbox.models import SandboxDirectConnectionConfig
 
     _SDK_IMPORT_ERROR: Exception | None = None
 except ImportError as exc:  # pragma: no cover
