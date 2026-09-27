@@ -23,6 +23,7 @@ from prodavan.application.agent.adapter_kinds import (
     api_kind_to_bridge_adapter,
 )
 from prodavan.application.agent.project_bind import bind_project_runtime
+from prodavan.application.agent.runtime_auth import runtime_auth_headers
 from prodavan.application.agent.runtime_model import sanitize_runtime_model
 from prodavan.application.agent.runtime_transport import (
     RuntimeEndpoint,
@@ -61,9 +62,7 @@ def _explicit_bridge_model(model: str | None) -> str | None:
 
 def _runtime_request_headers(extra: Mapping[str, str] | None = None) -> dict[str, str]:
     headers = {PRODAVAN_EVENTS_OWNER_HEADER: PRODAVAN_EVENTS_OWNER_API}
-    token = settings.pod_agent_runtime_token.strip()
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    headers.update(runtime_auth_headers())
     if extra:
         headers.update(extra)
     return headers
