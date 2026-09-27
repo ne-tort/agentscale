@@ -54,6 +54,88 @@ def _project() -> ProjectRow:
 
 
 @pytest.mark.asyncio
+async def test_sync_desired_normalizes_stale_stub_ref_in_sandbox_mode(monkeypatch) -> None:
+    # Regression (launch 422): rows persisted in stub mode carry
+    # ``object-ws:`` refs; the sandbox adapter treats runtime_ref as a
+    # SandboxClaim name and k8s rejects it with 422 on create.
+    from prodavan.config.settings import settings
+
+    monkeypatch.setattr(settings, "pod_runtime_mode", "sandbox")
+    session = AsyncMock()
+    project = _project()
+    pod = ProjectPodRow(
+        id="pod_abc123",
+        project_id=project.id,
+        workspace_key=project.workspace_key,
+        status=PodStatus.FAILED,
+        desired_state=PodDesiredState.RUNNING,
+        runtime_ref="object-ws:wk_demo",
+        hydrate_generation=0,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    session.get = AsyncMock(return_value=project)
+
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = pod
+    session.execute = AsyncMock(return_value=execute_result)
+
+    runtime = AsyncMock()
+    cmd = PodCommand(session, runtime=runtime, events=AsyncMock(spec=PodLifecycleEmitter))
+    cmd._project_events = AsyncMock()
+
+    await cmd.sync_desired(
+        project.id,
+        PodDesiredState.RUNNING,
+        principal=_principal(),
+        reason="reconcile",
+    )
+
+    assert pod.runtime_ref == "sandbox-claim-wk-demo"
+    assert project.container_ref == "sandbox-claim-wk-demo"
+    runtime.ensure_running.assert_awaited_once()
+    assert runtime.ensure_running.await_args.kwargs["runtime_ref"] == "sandbox-claim-wk-demo"
+
+
+@pytest.mark.asyncio
+async def test_sync_desired_keeps_legacy_ref_in_k8s_mode(monkeypatch) -> None:
+    from prodavan.config.settings import settings
+
+    monkeypatch.setattr(settings, "pod_runtime_mode", "k8s")
+    session = AsyncMock()
+    project = _project()
+    pod = ProjectPodRow(
+        id="pod_abc123",
+        project_id=project.id,
+        workspace_key=project.workspace_key,
+        status=PodStatus.RUNNING,
+        desired_state=PodDesiredState.RUNNING,
+        runtime_ref="pod-wk-demo",
+        hydrate_generation=0,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+    session.get = AsyncMock(return_value=project)
+
+    execute_result = MagicMock()
+    execute_result.scalar_one_or_none.return_value = pod
+    session.execute = AsyncMock(return_value=execute_result)
+
+    runtime = AsyncMock()
+    cmd = PodCommand(session, runtime=runtime, events=AsyncMock(spec=PodLifecycleEmitter))
+    cmd._project_events = AsyncMock()
+
+    await cmd.sync_desired(
+        project.id,
+        PodDesiredState.RUNNING,
+        principal=_principal(),
+        reason="test",
+    )
+
+    assert pod.runtime_ref == "pod-wk-demo"
+
+
+@pytest.mark.asyncio
 async def test_sync_desired_running_creates_and_starts_pod() -> None:
     session = AsyncMock()
     project = _project()

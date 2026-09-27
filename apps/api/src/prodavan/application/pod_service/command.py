@@ -73,6 +73,7 @@ class PodCommand:
             raise AppError(code="NOT_FOUND", title="Not Found", status=404, detail="Project not found")
 
         pod = await self._get_live_row(project_id)
+        self._normalize_sandbox_runtime_ref(project, pod)
         if pod is None and desired == PodDesiredState.ABSENT:
             if project.container_ref:
                 if reason in _TERMINATE_REASONS:
@@ -230,7 +231,10 @@ class PodCommand:
                 principal=principal,
                 reason="provision.start",
             )
-
+        # server_default columns (updated_at) are not loaded on insert; an
+        # explicit refresh avoids implicit IO in async sessions
+        # (MissingGreenlet in celery's fresh-engine context).
+        await self._session.refresh(pod)
         return PodQuery._public(pod)
 
     async def attach_to_project(
@@ -346,6 +350,39 @@ class PodCommand:
         await self._session.commit()
         await self._session.refresh(pod)
         return PodQuery._public(pod)
+
+    def _normalize_sandbox_runtime_ref(
+        self, project: ProjectRow, pod: ProjectPodRow | None
+    ) -> None:
+        """Sandbox mode: runtime_ref *is* the SandboxClaim name, derived
+        deterministically from the workspace key.
+
+        Heals rows persisted under a different runtime mode: stub
+        ``object-ws:`` refs are rejected by the k8s API as claim names
+        with 422; legacy ``pod-`` refs from k8s mode would create
+        misnamed claims. Idempotent no-op outside sandbox mode.
+        """
+        mode = (settings.pod_runtime_mode or "stub").strip().lower()
+        if mode != "sandbox":
+            return
+        workspace_key = (pod.workspace_key if pod is not None else None) or project.workspace_key
+        expected = runtime_ref_for(workspace_key, mode="sandbox")
+        if pod is not None and pod.runtime_ref != expected:
+            logger.warning(
+                "normalizing stale runtime_ref project_id=%s old=%r new=%r",
+                project.id,
+                pod.runtime_ref,
+                expected,
+            )
+            pod.runtime_ref = expected
+        if project.container_ref and project.container_ref != expected:
+            logger.warning(
+                "normalizing stale container_ref project_id=%s old=%r new=%r",
+                project.id,
+                project.container_ref,
+                expected,
+            )
+            project.container_ref = expected
 
     async def _get_live_row(self, project_id: str) -> ProjectPodRow | None:
         q = await self._session.execute(

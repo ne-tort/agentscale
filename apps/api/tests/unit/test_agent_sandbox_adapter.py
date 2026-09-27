@@ -153,6 +153,24 @@ def test_sandbox_claim_ref_is_deterministic() -> None:
     assert sandbox_claim_ref("WS_Demo_01") == "sandbox-claim-ws-demo-01"
 
 
+def test_sandbox_claim_ref_is_domain_single_source() -> None:
+    # PodCommand persists runtime_ref_for(mode="sandbox"); the adapter must
+    # resolve the SAME claim name or create/get diverge (k8s 422 on create
+    # with an invalid name, 404 on get).
+    from prodavan.domain.pods.types import runtime_ref_for
+
+    assert sandbox_claim_ref("ws-demo-01") == runtime_ref_for("ws-demo-01", mode="sandbox")
+
+
+def test_runtime_ref_for_sandbox_is_valid_claim_name() -> None:
+    from prodavan.domain.pods.types import runtime_ref_for
+
+    ref = runtime_ref_for("ws-demo-01", mode="sandbox")
+    assert ref == "sandbox-claim-ws-demo-01"
+    # k8s resource names must not contain ':' (the stub format does).
+    assert ":" not in ref
+
+
 # ------------------------------------------------------------ ensure_running
 
 
