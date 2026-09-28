@@ -36,6 +36,8 @@ class ChatComposer extends StatefulWidget {
     this.disabledHint,
     this.onCancel,
     this.onOpenSettings,
+    this.modelLabel,
+    this.onPickModel,
     this.projectId,
     this.sessionId,
     this.api,
@@ -57,6 +59,12 @@ class ChatComposer extends StatefulWidget {
   final String? disabledHint;
   final VoidCallback? onCancel;
   final VoidCallback? onOpenSettings;
+
+  /// Label for the quick model-switch pill (see [onPickModel]).
+  final String? modelLabel;
+
+  /// Opens the model picker sheet; the pill is hidden when null.
+  final VoidCallback? onPickModel;
   final String? projectId;
   /// Null / empty → pending «Новый диалог» (no session yet).
   final String? sessionId;
@@ -392,6 +400,54 @@ class _ChatComposerState extends State<ChatComposer> {
     );
   }
 
+  /// Quick model-switch pill next to Send. Visible whenever [widget.onPickModel]
+  /// is set; dimmed and inert while disabled or streaming (aligns with
+  /// [_canSend] semantics without hiding the current model).
+  Widget _modelPill() {
+    if (widget.onPickModel == null) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    final muted = scheme.onSurfaceVariant;
+    final active = widget.enabled && !widget.streaming;
+    final label = (widget.modelLabel ?? '').trim();
+    return Padding(
+      padding: const EdgeInsets.only(right: AppSpacing.xs),
+      child: Opacity(
+        opacity: active ? 1 : 0.5,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: active ? widget.onPickModel : null,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            constraints: const BoxConstraints(minHeight: 36),
+            decoration: BoxDecoration(
+              color: scheme.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.smart_toy_outlined, size: 14, color: muted),
+                const SizedBox(width: 4),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 140),
+                  child: Text(
+                    label.isEmpty ? '—' : label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelMedium
+                        ?.copyWith(color: muted),
+                  ),
+                ),
+                const SizedBox(width: 2),
+                Icon(Icons.expand_more, size: 14, color: muted),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _sendButton(AppLocalizations l10n) {
     if (widget.onCancel != null) {
       return IconButton(
@@ -552,6 +608,7 @@ class _ChatComposerState extends State<ChatComposer> {
                                 _plusButton(l10n),
                                 _attachButton(l10n),
                                 const Spacer(),
+                                _modelPill(),
                                 _sendButton(l10n),
                               ],
                             ),
@@ -563,6 +620,7 @@ class _ChatComposerState extends State<ChatComposer> {
                             _plusButton(l10n),
                             _attachButton(l10n),
                             Expanded(child: field),
+                            _modelPill(),
                             _sendButton(l10n),
                           ],
                         ),

@@ -4,6 +4,9 @@ import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/chat/models/chat_block.dart';
 import 'package:prodavan/core/chat/widgets/blocks/chat_blocks.dart';
 
+String? _nonEmptyString(Object? value) =>
+    value is String && value.trim().isNotEmpty ? value : null;
+
 class ChatBlockRenderer extends StatelessWidget {
   const ChatBlockRenderer({
     super.key,
@@ -13,6 +16,8 @@ class ChatBlockRenderer extends StatelessWidget {
     this.sessionId,
     this.api,
     this.onResolveApproval,
+    this.costResolver,
+    this.turnStreaming = false,
   });
 
   final ChatBlock block;
@@ -21,6 +26,12 @@ class ChatBlockRenderer extends StatelessWidget {
   final String? sessionId;
   final ProdavanApi? api;
   final void Function(String approvalId, String decision)? onResolveApproval;
+  final double? Function(String? model, int? inputTokens, int? outputTokens)? costResolver;
+
+  /// Parent turn is still streaming — the subagent block uses it to decide
+  /// whether the child agent is running (spinner + transcript polling).
+  /// ChatMessageList should forward its own `turnStreaming` here.
+  final bool turnStreaming;
 
   @override
   Widget build(BuildContext context) {
@@ -44,11 +55,14 @@ class ChatBlockRenderer extends StatelessWidget {
           attachments: attachments,
         );
       case 'assistant_markdown':
+        final usage = block.raw['usage'];
         return AssistantStreamBlock(
           text: block.text,
           streaming: block.isStreaming,
           cancelled: block.raw['_cancelled'] == true,
           interrupted: block.raw['_interrupted'] == true,
+          usageRaw: usage is Map ? Map<String, dynamic>.from(usage) : null,
+          costResolver: costResolver,
         );
       case 'thinking':
         return ThinkingBlock(
@@ -88,29 +102,49 @@ class ChatBlockRenderer extends StatelessWidget {
           onDeny: onResolveApproval == null ? null : () => onResolveApproval!(id, 'deny'),
         );
       case 'subagent':
-        final subId = block.raw['id'] as String? ?? block.raw['agent_id'] as String? ?? '';
+        // Sidechain transcripts are keyed by the PARENT tool-use id; block.id
+        // falls back to agent_id, so prefer parent_tool_use_id explicitly.
+        final toolUseId = _nonEmptyString(block.raw['parent_tool_use_id']) ?? block.id;
+        final summary = _nonEmptyString(block.raw['result_summary']);
+        final eventsRaw = block.raw['events'];
         return SubagentBlock(
-          title: block.raw['agent_type'] as String? ?? block.raw['agent_id'] as String? ?? 'Subagent',
-          events: block.raw['events'] as List? ?? const [],
-          onFetchSidechain: api != null && projectId != null && sessionId != null && subId.isNotEmpty
-              ? () async {
-                  final body = await api!.getSidechainTranscript(
-                    projectId: projectId!,
-                    sessionId: sessionId!,
-                    toolUseId: subId,
-                  );
-                  final items = body['blocks'] ?? body['messages'] ?? body['events'];
-                  if (items is List) return items.cast<Map<String, dynamic>>();
-                  return const [];
-                }
-              : null,
+          title: _nonEmptyString(block.raw['agent_type']) ??
+              _nonEmptyString(block.raw['agent_id']) ??
+              'Subagent',
+          events: eventsRaw is List ? eventsRaw : const <dynamic>[],
+          resultSummary: summary,
+          running: turnStreaming && summary == null,
+          onFetchSidechain:
+              api != null && projectId != null && sessionId != null && toolUseId.isNotEmpty
+                  ? () async {
+                      final body = await api!.getSidechainTranscript(
+                        projectId: projectId!,
+                        sessionId: sessionId!,
+                        toolUseId: toolUseId,
+                      );
+                      final items = body['blocks'] ?? body['messages'] ?? body['events'];
+                      if (items is List) {
+                        return [
+                          for (final item in items)
+                            if (item is Map<String, dynamic>)
+                              item
+                            else if (item is Map)
+                              Map<String, dynamic>.from(item),
+                        ];
+                      }
+                      return const <Map<String, dynamic>>[];
+                    }
+                  : null,
         );
       case 'plan':
         return PlanProgressBlock(
           tasks: block.raw['tasks'] as List? ?? const [],
+          message: block.raw['message'] as String?,
         );
       case 'usage':
-        return UsageBlock(raw: block.raw);
+        // Usage is attached to assistant blocks by the projection; a leftover
+        // standalone block renders nothing.
+        return const SizedBox.shrink();
       case 'error':
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
@@ -137,42 +171,4 @@ class ChatBlockRenderer extends StatelessWidget {
         return const SizedBox.shrink();
     }
   }
-}
-
-ChatBlock? pairedToolResultFor(List<ChatBlock> blocks, int index) {
-  final block = blocks[index];
-  if (block.kind != 'tool_call') return null;
-  final callId = block.raw['id'];
-
-  if (index + 1 < blocks.length) {
-    final next = blocks[index + 1];
-    if (next.kind == 'tool_result') {
-      final resultId = next.raw['id'];
-      if (callId != null && resultId != null && callId == resultId) return next;
-      if (callId == null && resultId == null) return next;
-    }
-  }
-
-  if (callId == null) return null;
-  final limit = blocks.length < index + 25 ? blocks.length : index + 25;
-  for (var j = index + 1; j < limit; j++) {
-    final b = blocks[j];
-    if (b.kind == 'tool_result' && b.raw['id'] == callId) return b;
-  }
-  return null;
-}
-
-bool isMergedToolResult(List<ChatBlock> blocks, int index) {
-  if (index <= 0) return false;
-  final block = blocks[index];
-  if (block.kind != 'tool_result') return false;
-  final resultId = block.raw['id'];
-  for (var i = 0; i < index; i++) {
-    if (blocks[i].kind != 'tool_call') continue;
-    final paired = pairedToolResultFor(blocks, i);
-    if (paired == null) continue;
-    if (identical(paired, block)) return true;
-    if (resultId != null && paired.raw['id'] == resultId) return true;
-  }
-  return false;
 }

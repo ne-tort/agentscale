@@ -1050,11 +1050,6 @@
       }
     }
   },
-  "projectChatUsage": "Usage",
-  "projectChatUsageInputTokens": "Input tokens",
-  "projectChatUsageOutputTokens": "Output tokens",
-  "projectChatUsageTotalTokens": "Total tokens",
-  "projectChatUsageCost": "Cost",
   "projectChatSettingsTitle": "Chat settings",
   "projectChatModelSelectTitle": "Select model",
   "projectChatModelColumnPrice": "In/out price",
@@ -1169,6 +1164,20 @@
   "@projectChatWorked": {
     "placeholders": { "count": { "type": "int" } }
   },
+  "projectChatAgentWorking": "agentscale is working…",
+  "chatCopyMessage": "Copy reply",
+  "chatCopiedMessage": "Copied",
+  "chatUsageInputLabel": "input:",
+  "chatUsageOutputLabel": "output:",
+  "chatModelPricePerMtok": "{priceIn} / {priceOut} $ · 1M tokens",
+  "@chatModelPricePerMtok": {
+    "placeholders": {
+      "priceIn": { "type": "String" },
+      "priceOut": { "type": "String" }
+    }
+  },
+  "chatModelDefaultLabel": "Default",
+  "chatModelPickerEmpty": "No models available",
   "projectChatToolReadFile": "Read file",
   "projectChatToolReadPath": "Read {path}",
   "@projectChatToolReadPath": {

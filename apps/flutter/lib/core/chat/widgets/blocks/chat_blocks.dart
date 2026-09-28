@@ -1,13 +1,19 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:markdown/markdown.dart' as md;
 
 import 'package:prodavan/core/chat/markdown_table_normalize.dart';
 import 'package:prodavan/core/chat/models/chat_block.dart';
+import 'package:prodavan/core/chat/models/chat_projection.dart';
 import 'package:prodavan/core/chat/thinking_duration.dart';
 import 'package:prodavan/core/chat/tool_activity_labels.dart';
+import 'package:prodavan/core/chat/widgets/blocks/chat_block_renderer.dart';
+import 'package:prodavan/core/chat/widgets/chat_display_grouping.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -23,6 +29,46 @@ TextStyle _mutedBodyStyle(BuildContext context) {
   return base.copyWith(
     color: Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.72),
   );
+}
+
+String? _stringOrNull(Object? value) =>
+    value is String && value.isNotEmpty ? value : null;
+
+int? _intOrNull(Object? value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return null;
+}
+
+double? _doubleOrNull(Object? value) {
+  if (value is double) return value;
+  if (value is num) return value.toDouble();
+  return null;
+}
+
+/// Thousands grouping with a non-breaking space (no mid-number wraps).
+String _formatTokens(int value) {
+  final negative = value < 0;
+  final digits = value.abs().toString();
+  final buf = StringBuffer(negative ? '-' : '');
+  for (var i = 0; i < digits.length; i++) {
+    if (i > 0 && (digits.length - i) % 3 == 0) buf.write('\u00A0');
+    buf.write(digits[i]);
+  }
+  return buf.toString();
+}
+
+/// `$X` with up to 4 decimals, trailing zeros trimmed but ≥2 decimals kept
+/// (`$0.05`, `$1.27`, `$0.0128`).
+String _formatCost(double value) {
+  var s = value.toStringAsFixed(4);
+  final dot = s.indexOf('.');
+  if (dot >= 0) {
+    while (s.endsWith('0') && s.length - dot - 1 > 2) {
+      s = s.substring(0, s.length - 1);
+    }
+  }
+  return '\$$s';
 }
 
 class ChatMutedLine extends StatefulWidget {
@@ -164,13 +210,52 @@ class ChatMarkdownBody extends StatelessWidget {
   }
 }
 
-class AssistantStreamBlock extends StatelessWidget {
+/// Blinking cursor shown while assistant text streams.
+class _StreamingCursor extends StatefulWidget {
+  const _StreamingCursor();
+
+  @override
+  State<_StreamingCursor> createState() => _StreamingCursorState();
+}
+
+class _StreamingCursorState extends State<_StreamingCursor>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 600),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final fontSize = Theme.of(context).textTheme.bodyMedium?.fontSize ?? 14;
+    return FadeTransition(
+      opacity: _controller,
+      child: Container(
+        width: 2,
+        height: fontSize * 1.2,
+        margin: const EdgeInsets.only(top: 2),
+        color: scheme.primary,
+      ),
+    );
+  }
+}
+
+class AssistantStreamBlock extends StatefulWidget {
   const AssistantStreamBlock({
     super.key,
     required this.text,
     this.streaming = false,
     this.cancelled = false,
     this.interrupted = false,
+    this.usageRaw,
+    this.costResolver,
   });
 
   final String text;
@@ -180,28 +265,228 @@ class AssistantStreamBlock extends StatelessWidget {
   /// SSE connection dropped mid-turn: show an interrupted marker.
   final bool interrupted;
 
+  /// Accumulated turn usage (tokens / model / cost) rendered as hover
+  /// metadata below the message — replaces the standalone usage block.
+  final Map<String, dynamic>? usageRaw;
+
+  /// UI-side cost estimate from the models catalog; runtime `cost_usd` wins.
+  final double? Function(String? model, int? inputTokens, int? outputTokens)? costResolver;
+
+  @override
+  State<AssistantStreamBlock> createState() => _AssistantStreamBlockState();
+}
+
+class _AssistantStreamBlockState extends State<AssistantStreamBlock> {
+  bool _hover = false;
+  bool _copied = false;
+  Timer? _copiedReset;
+
+  @override
+  void dispose() {
+    _copiedReset?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.text));
+    if (!mounted) return;
+    _copiedReset?.cancel();
+    setState(() => _copied = true);
+    _copiedReset = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  /// Hover metadata row (model · вход: N · выход: N · $cost · copy). Collapsed
+  /// to zero height while hidden — reserves no space; AnimatedSize makes the
+  /// reveal smooth instead of a layout jump.
+  Widget _usageRow(BuildContext context) {
+    final usage = widget.usageRaw;
+    final model = _stringOrNull(usage?['model']);
+    final input = _intOrNull(usage?['input_tokens']);
+    final output = _intOrNull(usage?['output_tokens']);
+    var cost = _doubleOrNull(usage?['cost_usd']);
+    cost ??= widget.costResolver?.call(model, input, output);
+    final hasAny = model != null || input != null || output != null || cost != null;
+    final visible = !widget.streaming && hasAny && (_hover || _copied);
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 160),
+      curve: Curves.easeOut,
+      child: visible
+          ? _buildUsageRow(context, model: model, input: input, output: output, cost: cost)
+          : const SizedBox(width: double.infinity, height: 0),
+    );
+  }
+
+  Widget _buildUsageRow(
+    BuildContext context, {
+    String? model,
+    int? input,
+    int? output,
+    double? cost,
+  }) {
+    final l10n = AppLocalizations.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final style = _mutedTextStyle(context).copyWith(
+      fontSize: 12,
+      fontFeatures: const [FontFeature.tabularFigures()],
+    );
+    final cells = <Widget>[
+      if (model != null)
+        Flexible(
+          child: Text(
+            model,
+            style: style,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      if (input != null)
+        Text('${l10n.chatUsageInputLabel} ${_formatTokens(input)}', style: style),
+      if (output != null)
+        Text('${l10n.chatUsageOutputLabel} ${_formatTokens(output)}', style: style),
+      if (cost != null) Text(_formatCost(cost), style: style),
+    ];
+    final items = <Widget>[];
+    for (var i = 0; i < cells.length; i++) {
+      if (i > 0) items.add(const SizedBox(width: 8));
+      items.add(cells[i]);
+    }
+    return Padding(
+      padding: EdgeInsets.only(top: AppSpacing.xs / 2),
+      child: Row(
+        children: [
+          ...items,
+          const Spacer(),
+          SizedBox(
+            width: 28,
+            height: 28,
+            child: IconButton(
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              iconSize: 16,
+              tooltip: _copied ? l10n.chatCopiedMessage : l10n.chatCopyMessage,
+              onPressed: _copy,
+              icon: Icon(
+                _copied ? Icons.check : Icons.copy_outlined,
+                size: 16,
+                color: _copied ? scheme.primary : null,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
-    if (text.isEmpty && !cancelled && !interrupted) return const SizedBox.shrink();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (streaming)
-          Text(text, style: Theme.of(context).textTheme.bodyMedium)
-        else if (text.isNotEmpty)
-          ChatMarkdownBody(text: text),
-        if (cancelled)
-          Padding(
-            padding: EdgeInsets.only(top: AppSpacing.xs),
-            child: Text(l10n.projectChatCancelled, style: Theme.of(context).textTheme.labelSmall),
+    if (widget.text.isEmpty && !widget.cancelled && !widget.interrupted) {
+      return const SizedBox.shrink();
+    }
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (widget.streaming) ...[
+            // Markdown while streaming too — no plain-text → markdown reflow
+            // jump when the block completes.
+            ChatMarkdownBody(text: widget.text),
+            const _StreamingCursor(),
+          ] else if (widget.text.isNotEmpty)
+            ChatMarkdownBody(text: widget.text),
+          if (widget.cancelled)
+            Padding(
+              padding: EdgeInsets.only(top: AppSpacing.xs),
+              child: Text(l10n.projectChatCancelled, style: Theme.of(context).textTheme.labelSmall),
+            ),
+          if (widget.interrupted)
+            Padding(
+              padding: EdgeInsets.only(top: AppSpacing.xs),
+              child: Text(l10n.projectChatInterrupted, style: Theme.of(context).textTheme.labelSmall),
+            ),
+          _usageRow(context),
+        ],
+      ),
+    );
+  }
+}
+
+/// "agentscale работает…" — turn is streaming but no block streams and no
+/// tool call is pending: the agent is silent between events, and the user
+/// must see it did not stop.
+class AgentWorkingIndicator extends StatefulWidget {
+  const AgentWorkingIndicator({super.key});
+
+  @override
+  State<AgentWorkingIndicator> createState() => _AgentWorkingIndicatorState();
+}
+
+class _AgentWorkingIndicatorState extends State<AgentWorkingIndicator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1200),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  /// Staggered 3-dot pulse: cosine breathe at phases 0 / 0.33 / 0.66.
+  double _dotOpacity(int index) {
+    final phase = index / 3;
+    final t = (_controller.value + phase) % 1.0;
+    return 0.15 + 0.85 * (0.5 - 0.5 * math.cos(2 * math.pi * t));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final scheme = Theme.of(context).colorScheme;
+    final color = scheme.onSurfaceVariant.withValues(alpha: 0.72);
+    // The l10n copy ends with "…" — the ellipsis is rendered as animated
+    // dots instead, so strip any trailing dots from the base text.
+    var label = l10n.projectChatAgentWorking;
+    while (label.endsWith('…') || label.endsWith('.')) {
+      label = label.substring(0, label.length - 1);
+    }
+    label = label.trimRight();
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, _) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: 14,
+            height: 14,
+            child: CircularProgressIndicator(strokeWidth: 1.8, color: color),
           ),
-        if (interrupted)
-          Padding(
-            padding: EdgeInsets.only(top: AppSpacing.xs),
-            child: Text(l10n.projectChatInterrupted, style: Theme.of(context).textTheme.labelSmall),
+          const SizedBox(width: 8),
+          Text(
+            label,
+            style: _mutedTextStyle(context).copyWith(fontSize: 12.5),
           ),
-      ],
+          const SizedBox(width: 4),
+          for (var i = 0; i < 3; i++)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 1),
+              child: Container(
+                width: 3,
+                height: 3,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: scheme.onSurfaceVariant.withValues(alpha: _dotOpacity(i)),
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
@@ -327,27 +612,6 @@ class _AttachmentSpoiler extends StatelessWidget {
       ],
     );
   }
-}
-
-({String label, String? detail}) toolActivityPresentation(String name, Map<String, dynamic> input) {
-  // Legacy non-l10n fallback — prefer formatToolActivityLabel in widgets.
-  final kind = normalizeToolKind(name);
-  final path = extractToolContextPath(input);
-  final pattern = extractToolContextPattern(input);
-  final command = extractToolContextCommand(input);
-  return switch (kind) {
-    ToolKind.fileRead => (label: path != null ? 'Прочитан $path' : 'Прочитан файл', detail: null),
-    ToolKind.fileWrite => (label: path != null ? 'Записан $path' : 'Записан файл', detail: null),
-    ToolKind.fileEdit => (label: path != null ? 'Изменён $path' : 'Изменён файл', detail: null),
-    ToolKind.fileDelete => (label: path != null ? 'Удалён $path' : 'Удалён файл', detail: null),
-    ToolKind.searchGlob => (label: pattern != null ? 'Поиск файлов $pattern' : 'Поиск файлов', detail: null),
-    ToolKind.searchGrep => (label: pattern != null ? 'Поиск $pattern' : 'Поиск', detail: null),
-    ToolKind.listDir => (label: path != null ? 'Список $path' : 'Список файлов', detail: null),
-    ToolKind.shell => (label: 'Запущена команда', detail: command),
-    ToolKind.mcp => (label: 'mcp ${name.replaceFirst(RegExp(r'^mcp[_-]*', caseSensitive: false), '').trim()}'.trim(), detail: null),
-    ToolKind.subagent => (label: 'Подагент $name', detail: null),
-    ToolKind.generic => (label: 'Инструмент $name', detail: null),
-  };
 }
 
 class ToolActivityBlock extends StatefulWidget {
@@ -501,16 +765,39 @@ class ApprovalBlock extends StatelessWidget {
   }
 }
 
+/// Subagent (sidechain) task line: muted collapsible header + result summary,
+/// live transcript when expanded.
+///
+/// - Collapsed: one-line muted summary of what the child agent concluded
+///   (Claude-style task line); spinner while it is still running.
+/// - Expanded: fetches the sidechain transcript (REST) and renders it as a
+///   mini chat (markdown / thinking / tool activity) via [ChatBlockRenderer]
+///   WITHOUT api/session wiring, so nested subagents never recurse into
+///   fetching their own sidechains. While the parent turn streams, the
+///   transcript is polled every 2.5 s; a failed fetch falls back to the
+///   live `events` captured by the projection.
 class SubagentBlock extends StatefulWidget {
   const SubagentBlock({
     super.key,
     required this.title,
     this.events = const [],
+    this.resultSummary,
+    this.running = false,
     this.onFetchSidechain,
   });
 
   final String title;
+
+  /// Child events captured live by the projection (`subagent_event`).
   final List<dynamic> events;
+
+  /// One-line conclusion emitted by `subagent_stop`.
+  final String? resultSummary;
+
+  /// Parent turn is streaming and no result yet: header spinner + polling.
+  final bool running;
+
+  /// Fetches the sidechain transcript blocks (server-rendered chat blocks).
   final Future<List<Map<String, dynamic>>> Function()? onFetchSidechain;
 
   @override
@@ -518,57 +805,199 @@ class SubagentBlock extends StatefulWidget {
 }
 
 class _SubagentBlockState extends State<SubagentBlock> {
+  static const _pollInterval = Duration(milliseconds: 2500);
+
   List<Map<String, dynamic>>? _sidechain;
   bool _loading = false;
   bool _open = false;
   bool _offline = false;
+  Timer? _pollTimer;
+
+  @override
+  void didUpdateWidget(covariant SubagentBlock oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!widget.running && oldWidget.running) {
+      _pollTimer?.cancel();
+      _pollTimer = null;
+    } else if (widget.running && _pollTimer == null) {
+      // Turn resumed streaming (or fetching capability appeared) — resume
+      // live transcript polling if the block is expanded.
+      _schedulePoll();
+    }
+  }
+
+  @override
+  void dispose() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    super.dispose();
+  }
 
   Future<void> _load() async {
-    if (widget.onFetchSidechain == null || _loading) return;
+    final fetch = widget.onFetchSidechain;
+    if (fetch == null || _loading) return;
+    // Finished subagent with a cached transcript — no refetch on re-expand.
+    if (_sidechain != null && !widget.running) return;
     setState(() {
       _loading = true;
       _offline = false;
     });
     try {
-      _sidechain = await widget.onFetchSidechain!();
+      final blocks = await fetch();
+      if (!mounted) return;
+      setState(() => _sidechain = blocks);
     } catch (_) {
       if (mounted) setState(() => _offline = true);
     } finally {
       if (mounted) setState(() => _loading = false);
+      _schedulePoll();
     }
+  }
+
+  /// While running and expanded: refresh the transcript on a timer.
+  void _schedulePoll() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
+    if (!mounted || !widget.running || !_open || widget.onFetchSidechain == null) return;
+    _pollTimer = Timer(_pollInterval, _load);
+  }
+
+  Widget? _headerTrailing(BuildContext context) {
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant.withValues(alpha: 0.72);
+    if (widget.running) {
+      return SizedBox(
+        width: 12,
+        height: 12,
+        child: CircularProgressIndicator(strokeWidth: 1.8, color: muted),
+      );
+    }
+    if (widget.resultSummary != null) {
+      return Padding(
+        padding: const EdgeInsets.only(right: 2),
+        child: Icon(Icons.check_circle_outline, size: 14, color: muted),
+      );
+    }
+    return null;
+  }
+
+  /// Compact muted line per live child event: `type · excerpt` (≤120 chars).
+  List<Widget> _eventLines(BuildContext context) {
+    final style = _mutedBodyStyle(context).copyWith(fontSize: 12);
+    return [
+      for (final ev in widget.events)
+        if (ev is Map)
+          Padding(
+            padding: EdgeInsets.only(bottom: AppSpacing.xs / 2),
+            child: Text(
+              _subagentEventLine(ev),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: style,
+            ),
+          ),
+    ];
+  }
+
+  static String _subagentEventLine(Map ev) {
+    var type = '';
+    final t = ev['type'] ?? ev['kind'];
+    if (t is String && t.trim().isNotEmpty) type = t.trim();
+    String? excerpt;
+    final data = ev['data'];
+    for (final candidate in [
+      ev['text'],
+      if (data is Map) data['text'],
+      if (data is Map) data['content'],
+      ev['message'],
+      ev['output'],
+    ]) {
+      if (candidate is String && candidate.trim().isNotEmpty) {
+        excerpt = candidate;
+        break;
+      }
+    }
+    if (excerpt == null) return type.isEmpty ? 'event' : type;
+    final flat = excerpt.replaceAll('\n', ' ').trim();
+    final cut = flat.length <= 120 ? flat : '${flat.substring(0, 120)}…';
+    return type.isEmpty ? cut : '$type · $cut';
+  }
+
+  /// Fetched sidechain rendered as a mini transcript (no api/session wiring:
+  /// nested subagent blocks stay inert — no recursive sidechain fetching).
+  Widget _transcriptBody(BuildContext context) {
+    final blocks = chatBlocksFromTranscript(_sidechain);
+    if (blocks.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: _eventLines(context),
+      );
+    }
+    final pairs = mergeToolPairs(blocks);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final pair in pairs)
+          ChatBlockRenderer(
+            key: ValueKey('sc-${pair.block.key}'),
+            block: pair.block,
+            pairedToolResult: pair.paired,
+          ),
+      ],
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
+    final summary = widget.resultSummary;
+    final eventLines = _open ? _eventLines(context) : const <Widget>[];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ChatMutedLine(
           label: widget.title,
+          trailing: _headerTrailing(context),
           expanded: _open,
           onTap: () {
             setState(() => _open = !_open);
-            if (_open) _load();
+            if (_open) {
+              _load();
+            } else {
+              _pollTimer?.cancel();
+              _pollTimer = null;
+            }
           },
         ),
+        if (!_open && summary != null && summary.trim().isNotEmpty)
+          Padding(
+            padding: EdgeInsets.only(bottom: AppSpacing.xs / 2),
+            child: Text(
+              summary,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: _mutedBodyStyle(context).copyWith(fontSize: 12),
+            ),
+          ),
         if (_open) ...[
           if (_loading) const LinearProgressIndicator(),
-          if (_offline)
+          if (_offline) ...[
             ChatInsetPanel(
               child: Text(l10n.projectChatSidechainOffline, style: _mutedBodyStyle(context)),
-            )
-          else
+            ),
+            if (eventLines.isNotEmpty)
+              ChatInsetPanel(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: eventLines,
+                ),
+              ),
+          ] else if (_sidechain != null)
+            ChatInsetPanel(child: _transcriptBody(context))
+          else if (eventLines.isNotEmpty)
             ChatInsetPanel(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (final ev in _sidechain ?? widget.events)
-                    Padding(
-                      padding: EdgeInsets.only(bottom: AppSpacing.xs),
-                      child: Text(ev.toString(), style: _mutedBodyStyle(context)),
-                    ),
-                ],
+                children: eventLines,
               ),
             ),
         ],
@@ -578,9 +1007,10 @@ class _SubagentBlockState extends State<SubagentBlock> {
 }
 
 class PlanProgressBlock extends StatelessWidget {
-  const PlanProgressBlock({super.key, required this.tasks});
+  const PlanProgressBlock({super.key, required this.tasks, this.message});
 
   final List<dynamic> tasks;
+  final String? message;
 
   @override
   Widget build(BuildContext context) {
@@ -589,11 +1019,13 @@ class PlanProgressBlock extends StatelessWidget {
       return title != null && '$title'.trim().isNotEmpty;
     }).toList();
     if (visible.isEmpty) return const SizedBox.shrink();
+    final intro = _stringOrNull(message);
     return Padding(
       padding: EdgeInsets.symmetric(vertical: AppSpacing.xs),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          if (intro != null) ChatMutedLine(label: intro),
           for (final task in visible)
             CheckboxListTile(
               contentPadding: EdgeInsets.zero,
@@ -622,6 +1054,7 @@ class ThinkingBlock extends StatefulWidget {
 
 class _ThinkingBlockState extends State<ThinkingBlock> {
   bool _open = false;
+  bool _userToggled = false;
 
   @override
   void initState() {
@@ -634,6 +1067,9 @@ class _ThinkingBlockState extends State<ThinkingBlock> {
     super.didUpdateWidget(oldWidget);
     if (widget.streaming && !_open) {
       setState(() => _open = true);
+    } else if (oldWidget.streaming && !widget.streaming && !_userToggled && _open) {
+      // Stream finished and the user never touched the spoiler — collapse.
+      setState(() => _open = false);
     }
   }
 
@@ -651,80 +1087,16 @@ class _ThinkingBlockState extends State<ThinkingBlock> {
         ChatMutedLine(
           label: title,
           expanded: _open,
-          onTap: widget.text.isEmpty ? null : () => setState(() => _open = !_open),
+          onTap: widget.text.isEmpty
+              ? null
+              : () => setState(() {
+                    _userToggled = true;
+                    _open = !_open;
+                  }),
         ),
         if (_open && widget.text.isNotEmpty)
           ChatInsetPanel(
             child: Text(widget.text, style: _mutedBodyStyle(context)),
-          ),
-      ],
-    );
-  }
-}
-
-class UsageBlock extends StatefulWidget {
-  const UsageBlock({super.key, required this.raw});
-
-  final Map<String, dynamic> raw;
-
-  @override
-  State<UsageBlock> createState() => _UsageBlockState();
-}
-
-class _UsageBlockState extends State<UsageBlock> {
-  bool _open = false;
-
-  String? _formatNum(Object? value) {
-    if (value == null) return null;
-    return value.toString();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context);
-    final rows = <Widget>[];
-    void addRow(String label, Object? value) {
-      final formatted = _formatNum(value);
-      if (formatted == null) return;
-      rows.add(Padding(
-        padding: EdgeInsets.only(bottom: AppSpacing.xs),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 140,
-              child: Text(label, style: Theme.of(context).textTheme.bodySmall),
-            ),
-            Expanded(child: Text(formatted)),
-          ],
-        ),
-      ));
-    }
-
-    addRow(l10n.projectChatUsageInputTokens, widget.raw['input_tokens']);
-    addRow(l10n.projectChatUsageOutputTokens, widget.raw['output_tokens']);
-    addRow(l10n.projectChatUsageTotalTokens, widget.raw['total_tokens']);
-    addRow(l10n.projectChatUsageCost, widget.raw['total_cost_usd'] ?? widget.raw['cost_usd']);
-    if (widget.raw['model'] != null) {
-      addRow(l10n.projectChatModelLabel, widget.raw['model']);
-    }
-
-    if (rows.isEmpty) return const SizedBox.shrink();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        ChatMutedLine(
-          label: l10n.projectChatUsage,
-          expanded: _open,
-          onTap: () => setState(() => _open = !_open),
-        ),
-        if (_open)
-          ChatInsetPanel(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: rows,
-            ),
           ),
       ],
     );

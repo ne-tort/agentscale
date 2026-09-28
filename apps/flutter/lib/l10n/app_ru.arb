@@ -1052,11 +1052,6 @@
       }
     }
   },
-  "projectChatUsage": "Расход",
-  "projectChatUsageInputTokens": "Входные токены",
-  "projectChatUsageOutputTokens": "Выходные токены",
-  "projectChatUsageTotalTokens": "Всего токенов",
-  "projectChatUsageCost": "Стоимость",
   "projectChatSettingsTitle": "Настройки чата",
   "projectChatModelSelectTitle": "Выбор модели",
   "projectChatModelColumnPrice": "Цена вх/вых",
@@ -1171,6 +1166,20 @@
   "@projectChatWorked": {
     "placeholders": { "count": { "type": "int" } }
   },
+  "projectChatAgentWorking": "agentscale работает…",
+  "chatCopyMessage": "Копировать ответ",
+  "chatCopiedMessage": "Скопировано",
+  "chatUsageInputLabel": "вход:",
+  "chatUsageOutputLabel": "выход:",
+  "chatModelPricePerMtok": "{priceIn} / {priceOut} $ · 1M токенов",
+  "@chatModelPricePerMtok": {
+    "placeholders": {
+      "priceIn": { "type": "String" },
+      "priceOut": { "type": "String" }
+    }
+  },
+  "chatModelDefaultLabel": "По умолчанию",
+  "chatModelPickerEmpty": "Нет доступных моделей",
   "projectChatToolReadFile": "Прочитан файл",
   "projectChatToolReadPath": "Прочитан {path}",
   "@projectChatToolReadPath": {

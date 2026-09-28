@@ -7,6 +7,15 @@ class ChatBlock {
 
   String get id => raw['id'] as String? ?? '';
 
+  /// Stable widget-key identity.
+  ///
+  /// Blocks created by the live projection ([applyStreamEvent]) or the
+  /// transcript loader ([chatBlocksFromTranscript]) always carry a unique
+  /// `_key`. Anything else falls back to its wire id, then kind — callers
+  /// building ad-hoc blocks (tests) may collide there, so list keying in
+  /// production must rely on the assigned `_key` only.
+  String get key => raw['_key'] as String? ?? (id.isNotEmpty ? id : kind);
+
   String get text => raw['text'] as String? ?? '';
 
   bool get isStreaming => raw['_streaming'] == true;
@@ -23,25 +32,4 @@ class ChatBlock {
   }
 
   Map<String, dynamic> toJson() => Map<String, dynamic>.from(raw)..['kind'] = kind;
-}
-
-/// In-flight assistant stream state for a single turn.
-class ChatTurnState {
-  ChatTurnState({this.userBlock, this.blocks = const [], this.cancelled = false});
-
-  ChatBlock? userBlock;
-  List<ChatBlock> blocks;
-  bool cancelled;
-
-  ChatTurnState copyWith({
-    ChatBlock? userBlock,
-    List<ChatBlock>? blocks,
-    bool? cancelled,
-  }) {
-    return ChatTurnState(
-      userBlock: userBlock ?? this.userBlock,
-      blocks: blocks ?? this.blocks,
-      cancelled: cancelled ?? this.cancelled,
-    );
-  }
 }

@@ -29,8 +29,7 @@ void main() {
         const CabinetChatsRail(
           extended: true,
           newChatEnabled: false,
-          pinned: [],
-          projectChats: [],
+          projectGroups: [],
           activeSessionId: null,
           onNewChat: null,
           onOpenChat: _noopOpen,
@@ -45,8 +44,7 @@ void main() {
         CabinetChatsRail(
           extended: true,
           newChatEnabled: true,
-          pinned: const [],
-          projectChats: const [],
+          projectGroups: [],
           activeSessionId: null,
           onNewChat: () {},
           onOpenChat: _noopOpen,
@@ -57,6 +55,57 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(AppTaperHairline), findsOneWidget);
   });
+
+  testWidgets('divider shows when a project branch has chats', (tester) async {
+    await tester.pumpWidget(
+      _app(
+        CabinetChatsRail(
+          extended: true,
+          newChatEnabled: false,
+          projectGroups: [
+            _group('proj_1', 'Alpha', chats: [_chat('ags_1', 'A1')]),
+          ],
+          activeSessionId: null,
+          onNewChat: null,
+          onOpenChat: _noopOpen,
+          showLeadingDivider: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(AppTaperHairline), findsOneWidget);
+    expect(find.text('A1'), findsOneWidget);
+  });
+}
+
+Map<String, dynamic> _group(
+  String id,
+  String name, {
+  bool newChatEnabled = false,
+  List<Map<String, dynamic>> chats = const [],
+}) {
+  return <String, dynamic>{
+    'project_id': id,
+    'project_name': name,
+    'status': 'active',
+    'new_chat_enabled': newChatEnabled,
+    'chats': chats,
+  };
+}
+
+Map<String, dynamic> _chat(String sid, String title, {bool pinned = false}) {
+  return <String, dynamic>{
+    'session_id': sid,
+    'project_id': 'proj_1',
+    'project_name': 'Alpha',
+    'title': title,
+    'pinned': pinned,
+    'has_draft': false,
+    'has_messages': true,
+    'last_message_at': '2026-06-01T00:00:00+00:00',
+    'status': 'active',
+    'created_at': '2026-06-01T00:00:00+00:00',
+  };
 }
 
 void _noopOpen(Map<String, dynamic> chat) {}

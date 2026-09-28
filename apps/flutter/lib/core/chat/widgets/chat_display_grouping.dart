@@ -168,7 +168,7 @@ ChatDisplayPair mergeThinkingPairs(List<ChatDisplayPair> items) {
       raw: {
         'text': buf.toString(),
         if (duration > 0) 'duration_ms': duration,
-        if (streaming) '_streaming': true,
+        if (streaming) '_streaming': true, '_key': items.first.block.key,
       },
     ),
     paired: null,

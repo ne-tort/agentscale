@@ -59,6 +59,40 @@ void main() {
       expect(out, contains('A'));
       expect(out, contains('1'));
     });
+
+    test('does not touch lines inside fenced code blocks', () {
+      const src = '''
+|| a | b || |---|---| || 1 | 2 ||
+
+```dart
+|| glued | table ||
+| not | a | table |
+```
+
+~~~text
+| tilde | fence |
+~~~
+
+| A | B |
+|---|---|
+| x | y |
+''';
+      final out = normalizeChatMarkdownTables(src);
+      final lines = out.split('\n');
+      // Outside the fences: the glued row is expanded as before.
+      expect(lines.first, isNot(contains('||')));
+      expect(lines.first, contains('a'));
+      // Fence markers preserved.
+      expect(out, contains('```dart'));
+      expect(out, contains('~~~text'));
+      // Inside the fences: content untouched.
+      expect(out, contains('|| glued | table ||'));
+      expect(out, contains('| not | a | table |'));
+      expect(out, contains('| tilde | fence |'));
+      // Table after the fences keeps its own separator (no double insertion).
+      expect(out, contains('| A | B |'));
+      expect(out, isNot(contains('|---|---|---|')));
+    });
   });
 }
 

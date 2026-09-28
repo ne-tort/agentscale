@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'package:prodavan/core/preferences/collapsed_projects_store.dart';
 import 'package:prodavan/core/responsive/app_breakpoints.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
@@ -53,8 +54,10 @@ class _CabinetShellState extends State<CabinetShell> {
   List<CabinetNavEntry> _dataEntries = const [];
 
   bool _newChatEnabled = false;
-  List<Map<String, dynamic>> _pinnedChats = const [];
-  List<Map<String, dynamic>> _projectChats = const [];
+  /// Sidebar tree: one group per cabinet project (decoupled from selection).
+  List<Map<String, dynamic>> _projectGroups = const [];
+  /// Collapsed project branch ids in the chats rail (persisted per user).
+  Set<String> _collapsedProjectIds = const <String>{};
   Timer? _presenceHeartbeat;
 
   bool get _showManagement => _managementEntries.isNotEmpty;
@@ -83,6 +86,7 @@ class _CabinetShellState extends State<CabinetShell> {
     workContext.addListener(_onWorkContext);
     _loadNav();
     _loadSelectionAndSidebar();
+    unawaited(_loadCollapsedProjects());
     _startPresenceHeartbeat();
   }
 
@@ -176,6 +180,46 @@ class _CabinetShellState extends State<CabinetShell> {
     }
   }
 
+  Future<void> _loadCollapsedProjects() async {
+    final ids = await CollapsedProjectsStore.load();
+    if (!mounted) return;
+    if (ids.isEmpty && _collapsedProjectIds.isEmpty) return;
+    setState(() => _collapsedProjectIds = ids);
+  }
+
+  void _toggleProjectCollapsed(String projectId) {
+    final next = Set<String>.of(_collapsedProjectIds);
+    if (!next.add(projectId)) {
+      next.remove(projectId);
+    }
+    setState(() => _collapsedProjectIds = next);
+    // Fire-and-forget persist — collapse state is UI-only.
+    unawaited(CollapsedProjectsStore.save(next));
+  }
+
+  /// Older backend (no `projects` tree): synthesize a single group from the
+  /// legacy fields so the rail still works — chats under the selected project.
+  List<Map<String, dynamic>> _legacyProjectGroups({
+    required List<Map<String, dynamic>> pinned,
+    required List<Map<String, dynamic>> projectChats,
+    required bool newChatEnabled,
+    String? selectedProjectId,
+  }) {
+    if (selectedProjectId == null) return const [];
+    final chats = [...pinned, ...projectChats];
+    if (chats.isEmpty) return const [];
+    final name = (chats.first['project_name'] as String?) ?? selectedProjectId;
+    return [
+      <String, dynamic>{
+        'project_id': selectedProjectId,
+        'project_name': name,
+        'status': 'active',
+        'new_chat_enabled': newChatEnabled,
+        'chats': chats,
+      },
+    ];
+  }
+
   Future<void> _reloadSidebar() async {
     try {
       final body = await workContext.api.getChatsSidebar(widget.cabinetId);
@@ -187,18 +231,31 @@ class _CabinetShellState extends State<CabinetShell> {
       final projectList = projectChats is List
           ? projectChats.cast<Map<String, dynamic>>()
           : const <Map<String, dynamic>>[];
+      final rawGroups = body['projects'];
+      final groups = rawGroups is List && rawGroups.isNotEmpty
+          ? rawGroups.cast<Map<String, dynamic>>()
+          : _legacyProjectGroups(
+              pinned: pinnedList,
+              projectChats: projectList,
+              newChatEnabled: body['new_chat_enabled'] == true,
+              selectedProjectId: body['selected_project_id'] as String?,
+            );
       setState(() {
         _newChatEnabled = body['new_chat_enabled'] == true;
-        _pinnedChats = pinnedList;
-        _projectChats = projectList;
+        _projectGroups = groups;
         final selected = body['selected_project_id'] as String?;
         if (selected != workContext.selectedProjectId) {
           workContext.setSelectedProjectId(selected);
         }
         final active = workContext.selectedSessionId;
         if (active != null) {
-          final stillThere = [...pinnedList, ...projectList]
-              .any((c) => c['session_id'] == active);
+          // Keep the open chat while it is present in ANY project branch.
+          final stillThere = groups.any(
+            (g) =>
+                (g['chats'] as List?)
+                    ?.any((c) => c is Map && c['session_id'] == active) ==
+                true,
+          );
           if (!stillThere) {
             workContext.setSelectedSessionId(null);
           }
@@ -362,8 +419,15 @@ class _CabinetShellState extends State<CabinetShell> {
   }
 
   Future<void> _newChat() async {
+    if (!_newChatEnabled) return;
     final projectId = workContext.selectedProjectId;
-    if (projectId == null || !_newChatEnabled) return;
+    if (projectId == null) return;
+    await _newChatForProject(projectId);
+  }
+
+  /// Start a chat in [projectId] — does NOT move the project selection;
+  /// the selection only drives the global "new chat" default.
+  Future<void> _newChatForProject(String projectId) async {
     try {
       String name = projectId;
       try {
@@ -424,10 +488,12 @@ class _CabinetShellState extends State<CabinetShell> {
       MaterialPageRoute<void>(
         builder: (_) => CabinetChatsPage(
           newChatEnabled: _newChatEnabled,
-          pinned: _pinnedChats,
-          projectChats: _projectChats,
+          projectGroups: _projectGroups,
+          collapsedProjectIds: _collapsedProjectIds,
           activeSessionId: workContext.selectedSessionId,
           onNewChat: _newChatEnabled ? _newChat : null,
+          onNewChatForProject: _newChatForProject,
+          onToggleProjectCollapsed: _toggleProjectCollapsed,
           onOpenChat: _openChat,
         ),
       ),
@@ -438,10 +504,12 @@ class _CabinetShellState extends State<CabinetShell> {
     return CabinetChatsRail(
       extended: extended,
       newChatEnabled: _newChatEnabled,
-      pinned: _pinnedChats,
-      projectChats: _projectChats,
+      projectGroups: _projectGroups,
+      collapsedProjectIds: _collapsedProjectIds,
       activeSessionId: workContext.selectedSessionId,
       onNewChat: _newChatEnabled ? _newChat : null,
+      onNewChatForProject: _newChatForProject,
+      onToggleProjectCollapsed: _toggleProjectCollapsed,
       onOpenChat: _openChat,
       showLeadingDivider: true,
     );

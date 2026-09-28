@@ -19,12 +19,20 @@ int _blocksScrollFingerprint(List<ChatBlock> blocks) {
   return Object.hash(blocks.length, last.kind, last.text.length, last.isStreaming);
 }
 
-/// Stable across stream text growth (prefix-based); prefers explicit tool/call ids.
-String _stableBlockKey(ChatBlock block) {
-  if (block.id.isNotEmpty) return '${block.kind}-${block.id}';
-  final t = block.text;
-  final prefix = t.length <= 64 ? t : t.substring(0, 64);
-  return '${block.kind}-${Object.hash(prefix, block.raw['duration_ms'], block.raw['name'])}';
+/// Entry identity for the top-level ListView child.
+///
+/// The key MUST sit on the direct ListView child (the SelectionArea subtree):
+/// a reverse list prepends new blocks, and index-matched children destroy the
+/// element subtree (with every collapsible State) on each prepend. Keyed
+/// matching keeps the state alive — this is the collapse-bug fix.
+String _displayEntryKey(ChatDisplayEntry entry) {
+  return switch (entry) {
+    ChatDisplaySingle(:final item) => 'single:${item.block.key}',
+    ChatDisplayGroup(:final kind, :final items) =>
+      'group:${kind.name}:${items.first.block.key}:${items.last.block.key}',
+    ChatDisplayWorkSession(:final items) =>
+      'work:${items.first.block.key}:${items.last.block.key}',
+  };
 }
 
 String _groupLabel(AppLocalizations l10n, ActivityGroupKind kind, int count) {
@@ -129,6 +137,8 @@ class ChatMessageList extends StatefulWidget {
     this.loadingHistory = false,
     this.onLoadOlder,
     this.turnStreaming = false,
+    this.showWorkingIndicator = false,
+    this.costResolver,
   });
 
   final List<ChatBlock> blocks;
@@ -140,6 +150,12 @@ class ChatMessageList extends StatefulWidget {
   final bool loadingHistory;
   final VoidCallback? onLoadOlder;
   final bool turnStreaming;
+
+  /// "agentscale работает…" while the turn streams but the agent is silent.
+  final bool showWorkingIndicator;
+
+  /// Cost estimate for assistant usage metadata (runtime cost wins).
+  final double? Function(String? model, int? inputTokens, int? outputTokens)? costResolver;
 
   @override
   State<ChatMessageList> createState() => ChatMessageListState();
@@ -218,38 +234,44 @@ class ChatMessageListState extends State<ChatMessageList> {
   Widget _renderPair(ChatDisplayPair item) {
     final block = item.block;
     return ChatBlockRenderer(
-      key: ValueKey(_stableBlockKey(block)),
+      key: ValueKey(block.key),
       block: block,
       pairedToolResult: item.paired,
       projectId: widget.projectId,
       sessionId: widget.sessionId,
       api: widget.api,
       onResolveApproval: widget.onResolveApproval,
+      costResolver: widget.costResolver,
+      turnStreaming: widget.turnStreaming,
     );
   }
 
   Widget _renderEntry(AppLocalizations l10n, ChatDisplayEntry entry) {
-    // Per-item SelectionArea: a single wrap around the ListView eats drag gestures.
-    return SelectionArea(
-      child: switch (entry) {
-        ChatDisplaySingle(:final item) => _renderPair(item),
-        ChatDisplayGroup(:final kind, :final items) => GroupedActivityBlock(
-            kind: kind,
-            items: items,
-            label: _groupLabel(l10n, kind, items.length),
-            diffStats: aggregateDiffStats(items),
-            childBuilder: _renderPair,
-          ),
-        ChatDisplayWorkSession(:final items, :final streaming) => _WorkSessionBlock(
-            label: streaming
-                ? l10n.projectChatWorking
-                : l10n.projectChatWorked(workActionCount(items)),
-            items: items,
-            innerEntries: groupInnerWorkItems(items),
-            diffStats: aggregateDiffStats(items),
-            childBuilder: _renderPair,
-          ),
-      },
+    // Keyed TOP-LEVEL child (see [_displayEntryKey]) + per-item SelectionArea:
+    // a single wrap around the ListView eats drag gestures.
+    return KeyedSubtree(
+      key: ValueKey(_displayEntryKey(entry)),
+      child: SelectionArea(
+        child: switch (entry) {
+          ChatDisplaySingle(:final item) => _renderPair(item),
+          ChatDisplayGroup(:final kind, :final items) => GroupedActivityBlock(
+              kind: kind,
+              items: items,
+              label: _groupLabel(l10n, kind, items.length),
+              diffStats: aggregateDiffStats(items),
+              childBuilder: _renderPair,
+            ),
+          ChatDisplayWorkSession(:final items, :final streaming) => _WorkSessionBlock(
+              label: streaming
+                  ? l10n.projectChatWorking
+                  : l10n.projectChatWorked(workActionCount(items)),
+              items: items,
+              innerEntries: groupInnerWorkItems(items),
+              diffStats: aggregateDiffStats(items),
+              childBuilder: _renderPair,
+            ),
+        },
+      ),
     );
   }
 
@@ -309,8 +331,6 @@ class ChatMessageListState extends State<ChatMessageList> {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context);
     final entries = groupDisplayEntries(widget.blocks, turnStreaming: widget.turnStreaming);
-    // reverse:true — first child is visual bottom (newest).
-    final visual = entries.reversed.toList(growable: false);
 
     if (!_didInitialBottom && widget.blocks.isNotEmpty) {
       _didInitialBottom = true;
@@ -323,6 +343,18 @@ class ChatMessageListState extends State<ChatMessageList> {
 
     // Eager children (not builder): markdown/tool panels have unbounded height;
     // builder underestimates maxScrollExtent → hard scroll ceiling after 1–2 items.
+    //
+    // reverse:true — first child is visual bottom (newest). The working
+    // indicator is the newest thing in the list while it shows.
+    final children = <Widget>[
+      if (widget.showWorkingIndicator)
+        const SizedBox(
+          key: ValueKey('agent-working-indicator'),
+          child: AgentWorkingIndicator(),
+        ),
+        for (final e in entries.reversed) _renderEntry(l10n, e),
+    ];
+
     return Stack(
       children: [
         NotificationListener<ScrollNotification>(
@@ -336,7 +368,7 @@ class ChatMessageListState extends State<ChatMessageList> {
             controller: _scroll,
             reverse: true,
             padding: EdgeInsets.all(AppSpacing.md),
-            children: [for (final e in visual) _renderEntry(l10n, e)],
+            children: children,
           ),
         ),
         if (widget.loadingHistory)
@@ -368,6 +400,8 @@ class ChatScaffold extends StatelessWidget {
     this.onOpenChatSettings,
     this.onSessionMaterialized,
     this.onDraftPresenceChanged,
+    this.modelLabel,
+    this.onPickModel,
     this.disabledHint,
     this.wakeMode = false,
     this.waking = false,
@@ -385,6 +419,12 @@ class ChatScaffold extends StatelessWidget {
   final VoidCallback? onOpenChatSettings;
   final void Function(String sessionId)? onSessionMaterialized;
   final VoidCallback? onDraftPresenceChanged;
+
+  /// Label for the composer's quick model-switch pill.
+  final String? modelLabel;
+
+  /// Opens the model picker sheet from the composer pill.
+  final VoidCallback? onPickModel;
   final Widget title;
   final String? disabledHint;
   final bool wakeMode;
@@ -414,7 +454,10 @@ class ChatScaffold extends StatelessWidget {
                 Expanded(
                   child: (loading && !controller.hasCachedTranscript)
                       ? const ChatTranscriptSkeleton()
-                      : controller.visibleBlocks.isEmpty
+                      // Render the (possibly empty) list while streaming so
+                      // the working indicator shows right after the first
+                      // send — the list shows just the indicator.
+                      : (controller.visibleBlocks.isEmpty && !controller.streaming)
                           ? const SizedBox.shrink()
                           : ChatMessageList(
                               blocks: controller.visibleBlocks,
@@ -427,6 +470,8 @@ class ChatScaffold extends StatelessWidget {
                                   ? controller.loadOlderTranscript
                                   : null,
                               turnStreaming: controller.streaming,
+                              showWorkingIndicator: controller.showWorkingIndicator,
+                              costResolver: controller.usageCostUsd,
                               onResolveApproval: (id, decision) =>
                                   controller.resolveApproval(id, decision),
                             ),
@@ -449,6 +494,8 @@ class ChatScaffold extends StatelessWidget {
                   onSend: (text, refs) => controller.send(text, attachmentRefs: refs),
                   onCancel: controller.streaming ? () => controller.cancelStream() : null,
                   onOpenSettings: onOpenChatSettings,
+                  modelLabel: modelLabel,
+                  onPickModel: onPickModel,
                   onSessionMaterialized: (sid) {
                     controller.sessionId = sid;
                     onSessionMaterialized?.call(sid);
