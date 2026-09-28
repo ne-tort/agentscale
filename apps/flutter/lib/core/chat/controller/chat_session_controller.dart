@@ -11,6 +11,18 @@ import 'package:prodavan/core/chat/transcript_cache.dart';
 
 /// Live SSE chat session — blocks projection with optimistic user + streaming assistant.
 class ChatSessionController {
+  /// Silence watchdog (Wave 5): server keepalives every ~15s prove the path
+  /// is alive; this budget of total silence (no events AND no keepalives)
+  /// means a wedged runtime or a silently cut relay — abort with an honest
+  /// error instead of an eternal "typing" state.
+  static const _streamSilenceWatchdog = Duration(seconds: 90);
+
+  /// The error surfaced when the silence watchdog aborts the stream.
+  static AgentStreamError _bridgeTimeoutError() => AgentStreamError(const {
+    'code': 'BRIDGE_TIMEOUT',
+    'message': 'agent runtime silent: no events or keepalives',
+  });
+
   ChatSessionController({
     required this.api,
     required this.projectId,
@@ -250,16 +262,33 @@ class ChatSessionController {
     notifyImmediate();
 
     _handle?.abort();
-    _handle = api.projectChatStream(
+    final handle = api.projectChatStream(
       projectId: projectId,
       text: trimmed,
       sessionId: sessionId,
       model: selectedModel,
       attachmentRefs: attachmentRefs,
     );
+    _handle = handle;
+
+    // Silence watchdog: reset by every event AND by server keepalives; on
+    // fire — abort the stream and report BRIDGE_TIMEOUT below.
+    var watchdogFired = false;
+    Timer? watchdog;
+    void armWatchdog() {
+      watchdog?.cancel();
+      watchdog = Timer(_streamSilenceWatchdog, () {
+        watchdogFired = true;
+        handle.abort();
+      });
+    }
+
+    handle.onKeepalive = armWatchdog;
+    armWatchdog();
 
     try {
-      await for (final event in _handle!.stream) {
+      await for (final event in handle.stream) {
+        armWatchdog();
         final type = event['type'] as String?;
         final data = event['data'];
         if (type == '_session' && data is Map<String, dynamic>) {
@@ -305,21 +334,29 @@ class ChatSessionController {
         }
         notify();
       }
-      blocks.addAll(_liveTurnBlocks);
-      _liveTurnBlocks = const [];
-      if (pendingApprovals.isEmpty) {
-        pendingApprovals = await _fetchPending();
+      if (watchdogFired) {
+        // The turn never produced (or stopped producing) anything — mark it
+        // interrupted and hand the user text back to the composer.
+        error = _bridgeTimeoutError();
+        _finalizeInterruptedTurn(trimmed);
+      } else {
+        blocks.addAll(_liveTurnBlocks);
+        _liveTurnBlocks = const [];
+        if (pendingApprovals.isEmpty) {
+          pendingApprovals = await _fetchPending();
+        }
+        _saveToCache();
       }
-      _saveToCache();
     } on ProdavanApiException catch (e) {
-      error = e;
+      error = watchdogFired ? _bridgeTimeoutError() : e;
       _finalizeInterruptedTurn(trimmed);
       notifyImmediate();
     } catch (e) {
-      error = e;
+      error = watchdogFired ? _bridgeTimeoutError() : e;
       _finalizeInterruptedTurn(trimmed);
       notifyImmediate();
     } finally {
+      watchdog?.cancel();
       streaming = false;
       notifyImmediate();
     }

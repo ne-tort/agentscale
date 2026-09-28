@@ -76,6 +76,15 @@ def build_pod_metrics() -> PodMetricsPort | None:
         return _metrics_singleton
     _metrics_resolved = True
     mode = (settings.pod_runtime_mode or "stub").strip().lower()
+    if mode == "sandbox":
+        from prodavan.application.pod_service.adapters.agent_sandbox.metrics import (
+            SandboxPodMetricsAdapter,
+        )
+
+        # metrics.k8s.io serves sandbox pods too (pod name == Sandbox name);
+        # the adapter resolves the claim -> sandbox mapping internally.
+        _metrics_singleton = SandboxPodMetricsAdapter()
+        return _metrics_singleton
     if mode != "k8s":
         return None
     from prodavan.application.pod_service.adapters.k8s.metrics import K8sPodMetricsAdapter

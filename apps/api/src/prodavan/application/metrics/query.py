@@ -95,12 +95,20 @@ class MetricsQuery:
     ) -> dict[str, Any]:
         latest = await self._store.get_project_latest(project_id)
         series = await self._store.get_project_series(project_id, window)
+        stale = self._is_stale(latest) if latest else True
+        available = latest is not None and not stale
         return {
             "project_id": project_id,
             "latest": latest,
             "series": series,
             "window": window,
-            "stale": self._is_stale(latest) if latest else True,
+            "stale": stale,
+            # Explicit availability contract: an empty hot store must not
+            # look identical to a broken one for the UI.
+            "metrics_available": available,
+            "metrics_unavailable_reason": (
+                None if available else ("metrics not yet available" if latest is None else "metrics stale")
+            ),
         }
 
     def _is_stale(self, sample: dict[str, Any]) -> bool:

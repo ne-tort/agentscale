@@ -1163,6 +1163,7 @@ class ProdavanApi {
     this.projectId = projectId;
     final client = http.Client();
     final controller = StreamController<Map<String, dynamic>>();
+    late final ProjectChatStreamHandle handle;
 
     Future<void> pump() async {
       try {
@@ -1188,12 +1189,21 @@ class ProdavanApi {
             if (sep < 0) break;
             final block = buffer.substring(0, sep);
             buffer = buffer.substring(sep + 2);
+            var sawKeepalive = false;
             for (final line in block.split('\n')) {
+              if (line.startsWith(':')) {
+                // SSE comment frame (server keepalive) — not an event.
+                sawKeepalive = true;
+                continue;
+              }
               if (!line.startsWith('data: ')) continue;
               final payload = jsonDecode(line.substring(6));
               if (payload is Map<String, dynamic> && !controller.isClosed) {
                 controller.add(payload);
               }
+            }
+            if (sawKeepalive && !controller.isClosed) {
+              handle.onKeepalive?.call();
             }
           }
         }
@@ -1210,9 +1220,7 @@ class ProdavanApi {
       }
     }
 
-    pump();
-
-    return ProjectChatStreamHandle(
+    handle = ProjectChatStreamHandle(
       stream: controller.stream,
       abort: () {
         client.close();
@@ -1221,6 +1229,9 @@ class ProdavanApi {
         }
       },
     );
+    pump();
+
+    return handle;
   }
 
   Future<Map<String, dynamic>> getProjectSelection(String cabinetId) async {
@@ -1478,6 +1489,10 @@ class ProjectChatStreamHandle {
 
   final Stream<Map<String, dynamic>> stream;
   final void Function() abort;
+
+  /// Server keepalive (SSE comment frame) — proof the path is alive while no
+  /// events flow. Consumers use it to reset silence watchdogs.
+  void Function()? onKeepalive;
 }
 
 class ProdavanApiException implements Exception {

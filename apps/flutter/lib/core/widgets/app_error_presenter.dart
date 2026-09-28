@@ -214,7 +214,8 @@ abstract final class AppErrors {
       'AGENT_PROVIDER_RATE_LIMIT' => l10n.errorAgentProviderRateLimit,
       'AGENT_PROVIDER_UNAVAILABLE' => l10n.errorAgentProviderUnavailable,
       'AGENT_RUNTIME_ERROR' => l10n.errorAgentRuntimeError,
-      'BRIDGE_SEND_FAILED' || 'BRIDGE_EMPTY_STREAM' || 'BRIDGE_UNREACHABLE' => l10n.errorAgentBridge,
+      'BRIDGE_SEND_FAILED' || 'BRIDGE_EMPTY_STREAM' || 'BRIDGE_UNREACHABLE' || 'BRIDGE_TIMEOUT' =>
+        l10n.errorAgentBridge,
       'CASCADE_INCOMPLETE' => l10n.errorCascadeIncomplete,
       'SCHEMA_DROP_FAILED' => l10n.errorServer,
       'AUTH_MISCONFIGURED' => l10n.errorIdentityProvider,

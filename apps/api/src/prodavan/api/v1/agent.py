@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 from typing import Annotated
 
 from fastapi import APIRouter, Depends
@@ -16,7 +18,14 @@ from prodavan.domain.errors import AppError
 from prodavan.domain.projects import CHAT_MAX_ATTACHMENTS_PER_MESSAGE, CHAT_MAX_MESSAGE_CHARS
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["agent"])
+
+# SSE keepalive cadence for /chat/stream: L4 relays (punnel) silently cut
+# idle streams, and without any frame the client cannot tell "thinking"
+# from "wedged". Emitted only between events (never mid-turn data).
+_CHAT_STREAM_KEEPALIVE_SEC = 15.0
 
 
 class SendMessageBody(BaseModel):
@@ -317,21 +326,52 @@ async def project_chat_stream(
 
     async def generate():
         svc = AgentSessionService(session)
+        iterator = svc.iter_chat_turn_sse(
+            project_id=project_id,
+            text=_chat_text(body.text, body.attachment_refs),
+            session_id=body.session_id,
+            attachment_refs=body.attachment_refs,
+            principal=principal,
+            employee=employee,
+            model=body.model,
+        ).__aiter__()
+        pending: asyncio.Task | None = None
         try:
-            async for event in svc.iter_chat_turn_sse(
-                project_id=project_id,
-                text=_chat_text(body.text, body.attachment_refs),
-                session_id=body.session_id,
-                attachment_refs=body.attachment_refs,
-                principal=principal,
-                employee=employee,
-                model=body.model,
-            ):
+            while True:
+                if pending is None:
+                    pending = asyncio.ensure_future(iterator.__anext__())
+                # asyncio.wait (NOT wait_for): cancelling an in-flight
+                # __anext__ would tear the generator mid-DB-flush. We just
+                # stop waiting and emit a keepalive comment instead.
+                done, _ = await asyncio.wait({pending}, timeout=_CHAT_STREAM_KEEPALIVE_SEC)
+                if not done:
+                    yield ": keepalive\n\n"
+                    continue
+                task = pending
+                pending = None
+                try:
+                    event = task.result()
+                except StopAsyncIteration:
+                    break
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
         except AppError as err:
             payload = {
                 "type": "_error",
                 "data": {"code": err.code, "title": err.title, "detail": err.detail, "status": err.status},
+            }
+            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+        except Exception as exc:
+            # Never drop the TCP connection without a structured frame —
+            # the client would otherwise sit in "streaming" forever.
+            logger.exception("chat stream failed project=%s", project_id)
+            payload = {
+                "type": "_error",
+                "data": {
+                    "code": "INTERNAL",
+                    "title": "Internal error",
+                    "detail": str(exc)[:300],
+                    "status": 500,
+                },
             }
             yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 

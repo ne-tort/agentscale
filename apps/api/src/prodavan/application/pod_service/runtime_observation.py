@@ -636,6 +636,52 @@ class RuntimeObservationService:
         if observed == ObservedState.ABSENT and pod.desired_state == PodDesiredState.RUNNING.value:
             # Flap tolerance mirrors k8s: absent is reconcile-recoverable.
             kw["last_error"] = pod.last_error or "sandbox claim not found"
+
+        # Metrics — same contract as _observe_k8s: cached hot-store sample
+        # first, live metrics.k8s.io fetch while the sandbox is Running
+        # (pod name == sandbox name), explicit metrics_available either way
+        # so the UI never has to guess.
+        cached = await self._metrics_query.get_project_runtime_metrics(project.id)
+        metrics_body: dict[str, Any] | None = None
+        if cached is not None and not cached.get("degraded"):
+            metrics_body = {
+                k: cached[k]
+                for k in ("cpu_millicores", "memory_bytes", "timestamp")
+                if k in cached and cached[k] is not None
+            }
+        if observed == ObservedState.RUNNING and runtime_ref:
+            metrics_port = build_pod_metrics()
+            if metrics_port is not None:
+                try:
+                    live_metrics = await metrics_port.get_pod_metrics(
+                        runtime_ref=runtime_ref,
+                        sandbox_name=str(status.get("sandbox_name") or "") or None,
+                    )
+                    if live_metrics:
+                        metrics_body = {
+                            **live_metrics,
+                            "timestamp": EventEnvelope.now_iso(),
+                        }
+                        await PodMetricsSampler(self._session).cache_live_metrics(
+                            pod=pod,
+                            project=project,
+                            metrics=live_metrics,
+                            status=status,
+                        )
+                except Exception:
+                    logger.exception(
+                        "sandbox live metrics fetch failed runtime_ref=%s", runtime_ref
+                    )
+        metrics_available = self._metrics_available(metrics_body, cached)
+        kw["metrics"] = metrics_body if metrics_available else None
+        kw["metrics_fresh"] = metrics_available
+        kw["metrics_available"] = metrics_available
+        if not metrics_available:
+            kw["metrics_unavailable_reason"] = (
+                "metrics not yet available"
+                if observed == ObservedState.RUNNING
+                else "sandbox not running"
+            )
         return self._summary(observed, **kw)
 
     async def _observe_stub(self, project: ProjectRow, pod: ProjectPodRow) -> dict[str, Any]:
