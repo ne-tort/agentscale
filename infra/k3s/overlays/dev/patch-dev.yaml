@@ -149,7 +149,7 @@ data:
   # L15 agent-runtime — single container Pod (prodavan-agent-runtime image in GHCR)
   POD_AGENT_RUNTIME_ENABLED: "true"
   POD_AGENT_RUNTIME_AUTH_SECRET: pod-agent-bridge-auth
-  POD_AGENT_RUNTIME_IMAGE: ghcr.io/ne-tort/prodavan-agent-runtime:a9a9db5452e2
+  POD_AGENT_RUNTIME_IMAGE: ghcr.io/ne-tort/prodavan-agent-runtime:3a21e75724ac
   POD_AGENT_RUNTIME_BOOTSTRAP_ENABLED: "true"
   # CLAW-WEB — web.search provider config. The sandbox agent-runtime never
   # reaches SearxNG directly: `provider=prodavan_api` makes the built-in
