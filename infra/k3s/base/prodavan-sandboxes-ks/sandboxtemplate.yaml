@@ -37,7 +37,7 @@ spec:
       - name: agent-runtime
         # Versioned tag — bumped by PR when prodavan-claw image is rebuilt.
         # TODO: keep in sync with ghcr.io/ne-tort/prodavan-agent-runtime releases.
-        image: ghcr.io/ne-tort/prodavan-agent-runtime:aa875c766f48 # prodavan-claw@aa875c7 (Wave 6: visible provider errors, MCP rebind oscillation fix, MCP child stderr observability)
+        image: ghcr.io/ne-tort/prodavan-agent-runtime:01c01321e606 # prodavan-claw@01c0132 (warm-bind provider endpoint sync — fixes 401 Missing Authentication header routing leased keys to openrouter.ai; Wave 6 visible provider errors, MCP rebind oscillation fix, MCP child stderr observability)
         imagePullPolicy: IfNotPresent
         # Static platform env — claims cannot carry env
         # (envVarsInjectionPolicy: Disallowed), so all boot-time config lives
