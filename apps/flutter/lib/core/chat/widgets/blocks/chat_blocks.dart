@@ -225,22 +225,25 @@ class UserMessageBlock extends StatefulWidget {
 class _UserMessageBlockState extends State<UserMessageBlock> {
   final Set<int> _openSpoilers = {};
 
-  String _attachmentLabel(Map<String, dynamic> att) {
+  String _attachmentLabel(AppLocalizations l10n, Map<String, dynamic> att) {
     final name = att['filename'] as String? ?? 'file';
     final kind = att['kind'] as String? ?? '';
     final rows = att['row_count'];
     if (kind == 'inline_json') {
-      return rows is int ? 'Вложение: $name ($rows строк)' : 'Вложение: $name (JSON)';
+      return rows is int
+          ? l10n.chatAttachmentRowsLabel(name, rows)
+          : l10n.chatAttachmentJsonLabel(name);
     }
     final path = att['workspace_path'] as String?;
     if (path != null && path.isNotEmpty) {
-      return 'Вложение: $name → /workspace/$path';
+      return l10n.chatAttachmentPathLabel(name, path);
     }
-    return 'Вложение: $name';
+    return l10n.chatAttachmentLabel(name);
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
     final scheme = Theme.of(context).colorScheme;
     final attachments = widget.attachments;
     final refs = widget.attachmentRefs;
@@ -263,7 +266,7 @@ class _UserMessageBlockState extends State<UserMessageBlock> {
                 Padding(
                   padding: EdgeInsets.only(top: AppSpacing.xs),
                   child: _AttachmentSpoiler(
-                    label: _attachmentLabel(attachments[i]),
+                    label: _attachmentLabel(l10n, attachments[i]),
                     expanded: _openSpoilers.contains(i),
                     onTap: attachments[i]['kind'] == 'inline_json' && attachments[i]['inline_json'] != null
                         ? () => setState(() {

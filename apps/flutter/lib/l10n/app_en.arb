@@ -1064,6 +1064,46 @@
   "projectChatNeedsUpdate": "Project needs an update. Update?",
   "projectChatCancelled": "Cancelled",
   "projectChatInterrupted": "Interrupted — your message was restored to the input field",
+  "chatMessageTooLong": "Message is too long (max {max} characters)",
+  "@chatMessageTooLong": {
+    "placeholders": {
+      "max": { "type": "int" }
+    }
+  },
+  "chatTooManyAttachments": "Too many attachments (max {max})",
+  "@chatTooManyAttachments": {
+    "placeholders": {
+      "max": { "type": "int" }
+    }
+  },
+  "chatFileTooLarge": "File is too large",
+  "chatAttachmentUploadFailed": "Failed to upload the attachment",
+  "chatAttachmentLabel": "Attachment: {name}",
+  "@chatAttachmentLabel": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "chatAttachmentJsonLabel": "Attachment: {name} (JSON)",
+  "@chatAttachmentJsonLabel": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "chatAttachmentPathLabel": "Attachment: {name} → /workspace/{path}",
+  "@chatAttachmentPathLabel": {
+    "placeholders": {
+      "name": { "type": "String" },
+      "path": { "type": "String" }
+    }
+  },
+  "chatAttachmentRowsLabel": "Attachment: {name} ({rows, plural, one{{rows} row} other{{rows} rows}})",
+  "@chatAttachmentRowsLabel": {
+    "placeholders": {
+      "name": { "type": "String" },
+      "rows": { "type": "int" }
+    }
+  },
   "projectAgentFailedToStart": "Agent failed to start: {reason}",
   "@projectAgentFailedToStart": {
     "placeholders": {

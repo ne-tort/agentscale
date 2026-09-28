@@ -3464,6 +3464,54 @@ abstract class AppLocalizations {
   /// **'Interrupted — your message was restored to the input field'**
   String get projectChatInterrupted;
 
+  /// No description provided for @chatMessageTooLong.
+  ///
+  /// In en, this message translates to:
+  /// **'Message is too long (max {max} characters)'**
+  String chatMessageTooLong(int max);
+
+  /// No description provided for @chatTooManyAttachments.
+  ///
+  /// In en, this message translates to:
+  /// **'Too many attachments (max {max})'**
+  String chatTooManyAttachments(int max);
+
+  /// No description provided for @chatFileTooLarge.
+  ///
+  /// In en, this message translates to:
+  /// **'File is too large'**
+  String get chatFileTooLarge;
+
+  /// No description provided for @chatAttachmentUploadFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Failed to upload the attachment'**
+  String get chatAttachmentUploadFailed;
+
+  /// No description provided for @chatAttachmentLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Attachment: {name}'**
+  String chatAttachmentLabel(String name);
+
+  /// No description provided for @chatAttachmentJsonLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Attachment: {name} (JSON)'**
+  String chatAttachmentJsonLabel(String name);
+
+  /// No description provided for @chatAttachmentPathLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Attachment: {name} → /workspace/{path}'**
+  String chatAttachmentPathLabel(String name, String path);
+
+  /// No description provided for @chatAttachmentRowsLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Attachment: {name} ({rows, plural, one{{rows} row} other{{rows} rows}})'**
+  String chatAttachmentRowsLabel(String name, int rows);
+
   /// No description provided for @projectAgentFailedToStart.
   ///
   /// In en, this message translates to:

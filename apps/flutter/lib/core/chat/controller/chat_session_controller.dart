@@ -350,7 +350,14 @@ class ChatSessionController {
     _liveTurnBlocks = const [];
     streaming = false;
     if (sessionId.isNotEmpty) {
-      await api.cancelAgentSession(projectId: projectId, sessionId: sessionId);
+      try {
+        await api.cancelAgentSession(projectId: projectId, sessionId: sessionId);
+      } catch (e) {
+        // Best-effort server-side cancel: the local turn is already marked
+        // cancelled; surface the failure via [error] so the UI can snack it
+        // instead of crashing on an unhandled async error.
+        error = e;
+      }
     }
     _saveToCache();
     notifyImmediate();

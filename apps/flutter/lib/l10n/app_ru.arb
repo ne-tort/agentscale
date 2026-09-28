@@ -1066,6 +1066,46 @@
   "projectChatNeedsUpdate": "Проект требует обновления. Обновить?",
   "projectChatCancelled": "Отменено",
   "projectChatInterrupted": "Прервано — сообщение восстановлено в поле ввода",
+  "chatMessageTooLong": "Сообщение слишком длинное (макс. {max} знаков)",
+  "@chatMessageTooLong": {
+    "placeholders": {
+      "max": { "type": "int" }
+    }
+  },
+  "chatTooManyAttachments": "Слишком много вложений (макс. {max})",
+  "@chatTooManyAttachments": {
+    "placeholders": {
+      "max": { "type": "int" }
+    }
+  },
+  "chatFileTooLarge": "Файл слишком большой",
+  "chatAttachmentUploadFailed": "Не удалось загрузить вложение",
+  "chatAttachmentLabel": "Вложение: {name}",
+  "@chatAttachmentLabel": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "chatAttachmentJsonLabel": "Вложение: {name} (JSON)",
+  "@chatAttachmentJsonLabel": {
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+  "chatAttachmentPathLabel": "Вложение: {name} → /workspace/{path}",
+  "@chatAttachmentPathLabel": {
+    "placeholders": {
+      "name": { "type": "String" },
+      "path": { "type": "String" }
+    }
+  },
+  "chatAttachmentRowsLabel": "Вложение: {name} ({rows, plural, one{{rows} строка} few{{rows} строки} many{{rows} строк} other{{rows} строки}})",
+  "@chatAttachmentRowsLabel": {
+    "placeholders": {
+      "name": { "type": "String" },
+      "rows": { "type": "int" }
+    }
+  },
   "projectAgentFailedToStart": "Агент не запустился: {reason}",
   "@projectAgentFailedToStart": {
     "placeholders": {
