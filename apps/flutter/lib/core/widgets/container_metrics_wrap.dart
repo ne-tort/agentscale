@@ -91,6 +91,38 @@ class ContainerMetricsWrap extends StatelessWidget {
     final podServiceId = containerPodServiceId(container);
     final k8sPodName = containerK8sPodName(container);
 
+    // Sandbox runtime identity: sandbox/claim ref name + warm/cold launch
+    // badge; the full service FQDN goes to the tooltip (too long to inline).
+    final isSandbox = containerIsSandboxRuntime(container);
+    final containerRuntime = ContainerRuntime.fromJson(container);
+    final runtimeRef = isSandbox ? containerRuntimeRefName(container) : null;
+    final launchBadge = formatContainerLaunchType(containerRuntime.launchType, l10n);
+    final serviceFqdn = containerRuntime.serviceFqdn;
+
+    Widget? runtimeRow;
+    if (runtimeRef != null) {
+      final content = Wrap(
+        spacing: AppSpacing.sm,
+        runSpacing: 2,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text(runtimeRef),
+          if (launchBadge != null)
+            _LaunchTypeBadge(
+              label: launchBadge,
+              warm: containerRuntime.launchType == 'warm',
+            ),
+        ],
+      );
+      runtimeRow = AppPreferenceTile(
+        title: l10n.containerRuntimeLabel,
+        icon: Icons.bolt_outlined,
+        subtitle: serviceFqdn != null
+            ? Tooltip(message: serviceFqdn, child: content)
+            : content,
+      );
+    }
+
     final lifecycleRows = <Widget>[
       _readOnlyRow(
         title: l10n.containerStateLabel,
@@ -98,6 +130,7 @@ class ContainerMetricsWrap extends StatelessWidget {
         icon: Icons.circle,
         accentColor: hasError ? errorColor : null,
       ),
+      ?runtimeRow,
       if (podServiceId != null)
         AppValuePreference<String>(
           title: l10n.containerPodServiceId,
@@ -237,6 +270,32 @@ class ContainerMetricsWrap extends StatelessWidget {
         if (resourceTiles.isNotEmpty) SizedBox(height: AppSpacing.md),
         ...lifecycleRows,
       ],
+    );
+  }
+}
+
+/// Warm/cold launch badge next to the sandbox runtime ref (launch_type).
+class _LaunchTypeBadge extends StatelessWidget {
+  const _LaunchTypeBadge({required this.label, required this.warm});
+
+  final String label;
+  final bool warm;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final color = warm ? context.appColors.success : scheme.outline;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(AppSpacing.xs),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(color: color),
+      ),
     );
   }
 }

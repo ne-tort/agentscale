@@ -653,6 +653,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get containerStateLabel => 'State';
 
   @override
+  String get containerRuntimeLabel => 'Runtime';
+
+  @override
+  String get containerLaunchTypeWarm => 'Warm start';
+
+  @override
+  String get containerLaunchTypeCold => 'Cold start';
+
+  @override
   String get containerCreatedAt => 'Created';
 
   @override

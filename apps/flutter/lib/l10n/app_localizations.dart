@@ -1226,6 +1226,24 @@ abstract class AppLocalizations {
   /// **'State'**
   String get containerStateLabel;
 
+  /// No description provided for @containerRuntimeLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Runtime'**
+  String get containerRuntimeLabel;
+
+  /// No description provided for @containerLaunchTypeWarm.
+  ///
+  /// In en, this message translates to:
+  /// **'Warm start'**
+  String get containerLaunchTypeWarm;
+
+  /// No description provided for @containerLaunchTypeCold.
+  ///
+  /// In en, this message translates to:
+  /// **'Cold start'**
+  String get containerLaunchTypeCold;
+
   /// No description provided for @containerCreatedAt.
   ///
   /// In en, this message translates to:

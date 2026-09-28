@@ -653,6 +653,15 @@ class AppLocalizationsRu extends AppLocalizations {
   String get containerStateLabel => 'Состояние';
 
   @override
+  String get containerRuntimeLabel => 'Рантайм';
+
+  @override
+  String get containerLaunchTypeWarm => 'Тёплый старт';
+
+  @override
+  String get containerLaunchTypeCold => 'Холодный старт';
+
+  @override
   String get containerCreatedAt => 'Создан';
 
   @override
