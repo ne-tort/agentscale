@@ -16,6 +16,7 @@ from prodavan.application.agent.openclaw_bridge import (
     bridge_envelope_to_agent_event,
     bridge_stub_error_event,
 )
+from prodavan.application.agent.runtime_transport import RuntimeEndpoint
 from prodavan.config.settings import settings as _real_settings
 from prodavan.domain.agent import AgentEventType
 from prodavan.infrastructure.k8s.sandbox.client import PodSnapshot
@@ -465,7 +466,7 @@ async def test_ensure_recent_bind_binds_when_unmarked() -> None:
     import prodavan.application.agent.openclaw_bridge as bridge_mod
 
     session = MagicMock()
-    bridge_mod._last_bind_attempt.pop("prj_unmarked", None)
+    bridge_mod._last_bind_attempt.pop("prodavan:bind:prj_unmarked", None)
     try:
         with (
             patch("prodavan.core.infra.cache.cache_get", new=AsyncMock(return_value=None)),
@@ -483,7 +484,7 @@ async def test_ensure_recent_bind_binds_when_unmarked() -> None:
         assert cache_set.await_args.args[0] == "prodavan:bind:prj_unmarked"
         assert cache_set.await_args.kwargs["ttl_sec"] == 12 * 60 * 60
     finally:
-        bridge_mod._last_bind_attempt.pop("prj_unmarked", None)
+        bridge_mod._last_bind_attempt.pop("prodavan:bind:prj_unmarked", None)
 
 
 @pytest.mark.asyncio
@@ -491,7 +492,7 @@ async def test_ensure_recent_bind_throttles_without_redis() -> None:
     import prodavan.application.agent.openclaw_bridge as bridge_mod
 
     session = MagicMock()
-    bridge_mod._last_bind_attempt.pop("prj_no_redis", None)
+    bridge_mod._last_bind_attempt.pop("prodavan:bind:prj_no_redis", None)
     try:
         with (
             patch("prodavan.core.infra.cache.cache_get", new=AsyncMock(return_value=None)),
@@ -505,4 +506,248 @@ async def test_ensure_recent_bind_throttles_without_redis() -> None:
             await bridge_mod.ensure_recent_bind(session, "prj_no_redis")
         assert bind.await_count == 1
     finally:
-        bridge_mod._last_bind_attempt.pop("prj_no_redis", None)
+        bridge_mod._last_bind_attempt.pop("prodavan:bind:prj_no_redis", None)
+
+
+# --------------------------------------------------- B3: bind mark on success only + sandbox-keyed
+
+
+@pytest.mark.asyncio
+async def test_ensure_recent_bind_does_not_mark_failed_bind() -> None:
+    """B3: bind_project_runtime never raises — a False result must NOT write
+    the 12h mark, or a failed bind suppresses retries for half a JWT TTL."""
+    import prodavan.application.agent.openclaw_bridge as bridge_mod
+
+    session = MagicMock()
+    try:
+        with (
+            patch("prodavan.core.infra.cache.cache_get", new=AsyncMock(return_value=None)),
+            patch(
+                "prodavan.core.infra.cache.cache_set", new=AsyncMock(return_value=True)
+            ) as cache_set,
+            patch(
+                "prodavan.application.agent.openclaw_bridge.bind_project_runtime",
+                new=AsyncMock(return_value=False),
+            ),
+        ):
+            await bridge_mod.ensure_recent_bind(session, "prj_bind_fail")
+        cache_set.assert_not_awaited()
+    finally:
+        bridge_mod._last_bind_attempt.pop("prodavan:bind:prj_bind_fail", None)
+
+
+@pytest.mark.asyncio
+async def test_ensure_recent_bind_keys_mark_by_sandbox_identity() -> None:
+    """B3: after a re-adoption (new sandbox name) the old mark must not
+    suppress a re-bind — the fresh runtime has no project token yet."""
+    import prodavan.application.agent.openclaw_bridge as bridge_mod
+
+    session = MagicMock()
+    endpoint_old = RuntimeEndpoint(
+        base_url="http://router:8080",
+        headers={"X-Sandbox-Id": "sbx-old"},
+    )
+    endpoint_new = RuntimeEndpoint(
+        base_url="http://router:8080",
+        headers={"X-Sandbox-Id": "sbx-new"},
+    )
+
+    def _fake_get(key: str) -> str | None:
+        # Only the OLD sandbox bind is marked.
+        return "1" if key == "prodavan:bind:prj_sbx:sbx-old" else None
+
+    try:
+        with (
+            patch("prodavan.core.infra.cache.cache_get", new=AsyncMock(side_effect=_fake_get)),
+            patch(
+                "prodavan.core.infra.cache.cache_set", new=AsyncMock(return_value=True)
+            ) as cache_set,
+            patch(
+                "prodavan.application.agent.openclaw_bridge.bind_project_runtime",
+                new=AsyncMock(return_value=True),
+            ) as bind,
+        ):
+            await bridge_mod.ensure_recent_bind(session, "prj_sbx", endpoint=endpoint_old)
+            bind.assert_not_awaited()  # mark for the CURRENT sandbox still valid
+            await bridge_mod.ensure_recent_bind(session, "prj_sbx", endpoint=endpoint_new)
+            bind.assert_awaited_once()  # new sandbox → fresh bind
+            assert cache_set.await_args.args[0] == "prodavan:bind:prj_sbx:sbx-new"
+    finally:
+        bridge_mod._last_bind_attempt.pop("prodavan:bind:prj_sbx:sbx-old", None)
+        bridge_mod._last_bind_attempt.pop("prodavan:bind:prj_sbx:sbx-new", None)
+
+
+def test_bind_attempt_throttle_is_bounded() -> None:
+    """B8a: the Redis-down fallback throttle map is capped (LRU eviction)."""
+    import prodavan.application.agent.openclaw_bridge as bridge_mod
+
+    saved = bridge_mod._last_bind_attempt
+    try:
+        bridge_mod._last_bind_attempt = bridge_mod.OrderedDict()
+        cap = bridge_mod._BIND_ATTEMPT_CACHE_MAX
+        for i in range(cap + 50):
+            # spaced beyond the throttle interval → every call records
+            assert not bridge_mod._bind_attempt_throttled(f"k{i}", now=10_000.0 + i * 1000.0)
+        assert len(bridge_mod._last_bind_attempt) == cap
+        # the freshest key is still throttled
+        assert bridge_mod._bind_attempt_throttled(
+            f"k{cap + 49}", now=10_000.0 + (cap + 49) * 1000.0 + 1.0
+        )
+    finally:
+        bridge_mod._last_bind_attempt = saved
+
+
+# --------------------------------------------------- B4: endpoint reuse + 404 invalidation
+
+
+@pytest.mark.asyncio
+async def test_iter_send_events_reuses_pre_resolved_endpoint() -> None:
+    """B4: the send hot path resolves the endpoint once (shared with the
+    lease push) — no second runtime_view + claim status round-trip."""
+    session = MagicMock()
+
+    endpoint = RuntimeEndpoint(
+        base_url="http://router:8080",
+        headers={"X-Sandbox-Id": "sbx-abc123"},
+    )
+
+    class _StreamResponse:
+        status_code = 200
+
+        async def aread(self) -> bytes:
+            return b""
+
+        def aiter_lines(self):
+            async def _gen():
+                yield 'data: {"type":"text_delta","data":{"text":"hi"}}'
+                yield "data: [DONE]"
+
+            return _gen()
+
+    class _StreamCtx:
+        async def __aenter__(self):
+            return _StreamResponse()
+
+        async def __aexit__(self, *args):
+            return None
+
+    mock_http = MagicMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.stream = MagicMock(return_value=_StreamCtx())
+
+    bootstrap = OpenClawBridgeBootstrap(session, http_client=lambda **_: mock_http)
+    bootstrap._resolve_endpoint_for_project = AsyncMock(return_value=None)
+
+    with (
+        patch("prodavan.application.agent.openclaw_bridge.settings") as mock_settings,
+        patch(
+            "prodavan.application.agent.openclaw_bridge.ensure_recent_bind",
+            new=AsyncMock(),
+        ),
+    ):
+        mock_settings.pod_agent_runtime_enabled = True
+        events = [
+            event
+            async for event in bootstrap.iter_send_events(
+                project_id="prj_1",
+                session_id="ags_abc",
+                message="hello",
+                endpoint=endpoint,
+            )
+        ]
+
+    assert [e.type for e in events] == [AgentEventType.TEXT_DELTA]
+    bootstrap._resolve_endpoint_for_project.assert_not_awaited()
+    stream_call = mock_http.stream.call_args
+    assert stream_call.kwargs["headers"]["X-Sandbox-Id"] == "sbx-abc123"
+
+
+@pytest.mark.asyncio
+async def test_stream_send_404_invalidates_cache_and_reresolves(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """B4: router 404 → cached claim→sandbox mapping invalidated, then ONE
+    re-resolve + retry against the fresh sandbox."""
+    import prodavan.application.agent.openclaw_bridge as bridge_mod
+    from prodavan.application.agent import runtime_transport as rt
+
+    monkeypatch.setattr(rt.settings, "pod_runtime_mode", "sandbox")
+
+    session = MagicMock()
+
+    ep_old = RuntimeEndpoint(
+        base_url="http://router:8080",
+        headers={"X-Sandbox-Id": "sbx-old"},
+    )
+    ep_new = RuntimeEndpoint(
+        base_url="http://router:8080",
+        headers={"X-Sandbox-Id": "sbx-new"},
+    )
+
+    class _StreamResponse:
+        def __init__(self, status_code: int, body: bytes = b"") -> None:
+            self.status_code = status_code
+            self._body = body
+
+        async def aread(self) -> bytes:
+            return self._body
+
+        def aiter_lines(self):
+            async def _gen():
+                yield 'data: {"type":"text_delta","data":{"text":"hi"}}'
+                yield "data: [DONE]"
+
+            return _gen()
+
+    class _StreamCtx:
+        def __init__(self, resp: _StreamResponse) -> None:
+            self._resp = resp
+
+        async def __aenter__(self):
+            return self._resp
+
+        async def __aexit__(self, *args):
+            return None
+
+    responses = iter(
+        [
+            _StreamResponse(404, b'{"error":"sandbox not found"}'),
+            _StreamResponse(200),
+        ]
+    )
+
+    mock_http = MagicMock()
+    mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+    mock_http.__aexit__ = AsyncMock(return_value=None)
+    mock_http.stream = MagicMock(side_effect=lambda *a, **kw: _StreamCtx(next(responses)))
+
+    bootstrap = OpenClawBridgeBootstrap(session, http_client=lambda **_: mock_http)
+    bootstrap._resolve_endpoint_for_project = AsyncMock(side_effect=[ep_new])
+    invalidate = AsyncMock()
+
+    with (
+        patch("prodavan.application.agent.openclaw_bridge.settings") as mock_settings,
+        patch.object(bridge_mod, "invalidate_sandbox_name_cache", invalidate),
+        patch(
+            "prodavan.application.agent.openclaw_bridge.ensure_recent_bind",
+            new=AsyncMock(),
+        ),
+    ):
+        mock_settings.pod_agent_runtime_enabled = True
+        events = [
+            event
+            async for event in bootstrap.iter_send_events(
+                project_id="prj_1",
+                session_id="ags_abc",
+                message="hello",
+                endpoint=ep_old,
+            )
+        ]
+
+    assert [e.type for e in events] == [AgentEventType.TEXT_DELTA]
+    invalidate.assert_awaited_once()
+    assert invalidate.await_args.kwargs["sandbox_name"] == "sbx-old"
+    # exactly ONE re-resolve — the fresh endpoint served the retry
+    bootstrap._resolve_endpoint_for_project.assert_awaited_once()
+    assert mock_http.stream.call_count == 2

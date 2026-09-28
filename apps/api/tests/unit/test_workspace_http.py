@@ -236,3 +236,65 @@ async def test_runtime_http_error_maps_to_bad_gateway(adapter: HttpAgentRuntimeW
 
     assert exc_info.value.code == "RUNTIME_FS_FAILED"
     assert exc_info.value.status == 502
+
+
+# ------------------------------------------------------------- B5: 404/410 re-resolve
+
+
+@pytest.mark.asyncio
+async def test_workspace_404_reresolves_once_and_succeeds(
+    adapter: HttpAgentRuntimeWorkspaceAdapter,
+) -> None:
+    """B5: a 404/410 invalidates cached routing and retries ONCE against a
+    re-resolved endpoint."""
+    resp_404 = MagicMock()
+    resp_404.status_code = 404
+    resp_404.text = "gone"
+    resp_200 = MagicMock()
+    resp_200.status_code = 200
+    resp_200.json.return_value = {"entries": []}
+
+    mock_http = _mock_http_client()
+    mock_http.request = AsyncMock(side_effect=[resp_404, resp_200])
+    adapter._invalidate_runtime_endpoint = AsyncMock()  # type: ignore[method-assign]
+
+    with (
+        patch("prodavan.application.pod_service.adapters.k8s.workspace_http.settings") as mock_settings,
+        patch(
+            "prodavan.application.pod_service.adapters.k8s.workspace_http.httpx.AsyncClient",
+            return_value=mock_http,
+        ),
+    ):
+        mock_settings.pod_agent_runtime_port = 3921
+        entries = await adapter.list_entries(runtime_ref="pod-wk-demo", path=".")
+
+    assert entries == []
+    assert mock_http.request.await_count == 2
+    adapter._invalidate_runtime_endpoint.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_workspace_repeated_404_raises_after_one_retry(
+    adapter: HttpAgentRuntimeWorkspaceAdapter,
+) -> None:
+    """B5: the retry budget is exactly one re-resolve — a second 404 errors."""
+    resp_404 = MagicMock()
+    resp_404.status_code = 404
+    resp_404.text = "gone"
+
+    mock_http = _mock_http_client()
+    mock_http.request = AsyncMock(side_effect=[resp_404, resp_404])
+
+    with (
+        patch("prodavan.application.pod_service.adapters.k8s.workspace_http.settings") as mock_settings,
+        patch(
+            "prodavan.application.pod_service.adapters.k8s.workspace_http.httpx.AsyncClient",
+            return_value=mock_http,
+        ),
+    ):
+        mock_settings.pod_agent_runtime_port = 3921
+        with pytest.raises(AppError) as exc_info:
+            await adapter.list_entries(runtime_ref="pod-wk-demo", path=".")
+
+    assert exc_info.value.code == "RUNTIME_FS_FAILED"
+    assert mock_http.request.await_count == 2

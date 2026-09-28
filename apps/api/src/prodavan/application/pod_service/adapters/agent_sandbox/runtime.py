@@ -393,6 +393,14 @@ class AgentSandboxPodRuntimeAdapter:
         if claim is None:
             return out
 
+        # Steady-state TTL re-arm (B2): get_status is the observed hot path
+        # (runtime_view / endpoint resolve run it constantly), so a live
+        # project's claim keeps its shutdownTime pushed out even when the
+        # project is never paused/resumed. The ttl/2 threshold inside
+        # _ensure_claim_ttl bounds this to ~1 patch per half TTL — and it
+        # costs no extra GETs (the claim was just fetched).
+        await self._ensure_claim_ttl(client, claim, runtime_ref, namespace)
+
         out["claim_name"] = runtime_ref
         metadata = claim.get("metadata") or {}
         labels = metadata.get("labels") or {}

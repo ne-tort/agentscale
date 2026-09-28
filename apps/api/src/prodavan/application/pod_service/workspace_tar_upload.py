@@ -6,7 +6,7 @@ import io
 import logging
 import mimetypes
 import tarfile
-from typing import Any
+from typing import Any, BinaryIO
 
 from prodavan.application.pod_service.ports.dehydrate import DehydrateResult
 from prodavan.application.pod_service.workspace_dehydrate_rules import is_excluded_rel, max_file_bytes
@@ -20,17 +20,29 @@ logger = logging.getLogger(__name__)
 def upload_workspace_tar(
     *,
     workspace_key: str,
-    tar_bytes: bytes,
+    tar_bytes: bytes | None = None,
+    tar_file: BinaryIO | None = None,
     store: Any | None = None,
 ) -> DehydrateResult:
-    """Extract gzip/ustar archive rooted at /workspace and overwrite MinIO last-good."""
+    """Extract gzip/ustar archive rooted at /workspace and overwrite MinIO last-good.
+
+    ``tar_file`` (binary file-like) lets callers stream large archives from a
+    spooled temp file instead of buffering the whole archive in memory;
+    ``tar_bytes`` remains the in-memory option.
+    """
     mgr = store or ensure_file_store()
     uploaded = 0
     skipped = 0
     kept_keys: set[str] = set()
     cap = max_file_bytes()
 
-    with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:*") as archive:
+    if tar_file is not None:
+        tar_file.seek(0)
+        fileobj: BinaryIO = tar_file
+    else:
+        fileobj = io.BytesIO(tar_bytes or b"")
+
+    with tarfile.open(fileobj=fileobj, mode="r:*") as archive:
         for member in archive.getmembers():
             if not member.isfile():
                 continue

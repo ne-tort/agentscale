@@ -512,3 +512,86 @@ async def test_promote_or_demote_sandbox_does_not_promote_on_transitional() -> N
         action = await svc.promote_or_demote(project=project, pod=pod)
     assert action == "noop"
     assert pod.status == PodStatus.PROVISIONING
+
+
+# ---------------------------------------------------- cold-start budget (B7)
+
+
+@pytest.mark.asyncio
+async def test_observe_sandbox_cold_provisioning_maps_to_pulling() -> None:
+    """B7: warm-pool miss → cold sandbox pulls the image; report PULLING so
+    promote_or_demote grants the image-pull budget."""
+    session = AsyncMock()
+    svc = RuntimeObservationService(session)
+    project = _project()
+    pod = _pod(status=PodStatus.PROVISIONING)
+
+    runtime_mock = AsyncMock()
+    runtime_mock.get_status = AsyncMock(
+        return_value={
+            "observed_state": "provisioning",
+            "phase": "Pending",
+            "ready": False,
+            "launch_type": "cold",
+            "sandbox_name": "sbx-cold1",
+        }
+    )
+
+    with (
+        patch("prodavan.application.pod_service.runtime_observation.settings") as mock_settings,
+        patch(
+            "prodavan.application.pod_service.runtime_observation.build_pod_runtime",
+            return_value=runtime_mock,
+        ),
+    ):
+        mock_settings.pod_runtime_mode = "sandbox"
+        out = await svc.observe(project=project, pod=pod)
+
+    assert out["observed_state"] == ObservedState.PULLING.value
+    assert out["launch_type"] == "cold"
+
+
+@pytest.mark.asyncio
+async def test_promote_or_demote_sandbox_cold_start_within_pull_budget() -> None:
+    """B7: sandbox cold launch at age 150s must NOT fail — the image-pull
+    budget (600s) applies, not the provisioning budget (120s)."""
+    session = MagicMock()
+    svc = RuntimeObservationService(session)
+    project = _project()
+    pod = _pod(status=PodStatus.PROVISIONING)
+    pod.updated_at = datetime.now(UTC) - timedelta(seconds=150)
+    svc.observe = AsyncMock(  # type: ignore[method-assign]
+        return_value={
+            "observed_state": ObservedState.PULLING.value,
+            "launch_type": "cold",
+        }
+    )
+    with patch("prodavan.application.pod_service.runtime_observation.settings") as mock_settings:
+        mock_settings.pod_runtime_mode = "sandbox"
+        mock_settings.pod_provisioning_timeout_sec = 120
+        mock_settings.pod_image_pull_timeout_sec = 600
+        action = await svc.promote_or_demote(project=project, pod=pod)
+    assert action == "noop"
+    assert pod.status == PodStatus.PROVISIONING
+    assert project.status == ProjectStatus.ACTIVE
+
+
+@pytest.mark.asyncio
+async def test_promote_or_demote_sandbox_warm_provisioning_still_times_out() -> None:
+    """Guard: only COLD launches get the image-pull budget — a stuck warm
+    adoption still fails at the provisioning budget."""
+    session = MagicMock()
+    svc = RuntimeObservationService(session)
+    project = _project()
+    pod = _pod(status=PodStatus.PROVISIONING)
+    pod.updated_at = datetime.now(UTC) - timedelta(seconds=150)
+    svc.observe = AsyncMock(  # type: ignore[method-assign]
+        return_value={"observed_state": ObservedState.PROVISIONING.value}
+    )
+    with patch("prodavan.application.pod_service.runtime_observation.settings") as mock_settings:
+        mock_settings.pod_runtime_mode = "sandbox"
+        mock_settings.pod_provisioning_timeout_sec = 120
+        mock_settings.pod_image_pull_timeout_sec = 600
+        action = await svc.promote_or_demote(project=project, pod=pod)
+    assert action == "failed_timeout"
+    assert pod.status == PodStatus.FAILED

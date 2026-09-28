@@ -183,6 +183,10 @@ class Settings(BaseSettings):
     pod_sandbox_memory_limit: str = "1Gi"
     pod_ready_timeout_sec: int = 20
     pod_image_pull_timeout_sec: int = 600
+    # Post-turn workspace checkpoint throttle (seconds per project; 0 = off).
+    # Checkpoints stream + upload the whole workspace; one per interval is
+    # enough for the last-good tree (B9).
+    pod_workspace_checkpoint_interval_sec: int = 300
     # L15 agent-runtime — single container Pod workload (Platform OpenClaw + SDK adapters).
     pod_agent_runtime_enabled: bool = Field(
         default=False,

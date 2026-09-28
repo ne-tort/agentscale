@@ -134,3 +134,81 @@ async def test_resolve_runtime_endpoint_skips_stub_refs(monkeypatch: pytest.Monk
         "prodavan.application.pod_service.query.PodQuery.runtime_view", _fake_runtime_view
     )
     assert await resolve_runtime_endpoint(MagicMock(), "prj_1") is None
+
+
+# ------------------------------------------------- claim→sandbox cache (B4)
+
+
+@pytest.mark.asyncio
+async def test_sandbox_endpoint_uses_cached_sandbox_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """B4: cache hit → ZERO claim status GETs on the resolve hot path."""
+    _mode(monkeypatch, "sandbox")
+    runtime = _runtime_with_status({"sandbox_name": "sbx-should-not-be-fetched"})
+    monkeypatch.setattr(rt, "cache_get", AsyncMock(return_value="sbx-cached"))
+    monkeypatch.setattr(rt, "cache_set", AsyncMock(return_value=True))
+
+    ep = await resolve_runtime_endpoint_for_ref(REF, runtime=runtime)
+
+    assert ep is not None
+    assert ep.headers["X-Sandbox-Id"] == "sbx-cached"
+    runtime.get_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_sandbox_endpoint_cache_miss_fetches_and_caches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """B4: cache miss → one claim status GET, then both cache keys written."""
+    _mode(monkeypatch, "sandbox")
+    runtime = _runtime_with_status({"sandbox_name": "sbx-live"})
+    monkeypatch.setattr(rt, "cache_get", AsyncMock(return_value=None))
+    cache_set = AsyncMock(return_value=True)
+    monkeypatch.setattr(rt, "cache_set", cache_set)
+
+    ep = await resolve_runtime_endpoint_for_ref(REF, runtime=runtime)
+
+    assert ep is not None and ep.headers["X-Sandbox-Id"] == "sbx-live"
+    runtime.get_status.assert_awaited_once()
+    cached = {call.args[0]: call.args[1] for call in cache_set.await_args_list}
+    assert cached[f"prodavan:sandbox-name:{REF}"] == "sbx-live"
+    assert cached["prodavan:sandbox-claim:sbx-live"] == REF
+
+
+@pytest.mark.asyncio
+async def test_sandbox_endpoint_reuses_prefetched_view(monkeypatch: pytest.MonkeyPatch) -> None:
+    """B4: a pre-fetched runtime_view skips BOTH the view refresh and the
+    claim status GET — the send hot path observes exactly once."""
+    _mode(monkeypatch, "sandbox")
+    runtime = _runtime_with_status({"sandbox_name": "sbx-other"})
+    monkeypatch.setattr(rt, "cache_get", AsyncMock(return_value=None))
+    monkeypatch.setattr(rt, "cache_set", AsyncMock(return_value=True))
+
+    view = {
+        "observed_state": "running",
+        "runtime_ref": REF,
+        "sandbox_name": "sbx-view",
+    }
+    ep = await rt.resolve_runtime_endpoint(MagicMock(), "prj_1", runtime=runtime, view=view)
+
+    assert ep is not None and ep.headers["X-Sandbox-Id"] == "sbx-view"
+    runtime.get_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_invalidate_sandbox_name_cache_drops_both_mappings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """B4: router 404/410 invalidation clears forward AND reverse mappings."""
+    deleted: list[str] = []
+    monkeypatch.setattr(rt, "cache_get", AsyncMock(return_value=REF))
+
+    async def _delete(key: str) -> bool:
+        deleted.append(key)
+        return True
+
+    monkeypatch.setattr(rt, "cache_delete", _delete)
+
+    await rt.invalidate_sandbox_name_cache(sandbox_name="sbx-old")
+
+    assert "prodavan:sandbox-claim:sbx-old" in deleted
+    assert f"prodavan:sandbox-name:{REF}" in deleted

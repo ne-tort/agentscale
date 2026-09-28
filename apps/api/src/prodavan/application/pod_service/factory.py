@@ -45,8 +45,15 @@ def build_pod_runtime(*, force_new: bool = False) -> PodRuntimePort:
             settings.pod_sandbox_namespace,
             settings.pod_sandbox_warmpool,
         )
-    else:
+    elif mode == "stub":
         adapter = StubPodRuntimeAdapter()
+    else:
+        # Unknown mode must fail loudly: silently falling back to stub hides
+        # deploy misconfigurations (pods look "running" but nothing reaches a
+        # cluster).
+        raise ValueError(
+            f"unknown pod_runtime_mode {mode!r} (expected 'stub' | 'k8s' | 'sandbox')"
+        )
     if not force_new:
         _runtime_singleton = adapter
     return adapter

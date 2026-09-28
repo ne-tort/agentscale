@@ -33,6 +33,7 @@ from prodavan.application.agent.openclaw_bridge import (
 from prodavan.application.agent.policy_service import AgentPolicyService
 from prodavan.application.agent.runtime_guard import require_running_pod_runtime
 from prodavan.application.agent.runtime_model import sanitize_runtime_model, sdk_fallback_model
+from prodavan.application.agent.runtime_transport import resolve_runtime_endpoint
 from prodavan.application.agent.stream_normalizer import TurnStreamNormalizer
 from prodavan.application.agent.token_normalizer import (
     TokenNormalizer,
@@ -351,6 +352,24 @@ class AgentSessionService:
         return normalized, next_seq
 
     async def _checkpoint_workspace_after_turn(self, *, project_id: str) -> None:
+        # Throttle (B9): a checkpoint streams + uploads the whole workspace,
+        # so one per project per interval is enough for the last-good tree.
+        # The Redis NX guard IS the throttle window (left to expire, never
+        # released); without Redis the checkpoint runs unthrottled (the
+        # checkpoint itself is best-effort anyway).
+        interval = int(settings.pod_workspace_checkpoint_interval_sec or 0)
+        if interval > 0:
+            from prodavan.core.infra.cache import acquire_lock, cache_key
+            from prodavan.core.infra.redis_manager import get_redis_manager
+
+            mgr = get_redis_manager()
+            if mgr is not None and mgr.enabled:
+                guard = await acquire_lock(
+                    cache_key("ws-checkpoint", project_id),
+                    ttl_sec=interval,
+                )
+                if guard is None:
+                    return
         await checkpoint_project_workspace(self._session, project_id=project_id, best_effort=True)
 
     async def _project_hydrate_generation(self, project_id: str) -> int | None:
@@ -835,11 +854,23 @@ class AgentSessionService:
         turn_ok = False
         if settings.pod_agent_runtime_enabled:
             bridge = OpenClawBridgeBootstrap(self._session)
+            # Resolve the runtime endpoint ONCE per message (B4): the guard
+            # above already produced a fresh runtime_view, so reuse it — the
+            # lease push and the send share the endpoint instead of paying
+            # for two more runtime_view + claim-status round-trips. The
+            # bridge still re-resolves on its own after a recoverable
+            # 404/410 (sandbox re-adoption).
+            runtime_endpoint = await resolve_runtime_endpoint(
+                self._session,
+                project_id,
+                view=runtime,
+            )
             if row.resolved_key_id:
                 pushed = await AgentCredentialBroker(self._session).push_lease_to_runtime(
                     project_id=project_id,
                     key_id=row.resolved_key_id,
                     principal=principal,
+                    endpoint=runtime_endpoint,
                 )
                 if not pushed:
                     raise agent_runtime_unavailable(
@@ -851,6 +882,7 @@ class AgentSessionService:
                 session_id=session_id,
                 message=bridge_message,
                 model=send_model,
+                endpoint=runtime_endpoint,
                 bootstrap=BridgeSessionBootstrap(
                     session_id=row.id,
                     prodavan_session_id=row.id,
