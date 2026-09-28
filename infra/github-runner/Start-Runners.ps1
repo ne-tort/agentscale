@@ -77,20 +77,20 @@ $ErrorActionPreference = $prevEa
 # Drop stale offline registrations (best-effort)
 if (Get-Command gh -ErrorAction SilentlyContinue) {
     Write-Host 'Prune offline GitHub runner registrations (best-effort)...'
-    $json = gh api repos/ne-tort/prodavan/actions/runners 2>$null
+    $json = gh api repos/ne-tort/agentscale/actions/runners 2>$null
     if ($json) {
         $runners = ($json | ConvertFrom-Json).runners
         foreach ($r in $runners) {
             if ($r.status -eq 'offline') {
                 Write-Host "  DELETE $($r.name) id=$($r.id)"
-                gh api -X DELETE "repos/ne-tort/prodavan/actions/runners/$($r.id)" 2>$null | Out-Null
+                gh api -X DELETE "repos/ne-tort/agentscale/actions/runners/$($r.id)" 2>$null | Out-Null
             }
         }
     }
 }
 
 Write-Host ''
-Write-Host 'Check: gh api repos/ne-tort/prodavan/actions/runners --jq ".runners[]|{name,status,busy}"'
+Write-Host 'Check: gh api repos/ne-tort/agentscale/actions/runners --jq ".runners[]|{name,status,busy}"'
 Write-Host 'Expect: prodavan-runners-runner-1..4 Up, logs "Listening for Jobs"'
 Write-Host 'Heal after reboot: .\Ensure-RunnersHealthy.ps1 (also from tools/win-wsl-keepalive.ps1)'
 Write-Host 'Stop:  docker compose down'
