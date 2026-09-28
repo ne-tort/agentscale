@@ -51,7 +51,7 @@ x-runner-common: &runner-common
 
 x-runner-env: &runner-env
   <<: *cache-env
-  REPO_URL: ${REPO_URL:-https://github.com/ne-tort/prodavan}
+  REPO_URL: ${REPO_URL:-https://github.com/ne-tort/agentscale}
   ACCESS_TOKEN: ${ACCESS_TOKEN:-}
   RUNNER_TOKEN: ${RUNNER_TOKEN:-}
   RUNNER_SCOPE: repo
@@ -76,7 +76,7 @@ services:
     container_name: prodavan-runners-runner-1
     environment:
       <<: *runner-env
-      RUNNER_NAME: ${RUNNER_NAME_PREFIX:-dd-prodavan}-1
+      RUNNER_NAME: dd-as-2 # dd-as-1 is the standalone agentscale-runner-1 below
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${USERPROFILE}/.kube:/home/runner/.kube:ro
@@ -88,7 +88,7 @@ services:
     container_name: prodavan-runners-runner-2
     environment:
       <<: *runner-env
-      RUNNER_NAME: ${RUNNER_NAME_PREFIX:-dd-prodavan}-2
+      RUNNER_NAME: dd-as-3
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${USERPROFILE}/.kube:/home/runner/.kube:ro
@@ -100,7 +100,7 @@ services:
     container_name: prodavan-runners-runner-3
     environment:
       <<: *runner-env
-      RUNNER_NAME: ${RUNNER_NAME_PREFIX:-dd-prodavan}-3
+      RUNNER_NAME: dd-as-4
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${USERPROFILE}/.kube:/home/runner/.kube:ro
@@ -112,7 +112,7 @@ services:
     container_name: prodavan-runners-runner-4
     environment:
       <<: *runner-env
-      RUNNER_NAME: ${RUNNER_NAME_PREFIX:-dd-prodavan}-4
+      RUNNER_NAME: dd-as-5
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${USERPROFILE}/.kube:/home/runner/.kube:ro
