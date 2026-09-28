@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import 'package:prodavan/core/api/prodavan_api.dart';
-import 'package:prodavan/core/containers/project_container_poll.dart';
+import 'package:prodavan/core/jobs/app_job_store.dart';
+import 'package:prodavan/core/jobs/project_wake_flow.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
@@ -68,14 +68,19 @@ class _ProjectManagementPageState extends State<ProjectManagementPage> {
       confirmLabel: l10n.projectPauseProject,
       severity: AppStatusSeverity.warning,
     );
-    if (!ok) return;
+    if (!ok || !mounted) return;
+    // Pause via lifecycle job + poll (waitFor suspended): the button flips
+    // only once the sandbox actually sleeps, not on the bare API call.
     setState(() => _pausing = true);
     try {
-      await workContext.api.pauseProject(widget.projectId);
-      if (!mounted) return;
-      await _load();
-    } catch (e) {
-      if (mounted) AppErrors.showSnack(context, e);
+      await runProjectWakeFlow(
+        context: context,
+        action: ProjectWakeAction.pause,
+        store: appJobStore,
+        api: workContext.api,
+        projectId: widget.projectId,
+        onSettled: _load,
+      );
     } finally {
       if (mounted) setState(() => _pausing = false);
     }
@@ -86,30 +91,14 @@ class _ProjectManagementPageState extends State<ProjectManagementPage> {
     AppSnackBar.info(context, l10n.projectResumeStartingSnack);
     setState(() => _resuming = true);
     try {
-      try {
-        await workContext.api.resumeProject(widget.projectId);
-      } on ProdavanApiException catch (e) {
-        if (e.statusCode != 422 ||
-            !e.body.toLowerCase().contains('not paused')) {
-          rethrow;
-        }
-      }
-      final container = await pollProjectContainerUntilSettled(
+      await runProjectWakeFlow(
+        context: context,
+        action: ProjectWakeAction.resume,
+        store: appJobStore,
         api: workContext.api,
         projectId: widget.projectId,
+        onSettled: _load,
       );
-      if (!mounted) return;
-      final failure = containerObservedFailureMessage(container);
-      if (failure != null) {
-        AppErrors.showSnack(context, failure);
-      }
-      await _load();
-      workContext.notifyProjectLifecycleChanged();
-    } catch (e) {
-      if (mounted) {
-        await _load();
-        AppErrors.showSnack(context, e);
-      }
     } finally {
       if (mounted) setState(() => _resuming = false);
     }

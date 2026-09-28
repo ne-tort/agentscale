@@ -68,7 +68,21 @@ Future<Map<String, dynamic>?> _afterJob(
 ) async {
   final job = await jobFuture;
   if (job.status == AppJobStatus.failed) {
-    throw StateError(job.error ?? 'job failed');
+    // Rebuild the typed error that AppJobStore stringified, so the error
+    // presenter shows the honest, localized copy (container last_error /
+    // poll timeout) instead of a generic StateError fallback.
+    switch (job.errorKind) {
+      case AppJobErrorKind.containerObservedFailure:
+        throw ContainerObservedFailureException(job.error ?? 'container failed');
+      case AppJobErrorKind.timeout:
+        final message = job.error;
+        throw TimeoutException(
+          message == null || message == 'timeout' ? null : message,
+          job.deadlineAt.difference(job.startedAt),
+        );
+      default:
+        throw StateError(job.error ?? 'job failed');
+    }
   }
   return api.getProjectContainer(projectId);
 }
@@ -80,6 +94,7 @@ Future<Map<String, dynamic>?> runProjectLaunchJob({
   required String projectId,
   required AppLocalizations l10n,
   bool invokeApi = true,
+  Duration? timeout,
 }) {
   return _afterJob(
     store.start(
@@ -87,7 +102,7 @@ Future<Map<String, dynamic>?> runProjectLaunchJob({
       subjectId: projectId,
       title: l10n.projectLaunchInProgress,
       subtitle: l10n.projectLaunchStartingSnack,
-      timeout: appJobDefaultTimeout,
+      timeout: timeout ?? appJobDefaultTimeout,
       run: (ctrl) async {
         if (invokeApi) {
           try {
@@ -118,6 +133,7 @@ Future<Map<String, dynamic>?> runProjectReloadJob({
   required String projectId,
   required AppLocalizations l10n,
   bool invokeApi = true,
+  Duration? timeout,
 }) {
   return _afterJob(
     store.start(
@@ -125,7 +141,7 @@ Future<Map<String, dynamic>?> runProjectReloadJob({
       subjectId: projectId,
       title: l10n.projectReloadInProgress,
       subtitle: l10n.projectLaunchStartingSnack,
-      timeout: containerPollDefaultTimeout,
+      timeout: timeout ?? containerPollDefaultTimeout,
       run: (ctrl) async {
         if (invokeApi) {
           await api.reloadProject(projectId);
@@ -152,6 +168,7 @@ Future<Map<String, dynamic>?> runProjectResumeJob({
   required String projectId,
   required AppLocalizations l10n,
   bool invokeApi = true,
+  Duration? timeout,
 }) {
   return _afterJob(
     store.start(
@@ -159,7 +176,7 @@ Future<Map<String, dynamic>?> runProjectResumeJob({
       subjectId: projectId,
       title: l10n.projectResumeInProgress,
       subtitle: l10n.projectResumeStartingSnack,
-      timeout: containerPollDefaultTimeout,
+      timeout: timeout ?? containerPollDefaultTimeout,
       run: (ctrl) async {
         if (invokeApi) {
           try {
@@ -178,6 +195,50 @@ Future<Map<String, dynamic>?> runProjectResumeJob({
           l10n: l10n,
           timeout: ctrl.remaining,
           waitFor: containerPollWaitForRunning,
+        );
+        workContext.notifyProjectLifecycleChanged();
+      },
+    ),
+    api,
+    projectId,
+  );
+}
+
+/// Pause (suspend) the sandbox and poll until it sleeps — suspend takes
+/// seconds with agent-sandbox, so the button state flips only once the
+/// container actually reports suspended/failed/absent.
+Future<Map<String, dynamic>?> runProjectPauseJob({
+  required AppJobStore store,
+  required ProdavanApi api,
+  required String projectId,
+  required AppLocalizations l10n,
+  bool invokeApi = true,
+  Duration? timeout,
+}) {
+  return _afterJob(
+    store.start(
+      kind: AppJobKinds.projectPause,
+      subjectId: projectId,
+      title: l10n.projectPauseInProgress,
+      subtitle: l10n.containerObservedPausing,
+      timeout: timeout ?? containerPollDefaultTimeout,
+      run: (ctrl) async {
+        if (invokeApi) {
+          try {
+            await api.pauseProject(projectId);
+          } on ProdavanApiException catch (e) {
+            // Already sleeping / not running — join the poll instead of
+            // failing; the poll verifies the honest end state.
+            if (e.statusCode != 422) rethrow;
+          }
+        }
+        await _pollUntilSettledOrThrow(
+          api: api,
+          projectId: projectId,
+          ctrl: ctrl,
+          l10n: l10n,
+          timeout: ctrl.remaining,
+          waitFor: containerPollWaitForSuspended,
         );
         workContext.notifyProjectLifecycleChanged();
       },
@@ -218,6 +279,14 @@ Future<void> resumePersistedLifecycleJob({
       );
     case AppJobKinds.projectResume:
       await runProjectResumeJob(
+        store: store,
+        api: api,
+        projectId: projectId,
+        l10n: l10n,
+        invokeApi: false,
+      );
+    case AppJobKinds.projectPause:
+      await runProjectPauseJob(
         store: store,
         api: api,
         projectId: projectId,

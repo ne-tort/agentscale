@@ -3,9 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/containers/container_runtime_presenter.dart';
-import 'package:prodavan/core/containers/project_container_poll.dart';
 import 'package:prodavan/core/jobs/app_job_store.dart';
 import 'package:prodavan/core/jobs/project_lifecycle_jobs.dart';
+import 'package:prodavan/core/jobs/project_wake_flow.dart';
 import 'package:prodavan/core/preferences/preferences.dart';
 import 'package:prodavan/core/refresh/app_auto_refresh.dart';
 import 'package:prodavan/core/session/work_context.dart';
@@ -13,7 +13,6 @@ import 'package:prodavan/core/theme/app_color_tokens.dart';
 import 'package:prodavan/core/theme/app_spacing.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
-import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/core/widgets/container_metrics_wrap.dart';
 import 'package:prodavan/features/containers/container_workspace_api.dart';
 import 'package:prodavan/features/containers/container_workspace_files_page.dart';
@@ -122,26 +121,15 @@ class _ProjectContainerPageState extends State<ProjectContainerPage> {
   }
 
   Future<void> _reload() async {
-    final l10n = AppLocalizations.of(context);
-    try {
-      final container = await runProjectReloadJob(
-        store: appJobStore,
-        api: workContext.api,
-        projectId: widget.projectId,
-        l10n: l10n,
-      );
-      if (!mounted) return;
-      final failure = containerObservedFailureMessage(container);
-      if (failure != null) {
-        AppErrors.showSnack(context, failure);
-      } else {
-        AppSnackBar.success(context, l10n.projectReloadSuccess);
-      }
-      await _load();
-    } catch (e) {
-      if (mounted) AppErrors.showSnack(context, e);
-      await _load();
-    }
+    await runProjectWakeFlow(
+      context: context,
+      action: ProjectWakeAction.reload,
+      store: appJobStore,
+      api: workContext.api,
+      projectId: widget.projectId,
+      successSnack: (l10n) => l10n.projectReloadSuccess,
+      onSettled: _load,
+    );
   }
 
   @override

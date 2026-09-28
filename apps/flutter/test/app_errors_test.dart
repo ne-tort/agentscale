@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'package:prodavan/core/api/prodavan_api.dart';
+import 'package:prodavan/core/containers/project_container_poll.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -112,5 +115,40 @@ void main() {
     );
     expect(presented.display, l10n.errorGateway);
     expect(presented.diagnostic, 'HTTP 502');
+  });
+
+  testWidgets('ContainerObservedFailureException shows the honest reason', (tester) async {
+    final l10n = await l10nFor(tester, const Locale('ru'));
+    final presented = AppErrors.present(
+      ContainerObservedFailureException('ImagePullBackOff'),
+      l10n,
+    );
+    expect(presented.display, l10n.projectAgentFailedToStart('ImagePullBackOff'));
+    expect(presented.diagnostic, 'ImagePullBackOff');
+  });
+
+  testWidgets('TimeoutException with localized message keeps it', (tester) async {
+    final l10n = await l10nFor(tester, const Locale('ru'));
+    final presented = AppErrors.present(
+      TimeoutException(l10n.containerPollTimeout, const Duration(minutes: 5)),
+      l10n,
+    );
+    expect(presented.display, l10n.containerPollTimeout);
+  });
+
+  testWidgets('TimeoutException without message falls back to containerPollTimeout', (tester) async {
+    final l10n = await l10nFor(tester, const Locale('ru'));
+    final presented = AppErrors.present(TimeoutException(null), l10n);
+    expect(presented.display, l10n.containerPollTimeout);
+    expect(presented.diagnostic, 'TimeoutException');
+  });
+
+  testWidgets('raw String failure no longer masks as container reason', (tester) async {
+    // Guard for the audit fix: a plain String must NOT reach the presenter
+    // from wake flows anymore (call-sites pass ContainerObservedFailureException);
+    // if one still does, it renders the generic copy — not the raw text.
+    final l10n = await l10nFor(tester, const Locale('ru'));
+    final presented = AppErrors.present('some raw failure', l10n);
+    expect(presented.display, l10n.errorUnexpected);
   });
 }

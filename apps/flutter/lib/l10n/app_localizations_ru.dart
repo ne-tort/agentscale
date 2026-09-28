@@ -2549,6 +2549,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get projectResumeStartingSnack => 'Проект возобновляется…';
 
   @override
+  String get projectPauseInProgress => 'Приостановка проекта…';
+
+  @override
   String get projectPauseConfirmMessage =>
       'При приостановке проекта агент будет недоступен.';
 

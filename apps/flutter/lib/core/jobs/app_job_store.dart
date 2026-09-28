@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:prodavan/core/containers/project_container_poll.dart';
+
 /// In-process + persisted job tracker (survives navigation and page reload).
 class AppJobStore extends ChangeNotifier {
   AppJobStore({SharedPreferences? prefs}) : _prefsOverride = prefs;
@@ -85,6 +87,7 @@ class AppJobStore extends ChangeNotifier {
               _jobs[job.id] = job.copyWith(
                 status: AppJobStatus.failed,
                 error: 'timeout',
+                errorKind: AppJobErrorKind.timeout,
                 updatedAt: DateTime.now(),
               );
             } else {
@@ -118,7 +121,7 @@ class AppJobStore extends ChangeNotifier {
     final existing = bySubject(kind: kind, subjectId: subjectId);
     if (existing != null && existing.status == AppJobStatus.running) {
       if (existing.isExpired) {
-        _finish(existing.id, AppJobStatus.failed, error: 'timeout');
+        _finish(existing.id, AppJobStatus.failed, error: 'timeout', errorKind: AppJobErrorKind.timeout);
       } else if (_activeRunners.contains(existing.id)) {
         return _completers[existing.id]!.future;
       } else {
@@ -162,14 +165,28 @@ class AppJobStore extends ChangeNotifier {
     unawaited(() async {
       try {
         if (job.isExpired) {
-          throw TimeoutException('job deadline exceeded', job.deadlineAt.difference(job.startedAt));
+          throw TimeoutException(null, job.deadlineAt.difference(job.startedAt));
         }
         await run(ctrl).timeout(job.remaining);
         _finish(id, AppJobStatus.succeeded);
+      } on ContainerObservedFailureException catch (e) {
+        // Keep the structured kind so callers can rebuild the typed error
+        // (honest container last_error snack) instead of a generic StateError.
+        _finish(
+          id,
+          AppJobStatus.failed,
+          error: e.reason,
+          errorKind: AppJobErrorKind.containerObservedFailure,
+        );
       } on TimeoutException catch (e) {
-        _finish(id, AppJobStatus.failed, error: e.message ?? 'timeout');
+        _finish(
+          id,
+          AppJobStatus.failed,
+          error: _timeoutErrorMessage(e),
+          errorKind: AppJobErrorKind.timeout,
+        );
       } catch (e) {
-        _finish(id, AppJobStatus.failed, error: e.toString());
+        _finish(id, AppJobStatus.failed, error: e.toString(), errorKind: AppJobErrorKind.other);
       } finally {
         _activeRunners.remove(id);
       }
@@ -202,12 +219,13 @@ class AppJobStore extends ChangeNotifier {
     if (job != null) clear(job.id);
   }
 
-  void _finish(String id, AppJobStatus status, {String? error}) {
+  void _finish(String id, AppJobStatus status, {String? error, String? errorKind}) {
     final job = _jobs[id];
     if (job == null) return;
     final next = job.copyWith(
       status: status,
       error: error,
+      errorKind: errorKind,
       updatedAt: DateTime.now(),
     );
     _jobs[id] = next;
@@ -250,6 +268,19 @@ class AppJobStore extends ChangeNotifier {
   }
 }
 
+/// Keep an already-localized timeout message (e.g. the lifecycle poll throws
+/// TimeoutException with containerPollTimeout), but normalize dart:async's
+/// default 'Future not completed' / empty messages to the 'timeout' sentinel
+/// so the restored error falls back to localized copy instead of leaking
+/// English SDK text into the UI.
+String _timeoutErrorMessage(TimeoutException e) {
+  final message = e.message?.trim();
+  if (message == null || message.isEmpty || message == 'Future not completed') {
+    return 'timeout';
+  }
+  return message;
+}
+
 enum AppJobStatus { running, succeeded, failed }
 
 class AppJob {
@@ -264,6 +295,7 @@ class AppJob {
     required this.deadlineAt,
     required this.updatedAt,
     this.error,
+    this.errorKind,
   });
 
   final String id;
@@ -276,6 +308,10 @@ class AppJob {
   final DateTime deadlineAt;
   final DateTime updatedAt;
   final String? error;
+
+  /// Structured failure kind (see [AppJobErrorKind]) — survives [error]
+  /// stringification so callers can rebuild typed, localized errors.
+  final String? errorKind;
 
   bool get isExpired => DateTime.now().isAfter(deadlineAt);
 
@@ -290,6 +326,7 @@ class AppJob {
     AppJobStatus? status,
     DateTime? updatedAt,
     String? error,
+    String? errorKind,
   }) {
     return AppJob(
       id: id,
@@ -302,6 +339,7 @@ class AppJob {
       deadlineAt: deadlineAt,
       updatedAt: updatedAt ?? this.updatedAt,
       error: error,
+      errorKind: errorKind,
     );
   }
 
@@ -316,6 +354,7 @@ class AppJob {
         'deadlineAt': deadlineAt.toIso8601String(),
         'updatedAt': updatedAt.toIso8601String(),
         if (error != null) 'error': error,
+        if (errorKind != null) 'errorKind': errorKind,
       };
 
   factory AppJob.fromJson(Map<String, dynamic> json) {
@@ -334,6 +373,7 @@ class AppJob {
           DateTime.now().add(const Duration(minutes: 12)),
       updatedAt: DateTime.tryParse(json['updatedAt'] as String? ?? '') ?? DateTime.now(),
       error: json['error'] as String?,
+      errorKind: json['errorKind'] as String?,
     );
   }
 }
@@ -353,16 +393,31 @@ abstract final class AppJobKinds {
   static const projectLaunch = 'project.launch';
   static const projectReload = 'project.reload';
   static const projectResume = 'project.resume';
-  static const projectSync = 'project.sync';
+  static const projectPause = 'project.pause';
 
   static const lifecycle = {
     projectLaunch,
     projectReload,
     projectResume,
-    projectSync,
+    projectPause,
   };
 
   static bool isLifecycle(String kind) => lifecycle.contains(kind);
+}
+
+/// Structured failure kind of a finished job — survives [AppJob.error]
+/// stringification so callers can rebuild a typed, localized error after
+/// awaiting the job instead of falling back to a generic copy.
+abstract final class AppJobErrorKind {
+  /// Container settled in `failed`: [AppJob.error] carries the container's
+  /// last_error; rebuild `ContainerObservedFailureException`.
+  static const containerObservedFailure = 'container_observed_failure';
+
+  /// Poll / deadline timeout: [AppJob.error] may carry an already-localized
+  /// message (containerPollTimeout); rebuild a `TimeoutException`.
+  static const timeout = 'timeout';
+
+  static const other = 'other';
 }
 
 /// Default wall-clock budget: image pull (600s) + Ready (20s) + client slack.

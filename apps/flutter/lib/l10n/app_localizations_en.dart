@@ -2534,6 +2534,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get projectResumeStartingSnack => 'Project is resuming…';
 
   @override
+  String get projectPauseInProgress => 'Pausing project…';
+
+  @override
   String get projectPauseConfirmMessage =>
       'While paused, the agent will be unavailable.';
 

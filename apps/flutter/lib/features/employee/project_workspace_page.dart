@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 
 import 'package:prodavan/core/chat/controller/chat_session_controller.dart';
 import 'package:prodavan/core/chat/widgets/chat_scaffold.dart';
-import 'package:prodavan/core/api/prodavan_api.dart';
 import 'package:prodavan/core/containers/container_runtime_presenter.dart';
-import 'package:prodavan/core/containers/project_container_poll.dart';
+import 'package:prodavan/core/jobs/app_job_store.dart';
+import 'package:prodavan/core/jobs/project_wake_flow.dart';
 import 'package:prodavan/core/session/work_context.dart';
 import 'package:prodavan/core/widgets/app_bar_title_editor.dart';
 import 'package:prodavan/core/widgets/app_error_presenter.dart';
@@ -132,53 +132,39 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     super.dispose();
   }
 
-  /// Same resume/reload + poll + snack flow as project settings; stay on chat.
+  /// Same wake flow as project settings (shared [runProjectWakeFlow]):
+  /// suspended → resume job, otherwise reload job. The job polls with
+  /// `waitFor: {running, failed}` so the first post-resume tick (still
+  /// `suspended`) no longer ends the wait early; the reload success snack
+  /// fires only after the poll settles.
   Future<void> _wakeProject() async {
     if (_waking || _chatSendable) return;
     final l10n = AppLocalizations.of(context);
+    final suspended = projectChatSuspended(_project);
+    if (suspended) {
+      AppSnackBar.info(context, l10n.projectResumeStartingSnack);
+    }
     setState(() => _waking = true);
     try {
-      if (projectChatSuspended(_project)) {
-        AppSnackBar.info(context, l10n.projectResumeStartingSnack);
-        try {
-          await workContext.api.resumeProject(widget.projectId);
-        } on ProdavanApiException catch (e) {
-          if (!_isAlreadyResumedError(e)) rethrow;
-        }
-      } else {
-        await workContext.api.reloadProject(widget.projectId);
-        if (!mounted) return;
-        AppSnackBar.success(context, l10n.projectReloadSuccess);
-      }
-      final container = await pollProjectContainerUntilSettled(
+      await runProjectWakeFlow(
+        context: context,
+        action: suspended ? ProjectWakeAction.resume : ProjectWakeAction.reload,
+        store: appJobStore,
         api: workContext.api,
         projectId: widget.projectId,
+        successSnack: suspended ? null : (l10n) => l10n.projectReloadSuccess,
+        onSettled: () async {
+          await _refreshProjectFlags();
+          if (!mounted) return;
+          if (_chatReadable) {
+            await _chat.loadTranscript();
+            if (_chatSendable) {
+              unawaited(_chat.loadModels());
+            }
+          }
+          workContext.notifyProjectLifecycleChanged();
+        },
       );
-      if (!mounted) return;
-      if (!containerObservedSettled(container)) {
-        // Poll hit the timeout without settling - honest error instead of
-        // silently dropping back to the wake CTA.
-        AppSnackBar.error(context, l10n.containerPollTimeout);
-      } else {
-        final failure = containerObservedFailureMessage(container);
-        if (failure != null) {
-          AppErrors.showSnack(context, failure);
-        }
-      }
-      await _refreshProjectFlags();
-      if (!mounted) return;
-      if (_chatReadable) {
-        await _chat.loadTranscript();
-        if (_chatSendable) {
-          unawaited(_chat.loadModels());
-        }
-      }
-      workContext.notifyProjectLifecycleChanged();
-    } catch (e) {
-      if (mounted) {
-        await _refreshProjectFlags();
-        if (!_chatSendable) AppErrors.showSnack(context, e);
-      }
     } finally {
       if (mounted) setState(() => _waking = false);
     }
@@ -208,12 +194,6 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     } catch (e) {
       if (mounted) AppErrors.showSnack(context, e);
     }
-  }
-
-  bool _isAlreadyResumedError(ProdavanApiException e) {
-    if (e.statusCode != 422) return false;
-    final body = e.body.toLowerCase();
-    return body.contains('not paused') || body.contains('not paused or completed');
   }
 
   Future<bool> _ensureSession() async {

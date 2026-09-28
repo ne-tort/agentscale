@@ -4550,6 +4550,12 @@ abstract class AppLocalizations {
   /// **'Project is resuming…'**
   String get projectResumeStartingSnack;
 
+  /// No description provided for @projectPauseInProgress.
+  ///
+  /// In en, this message translates to:
+  /// **'Pausing project…'**
+  String get projectPauseInProgress;
+
   /// No description provided for @projectPauseConfirmMessage.
   ///
   /// In en, this message translates to:
