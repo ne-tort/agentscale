@@ -33,9 +33,23 @@ jobs:
           echo "${{ runner.temp }}/venv/bin" >> "${GITHUB_PATH}"
           "${{ runner.temp }}/venv/bin/python" -m pip install -U pip
 
+      - name: Warm postgres image (WSL TLS flakiness)
+        # Runner Docker Hub pulls flake with TLS handshake timeouts (same
+        # known issue ci-images.yml fights with its "Warm base images" step):
+        # `docker run postgres:16.15` dies with exit 125 / "Start Postgres
+        # has timed out" on a cold registry fetch. Retry the pull first.
+        run: |
+          set -euo pipefail
+          for i in 1 2 3 4 5; do
+            if docker pull postgres:16.15; then break; fi
+            echo "retry $i postgres:16.15"
+            sleep 10
+          done
+          docker image inspect postgres:16.15 >/dev/null
+
       - name: Start Postgres
         id: pg
-        timeout-minutes: 2
+        timeout-minutes: 5
         run: |
           set -euo pipefail
           # Docker Desktop runners: published ports land on Desktop VM → host.docker.internal
