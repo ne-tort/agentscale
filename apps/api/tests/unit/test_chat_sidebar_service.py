@@ -25,13 +25,63 @@ def _employee() -> MagicMock:
     return emp
 
 
-def _project(*, cabinet_id: str = "cab_1", status: str = "active") -> MagicMock:
+def _project(
+    *,
+    pid: str = "proj_1",
+    name: str = "Alpha",
+    cabinet_id: str = "cab_1",
+    status: str = "active",
+) -> MagicMock:
     p = MagicMock()
-    p.id = "proj_1"
+    p.id = pid
     p.cabinet_id = cabinet_id
-    p.name = "Alpha"
+    p.name = name
     p.status = status
     return p
+
+
+def _session_row(
+    *,
+    sid: str,
+    project_id: str = "proj_1",
+    title: str | None = None,
+    last_message_at: datetime | None = None,
+    created_at: datetime | None = None,
+) -> AgentSessionRow:
+    return AgentSessionRow(
+        id=sid,
+        project_id=project_id,
+        resolved_key_id=None,
+        provider="cursor",
+        api_kind="cursor_sdk",
+        vendor_agent_id=sid,
+        model=None,
+        cwd="/workspace",
+        status=AgentSessionStatus.ACTIVE,
+        title=title,
+        last_message_at=last_message_at,
+        created_at=created_at,
+    )
+
+
+def _pod_row(
+    *,
+    project_id: str,
+    status: str = "running",
+    desired_state: str = "running",
+) -> MagicMock:
+    pod = MagicMock()
+    pod.project_id = project_id
+    pod.status = status
+    pod.desired_state = desired_state
+    return pod
+
+
+def _rows_result(rows: list) -> MagicMock:
+    """Mock for a scalars().all() execute result."""
+    result = MagicMock()
+    result.scalars.return_value.all.return_value = list(rows)
+    return result
 
 
 def _drafts_result(session_ids: list[str] | None = None) -> MagicMock:
@@ -125,22 +175,19 @@ async def test_sidebar_sorts_pinned_and_project_chats() -> None:
     pin = MagicMock()
     pin.session_id = "ags_old"
 
-    projects_result = MagicMock()
-    projects_result.scalars.return_value.all.return_value = [proj]
-    pins_result = MagicMock()
-    pins_result.scalars.return_value.all.return_value = [pin]
-    pinned_sess = MagicMock()
-    pinned_sess.scalars.return_value.all.return_value = [older]
-    project_sess = MagicMock()
-    project_sess.scalars.return_value.all.return_value = [older, newer]
+    projects_result = _rows_result([proj])
+    pins_result = _rows_result([pin])
+    pinned_sess = _rows_result([older])
+    project_sess = _rows_result([older, newer])
     session.get = AsyncMock(return_value=sel)
-    # projects → pins → drafts → pinned sessions → project sessions
+    # projects → pins → drafts → pinned sessions → pods batch → project sessions
     session.execute = AsyncMock(
         side_effect=[
             projects_result,
             pins_result,
             _drafts_result(),
             pinned_sess,
+            _rows_result([]),
             project_sess,
         ]
     )
@@ -162,6 +209,13 @@ async def test_sidebar_sorts_pinned_and_project_chats() -> None:
     assert out["selected_project_id"] == "proj_1"
     assert [c["session_id"] for c in out["pinned"]] == ["ags_old"]
     assert [c["session_id"] for c in out["project_chats"]] == ["ags_new"]
+    # Tree: pinned chat stays inside its project branch, pinned first.
+    assert [g["project_id"] for g in out["projects"]] == ["proj_1"]
+    branch = out["projects"][0]
+    assert [c["session_id"] for c in branch["chats"]] == ["ags_old", "ags_new"]
+    assert branch["chats"][0]["pinned"] is True
+    assert branch["chats"][1]["pinned"] is False
+    assert branch["new_chat_enabled"] is True
 
 
 @pytest.mark.asyncio
@@ -171,15 +225,18 @@ async def test_sidebar_new_chat_disabled_unless_container_running() -> None:
     sel = MagicMock()
     sel.project_id = "proj_1"
     proj = _project(status="active")
-    projects_result = MagicMock()
-    projects_result.scalars.return_value.all.return_value = [proj]
-    pins_result = MagicMock()
-    pins_result.scalars.return_value.all.return_value = []
-    project_sess = MagicMock()
-    project_sess.scalars.return_value.all.return_value = []
+    projects_result = _rows_result([proj])
+    pins_result = _rows_result([])
+    project_sess = _rows_result([])
     session.get = AsyncMock(return_value=sel)
     session.execute = AsyncMock(
-        side_effect=[projects_result, pins_result, _drafts_result(), project_sess]
+        side_effect=[
+            projects_result,
+            pins_result,
+            _drafts_result(),
+            _rows_result([]),
+            project_sess,
+        ]
     )
 
     svc = ChatSidebarService(session)
@@ -196,6 +253,7 @@ async def test_sidebar_new_chat_disabled_unless_container_running() -> None:
 
     assert out["new_chat_enabled"] is False
     assert out["observed_state"] == "starting"
+    assert out["projects"][0]["new_chat_enabled"] is False
 
 
 @pytest.mark.asyncio
@@ -205,12 +263,9 @@ async def test_sidebar_new_chat_disabled_for_error_project() -> None:
     sel = MagicMock()
     sel.project_id = "proj_1"
     proj = _project(status="error")
-    projects_result = MagicMock()
-    projects_result.scalars.return_value.all.return_value = [proj]
-    pins_result = MagicMock()
-    pins_result.scalars.return_value.all.return_value = []
-    project_sess = MagicMock()
-    project_sess.scalars.return_value.all.return_value = []
+    projects_result = _rows_result([proj])
+    pins_result = _rows_result([])
+    project_sess = _rows_result([])
     session.get = AsyncMock(return_value=sel)
     session.execute = AsyncMock(
         side_effect=[projects_result, pins_result, _drafts_result(), project_sess]
@@ -222,6 +277,8 @@ async def test_sidebar_new_chat_disabled_for_error_project() -> None:
 
     assert out["new_chat_enabled"] is False
     assert out["observed_state"] is None
+    assert out["projects"][0]["status"] == "error"
+    assert out["projects"][0]["new_chat_enabled"] is False
 
 
 @pytest.mark.asyncio
@@ -306,12 +363,9 @@ async def test_sidebar_keeps_young_empty_shells_from_gc() -> None:
         last_message_at=None,
         created_at=datetime.now(tz=UTC) - (_EMPTY_SHELL_GC_GRACE * 2),
     )
-    projects_result = MagicMock()
-    projects_result.scalars.return_value.all.return_value = [proj]
-    pins_result = MagicMock()
-    pins_result.scalars.return_value.all.return_value = []
-    project_sess = MagicMock()
-    project_sess.scalars.return_value.all.return_value = [young, old]
+    projects_result = _rows_result([proj])
+    pins_result = _rows_result([])
+    project_sess = _rows_result([young, old])
     no_events = MagicMock()
     no_events.scalar_one_or_none.return_value = None
     session.get = AsyncMock(return_value=sel)
@@ -320,6 +374,7 @@ async def test_sidebar_keeps_young_empty_shells_from_gc() -> None:
             projects_result,
             pins_result,
             _drafts_result(),
+            _rows_result([]),
             project_sess,
             no_events,  # event check for old empty shell
         ]
@@ -339,6 +394,7 @@ async def test_sidebar_keeps_young_empty_shells_from_gc() -> None:
         out = await svc.sidebar(cabinet_id="cab_1", principal=_principal(), employee=emp)
 
     assert out["project_chats"] == []
+    assert out["projects"][0]["chats"] == []
     deleted_ids = [c.args[0].id for c in session.delete.await_args_list]
     assert "ags_old_empty" in deleted_ids
     assert "ags_young" not in deleted_ids
@@ -369,3 +425,222 @@ def test_touch_session_sets_title_once() -> None:
     _touch_session_activity(row, text="Second message should not rename")
     assert row.title == "Hello world"
     assert row.last_message_at >= first_at
+
+
+@pytest.mark.asyncio
+async def test_sidebar_projects_tree_contains_all_cabinet_projects() -> None:
+    """Tree has one branch per alive project — not only the selected one."""
+    session = AsyncMock()
+    emp = _employee()
+    sel = MagicMock()
+    sel.project_id = "proj_1"
+    proj1 = _project(pid="proj_1", name="Alpha")
+    proj2 = _project(pid="proj_2", name="Beta", status="paused")
+    deleted = _project(pid="proj_del", name="Gone", status="deleted")
+
+    chat1 = _session_row(
+        sid="ags_1",
+        project_id="proj_1",
+        title="A1",
+        last_message_at=datetime(2026, 6, 1, tzinfo=UTC),
+        created_at=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+    chat2 = _session_row(
+        sid="ags_2",
+        project_id="proj_2",
+        title="B1",
+        last_message_at=datetime(2026, 5, 1, tzinfo=UTC),
+        created_at=datetime(2026, 5, 1, tzinfo=UTC),
+    )
+
+    session.get = AsyncMock(return_value=sel)
+    session.execute = AsyncMock(
+        side_effect=[
+            _rows_result([proj1, proj2, deleted]),  # projects
+            _rows_result([]),  # pins
+            _drafts_result(),  # drafts
+            _rows_result([]),  # pods batch
+            _rows_result([chat1, chat2]),  # sessions of all projects
+        ]
+    )
+
+    svc = ChatSidebarService(session)
+    with (
+        patch.object(svc._cabinets, "require_access", new=AsyncMock()),
+        patch(
+            "prodavan.application.agent.chat_sidebar_service.PodQuery"
+        ) as pod_cls,
+    ):
+        pod_cls.return_value.runtime_view = AsyncMock(
+            return_value={"observed_state": "running"}
+        )
+        out = await svc.sidebar(cabinet_id="cab_1", principal=_principal(), employee=emp)
+
+    # Branches: all alive projects, alphabetically, soft-deleted skipped.
+    assert [g["project_id"] for g in out["projects"]] == ["proj_1", "proj_2"]
+    by_id = {g["project_id"]: g for g in out["projects"]}
+    assert by_id["proj_1"]["project_name"] == "Alpha"
+    assert by_id["proj_1"]["status"] == "active"
+    assert by_id["proj_2"]["status"] == "paused"
+    assert by_id["proj_2"]["new_chat_enabled"] is False
+    assert [c["session_id"] for c in by_id["proj_1"]["chats"]] == ["ags_1"]
+    assert [c["session_id"] for c in by_id["proj_2"]["chats"]] == ["ags_2"]
+    # Legacy fields keep their old shape.
+    assert out["project_ids_in_cabinet"] == ["proj_1", "proj_2", "proj_del"]
+    assert [c["session_id"] for c in out["project_chats"]] == ["ags_1"]
+    assert out["pinned"] == []
+
+
+@pytest.mark.asyncio
+async def test_sidebar_branch_sorts_pinned_first_then_recency() -> None:
+    """Within a branch: pinned chats first (recency), then the rest by recency."""
+    session = AsyncMock()
+    emp = _employee()
+    sel = MagicMock()
+    sel.project_id = "proj_1"
+    proj = _project()
+    pinned_chat = _session_row(
+        sid="ags_pin",
+        project_id="proj_1",
+        title="Pinned",
+        last_message_at=datetime(2026, 1, 1, tzinfo=UTC),
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    newer = _session_row(
+        sid="ags_new",
+        project_id="proj_1",
+        title="New",
+        last_message_at=datetime(2026, 6, 1, tzinfo=UTC),
+        created_at=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+    older = _session_row(
+        sid="ags_mid",
+        project_id="proj_1",
+        title="Mid",
+        last_message_at=datetime(2026, 3, 1, tzinfo=UTC),
+        created_at=datetime(2026, 3, 1, tzinfo=UTC),
+    )
+    pin = MagicMock()
+    pin.session_id = "ags_pin"
+
+    session.get = AsyncMock(return_value=sel)
+    session.execute = AsyncMock(
+        side_effect=[
+            _rows_result([proj]),  # projects
+            _rows_result([pin]),  # pins
+            _drafts_result(),  # drafts
+            _rows_result([pinned_chat]),  # pinned sessions
+            _rows_result([]),  # pods batch
+            _rows_result([pinned_chat, newer, older]),  # sessions
+        ]
+    )
+
+    svc = ChatSidebarService(session)
+    with (
+        patch.object(svc._cabinets, "require_access", new=AsyncMock()),
+        patch(
+            "prodavan.application.agent.chat_sidebar_service.PodQuery"
+        ) as pod_cls,
+    ):
+        pod_cls.return_value.runtime_view = AsyncMock(
+            return_value={"observed_state": "running"}
+        )
+        out = await svc.sidebar(cabinet_id="cab_1", principal=_principal(), employee=emp)
+
+    branch = out["projects"][0]
+    assert [c["session_id"] for c in branch["chats"]] == ["ags_pin", "ags_new", "ags_mid"]
+    assert branch["chats"][0]["pinned"] is True
+    # Pinned chat is NOT removed from its project branch…
+    assert any(c["session_id"] == "ags_pin" for c in branch["chats"])
+    # …while the legacy project_chats field still excludes pins.
+    assert [c["session_id"] for c in out["project_chats"]] == ["ags_new", "ags_mid"]
+    assert [c["session_id"] for c in out["pinned"]] == ["ags_pin"]
+
+
+@pytest.mark.asyncio
+async def test_sidebar_branch_new_chat_requires_active_and_running_pod() -> None:
+    """Per-branch new_chat_enabled: active project + running container only."""
+    session = AsyncMock()
+    emp = _employee()
+    sel = MagicMock()
+    sel.project_id = "proj_sel"
+    projects = [
+        _project(pid="proj_sel", name="Sel"),
+        _project(pid="proj_ok", name="Ok"),
+        _project(pid="proj_paused", name="Paused", status="paused"),
+        _project(pid="proj_prov", name="Prov"),
+        _project(pid="proj_nopod", name="NoPod"),
+    ]
+
+    session.get = AsyncMock(return_value=sel)
+    session.execute = AsyncMock(
+        side_effect=[
+            _rows_result(projects),  # projects
+            _rows_result([]),  # pins
+            _drafts_result(),  # drafts
+            _rows_result(
+                [
+                    _pod_row(project_id="proj_sel"),
+                    _pod_row(project_id="proj_ok"),
+                    _pod_row(project_id="proj_prov", status="provisioning"),
+                ]
+            ),  # pods batch (no live pod for proj_nopod)
+            _rows_result([]),  # sessions
+        ]
+    )
+
+    svc = ChatSidebarService(session)
+    with (
+        patch.object(svc._cabinets, "require_access", new=AsyncMock()),
+        patch(
+            "prodavan.application.agent.chat_sidebar_service.PodQuery"
+        ) as pod_cls,
+    ):
+        pod_cls.return_value.runtime_view = AsyncMock(
+            return_value={"observed_state": "running"}
+        )
+        out = await svc.sidebar(cabinet_id="cab_1", principal=_principal(), employee=emp)
+
+    by_id = {g["project_id"]: g for g in out["projects"]}
+    assert by_id["proj_sel"]["new_chat_enabled"] is True  # active + observed running
+    assert by_id["proj_ok"]["new_chat_enabled"] is True  # active + live pod running
+    assert by_id["proj_paused"]["new_chat_enabled"] is False  # paused project
+    assert by_id["proj_prov"]["new_chat_enabled"] is False  # pod not running yet
+    assert by_id["proj_nopod"]["new_chat_enabled"] is False  # no live pod row
+    # Global gate mirrors the selected project.
+    assert out["new_chat_enabled"] is True
+
+
+@pytest.mark.asyncio
+async def test_sidebar_selected_project_absent_keeps_tree() -> None:
+    """No selection (or selection outside the cabinet) — tree still lists projects."""
+    session = AsyncMock()
+    emp = _employee()
+    proj = _project(pid="proj_1", name="Alpha")
+    chat = _session_row(
+        sid="ags_1",
+        project_id="proj_1",
+        title="A1",
+        last_message_at=datetime(2026, 6, 1, tzinfo=UTC),
+        created_at=datetime(2026, 6, 1, tzinfo=UTC),
+    )
+    session.get = AsyncMock(return_value=None)
+    session.execute = AsyncMock(
+        side_effect=[
+            _rows_result([proj]),  # projects
+            _rows_result([]),  # pins
+            _drafts_result(),  # drafts
+            _rows_result([]),  # pods batch
+            _rows_result([chat]),  # sessions
+        ]
+    )
+
+    svc = ChatSidebarService(session)
+    with patch.object(svc._cabinets, "require_access", new=AsyncMock()):
+        out = await svc.sidebar(cabinet_id="cab_1", principal=_principal(), employee=emp)
+
+    assert out["selected_project_id"] is None
+    assert out["new_chat_enabled"] is False
+    assert [c["session_id"] for c in out["projects"][0]["chats"]] == ["ags_1"]
+    assert out["project_chats"] == []
+    assert out["projects"][0]["new_chat_enabled"] is False

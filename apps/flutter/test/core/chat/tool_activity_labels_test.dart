@@ -175,4 +175,33 @@ void main() {
       expect(result.label, endsWith('…'));
     });
   });
+
+  group('parseDiffStats', () {
+    test('gated: grep-like output without diff markers → null', () {
+      // Grep hits and notes may start lines with '+'/'-' but are not diffs.
+      expect(parseDiffStats('src/a.dart:42: +foo\nsrc/b.dart:1: -bar'), isNull);
+      expect(parseDiffStats('+hello\n-world'), isNull);
+      expect(parseDiffStats('random notes\n+1\n-2'), isNull);
+    });
+
+    test('unified diff with hunk marker counts +/- lines', () {
+      final stats = parseDiffStats(
+        '--- a/f.py\n+++ b/f.py\n@@ -1,2 +1,3 @@\n+added\n-removed\n context',
+      );
+      expect(stats?.added, 1);
+      expect(stats?.removed, 1);
+    });
+
+    test('diff --git header is enough to gate in', () {
+      final stats = parseDiffStats('diff --git a/x b/x\n+new line');
+      expect(stats?.added, 1);
+      expect(stats?.removed, 0);
+    });
+
+    test('structural map payloads bypass the gate', () {
+      final stats = parseDiffStats({'lines_added': 2, 'lines_removed': 1});
+      expect(stats?.added, 2);
+      expect(stats?.removed, 1);
+    });
+  });
 }

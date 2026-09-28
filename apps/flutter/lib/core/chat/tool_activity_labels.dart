@@ -176,6 +176,18 @@ String? _listPathsFrom(Object? value) {
   }
   final text = (unwrapped ?? output).toString();
   if (text.isEmpty) return null;
+  // Only count +/- lines when the output actually is a diff: text that merely
+  // starts lines with '+'/'-' (grep hits, notes, random output) must not
+  // produce fake ± badges. Require a hunk marker or diff/file headers.
+  var hasDiffStructure = false;
+  for (final line in text.split('\n')) {
+    final t = line.trimLeft();
+    if (t.startsWith('@@') || t.startsWith('diff --git') || t.startsWith('+++') || t.startsWith('---')) {
+      hasDiffStructure = true;
+      break;
+    }
+  }
+  if (!hasDiffStructure) return null;
   var added = 0;
   var removed = 0;
   for (final line in text.split('\n')) {

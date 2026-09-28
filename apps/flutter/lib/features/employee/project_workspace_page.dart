@@ -13,8 +13,8 @@ import 'package:prodavan/core/widgets/app_error_presenter.dart';
 import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_snack_bar.dart';
 import 'package:prodavan/features/employee/agent_chat_errors.dart';
-import 'package:prodavan/features/employee/cabinet_project_settings_page.dart';
 import 'package:prodavan/features/employee/project_chat_settings_page.dart';
+import 'package:prodavan/features/employee/widgets/chat_model_picker_sheet.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
 /// Project agent workspace — [sessionId] null = pending «Новый диалог».
@@ -56,6 +56,10 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
   late String _title;
   late bool _pinned;
   late String? _sessionId;
+
+  /// Set when the user picked a model explicitly — the session model restore
+  /// (first load) must not override an explicit choice.
+  bool _userPickedModel = false;
 
   bool get _hasSession => _sessionId != null && _sessionId!.isNotEmpty;
 
@@ -119,6 +123,7 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
       if (_chatSendable) {
         unawaited(_chat.loadModels());
       }
+      unawaited(_restoreSessionModel());
     } catch (e) {
       if (mounted) showAgentChatSnack(context, e);
     } finally {
@@ -249,11 +254,22 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
           sessionId: _sessionId ?? '',
           title: _title,
           pinned: _pinned,
+          cabinetId: widget.cabinetId,
           onTitleChanged: (v) {
             if (mounted) setState(() => _title = v);
           },
           onPinnedChanged: (v) {
             if (mounted) setState(() => _pinned = v);
+          },
+          onProjectSettingsClosed: () {
+            // Project-level settings may change chat readability / sendability.
+            unawaited(_refreshProjectFlags());
+            if (_chatReadable) {
+              unawaited(_chat.loadTranscript());
+              if (_chatSendable) {
+                unawaited(_chat.loadModels());
+              }
+            }
           },
         ),
       ),
@@ -263,23 +279,44 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
     }
   }
 
-  Future<void> _openSettings() async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => CabinetProjectSettingsPage(
-          cabinetId: widget.cabinetId,
-          projectId: widget.projectId,
-        ),
-      ),
+  /// Composer pill: quick model switch via bottom sheet. An explicit user
+  /// pick wins over the session's stored model ([_restoreSessionModel]).
+  Future<void> _pickModelQuick() async {
+    if (_chat.streaming) return;
+    final picked = await showChatModelPickerSheet(
+      context,
+      models: _chat.availableModels,
+      selectedModelId: _chat.selectedModel ?? _chat.defaultModel,
+      defaultModelId: _chat.defaultModel,
+      enabled: true,
     );
-    await _refreshProjectFlags();
-    if (_chatReadable) {
-      await _chat.loadTranscript();
-      if (_chatSendable) {
-        unawaited(_chat.loadModels());
-      }
+    if (picked == null || !mounted) return;
+    setState(() {
+      _userPickedModel = true;
+      _chat.selectedModel = picked;
+      _chat.notifyImmediate();
+    });
+  }
+
+  /// Best-effort: apply the session's persisted model once after the initial
+  /// load. Skipped when the user already picked a model explicitly.
+  Future<void> _restoreSessionModel() async {
+    if (!_hasSession || _userPickedModel) return;
+    try {
+      final body = await workContext.api.getAgentSession(
+        projectId: widget.projectId,
+        sessionId: _sessionId!,
+      );
+      if (!mounted) return;
+      final model = (body['model'] as String? ?? '').trim();
+      if (model.isEmpty || model == _chat.selectedModel) return;
+      setState(() {
+        _chat.selectedModel = model;
+        _chat.notifyImmediate();
+      });
+    } catch (_) {
+      // Model restore is best-effort.
     }
-    if (mounted) setState(() {});
   }
 
   String get _displayTitle {
@@ -367,11 +404,6 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
               }
             },
           ),
-          IconButton(
-            icon: const Icon(Icons.settings_outlined),
-            tooltip: l10n.projectProjectSettings,
-            onPressed: _openSettings,
-          ),
         ],
       ],
       body: !showChat
@@ -393,6 +425,9 @@ class _ProjectWorkspacePageState extends State<ProjectWorkspacePage> {
               onDismissUpdate: needsUpdate && !_updating ? _dismissWorkspaceUpdate : null,
               title: Text(_displayTitle),
               onOpenChatSettings: _openChatSettings,
+              modelLabel: _chat.selectedModelLabel,
+              onPickModel:
+                  (_chatSendable && !needsUpdate) ? _pickModelQuick : null,
               onSessionMaterialized: _onSessionMaterialized,
               onDraftPresenceChanged: widget.onDraftPresenceChanged,
             ),

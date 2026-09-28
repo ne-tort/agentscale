@@ -1867,21 +1867,6 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
-  String get projectChatUsage => 'Usage';
-
-  @override
-  String get projectChatUsageInputTokens => 'Input tokens';
-
-  @override
-  String get projectChatUsageOutputTokens => 'Output tokens';
-
-  @override
-  String get projectChatUsageTotalTokens => 'Total tokens';
-
-  @override
-  String get projectChatUsageCost => 'Cost';
-
-  @override
   String get projectChatSettingsTitle => 'Chat settings';
 
   @override
@@ -2026,6 +2011,32 @@ class AppLocalizationsEn extends AppLocalizations {
   String projectChatWorked(int count) {
     return 'Worked · $count actions';
   }
+
+  @override
+  String get projectChatAgentWorking => 'agentscale is working…';
+
+  @override
+  String get chatCopyMessage => 'Copy reply';
+
+  @override
+  String get chatCopiedMessage => 'Copied';
+
+  @override
+  String get chatUsageInputLabel => 'input:';
+
+  @override
+  String get chatUsageOutputLabel => 'output:';
+
+  @override
+  String chatModelPricePerMtok(String priceIn, String priceOut) {
+    return '$priceIn / $priceOut \$ · 1M tokens';
+  }
+
+  @override
+  String get chatModelDefaultLabel => 'Default';
+
+  @override
+  String get chatModelPickerEmpty => 'No models available';
 
   @override
   String get projectChatToolReadFile => 'Read file';

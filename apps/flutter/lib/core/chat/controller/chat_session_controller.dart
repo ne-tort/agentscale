@@ -76,6 +76,55 @@ class ChatSessionController {
   final _tick = StreamController<void>.broadcast();
   Timer? _notifyTimer;
 
+  /// Last tool call of the live turn that has no matching tool result yet.
+  bool get hasPendingToolCall {
+    var lastCallIdx = -1;
+    for (var i = 0; i < _liveTurnBlocks.length; i++) {
+      if (_liveTurnBlocks[i].kind == 'tool_call') lastCallIdx = i;
+    }
+    if (lastCallIdx < 0) return false;
+    final callId = _liveTurnBlocks[lastCallIdx].id;
+    if (callId.isEmpty) return true;
+    return !_liveTurnBlocks.any((b) => b.kind == 'tool_result' && b.id == callId);
+  }
+
+  /// Any live block is actively streaming (text/thinking deltas arriving).
+  bool get anyBlockStreaming => _liveTurnBlocks.any((b) => b.isStreaming);
+
+  /// "agentscale работает…" — the turn is streaming but the agent is silent
+  /// (right after send, between events): show the working indicator so the
+  /// user sees the agent did not stop.
+  bool get showWorkingIndicator => streaming && !anyBlockStreaming && !hasPendingToolCall;
+
+  /// UI-side cost estimate for usage metadata: runtime `cost_usd` wins, this
+  /// only computes from the models catalog when the runtime did not report.
+  double? usageCostUsd(String? model, int? inputTokens, int? outputTokens) {
+    if (model == null || model.isEmpty) return null;
+    if (inputTokens == null && outputTokens == null) return null;
+    Map<String, dynamic>? entry;
+    for (final m in availableModels) {
+      final id = m['id'] as String?;
+      final label = m['label'] as String?;
+      if (id == model || label == model) {
+        entry = m;
+        break;
+      }
+    }
+    if (entry == null) return null;
+    double? price(Object? raw) {
+      if (raw is num) return raw.toDouble();
+      return num.tryParse('$raw')?.toDouble();
+    }
+
+    final inPrice = price(entry['input_price_usd_per_mtok']);
+    final outPrice = price(entry['output_price_usd_per_mtok']);
+    if (inPrice == null && outPrice == null) return null;
+    var cost = 0.0;
+    if (inPrice != null && inputTokens != null) cost += (inputTokens / 1e6) * inPrice;
+    if (outPrice != null && outputTokens != null) cost += (outputTokens / 1e6) * outPrice;
+    return cost;
+  }
+
   /// Set when a live turn is interrupted by a connection drop (SSE break):
   /// the composer listens and restores the user text as an editable draft
   /// instead of losing the message.
@@ -261,13 +310,10 @@ class ChatSessionController {
       }
     }
 
-    final userBlock = ChatBlock(
-      kind: 'user',
-      raw: {
-        'text': trimmed,
-        if (attachmentRefs.isNotEmpty) 'attachment_refs': attachmentRefs,
-      },
-    );
+    final userBlock = createLiveBlock('user', {
+      'text': trimmed,
+      if (attachmentRefs.isNotEmpty) 'attachment_refs': attachmentRefs,
+    });
     _liveTurnBlocks = [userBlock];
     notifyImmediate();
 
@@ -315,7 +361,7 @@ class ChatSessionController {
           }
           final pending = data['pending_approvals'];
           if (pending is List) pendingApprovals = pending.cast<Map<String, dynamic>>();
-          _liveTurnBlocks = finalizeTurnBlocks(_liveTurnBlocks);
+          _liveTurnBlocks = attachUsageToAssistant(finalizeTurnBlocks(_liveTurnBlocks));
         } else if (type == '_error' && data is Map<String, dynamic>) {
           error = ProdavanApiException(
             data['status'] is int ? data['status'] as int : 503,
@@ -373,7 +419,7 @@ class ChatSessionController {
         error = _bridgeTimeoutError();
         _finalizeInterruptedTurn(trimmed);
       } else {
-        blocks.addAll(_liveTurnBlocks);
+        blocks.addAll(attachUsageToAssistant(_liveTurnBlocks));
         _liveTurnBlocks = const [];
         if (pendingApprovals.isEmpty) {
           pendingApprovals = await _fetchPending();
@@ -401,7 +447,7 @@ class ChatSessionController {
   /// as an editable draft.
   void _finalizeInterruptedTurn(String userText) {
     if (_liveTurnBlocks.isNotEmpty) {
-      _liveTurnBlocks = finalizeTurnBlocks(_liveTurnBlocks, interrupted: true);
+      _liveTurnBlocks = attachUsageToAssistant(finalizeTurnBlocks(_liveTurnBlocks, interrupted: true));
       blocks.addAll(_liveTurnBlocks);
       _liveTurnBlocks = const [];
       _saveToCache();
@@ -415,7 +461,7 @@ class ChatSessionController {
 
   Future<void> cancelStream() async {
     _handle?.abort();
-    _liveTurnBlocks = finalizeTurnBlocks(_liveTurnBlocks, cancelled: true);
+    _liveTurnBlocks = attachUsageToAssistant(finalizeTurnBlocks(_liveTurnBlocks, cancelled: true));
     blocks.addAll(_liveTurnBlocks);
     _liveTurnBlocks = const [];
     streaming = false;

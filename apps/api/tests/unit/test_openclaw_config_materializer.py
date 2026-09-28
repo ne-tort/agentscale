@@ -163,6 +163,38 @@ def test_mcp_allowlist_on_config() -> None:
     assert cfg["mcp"]["allow_servers"] == ["echo", "github"]
 
 
+def test_build_openclaw_config_agents_block_canonical_names() -> None:
+    # Unified MCP-only loop pool: subagent profiles use canonical
+    # `mcp.openclaw.*` names; `default` omits tools → full parent-pool
+    # inheritance (external MCP servers included).
+    cfg = build_openclaw_config(
+        company_policy=CompanyAgentRuntimePolicy(tool_preset="workspace_dev"),
+    )
+    agents = cfg["agents"]
+    assert agents["default"]["description"]
+    assert "tools" not in agents["default"]
+    assert set(agents["readonly"]["tools"]) == {
+        "mcp.openclaw.fs.read",
+        "mcp.openclaw.fs.list",
+        "mcp.openclaw.search.grep",
+        "mcp.openclaw.search.glob",
+    }
+    assert "mcp.openclaw.fs.write" in agents["implement"]["tools"]
+    assert "mcp.openclaw.fs.edit" in agents["implement"]["tools"]
+
+
+def test_build_openclaw_config_agents_implement_drops_denied_writes() -> None:
+    # chat_readonly denies fs.write via the permissions deny list — the
+    # implement profile must degrade to the readonly tool set.
+    cfg = build_openclaw_config(
+        company_policy=CompanyAgentRuntimePolicy(tool_preset="chat_readonly"),
+    )
+    agents = cfg["agents"]
+    assert "mcp.openclaw.fs.write" not in agents["implement"]["tools"]
+    assert "mcp.openclaw.fs.edit" not in agents["implement"]["tools"]
+    assert set(agents["implement"]["tools"]) == set(agents["readonly"]["tools"])
+
+
 def test_provider_to_default_api_kind() -> None:
     assert provider_to_default_api_kind("cursor") == "cursor_sdk"
     assert provider_to_default_api_kind("codex") == "codex_sdk"

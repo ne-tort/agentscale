@@ -121,6 +121,35 @@ def tool_policy_to_permissions(policy: AgentToolPolicy) -> dict[str, Any]:
     return perms
 
 
+def subagent_profiles_from_permissions(perms: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Subagent profiles for the OpenClaw ``agents`` block (canonical names).
+
+    The loop pool is MCP-only: built-ins reach subagents as
+    ``mcp.openclaw.<bare>`` and external servers as ``mcp.<server>.<tool>``.
+    ``default`` omits ``tools`` so it inherits the full parent pool (minus
+    agent.spawn), external MCP servers included. ``implement`` drops
+    write/edit when the permissions block already denies them (plan-mode /
+    no-write presets) — mirroring the deny wiring above.
+    """
+    deny: set[str] = set(perms.get("deny") or ())
+    implement_tools = list(_READ_TOOLS)
+    if not deny.intersection(_WRITE_TOOLS):
+        implement_tools += list(_WRITE_TOOLS)
+    return {
+        "default": {
+            "description": "General-purpose subagent — inherits the parent tool pool",
+        },
+        "readonly": {
+            "description": "Read-only codebase exploration",
+            "tools": list(_READ_TOOLS),
+        },
+        "implement": {
+            "description": "Read/write workspace files",
+            "tools": implement_tools,
+        },
+    }
+
+
 def filter_mcp_packages_by_policy(
     packages: list[dict[str, Any]],
     policy: AgentToolPolicy,
@@ -168,14 +197,18 @@ def build_openclaw_config(
     policy = tool_policy or default_tool_policy(company_policy.tool_preset)
     adapter = api_kind_to_bridge_adapter(api_kind)
     runtime_adapter = adapter if adapter != "platform_openclaw" else "platform_openclaw"
+    perms = tool_policy_to_permissions(policy)
 
     cfg: dict[str, Any] = {
         "version": 1,
         "runtime": {
             "adapter": runtime_adapter,
         },
-        "permissions": tool_policy_to_permissions(policy),
+        "permissions": perms,
         "tools": {"built_in": True, "mcp": policy.mcp != "deny"},
+        # Subagent profiles — canonical `mcp.*` names; `default` has no tools
+        # list → inherits the parent pool (incl. external MCP servers).
+        "agents": subagent_profiles_from_permissions(perms),
         # Context compaction — tool-heavy agent work (15+ MCP calls/run)
         # generates many assistant+tool messages. Default pipeline limits
         # (max_messages=32, keep_recent=6, auto_compact=96k chars) drop

@@ -4,14 +4,46 @@
 /// - rows glued into one line (`|| a | b || |---| || c | d ||`)
 /// - double-pipe row wrappers (`|| … ||` → `| … |`)
 /// - missing separator row after a header
+///
+/// Fenced code blocks (``` / ~~~) are never touched — normalization must not
+/// rewrite code samples, no matter how pipe-rich they look.
 String normalizeChatMarkdownTables(String source) {
   if (!source.contains('|')) return source;
 
   final lines = <String>[];
+  final fenced = <bool>[];
+  final fenceRe = RegExp(r'^\s{0,3}(`{3,}|~{3,})');
+  var fenceMarker = '';
+  var fenceLen = 0;
   for (final line in source.split('\n')) {
-    lines.addAll(_expandPossiblyGluedTableLine(line));
+    final m = fenceRe.firstMatch(line);
+    if (m != null) {
+      final marker = m.group(1)![0];
+      final len = m.group(1)!.length;
+      final rest = line.substring(m.end).trim();
+      if (fenceMarker.isEmpty) {
+        fenceMarker = marker;
+        fenceLen = len;
+      } else if (marker == fenceMarker && len >= fenceLen && rest.isEmpty) {
+        // Closing fence: same marker, at least as long, nothing after it.
+        fenceMarker = '';
+      }
+      lines.add(line);
+      fenced.add(true);
+      continue;
+    }
+    if (fenceMarker.isEmpty) {
+      final expanded = _expandPossiblyGluedTableLine(line);
+      lines.addAll(expanded);
+      for (var k = 0; k < expanded.length; k++) {
+        fenced.add(false);
+      }
+    } else {
+      lines.add(line);
+      fenced.add(true);
+    }
   }
-  return _ensureTableSeparators(lines).join('\n');
+  return _ensureTableSeparators(lines, fenced).join('\n');
 }
 
 final _separatorRowRe = RegExp(
@@ -118,15 +150,19 @@ String _normalizeTableRow(String row) {
   return r;
 }
 
-List<String> _ensureTableSeparators(List<String> lines) {
+List<String> _ensureTableSeparators(List<String> lines, List<bool> fenced) {
   if (lines.length < 2) return lines;
   final out = <String>[];
   for (var i = 0; i < lines.length; i++) {
     final cur = lines[i];
+    final curFenced = i < fenced.length ? fenced[i] : false;
     out.add(cur);
+    if (curFenced) continue;
     if (!_looksLikeTableRow(cur) || _looksLikeSeparator(cur)) continue;
     if (i + 1 >= lines.length) continue;
     final next = lines[i + 1];
+    final nextFenced = i + 1 < fenced.length ? fenced[i + 1] : false;
+    if (nextFenced) continue;
     if (!_looksLikeTableRow(next) || _looksLikeSeparator(next)) continue;
     // Only between first header row and following body when separator is missing.
     final prev = out.length >= 2 ? out[out.length - 2] : null;

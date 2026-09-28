@@ -11,6 +11,7 @@ import 'package:prodavan/core/widgets/app_scaffold.dart';
 import 'package:prodavan/core/widgets/app_status_banner.dart';
 import 'package:prodavan/core/widgets/app_trailing_chevron.dart';
 import 'package:prodavan/core/widgets/session_metrics_wrap.dart';
+import 'package:prodavan/features/employee/cabinet_project_settings_page.dart';
 import 'package:prodavan/features/employee/project_chat_model_select_page.dart';
 import 'package:prodavan/l10n/app_localizations.dart';
 
@@ -25,6 +26,8 @@ class ProjectChatSettingsPage extends StatefulWidget {
     required this.pinned,
     this.agentTokensUsed,
     this.agentRequests,
+    this.cabinetId,
+    this.onProjectSettingsClosed,
     required this.onTitleChanged,
     required this.onPinnedChanged,
   });
@@ -37,6 +40,13 @@ class ProjectChatSettingsPage extends StatefulWidget {
   final bool pinned;
   final Object? agentTokensUsed;
   final Object? agentRequests;
+
+  /// When set, chat settings embeds a «Настройки проекта» hub tile.
+  final String? cabinetId;
+
+  /// Fired after the embedded project settings page pops — the host refreshes
+  /// chat readability / transcript / model catalog.
+  final VoidCallback? onProjectSettingsClosed;
   final ValueChanged<String> onTitleChanged;
   final ValueChanged<bool> onPinnedChanged;
 
@@ -104,6 +114,24 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
     controller.selectedModel = picked;
     controller.notifyImmediate();
     setState(() {});
+  }
+
+  /// Project-level settings hub (moved here from the workspace AppBar):
+  /// push the full [CabinetProjectSettingsPage], then let the host refresh
+  /// chat state via [widget.onProjectSettingsClosed].
+  Future<void> _openProjectSettings() async {
+    final cabinetId = widget.cabinetId;
+    if (cabinetId == null) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => CabinetProjectSettingsPage(
+          cabinetId: cabinetId,
+          projectId: widget.projectId,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    widget.onProjectSettingsClosed?.call();
   }
 
   Future<void> _saveTitle(String value) async {
@@ -183,6 +211,12 @@ class _ProjectChatSettingsPageState extends State<ProjectChatSettingsPage> {
             enabled: enabled,
             onChanged: _setPinned,
           ),
+          if (widget.cabinetId != null)
+            AppNavPreference(
+              title: l10n.projectProjectSettings,
+              icon: Icons.settings_outlined,
+              onTap: _openProjectSettings,
+            ),
           if (controller != null)
             AppPreferenceTile(
               title: l10n.projectChatModelLabel,

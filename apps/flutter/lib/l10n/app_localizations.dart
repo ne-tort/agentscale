@@ -3380,36 +3380,6 @@ abstract class AppLocalizations {
   /// **'Reasoned for {duration}'**
   String projectChatReasonedPast(String duration);
 
-  /// No description provided for @projectChatUsage.
-  ///
-  /// In en, this message translates to:
-  /// **'Usage'**
-  String get projectChatUsage;
-
-  /// No description provided for @projectChatUsageInputTokens.
-  ///
-  /// In en, this message translates to:
-  /// **'Input tokens'**
-  String get projectChatUsageInputTokens;
-
-  /// No description provided for @projectChatUsageOutputTokens.
-  ///
-  /// In en, this message translates to:
-  /// **'Output tokens'**
-  String get projectChatUsageOutputTokens;
-
-  /// No description provided for @projectChatUsageTotalTokens.
-  ///
-  /// In en, this message translates to:
-  /// **'Total tokens'**
-  String get projectChatUsageTotalTokens;
-
-  /// No description provided for @projectChatUsageCost.
-  ///
-  /// In en, this message translates to:
-  /// **'Cost'**
-  String get projectChatUsageCost;
-
   /// No description provided for @projectChatSettingsTitle.
   ///
   /// In en, this message translates to:
@@ -3613,6 +3583,54 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Worked · {count} actions'**
   String projectChatWorked(int count);
+
+  /// No description provided for @projectChatAgentWorking.
+  ///
+  /// In en, this message translates to:
+  /// **'agentscale is working…'**
+  String get projectChatAgentWorking;
+
+  /// No description provided for @chatCopyMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy reply'**
+  String get chatCopyMessage;
+
+  /// No description provided for @chatCopiedMessage.
+  ///
+  /// In en, this message translates to:
+  /// **'Copied'**
+  String get chatCopiedMessage;
+
+  /// No description provided for @chatUsageInputLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'input:'**
+  String get chatUsageInputLabel;
+
+  /// No description provided for @chatUsageOutputLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'output:'**
+  String get chatUsageOutputLabel;
+
+  /// No description provided for @chatModelPricePerMtok.
+  ///
+  /// In en, this message translates to:
+  /// **'{priceIn} / {priceOut} \$ · 1M tokens'**
+  String chatModelPricePerMtok(String priceIn, String priceOut);
+
+  /// No description provided for @chatModelDefaultLabel.
+  ///
+  /// In en, this message translates to:
+  /// **'Default'**
+  String get chatModelDefaultLabel;
+
+  /// No description provided for @chatModelPickerEmpty.
+  ///
+  /// In en, this message translates to:
+  /// **'No models available'**
+  String get chatModelPickerEmpty;
 
   /// No description provided for @projectChatToolReadFile.
   ///

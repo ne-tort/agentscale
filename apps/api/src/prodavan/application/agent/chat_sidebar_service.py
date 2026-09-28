@@ -12,6 +12,8 @@ from prodavan.application.cabinets.access import CabinetAccessService
 from prodavan.application.pod_service.query import PodQuery
 from prodavan.domain.errors import AppError
 from prodavan.domain.identity import Principal
+from prodavan.domain.pods import POD_TERMINAL_STATUSES, PodDesiredState, PodStatus
+from prodavan.domain.projects import ProjectStatus
 from prodavan.infrastructure.persistence.models.agent import (
     AgentEventRow,
     AgentSessionRow,
@@ -19,7 +21,7 @@ from prodavan.infrastructure.persistence.models.agent import (
     EmployeeProjectSelectionRow,
 )
 from prodavan.infrastructure.persistence.models.identity import EmployeeRow
-from prodavan.infrastructure.persistence.models.projects import ProjectRow
+from prodavan.infrastructure.persistence.models.projects import ProjectPodRow, ProjectRow
 
 # Keep brand-new empty shells (settings open / mid-send) so sidebar GC cannot
 # delete them before the first user message lands — that caused 404 on send.
@@ -52,6 +54,33 @@ def _chat_item(row: AgentSessionRow, *, project_name: str, pinned: bool, has_dra
 
 def _sort_key(row: AgentSessionRow) -> datetime:
     return row.last_message_at or row.created_at or datetime.min.replace(tzinfo=UTC)
+
+
+def _split_visible(
+    rows: list[AgentSessionRow],
+    *,
+    pinned_ids: set[str],
+    draft_ids: set[str],
+    now: datetime,
+) -> tuple[list[AgentSessionRow], list[AgentSessionRow]]:
+    """Split project sessions into visible chats and abandoned empty shells.
+
+    Visibility: empty shells (no messages, no draft) are hidden; abandoned ones
+    past the grace window are returned for GC. Pinned shells mirror the pinned
+    list rule — hidden, but never GC'd from the sidebar.
+    """
+    visible: list[AgentSessionRow] = []
+    to_gc: list[AgentSessionRow] = []
+    for r in rows:
+        has_draft = r.id in draft_ids
+        has_messages = r.last_message_at is not None
+        if not has_messages and not has_draft:
+            # Hide empty shells; only GC abandoned ones past the grace window.
+            if r.id not in pinned_ids and not _is_young_empty_shell(r, now=now):
+                to_gc.append(r)
+            continue
+        visible.append(r)
+    return visible, to_gc
 
 
 class ChatSidebarService:
@@ -167,7 +196,6 @@ class ChatSidebarService:
         project_chats: list[dict] = []
         new_chat_enabled = False
         observed_state: str | None = None
-        empty_to_gc: list[AgentSessionRow] = []
         if selected_project_id and selected_project_id in projects:
             proj = projects[selected_project_id]
             # New chat only when project is active and container is running —
@@ -176,27 +204,118 @@ class ChatSidebarService:
                 runtime = await PodQuery(self._session).runtime_view(proj.id)
                 observed_state = runtime.get("observed_state") if runtime else None
                 new_chat_enabled = observed_state == "running"
+
+        # Tree branches: one entry per alive project in the cabinet — the
+        # sidebar is NOT bound to the selected project. Soft-deleted projects
+        # are skipped (same rule as cabinet project listing); everything else
+        # (draft/active/paused/error/completed) gets a branch.
+        tree_projects = sorted(
+            (p for p in projects.values() if p.status != ProjectStatus.DELETED),
+            key=lambda p: ((p.name or "").lower(), p.id),
+        )
+        tree_id_set = {p.id for p in tree_projects}
+        tree_ids = [p.id for p in tree_projects]
+
+        # Per-branch new_chat_enabled without N+1 runtime_view calls: the
+        # selected project keeps the exact runtime check above; every other
+        # active project is gated from live pod rows fetched in ONE query.
+        active_tree_ids = [p.id for p in tree_projects if p.status == ProjectStatus.ACTIVE]
+        pod_rows: dict[str, ProjectPodRow] = {}
+        if active_tree_ids:
+            pods_q = await self._session.execute(
+                select(ProjectPodRow).where(
+                    ProjectPodRow.project_id.in_(active_tree_ids),
+                    ProjectPodRow.status.notin_(tuple(POD_TERMINAL_STATUSES)),
+                )
+            )
+            for pod in pods_q.scalars().all():
+                if pod.project_id is not None:
+                    pod_rows[pod.project_id] = pod
+
+        # Sessions of every cabinet project in ONE query (visible statuses
+        # only). Also covers a soft-deleted selected project so the legacy
+        # project_chats field keeps its old semantics.
+        query_ids = list(tree_ids)
+        if selected_project_id and selected_project_id in projects and selected_project_id not in tree_id_set:
+            query_ids.append(selected_project_id)
+        sessions_by_project: dict[str, list[AgentSessionRow]] = {}
+        if query_ids:
             sess_q = await self._session.execute(
                 select(AgentSessionRow)
-                .where(AgentSessionRow.project_id == selected_project_id)
+                .where(AgentSessionRow.project_id.in_(query_ids))
                 .where(AgentSessionRow.status.in_(["active", "suspended", "closed"]))
             )
-            rows = [r for r in sess_q.scalars().all() if r.id not in pinned_ids]
-            rows.sort(key=_sort_key, reverse=True)
-            pname = proj.name
-            visible: list[dict] = []
-            for r in rows:
-                has_draft = r.id in draft_ids
-                has_messages = r.last_message_at is not None
-                if not has_messages and not has_draft:
-                    # Hide empty shells; only GC abandoned ones past the grace window.
-                    if not _is_young_empty_shell(r, now=now):
-                        empty_to_gc.append(r)
-                    continue
-                visible.append(
-                    _chat_item(r, project_name=pname, pinned=False, has_draft=has_draft)
+            for row in sess_q.scalars().all():
+                sessions_by_project.setdefault(row.project_id, []).append(row)
+
+        empty_to_gc: list[AgentSessionRow] = []
+        visible_by_project: dict[str, list[AgentSessionRow]] = {}
+        projects_payload: list[dict] = []
+        for proj in tree_projects:
+            rows = sessions_by_project.get(proj.id, [])
+            visible, to_gc = _split_visible(
+                rows, pinned_ids=pinned_ids, draft_ids=draft_ids, now=now
+            )
+            empty_to_gc.extend(to_gc)
+            visible_by_project[proj.id] = visible
+            # Branch order: pinned first (recency inside the pinned tier),
+            # then the rest by recency.
+            visible.sort(key=lambda r: (r.id in pinned_ids, _sort_key(r)), reverse=True)
+            if proj.id == selected_project_id:
+                branch_new_chat = new_chat_enabled
+            elif proj.status == ProjectStatus.ACTIVE:
+                pod = pod_rows.get(proj.id)
+                branch_new_chat = (
+                    pod is not None
+                    and pod.status == PodStatus.RUNNING
+                    and pod.desired_state == PodDesiredState.RUNNING.value
                 )
-            project_chats = visible
+            else:
+                branch_new_chat = False
+            projects_payload.append(
+                {
+                    "project_id": proj.id,
+                    "project_name": proj.name,
+                    "status": proj.status,
+                    "new_chat_enabled": branch_new_chat,
+                    "chats": [
+                        _chat_item(
+                            r,
+                            project_name=proj.name,
+                            pinned=r.id in pinned_ids,
+                            has_draft=r.id in draft_ids,
+                        )
+                        for r in visible
+                    ],
+                }
+            )
+
+        # Legacy field (backward compat): selected project's chats, pinned
+        # excluded, recency order — same shape as before the tree.
+        if selected_project_id and selected_project_id in projects:
+            if selected_project_id in tree_id_set:
+                sel_visible = visible_by_project.get(selected_project_id, [])
+            else:
+                # Soft-deleted selected project: no branch, but the legacy
+                # list keeps listing its chats.
+                sel_visible, sel_gc = _split_visible(
+                    sessions_by_project.get(selected_project_id, []),
+                    pinned_ids=pinned_ids,
+                    draft_ids=draft_ids,
+                    now=now,
+                )
+                empty_to_gc.extend(sel_gc)
+            legacy_rows = [r for r in sel_visible if r.id not in pinned_ids]
+            legacy_rows.sort(key=_sort_key, reverse=True)
+            project_chats = [
+                _chat_item(
+                    r,
+                    project_name=projects[selected_project_id].name,
+                    pinned=False,
+                    has_draft=r.id in draft_ids,
+                )
+                for r in legacy_rows
+            ]
 
         # Drop empty shells (created then abandoned with no draft / no messages).
         for row in empty_to_gc:
@@ -218,6 +337,7 @@ class ChatSidebarService:
             "pinned": pinned,
             "project_chats": project_chats,
             "project_ids_in_cabinet": project_ids,
+            "projects": projects_payload,
         }
 
     async def set_pin(

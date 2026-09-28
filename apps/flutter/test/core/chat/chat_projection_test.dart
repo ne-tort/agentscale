@@ -84,18 +84,236 @@ void main() {
     expect(blocks[2].isStreaming, isTrue);
   });
 
-  test('applyStreamEvent merges usage blocks', () {
-    var blocks = applyStreamEvent([], {
-      'type': 'usage',
-      'data': {'input_tokens': 10},
+  group('usage attach', () {
+    test('applyStreamEvent attaches usage to the nearest preceding assistant block', () {
+      var blocks = applyStreamEvent([], {
+        'type': 'text_delta',
+        'data': {'text': 'Hi'},
+      });
+      blocks = applyStreamEvent(blocks, {
+        'type': 'usage',
+        'data': {'input_tokens': 10, 'model': 'm1', 'cost_usd': 0.01},
+      });
+      expect(blocks.length, 1);
+      expect(blocks.single.kind, 'assistant_markdown');
+      final usage = blocks.single.raw['usage'] as Map<String, dynamic>;
+      expect(usage['input_tokens'], 10);
+      expect(usage['model'], 'm1');
+      expect(usage['cost_usd'], 0.01);
     });
-    blocks = applyStreamEvent(blocks, {
-      'type': 'usage',
-      'data': {'output_tokens': 5},
+
+    test('multiple usage events in a turn accumulate on the assistant block', () {
+      var blocks = applyStreamEvent([], {
+        'type': 'text_delta',
+        'data': {'text': 'Hi'},
+      });
+      blocks = applyStreamEvent(blocks, {
+        'type': 'usage',
+        'data': {'input_tokens': 10, 'output_tokens': 5, 'model': 'm1', 'cost_usd': 0.02},
+      });
+      blocks = applyStreamEvent(blocks, {
+        'type': 'usage',
+        'data': {
+          'input_tokens': 7,
+          'cache_read_tokens': 100,
+          'model': 'm2',
+        },
+      });
+      expect(blocks.single.kind, 'assistant_markdown');
+      final usage = blocks.single.raw['usage'] as Map<String, dynamic>;
+      expect(usage['input_tokens'], 17);
+      expect(usage['output_tokens'], 5);
+      expect(usage['cache_read_tokens'], 100);
+      expect(usage['cost_usd'], 0.02);
+      expect(usage['model'], 'm2');
     });
-    expect(blocks.length, 1);
-    expect(blocks.single.kind, 'usage');
-    expect(blocks.single.raw['input_tokens'], 10);
-    expect(blocks.single.raw['output_tokens'], 5);
+
+    test('usage without a preceding assistant home is dropped', () {
+      var blocks = applyStreamEvent([], {
+        'type': 'usage',
+        'data': {'input_tokens': 10},
+      });
+      expect(blocks, isEmpty);
+
+      final out = attachUsageToAssistant([
+        ChatBlock(kind: 'tool_call', raw: {'id': 't1', 'name': 'Read'}),
+        ChatBlock(kind: 'usage', raw: {'input_tokens': 3}),
+      ]);
+      expect(out.where((b) => b.kind == 'usage'), isEmpty);
+      expect(out.length, 1);
+    });
+
+    test('attachUsageToAssistant keeps late usage blocks from transcripts', () {
+      final out = attachUsageToAssistant([
+        ChatBlock(kind: 'user', raw: {'text': 'q'}),
+        ChatBlock(kind: 'assistant_markdown', raw: {'text': 'a1'}),
+        ChatBlock(kind: 'usage', raw: {'input_tokens': 4}),
+        ChatBlock(kind: 'assistant_markdown', raw: {'text': 'a2'}),
+        ChatBlock(kind: 'usage', raw: {'output_tokens': 9}),
+      ]);
+      expect(out.length, 3);
+      expect(out.where((b) => b.kind == 'usage'), isEmpty);
+      expect((out[1].raw['usage'] as Map)['input_tokens'], 4);
+      expect((out[2].raw['usage'] as Map)['output_tokens'], 9);
+    });
+
+    test('chatBlocksFromTranscript attaches usage and assigns stable keys', () {
+      final blocks = chatBlocksFromTranscript([
+        {'kind': 'user', 'text': 'q'},
+        {'kind': 'assistant_markdown', 'text': 'a'},
+        {'kind': 'usage', 'input_tokens': 4, 'output_tokens': 2, 'cost_usd': 0.05, 'model': 'm'},
+      ]);
+      expect(blocks.length, 2);
+      expect(blocks.where((b) => b.kind == 'usage'), isEmpty);
+      final usage = blocks[1].raw['usage'] as Map<String, dynamic>;
+      expect(usage['input_tokens'], 4);
+      expect(usage['output_tokens'], 2);
+      expect(usage['cost_usd'], 0.05);
+      expect(usage['model'], 'm');
+      expect(blocks[1].key, 'h1');
+    });
+  });
+
+  group('subagent matching', () {
+    test('subagent_event matches by agent_id when ids disagree', () {
+      var blocks = applyStreamEvent([], {
+        'type': 'subagent_start',
+        'data': {'agent_id': 'ag_1', 'parent_tool_use_id': 'tu_1', 'type': 'researcher'},
+      });
+      // Block id is agent_id; event carries only agent_id.
+      blocks = applyStreamEvent(blocks, {
+        'type': 'subagent_event',
+        'data': {
+          'agent_id': 'ag_1',
+          'child_event': {'kind': 'text', 'text': 'working'},
+        },
+      });
+      final sub = blocks.where((b) => b.kind == 'subagent').single;
+      expect((sub.raw['events'] as List).length, 1);
+    });
+
+    test('subagent_event matches by parent_tool_use_id when agent_id differs', () {
+      var blocks = applyStreamEvent([], {
+        'type': 'subagent_start',
+        'data': {'agent_id': 'ag_1', 'parent_tool_use_id': 'tu_1'},
+      });
+      // Block id is agent_id; event carries only parent_tool_use_id.
+      blocks = applyStreamEvent(blocks, {
+        'type': 'subagent_event',
+        'data': {
+          'parent_tool_use_id': 'tu_1',
+          'child_event': {'text': 'x'},
+        },
+      });
+      final sub = blocks.where((b) => b.kind == 'subagent').single;
+      expect((sub.raw['events'] as List).length, 1);
+    });
+
+    test('subagent_stop matches by either id kind', () {
+      var blocks = applyStreamEvent([], {
+        'type': 'subagent_start',
+        'data': {'agent_id': 'ag_1', 'parent_tool_use_id': 'tu_1'},
+      });
+      blocks = applyStreamEvent(blocks, {
+        'type': 'subagent_stop',
+        'data': {'parent_tool_use_id': 'tu_1', 'result_summary': 'done'},
+      });
+      expect(blocks.single.raw['result_summary'], 'done');
+
+      var blocks2 = applyStreamEvent([], {
+        'type': 'subagent_start',
+        'data': {'agent_id': 'ag_2', 'parent_tool_use_id': 'tu_2'},
+      });
+      blocks2 = applyStreamEvent(blocks2, {
+        'type': 'subagent_stop',
+        'data': {'agent_id': 'ag_2', 'result_summary': 'ok'},
+      });
+      expect(blocks2.single.raw['result_summary'], 'ok');
+    });
+
+    test('subagent events do not leak into other subagent blocks', () {
+      var blocks = applyStreamEvent([], {
+        'type': 'subagent_start',
+        'data': {'agent_id': 'ag_1', 'parent_tool_use_id': 'tu_1'},
+      });
+      blocks = applyStreamEvent(blocks, {
+        'type': 'subagent_start',
+        'data': {'agent_id': 'ag_2', 'parent_tool_use_id': 'tu_2'},
+      });
+      blocks = applyStreamEvent(blocks, {
+        'type': 'subagent_event',
+        'data': {
+          'parent_tool_use_id': 'tu_2',
+          'child_event': {'text': 'only for ag_2'},
+        },
+      });
+      expect(((blocks[0].raw['events'] as List?) ?? []).length, 0);
+      expect((blocks[1].raw['events'] as List).length, 1);
+    });
+  });
+
+  group('block identity', () {
+    test('live projection assigns a unique _key to every block', () {
+      var blocks = <ChatBlock>[];
+      for (var i = 0; i < 12; i++) {
+        blocks = applyStreamEvent(blocks, {'type': 'text_delta', 'data': {'text': 'a'}});
+        blocks = applyStreamEvent(blocks, {
+          'type': 'tool_call',
+          'data': {'id': 't$i', 'name': 'Read', 'input': {}},
+        });
+        blocks = applyStreamEvent(blocks, {
+          'type': 'tool_result',
+          'data': {'id': 't$i', 'name': 'Read', 'output': 'x'},
+        });
+        blocks = applyStreamEvent(blocks, {'type': 'usage', 'data': {'input_tokens': 1}});
+        blocks = applyStreamEvent(blocks, {
+          'type': 'task_progress',
+          'data': {
+            'tasks': [
+              {'id': 'a', 'title': 't'},
+            ],
+            'message': 'm',
+          },
+        });
+        blocks = applyStreamEvent(blocks, {
+          'type': 'error',
+          'data': {'code': 'X', 'message': 'y'},
+        });
+      }
+      final keys = blocks.map((b) => b.key).toList();
+      expect(keys.toSet().length, keys.length, reason: 'keys must not collide: $keys');
+      expect(blocks.where((b) => b.kind == 'usage'), isEmpty);
+      // Keyed blocks keep their key across streaming text updates.
+      var stream = applyStreamEvent(<ChatBlock>[], {'type': 'text_delta', 'data': {'text': 'x'}});
+      final keyBefore = stream.single.key;
+      stream = applyStreamEvent(stream, {'type': 'text_delta', 'data': {'text': 'y'}});
+      expect(stream.single.text, 'xy');
+      expect(stream.single.key, keyBefore);
+    });
+
+    test('chatBlocksFromTranscript keys are unique (same text, no ids)', () {
+      final blocks = chatBlocksFromTranscript([
+        {'kind': 'user', 'text': 'hi'},
+        {'kind': 'user', 'text': 'hi'},
+        {'kind': 'assistant_markdown', 'text': ''},
+      ]);
+      final keys = blocks.map((b) => b.key).toList();
+      expect(keys.toSet().length, keys.length);
+      expect(keys[0], 'h0');
+      expect(keys[1], 'h1');
+    });
+
+    test('user_message echo preserves the local block identity', () {
+      var blocks = <ChatBlock>[
+        createLiveBlock('user', {'text': 'hi'}),
+      ];
+      final keyBefore = blocks.single.key;
+      blocks = applyStreamEvent(blocks, {
+        'type': 'user_message',
+        'data': {'text': 'hi', 'id': 'srv_1'},
+      });
+      expect(blocks.single.kind, 'user');
+      expect(blocks.single.key, keyBefore);
+    });
   });
 }

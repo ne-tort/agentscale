@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:prodavan/core/chat/models/chat_block.dart';
+import 'package:prodavan/core/chat/models/chat_projection.dart';
 import 'package:prodavan/core/chat/widgets/blocks/chat_blocks.dart';
 import 'package:prodavan/core/chat/widgets/chat_display_grouping.dart';
 
@@ -168,6 +169,17 @@ void main() {
     expect(merged.block.raw['duration_ms'], 99);
   });
 
+  test('mergeThinkingPairs keeps the first block key for widget identity', () {
+    final first = createLiveBlock('thinking', {'text': 'one'});
+    final second = createLiveBlock('thinking', {'text': 'two'});
+    final merged = mergeThinkingPairs([
+      (block: first, paired: null),
+      (block: second, paired: null),
+    ]);
+    expect(merged.block.key, first.key);
+    expect(merged.block.key, isNot(second.key));
+  });
+
   test('aggregateDiffStats sums +/- across group items', () {
     final items = [
       (
@@ -182,5 +194,22 @@ void main() {
     final stats = aggregateDiffStats(items);
     expect(stats?.added, 5);
     expect(stats?.removed, 1);
+  });
+
+  test('usage blocks are absent after attach — no standalone usage entry', () {
+    final blocks = attachUsageToAssistant([
+      ChatBlock(kind: 'user', raw: {'text': 'hi'}),
+      ChatBlock(kind: 'assistant_markdown', raw: {'text': 'answer'}),
+      ChatBlock(kind: 'usage', raw: {'input_tokens': 1, 'output_tokens': 2, 'model': 'm'}),
+    ]);
+    expect(blocks.where((b) => b.kind == 'usage'), isEmpty);
+    expect((blocks[1].raw['usage'] as Map)['input_tokens'], 1);
+    final entries = groupDisplayEntries(blocks);
+    // user + assistant singles only; no usage-driven entry appears.
+    expect(entries.length, 2);
+    expect(
+      entries.whereType<ChatDisplaySingle>().map((e) => e.item.block.kind),
+      everyElement(isNot('usage')),
+    );
   });
 }
