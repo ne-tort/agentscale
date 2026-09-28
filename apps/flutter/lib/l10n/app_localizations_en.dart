@@ -2124,6 +2124,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get errorAgentBridge => 'Could not reach the agent in the container.';
 
   @override
+  String get errorAgentTurnFailed =>
+      'The agent could not complete the turn. See details in the chat.';
+
+  @override
   String get errorCascadeIncomplete =>
       'Delete cascade is still in progress. Wait or retry later.';
 

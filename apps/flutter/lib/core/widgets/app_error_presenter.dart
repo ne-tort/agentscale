@@ -216,6 +216,7 @@ abstract final class AppErrors {
       'AGENT_RUNTIME_ERROR' => l10n.errorAgentRuntimeError,
       'BRIDGE_SEND_FAILED' || 'BRIDGE_EMPTY_STREAM' || 'BRIDGE_UNREACHABLE' || 'BRIDGE_TIMEOUT' =>
         l10n.errorAgentBridge,
+      'AGENT_TURN_FAILED' => l10n.errorAgentTurnFailed,
       'CASCADE_INCOMPLETE' => l10n.errorCascadeIncomplete,
       'SCHEMA_DROP_FAILED' => l10n.errorServer,
       'AUTH_MISCONFIGURED' => l10n.errorIdentityProvider,

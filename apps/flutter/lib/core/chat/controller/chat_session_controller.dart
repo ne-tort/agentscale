@@ -23,6 +23,16 @@ class ChatSessionController {
     'message': 'agent runtime silent: no events or keepalives',
   });
 
+  /// done-reasons that mean the turn FAILED (vs "completed"). Older runtimes
+  /// swallow provider errors into done{reason} without an error frame — the
+  /// UI must still surface the failure (Wave 6).
+  static const _turnFailureReasons = {
+    'api_error',
+    'model_error',
+    'prompt_too_long',
+    'aborted_streaming',
+  };
+
   ChatSessionController({
     required this.api,
     required this.projectId,
@@ -323,6 +333,29 @@ class ChatSessionController {
           } else {
             error = AgentStreamError({'message': event.toString()});
           }
+        } else if (type == 'done') {
+          _liveTurnBlocks = applyStreamEvent(_liveTurnBlocks, event);
+          final doneData = data is Map<String, dynamic>
+              ? data
+              : (data is Map ? Map<String, dynamic>.from(data) : null);
+          final reason = doneData?['reason']?.toString() ?? '';
+          if (_turnFailureReasons.contains(reason) && error == null) {
+            // The runtime ended the turn with a failure reason but no error
+            // frame — synthesize one so the user sees what happened (inline
+            // error block + error state) instead of a silently empty turn.
+            final detail = doneData?['error_message']?.toString() ?? '';
+            final errData = <String, dynamic>{
+              'code': 'AGENT_TURN_FAILED',
+              'message': detail.isNotEmpty ? detail : 'agent turn failed: $reason',
+            };
+            error = AgentStreamError(errData);
+            _liveTurnBlocks = applyStreamEvent(_liveTurnBlocks, {
+              'type': 'error',
+              'data': errData,
+            });
+          }
+          notify();
+          continue;
         } else {
           _liveTurnBlocks = applyStreamEvent(_liveTurnBlocks, event);
           if (type == 'text_delta' || type == 'thinking_delta') {
@@ -386,6 +419,9 @@ class ChatSessionController {
     blocks.addAll(_liveTurnBlocks);
     _liveTurnBlocks = const [];
     streaming = false;
+    // Notify BEFORE the network call: the stop button must respond even when
+    // the cancel request hangs on a bad network (Wave 6).
+    notifyImmediate();
     if (sessionId.isNotEmpty) {
       try {
         await api.cancelAgentSession(projectId: projectId, sessionId: sessionId);
