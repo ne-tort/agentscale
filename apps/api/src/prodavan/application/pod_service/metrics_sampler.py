@@ -29,7 +29,7 @@ class PodMetricsSampler:
 
     async def sample_managed_pods(self) -> dict[str, int]:
         mode = (settings.pod_runtime_mode or "stub").strip().lower()
-        if mode != "k8s":
+        if mode not in ("k8s", "sandbox"):
             return {"sampled": 0, "skipped": 0}
 
         metrics_port = build_pod_metrics()
@@ -67,7 +67,7 @@ class PodMetricsSampler:
     async def sample_project(self, project_id: str) -> str:
         """Opportunistic sample for one project (e.g. runtime_view read path)."""
         mode = (settings.pod_runtime_mode or "stub").strip().lower()
-        if mode != "k8s":
+        if mode not in ("k8s", "sandbox"):
             return "noop"
 
         metrics_port = build_pod_metrics()
@@ -138,7 +138,12 @@ class PodMetricsSampler:
         metrics: dict[str, Any] | None = None
         try:
             status = await runtime_port.get_status(runtime_ref=runtime_ref) or {}
-            metrics = await metrics_port.get_pod_metrics(runtime_ref=runtime_ref)
+            metrics = await metrics_port.get_pod_metrics(
+                runtime_ref=runtime_ref,
+                # sandbox mode: the status just fetched carries the sandbox
+                # (pod) name — pass it through to skip a duplicate claim GET.
+                sandbox_name=str(status.get("sandbox_name") or "") or None,
+            )
         except Exception:
             logger.debug("pod metrics sampler skipped runtime_ref=%s", runtime_ref, exc_info=True)
             return "skipped"

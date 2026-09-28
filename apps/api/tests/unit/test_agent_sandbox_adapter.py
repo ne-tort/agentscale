@@ -225,7 +225,7 @@ async def test_ensure_running_resumes_suspended_sandbox() -> None:
     assert kwargs["name"] == SANDBOX_NAME
     assert kwargs["namespace"] == NAMESPACE
     assert kwargs["plural"] == "sandboxes"
-    assert kwargs["body"] == {"spec": {"operatingMode": "Running"}}
+    assert kwargs["body"] == [{"op": "add", "path": "/spec/operatingMode", "value": "Running"}]
     client.k8s_helper.create_sandbox_claim.assert_not_awaited()
 
 
@@ -250,7 +250,9 @@ async def test_pause_patches_operating_mode_suspended() -> None:
     await adapter.pause(runtime_ref=REF)
     patch = client.k8s_helper.custom_objects_api.patch_namespaced_custom_object
     patch.assert_awaited_once()
-    assert patch.await_args.kwargs["body"] == {"spec": {"operatingMode": "Suspended"}}
+    assert patch.await_args.kwargs["body"] == [
+        {"op": "add", "path": "/spec/operatingMode", "value": "Suspended"}
+    ]
 
 
 async def test_pause_idempotent_when_already_suspended() -> None:
@@ -494,8 +496,10 @@ async def test_ensure_running_extends_claim_ttl_when_expiry_near() -> None:
     assert kwargs["plural"] == "sandboxclaims"
     assert kwargs["name"] == REF
     assert kwargs["namespace"] == NAMESPACE
-    new_time = kwargs["body"]["spec"]["lifecycle"]["shutdownTime"]
-    new_dt = datetime.fromisoformat(new_time.replace("Z", "+00:00"))
+    ops = kwargs["body"]
+    assert isinstance(ops, list) and len(ops) == 1
+    assert ops[0]["op"] == "add" and ops[0]["path"] == "/spec/lifecycle/shutdownTime"
+    new_dt = datetime.fromisoformat(ops[0]["value"].replace("Z", "+00:00"))
     assert new_dt > datetime.now(UTC) + timedelta(seconds=ttl - 3600)
 
 
@@ -589,8 +593,10 @@ async def test_get_status_rearms_claim_ttl_when_expiry_near() -> None:
     kwargs = patch.await_args.kwargs
     assert kwargs["plural"] == "sandboxclaims"
     assert kwargs["name"] == REF
-    new_time = kwargs["body"]["spec"]["lifecycle"]["shutdownTime"]
-    new_dt = datetime.fromisoformat(new_time.replace("Z", "+00:00"))
+    ops = kwargs["body"]
+    assert isinstance(ops, list) and len(ops) == 1
+    assert ops[0]["op"] == "add" and ops[0]["path"] == "/spec/lifecycle/shutdownTime"
+    new_dt = datetime.fromisoformat(ops[0]["value"].replace("Z", "+00:00"))
     assert new_dt > datetime.now(UTC) + timedelta(seconds=ttl - 3600)
 
 

@@ -61,8 +61,18 @@ _RECOVERABLE_SEND_ERROR_CODES = frozenset(
         "BRIDGE_UNREACHABLE",
         "BRIDGE_EMPTY_STREAM",
         "BRIDGE_HYDRATING",
+        "BRIDGE_TIMEOUT",
     }
 )
+
+# Streaming send timeouts (Wave 5): the old ``timeout=None`` let a wedged
+# runtime (hung LLM call, stalled transcript fetch) hold the API→client SSE
+# open forever with zero events — the user saw an eternal "typing". The read
+# budget bounds *silence between bytes*: the runtime's 15s SSE pings reset
+# it, so long agent turns are NOT cut — only true silence is.
+_SEND_CONNECT_TIMEOUT_SEC = 10.0
+_SEND_READ_TIMEOUT_SEC = 90.0
+_SEND_WRITE_TIMEOUT_SEC = 30.0
 
 # register_session 409-hydrating: the runtime is restoring its workspace
 # from the bind payload; one retry after this delay, then normal semantics.
@@ -498,7 +508,13 @@ class OpenClawBridgeBootstrap:
 
         try:
             yielded = False
-            async with self._http_client(timeout=None) as client:
+            timeout = httpx.Timeout(
+                connect=_SEND_CONNECT_TIMEOUT_SEC,
+                read=_SEND_READ_TIMEOUT_SEC,
+                write=_SEND_WRITE_TIMEOUT_SEC,
+                pool=_SEND_CONNECT_TIMEOUT_SEC,
+            )
+            async with self._http_client(timeout=timeout) as client:
                 async with client.stream(
                     "POST",
                     url,
@@ -567,6 +583,19 @@ class OpenClawBridgeBootstrap:
                         "retryable": True,
                     },
                 )
+        except httpx.TimeoutException as exc:
+            # Read/connect/pool/write timeout — the runtime (or router) went
+            # silent. Recoverable: iter_send_events re-registers and retries
+            # once against a freshly resolved endpoint.
+            logger.warning("openclaw send timeout session=%s: %s", session_id, exc)
+            yield AgentEvent.now(
+                AgentEventType.ERROR,
+                {
+                    "code": "BRIDGE_TIMEOUT",
+                    "message": f"agent runtime timed out ({type(exc).__name__})",
+                    "retryable": True,
+                },
+            )
         except Exception as exc:
             logger.warning("openclaw send proxy failed session=%s: %s", session_id, exc)
             yield AgentEvent.now(

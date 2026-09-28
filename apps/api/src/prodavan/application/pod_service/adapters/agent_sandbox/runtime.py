@@ -180,15 +180,23 @@ class AgentSandboxPodRuntimeAdapter:
     async def _patch_sandbox_operating_mode(
         self, client: Any, sandbox_name: str, namespace: str, mode: str
     ) -> None:
-        """Patch Sandbox spec.operatingMode (Suspend/Resume) via the SDK client."""
-        body = {"spec": {"operatingMode": mode}}
+        """Patch Sandbox spec.operatingMode (Suspend/Resume) via the SDK client.
+
+        JSON Patch (RFC 6902), never a merge-patch dict: kubernetes_asyncio
+        derives the Content-Type from the body shape, and a dict body falls
+        through to ``application/json-patch+json`` — the apiserver then
+        rejects the object (it expects []jsonPatchOp) and pause/resume dies
+        with a 400. A list body makes the wire format deterministic;
+        ``add`` creates-or-replaces the target field (RFC 6902 §4.1).
+        """
+        patch = [{"op": "add", "path": "/spec/operatingMode", "value": mode}]
         await client.k8s_helper.custom_objects_api.patch_namespaced_custom_object(
             group=SANDBOX_API_GROUP,
             version=SANDBOX_API_VERSION,
             namespace=namespace,
             plural=SANDBOX_PLURAL,
             name=sandbox_name,
-            body=body,
+            body=patch,
         )
         logger.info("sandbox patched name=%s operatingMode=%s", sandbox_name, mode)
 
@@ -237,13 +245,18 @@ class AgentSandboxPodRuntimeAdapter:
             namespace=namespace,
             plural=CLAIM_PLURAL,
             name=claim_name,
-            body={
-                "spec": {
-                    "lifecycle": {
-                        "shutdownTime": new_shutdown.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                    }
+            # JSON Patch for the same reason as _patch_sandbox_operating_mode:
+            # kubernetes_asyncio sends a dict body as
+            # application/json-patch+json and the apiserver rejects it.
+            # ``add`` replaces the existing shutdownTime (spec.lifecycle is
+            # guaranteed present — the current shutdownTime was parsed above).
+            body=[
+                {
+                    "op": "add",
+                    "path": "/spec/lifecycle/shutdownTime",
+                    "value": new_shutdown.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 }
-            },
+            ],
         )
         logger.info(
             "sandbox claim ttl extended claim=%s remaining=%.0fs ttl=%ss",
