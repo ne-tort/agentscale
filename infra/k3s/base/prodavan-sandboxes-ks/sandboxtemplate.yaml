@@ -37,7 +37,7 @@ spec:
       - name: agent-runtime
         # Versioned tag — bumped by PR when prodavan-claw image is rebuilt.
         # TODO: keep in sync with ghcr.io/ne-tort/prodavan-agent-runtime releases.
-        image: ghcr.io/ne-tort/prodavan-agent-runtime:3a21e75724ac # prodavan-claw@3a21e75 (Wave 4: TranscriptRouter bind-aware dual-write, symlink containment, hydrate gating/caps, SSE keepalive)
+        image: ghcr.io/ne-tort/prodavan-agent-runtime:d91c1fe1bf7a # prodavan-claw@d91c1fe (Wave 5: fetch wall-clock timeouts, bun builtin MCP spawn, MCP rebind on bind)
         imagePullPolicy: IfNotPresent
         # Static platform env — claims cannot carry env
         # (envVarsInjectionPolicy: Disallowed), so all boot-time config lives
