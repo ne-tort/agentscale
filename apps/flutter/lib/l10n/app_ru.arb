@@ -1225,6 +1225,7 @@
   "errorAgentProviderUnavailable": "AI-провайдер временно недоступен. Повторите позже.",
   "errorAgentRuntimeError": "Ошибка агента при обработке запроса.",
   "errorAgentBridge": "Не удалось связаться с агентом в контейнере.",
+  "errorAgentTurnFailed": "Агент не смог завершить ход. Подробности — в чате.",
   "errorCascadeIncomplete": "Каскад удаления ещё не завершён. Подождите или повторите позже.",
   "companyCredentialsCreated": "Логин: {companyId} · пароль: {password}",
   "@companyCredentialsCreated": {

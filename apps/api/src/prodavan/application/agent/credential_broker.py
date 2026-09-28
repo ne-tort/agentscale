@@ -167,7 +167,9 @@ class AgentCredentialBroker:
             await self._keys.require_key_available_for_project(project=project, key_id=key_id)
             secret = await self._keys.resolve_secret_for_key(key_id)
         except Exception as exc:
-            logger.debug("credential push skipped key=%s: %s", key_id, exc)
+            # wave6: was debug — invisible in cluster; a skipped push means the
+            # runtime has no key and the turn dies silently downstream.
+            logger.warning("credential push skipped key=%s: %s", key_id, exc)
             return False
 
         if endpoint is None:
@@ -206,7 +208,8 @@ class AgentCredentialBroker:
                     "body": response.text[:200],
                 }
         except Exception as exc:
-            logger.debug("credential push unreachable project=%s: %s", project_id, exc)
+            # wave6: was debug — unreachable runtime on push = silent dead chat.
+            logger.warning("credential push unreachable project=%s: %s", project_id, exc)
             failure_detail = {
                 "lease_id": lease_id,
                 "project_id": project_id,

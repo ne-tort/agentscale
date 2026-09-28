@@ -2139,6 +2139,10 @@ class AppLocalizationsRu extends AppLocalizations {
   String get errorAgentBridge => 'Не удалось связаться с агентом в контейнере.';
 
   @override
+  String get errorAgentTurnFailed =>
+      'Агент не смог завершить ход. Подробности — в чате.';
+
+  @override
   String get errorCascadeIncomplete =>
       'Каскад удаления ещё не завершён. Подождите или повторите позже.';
 

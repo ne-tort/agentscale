@@ -137,12 +137,20 @@ async def _bind(
     if endpoint is None:
         return False
 
+    auth_token = await _mint_bind_token(session, project, pod_id)
+    if not auth_token:
+        # wave6 (M-1): the bridge 400s a bind without a token — a doomed call
+        # that also re-triggers on every send (no bind mark set). Skip it.
+        logger.warning(
+            "project bind skipped: no bridge token project_id=%s", project_id
+        )
+        return False
     body: dict[str, Any] = {
         "project_id": project_id,
         "pod_id": pod_id,
         "workspace_key": workspace_key,
         "api_base_url": settings.pod_agent_runtime_api_base_url,
-        "auth_token": await _mint_bind_token(session, project, pod_id),
+        "auth_token": auth_token,
         "env": await _load_bind_env(session, project),
     }
     url = f"{endpoint.base_url}/v1/project/bind"

@@ -1223,6 +1223,7 @@
   "errorAgentProviderUnavailable": "AI provider is temporarily unavailable. Try again later.",
   "errorAgentRuntimeError": "Agent runtime failed while processing the request.",
   "errorAgentBridge": "Could not reach the agent in the container.",
+  "errorAgentTurnFailed": "The agent could not complete the turn. See details in the chat.",
   "errorCascadeIncomplete": "Delete cascade is still in progress. Wait or retry later.",
   "companyCredentialsCreated": "Login: {companyId} · password: {password}",
   "@companyCredentialsCreated": {

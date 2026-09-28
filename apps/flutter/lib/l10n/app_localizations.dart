@@ -3758,6 +3758,12 @@ abstract class AppLocalizations {
   /// **'Could not reach the agent in the container.'**
   String get errorAgentBridge;
 
+  /// No description provided for @errorAgentTurnFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'The agent could not complete the turn. See details in the chat.'**
+  String get errorAgentTurnFailed;
+
   /// No description provided for @errorCascadeIncomplete.
   ///
   /// In en, this message translates to:
